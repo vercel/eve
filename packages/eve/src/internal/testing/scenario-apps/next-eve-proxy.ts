@@ -15,13 +15,17 @@ export interface NextEveProxyDescriptorOptions {
 export function createNextEveProxyDescriptor(
   options: NextEveProxyDescriptorOptions = {},
 ): ScenarioAppDescriptor {
+  const dependencies: Record<string, string> = {
+    next: resolveInstalledPackageVersion("next"),
+    react: resolveInstalledPackageVersion("react"),
+    "react-dom": resolveInstalledPackageVersion("react-dom"),
+  };
+  if (options.vercelVersion !== undefined) {
+    dependencies.vercel = options.vercelVersion;
+  }
+
   return {
-    dependencies: {
-      next: resolveInstalledPackageVersion("next"),
-      react: resolveInstalledPackageVersion("react"),
-      "react-dom": resolveInstalledPackageVersion("react-dom"),
-      ...(options.vercelVersion === undefined ? {} : { vercel: options.vercelVersion }),
-    },
+    dependencies,
     files: {
       "agent/agent.mjs": `import { defineAgent } from "eve";
 

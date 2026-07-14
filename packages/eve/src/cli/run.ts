@@ -1,15 +1,10 @@
-import { resolve } from "node:path";
-
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
-import {
-  EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV,
-  EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
-  resolveApplicationRoot,
-} from "#internal/application/paths.js";
+import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
+import { resolveInternalVercelServiceOutput } from "#cli/vercel-service-output.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
@@ -67,46 +62,6 @@ interface ProductionCliOptions {
 
 interface BuildCliOptions {
   skipSandboxPrewarm?: boolean;
-}
-
-function resolveInternalBuildDirectory(
-  appRoot: string,
-  environmentVariableName: string,
-): string | undefined {
-  const configuredDirectory = process.env[environmentVariableName];
-
-  if (configuredDirectory === undefined || configuredDirectory.trim().length === 0) {
-    return undefined;
-  }
-
-  return resolve(appRoot, configuredDirectory);
-}
-
-function resolveInternalVercelServiceOutput(appRoot: string):
-  | {
-      readonly hostOutputDirectory: string;
-      readonly serviceOutputDirectory: string;
-    }
-  | undefined {
-  const hostOutputDirectory = resolveInternalBuildDirectory(
-    appRoot,
-    EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
-  );
-  const serviceOutputDirectory = resolveInternalBuildDirectory(
-    appRoot,
-    EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV,
-  );
-
-  if (hostOutputDirectory === undefined && serviceOutputDirectory === undefined) {
-    return undefined;
-  }
-  if (hostOutputDirectory === undefined || serviceOutputDirectory === undefined) {
-    throw new Error(
-      `${EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV} and ${EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV} must be set together.`,
-    );
-  }
-
-  return { hostOutputDirectory, serviceOutputDirectory };
 }
 
 interface CliRuntimeDependencies {
