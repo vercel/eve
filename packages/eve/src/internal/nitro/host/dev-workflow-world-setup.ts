@@ -10,6 +10,7 @@ import {
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
+  usesParentDevelopmentWorkflowWorld,
 } from "#internal/workflow/development-world-protocol.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
@@ -20,10 +21,14 @@ export function createDevelopmentWorkflowWorld(input: {
   readonly preparedHost: PreparedDevelopmentApplicationHost;
   readonly transportSecret: string;
 }): ParentDevelopmentWorkflowWorld | undefined {
-  // An explicitly configured World stays inside the worker; the parent only
-  // owns the default local World, which must survive worker replacement.
+  // A World that does not resolve to the vendored local package stays inside
+  // the worker; the parent only owns the local World, which must survive
+  // worker replacement. The predicate is shared with the generated worker
+  // plugin so the two sides cannot disagree.
   if (
-    input.preparedHost.compileResult.manifest.config.experimental?.workflow?.world !== undefined
+    !usesParentDevelopmentWorkflowWorld(
+      input.preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
+    )
   ) {
     return undefined;
   }

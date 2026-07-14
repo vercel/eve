@@ -421,6 +421,31 @@ describe("createDevelopmentServer", () => {
     expect(mocks.worldInstance.close).toHaveBeenCalledOnce();
   });
 
+  it("serves the parent World for an explicitly local Workflow World", async () => {
+    const preparedHost = await mocks.prepareDevelopmentApplicationHost();
+    mocks.prepareDevelopmentApplicationHost.mockClear();
+    mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce({
+      ...preparedHost,
+      compileResult: {
+        manifest: {
+          config: {
+            experimental: { workflow: { world: "local" } },
+            name: "test-agent",
+          },
+        },
+      },
+    } as never);
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    // Explicit "local" resolves to the same vendored world as an absent
+    // config; the worker plugin wires the parent RPC client for it, so the
+    // parent must create the World that serves those calls.
+    expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledOnce();
+    await server.close();
+  });
+
   it("keeps an explicitly configured Workflow World inside the worker", async () => {
     const preparedHost = await mocks.prepareDevelopmentApplicationHost();
     mocks.prepareDevelopmentApplicationHost.mockClear();

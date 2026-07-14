@@ -123,6 +123,7 @@ async function createCoordinatorWithServer() {
   const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
     devServer,
     initialHost: createHost("initial", "run-1"),
+    workflowWorld: undefined,
   });
   return { coordinator, devServer };
 }
@@ -179,6 +180,7 @@ describe("transactional authored rebuild coordinator", () => {
     const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
       devServer,
       initialHost: createHost("initial", "run-1"),
+      workflowWorld: undefined,
     });
 
     const structuralHost = createHost("structural", "run-2");

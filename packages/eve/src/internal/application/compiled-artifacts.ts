@@ -13,6 +13,7 @@ import {
 } from "#internal/application/package.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
+import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 
 export type BuiltInWorkflowWorldTarget = "local" | "vercel";
 
@@ -282,8 +283,7 @@ export function createDevelopmentWorkflowWorldPluginSource(input: {
   compiledArtifactsBootstrapPath: string;
   configuredWorld: AgentWorkflowWorldDefinition | undefined;
 }): string {
-  const packageName = getWorldImport({ WORKFLOW_TARGET_WORLD: input.configuredWorld ?? "local" });
-  if (packageName !== "@workflow/world-local") {
+  if (!usesParentDevelopmentWorkflowWorld(input.configuredWorld)) {
     return createWorkflowWorldPluginSource({
       ...input,
       defaultWorld: "local",

@@ -1,4 +1,25 @@
+import { getWorldImport } from "@workflow/utils";
+
+import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
+
 export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-world";
+
+/**
+ * Whether development serves this app's Workflow World from the CLI parent.
+ * The parent's world creation and the generated worker plugin must agree on
+ * this predicate: a worker wired for the parent RPC client fails every World
+ * call when the parent never created a World to serve it. An explicit
+ * `world: "local"` resolves to the same vendored world as an absent config,
+ * so both take the parent-owned path.
+ */
+export function usesParentDevelopmentWorkflowWorld(
+  configuredWorld: AgentWorkflowWorldDefinition | undefined,
+): boolean {
+  return (
+    getWorldImport({ WORKFLOW_TARGET_WORLD: configuredWorld ?? "local" }) ===
+    "@workflow/world-local"
+  );
+}
 export const DEVELOPMENT_WORKFLOW_SECRET_ENV = "EVE_DEV_WORKFLOW_TRANSPORT_SECRET";
 export const DEVELOPMENT_WORKER_APP_ROOT_ENV = "EVE_DEV_WORKER_APP_ROOT";
 export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/stream`;
