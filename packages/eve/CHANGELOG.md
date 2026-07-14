@@ -1,5 +1,14 @@
 # eve
 
+## 0.24.1
+
+### Patch Changes
+
+- e0b64a5: Keep development runtime generations executable after authored source or dependencies change by bundling ordinary dependencies and materializing configured external dependency closures.
+- c4f5b58: Model calls now merge multiple system instructions into one message, avoiding provider failures when dynamic instructions are combined with array-form user content.
+- 6aac45d: `eve build` now uses invocation-owned compiler, host, Nitro, Workflow, and output workspaces. Concurrent builds can run beside `eve dev`, and failed builds preserve the last successfully published output.
+- 0046308: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+
 ## 0.24.0
 
 ### Minor Changes
