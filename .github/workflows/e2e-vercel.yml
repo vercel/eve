@@ -58,19 +58,24 @@ jobs:
         run: .github/scripts/discover-e2e-fixtures.sh
 
   e2e:
-    name: e2e-vercel (${{ matrix.name }})
+    name: e2e-vercel (${{ matrix.fixture.name }}, ${{ matrix.model.name }})
     runs-on: ubuntu-latest
     needs: [changes, discover-fixtures]
-    # No job-level `if`: these matrix jobs are required checks under their
-    # expanded names, and a skipped matrix never reports them, leaving PRs
-    # stuck on "Expected - Waiting for status to be reported". Instead every
-    # step is guarded, so an irrelevant diff reports success in seconds.
+    # No job-level `if`: the stable aggregate check below requires a successful
+    # matrix result. Guarding each step lets an irrelevant diff satisfy it in
+    # seconds without running setup or evals.
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.discover-fixtures.outputs.matrix) }}
+        fixture: ${{ fromJSON(needs.discover-fixtures.outputs.matrix) }}
+        model:
+          - name: openai-sol
+            id: openai/gpt-5.6-sol
+          - name: anthropic-opus
+            id: anthropic/claude-opus-4.8
 
     env:
+      EVE_E2E_MODEL: ${{ matrix.model.id }}
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -110,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$EVE_EVAL_JUNIT_DIR"
-          cd "${{ matrix.dir }}"
+          cd "${{ matrix.fixture.dir }}"
 
           token_args=()
           if [ -n "${VERCEL_TOKEN:-}" ]; then
@@ -133,9 +138,11 @@ jobs:
             VERCEL_TARGET_ENV=preview \
             VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
             pnpm exec eve build
-          DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview "${token_args[@]}" | tail -n 1)"
+          DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview \
+            --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" "${token_args[@]}" | tail -n 1)"
 
-          npx eve eval --strict --verbose --url "$DEPLOYMENT_URL" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
+          npx eve eval --strict --verbose --url "$DEPLOYMENT_URL" \
+            --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.fixture.name }}-${{ matrix.model.name }}.xml"
 
           # Redeploy-tagged evals rebuild and redeploy the fixture from inside
           # the eval body, repointing a run-scoped alias at each new
@@ -143,20 +150,21 @@ jobs:
           # never change what they serve) and are skipped in the main suite
           # above because EVE_E2E_REDEPLOY_ALIAS is unset there.
           if npx eve eval --tag redeploy --list >/dev/null 2>&1; then
-            ALIAS="eve-e2e-${{ matrix.name }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.vercel.app"
+            ALIAS="eve-e2e-${{ matrix.fixture.name }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ strategy.job-index }}.vercel.app"
             # vc alias does not infer the team from the project link the way
             # link/deploy do, so pass the scope explicitly.
             pnpm exec vc alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}" "${scope_args[@]}"
             EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
               npx eve eval --tag redeploy --strict --verbose \
-              --url "https://$ALIAS" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-redeploy.xml"
+              --url "https://$ALIAS" \
+              --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.fixture.name }}-${{ matrix.model.name }}-redeploy.xml"
           fi
 
       - name: Upload eval artifacts
         if: (failure()) && needs.changes.outputs.relevant == 'true'
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v6
         with:
-          name: eval-artifacts-vercel-${{ matrix.name }}
+          name: eval-artifacts-vercel-${{ matrix.fixture.name }}-${{ matrix.model.name }}
           path: |
             .junit
             e2e/fixtures/*/.eve/evals
@@ -164,3 +172,18 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
+
+  e2e-required:
+    name: e2e-vercel
+    runs-on: ubuntu-latest
+    needs: [e2e]
+    if: always()
+    steps:
+      - name: Require successful e2e matrix
+        env:
+          E2E_RESULT: ${{ needs.e2e.result }}
+        run: |
+          if [ "$E2E_RESULT" != "success" ]; then
+            echo "E2E matrix result: $E2E_RESULT"
+            exit 1
+          fi
