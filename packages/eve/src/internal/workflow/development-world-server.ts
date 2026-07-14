@@ -87,7 +87,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     this.#agentName = input.agentName;
     this.#appRoot = input.appRoot;
-    this.#dataDir = join(input.appRoot, ".eve", "workflow-data");
+    this.#dataDir = join(input.appRoot, ".workflow-data");
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
     this.#transportSecret = input.transportSecret;
     this.#world = createWorld({
@@ -115,7 +115,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       console.error(
         `[eve:dev] ${String(missingGenerationIds.size)} active local Workflow run(s) reference development generations that no longer exist ` +
           `(${[...missingGenerationIds].join(", ")}). Their deliveries are quarantined; ` +
-          `remove ".eve/workflow-data" to discard the app's active local Workflow runs.`,
+          `remove ".workflow-data" to discard the app's active local Workflow runs.`,
       );
     }
     await this.#world.start?.();
@@ -372,7 +372,7 @@ async function reenqueueActiveDevelopmentRuns(input: {
       } catch (error) {
         throw new Error(
           `Failed to read the app's active local Workflow runs. ` +
-            `Remove ".eve/workflow-data" to discard them.`,
+            `Remove ".workflow-data" to discard them.`,
           { cause: error },
         );
       }

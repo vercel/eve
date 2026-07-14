@@ -46,7 +46,7 @@ export class MissingDevelopmentGenerationError extends Error {
   constructor(generationId: string, cause?: unknown) {
     super(
       `Workflow run references missing development generation "${generationId}". ` +
-        `Remove ".eve/workflow-data" to discard the app's active local Workflow runs.`,
+        `Remove ".workflow-data" to discard the app's active local Workflow runs.`,
       cause === undefined ? undefined : { cause },
     );
     this.name = "MissingDevelopmentGenerationError";

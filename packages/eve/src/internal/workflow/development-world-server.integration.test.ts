@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -41,6 +41,21 @@ afterEach(() => {
 });
 
 describe("parent development Workflow World", () => {
+  it("stores local Workflow state under the app's top-level .workflow-data directory", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-data-dir-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+
+    try {
+      await world.start();
+      await expect(access(join(appRoot, ".workflow-data", "version.txt"))).resolves.toBeUndefined();
+      await expect(access(join(appRoot, ".eve", "workflow-data"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await world.close();
+    }
+  });
+
   it("pins a turn delivery to its recorded generation until it becomes terminal", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-world-");
     await seedGeneration(appRoot, "generation-a");
@@ -155,7 +170,7 @@ describe("parent development Workflow World", () => {
       // the failure is reported explicitly.
       await expect(restarted.start()).resolves.toBeUndefined();
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("generation-a"));
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(".eve/workflow-data"));
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(".workflow-data"));
     } finally {
       errorSpy.mockRestore();
       await restarted.close();
@@ -256,8 +271,8 @@ describe("parent development Workflow World", () => {
 
   it("protects all generations when a persisted run record is unreadable", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-unreadable-run-");
-    await mkdir(join(appRoot, ".eve", "workflow-data", "runs"), { recursive: true });
-    await writeFile(join(appRoot, ".eve", "workflow-data", "runs", "unreadable.json"), "{");
+    await mkdir(join(appRoot, ".workflow-data", "runs"), { recursive: true });
+    await writeFile(join(appRoot, ".workflow-data", "runs", "unreadable.json"), "{");
     const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {

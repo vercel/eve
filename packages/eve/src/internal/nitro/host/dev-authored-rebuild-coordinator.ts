@@ -151,7 +151,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     console.warn(
       `[eve:dev] generation pruning is paused (${reason}). ` +
         `Old generations are retained under ".eve/dev-runtime" until this clears; ` +
-        `removing ".eve/workflow-data" discards the app's active local Workflow runs.`,
+        `removing ".workflow-data" discards the app's active local Workflow runs.`,
     );
   }
 
