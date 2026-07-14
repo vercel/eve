@@ -36,20 +36,20 @@ function includesApplicationRoutes(surface: NitroBuildSurface): boolean {
 const INLINE_JS_UNSAFE_CHAR_MAP: Record<string, string> = {
   "<": "\\u003C",
   ">": "\\u003E",
-  "/": "\\u002F",
-  "\\": "\\\\",
-  "\b": "\\b",
-  "\f": "\\f",
-  "\n": "\\n",
-  "\r": "\\r",
-  "\t": "\\t",
-  "\0": "\\0",
   "\u2028": "\\u2028",
   "\u2029": "\\u2029",
 };
 
+/**
+ * Escapes ONLY the characters that {@link JSON.stringify} leaves intact but are
+ * unsafe to embed directly in inline JS/HTML source (`<`, `>`, and the U+2028 /
+ * U+2029 line separators). The input is expected to already be a valid JS
+ * string literal produced by `JSON.stringify`, so backslashes, quotes and
+ * control characters are already escaped — re-escaping them here would double
+ * the backslashes and corrupt values such as Windows filesystem paths.
+ */
 function escapeUnsafeCharsForInlineJs(value: string): string {
-  return value.replace(/[<>\/\\\b\f\n\r\t\0\u2028\u2029]/g, (char) => INLINE_JS_UNSAFE_CHAR_MAP[char] ?? char);
+  return value.replace(/[<>\u2028\u2029]/g, (char) => INLINE_JS_UNSAFE_CHAR_MAP[char] ?? char);
 }
 
 function includesWorkflowRoute(surface: NitroBuildSurface): boolean {
