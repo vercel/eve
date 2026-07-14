@@ -22,6 +22,7 @@ interface VercelServiceConfig {
   readonly buildCommand?: string;
   readonly entrypoint?: string;
   readonly framework?: string;
+  readonly installCommand?: string;
   readonly mount?: string | VercelServiceMount;
   readonly routes?: readonly VercelRouteConfig[];
   readonly routePrefix?: string;
@@ -32,6 +33,7 @@ interface VercelServiceConfig {
 interface MutableGeneratedVercelServiceConfig {
   buildCommand: string;
   framework: "eve";
+  installCommand?: string;
   routePrefix?: string;
   routes: readonly VercelRouteConfig[];
   root: string;
@@ -81,6 +83,7 @@ export interface EnsureVercelOutputConfigResult {
 export interface EnsureVercelOutputConfigAgentInput {
   readonly appRoot: string;
   readonly buildCommand: string;
+  readonly installCommand?: string;
   readonly name?: string;
   readonly publicRoutePrefix: string;
   readonly servicePrefix: string;
@@ -471,6 +474,10 @@ export async function ensureEveVercelOutputConfig(input: {
         routes: insertEveServiceRequestPathRoute(undefined, routeSrc),
         root: resolveRelativeEntrypoint(input.nextRoot, agent.appRoot),
       };
+
+      if (agent.installCommand !== undefined) {
+        serviceConfig.installCommand = agent.installCommand;
+      }
 
       if (agent.publicRoutePrefix.length > 0) {
         serviceConfig.routePrefix = agent.publicRoutePrefix;
