@@ -173,10 +173,8 @@ jobs:
       - name: Run TUI smoke tests
         run: pnpm test:tui
 
-  test-dev-windows:
+  test-dev-schedule-windows:
     runs-on: windows-latest
-    # Temporarily disabled: consistently failing in CI and not currently debuggable.
-    if: false
 
     steps:
       - name: Checkout code
@@ -196,7 +194,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run eve dev scenario
+      - name: Run eve dev schedule scenario
         run: |
           $env:Path = "$env:PNPM_HOME;$env:Path"
-          pnpm --dir packages/eve exec vitest run --config vitest.dev-server.config.ts
+          pnpm --dir packages/eve exec vitest run --config vitest.dev-server.config.ts -t "dispatches a schedule through the bundled dev route"
