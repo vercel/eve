@@ -35,9 +35,8 @@ export function createCompactionRegressionAgent(input: {
 
       const regression = activeRegression;
       const marker = completionMarker(regression.regressionCase);
-      const promptText = request.messages.map((message) => message.text).join("\n");
 
-      if (checkpointProvesCompletion(promptText, marker)) {
+      if (checkpointProvesCompletion(request.messages, marker)) {
         return `Done: ${marker}`;
       }
 
@@ -111,21 +110,16 @@ function completionMarker(regressionCase: RegressionCase): string {
     : "SOURCE_ANALYSIS_COMPLETE";
 }
 
-function checkpointProvesCompletion(text: string, marker: string): boolean {
-  const requiredSections = [
-    "## Goal",
-    "## Constraints and preferences",
-    "## Progress",
-    "### Done",
-    "### In progress",
-    "### Blocked",
-    "## Key decisions",
-    "## Next steps",
-    "## Critical context",
-  ];
-  if (!requiredSections.every((section) => text.includes(section))) return false;
+function checkpointProvesCompletion(
+  messages: MockModelRequest["messages"],
+  marker: string,
+): boolean {
+  return messages.some((message, index) => {
+    if (message.role !== "user" || message.text !== "Summary of our conversation so far:") {
+      return false;
+    }
 
-  const start = text.lastIndexOf("### Done");
-  const end = text.indexOf("### In progress", start);
-  return text.slice(start, end < 0 ? undefined : end).includes(marker);
+    const checkpoint = messages[index + 1];
+    return checkpoint?.role === "assistant" && checkpoint.text.includes(marker);
+  });
 }
