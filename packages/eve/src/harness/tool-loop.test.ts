@@ -6729,6 +6729,60 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("keeps channel context after the approval-response model call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Approved.", role: "assistant" }] },
+      text: "Approved.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const readGenerateMessages = (index: number) => {
+      const agent = vi.mocked(ToolLoopAgent).mock.results[index]?.value;
+      if (agent === undefined) {
+        throw new Error(`ToolLoopAgent mock did not return instance ${String(index)}.`);
+      }
+      const call = vi.mocked(agent.generate).mock.calls[0]?.[0];
+      if (call === undefined) {
+        throw new Error(`ToolLoopAgent instance ${String(index)} did not generate.`);
+      }
+      return call.messages;
+    };
+
+    const config = createTestConfig("conversation", undefined, {
+      tools: new Map([
+        [
+          "bash",
+          {
+            description: "Run shell commands",
+            execute: vi.fn().mockResolvedValue("ok"),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "bash",
+          },
+        ],
+      ]),
+    });
+    const harness = createToolLoopHarness(config);
+    const context = "<linear_context>issue metadata</linear_context>";
+
+    const firstResult = await harness(createPendingBashApprovalSession(), {
+      context: [context],
+      inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
+    });
+
+    const firstMessages = readGenerateMessages(0);
+    expect(typeof firstResult.next).toBe("function");
+    expect(firstMessages.at(-1)?.role).toBe("tool");
+    expect(firstMessages).not.toContainEqual({ content: context, role: "user" });
+
+    const secondResult = await harness(firstResult.session);
+
+    const secondMessages = readGenerateMessages(1);
+    expect(secondResult.next).toBeNull();
+    expect(secondMessages.at(-1)).toEqual({ content: context, role: "user" });
+  });
+
   it("deferred message lands as last non-system message after explicit approval denial", async () => {
     // Step 1: pending approval + user sends a follow-up message. The approval
     // remains pending and the message is deferred. Step 2: the user denies the

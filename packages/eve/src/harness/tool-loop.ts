@@ -584,7 +584,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    if (stepInput.input?.context !== undefined) {
+    if (stepInput.input?.context !== undefined && pending.deferredContext !== true) {
       for (const entry of stepInput.input.context) {
         messages.push({ content: entry, role: "user" });
       }
