@@ -39,9 +39,12 @@ const DEV_SERVER_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   ),
 };
 const DEV_SCHEDULE_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
-  ...DEV_SERVER_AGENT_DESCRIPTOR,
   files: {
-    ...DEV_SERVER_AGENT_DESCRIPTOR.files,
+    "agent/agent.ts": `import { defineAgent } from "eve";
+
+export default defineAgent({ model: "openai/gpt-5.4-mini" });
+`,
+    "agent/instructions.md": "You are a precise assistant.\n",
     "agent/schedules/heartbeat.ts": `import { defineSchedule } from "eve/schedules";
 
 export default defineSchedule({
@@ -50,6 +53,7 @@ export default defineSchedule({
 });
 `,
   },
+  installDependencies: true,
   name: "dev-schedule-dispatch",
 };
 
