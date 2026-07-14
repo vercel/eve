@@ -121,6 +121,10 @@ with these model entries:
 
 The short name is the stable Actions check identifier; the full id selects the
 provider model. Updating a model version does not rename required checks.
+Each workflow also publishes one stable aggregate check, `e2e-local` or
+`e2e-vercel`, which succeeds only when every fixture and model leg succeeds.
+Require those two checks in the repository ruleset so newly added fixtures and
+models become required automatically.
 
 Each leg exports the selected id as `EVE_E2E_MODEL` before it runs:
 
