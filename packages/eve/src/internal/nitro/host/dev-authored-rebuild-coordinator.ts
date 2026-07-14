@@ -310,7 +310,10 @@ function startSandboxPrewarmAfterCommit(
   if (!hasSandboxRelatedChange(host.compileResult.project.agentRoot, changedPaths)) {
     return;
   }
-  const artifactsConfig = createDevelopmentNitroArtifactsConfig({ appRoot: host.appRoot });
+  const artifactsConfig = createDevelopmentNitroArtifactsConfig({
+    appRoot: host.appRoot,
+    configuredWorld: host.compileResult.manifest.config.experimental?.workflow?.world,
+  });
   startDevelopmentSandboxPrewarmInBackground({
     appRoot: host.appRoot,
     compiledArtifactsSource: resolveNitroCompiledArtifactsSource(artifactsConfig),

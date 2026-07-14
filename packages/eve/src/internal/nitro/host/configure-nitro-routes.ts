@@ -396,6 +396,7 @@ export async function configureDevelopmentNitroRoutes(
 
   const artifactsConfig = createDevelopmentNitroArtifactsConfig({
     appRoot: preparedHost.appRoot,
+    configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
   });
   registerApplicationRoutes(nitro, preparedHost, artifactsConfig);
   registerDevelopmentControlRoutes(nitro, artifactsConfig);

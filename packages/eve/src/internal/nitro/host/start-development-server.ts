@@ -400,6 +400,7 @@ async function startNitroDevelopmentServer(
     const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(
       createDevelopmentNitroArtifactsConfig({
         appRoot: preparedHost.appRoot,
+        configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
       }),
     );
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
