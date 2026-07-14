@@ -207,6 +207,31 @@ describe("teamsChannel", () => {
     });
   });
 
+  it("keeps a channel thread token stable when follow-ups omit replyToId", async () => {
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      onMessage: () => ({ auth: null }),
+    });
+    const initial = messageActivity({ conversationType: "channel" });
+    initial.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+    initial.id = "THREAD_ROOT";
+    const followUp = messageActivity({ conversationType: "channel" });
+    followUp.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+    followUp.id = "FOLLOW_UP_ACTIVITY";
+
+    const initialRequest = await firePost(channel, initial);
+    const followUpRequest = await firePost(channel, followUp);
+    const initialOptions = initialRequest.send.mock.calls[0]![1] as {
+      readonly continuationToken: string;
+    };
+
+    expect(followUpRequest.send.mock.calls[0]![1]).toMatchObject({
+      continuationToken: initialOptions.continuationToken,
+      state: { replyToActivityId: "THREAD_ROOT" },
+    });
+    expect(initialOptions.continuationToken).toBe("TENANT:CONV:THREAD_ROOT");
+  });
+
   it("receive starts proactive sessions and anchors initial channel messages", async () => {
     const requests: Array<{ body: unknown; url: string }> = [];
     const channel = teamsChannel({

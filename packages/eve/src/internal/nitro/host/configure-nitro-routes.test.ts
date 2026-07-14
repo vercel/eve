@@ -85,7 +85,8 @@ vi.mock("../../application/paths.js", () => ({
 }));
 
 const { configureNitroRoutes } = await import("./configure-nitro-routes.js");
-const { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } = await import("#protocol/routes.js");
+const { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } =
+  await import("#protocol/routes.js");
 
 function createNitroStub(
   input: { buildDir?: string; dev?: boolean; rootDir?: string } = {},
@@ -308,6 +309,18 @@ describe("configureNitroRoutes", () => {
         route: "/eve/v1/dev/runtime-artifacts",
       }),
     );
+  });
+
+  it("bakes the module map loader into the dev schedule handler", async () => {
+    const nitro = createNitroStub({ dev: true });
+
+    await configureNitroRoutes(nitro, createPreparedHost(), {
+      surface: "app",
+    });
+
+    const source = nitro.options.virtual[`#eve-route${EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN}`];
+    expect(source).toContain('"moduleMapLoaderPath"');
+    expect(source).toContain("authored-module-map-loader.js");
   });
 
   it("registers the agent info route for dev and production app builds", async () => {

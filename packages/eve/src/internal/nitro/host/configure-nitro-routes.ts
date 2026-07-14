@@ -373,7 +373,7 @@ export async function configureNitroRoutes(
         route: EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
       });
       addFrameworkVirtualHandler(nitro, {
-        args: JSON.stringify({ appRoot: artifactsConfig.appRoot }),
+        args: JSON.stringify(artifactsConfig),
         handlerExport: "handleDevScheduleDispatchRequest",
         method: "POST",
         modulePath: resolvePackageSourceFilePath(
