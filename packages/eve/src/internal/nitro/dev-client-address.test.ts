@@ -27,6 +27,18 @@ describe("development client address metadata", () => {
     expect(readTrustedDevelopmentClientAddress(headers, SECRET)).toBe("10.0.0.9");
   });
 
+  it("stamps Node request headers used by WebSocket upgrades", () => {
+    const headers = {
+      [DEVELOPMENT_CLIENT_ADDRESS_HEADER]: "203.0.113.7",
+      [DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER]: "forged",
+    };
+    stampDevelopmentClientAddress(headers, "10.0.0.9", SECRET);
+
+    expect(headers[DEVELOPMENT_CLIENT_ADDRESS_HEADER]).toBe("10.0.0.9");
+    expect(headers[DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER]).not.toBe("forged");
+    expect(readTrustedDevelopmentClientAddress(new Headers(headers), SECRET)).toBe("10.0.0.9");
+  });
+
   it("drops the metadata entirely when no secret or address is available", () => {
     const headers = new Headers({
       [DEVELOPMENT_CLIENT_ADDRESS_HEADER]: "203.0.113.7",

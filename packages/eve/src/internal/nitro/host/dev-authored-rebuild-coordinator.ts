@@ -9,6 +9,7 @@ import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
+import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import {
   activateDevelopmentGeneration,
@@ -30,6 +31,20 @@ export class PostCommitDevelopmentRebuildError extends Error {
       { cause },
     );
     this.name = "PostCommitDevelopmentRebuildError";
+  }
+}
+
+/**
+ * Raised when an authored reload changes which process owns the Workflow
+ * World. That ownership is fixed when the development server starts, so the
+ * existing server must keep serving until the user restarts it.
+ */
+export class DevelopmentWorkflowWorldChangeRequiresRestartError extends Error {
+  constructor() {
+    super(
+      "Changing experimental.workflow.world between the parent-owned local World and a custom World requires restarting eve dev.",
+    );
+    this.name = "DevelopmentWorkflowWorldChangeRequiresRestartError";
   }
 }
 
@@ -69,6 +84,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   #currentHostFingerprint: string;
   #currentRuntimeFingerprint: string;
   readonly #devServer: DrainedNitroDevServer;
+  readonly #usesParentWorkflowWorld: boolean;
 
   constructor(input: {
     readonly currentHostFingerprint: string;
@@ -80,6 +96,9 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     this.#currentHostFingerprint = input.currentHostFingerprint;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
     this.#devServer = input.devServer;
+    this.#usesParentWorkflowWorld = usesParentDevelopmentWorkflowWorld(
+      input.initialHost.compileResult.manifest.config.experimental?.workflow?.world,
+    );
   }
 
   async rebuild(input: {
@@ -95,6 +114,13 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
 
     try {
       nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot);
+      if (
+        usesParentDevelopmentWorkflowWorld(
+          nextHost.compileResult.manifest.config.experimental?.workflow?.world,
+        ) !== this.#usesParentWorkflowWorld
+      ) {
+        throw new DevelopmentWorkflowWorldChangeRequiresRestartError();
+      }
       const nextHostFingerprint = await computeDevelopmentHostFingerprint(nextHost);
       const nextRuntimeFingerprint = nextHost.generation.fingerprint;
       const hasStructuralChange = nextHostFingerprint !== this.#currentHostFingerprint;

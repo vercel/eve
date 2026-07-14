@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import type { IncomingHttpHeaders } from "node:http";
 
 export const DEVELOPMENT_CLIENT_ADDRESS_HEADER = "x-eve-dev-client-address";
 export const DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER = "x-eve-dev-client-address-signature";
@@ -11,12 +12,12 @@ export const DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER = "x-eve-dev-client-add
  * unsigned header could be forged by anything that discovers it.
  */
 export function stampDevelopmentClientAddress(
-  headers: Headers,
+  headers: Headers | IncomingHttpHeaders,
   address: string | undefined,
   secret: string | undefined,
 ): void {
-  headers.delete(DEVELOPMENT_CLIENT_ADDRESS_HEADER);
-  headers.delete(DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER);
+  deleteHeader(headers, DEVELOPMENT_CLIENT_ADDRESS_HEADER);
+  deleteHeader(headers, DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER);
   if (
     address === undefined ||
     address.length === 0 ||
@@ -25,8 +26,12 @@ export function stampDevelopmentClientAddress(
   ) {
     return;
   }
-  headers.set(DEVELOPMENT_CLIENT_ADDRESS_HEADER, address);
-  headers.set(DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER, signClientAddress(address, secret));
+  setHeader(headers, DEVELOPMENT_CLIENT_ADDRESS_HEADER, address);
+  setHeader(
+    headers,
+    DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER,
+    signClientAddress(address, secret),
+  );
 }
 
 /**
@@ -64,4 +69,20 @@ export function timingSafeEqualStrings(a: string, b: string): boolean {
 
 function signClientAddress(address: string, secret: string): string {
   return createHmac("sha256", secret).update(address).digest("base64url");
+}
+
+function deleteHeader(headers: Headers | IncomingHttpHeaders, name: string): void {
+  if (headers instanceof Headers) {
+    headers.delete(name);
+    return;
+  }
+  delete headers[name];
+}
+
+function setHeader(headers: Headers | IncomingHttpHeaders, name: string, value: string): void {
+  if (headers instanceof Headers) {
+    headers.set(name, value);
+    return;
+  }
+  headers[name] = value;
 }

@@ -173,6 +173,38 @@ describe("drained Nitro dev server", () => {
     await server.close();
   });
 
+  it("waits for an already-releasing retired worker before close resolves", async () => {
+    const { createRunner } = createRunnerFactory(async () => new Response("ok"));
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    let notifyDisposeStarted: (() => void) | undefined;
+    const disposeStarted = new Promise<void>((resolve) => {
+      notifyDisposeStarted = resolve;
+    });
+    let finishDispose: (() => void) | undefined;
+    const disposeFinished = new Promise<void>((resolve) => {
+      finishDispose = resolve;
+    });
+    const disposeFirst = vi.fn(async () => {
+      notifyDisposeStarted?.();
+      await disposeFinished;
+    });
+
+    await server.replaceWorker(replacement("/tmp/first.mjs", disposeFirst));
+    await server.replaceWorker(replacement("/tmp/second.mjs"));
+    await withinDeadline(disposeStarted, "Timed out waiting for retired host disposal to start.");
+
+    const closing = server.close();
+    const closeState = await Promise.race([
+      closing.then(() => "closed" as const),
+      new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 25)),
+    ]);
+    expect(closeState).toBe("pending");
+
+    finishDispose?.();
+    await withinDeadline(closing, "Timed out waiting for retired host disposal during close.");
+    expect(disposeFirst).toHaveBeenCalledOnce();
+  });
+
   it("restarts the worker with its own workspace when it exits unexpectedly", async () => {
     const { createRunner, runners } = createRunnerFactory(
       async (_request, runnerIndex) => new Response(`runner-${String(runnerIndex)}`),
@@ -489,6 +521,57 @@ describe("drained Nitro dev server", () => {
       SECRET,
     );
     expect(verified).toBe("127.0.0.1");
+
+    await server.close();
+  });
+
+  it("stamps signed client-address metadata on WebSocket upgrades", async () => {
+    const SECRET = "scenario-websocket-transport-secret";
+    const { createRunner, runners } = createRunnerFactory(async () => new Response("ok"));
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    server.setClientAddressSecret(SECRET);
+    const listener = await listen(server);
+    await server.replaceWorker(replacement("/tmp/first.mjs"));
+    let observedHeaders: Record<string, string | string[] | undefined> | undefined;
+    (runners[0] as { upgrade: unknown }).upgrade = vi.fn(
+      async (input: Parameters<DevelopmentRunner["upgrade"]>[0]) => {
+        observedHeaders = input.node.req.headers;
+        input.node.socket.destroy();
+      },
+    );
+
+    const target = new URL(listener.url ?? "");
+    await withinDeadline(
+      new Promise<void>((resolve, reject) => {
+        const socket = connect({ host: target.hostname, port: Number(target.port) }, () => {
+          socket.write(
+            "GET / HTTP/1.1\r\n" +
+              "Host: localhost\r\n" +
+              "Connection: Upgrade\r\n" +
+              "Upgrade: websocket\r\n" +
+              `${DEVELOPMENT_CLIENT_ADDRESS_HEADER}: 203.0.113.7\r\n` +
+              `${DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER}: forged\r\n\r\n`,
+          );
+        });
+        socket.once("close", () => resolve());
+        socket.once("error", reject);
+      }),
+      "Timed out waiting for the WebSocket upgrade to reach the worker.",
+    );
+
+    const address = observedHeaders?.[DEVELOPMENT_CLIENT_ADDRESS_HEADER];
+    const signature = observedHeaders?.[DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER];
+    expect(address).toBe("127.0.0.1");
+    expect(signature).not.toBe("forged");
+    expect(
+      readTrustedDevelopmentClientAddress(
+        new Headers({
+          [DEVELOPMENT_CLIENT_ADDRESS_HEADER]: String(address),
+          [DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER]: String(signature),
+        }),
+        SECRET,
+      ),
+    ).toBe("127.0.0.1");
 
     await server.close();
   });

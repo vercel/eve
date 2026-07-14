@@ -284,16 +284,31 @@ async function readGenerationRuntimeAppRoot(
     generationId,
     "generation.json",
   );
+  let source: string;
+  try {
+    source = await readFile(metadataPath, "utf8");
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      throw new MissingDevelopmentGenerationError(generationId, error);
+    }
+    throw error;
+  }
   let metadata: unknown;
   try {
-    metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    metadata = JSON.parse(source);
   } catch (error) {
-    throw new MissingDevelopmentGenerationError(generationId, error);
+    throw new Error(`Development generation "${generationId}" has invalid metadata.`, {
+      cause: error,
+    });
   }
   if (!isRecord(metadata) || typeof metadata.runtimeAppRoot !== "string") {
     throw new Error(`Development generation "${generationId}" has invalid metadata.`);
   }
   return metadata.runtimeAppRoot;
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

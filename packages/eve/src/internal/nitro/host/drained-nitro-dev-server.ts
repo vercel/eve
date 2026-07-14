@@ -36,7 +36,7 @@ interface RunnerSlot {
   disposed: boolean;
   readonly entry: string;
   quietListeners: Array<() => void>;
-  released: boolean;
+  releasePromise: Promise<void> | undefined;
   readonly runner: DevelopmentRunner;
   readonly workerData: Readonly<Record<string, unknown>>;
 }
@@ -116,7 +116,7 @@ export class DrainedNitroDevServer {
       disposed: false,
       entry: replacement.entry,
       quietListeners: [],
-      released: false,
+      releasePromise: undefined,
       runner: this.#createRunner({
         entry: replacement.entry,
         name: `eve-dev-${String(this.#runnerCounter++)}`,
@@ -271,11 +271,12 @@ export class DrainedNitroDevServer {
     await Promise.all(listenerClosePromises);
   }
 
-  async #releaseSlot(slot: RunnerSlot): Promise<void> {
-    if (slot.released) {
-      return;
-    }
-    slot.released = true;
+  #releaseSlot(slot: RunnerSlot): Promise<void> {
+    slot.releasePromise ??= this.#releaseSlotOnce(slot);
+    return slot.releasePromise;
+  }
+
+  async #releaseSlotOnce(slot: RunnerSlot): Promise<void> {
     await slot.runner.close().catch(() => undefined);
     await this.#disposeSlot(slot);
   }
@@ -312,7 +313,7 @@ export class DrainedNitroDevServer {
         // replacement inherits its dispose and the crashed slot releases
         // nothing itself.
         slot.disposed = true;
-        slot.released = true;
+        slot.releasePromise = Promise.resolve();
         await this.#replaceWorker({
           dispose: slot.dispose,
           entry: slot.entry,
@@ -330,8 +331,7 @@ export class DrainedNitroDevServer {
   #drainInBackground(slot: RunnerSlot): void {
     this.#draining.add(slot);
     const finishDrain = () => {
-      this.#draining.delete(slot);
-      void this.#releaseSlot(slot);
+      void this.#releaseSlot(slot).finally(() => this.#draining.delete(slot));
     };
     if (slot.activeExchanges === 0) {
       finishDrain();
@@ -412,6 +412,11 @@ export class DrainedNitroDevServer {
   async #handleUpgrade(request: IncomingMessage, socket: Socket, head: Buffer): Promise<void> {
     let settle: (() => void) | undefined;
     try {
+      stampDevelopmentClientAddress(
+        request.headers,
+        request.socket.remoteAddress ?? undefined,
+        this.#clientAddressSecret,
+      );
       await this.waitForActiveRunner();
       const slot = this.#active;
       if (slot === undefined) {

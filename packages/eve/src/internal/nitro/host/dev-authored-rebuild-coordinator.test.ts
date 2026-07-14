@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import {
   createDevelopmentAuthoredRebuildCoordinator,
+  DevelopmentWorkflowWorldChangeRequiresRestartError,
   PostCommitDevelopmentRebuildError,
 } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
@@ -59,10 +60,21 @@ vi.mock("#execution/sandbox/development-prewarm.js", () => ({
   startDevelopmentSandboxPrewarmInBackground: vi.fn(),
 }));
 
-function createHost(id: string, runtimeFingerprint: string): PreparedDevelopmentApplicationHost {
+function createHost(
+  id: string,
+  runtimeFingerprint: string,
+  configuredWorld?: string,
+): PreparedDevelopmentApplicationHost {
   return {
     appRoot: "/tmp/eve-test",
     compileResult: {
+      manifest: {
+        config: {
+          experimental: {
+            workflow: configuredWorld === undefined ? undefined : { world: configuredWorld },
+          },
+        },
+      },
       project: { agentRoot: "/tmp/eve-test/agent" },
     } as CompileAgentResult,
     compiledArtifacts: {
@@ -195,4 +207,35 @@ describe("transactional authored rebuild coordinator", () => {
     expect(mocks.environmentCommit).not.toHaveBeenCalled();
     await devServer.close();
   });
+
+  it.each([
+    { initialWorld: undefined, nextWorld: "@example/custom-world" },
+    { initialWorld: "@example/custom-world", nextWorld: "local" },
+  ])(
+    "requires a restart when Workflow World ownership changes from $initialWorld to $nextWorld",
+    async ({ initialWorld, nextWorld }) => {
+      const devServer = new DrainedNitroDevServer({ error: () => undefined }, createRunner);
+      mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
+      const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
+        devServer,
+        initialHost: createHost("initial", "run-1", initialWorld),
+      });
+      const candidate = createHost("candidate", "run-2", nextWorld);
+      mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(candidate);
+
+      await expect(coordinator.rebuild({ changedPaths: [] })).rejects.toBeInstanceOf(
+        DevelopmentWorkflowWorldChangeRequiresRestartError,
+      );
+
+      expect(mocks.computeDevelopmentHostFingerprint).toHaveBeenCalledOnce();
+      expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
+      expect(mocks.buildDevelopmentHostCandidate).not.toHaveBeenCalled();
+      expect(mocks.removeDevelopmentHostWorkspace).toHaveBeenCalledWith(candidate.workspace);
+      expect(mocks.discardDevelopmentGeneration).toHaveBeenCalledWith(candidate.generation);
+      expect(mocks.environmentRollback).toHaveBeenCalledOnce();
+      expect(mocks.environmentCommit).not.toHaveBeenCalled();
+
+      await devServer.close();
+    },
+  );
 });

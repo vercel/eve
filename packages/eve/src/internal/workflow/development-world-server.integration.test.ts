@@ -210,6 +210,62 @@ describe("parent development Workflow World", () => {
     }
   });
 
+  it("retries a delivery when generation metadata is temporarily unreadable", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-retry-delivery-");
+    await seedGeneration(appRoot, "generation-a");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      await world.start();
+      const created = await callWorld(world, "events.create", [
+        null,
+        {
+          eventData: {
+            deploymentId: "generation-a",
+            executionContext: {},
+            input: new Uint8Array(),
+            workflowName: turnWorkflowReference.workflowId,
+          },
+          eventType: "run_created",
+          specVersion: 5,
+        },
+      ]);
+      const runId = readCreatedRunId(created);
+      const metadataPath = join(
+        appRoot,
+        ".eve",
+        "dev-runtime",
+        "snapshots",
+        "generation-a",
+        "generation.json",
+      );
+      await rm(metadataPath);
+      await mkdir(metadataPath);
+
+      const handled = vi.fn(async () => undefined);
+      const handler = createDevelopmentWorkflowWorld().createQueueHandler(QUEUE_PREFIX, handled);
+      const createDelivery = () =>
+        new Request("http://localhost/.well-known/workflow/v1/flow", {
+          body: JSON.stringify({ runId }),
+          headers: deliveryHeaders({}),
+          method: "POST",
+        });
+
+      const failed = await handler(createDelivery());
+      expect(failed.status).toBe(500);
+      expect(handled).not.toHaveBeenCalled();
+
+      await rm(metadataPath, { recursive: true });
+      await seedGeneration(appRoot, "generation-a");
+      const retried = await handler(createDelivery());
+      expect(retried.status).toBe(200);
+      expect(handled).toHaveBeenCalledOnce();
+    } finally {
+      await world.close();
+    }
+  });
+
   it("rejects untrusted World requests on the call and stream routes", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-untrusted-");
     const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });

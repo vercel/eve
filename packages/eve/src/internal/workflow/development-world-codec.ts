@@ -5,12 +5,13 @@
 // across the parent/worker HTTP boundary.
 const VALUE_TYPE_KEY = "__eveDevelopmentWorldType";
 const DATE_MARKER = "date";
+const OBJECT_MARKER = "object";
 const UINT8_ARRAY_MARKER = "uint8-array";
 const UNDEFINED_MARKER = "undefined";
 
 interface EncodedValue {
   readonly [VALUE_TYPE_KEY]: string;
-  readonly data?: string;
+  readonly data?: unknown;
 }
 
 export interface SerializedDevelopmentWorldError {
@@ -25,12 +26,12 @@ export function encodeDevelopmentWorldValue(value: unknown): string {
 }
 
 export function decodeDevelopmentWorldValue(source: string): unknown {
-  const decoded = decodeDevelopmentWorldJson(source) as { readonly value?: unknown };
-  return decoded.value;
+  const decoded = JSON.parse(source) as unknown;
+  return isRecord(decoded) ? decodeTransportValue(decoded.value) : undefined;
 }
 
 export function decodeDevelopmentWorldJson(source: string): unknown {
-  return decodeValue(JSON.parse(source) as unknown);
+  return decodeWorkflowJsonValue(JSON.parse(source) as unknown);
 }
 
 export function serializeDevelopmentWorldError(error: unknown): SerializedDevelopmentWorldError {
@@ -81,14 +82,19 @@ function encodeValue(value: unknown): unknown {
     return value.map((item) => encodeValue(item));
   }
   if (isRecord(value)) {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, encodeValue(item)]));
+    return {
+      [VALUE_TYPE_KEY]: OBJECT_MARKER,
+      data: Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, encodeValue(item)]),
+      ),
+    } satisfies EncodedValue;
   }
   return value;
 }
 
-function decodeValue(value: unknown): unknown {
+function decodeTransportValue(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => decodeValue(item));
+    return value.map((item) => decodeTransportValue(item));
   }
   if (!isRecord(value)) {
     return value;
@@ -99,13 +105,34 @@ function decodeValue(value: unknown): unknown {
   if (value[VALUE_TYPE_KEY] === DATE_MARKER && typeof value.data === "string") {
     return new Date(value.data);
   }
+  if (value[VALUE_TYPE_KEY] === UINT8_ARRAY_MARKER && typeof value.data === "string") {
+    return Uint8Array.from(Buffer.from(value.data, "base64"));
+  }
+  if (value[VALUE_TYPE_KEY] === OBJECT_MARKER && isRecord(value.data)) {
+    return Object.fromEntries(
+      Object.entries(value.data).map(([key, item]) => [key, decodeTransportValue(item)]),
+    );
+  }
+  throw new Error("Development Workflow World transport contained an invalid encoded value.");
+}
+
+function decodeWorkflowJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => decodeWorkflowJsonValue(item));
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
   if (
-    (value[VALUE_TYPE_KEY] === UINT8_ARRAY_MARKER || value.__type === "Uint8Array") &&
+    Object.keys(value).length === 2 &&
+    value.__type === "Uint8Array" &&
     typeof value.data === "string"
   ) {
     return Uint8Array.from(Buffer.from(value.data, "base64"));
   }
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, decodeValue(item)]));
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, decodeWorkflowJsonValue(item)]),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
