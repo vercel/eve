@@ -279,6 +279,15 @@ export function createWorkflowWorldPluginSource(input: {
   ].join("\n");
 }
 
+/**
+ * Generates the dev worker's Workflow World wiring. Configs that resolve to
+ * the vendored local World get the parent RPC client so run state survives
+ * worker replacement; any other World is instantiated inside the worker
+ * unchanged, because eve does not own its lifetime. The selection predicate
+ * is shared with the parent's world creation — a worker wired for the RPC
+ * client fails every World call unless the parent created a World to serve
+ * it.
+ */
 export function createDevelopmentWorkflowWorldPluginSource(input: {
   compiledArtifactsBootstrapPath: string;
   configuredWorld: AgentWorkflowWorldDefinition | undefined;

@@ -63,6 +63,16 @@ export async function createDevelopmentAuthoredRebuildCoordinator(input: {
   return coordinator;
 }
 
+/**
+ * Serializes authored rebuilds into a transaction whose commit order makes
+ * rollback unnecessary: a candidate generation and worker are prepared while
+ * the previous worker keeps serving, the ready worker is swapped in first,
+ * and the generation pointer is activated second. Workers are
+ * generation-neutral (they load authored modules through the pointer), so
+ * every intermediate state serves consistent code, and any failure before
+ * the swap simply discards the candidate. Failures after the swap must
+ * never travel the discard path — see {@link PostCommitDevelopmentRebuildError}.
+ */
 class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentAuthoredRebuildCoordinator {
   #currentHost: PreparedDevelopmentApplicationHost;
   #currentHostFingerprint: string;

@@ -48,11 +48,32 @@ async function call<T>(
   return decodeDevelopmentWorldValue(await response.text()) as T;
 }
 
+/**
+ * Worker-side Workflow World: an interface-faithful shim whose every method
+ * forwards to the real local World in the CLI parent process.
+ *
+ * Why: a dev worker is disposed on every structural reload, so nothing with
+ * run lifetime may live inside it. The `World` interface is already fully
+ * async because production Worlds are remote services — inserting HTTP
+ * between the runtime and the World changes topology, not semantics, and
+ * makes development match production's compute/state split. The runtime
+ * cannot observe the difference, so `@workflow/core` needs no changes and
+ * this file is deletable the day a multi-process local World ships upstream.
+ *
+ * Two members are not simple forwards. `streams.get` must return a live
+ * `ReadableStream`, so it uses a dedicated route and hands back the response
+ * body. `createQueueHandler` points the other way entirely: it returns the
+ * HTTP handler that the parent's queue posts deliveries into, and is where a
+ * delivery gets pinned to the generation its run started on.
+ */
 export function createDevelopmentWorkflowWorld(): World {
   const world = {
     specVersion: 5 as SpecVersion,
     processExitTriggersQueueRedelivery: false,
     async getDeploymentId() {
+      // Inside a pinned delivery, steps and child runs must record the
+      // delivery's generation — not whatever is active — so replay after a
+      // reload returns to the same authored modules.
       return (
         getDevelopmentWorkflowGeneration()?.generationId ?? (await call<string>("getDeploymentId"))
       );

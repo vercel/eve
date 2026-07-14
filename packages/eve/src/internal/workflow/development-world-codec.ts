@@ -1,3 +1,8 @@
+// World values are not plain JSON: run records carry Dates, stream chunks
+// carry Uint8Arrays, and rejections must rehydrate into real Errors on the
+// caller's side so the workflow runtime observes the same values it would
+// from an in-process World. This codec exists only to preserve those shapes
+// across the parent/worker HTTP boundary.
 const VALUE_TYPE_KEY = "__eveDevelopmentWorldType";
 const DATE_MARKER = "date";
 const UINT8_ARRAY_MARKER = "uint8-array";
