@@ -15,7 +15,6 @@ describe("registerChannelVirtualHandlers", () => {
     registerChannelVirtualHandlers(nitro, {
       artifactsConfig: createDevelopmentNitroArtifactsConfig({
         appRoot: "/app",
-        configuredWorld: undefined,
       }),
       registrations: [{ cors: {}, method: "POST", route: "/eve/v1/session" }],
     });
@@ -54,7 +53,6 @@ describe("registerChannelVirtualHandlers", () => {
     registerChannelVirtualHandlers(nitro, {
       artifactsConfig: createDevelopmentNitroArtifactsConfig({
         appRoot: "/app",
-        configuredWorld: undefined,
       }),
       registrations: [
         { cors: {}, method: "GET", route: "/eve/v1/session/:sessionId/events" },
@@ -81,7 +79,6 @@ describe("registerChannelVirtualHandlers", () => {
     registerChannelVirtualHandlers(nitro, {
       artifactsConfig: createDevelopmentNitroArtifactsConfig({
         appRoot: "/app",
-        configuredWorld: undefined,
       }),
       registrations: [{ method: "WEBSOCKET", route: "/voice" }],
     });

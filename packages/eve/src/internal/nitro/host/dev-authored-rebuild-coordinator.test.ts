@@ -123,7 +123,6 @@ async function createCoordinatorWithServer() {
   const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
     devServer,
     initialHost: createHost("initial", "run-1"),
-    workflowWorld: undefined,
   });
   return { coordinator, devServer };
 }
@@ -161,7 +160,6 @@ describe("transactional authored rebuild coordinator", () => {
       appRoot: retryHost.appRoot,
       generation: retryHost.generation,
     });
-
     await devServer.close();
   });
 
@@ -180,7 +178,6 @@ describe("transactional authored rebuild coordinator", () => {
     const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
       devServer,
       initialHost: createHost("initial", "run-1"),
-      workflowWorld: undefined,
     });
 
     const structuralHost = createHost("structural", "run-2");
@@ -196,7 +193,6 @@ describe("transactional authored rebuild coordinator", () => {
     expect(mocks.activateDevelopmentGeneration).not.toHaveBeenCalled();
     expect(mocks.environmentRollback).toHaveBeenCalledOnce();
     expect(mocks.environmentCommit).not.toHaveBeenCalled();
-
     await devServer.close();
   });
 });

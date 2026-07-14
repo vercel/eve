@@ -20,10 +20,6 @@ const mocks = vi.hoisted(() => {
   };
   const mocksWorldInstance = {
     close: vi.fn(async () => undefined),
-    collectGenerationReferences: vi.fn(async () => ({
-      generationIds: new Set<string>(),
-      protectAll: false,
-    })),
     handleRequest: vi.fn(async () => undefined),
     start: vi.fn(async () => undefined),
   };

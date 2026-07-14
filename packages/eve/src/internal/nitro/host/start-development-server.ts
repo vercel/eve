@@ -485,7 +485,6 @@ async function startNitroDevelopmentServer(
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
       devServer: activeDevServer,
       initialHost: preparedHost,
-      workflowWorld,
     });
 
     authoredSourceWatcher = await devBootPhase(

@@ -383,7 +383,7 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
-  it("prunes an inactive generation after its leases and durable references are released", async () => {
+  it("retains every activated generation until lease-aware pruning exists", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-activated-retention-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const firstSnapshotRoot = join(snapshotsRoot, "first");
@@ -391,6 +391,7 @@ describe("development runtime artifact snapshots", () => {
 
     for (const snapshotRoot of [firstSnapshotRoot, nextSnapshotRoot]) {
       await mkdir(snapshotRoot, { recursive: true });
+      await utimes(snapshotRoot, new Date(1_000), new Date(1_000));
       await activateDevelopmentRuntimeArtifactsSnapshot({
         appRoot,
         snapshot: {
@@ -400,7 +401,6 @@ describe("development runtime artifact snapshots", () => {
           sourceRoot: appRoot,
         },
       });
-      await utimes(snapshotRoot, new Date(1_000), new Date(1_000));
     }
 
     await pruneDevelopmentRuntimeArtifactsSnapshots({
@@ -410,11 +410,11 @@ describe("development runtime artifact snapshots", () => {
       retainCount: 0,
     });
 
-    expect(existsSync(firstSnapshotRoot)).toBe(false);
+    expect(existsSync(firstSnapshotRoot)).toBe(true);
     expect(existsSync(nextSnapshotRoot)).toBe(true);
   });
 
-  it("preserves generations explicitly referenced by nonterminal Workflow records", async () => {
+  it("preserves snapshots referenced by active durable workflow data", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-durable-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const activeSnapshotRoot = join(snapshotsRoot, "active");
@@ -446,10 +446,77 @@ describe("development runtime artifact snapshots", () => {
         sourceRoot: appRoot,
       },
     });
+    await mkdir(join(appRoot, ".workflow-data", "default", "runs"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".workflow-data", "default", "runs", "parked-turn.json"),
+      `${JSON.stringify(
+        {
+          status: "running",
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(posixParkedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
+                  kind: "disk",
+                },
+              },
+            },
+          },
+          workflowId: "workflow//eve//turnWorkflow",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(appRoot, ".workflow-data", "default", "runs", "parked-turn-windows.json"),
+      `${JSON.stringify(
+        {
+          status: "running",
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(windowsParkedTurnSnapshotRoot, "source", "app").replaceAll(
+                    "/",
+                    "\\",
+                  ),
+                  kind: "disk",
+                },
+              },
+            },
+          },
+          workflowId: "workflow//eve//turnWorkflow",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await writeFile(
+      join(appRoot, ".workflow-data", "default", "runs", "completed-turn.json"),
+      `${JSON.stringify(
+        {
+          status: "completed",
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(completedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
+                  kind: "disk",
+                },
+              },
+            },
+          },
+          workflowId: "workflow//eve//turnWorkflow",
+        },
+        null,
+        2,
+      )}\n`,
+    );
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
       now,
-      protectedGenerationIds: new Set(["parked-turn-posix", "parked-turn-windows"]),
       recentWindowMs: 0,
       retainCount: 0,
     });
@@ -568,7 +635,7 @@ describe("development runtime artifact snapshots", () => {
     await withRuntimeSession(createRuntimeSession("next-imports-regression"), async () => {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
-          createDevelopmentNitroArtifactsConfig({ appRoot, configuredWorld: undefined }),
+          createDevelopmentNitroArtifactsConfig({ appRoot }),
         ),
       });
       const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];

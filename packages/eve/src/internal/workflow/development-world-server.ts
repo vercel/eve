@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
@@ -22,18 +21,6 @@ import {
 } from "#internal/workflow/development-world-protocol.js";
 
 /**
- * The set of development generations that active Workflow runs still own.
- * `protectAll` reports that ownership could not be determined (an unreadable
- * run record), in which case pruning must keep every generation.
- */
-export interface DevelopmentWorkflowGenerationReferences {
-  readonly generationIds: ReadonlySet<string>;
-  readonly protectAll: boolean;
-  /** Why ownership could not be determined, when `protectAll` is set. */
-  readonly reason?: string;
-}
-
-/**
  * The application's one local Workflow World, owned by the CLI parent.
  *
  * Why the parent: run records, the queue, and stream state must outlive the
@@ -51,7 +38,6 @@ export interface DevelopmentWorkflowGenerationReferences {
  */
 export interface ParentDevelopmentWorkflowWorld {
   close(): Promise<void>;
-  collectGenerationReferences(): Promise<DevelopmentWorkflowGenerationReferences>;
   handleRequest(request: Request): Promise<Response | undefined>;
   start(): Promise<void>;
 }
@@ -68,8 +54,6 @@ export function createParentDevelopmentWorkflowWorld(input: {
 class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWorld {
   readonly #agentName: string;
   readonly #appRoot: string;
-  readonly #dataDir: string;
-  readonly #recentlyEnqueuedGenerations = new Map<string, number>();
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
   readonly #world: World;
@@ -87,11 +71,10 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     this.#agentName = input.agentName;
     this.#appRoot = input.appRoot;
-    this.#dataDir = join(input.appRoot, ".workflow-data");
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
     this.#transportSecret = input.transportSecret;
     this.#world = createWorld({
-      dataDir: this.#dataDir,
+      dataDir: join(input.appRoot, ".workflow-data"),
       recoverActiveRuns: false,
     });
   }
@@ -100,13 +83,11 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     if (this.#started) {
       return;
     }
-    const references = await this.collectGenerationReferences();
+    const referencedGenerationIds = await this.#collectActiveTurnGenerationIds();
     const missingGenerationIds = new Set<string>();
-    if (!references.protectAll) {
-      for (const generationId of references.generationIds) {
-        if (!this.#generationExists(generationId)) {
-          missingGenerationIds.add(generationId);
-        }
+    for (const generationId of referencedGenerationIds) {
+      if (!this.#generationExists(generationId)) {
+        missingGenerationIds.add(generationId);
       }
     }
     if (missingGenerationIds.size > 0) {
@@ -148,69 +129,34 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return undefined;
   }
 
-  async collectGenerationReferences(): Promise<DevelopmentWorkflowGenerationReferences> {
+  async #collectActiveTurnGenerationIds(): Promise<ReadonlySet<string>> {
     const generationIds = new Set<string>();
-    try {
-      const runIds = new Set<string>();
+    for (const status of ["pending", "running"] as const) {
       let cursor: string | undefined;
       do {
-        const page = await this.#world.runs.list({
-          pagination: { cursor, limit: 1_000 },
-          resolveData: "none",
-        });
+        let page: Awaited<ReturnType<World["runs"]["list"]>>;
+        try {
+          page = await this.#world.runs.list({
+            pagination: { cursor, limit: 1_000 },
+            resolveData: "none",
+            status,
+          });
+        } catch (error) {
+          throw new Error(
+            `Failed to read the app's active local Workflow runs. ` +
+              `Remove ".workflow-data" to discard them.`,
+            { cause: error },
+          );
+        }
         for (const run of page.data) {
-          runIds.add(run.runId);
-          if (
-            (run.status === "pending" || run.status === "running") &&
-            run.workflowName === turnWorkflowReference.workflowId
-          ) {
+          if (run.workflowName === turnWorkflowReference.workflowId) {
             generationIds.add(run.deploymentId);
           }
         }
         cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
       } while (cursor !== undefined);
-      for (const persistedRunId of await this.#readPersistedRunIds()) {
-        if (!runIds.has(persistedRunId)) {
-          return {
-            generationIds: new Set(),
-            protectAll: true,
-            reason: `run record "${persistedRunId}" is unreadable`,
-          };
-        }
-      }
-      // Deliveries enqueued moments ago may not have written a run record
-      // yet (resilient starts persist the record asynchronously), so their
-      // generations are protected for a horizon after enqueue.
-      const horizon = Date.now() - RECENT_ENQUEUE_PROTECTION_MS;
-      for (const [generationId, enqueuedAt] of this.#recentlyEnqueuedGenerations) {
-        if (enqueuedAt < horizon) {
-          this.#recentlyEnqueuedGenerations.delete(generationId);
-        } else {
-          generationIds.add(generationId);
-        }
-      }
-      return { generationIds, protectAll: false };
-    } catch (error) {
-      return {
-        generationIds: new Set(),
-        protectAll: true,
-        reason: error instanceof Error ? error.message : String(error),
-      };
     }
-  }
-
-  async #readPersistedRunIds(): Promise<readonly string[]> {
-    try {
-      const entries = await readdir(join(this.#dataDir, "runs"), { withFileTypes: true });
-      return entries
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-        .map((entry) => entry.name.slice(0, -".json".length));
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    }
+    return generationIds;
   }
 
   async #handleCall(request: Request): Promise<Response> {
@@ -254,7 +200,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
 
   async #queue(...args: Parameters<World["queue"]>): ReturnType<World["queue"]> {
     const [queueName, message, options] = args;
-    this.#recordEnqueuedGeneration(message);
     return await this.#world.queue(queueName, message, {
       ...options,
       headers: {
@@ -303,20 +248,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return header !== null && timingSafeEqualStrings(header, this.#transportSecret);
   }
 
-  #recordEnqueuedGeneration(message: unknown): void {
-    if (!isObject(message) || !isObject(message.runInput)) {
-      return;
-    }
-    const generationId = message.runInput.deploymentId;
-    if (
-      typeof generationId === "string" &&
-      isValidGenerationId(generationId) &&
-      existsSync(join(this.#appRoot, ".eve", "dev-runtime", "snapshots", generationId))
-    ) {
-      this.#recentlyEnqueuedGenerations.set(generationId, Date.now());
-    }
-  }
-
   #generationExists(generationId: string): boolean {
     if (!isValidGenerationId(generationId)) {
       return false;
@@ -350,8 +281,6 @@ function isDevelopmentWorldCall(value: unknown): value is DevelopmentWorldCall {
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
-const RECENT_ENQUEUE_PROTECTION_MS = 30 * 60 * 1000;
 
 async function reenqueueActiveDevelopmentRuns(input: {
   readonly enqueue: World["queue"];

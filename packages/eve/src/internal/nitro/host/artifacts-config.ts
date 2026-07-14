@@ -14,7 +14,7 @@ import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
  */
 export function createDevelopmentNitroArtifactsConfig(input: {
   readonly appRoot: string;
-  readonly configuredWorld: AgentWorkflowWorldDefinition | undefined;
+  readonly configuredWorld?: AgentWorkflowWorldDefinition;
 }): DevelopmentNitroArtifactsConfig {
   return {
     appRoot: input.appRoot,

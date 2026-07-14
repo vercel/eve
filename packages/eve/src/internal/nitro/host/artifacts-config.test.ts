@@ -8,7 +8,6 @@ describe("development artifacts durable strategy", () => {
   it("stores logical generation selectors when the parent owns the World", () => {
     const config = createDevelopmentNitroArtifactsConfig({
       appRoot: "/tmp/eve-test-app",
-      configuredWorld: undefined,
     });
 
     const source = resolveNitroCompiledArtifactsSource(config);

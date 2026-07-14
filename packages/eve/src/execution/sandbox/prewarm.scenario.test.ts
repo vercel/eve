@@ -104,7 +104,7 @@ describe("prewarmAppSandboxes", () => {
     await prewarmAppSandboxes({
       appRoot,
       compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
-        createDevelopmentNitroArtifactsConfig({ appRoot, configuredWorld: undefined }),
+        createDevelopmentNitroArtifactsConfig({ appRoot }),
       ),
       dispatch: createRecordingDispatch(events),
     });

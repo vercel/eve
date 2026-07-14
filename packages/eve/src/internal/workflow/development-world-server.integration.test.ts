@@ -56,7 +56,7 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it("pins a turn delivery to its recorded generation until it becomes terminal", async () => {
+  it("pins a turn delivery to its recorded generation", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-world-");
     await seedGeneration(appRoot, "generation-a");
     await seedGeneration(appRoot, "generation-b");
@@ -83,23 +83,6 @@ describe("parent development Workflow World", () => {
 
       activeGenerationId = "generation-b";
       await expect(deliverToWorker({ runId })).resolves.toBe("generation-a");
-      await expect(world.collectGenerationReferences()).resolves.toEqual({
-        generationIds: new Set(["generation-a"]),
-        protectAll: false,
-      });
-
-      await callWorld(world, "events.create", [
-        runId,
-        {
-          eventData: { result: new Uint8Array() },
-          eventType: "run_completed",
-          specVersion: 5,
-        },
-      ]);
-      await expect(world.collectGenerationReferences()).resolves.toEqual({
-        generationIds: new Set(),
-        protectAll: false,
-      });
     } finally {
       await world.close();
     }
@@ -267,23 +250,6 @@ describe("parent development Workflow World", () => {
         transportSecret: "",
       }),
     ).toThrow("too short");
-  });
-
-  it("protects all generations when a persisted run record is unreadable", async () => {
-    const appRoot = await createScratchDirectory("eve-parent-workflow-unreadable-run-");
-    await mkdir(join(appRoot, ".workflow-data", "runs"), { recursive: true });
-    await writeFile(join(appRoot, ".workflow-data", "runs", "unreadable.json"), "{");
-    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      const references = await world.collectGenerationReferences();
-      expect(references.protectAll).toBe(true);
-      expect(references.generationIds.size).toBe(0);
-      expect(references.reason).toBeDefined();
-    } finally {
-      warn.mockRestore();
-      await world.close();
-    }
   });
 });
 

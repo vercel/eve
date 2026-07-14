@@ -1,4 +1,4 @@
-import { basename, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 import { stageDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
@@ -9,11 +9,6 @@ import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
-import type { ParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
-import {
-  pruneDevelopmentRuntimeArtifactsSnapshots,
-  readActiveDevelopmentRuntimeArtifactsSnapshot,
-} from "#internal/nitro/dev-runtime-artifacts.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import {
   activateDevelopmentGeneration,
@@ -50,17 +45,13 @@ export interface DevelopmentAuthoredRebuildCoordinator {
 export async function createDevelopmentAuthoredRebuildCoordinator(input: {
   readonly devServer: DrainedNitroDevServer;
   readonly initialHost: PreparedDevelopmentApplicationHost;
-  readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 }): Promise<DevelopmentAuthoredRebuildCoordinator> {
-  const coordinator = new TransactionalDevelopmentAuthoredRebuildCoordinator({
+  return new TransactionalDevelopmentAuthoredRebuildCoordinator({
     currentHostFingerprint: await computeDevelopmentHostFingerprint(input.initialHost),
     currentRuntimeFingerprint: input.initialHost.generation.fingerprint,
     devServer: input.devServer,
     initialHost: input.initialHost,
-    workflowWorld: input.workflowWorld,
   });
-  coordinator.pruneInBackground();
-  return coordinator;
 }
 
 /**
@@ -78,81 +69,17 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   #currentHostFingerprint: string;
   #currentRuntimeFingerprint: string;
   readonly #devServer: DrainedNitroDevServer;
-  #prunePromise: Promise<void> | undefined;
-  #pruneRequested = false;
-  #reportedProtectAllReason: string | undefined;
-  readonly #workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 
   constructor(input: {
     readonly currentHostFingerprint: string;
     readonly currentRuntimeFingerprint: string;
     readonly devServer: DrainedNitroDevServer;
     readonly initialHost: PreparedDevelopmentApplicationHost;
-    readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
   }) {
     this.#currentHost = input.initialHost;
     this.#currentHostFingerprint = input.currentHostFingerprint;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
     this.#devServer = input.devServer;
-    this.#workflowWorld = input.workflowWorld;
-  }
-
-  pruneInBackground(): void {
-    this.#pruneRequested = true;
-    if (this.#prunePromise !== undefined) {
-      return;
-    }
-    this.#prunePromise = this.#prune()
-      .catch((error) => {
-        console.warn(`[eve:dev] failed to prune runtime generations: ${String(error)}`);
-      })
-      .finally(() => {
-        this.#prunePromise = undefined;
-        if (this.#pruneRequested) {
-          this.pruneInBackground();
-        }
-      });
-  }
-
-  async #prune(): Promise<void> {
-    this.#pruneRequested = false;
-    const appRoot = this.#currentHost.appRoot;
-    const references = (await this.#workflowWorld?.collectGenerationReferences()) ?? {
-      generationIds: new Set<string>(),
-      // Without a parent-owned World the queue may reference any generation.
-      protectAll: true,
-    };
-    this.#reportProtectAll(references);
-    const protectedGenerationIds = new Set(references.generationIds);
-    const active = readActiveDevelopmentRuntimeArtifactsSnapshot(appRoot);
-    if (active !== undefined) {
-      protectedGenerationIds.add(basename(active.snapshotRoot));
-    }
-    protectedGenerationIds.add(basename(this.#currentHost.generation.snapshotRoot));
-    await pruneDevelopmentRuntimeArtifactsSnapshots({
-      appRoot,
-      protectAll: references.protectAll,
-      protectedGenerationIds,
-    });
-  }
-
-  // Pruning silently retaining everything hides unbounded disk growth, so
-  // a determinable-ownership failure is surfaced once per distinct cause.
-  #reportProtectAll(references: { readonly protectAll: boolean; readonly reason?: string }): void {
-    if (this.#workflowWorld === undefined || !references.protectAll) {
-      this.#reportedProtectAllReason = undefined;
-      return;
-    }
-    const reason = references.reason ?? "generation ownership could not be determined";
-    if (reason === this.#reportedProtectAllReason) {
-      return;
-    }
-    this.#reportedProtectAllReason = reason;
-    console.warn(
-      `[eve:dev] generation pruning is paused (${reason}). ` +
-        `Old generations are retained under ".eve/dev-runtime" until this clears; ` +
-        `removing ".workflow-data" discards the app's active local Workflow runs.`,
-    );
   }
 
   async rebuild(input: {
@@ -191,7 +118,6 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         nextHost = undefined;
         environmentReload.commit();
         startSandboxPrewarmAfterCommit(committedHost, input.changedPaths);
-        this.pruneInBackground();
         return { host: committedHost, kind: "runtime" };
       }
 
@@ -204,7 +130,6 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       nextHost = undefined;
       environmentReload.commit();
       startSandboxPrewarmAfterCommit(result.host, input.changedPaths);
-      this.pruneInBackground();
       return result;
     } catch (error) {
       if (error instanceof PostCommitDevelopmentRebuildError) {
