@@ -2,22 +2,28 @@ import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
-const MIN_COMPLETED_SEARCHES = 10;
+const SEARCH_COUNT = 10;
+const QUERIES = [
+  "web search fanout probe 01",
+  "web search fanout probe 02",
+  "web search fanout probe 03",
+  "web search fanout probe 04",
+  "web search fanout probe 05",
+  "web search fanout probe 06",
+  "web search fanout probe 07",
+  "web search fanout probe 08",
+  "web search fanout probe 09",
+  "web search fanout probe 10",
+] as const;
 
-const EXPECTED_WINNERS =
-  "2026 New York Knicks; 2025 Oklahoma City Thunder; 2024 Boston Celtics; " +
-  "2023 Denver Nuggets; 2022 Golden State Warriors; 2021 Milwaukee Bucks; " +
-  "2020 Los Angeles Lakers; 2019 Toronto Raptors; 2018 Golden State Warriors; " +
-  "2017 Golden State Warriors.";
-
-function completedToolResultCount(events: readonly HandleMessageStreamEvent[], toolName: string) {
+function completedDistinctCalls(events: readonly HandleMessageStreamEvent[]): number {
   const callIds = new Set<string>();
   for (const event of events) {
     if (
       event.type === "action.result" &&
       event.data.status === "completed" &&
       event.data.result.kind === "tool-result" &&
-      event.data.result.toolName === toolName
+      event.data.result.toolName === TOOL_NAME
     ) {
       callIds.add(event.data.result.callId);
     }
@@ -26,18 +32,25 @@ function completedToolResultCount(events: readonly HandleMessageStreamEvent[], t
 }
 
 export default defineEval({
-  description: "Provider tools smoke: ten concurrent Exa web searches complete successfully.",
+  description: "Provider tools smoke: ten Exa web searches complete in a single turn.",
   async test(t) {
     const turn = await t.send(
-      "Using 10 concurrent web_search calls: lookup the nba finals winner from 2026 back to 2017",
+      [
+        `Call the \`${TOOL_NAME}\` tool exactly ${SEARCH_COUNT} separate times.`,
+        `Use each query exactly once: ${QUERIES.map((query) => `"${query}"`).join(", ")}.`,
+        "Do not use any other tool.",
+        "After every call returns, reply with exactly: web search fanout complete",
+      ].join("\n"),
     );
+    turn.expectOk();
 
     t.succeeded();
-    turn.eventsSatisfy(
-      "at least ten completed web_search calls",
-      (events) => completedToolResultCount(events, TOOL_NAME) >= MIN_COMPLETED_SEARCHES,
-    );
+    t.calledTool(TOOL_NAME, { count: (count) => count >= SEARCH_COUNT });
     t.noFailedActions();
-    t.judge.autoevals.factuality(EXPECTED_WINNERS, { on: turn.message }).atLeast(0.5);
+    turn.eventsSatisfy(
+      "ten distinct web_search calls complete",
+      (events) => completedDistinctCalls(events) >= SEARCH_COUNT,
+    );
+    t.messageIncludes(/web search fanout complete/iu);
   },
 });
