@@ -7,6 +7,7 @@ import {
   ToolLoopAgent,
   type UserContent,
 } from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -8896,11 +8897,12 @@ describe("createToolLoopHarness", () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
-          resolveModel: vi.fn().mockResolvedValue({
-            modelId: "claude-sonnet-4-5",
-            provider: "anthropic.messages",
-            specificationVersion: "v3",
-          } as unknown as LanguageModel),
+          resolveModel: vi.fn().mockResolvedValue(
+            new MockLanguageModelV3({
+              modelId: "claude-sonnet-4-5",
+              provider: "anthropic.messages",
+            }),
+          ),
         }),
       );
       const session = createTestSession();
