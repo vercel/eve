@@ -16,6 +16,7 @@ import {
   fetchText,
   forceDevelopmentRebuild,
   hasKnownDevServerFailure,
+  readDevelopmentRevision,
   startEveDev,
   wait,
   waitForCondition,
@@ -97,7 +98,9 @@ function startHealthProbe(serverUrl: string): HealthProbe {
     while (!stopped) {
       probes += 1;
       try {
-        const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, serverUrl));
+        const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, serverUrl), {
+          signal: AbortSignal.timeout(10_000),
+        });
         if (response.status !== 200) {
           failures.push(`health returned ${String(response.status)}`);
         }
@@ -155,8 +158,13 @@ describe("eve dev server chaos", () => {
         for (let round = 1; round <= 3; round += 1) {
           await writeFile(toolPath, toolSource(`storm-${String(round)}-a`));
           await writeFile(toolPath, toolSource(`storm-${String(round)}-b`));
+          const revisionBeforeBreak = await readDevelopmentRevision(server.url);
           await writeFile(toolPath, "export default { this is not valid typescript\n");
-          await wait(500);
+          // The watcher survives a failed candidate, so the forced rebuild
+          // resolves — the deterministic proof the broken build was
+          // attempted and rejected is the unchanged revision.
+          await forceDevelopmentRebuild(server.url);
+          await expect(readDevelopmentRevision(server.url)).resolves.toBe(revisionBeforeBreak);
           await rm(toolPath);
           await writeFile(toolPath, toolSource(`storm-${String(round)}-fixed`));
           await Promise.all([
@@ -173,7 +181,9 @@ describe("eve dev server chaos", () => {
 
         const probes = await probe.stop();
         expect(probe.failures, probe.failures.join("\n")).toEqual([]);
-        expect(probes).toBeGreaterThan(50);
+        // The floor proves the probe ran continuously through the storm;
+        // the storm itself is deterministic-length now, not wall-clock.
+        expect(probes).toBeGreaterThan(30);
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {
         await probe.stop();
@@ -200,7 +210,8 @@ describe("eve dev server chaos", () => {
         await reader?.read();
         abort.abort();
 
-        await expect(fetch(new URL("/chaos/crash", server.url))).resolves.toBeDefined();
+        const crashResponse = await fetch(new URL("/chaos/crash", server.url));
+        expect([200, 503]).toContain(crashResponse.status);
         await waitForCondition(async () => {
           try {
             return (await fetchText(server.url, "/chaos/worker-id")) !== firstWorkerId;
@@ -250,19 +261,18 @@ describe("eve dev server chaos", () => {
         await reader?.read();
 
         await fetch(new URL("/chaos/crash", server.url));
-        const settled = await withinDeadline(
+        await withinDeadline(
           (async () => {
             for (;;) {
               const result = await reader?.read();
               if (result === undefined || result.done) {
-                return "done";
+                return;
               }
             }
-          })().catch(() => "errored"),
+          })().catch(() => undefined),
           "Timed out waiting for the crashed worker's stream to settle.",
           15_000,
         );
-        expect(["done", "errored"]).toContain(settled);
 
         await waitForCondition(async () => {
           try {
@@ -319,14 +329,49 @@ describe("eve dev server chaos", () => {
       const server = await startEveDev(app.appRoot);
 
       try {
+        // Forged client-address metadata is stripped and re-stamped by the
+        // parent from the accepted socket, so the handler observes the real
+        // peer even when a client supplies every trusted header name.
         const response = await fetch(new URL("/chaos/request-ip", server.url), {
           headers: {
-            "x-eve-dev-workflow-delivery": "forged.forged",
+            "x-eve-dev-client-address": "203.0.113.7",
+            "x-eve-dev-client-address-signature": "forged",
             "x-forwarded-for": "203.0.113.7",
           },
         });
         expect(response.status).toBe(200);
         await expect(response.text()).resolves.toBe("127.0.0.1");
+      } finally {
+        await server.stop();
+      }
+    },
+    CHAOS_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "rejects untrusted internal transport requests on the public listener",
+    async () => {
+      const app = await scenarioApp(CHAOS_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const worldCall = await fetch(new URL("/eve/v1/dev/internal/workflow-world", server.url), {
+          body: "{}",
+          method: "POST",
+        });
+        expect(worldCall.status).toBe(401);
+
+        const forgedDelivery = await fetch(new URL("/.well-known/workflow/v1/flow", server.url), {
+          body: JSON.stringify({ runId: "wrun_forged" }),
+          headers: {
+            "x-eve-dev-workflow-delivery": "forged",
+            "x-vqs-message-attempt": "1",
+            "x-vqs-message-id": "msg_forged",
+            "x-vqs-queue-name": "forged-queue",
+          },
+          method: "POST",
+        });
+        expect(forgedDelivery.status).toBe(401);
       } finally {
         await server.stop();
       }

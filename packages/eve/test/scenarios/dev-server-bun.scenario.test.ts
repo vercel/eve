@@ -26,6 +26,12 @@ const BUN_LAYOUT_DESCRIPTOR: ScenarioAppDescriptor = {
 const bunAvailable = isBunAvailable();
 
 describe("eve dev server with bun", () => {
+  it("keeps bun available in CI so the suite cannot silently skip", () => {
+    if (process.env.CI !== undefined) {
+      expect(bunAvailable).toBe(true);
+    }
+  });
+
   it.skipIf(!bunAvailable)(
     "serves a bun-installed app under the Node runtime",
     async () => {

@@ -484,6 +484,21 @@ describe("eve dev server", () => {
         );
         expect(new TextDecoder().decode(firstChunk.value)).toBe("first\n");
 
+        // The parent-owned control route must answer continuously through
+        // candidate preparation and promotion, not merely at spot checks.
+        const revisionFailures: string[] = [];
+        let stopRevisionPolling = false;
+        const revisionPoller = (async () => {
+          while (!stopRevisionPolling) {
+            try {
+              await readDevelopmentRevision(server.url);
+            } catch (error) {
+              revisionFailures.push(String(error));
+            }
+            await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+          }
+        })();
+
         await writeFile(
           join(app.appRoot, "agent", "instrumentation.ts"),
           createBlockedInstrumentationSource(),
@@ -497,6 +512,10 @@ describe("eve dev server", () => {
         await writeFile(candidateReadyPath, "ready");
         await withinDeadline(rebuild, "Timed out waiting for candidate promotion.");
         await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("two");
+
+        stopRevisionPolling = true;
+        await revisionPoller;
+        expect(revisionFailures, revisionFailures.join("\n")).toEqual([]);
 
         await writeFile(streamReleasePath, "release");
         const secondChunk = await withinDeadline(

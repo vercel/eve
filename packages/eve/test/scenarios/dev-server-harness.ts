@@ -175,6 +175,9 @@ export function hasKnownDevServerFailure(text: string): boolean {
     text.includes("UNRESOLVED_IMPORT") ||
     text.includes("ECONNRESET") ||
     text.includes("socket hang up") ||
+    text.includes("UnhandledPromiseRejection") ||
+    text.includes("ERR_UNHANDLED_REJECTION") ||
+    text.includes("dev worker restart failed") ||
     (text.includes("ERR_MODULE_NOT_FOUND") && text.includes("authored-module-map-loader"))
   );
 }
