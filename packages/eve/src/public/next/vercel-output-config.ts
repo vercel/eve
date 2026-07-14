@@ -1,6 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, extname, join, relative, resolve } from "node:path";
 
+import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
+import { EVE_INTERNAL_BUILD_OUTPUT_DIR_ENV } from "#internal/application/paths.js";
 import {
   findClosestLinkedVercelDirectory,
   findClosestVercelOutputDirectory,
@@ -31,6 +33,7 @@ interface VercelServiceConfig {
 
 interface MutableGeneratedVercelServiceConfig {
   buildCommand: string;
+  entrypoint?: string;
   framework: "eve";
   routePrefix?: string;
   routes: readonly VercelRouteConfig[];
@@ -138,6 +141,95 @@ function resolveRelativeEntrypoint(fromRoot: string, toRoot: string): string {
   }
 
   return relativePath.replaceAll("\\", "/");
+}
+
+const AUTHORED_MODULE_FILE_EXTENSION_SET = new Set<string>(
+  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
+);
+
+function isAuthoredSourceFile(name: string): boolean {
+  const extension = extname(name).toLowerCase();
+  return extension === ".md" || AUTHORED_MODULE_FILE_EXTENSION_SET.has(extension);
+}
+
+async function readSourceDirectory(directory: string) {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    return entries.sort((left, right) => left.name.localeCompare(right.name));
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function findAgentEntrypoint(agentRoot: string): Promise<string | undefined> {
+  const rootEntries = await readSourceDirectory(agentRoot);
+  const rootSource = rootEntries.find(
+    (entry) => entry.isFile() && !entry.name.startsWith(".") && isAuthoredSourceFile(entry.name),
+  );
+  if (rootSource !== undefined) {
+    return join(agentRoot, rootSource.name);
+  }
+
+  const instructionsDirectory = rootEntries.find(
+    (entry) => entry.name === "instructions" && entry.isDirectory(),
+  );
+  if (instructionsDirectory === undefined) {
+    return undefined;
+  }
+
+  const instructionsRoot = join(agentRoot, instructionsDirectory.name);
+  const instructionSource = (await readSourceDirectory(instructionsRoot)).find(
+    (entry) => entry.isFile() && isAuthoredSourceFile(entry.name),
+  );
+  return instructionSource === undefined
+    ? undefined
+    : join(instructionsRoot, instructionSource.name);
+}
+
+function quoteShellArg(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+async function resolveGeneratedServiceBuild(input: {
+  readonly agent: EnsureVercelOutputConfigAgentInput;
+  readonly nextRoot: string;
+}): Promise<{
+  readonly buildCommand: string;
+  readonly entrypoint?: string;
+  readonly root: string;
+}> {
+  const root = resolveRelativeEntrypoint(input.nextRoot, input.agent.appRoot);
+  if (resolve(input.agent.appRoot) !== resolve(input.nextRoot)) {
+    return { buildCommand: input.agent.buildCommand, root };
+  }
+
+  const sourceFile = await findAgentEntrypoint(join(input.agent.appRoot, "agent"));
+  if (sourceFile === undefined) {
+    return { buildCommand: input.agent.buildCommand, root };
+  }
+
+  // Vercel discovers Build Output beside the service entrypoint. Giving the
+  // co-located service an authored entrypoint keeps its output away from the
+  // Next.js root output while the command itself still runs from the app root.
+  const serviceBuildDirectory = dirname(sourceFile);
+  const appRootFromService = resolveRelativeEntrypoint(serviceBuildDirectory, input.agent.appRoot);
+  const serviceOutputFromAppRoot = resolveRelativeEntrypoint(
+    input.agent.appRoot,
+    join(serviceBuildDirectory, ".vercel", "output"),
+  );
+
+  return {
+    buildCommand: [
+      `cd ${quoteShellArg(appRootFromService)}`,
+      `export ${EVE_INTERNAL_BUILD_OUTPUT_DIR_ENV}=${quoteShellArg(serviceOutputFromAppRoot)}`,
+      input.agent.buildCommand,
+    ].join(" && "),
+    entrypoint: resolveRelativeEntrypoint(input.agent.appRoot, sourceFile),
+    root,
+  };
 }
 
 async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
@@ -465,12 +557,20 @@ export async function ensureEveVercelOutputConfig(input: {
     const routeSrc = createEveServiceRouteSrc(agent.publicRoutePrefix);
 
     if (configuredEveServiceEntry === undefined) {
+      const generatedBuild = await resolveGeneratedServiceBuild({
+        agent,
+        nextRoot: input.nextRoot,
+      });
       const serviceConfig: MutableGeneratedVercelServiceConfig = {
-        buildCommand: agent.buildCommand,
+        buildCommand: generatedBuild.buildCommand,
         framework: "eve",
         routes: insertEveServiceRequestPathRoute(undefined, routeSrc),
-        root: resolveRelativeEntrypoint(input.nextRoot, agent.appRoot),
+        root: generatedBuild.root,
       };
+
+      if (generatedBuild.entrypoint !== undefined) {
+        serviceConfig.entrypoint = generatedBuild.entrypoint;
+      }
 
       if (agent.publicRoutePrefix.length > 0) {
         serviceConfig.routePrefix = agent.publicRoutePrefix;

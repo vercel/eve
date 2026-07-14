@@ -95,6 +95,30 @@ describe("withEve Vercel config", () => {
     expect(rewrites).toBeUndefined();
   });
 
+  it("isolates a co-located eve service from the Next.js Build Output", async () => {
+    const appRoot = await createTempAppRoot();
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await writeFile(join(appRoot, "agent", "instructions.md"), "You are helpful.\n");
+    process.chdir(appRoot);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await resolveConfig(withEve<TestConfig>({}));
+
+    const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
+    expect(outputConfig).toMatchObject({
+      services: {
+        eve: {
+          buildCommand:
+            "cd '..' && export EVE_INTERNAL_BUILD_OUTPUT_DIR='agent/.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
+          entrypoint: "agent/instructions.md",
+          framework: "eve",
+          root: ".",
+        },
+      },
+    });
+  });
+
   it("writes Build Output config to the closest existing .vercel directory", async () => {
     const projectRoot = await createTempAppRoot();
     const appRoot = join(projectRoot, "apps", "web");
