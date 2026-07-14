@@ -226,8 +226,8 @@ export function resolvePendingInput(input: {
 
       return {
         consumedMessage: resolvedStepInput?.messageConsumed,
-        ...(deferredInput.context === undefined ? {} : { deferredContext: true }),
-        ...(deferredInput.message === undefined ? {} : { deferredMessage: true }),
+        deferredContext: deferredInput.context === undefined ? undefined : true,
+        deferredMessage: deferredInput.message === undefined ? undefined : true,
         limitContinuation,
         outcome: "resolved",
         messages,
