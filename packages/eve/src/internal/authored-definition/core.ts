@@ -10,6 +10,7 @@ import {
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
+  expectPositiveInteger,
   expectProviderOptions,
   expectString,
   getOptionalStringRecordProperty,
@@ -129,14 +130,6 @@ function normalizeAgentReasoningDefinition(
   }
 }
 
-function expectPositiveInteger(value: unknown, message: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
-    throw new Error(message);
-  }
-
-  return value;
-}
-
 function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
@@ -183,11 +176,7 @@ function normalizeAgentLimitsDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["limits"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(
-    record,
-    ["maxInputTokensPerSession", "maxOutputTokensPerSession", "maxSubagents"],
-    message,
-  );
+  expectOnlyKnownKeys(record, ["maxInputTokensPerSession", "maxOutputTokensPerSession"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
 
   if (record.maxInputTokensPerSession !== undefined) {
@@ -202,10 +191,6 @@ function normalizeAgentLimitsDefinition(
       message,
     );
   }
-  if (record.maxSubagents !== undefined) {
-    normalizedDefinition.maxSubagents = expectPositiveInteger(record.maxSubagents, message);
-  }
-
   return normalizedDefinition;
 }
 

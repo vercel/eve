@@ -151,7 +151,9 @@ jobs:
         id: baseline_build
         continue-on-error: true
         working-directory: ${{ steps.baseline.outputs.root }}
-        run: VERCEL=1 pnpm --filter "${STEPS_BASELINE_WEATHER_APP_OUTPUTS_FILTER}" build
+        run: >-
+          VERCEL=1 pnpm --filter "${STEPS_BASELINE_WEATHER_APP_OUTPUTS_FILTER}"
+          exec eve build --skip-sandbox-prewarm
         env:
           STEPS_BASELINE_WEATHER_APP_OUTPUTS_FILTER: ${{ steps.baseline_weather_app.outputs.filter }}
 
@@ -180,7 +182,9 @@ jobs:
 
       - name: Build weather-agent in Vercel mode
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        run: VERCEL=1 pnpm --filter weather-agent build
+        run: >-
+          VERCEL=1 pnpm --filter weather-agent
+          exec eve build --skip-sandbox-prewarm
 
       - name: Generate bundle report
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}

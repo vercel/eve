@@ -60,6 +60,40 @@ describe("compiledAgentManifestSchema", () => {
     ).toThrow();
   });
 
+  it("rejects the removed agent-level maxSubagents limit", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+
+    expect(() =>
+      compiledAgentManifestSchema.parse({
+        ...manifest,
+        config: { ...manifest.config, limits: { maxSubagents: 4 } },
+      }),
+    ).toThrow();
+  });
+
+  it("preserves experimental Workflow tool configuration", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+      workflowTool: { maxSubagents: 6 },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.workflowTool).toEqual({ maxSubagents: 6 });
+  });
+
   it("preserves dynamic model resolver source", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

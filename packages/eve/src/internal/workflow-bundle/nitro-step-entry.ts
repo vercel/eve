@@ -22,6 +22,7 @@ export async function writeNitroStepEntrypoint(input: {
   readonly outfile: string;
   readonly preferAbsoluteFileImports?: boolean;
   readonly projectRoot: string;
+  readonly sideEffectFiles: readonly string[];
   readonly workingDir: string;
 }): Promise<WorkflowManifest> {
   const stepFiles = [...input.discoveredEntries.discoveredSteps].sort();
@@ -49,6 +50,7 @@ export async function writeNitroStepEntrypoint(input: {
     outfileDirectory,
     preferAbsoluteFileImports: input.preferAbsoluteFileImports ?? false,
     serdeOnlyFiles,
+    sideEffectFiles: input.sideEffectFiles,
     stepFiles,
   });
   const lines = [
@@ -74,10 +76,18 @@ function createEntrypointImportLines(input: {
   readonly outfileDirectory: string;
   readonly preferAbsoluteFileImports: boolean;
   readonly serdeOnlyFiles: readonly string[];
+  readonly sideEffectFiles: readonly string[];
   readonly stepFiles: readonly string[];
 }): readonly string[] {
   const importedModules = [
     input.builtinsImportSpecifier,
+    ...input.sideEffectFiles.map((filePath) =>
+      createFileImportSpecifier({
+        outfileDirectory: input.outfileDirectory,
+        preferAbsoluteFileImports: input.preferAbsoluteFileImports,
+        targetPath: filePath,
+      }),
+    ),
     ...input.stepFiles.map((filePath) =>
       createFileImportSpecifier({
         outfileDirectory: input.outfileDirectory,

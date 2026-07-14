@@ -16,6 +16,7 @@ import {
 } from "#public/channels/teams/attachments.js";
 import {
   callTeamsConnectorApi,
+  normalizeTeamsContinuationAddress,
   normalizeTeamsPostInput,
   replyToTeamsActivity,
   sendTeamsActivity,
@@ -34,11 +35,13 @@ import {
 import {
   defaultEvents,
   defaultOnMessage,
+  defaultTeamsAuth,
   teamsMentionUser,
 } from "#public/channels/teams/defaults.js";
 import {
   deriveTeamsInputResponses,
   isTeamsInputResponseActivity,
+  readTeamsInputReplyToActivityId,
   teamsInvokeResponse,
 } from "#public/channels/teams/hitl.js";
 import {
@@ -131,6 +134,9 @@ export type TeamsInboundResult = {
 /** Sync or async {@link TeamsInboundResult}. */
 export type TeamsInboundResultOrPromise = TeamsInboundResult | Promise<TeamsInboundResult>;
 
+/** Result of a Teams HITL submission authorization hook. Return `null` to reject. */
+export type TeamsInputResponseResult = { readonly auth: SessionAuthContext | null } | null;
+
 /** Result of a non-HITL Teams invoke hook. A `Response` returns verbatim, a plain object is JSON-encoded as the body, and `null`/`undefined` yields a 200 OK. */
 export type TeamsInvokeResult = Record<string, unknown> | Response | null | undefined;
 
@@ -182,6 +188,12 @@ export interface TeamsChannelConfig {
 
   /** Inbound message hook. Defaults to user-scoped auth and mention-gated dispatch outside personal chats. */
   onMessage?(ctx: TeamsContext, message: TeamsMessageActivity): TeamsInboundResultOrPromise;
+
+  /** Authorizes HITL card submissions. Defaults to the submitting Teams user. */
+  onInputResponse?(
+    ctx: TeamsContext,
+    activity: TeamsInvokeActivity | TeamsMessageActivity,
+  ): TeamsInputResponseResult | Promise<TeamsInputResponseResult>;
 
   /** Handler for non-HITL Teams invoke activities. Return a body, a Response, or `null`/`undefined` for a 200 OK. */
   onInvoke?(ctx: TeamsContext, activity: TeamsInvokeActivity): TeamsInvokeResultOrPromise;
@@ -246,6 +258,9 @@ export interface TeamsChannel extends Channel<
 export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
   const filesPolicy = normalizeTeamsFilesPolicy(config.files);
   const onMessage = config.onMessage ?? defaultOnMessage;
+  const onInputResponse =
+    config.onInputResponse ??
+    (config.onMessage === undefined ? defaultOnInputResponse : rejectInput);
   const mergedEvents: TeamsChannelEvents = { ...defaultEvents, ...config.events };
 
   return defineChannel<
@@ -285,13 +300,15 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
         if (activity.type === "message") {
           waitUntil(
-            dispatchMessage({
-              activity,
-              config,
-              filesPolicy,
-              onMessage,
-              send,
-            }),
+            isTeamsInputResponseActivity(activity)
+              ? dispatchInputResponses({ activity, config, onInputResponse, send })
+              : dispatchMessage({
+                  activity,
+                  config,
+                  filesPolicy,
+                  onMessage,
+                  send,
+                }),
           );
           return teamsOk();
         }
@@ -300,6 +317,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           return handleInvoke({
             activity,
             config,
+            onInputResponse,
             send,
             waitUntil,
           });
@@ -585,6 +603,7 @@ async function dispatchMessage(input: {
 async function handleInvoke(input: {
   readonly activity: TeamsInvokeActivity;
   readonly config: TeamsChannelConfig;
+  readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
   readonly send: SendFn<TeamsChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
@@ -592,6 +611,8 @@ async function handleInvoke(input: {
     input.waitUntil(
       dispatchInputResponses({
         activity: input.activity,
+        config: input.config,
+        onInputResponse: input.onInputResponse,
         send: input.send,
       }),
     );
@@ -608,17 +629,28 @@ async function handleInvoke(input: {
 
 async function dispatchInputResponses(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
+  readonly config: TeamsChannelConfig;
+  readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
   readonly send: SendFn<TeamsChannelState>;
 }): Promise<void> {
   const inputResponses = deriveTeamsInputResponses(input.activity as TeamsActivity);
   if (inputResponses.length === 0) return;
   const state = stateFromActivity(input.activity);
+  const ctx = buildTeamsBinding({ config: input.config, state });
+  let result: TeamsInputResponseResult;
+  try {
+    result = await input.onInputResponse(ctx, input.activity);
+  } catch (error) {
+    log.error("Teams input response authorization failed", { error });
+    return;
+  }
+  if (result === null) return;
   try {
     await input.send(
       { inputResponses },
       {
-        auth: null,
-        continuationToken: stateToken(state),
+        auth: result.auth,
+        continuationToken: resolveInputContinuationToken(input.activity, state),
         state,
       },
     );
@@ -630,18 +662,46 @@ async function dispatchInputResponses(input: {
 function stateFromActivity(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
 ): TeamsChannelState {
+  const address = normalizeTeamsContinuationAddress({
+    conversationId: activity.conversation.id,
+    replyToActivityId: teamsThreadRootActivityId(activity),
+  });
   return {
     bot: activity.recipient,
     channelId: activity.teamsChannelId ?? null,
     conversationId: activity.conversation.id,
     conversationType: activity.conversationType ?? activity.scope,
     pendingAuthActivityId: null,
-    replyToActivityId: teamsThreadRootActivityId(activity),
+    replyToActivityId: address.replyToActivityId,
     serviceUrl: activity.serviceUrl,
     teamId: activity.teamId ?? null,
     tenantId: activity.tenantId ?? null,
     triggeringUser: activity.from,
   };
+}
+
+function resolveInputContinuationToken(
+  activity: TeamsMessageActivity | TeamsInvokeActivity,
+  state: TeamsChannelState,
+): string {
+  const replyToActivityId = readTeamsInputReplyToActivityId(activity);
+  if (replyToActivityId === null) return stateToken(state);
+  return teamsContinuationToken({
+    conversationId: activity.conversation.id,
+    replyToActivityId,
+    tenantId: activity.tenantId,
+  });
+}
+
+function defaultOnInputResponse(
+  _ctx: TeamsContext,
+  activity: TeamsInvokeActivity | TeamsMessageActivity,
+): TeamsInputResponseResult {
+  return { auth: defaultTeamsAuth(activity) };
+}
+
+function rejectInput(): null {
+  return null;
 }
 
 function initialTeamsState(): TeamsChannelState {

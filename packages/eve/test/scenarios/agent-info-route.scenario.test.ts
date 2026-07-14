@@ -5,7 +5,7 @@ import type { H3Event } from "nitro";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { createNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
+import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
 import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
 import { EVE_CREATE_SESSION_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "../../src/protocol/routes.js";
@@ -73,7 +73,7 @@ async function requestAgentInfo(appRoot: string, request: Request): Promise<Resp
   return await dispatchChannelRequest(
     createInfoEvent(request),
     INFO_ROUTE_KEY,
-    createNitroArtifactsConfig({ appRoot, dev: true }),
+    createDevelopmentNitroArtifactsConfig({ appRoot }),
   );
 }
 

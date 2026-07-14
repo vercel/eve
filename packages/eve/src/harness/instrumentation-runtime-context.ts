@@ -32,7 +32,7 @@ export interface BuildTelemetryRuntimeContextInput {
   readonly emissionState: HarnessEmissionState;
   readonly environment: string;
   readonly modelInput: {
-    readonly instructions: string | readonly SystemModelMessage[] | undefined;
+    readonly instructions: string | SystemModelMessage | undefined;
     readonly messages: readonly ModelMessage[];
   };
   readonly session: HarnessSession;

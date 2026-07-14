@@ -11,7 +11,7 @@ import {
   resolvePackageDependencyPath,
   resolvePackageSourceFilePath,
 } from "#internal/application/package.js";
-import type { NitroArtifactsConfigInput } from "#internal/nitro/host/artifacts-config.js";
+import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { replaceDevLiveVirtualModules } from "#internal/nitro/host/dev-live-virtual-modules.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
@@ -98,7 +98,7 @@ export function computeChannelRouteRegistrations(
 export function registerChannelVirtualHandlers(
   nitro: Pick<ChannelRouteNitro, "options">,
   input: {
-    readonly artifactsConfig: NitroArtifactsConfigInput;
+    readonly artifactsConfig: NitroArtifactsConfig;
     readonly registrations: readonly NitroChannelRouteRegistration[];
   },
 ): void {
@@ -121,7 +121,7 @@ export function registerChannelVirtualHandlers(
 export function syncChannelVirtualHandlers(
   nitro: ChannelRouteNitro,
   input: {
-    readonly artifactsConfig: NitroArtifactsConfigInput;
+    readonly artifactsConfig: NitroArtifactsConfig;
     readonly next: readonly NitroChannelRouteRegistration[];
     readonly previous: readonly NitroChannelRouteRegistration[];
   },
@@ -163,7 +163,7 @@ function createChannelRouteKey(registration: NitroChannelRouteRegistration): str
 function addChannelVirtualHandler(
   nitro: Pick<ChannelRouteNitro, "options">,
   input: {
-    artifactsConfig: NitroArtifactsConfigInput;
+    artifactsConfig: NitroArtifactsConfig;
     cors?: NormalizedChannelCorsOptions;
     method: ChannelRouteMethod;
     preflightRoutes: Set<string>;

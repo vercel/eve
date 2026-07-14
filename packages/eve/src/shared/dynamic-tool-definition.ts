@@ -13,6 +13,8 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 type ToolContext = SessionContext & {
   /** Aborts when the active turn is cancelled. */
   readonly abortSignal: AbortSignal;
+  /** Final runtime name of the current tool. */
+  readonly toolName: string;
 };
 
 /**

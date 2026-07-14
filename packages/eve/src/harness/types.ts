@@ -84,8 +84,7 @@ export interface HarnessSession {
   readonly subagentDepth?: number;
   /**
    * Effective maximum subagent calls one `Workflow` invocation may dispatch
-   * for this session. Resolved at session creation as the tighter of the
-   * agent's `limits.maxSubagents` and any cap inherited from the parent run.
+   * for this session, configured by `experimental_workflow({ maxSubagents })`.
    * When omitted, the dispatch step applies the framework default.
    */
   readonly workflowMaxSubagents?: number;
@@ -228,16 +227,15 @@ export interface ToolLoopHarnessConfig {
   /**
    * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
-   * agents. Resolved by the runtime from the agent's `workflowEnabled` flag
-   * (set when `agent/tools/workflow.ts` re-exports the `ExperimentalWorkflow`
-   * marker). Only root sessions ever see the tool.
+   * agents. Resolved from the `experimental_workflow(...)` definition exported
+   * by `agent/tools/workflow.ts`. Only root sessions ever see the tool.
    * Defaults to `false`.
    */
   readonly workflow?: boolean;
   /**
    * Maximum subagent calls one `Workflow` invocation may dispatch, from the
-   * agent's `limits.maxSubagents`. Advertised in the tool description; the
-   * dispatch step enforces it. Defaults to
+   * authored Workflow tool definition. Advertised in the tool description;
+   * the dispatch step enforces it. Defaults to
    * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
    */
   readonly workflowMaxSubagents?: number;

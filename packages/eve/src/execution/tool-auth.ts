@@ -87,7 +87,7 @@ function buildToolContext(input: {
   readonly inlineAuthState: InlineAuthState;
 }): ToolContext {
   const { scope, justAuthorizedScopes, inlineAuthState } = input;
-  const base = buildBaseToolContext(input.options);
+  const base = buildBaseToolContext({ options: input.options, toolName: scope });
   return {
     ...base,
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {

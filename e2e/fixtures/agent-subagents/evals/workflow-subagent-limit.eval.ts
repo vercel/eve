@@ -1,13 +1,13 @@
 import { defineEval } from "eve/evals";
 
 /**
- * Workflow subagent budget: the fixture caps `limits.maxSubagents` at 2, so a
- * three-call fan-out spawns two children and the third call resolves inside
- * the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error result.
+ * Workflow subagent budget: the fixture configures `maxSubagents` as 2 on the
+ * Workflow tool, so a three-call fan-out spawns two children and the third call
+ * resolves inside the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error.
  */
 export default defineEval({
   description:
-    "Workflow calls beyond limits.maxSubagents resolve with WORKFLOW_SUBAGENT_LIMIT_REACHED instead of spawning children.",
+    "Workflow calls beyond the tool's maxSubagents config resolve with WORKFLOW_SUBAGENT_LIMIT_REACHED instead of spawning children.",
   async test(t) {
     await t.send(
       [

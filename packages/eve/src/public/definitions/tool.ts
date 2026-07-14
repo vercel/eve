@@ -88,6 +88,12 @@ export type ToolContext = SessionContext & {
    */
   readonly callId: string;
   /**
+   * Final runtime name of the current tool, including any namespace
+   * qualification. This is the same `toolName` carried by stream events and
+   * the tool's {@link ApprovalContext}.
+   */
+  readonly toolName: string;
+  /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
    * from `@vercel/connect/eve`.
@@ -330,50 +336,74 @@ export function isDisabledToolSentinel(value: unknown): value is DisabledToolSen
 }
 
 /**
- * Marker discriminator written into the {@link ExperimentalWorkflow} opt-in
- * sentinel.
+ * Discriminator written into definitions returned by
+ * {@link experimental_workflow}.
  */
-const ENABLE_WORKFLOW_TOOL_SENTINEL_KIND = "eve:enable-workflow-tool";
+const EXPERIMENTAL_WORKFLOW_TOOL_KIND = "eve:enable-workflow-tool";
 
 /**
- * Marker value re-exported as the default export of a file in `agent/tools/`
- * (conventionally `agent/tools/workflow.ts`) to enable the framework `Workflow`
- * orchestration tool. The tool is off unless this marker is present,
- * mirroring the {@link disableTool} opt-out in reverse.
+ * Configuration accepted by {@link experimental_workflow}.
  */
-export interface EnableWorkflowToolSentinel {
-  readonly kind: typeof ENABLE_WORKFLOW_TOOL_SENTINEL_KIND;
+export interface ExperimentalWorkflowToolInput {
+  /**
+   * Maximum number of subagent or remote-agent calls one `Workflow` program
+   * may dispatch, counted across sequential and parallel calls alike.
+   *
+   * Calls beyond the limit fail with a `WORKFLOW_SUBAGENT_LIMIT_REACHED`
+   * result instead of starting a child session.
+   *
+   * @default 100
+   */
+  readonly maxSubagents?: number;
 }
 
 /**
- * Opt-in marker for the framework `Workflow` tool, an isolated JavaScript sandbox whose
- * only callable operations are this agent's subagents and remote agents, for
- * orchestrating them from model-authored JavaScript. Re-export it as the
- * default export of `agent/tools/workflow.ts`:
- *
- * ```ts
- * export { ExperimentalWorkflow as default } from "eve/tools";
- * ```
- *
- * Only the root session sees the `Workflow` tool — delegated subagent sessions
- * never get it — and one Workflow program may dispatch at most
- * `limits.maxSubagents` subagent calls (default 100).
- *
- * The capability is experimental. The resulting model-facing tool is still
- * called `Workflow`.
+ * Framework `Workflow` tool definition returned by
+ * {@link experimental_workflow}.
  */
-export const ExperimentalWorkflow: EnableWorkflowToolSentinel = Object.freeze({
-  kind: ENABLE_WORKFLOW_TOOL_SENTINEL_KIND,
-});
+export interface ExperimentalWorkflowToolDefinition extends ExperimentalWorkflowToolInput {
+  readonly kind: typeof EXPERIMENTAL_WORKFLOW_TOOL_KIND;
+}
 
 /**
- * Type guard: returns whether `value` is the {@link ExperimentalWorkflow}
- * opt-in sentinel.
+ * Enables and configures the experimental framework `Workflow` tool, an
+ * isolated JavaScript sandbox whose only callable operations are this agent's
+ * subagents and remote agents. Export the result from
+ * `agent/tools/workflow.ts`:
+ *
+ * ```ts
+ * import { experimental_workflow } from "eve/tools";
+ *
+ * export default experimental_workflow({ maxSubagents: 25 });
+ * ```
+ *
+ * Only the root session sees the tool. The resulting model-facing tool is
+ * still called `Workflow`.
  */
-export function isEnableWorkflowToolSentinel(value: unknown): value is EnableWorkflowToolSentinel {
+export function experimental_workflow(
+  input: ExperimentalWorkflowToolInput = {},
+): ExperimentalWorkflowToolDefinition {
+  const definition: {
+    kind: typeof EXPERIMENTAL_WORKFLOW_TOOL_KIND;
+    maxSubagents?: number;
+  } = {
+    kind: EXPERIMENTAL_WORKFLOW_TOOL_KIND,
+  };
+  if (input.maxSubagents !== undefined) {
+    definition.maxSubagents = input.maxSubagents;
+  }
+  return definition;
+}
+
+/**
+ * Type guard for a definition returned by {@link experimental_workflow}.
+ */
+export function isExperimentalWorkflowToolDefinition(
+  value: unknown,
+): value is ExperimentalWorkflowToolDefinition {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { kind?: unknown }).kind === ENABLE_WORKFLOW_TOOL_SENTINEL_KIND
+    (value as { kind?: unknown }).kind === EXPERIMENTAL_WORKFLOW_TOOL_KIND
   );
 }
