@@ -253,7 +253,7 @@ async function readGenerationRuntimeAppRoot(
   } catch (error) {
     throw new Error(
       `Workflow run references missing development generation "${generationId}". ` +
-        `Remove ".workflow-data" to discard the app's active local Workflow runs.`,
+        `Remove ".eve/workflow-data" to discard the app's active local Workflow runs.`,
       { cause: error },
     );
   }

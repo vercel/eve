@@ -79,7 +79,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   }) {
     this.#agentName = input.agentName;
     this.#appRoot = input.appRoot;
-    this.#dataDir = join(input.appRoot, ".workflow-data");
+    this.#dataDir = join(input.appRoot, ".eve", "workflow-data");
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
     this.#transportSecret = input.transportSecret;
     this.#world = createWorld({
@@ -298,7 +298,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     if (!existsSync(manifestPath)) {
       throw new Error(
         `Workflow run references missing development generation "${generationId}". ` +
-          `Remove ".workflow-data" to discard the app's active local Workflow runs.`,
+          `Remove ".eve/workflow-data" to discard the app's active local Workflow runs.`,
       );
     }
   }

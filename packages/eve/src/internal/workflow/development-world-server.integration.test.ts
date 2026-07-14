@@ -158,8 +158,8 @@ describe("parent development Workflow World", () => {
 
   it("protects all generations when a persisted run record is unreadable", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-unreadable-run-");
-    await mkdir(join(appRoot, ".workflow-data", "runs"), { recursive: true });
-    await writeFile(join(appRoot, ".workflow-data", "runs", "unreadable.json"), "{");
+    await mkdir(join(appRoot, ".eve", "workflow-data", "runs"), { recursive: true });
+    await writeFile(join(appRoot, ".eve", "workflow-data", "runs", "unreadable.json"), "{");
     const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
