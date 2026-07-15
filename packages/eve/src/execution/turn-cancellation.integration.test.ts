@@ -24,12 +24,10 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
 
 /**
- * Layer-1 turn cancellation: resuming a session's `{sessionId}:cancel`
- * hook mid-turn settles the turn as `turn.cancelled` → `session.waiting`
- * with zero failure events, no step retries, and a session that accepts
- * the next message normally. The payload may carry a `turnId` guard
- * scoping the cancel to one observed turn. (The HTTP trigger arrives in
- * layer 2; these tests resume the hook directly.)
+ * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
+ * zero failure events, no step retries, and a session that accepts the next
+ * message normally. Coverage exercises direct hooks, the HTTP trigger, and
+ * layer-3 cancellation of adopted local descendants.
  */
 
 const FAILURE_EVENT_TYPES = ["step.failed", "turn.failed", "session.failed"] as const;
@@ -426,7 +424,7 @@ describe("turn cancellation integration", () => {
     });
   }, 60_000);
 
-  it("cancels a turn waiting on an in-flight subagent and does not re-dispatch it", async () => {
+  it("cascades cancellation to an in-flight subagent and does not re-dispatch it", async () => {
     const fixture = createWaitToolRuntime("turn-cancel-subagent");
     const continuationToken = "http:turn-cancel-subagent";
 
@@ -459,14 +457,11 @@ describe("turn cancellation integration", () => {
         expect(filterEventsByType(cancelledTurn, "subagent.called")).toHaveLength(1);
         expectNoFailureEvents(cancelledTurn);
 
-        // Unblock the orphaned child (no cascade in layer 1 — its late
-        // result lands on the parent's disposed inbox and is dropped).
         const childSessionId = filterEventsByType(cancelledTurn, "subagent.called")[0]?.data
           .childSessionId;
         expect(childSessionId).toBeDefined();
-        const childCancelToken = sessionCancelHookToken(childSessionId ?? "");
-        await waitForHookByToken(childCancelToken);
-        await resumeHook(childCancelToken, {}).catch(() => undefined);
+        await waitForHookSweep(sessionCancelHookToken(childSessionId ?? ""));
+        expect(fixture.toolAborts()).toBe(1);
 
         // The cleared pending batch must not re-dispatch on the next turn.
         await waitForHook({ runId: run.runId }, { token: continuationToken });

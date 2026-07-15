@@ -7,7 +7,10 @@ import { ContextKey } from "#context/key.js";
 import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import {
+  getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
+} from "#harness/runtime-actions.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -376,6 +379,16 @@ describe("dispatchRuntimeActionsStep", () => {
     });
 
     expect(result).toEqual({ results: [], sessionState: expect.any(Object) });
+    expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
+      {
+        childContinuationTokens: {
+          "call-1": "subagent:parent-session:call-1",
+        },
+        childSessionIds: {
+          "call-1": "child-run",
+        },
+      },
+    );
     expect(startMock).toHaveBeenCalledWith(
       workflowEntryReference,
       [
@@ -520,6 +533,90 @@ describe("dispatchRuntimeActionsStep", () => {
       "turn-inbox",
     );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
+  });
+
+  it("records a successfully started remote child session for cancellation", async () => {
+    const remote = {
+      definition: {
+        description: "Research remote",
+        kind: "remote",
+        name: "research",
+        nodeId: "remote/research",
+        path: "/eve/v1/session",
+        url: "https://remote.example.com",
+      },
+    };
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([["remote/research", remote]]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { ok: true, sessionId: "remote-child" },
+            { headers: { "x-eve-session-id": "remote-child" }, status: 202 },
+          ),
+        ),
+    );
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-remote",
+          description: "Delegate the work.",
+          input: { message: "investigate latest routing" },
+          kind: "remote-agent-call",
+          name: "research",
+          nodeId: "remote/research",
+          remoteAgentName: "research",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(result.results).toEqual([]);
+    expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
+      {
+        childSessionIds: { "call-remote": "remote-child" },
+      },
+    );
   });
 
   it("blocks a stale recursive agent call from a delegated session", async () => {

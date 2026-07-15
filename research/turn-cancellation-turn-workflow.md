@@ -69,9 +69,8 @@ resuming the cancel hook, which tests do directly.
   workflow results): the wait stops and the turn settles cancelled the same
   way. The pending runtime-action batch and workflow interrupt are dropped
   at settle time (their tool-call exchange lives inside the batch and never
-  reached history; replaying them would re-dispatch the actions).
-  Descendants are _not_ cascaded to (layer 3); their late results land on
-  the dead turn inbox and are dropped.
+  reached history; replaying them would re-dispatch the actions). Layer 3 now
+  cancels successfully adopted descendants before this settle.
 - **Cancel after the turn settled (or before it starts)**: benign no-op —
   the settle disposed the session cancel hook, so a late resume rejects
   with `HookNotFoundError`. Duplicate and same-instant cancels are also

@@ -1,11 +1,22 @@
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
-import { createEveCallbackRoutePath } from "#protocol/routes.js";
+import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#protocol/routes.js";
+import type { CancelTurnResult } from "#channel/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { formatSubagentInput } from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
+
+class RemoteAgentCancelRequestError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, options: { readonly retryable: boolean }) {
+    super(message);
+    this.name = "RemoteAgentCancelRequestError";
+    this.retryable = options.retryable;
+  }
+}
 
 export async function startRemoteAgentSession(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
@@ -71,6 +82,47 @@ export async function startRemoteAgentSession(input: {
   );
 }
 
+export async function cancelRemoteAgentTurn(input: {
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+  readonly sessionId: string;
+}): Promise<CancelTurnResult> {
+  const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
+    headers,
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new RemoteAgentCancelRequestError(
+      `Remote agent "${input.remote.name}" cancel-turn request failed with HTTP ${response.status}.`,
+      { retryable: isRetryableRemoteCancelStatus(response.status) },
+    );
+  }
+
+  let status: unknown;
+  try {
+    status = ((await response.json()) as { readonly status?: unknown }).status;
+  } catch {
+    throw new RemoteAgentCancelRequestError(
+      `Remote agent "${input.remote.name}" cancel-turn response was not valid JSON.`,
+      { retryable: false },
+    );
+  }
+
+  if (status !== "cancelling" && status !== "no_active_turn") {
+    throw new RemoteAgentCancelRequestError(
+      `Remote agent "${input.remote.name}" cancel-turn response did not include a valid status.`,
+      { retryable: false },
+    );
+  }
+
+  return { status };
+}
+
+export function isRetryableRemoteAgentCancelError(error: unknown): boolean {
+  return !(error instanceof RemoteAgentCancelRequestError) || error.retryable;
+}
+
 export function resolveRemoteAgentForAction(input: {
   readonly nodeId: string;
   readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
@@ -86,6 +138,20 @@ export function resolveRemoteAgentForAction(input: {
 
 function createRemoteAgentSessionUrl(remote: ResolvedRuntimeRemoteAgentNode): string {
   return new URL(remote.path, `${trimTrailingSlash(remote.url)}/`).toString();
+}
+
+function createRemoteAgentCancelTurnUrl(
+  remote: ResolvedRuntimeRemoteAgentNode,
+  sessionId: string,
+): string {
+  return new URL(
+    createEveCancelTurnRoutePath(sessionId),
+    `${trimTrailingSlash(remote.url)}/`,
+  ).toString();
+}
+
+function isRetryableRemoteCancelStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 async function resolveRemoteAgentRequestHeaders(

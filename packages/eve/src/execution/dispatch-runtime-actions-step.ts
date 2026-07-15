@@ -19,7 +19,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext } from "#context/serialize.js";
 import {
   getPendingRuntimeActionBatch,
-  recordPendingSubagentChildToken,
+  recordPendingSubagentChild,
 } from "#harness/runtime-actions.js";
 import {
   createSubagentCalledEvent,
@@ -143,9 +143,10 @@ export async function dispatchRuntimeActionsStep(input: {
           });
           const handle = await childRuntime.run(runInput);
 
-          nextSession = recordPendingSubagentChildToken({
+          nextSession = recordPendingSubagentChild({
             callId: action.callId,
             childContinuationToken,
+            childSessionId: handle.sessionId,
             session: nextSession,
           });
           childSessionId = handle.sessionId;
@@ -180,6 +181,11 @@ export async function dispatchRuntimeActionsStep(input: {
           name = action.name;
           remote = { url: resolvedRemote.url };
           toolName = action.remoteAgentName;
+          nextSession = recordPendingSubagentChild({
+            callId: action.callId,
+            childSessionId,
+            session: nextSession,
+          });
           break;
         }
         default:
