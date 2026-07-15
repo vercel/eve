@@ -511,6 +511,112 @@ function sessionYieldingTurns(turns: ReadonlyArray<readonly unknown[]>): ClientS
   return session;
 }
 
+describe("EveTUIRunner development session continuity", () => {
+  it("keeps the REPL session when HMR publishes a new runtime revision", async () => {
+    const requests: Array<{ readonly method: string; readonly url: URL }> = [];
+    const revisions = ["revision-a", "revision-a", "revision-b", "revision-b"];
+    const encoder = new TextEncoder();
+    let nextRevision = 0;
+    let nextSession = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input : input.url,
+        );
+        const method = init?.method ?? "GET";
+        requests.push({ method, url });
+
+        if (url.pathname.startsWith("/eve/v1/dev/runtime-artifacts")) {
+          const revision = revisions[Math.min(nextRevision, revisions.length - 1)] ?? "revision";
+          nextRevision += 1;
+          return Response.json({ revision });
+        }
+
+        if (method === "POST") {
+          const sessionId =
+            url.pathname === "/eve/v1/session"
+              ? `session-${String(++nextSession)}`
+              : (url.pathname.split("/").at(-1) ?? `session-${String(++nextSession)}`);
+          return Response.json({
+            continuationToken: `token-${sessionId}`,
+            sessionId,
+          });
+        }
+
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode('{"type":"session.waiting"}\n'));
+              controller.close();
+            },
+          }),
+        );
+      }),
+    );
+
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const session = client.session();
+    const createSession = vi.spyOn(client, "session");
+    const prompts: Array<string | undefined> = ["first", "second", undefined];
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+          }
+        }),
+      },
+      serverUrl: "http://localhost:3000",
+      session,
+    });
+
+    await runner.run();
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(session.state.sessionId).toBe("session-1");
+    expect(
+      requests
+        .filter(
+          (request) =>
+            request.method === "POST" && request.url.pathname.startsWith("/eve/v1/session"),
+        )
+        .map((request) => request.url.pathname),
+    ).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
+  });
+
+  it("starts a fresh session only after an explicit /new command", async () => {
+    const initialSession = sessionYielding([{ type: "session.waiting" }]);
+    const newSession = sessionYielding([{ type: "session.waiting" }]);
+    const client = stubClient();
+    const createSession = vi.spyOn(client, "session").mockReturnValue(newSession);
+    const prompts: Array<string | undefined> = ["first", "/new", "second", undefined];
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+          }
+        }),
+      },
+      session: initialSession,
+    });
+
+    await runner.run();
+
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(initialSession.send).toHaveBeenCalledOnce();
+    expect(newSession.send).toHaveBeenCalledOnce();
+  });
+});
+
 describe("EveTUIRunner terminal-failure recovery", () => {
   it("starts a fresh session and posts a notice after session.failed", async () => {
     const notices: string[] = [];

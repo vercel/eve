@@ -747,6 +747,42 @@ describe("eve dev server", () => {
   );
 
   it(
+    "makes a newly added tool available to the next turn in a continued session",
+    async () => {
+      const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const firstResult = await sendDevelopmentMessage({
+          message: "Hello.",
+          session: createDevelopmentSessionState(),
+          serverUrl: server.url,
+        });
+        const firstSessionId = firstResult.session.sessionId;
+        expect(firstSessionId).toBeDefined();
+
+        await writeFile(
+          join(app.appRoot, "agent", "tools", "get_added_marker.ts"),
+          createGenerationMarkerToolSource("added-tool", false),
+        );
+        await forceDevelopmentRebuild(server.url);
+
+        const secondResult = await sendDevelopmentMessage({
+          message: "Use get_added_marker.",
+          session: firstResult.session,
+          serverUrl: server.url,
+        });
+
+        expect(secondResult.sessionId).toBe(firstSessionId);
+        expect(readCompletedMessages(secondResult.events)).toContain("added-tool");
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
     "recovers a nonterminal child Workflow on its selected generation after restart",
     async () => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
