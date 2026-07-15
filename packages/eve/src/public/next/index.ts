@@ -2,6 +2,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 
 import type { NextConfig } from "next";
 
+import { resolvePackageRoot } from "#internal/application/package.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
@@ -325,23 +326,17 @@ function toPosixPath(path: string): string {
   return path.replaceAll("\\", "/");
 }
 
-function createDefaultBuildCommand(input: {
-  readonly agentRoot: string;
-  readonly nextRoot: string;
-}): string {
+function createDefaultBuildCommand(input: { readonly agentRoot: string }): string {
   const eveBinaryPath = toPosixPath(
-    relative(input.agentRoot, join(input.nextRoot, "node_modules", "eve", "bin", "eve.js")),
+    relative(input.agentRoot, join(resolvePackageRoot(), "bin", "eve.js")),
   );
   return `node ${quoteShellArg(eveBinaryPath)} build`;
 }
 
-function normalizeAgentsConfig(
-  options: WithEveOptions,
-  nextRoot: string,
-): readonly ResolvedEveNextAgent[] {
+function normalizeAgentsConfig(options: WithEveOptions): readonly ResolvedEveNextAgent[] {
   const servicePrefixBase = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
   const resolveBuildCommand = (agentRoot: string, buildCommand: string | undefined) =>
-    buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot, nextRoot });
+    buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot });
 
   if (options.agents === undefined) {
     const appRoot = resolveApplicationRoot(options.eveRoot);
@@ -402,7 +397,7 @@ export function withEve<TConfig extends EveNextConfig>(
 ): EveNextConfigFunction<TConfig> {
   const nextRoot = process.cwd();
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs);
-  const agents = normalizeAgentsConfig(options, nextRoot);
+  const agents = normalizeAgentsConfig(options);
 
   return async function eveNextConfig(phase, context) {
     const nextConfig = await resolveNextConfig(configOrFunction, phase, context);

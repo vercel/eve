@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("#internal/application/package.js", async () => {
+  const { join } = await import("node:path");
+  return {
+    resolvePackageRoot: vi.fn(() => join(process.cwd(), "node_modules", "eve")),
+  };
+});
+
 vi.mock("./vercel-output-config.js", () => ({
   ensureEveVercelOutputConfig: vi.fn(
     async (input: {

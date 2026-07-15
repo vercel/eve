@@ -1,9 +1,19 @@
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("#internal/application/package.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("#internal/application/package.js")>();
+  const { join } = await import("node:path");
+  return {
+    ...original,
+    resolvePackageRoot: vi.fn(() => join(process.cwd(), "node_modules", "eve")),
+  };
+});
+
+import { resolvePackageRoot } from "#internal/application/package.js";
 import { withEve, type EveNextConfig, type EveNextRewriteSections } from "./index.js";
 
 interface TestConfig extends EveNextConfig {
@@ -29,6 +39,9 @@ describe("withEve Vercel config", () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
+    vi.mocked(resolvePackageRoot).mockImplementation(() =>
+      join(process.cwd(), "node_modules", "eve"),
+    );
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -307,6 +320,47 @@ describe("withEve Vercel config", () => {
         },
       },
     });
+  });
+
+  it("references an installed eve binary from a monorepo app", async () => {
+    const projectRoot = await createTempAppRoot();
+    const nextRoot = join(projectRoot, "apps", "nextjs");
+    const agentRoot = join(nextRoot, "agents", "app-agent");
+    const evePackageRoot = join(projectRoot, "node_modules", "eve");
+    await mkdir(join(projectRoot, ".vercel"), { recursive: true });
+    await writeFile(join(projectRoot, ".vercel", "project.json"), "{}\n");
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(join(evePackageRoot, "bin"), { recursive: true });
+    await writeFile(join(evePackageRoot, "package.json"), "{}\n");
+    await writeFile(join(evePackageRoot, "bin", "eve.js"), "");
+    process.chdir(nextRoot);
+    vi.mocked(resolvePackageRoot).mockReturnValue(evePackageRoot);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    await resolveConfig(
+      withEve<TestConfig>(
+        {},
+        {
+          agents: {
+            "app-agent": "./agents/app-agent",
+          },
+        },
+      ),
+    );
+    const outputConfig = (await readJsonFile(
+      join(projectRoot, ".vercel", "output", "config.json"),
+    )) as {
+      services: Record<string, { buildCommand: string }>;
+    };
+    const buildCommand = outputConfig.services["eve-app-agent"]?.buildCommand;
+    const binaryPath = buildCommand?.match(/&& node '([^']+)' build$/)?.[1];
+
+    expect(binaryPath).toBeDefined();
+    const resolvedBinaryPath = resolve(agentRoot, binaryPath!);
+    expect(resolvedBinaryPath).toBe(join(evePackageRoot, "bin", "eve.js"));
+    expect((await stat(resolvedBinaryPath)).isFile()).toBe(true);
   });
 
   it("writes one Build Output service and route for each named agent", async () => {
