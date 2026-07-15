@@ -25,7 +25,7 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
-import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
+import { disposeHook } from "#execution/hook-ownership.js";
 import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
@@ -301,7 +301,9 @@ async function runDriverLoop(input: {
   } finally {
     await disposeSettledTurnControl?.();
     await deliveryHook.dispose();
-    await closeHookIterator(authIterator);
+    // Dispose without closing the iterator: a session cancelled while
+    // awaiting authorization can leave a durable read in flight, and an
+    // async iterator only honors `return()` after that read settles.
     await disposeHook(authHook);
   }
 }

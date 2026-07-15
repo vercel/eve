@@ -12,7 +12,11 @@ import {
 import { hydrateDurableSession } from "#execution/session.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
-import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
+import {
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission.js";
 import {
   clearAllProxyInputRequests,
   hasProxyInputRequests,
@@ -63,7 +67,7 @@ export async function settleCancelledTurnStep(input: {
   // (the proxy epilogue clears the turn id); re-emitting would fabricate
   // a turn id and duplicate the boundary.
   const alreadyEpilogued =
-    emissionState.turnId === "" && hasProxyInputRequests(durableSession.state);
+    isHarnessBetweenTurns(session) && hasProxyInputRequests(durableSession.state);
 
   if (!alreadyEpilogued) {
     const writer = input.parentWritable.getWriter();

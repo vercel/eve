@@ -96,6 +96,11 @@ interface DeliveryHookConfig {
   readonly values?: readonly HookPayload[];
 }
 
+interface AuthHookConfig {
+  readonly dispose?: () => void;
+  readonly return?: () => Promise<IteratorResult<HookPayload>>;
+}
+
 describe("workflowEntry", () => {
   beforeEach(() => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
@@ -764,6 +769,28 @@ describe("workflowEntry", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(symbolDispose).not.toHaveBeenCalled();
   });
+
+  it("disposes the auth hook without closing its iterator", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+
+    const authDispose = vi.fn();
+    const authReturn = createIteratorReturn();
+    installHookMocks({
+      authHook: { dispose: authDispose, return: authReturn },
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "ok" });
+
+    expect(authDispose).toHaveBeenCalledOnce();
+    expect(authReturn).not.toHaveBeenCalled();
+  });
 });
 
 function createSerializedContext(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -817,6 +844,7 @@ function turnResult(input: {
 }
 
 function installHookMocks(input: {
+  readonly authHook?: AuthHookConfig;
   readonly deliveryHooks?: readonly DeliveryHookConfig[];
   readonly symbolDispose?: () => void;
   readonly turnControls: readonly TurnControlPayload[];
@@ -836,7 +864,12 @@ function installHookMocks(input: {
     }
 
     if (token.endsWith(":auth")) {
-      return createMockHook({ token, values: [] }) as never;
+      return createMockHook({
+        dispose: input.authHook?.dispose,
+        return: input.authHook?.return,
+        token,
+        values: [],
+      }) as never;
     }
 
     const config = deliveryHooks.shift() ?? { token, values: [] };
