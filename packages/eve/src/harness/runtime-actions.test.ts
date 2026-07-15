@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   getPendingRuntimeActionBatch,
-  recordPendingSubagentChild,
+  recordPendingLocalSubagentChild,
+  recordPendingRemoteAgentChild,
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
@@ -106,16 +107,16 @@ describe("resolvePendingRuntimeActions", () => {
   });
 });
 
-describe("recordPendingSubagentChild", () => {
+describe("pending subagent child adoption", () => {
   it("records child session ids without disturbing local continuation-token cleanup", () => {
     let session = createParkedSession();
-    session = recordPendingSubagentChild({
+    session = recordPendingLocalSubagentChild({
       callId: "call-1",
       childContinuationToken: "subagent:test-session:call-1",
       childSessionId: "local-child",
       session,
     });
-    session = recordPendingSubagentChild({
+    session = recordPendingRemoteAgentChild({
       callId: "call-remote",
       childSessionId: "remote-child",
       session,
