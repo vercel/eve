@@ -7,6 +7,26 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export type LinearFetch = typeof fetch;
 
+/**
+ * Selection set for an Agent Session, shared by the create-on-issue and
+ * create-on-comment mutations. Linear's schema exposes the session's
+ * associations only as nested relations (`appUser`, `comment`, `issue`,
+ * `sourceComment`); the flat `*Id` scalars were removed, so selecting them
+ * returns HTTP 400. There is no `organization` relation on `AgentSession`.
+ */
+const AGENT_SESSION_FIELDS = `
+  fragment AgentSessionFields on AgentSession {
+    id
+    appUser { id }
+    comment { id }
+    creator { id }
+    issue { id identifier title url }
+    sourceComment { id }
+    status
+    url
+  }
+`;
+
 /** Transport options for Linear GraphQL calls. */
 export interface LinearApiOptions {
   /** Defaults to `https://api.linear.app/graphql`. */
@@ -212,19 +232,11 @@ export async function createLinearAgentSessionOnIssue(input: {
         agentSessionCreateOnIssue(input: $input) {
           success
           agentSession {
-            id
-            appUserId
-            commentId
-            creator { id }
-            issue { id identifier title url }
-            issueId
-            organizationId
-            sourceCommentId
-            status
-            url
+            ...AgentSessionFields
           }
         }
       }
+      ${AGENT_SESSION_FIELDS}
     `,
     queryName: "AgentSessionCreateOnIssue",
     variables: {
@@ -260,19 +272,11 @@ export async function createLinearAgentSessionOnComment(input: {
         agentSessionCreateOnComment(input: $input) {
           success
           agentSession {
-            id
-            appUserId
-            commentId
-            creator { id }
-            issue { id identifier title url }
-            issueId
-            organizationId
-            sourceCommentId
-            status
-            url
+            ...AgentSessionFields
           }
         }
       }
+      ${AGENT_SESSION_FIELDS}
     `,
     queryName: "AgentSessionCreateOnComment",
     variables: {
@@ -336,25 +340,33 @@ function normalizeAgentSessionRecord(value: unknown): LinearAgentSessionRecord {
     throw new Error("linearChannel: Linear Agent Session response was malformed.");
   }
 
-  const creator = isObject(value.creator) ? value.creator : undefined;
   const issue = normalizeIssue(value.issue);
   const record: LinearAgentSessionRecord = { id: value.id };
-  if (typeof value.appUserId === "string") record.appUserId = value.appUserId;
-  if (typeof value.commentId === "string" || value.commentId === null) {
-    record.commentId = value.commentId;
-  }
-  if (typeof creator?.id === "string" || creator === undefined) {
-    record.creatorId = typeof creator?.id === "string" ? creator.id : null;
-  }
+  const appUserId = relationId(value.appUser);
+  if (typeof appUserId === "string") record.appUserId = appUserId;
+  const commentId = relationId(value.comment);
+  if (commentId !== undefined) record.commentId = commentId;
+  const creatorId = relationId(value.creator);
+  if (creatorId !== undefined) record.creatorId = creatorId;
   if (issue !== undefined) record.issue = issue;
-  if (typeof value.issueId === "string" || value.issueId === null) record.issueId = value.issueId;
-  if (typeof value.organizationId === "string") record.organizationId = value.organizationId;
-  if (typeof value.sourceCommentId === "string" || value.sourceCommentId === null) {
-    record.sourceCommentId = value.sourceCommentId;
-  }
+  const issueId = relationId(value.issue);
+  if (issueId !== undefined) record.issueId = issueId;
+  const sourceCommentId = relationId(value.sourceComment);
+  if (sourceCommentId !== undefined) record.sourceCommentId = sourceCommentId;
   if (typeof value.status === "string") record.status = value.status;
   if (typeof value.url === "string" || value.url === null) record.url = value.url;
   return record;
+}
+
+/**
+ * Reads the `id` from a nested Linear relation selected as `{ id }`. Returns
+ * `null` when the relation is present but null (Linear's representation of an
+ * absent association), and `undefined` when the field was not returned.
+ */
+function relationId(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (isObject(value) && typeof value.id === "string") return value.id;
+  return undefined;
 }
 
 function normalizeAgentActivityRecord(value: unknown): LinearAgentActivityRecord | null {
