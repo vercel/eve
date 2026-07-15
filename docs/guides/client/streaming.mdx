@@ -141,7 +141,9 @@ Tail-relative attachments do not automatically reconnect or advance the session'
 
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream. Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
+Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops the server-side turn — it keeps running and remains attachable by index. To stop the turn itself, POST the session's [cancel route](../../channels/eve#routes) and watch the stream settle with `turn.cancelled` followed by `session.waiting`.
+
+Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 
 ```ts
 const controller = new AbortController();

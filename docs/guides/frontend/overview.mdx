@@ -69,7 +69,7 @@ export function Chat() {
 | `events`  | Raw eve stream events for this session.                                        |
 | `session` | Serializable session cursor (`sessionId`, `continuationToken`, `streamIndex`). |
 | `send`    | Send text or the full turn payload (multi-part messages, HITL responses).      |
-| `stop`    | Abort the active request.                                                      |
+| `stop`    | Abort the client's in-flight stream. The server-side turn keeps running.       |
 | `reset`   | Clear local events, data, errors, and the local session cursor.                |
 
 Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
@@ -96,7 +96,9 @@ await agent.send({
 });
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the active request, and `reset()` to clear local state so the next send starts a fresh durable session.
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the client's in-flight stream, and `reset()` to clear local state so the next send starts a fresh durable session.
+
+`stop()` is local: turns are resumable across disconnects, so detaching the stream never cancels the work — the turn keeps running and billing on the server. To stop the turn itself, POST the session's [cancel route](../../channels/eve#routes); the turn then settles on the stream as `turn.cancelled` followed by `session.waiting`.
 
 After eve confirms an attachment turn with `message.received`, the default reducer projects each
 received attachment as a `file` part on the user message. The part includes `mediaType`, optional
