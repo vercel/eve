@@ -2,8 +2,8 @@ import { defineEval, type EveEvalContext, type EveEvalTargetHandle } from "eve/e
 import { satisfies } from "eve/evals/expect";
 
 const TOOL_NAME = "wait-for-cancellation";
-const STREAM_OPEN_ATTEMPTS = 12;
 const STREAM_OPEN_RETRY_DELAY_MS = 250;
+const STREAM_OPEN_RETRY_TIMEOUT_MS = 60_000;
 const STREAM_OPEN_RETRYABLE_STATUS = new Set([404, 409, 425, 500, 502, 503, 504]);
 
 interface CreateSessionResponse {
@@ -94,23 +94,20 @@ async function openSessionStream(
   signal: AbortSignal,
 ): Promise<Response & { readonly body: ReadableStream<Uint8Array> }> {
   const path = `/eve/v1/session/${encodeURIComponent(sessionId)}/stream?startIndex=0`;
+  const deadline = Date.now() + STREAM_OPEN_RETRY_TIMEOUT_MS;
 
-  for (let attempt = 0; attempt < STREAM_OPEN_ATTEMPTS; attempt += 1) {
+  while (true) {
     const response = await t.target.fetch(path, { method: "GET", signal });
     if (response.ok && response.body !== null) {
       return response as Response & { readonly body: ReadableStream<Uint8Array> };
     }
 
-    const canRetry =
-      STREAM_OPEN_RETRYABLE_STATUS.has(response.status) && attempt + 1 < STREAM_OPEN_ATTEMPTS;
-    if (!canRetry) {
+    if (!STREAM_OPEN_RETRYABLE_STATUS.has(response.status) || Date.now() >= deadline) {
       throw new Error(`Stream request failed (${response.status}).`);
     }
     await response.body?.cancel();
     await t.sleep(STREAM_OPEN_RETRY_DELAY_MS);
   }
-
-  throw new Error("Stream request failed after retries.");
 }
 
 /**
