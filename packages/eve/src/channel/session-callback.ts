@@ -70,12 +70,16 @@ export function parseSessionCallback(value: unknown): SessionCallbackParseResult
 }
 
 function readCallbackUrlToken(url: URL): string | null {
+  // In multi-agent mode the minted callback carries the agent's public route
+  // prefix (`/eve/agents/<name>/eve/v1/callback/<token>`), so match the callback
+  // segment anywhere in the path rather than anchoring it to the origin.
   const tokenPrefix = createEveCallbackRoutePath("");
-  if (!url.pathname.startsWith(tokenPrefix)) {
+  const markerIndex = url.pathname.lastIndexOf(tokenPrefix);
+  if (markerIndex === -1) {
     return null;
   }
 
-  const encodedToken = url.pathname.slice(tokenPrefix.length);
+  const encodedToken = url.pathname.slice(markerIndex + tokenPrefix.length);
   if (encodedToken.length === 0 || encodedToken.includes("/")) {
     return null;
   }
