@@ -22,19 +22,25 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain(
       'validateWorkflowWorld({ packageName: "@acme/eve-world", world: workflowWorld });',
     );
+    expect(source).not.toContain("resolveLocalWorkflowWorldDataDirectory");
     expect(source).toContain("setWorld(workflowWorld);");
     expect(source).toContain("await getWorld();");
     expect(source).toContain("await workflowWorld.start?.();");
   });
 
-  it("selects vendored local and Vercel world packages with Workflow's selector", () => {
-    expect(
-      createWorkflowWorldPluginSource({
-        compiledArtifactsBootstrapPath: "/app/.eve/compile/bootstrap.mjs",
-        configuredWorld: undefined,
-        defaultWorld: "local",
-      }),
-    ).toContain("/compiled/@workflow/world-local/index.js");
+  it("configures the vendored local World with eve's app-local data resolver", () => {
+    const source = createWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/compile/bootstrap.mjs",
+      configuredWorld: undefined,
+      defaultWorld: "local",
+    });
+
+    expect(source).toContain("/compiled/@workflow/world-local/index.js");
+    expect(source).toContain("resolveLocalWorkflowWorldDataDirectory(process.cwd())");
+    expect(source).not.toContain("createWorldFromModule(workflowWorldModule)");
+  });
+
+  it("selects the vendored Vercel World with Workflow's selector", () => {
     expect(
       createWorkflowWorldPluginSource({
         compiledArtifactsBootstrapPath: "/app/.eve/compile/bootstrap.mjs",
