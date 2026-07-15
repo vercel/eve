@@ -5,7 +5,10 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
-import { createDevelopmentSourceSnapshotPlan } from "#internal/nitro/dev-runtime-source-snapshot.js";
+import {
+  createDevelopmentSourceSnapshotPlan,
+  toDevelopmentSourceSnapshotPath,
+} from "#internal/nitro/dev-runtime-source-snapshot.js";
 import {
   DEVELOPMENT_RUNTIME_ARTIFACTS_ACTIVATED_MARKER,
   pruneDevelopmentRuntimeArtifactsSnapshotDirectory,
@@ -104,6 +107,8 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
         "compiled-agent-manifest.json",
       ),
       runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
+      snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
+      sourceRoot: sourceSnapshotPlan.sourceRoot,
     });
     await validateSnapshotCompiledManifestRoots({
       manifestPath: join(
@@ -332,11 +337,15 @@ async function rewriteSnapshotCompiledManifest(input: {
   readonly appRoot: string;
   readonly manifestPath: string;
   readonly runtimeAppRoot: string;
+  readonly snapshotSourceRoot: string;
+  readonly sourceRoot: string;
 }): Promise<void> {
   const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as unknown;
   const rewritten = rewriteManifestRoots({
     appRoot: input.appRoot,
     runtimeAppRoot: input.runtimeAppRoot,
+    snapshotSourceRoot: input.snapshotSourceRoot,
+    sourceRoot: input.sourceRoot,
     value: manifest,
   });
 
@@ -346,6 +355,8 @@ async function rewriteSnapshotCompiledManifest(input: {
 function rewriteManifestRoots(input: {
   readonly appRoot: string;
   readonly runtimeAppRoot: string;
+  readonly snapshotSourceRoot: string;
+  readonly sourceRoot: string;
   readonly value: unknown;
 }): unknown {
   if (Array.isArray(input.value)) {
@@ -367,14 +378,41 @@ function rewriteManifestRoots(input: {
       continue;
     }
 
+    if (typeof value === "string" && key === "sourceRoot") {
+      rewritten[key] = rewritePathWithinSourceRoot({
+        path: value,
+        snapshotSourceRoot: input.snapshotSourceRoot,
+        sourceRoot: input.sourceRoot,
+      });
+      continue;
+    }
+
     rewritten[key] = rewriteManifestRoots({
       appRoot: input.appRoot,
       runtimeAppRoot: input.runtimeAppRoot,
+      snapshotSourceRoot: input.snapshotSourceRoot,
+      sourceRoot: input.sourceRoot,
       value,
     });
   }
 
   return rewritten;
+}
+
+function rewritePathWithinSourceRoot(input: {
+  readonly path: string;
+  readonly snapshotSourceRoot: string;
+  readonly sourceRoot: string;
+}): string {
+  if (!isPathInsideOrEqual(input.path, input.sourceRoot)) {
+    return input.path;
+  }
+
+  return toDevelopmentSourceSnapshotPath({
+    snapshotSourceRoot: input.snapshotSourceRoot,
+    sourcePath: input.path,
+    sourceRoot: input.sourceRoot,
+  });
 }
 
 function rewritePathWithinAppRoot(input: {

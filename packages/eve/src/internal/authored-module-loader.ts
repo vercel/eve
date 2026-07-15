@@ -2,11 +2,16 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { assertNoWorkflowDirectivePrologue } from "#internal/authored-directive-prologue.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
-import { createFixedNamespaceScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
+import {
+  createExtensionScopePlugin,
+  createFixedNamespaceScopePlugin,
+} from "#internal/bundler/extension-scope-plugin.js";
 import {
   CACHED_CHANNEL_PREFIX,
   RESOLVE_EXTENSIONS,
@@ -170,6 +175,85 @@ export async function bundleAuthoredModuleForGeneration(
   });
 
   return removeRolldownModuleRegionComments(code);
+}
+
+/**
+ * Bundles every runtime-authored module in one immutable generation graph.
+ * Shared dependencies are parsed and emitted once instead of once per authored
+ * entry.
+ */
+export async function bundleAuthoredModuleMapForGeneration(input: {
+  readonly manifest: CompiledAgentManifest;
+  readonly moduleMapPath: string;
+}): Promise<string> {
+  const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
+  const externalDependencies = normalizeExternalDependencies(
+    [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
+      (node) => node.config.build?.externalDependencies ?? [],
+    ),
+  );
+  const moduleMapSource = createCompiledModuleMapSource({
+    manifest: input.manifest,
+    moduleMapPath: input.moduleMapPath,
+  });
+  const extensionScopePlugin = createExtensionScopePlugin(
+    input.manifest.extensionMounts.map((mount) => ({
+      packageNamespace: mount.packageNamespace,
+      sourceRoot: mount.sourceRoot,
+    })),
+  );
+  const plugins = [
+    createVirtualGenerationModuleMapPlugin({
+      id: input.moduleMapPath,
+      source: moduleMapSource,
+    }),
+    createAuthoredDirectiveGuardPlugin(),
+    extensionScopePlugin,
+    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
+    createAuthoredAssetImportPlugin(),
+    createAuthoredPackageTsConfigPathsPlugin({
+      appPackageRoot: packageRoot,
+      extensions: RESOLVE_EXTENSIONS,
+    }),
+    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+    createGenerationPackageBoundaryPlugin({ externalDependencies, packageRoot }),
+  ].filter((plugin) => plugin !== null);
+
+  try {
+    const chunk = await buildSingleRolldownChunk("authored module map", {
+      cwd: packageRoot,
+      input: input.moduleMapPath,
+      platform: "node",
+      plugins,
+      resolve: {
+        extensions: [...RESOLVE_EXTENSIONS],
+      },
+      tsconfig: resolveAuthoredTsConfigPath(packageRoot),
+      output: {
+        comments: false,
+        format: "esm",
+        sourcemap: false,
+      },
+    });
+    return removeRolldownModuleRegionComments(chunk.code);
+  } catch (error) {
+    throw createAuthoredModuleBundleError(input.moduleMapPath, error);
+  }
+}
+
+function createVirtualGenerationModuleMapPlugin(input: {
+  readonly id: string;
+  readonly source: string;
+}): Record<string, unknown> {
+  return {
+    name: "eve-generation-module-map",
+    resolveId(id: string) {
+      return id === input.id ? id : undefined;
+    },
+    load(id: string) {
+      return id === input.id ? { code: input.source, moduleType: "js" as const } : undefined;
+    },
+  };
 }
 
 async function buildAuthoredModuleBundle(
