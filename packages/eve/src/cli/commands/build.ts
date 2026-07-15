@@ -28,7 +28,7 @@ export function registerBuildCommand(input: {
   input.program
     .command("build")
     .description("Build the current eve application.")
-    .option("--profile <path>", "Write timing and output-size profile JSON to a file")
+    .option("--profile <path>", "Write best-effort timing and output-size profile JSON to a file")
     .option(
       "--skip-sandbox-prewarm",
       "Skip sandbox template prewarm for a Vercel build; output may not be deployable",
@@ -61,14 +61,5 @@ export function registerBuildCommand(input: {
           tone: "success",
         }),
       );
-      if (profileOutputPath !== undefined) {
-        input.logger.log(
-          renderCliTaggedLine(theme, {
-            message: `wrote build profile to ${profileOutputPath}`,
-            tag: "build",
-            tone: "success",
-          }),
-        );
-      }
     });
 }

@@ -282,19 +282,67 @@ describe("buildApplication", () => {
     ]);
   });
 
-  it("rejects a profile path inside the published output", async () => {
+  it("keeps a profile path inside the published output from failing or changing a build", async () => {
     vi.stubEnv("VERCEL", "");
     const appRoot = await createScratchDirectory("eve-build-application-profile-output-");
+    const profilePath = join(appRoot, ".output", "build-profile.json");
 
-    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await expect(
-      buildApplication(appRoot, {
-        profileOutputPath: join(appRoot, ".output", "build-profile.json"),
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementationOnce(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+      const outputDir = await buildApplication(appRoot, {
+        profileOutputPath: profilePath,
         skipVercelSandboxPrewarm: false,
-      }),
-    ).rejects.toThrow("must be outside the published output directory");
+      });
 
-    expect(prepareProductionApplicationHostMock).not.toHaveBeenCalled();
+      expect(outputDir).toBe(join(appRoot, ".output"));
+      await expect(readFile(profilePath, "utf8")).rejects.toThrow();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("must be outside the published output directory"),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps profile write errors from failing a completed build", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-profile-write-error-");
+    const profileParentPath = join(appRoot, "profile-parent");
+    const profilePath = join(profileParentPath, "build.json");
+
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementationOnce(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
+    await writeFile(profileParentPath, "not-a-directory\n");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+      const outputDir = await buildApplication(appRoot, {
+        profileOutputPath: profilePath,
+        skipVercelSandboxPrewarm: false,
+      });
+
+      expect(outputDir).toBe(join(appRoot, ".output"));
+      await expect(readFile(join(outputDir, "eve-cache.json"), "utf8")).resolves.toContain(
+        "eveVersion",
+      );
+      await expect(readFile(profilePath, "utf8")).rejects.toThrow();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("failed to write optional build profile"),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("keeps the last-good output when Nitro mutates its target before failing", async () => {
@@ -339,6 +387,7 @@ describe("buildApplication", () => {
   it("builds isolated Vercel Nitro surfaces and stitches workflow functions", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-");
+    const profilePath = join(appRoot, ".eve", "profiles", "vercel-build.json");
     const stableFlowOutputDir = join(appRoot, ".eve", "nitro-output", "flow");
     const staleFlowOutputPath = join(stableFlowOutputDir, "stale-flow.txt");
 
@@ -382,7 +431,10 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+    const outputDir = await buildApplication(appRoot, {
+      ...DEPLOYABLE_BUILD_OPTIONS,
+      profileOutputPath: profilePath,
+    });
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
     expect(createProductionApplicationNitroMock).toHaveBeenCalledTimes(2);
@@ -449,6 +501,11 @@ describe("buildApplication", () => {
         }),
         log: expect.any(Function),
       }),
+    );
+    const profile = JSON.parse(await readFile(profilePath, "utf8")) as ApplicationBuildProfile;
+    expect(profile.target).toBe("vercel");
+    expect(profile.phases).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "sandbox.prewarm" })]),
     );
 
     const summary = JSON.parse(

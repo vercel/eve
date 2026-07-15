@@ -39,6 +39,7 @@ import type {
   PreparedApplicationHost,
 } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
+import { toErrorMessage } from "#shared/errors.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
@@ -69,6 +70,30 @@ function assertProfileOutputOutsideBuildOutput(
   if (profileOutputPath !== undefined && isPathInside(outputDirectory, profileOutputPath)) {
     throw new Error(
       `Build profile path ${profileOutputPath} must be outside the published output directory ${outputDirectory}.`,
+    );
+  }
+}
+
+async function writeOptionalApplicationBuildProfile(input: {
+  readonly outputDirectory: string;
+  readonly profileOutputPath: string;
+  readonly profiler: ApplicationBuildProfiler;
+}): Promise<void> {
+  try {
+    assertProfileOutputOutsideBuildOutput(input.profileOutputPath, input.outputDirectory);
+    const timing = input.profiler.finish();
+    const output = await measureApplicationBuildOutput(input.outputDirectory);
+    await writeApplicationBuildProfile(
+      input.profileOutputPath,
+      createApplicationBuildProfile({
+        output,
+        target: process.env.VERCEL ? "vercel" : "local",
+        timing,
+      }),
+    );
+  } catch (error) {
+    console.warn(
+      `eve: failed to write optional build profile to ${input.profileOutputPath}; continuing with the published build output: ${toErrorMessage(error)}`,
     );
   }
 }
@@ -389,7 +414,6 @@ export async function buildApplication(
   let preserveWorkspaceForRecovery = false;
   let outputDirectory: string;
   try {
-    assertProfileOutputOutsideBuildOutput(profileOutputPath, workspace.publication.output.finalDir);
     outputDirectory = await buildApplicationInWorkspace(workspace, options, profiler);
   } catch (error) {
     preserveWorkspaceForRecovery = error instanceof RecoverablePublicationError;
@@ -403,16 +427,11 @@ export async function buildApplication(
   }
 
   if (profiler !== undefined && profileOutputPath !== undefined) {
-    const timing = profiler.finish();
-    const output = await measureApplicationBuildOutput(outputDirectory);
-    await writeApplicationBuildProfile(
+    await writeOptionalApplicationBuildProfile({
+      outputDirectory,
       profileOutputPath,
-      createApplicationBuildProfile({
-        output,
-        target: process.env.VERCEL ? "vercel" : "local",
-        timing,
-      }),
-    );
+      profiler,
+    });
   }
 
   return outputDirectory;

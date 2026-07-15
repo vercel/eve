@@ -95,10 +95,10 @@ eve build [--profile <path>] [--skip-sandbox-prewarm]
 
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure.
 
-| Flag                     | Type   | Default | Description                                                                               |
-| ------------------------ | ------ | ------- | ----------------------------------------------------------------------------------------- |
-| `--profile <path>`       | string | off     | Write a versioned JSON report with build-phase timings and final output-size measurements |
-| `--skip-sandbox-prewarm` | flag   | off     | Skip sandbox template prewarm for a Vercel build; the output might not be deployable      |
+| Flag                     | Type   | Default | Description                                                                                   |
+| ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
+| `--profile <path>`       | string | off     | Best-effort versioned JSON report with build-phase timings and final output-size measurements |
+| `--skip-sandbox-prewarm` | flag   | off     | Skip sandbox template prewarm for a Vercel build; the output might not be deployable          |
 
 Use a profile file to establish a repeatable baseline before changing the build pipeline:
 
@@ -106,7 +106,7 @@ Use a profile file to establish a repeatable baseline before changing the build 
 eve build --profile .eve/build-profiles/baseline.json
 ```
 
-The report is written only after a successful build. It records total elapsed time, completed phase timings, and final regular-file totals for file count, raw bytes, and the sum of each file compressed with gzip. For Vercel output it also includes a subtotal for every real `.func` directory, so app and flow bundles can be compared separately. The profile path resolves from the app root and must be outside the published output directory; profile collection does not add a file to the deployment.
+The report is attempted only after a successful build. It records total elapsed time, completed phase timings, and final regular-file totals for file count, raw bytes, and the sum of each file compressed with gzip. For Vercel output it also includes a subtotal for every real `.func` directory, so app and flow bundles can be compared separately. The profile path resolves from the app root and should be outside the published output directory; profile collection does not add a file to the deployment. If collection or writing fails, eve emits a warning but keeps the completed build successful.
 
 Production builds do not write through the stable compiler, host, Nitro, or Workflow files owned by `eve dev`, so builds can run while a local dev server is active. A failed build leaves the last successful `.output/` and agent summary untouched. Concurrent completed builds serialize only the final publication window.
 
