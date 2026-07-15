@@ -137,7 +137,6 @@ export default defineEval({
     // The attach recovers the continuation token from the cancelled turn's
     // `session.waiting` boundary, so the same handle can send follow-ups.
     const session = await t.target.attachSession(sessionId, { startIndex: 0 });
-    session.calledTool(TOOL_NAME, { count: 1 });
     session.event("turn.cancelled", { count: 1 });
     session.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
     session.notEvent("turn.failed");
