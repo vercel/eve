@@ -9,7 +9,7 @@ Run evals from the fixture directory:
 
 ```sh
 cd e2e/fixtures/agent-basic-runtime
-pnpm exec eve eval --strict
+EVE_E2E_MODEL="openai/gpt-5.6-sol" pnpm exec eve eval --strict
 ```
 
 Every retained e2e eval is deterministic and self-contained. Coverage that
@@ -39,8 +39,8 @@ comes from the deployment URL returned by `vc deploy --prebuilt`.
 One-time project setup:
 
 - Configure the shared Vercel project for Node.js 24.
-- Provide the model-provider credentials the fixtures need (the agents and
-  judges run against `openai/gpt-5.5`) in the project's Preview environment.
+- Provide the model-provider credentials needed by `EVE_E2E_MODEL` in the
+  project's Preview environment.
 - Provide `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` in CI.
 
 Run a fixture against Vercel from its directory:
@@ -51,7 +51,8 @@ vc env pull --yes --environment=preview
 VERCEL=1 VERCEL_ENV=preview VERCEL_TARGET_ENV=preview \
   VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
   pnpm exec eve build
-DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview | tail -n 1)"
+DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview \
+  --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" | tail -n 1)"
 npx eve eval --strict --url "$DEPLOYMENT_URL"
 ```
 
@@ -80,17 +81,19 @@ must run against the alias — the `e2e-vercel` workflow sets
 evals as a second `eve eval` invocation after the main suite. Without the
 alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
-Most fixture agents run against `anthropic/claude-sonnet-5` and judges run
-against `openai/gpt-5.5`. Both are real models, so the environment must provide
-the corresponding model-provider credentials. `agent-prompt-cache` is the one
-fixture that authors a direct `@ai-sdk/anthropic` model instance instead of a
-gateway model id: its eval asserts the harness's Anthropic cache-breakpoint
-placement, which only runs on that path. The instance points at the AI
+Most fixture agents and their configured judges use `EVE_E2E_MODEL`, defaulting
+to `openai/gpt-5.6-sol` for local runs. CI sets it from the model matrix, so
+adding a matrix entry runs every discovered fixture against that model.
+`agent-prompt-cache` is the one fixture that authors a direct
+`@ai-sdk/anthropic` model instance instead of a gateway model id: its eval
+asserts the harness's Anthropic cache-breakpoint placement, which only runs on
+that path. It uses the matrix model when it is an Anthropic model and otherwise
+falls back to `anthropic/claude-opus-4.8`. The instance points at the AI
 Gateway's Anthropic-compatible Messages endpoint so it uses the same
-`AI_GATEWAY_API_KEY` credential as every other fixture. `agent-workflow-stress` uses eve's
-`mockModel` fixture helper so its 100-turn runs stay fast and deterministic. Its
-concurrent and sequential evals cover high-volume session execution and repeated
-session resumption respectively.
+`AI_GATEWAY_API_KEY` credential as every other fixture.
+`agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
+runs stay fast and deterministic. Its concurrent and sequential evals cover
+high-volume session execution and repeated session resumption respectively.
 
 ## Fixtures
 
@@ -110,12 +113,25 @@ When adding e2e coverage:
 ## CI
 
 `.github/workflows/e2e-local.yml` builds the eve package once per matrix leg,
-then runs one fixture directory:
+then runs one fixture directory. Its matrix crosses every discovered fixture
+with these model entries:
+
+- `openai-sol` → `openai/gpt-5.6-sol`
+- `anthropic-opus` → `anthropic/claude-opus-4.8`
+
+The short name is the stable Actions check identifier; the full id selects the
+provider model. Updating a model version does not rename required checks.
+Each workflow also publishes one stable aggregate check, `e2e-local` or
+`e2e-vercel`, which succeeds only when every fixture and model leg succeeds.
+Require those two checks in the repository ruleset so newly added fixtures and
+models become required automatically.
+
+Each leg exports the selected id as `EVE_E2E_MODEL` before it runs:
 
 ```sh
 pnpm --filter eve run build
 cd "$FIXTURE_DIR"
-pnpm exec eve eval --strict --junit "$JUNIT_PATH"
+EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"
 ```
 
 Always build with the full `build` script (not `build:js`); only the full
@@ -126,7 +142,8 @@ Vercel project id, builds Vercel output locally, deploys that output, and runs:
 
 ```sh
 pnpm exec eve build
-DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview | tail -n 1)"
+DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview \
+  --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" | tail -n 1)"
 npx eve eval --strict --url "$DEPLOYMENT_URL" --junit "$JUNIT_PATH"
 ```
 

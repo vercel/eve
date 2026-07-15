@@ -10,7 +10,7 @@ import type {
 import { coalesceDeliveries } from "#harness/messages.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
 import {
   createDelegatedSubagentErrorResult,
@@ -74,7 +74,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     | SessionCapabilities
     | undefined;
   const serializedBundle = input.serializedContext["eve.bundle"] as {
-    source: RuntimeCompiledArtifactsSource;
+    source: DurableCompiledArtifactsSource;
     nodeId?: string;
   };
 

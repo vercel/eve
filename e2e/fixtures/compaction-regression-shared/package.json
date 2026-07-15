@@ -1,0 +1,17 @@
+{
+  "name": "@eve/e2e-compaction-regression-shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./agent": "./src/agent.ts",
+    "./evals": "./src/evals.ts",
+    "./tools/advance-checkpoint": "./src/advance-checkpoint.ts",
+    "./tools/inspect-repository": "./src/inspect-repository.ts",
+    "./tools/perform-source-analysis": "./src/perform-source-analysis.ts"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  }
+}

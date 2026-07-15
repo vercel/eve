@@ -32,6 +32,7 @@ import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
 import experimentalAiSdkCodeMode from "./experimental-ai-sdk-code-mode.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
+import envRunner from "./env-runner.mjs";
 import grayMatter from "./gray-matter.mjs";
 import jose from "./jose.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
@@ -52,6 +53,7 @@ export const MODULES = [
   commander,
   experimentalAiSdkCodeMode,
   eventsourceParserStream,
+  envRunner,
   google,
   grayMatter,
   jose,

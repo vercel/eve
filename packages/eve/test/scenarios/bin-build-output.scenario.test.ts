@@ -187,9 +187,8 @@ describe("eve build process output", () => {
     expect(result.signal).toBeNull();
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("Discovery failed with 1 error(s) and 0 warning(s).");
-    expect(result.stderr).toContain(
-      `Diagnostics artifact: ${join(resolvedAppRoot, ".eve", "discovery", "diagnostics.json")}`,
-    );
+    expect(result.stderr).not.toContain("Diagnostics artifact:");
+    expect(result.stderr).not.toContain(`${join(resolvedAppRoot, ".eve", "builds")}/`);
     expect(result.stderr).toContain("Discovery diagnostics:");
     expect(result.stderr).toContain(
       'Expected authored instructions at "instructions.md", "instructions.ts", "instructions.cts", "instructions.mts", "instructions.js", "instructions.cjs", "instructions.mjs", or "instructions/" directory.',

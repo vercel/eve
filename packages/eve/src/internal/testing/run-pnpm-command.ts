@@ -8,6 +8,7 @@ const runFile = promisify(execFile);
 interface PnpmCommandInput {
   readonly args: readonly string[];
   readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -41,6 +42,7 @@ export async function runPnpmCommand(input: PnpmCommandInput): Promise<PnpmComma
   try {
     const result = await runFile(invocation.command, [...invocation.args], {
       cwd: input.cwd,
+      env: input.env,
       maxBuffer: 10 * 1024 * 1024,
       shell: invocation.shell,
     });

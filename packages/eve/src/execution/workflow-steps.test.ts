@@ -226,6 +226,20 @@ describe("dispatchTurnStep", () => {
     );
   });
 
+  it("starts turn workflows on the latest promoted generation in local development", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    const input = createTurnInput();
+    startMock.mockResolvedValue({ runId: "turn-run" });
+
+    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
+
+    expect(startMock).toHaveBeenCalledWith(
+      turnWorkflowReference,
+      [createTurnWorkflowInput(input)],
+      expect.objectContaining({ deploymentId: "latest" }),
+    );
+  });
+
   it("pins turn workflows to the current deployment off production", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     const input = createTurnInput();

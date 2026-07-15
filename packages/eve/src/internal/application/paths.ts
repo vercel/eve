@@ -10,6 +10,10 @@ import {
   resolvePackageSourceDirectoryPath,
 } from "#internal/application/package.js";
 
+export const EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV = "EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY";
+export const EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV =
+  "EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY";
+
 export interface ApplicationInfo {
   appRoot: string;
   outputDir: string;

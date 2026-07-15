@@ -1,7 +1,9 @@
 import { builtinModules } from "node:module";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
+
+import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
 import {
   buildWithNitroRolldown,
@@ -500,9 +502,7 @@ function resolveFirstExistingPath(paths: readonly string[]): { id: string } | un
 
 async function writeWorkflowBundleAtomically(outfile: string, source: string): Promise<void> {
   await mkdir(dirname(outfile), { recursive: true });
-  const tempPath = `${outfile}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tempPath, source);
-  await rename(tempPath, outfile);
+  await atomicWriteFile(outfile, source);
 }
 
 function mergeWorkflowManifest(target: WorkflowManifest, source: WorkflowManifest): void {
@@ -549,22 +549,4 @@ function createManifestRelativeFilepath(workingDir: string, absolutePath: string
 
 function isJavaScriptLikePath(path: string): boolean {
   return /\.(?:[cm]?[jt]sx?)$/.test(path);
-}
-
-/*
- * Some generated workflow artifacts (notably `workflows.mjs`) are read by
- * Nitro's Rolldown bundler concurrently with rebuilds during `eve dev`. A
- * plain `writeFile` truncates the target first and streams bytes, so a
- * reader can observe an empty or partial module mid-write and report
- * spurious "missing export" errors. Writing to a sibling temp file and
- * renaming relies on POSIX `rename` atomicity so readers always see
- * either the old or the new contents.
- */
-export async function atomicWriteFile(
-  targetPath: string,
-  contents: string | Buffer | Uint8Array,
-): Promise<void> {
-  const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now().toString(36)}`;
-  await writeFile(tmpPath, contents);
-  await rename(tmpPath, targetPath);
 }

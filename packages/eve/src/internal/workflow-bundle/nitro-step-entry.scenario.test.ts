@@ -21,6 +21,7 @@ describe("writeNitroStepEntrypoint", () => {
         outfile,
         preferAbsoluteFileImports: true,
         projectRoot: "G:\\projects\\eve",
+        sideEffectFiles: [],
         workingDir: "G:\\projects\\eve",
       });
 
@@ -57,6 +58,7 @@ describe("writeNitroStepEntrypoint", () => {
         },
         outfile,
         projectRoot: tempRoot,
+        sideEffectFiles: [],
         workingDir: tempRoot,
       });
 
@@ -72,6 +74,7 @@ describe("writeNitroStepEntrypoint", () => {
         },
         outfile,
         projectRoot: tempRoot,
+        sideEffectFiles: [],
         workingDir: tempRoot,
       });
 
