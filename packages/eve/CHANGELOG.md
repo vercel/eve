@@ -1,5 +1,16 @@
 # eve
 
+## 0.24.4
+
+### Patch Changes
+
+- d5db876: Session teardown now disposes authorization hooks without waiting on pending durable iterator reads, preventing cancelled sessions from hanging during cleanup.
+- 0dbea62: Store local Workflow World data under `.eve/.workflow-data` for both `eve dev` and `eve start`.
+- 9058962: Keep an active `eve dev` REPL session across successful authored-source reloads, so its next turn continues the durable conversation on the latest generation.
+- 4531a3d: Route all of eve's single-file bundles through a shared Rolldown helper that always disables code splitting. This closes a remaining gap where a dynamic import reachable from a final workflow bundle could still fail with "Expected one bundled ..." during builds.
+- b6e5923: Include the current continuation token in `session.waiting` events, and allow negative stream start indexes such as `-1` to read relative to the current tail.
+- 159d674: Turns are now cancellable: resuming a session's durable cancel hook (`{sessionId}:cancel`, with an optional `turnId` guard) aborts in-flight work and settles the turn as a new `turn.cancelled` stream event followed by `session.waiting` — never as a failure. Channels and stream-event hooks can handle `turn.cancelled`, and `eve/client` finalizes partially streamed messages. The HTTP cancellation API ships in a following release.
+
 ## 0.24.3
 
 ### Patch Changes
