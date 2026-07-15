@@ -5,12 +5,7 @@ import {
   isBrandedSkillEntry,
 } from "#shared/dynamic-tool-definition.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
-import {
-  type MaterializableSkillPackage,
-  normalizeSkillPackage,
-  removeSkillPackageFromSandbox,
-  writeSkillPackageToSandbox,
-} from "#shared/skill-package.js";
+import { type MaterializableSkillPackage, normalizeSkillPackage } from "#shared/skill-package.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
@@ -23,13 +18,11 @@ import {
   SandboxKey,
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import { materializeDynamicSkillUpdates } from "#context/dynamic-skill-materialization.js";
+import { logDynamicSkillMaterializationTelemetry } from "#context/dynamic-skill-telemetry.js";
 import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
 
 const log = createLogger("dynamic-skills");
-
-// ---------------------------------------------------------------------------
-// Name qualification
-// ---------------------------------------------------------------------------
 
 function qualifyDynamicSkillNames(
   resolver: { readonly slug: string; readonly extensionNamespace?: string },
@@ -78,14 +71,6 @@ async function formatDynamicSkillAnnouncement(input: {
   return formatAvailableSkillsSection(Object.values(input.manifest).flat(), { skillRoot }) ?? "";
 }
 
-// ---------------------------------------------------------------------------
-// Single entry detection
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Context key for pending announcements
-// ---------------------------------------------------------------------------
-
 import { ContextKey } from "#context/key.js";
 
 /**
@@ -95,10 +80,6 @@ import { ContextKey } from "#context/key.js";
  * context.
  */
 export const PendingSkillAnnouncementKey = new ContextKey<string>("eve.pendingSkillAnnouncement");
-
-// ---------------------------------------------------------------------------
-// Event dispatch
-// ---------------------------------------------------------------------------
 
 /**
  * Dispatches a stream event to dynamic skill resolvers. On a matching
@@ -113,6 +94,8 @@ export async function dispatchDynamicSkillEvent(input: {
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
+  const totalStartedAt = performance.now();
+  let announcementMs = 0;
 
   // Build phase: rebuild announcement from durable manifest when the
   // virtual key is empty (step boundary crossed). Sandbox files persist;
@@ -120,10 +103,12 @@ export async function dispatchDynamicSkillEvent(input: {
   if (ctx.get(PendingSkillAnnouncementKey) === undefined) {
     const manifest = ctx.get(DynamicSkillManifestKey);
     if (manifest !== undefined && Object.keys(manifest).length > 0) {
+      const announcementStartedAt = performance.now();
       ctx.setVirtualContext(
         PendingSkillAnnouncementKey,
         await formatDynamicSkillAnnouncement({ ctx, manifest }),
       );
+      announcementMs += performance.now() - announcementStartedAt;
     }
   }
 
@@ -136,6 +121,7 @@ export async function dispatchDynamicSkillEvent(input: {
   const manifest = ctx.get(DynamicSkillManifestKey) ?? {};
   const updates: DynamicSkillUpdate[] = [];
 
+  const resolverStartedAt = performance.now();
   const outcomes = await Promise.allSettled(
     matching.map(async (resolver) => {
       const handler = resolver.events[event.type];
@@ -158,6 +144,7 @@ export async function dispatchDynamicSkillEvent(input: {
       return { resolver, named } satisfies DynamicSkillResolution;
     }),
   );
+  const resolverMs = performance.now() - resolverStartedAt;
 
   for (const outcome of outcomes) {
     if (outcome.status === "rejected") {
@@ -183,8 +170,10 @@ export async function dispatchDynamicSkillEvent(input: {
       delete newManifest[resolver.slug];
     } else {
       newManifest[resolver.slug] = skills.map((skill) => ({
+        contentDigest: skill.contentDigest,
         description: skill.description,
         name: skill.name,
+        relativePaths: skill.files.map((file) => file.relativePath),
       }));
     }
   }
@@ -206,38 +195,47 @@ export async function dispatchDynamicSkillEvent(input: {
     }
   }
 
+  const sandboxStartedAt = performance.now();
   const sandbox = await ctx.require(SandboxKey).get();
-
-  if (sandbox !== null) {
-    const finalDynamicSkillNames = new Set(
-      Object.values(newManifest)
-        .flat()
-        .map((skill) => skill.name),
-    );
-    const removedSkillNames = new Set<string>();
-
-    for (const { resolver } of updates) {
-      for (const skill of manifest[resolver.slug] ?? []) {
-        if (!finalDynamicSkillNames.has(skill.name)) {
-          removedSkillNames.add(skill.name);
-        }
-      }
-    }
-
-    for (const name of removedSkillNames) {
-      await removeSkillPackageFromSandbox({ name, sandbox });
-    }
-
-    for (const { skills } of updates) {
-      for (const skill of skills) {
-        await writeSkillPackageToSandbox({ sandbox, skill });
-      }
-    }
-  }
+  const sandboxMs = performance.now() - sandboxStartedAt;
+  const materialization =
+    sandbox === null
+      ? undefined
+      : await materializeDynamicSkillUpdates({
+          nextManifest: newManifest,
+          previousManifest: manifest,
+          sandbox,
+          updates: updates.map(({ resolver, skills }) => ({
+            resolverSlug: resolver.slug,
+            skills,
+          })),
+        });
 
   ctx.set(DynamicSkillManifestKey, newManifest);
-  ctx.setVirtualContext(
-    PendingSkillAnnouncementKey,
-    await formatDynamicSkillAnnouncement({ ctx, manifest: newManifest }),
-  );
+  if (!dynamicSkillManifestsEqual(manifest, newManifest)) {
+    const announcementStartedAt = performance.now();
+    ctx.setVirtualContext(
+      PendingSkillAnnouncementKey,
+      await formatDynamicSkillAnnouncement({ ctx, manifest: newManifest }),
+    );
+    announcementMs += performance.now() - announcementStartedAt;
+  }
+
+  logDynamicSkillMaterializationTelemetry({
+    announcementMs,
+    eventType: event.type,
+    materialization,
+    packages: updates.flatMap((update) => update.skills),
+    resolverCount: matching.length,
+    resolverMs,
+    sandboxMs,
+    totalMs: performance.now() - totalStartedAt,
+  });
+}
+
+function dynamicSkillManifestsEqual(
+  left: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
+  right: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }

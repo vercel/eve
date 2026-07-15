@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash, type Hash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -12,6 +13,7 @@ export interface NormalizedSkillPackageFile {
 }
 
 export interface MaterializableSkillPackage {
+  readonly contentDigest: string;
   readonly description: string;
   readonly files: readonly NormalizedSkillPackageFile[];
   readonly license?: string;
@@ -45,6 +47,11 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
   files.sort((left, right) => comparePaths(left.relativePath, right.relativePath));
 
   return {
+    contentDigest: digestSkillPackage({
+      description: input.description,
+      files,
+      name: input.name,
+    }),
     description: input.description,
     files,
     license: input.license,
@@ -52,6 +59,31 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
     metadata: input.metadata === undefined ? undefined : { ...input.metadata },
     name: input.name,
   };
+}
+
+function digestSkillPackage(input: {
+  readonly description: string;
+  readonly files: readonly NormalizedSkillPackageFile[];
+  readonly name: string;
+}): string {
+  const hash = createHash("sha256");
+  hash.update("eve.dynamic-skill-package.v1\0");
+  updateLengthPrefixed(hash, Buffer.from(input.name, "utf8"));
+  updateLengthPrefixed(hash, Buffer.from(input.description, "utf8"));
+
+  for (const file of input.files) {
+    updateLengthPrefixed(hash, Buffer.from(file.relativePath, "utf8"));
+    updateLengthPrefixed(hash, file.content);
+  }
+
+  return hash.digest("hex");
+}
+
+function updateLengthPrefixed(hash: Hash, value: Uint8Array): void {
+  const length = Buffer.allocUnsafe(8);
+  length.writeBigUInt64BE(BigInt(value.byteLength));
+  hash.update(length);
+  hash.update(value);
 }
 
 /**
@@ -113,7 +145,15 @@ export async function removeSkillPackageFromSandbox(input: {
  * segment under the sandbox skill root.
  */
 export function assertSafeSkillPackageName(name: string): void {
-  if (
+  if (!isSafeSkillPackageName(name)) {
+    throw new Error(
+      'Expected skill name to be a non-empty shell-safe path segment starting with an alphanumeric character and containing only alphanumerics, ".", "_", or "-".',
+    );
+  }
+}
+
+export function isSafeSkillPackageName(name: string): boolean {
+  return !(
     name.length === 0 ||
     name.startsWith(".") ||
     name.includes("/") ||
@@ -121,11 +161,7 @@ export function assertSafeSkillPackageName(name: string): void {
     name.includes("..") ||
     !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) ||
     /^[A-Za-z]:/.test(name)
-  ) {
-    throw new Error(
-      'Expected skill name to be a non-empty shell-safe path segment starting with an alphanumeric character and containing only alphanumerics, ".", "_", or "-".',
-    );
-  }
+  );
 }
 
 function assertSafeSkillPackageFilePath(relativePath: string): void {
@@ -133,7 +169,13 @@ function assertSafeSkillPackageFilePath(relativePath: string): void {
     throw new Error('Skill package files must not include "SKILL.md"; eve generates it.');
   }
 
-  if (
+  if (!isSafeMaterializedSkillPackageFilePath(relativePath)) {
+    throw new Error("Expected skill package file paths to be relative POSIX paths.");
+  }
+}
+
+export function isSafeMaterializedSkillPackageFilePath(relativePath: string): boolean {
+  return !(
     relativePath.length === 0 ||
     relativePath.startsWith("/") ||
     relativePath.includes("\\") ||
@@ -141,9 +183,7 @@ function assertSafeSkillPackageFilePath(relativePath: string): void {
     relativePath
       .split("/")
       .some((segment) => segment.length === 0 || segment === "." || segment === "..")
-  ) {
-    throw new Error("Expected skill package file paths to be relative POSIX paths.");
-  }
+  );
 }
 
 function contentToBuffer(content: string | Uint8Array): Buffer {

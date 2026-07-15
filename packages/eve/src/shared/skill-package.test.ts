@@ -29,6 +29,43 @@ describe("normalizeSkillPackage", () => {
     expect(packageDefinition.files[0]?.content).toEqual(Buffer.from("Use primary sources.\n"));
     expect(packageDefinition.files[1]?.content).toEqual(Buffer.from([1, 2, 3]));
     expect(packageDefinition.files[2]?.content).toEqual(Buffer.from("# Checklist\n"));
+    expect(packageDefinition.contentDigest).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("digests normalized names, descriptions, ordered paths, and exact bytes", () => {
+    const first = normalizeSkillPackage({
+      name: "research",
+      description: "Research unfamiliar topics.",
+      markdown: "Use primary sources.\n",
+      metadata: { contentHash: "application-value" },
+      files: {
+        "references/checklist.md": "# Checklist\n",
+        "assets/query.bin": new Uint8Array([0, 255, 1]),
+      },
+    });
+    const reordered = normalizeSkillPackage({
+      name: "research",
+      description: "Research unfamiliar topics.",
+      markdown: "Use primary sources.\n",
+      metadata: { contentHash: "different-application-value" },
+      files: {
+        "assets/query.bin": new Uint8Array([0, 255, 1]),
+        "references/checklist.md": "# Checklist\n",
+      },
+    });
+    const changedBytes = normalizeSkillPackage({
+      name: "research",
+      description: "Research unfamiliar topics.",
+      markdown: "Use primary sources.\n",
+      metadata: { contentHash: "application-value" },
+      files: {
+        "references/checklist.md": "# Changed\n",
+        "assets/query.bin": new Uint8Array([0, 255, 1]),
+      },
+    });
+
+    expect(reordered.contentDigest).toBe(first.contentDigest);
+    expect(changedBytes.contentDigest).not.toBe(first.contentDigest);
   });
 
   it("rejects unsafe names and package-relative paths", () => {

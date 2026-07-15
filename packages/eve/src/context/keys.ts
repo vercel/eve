@@ -163,8 +163,12 @@ export const LiveStepToolsKey = new ContextKey<
  * Durable metadata for one session-scoped dynamic skill.
  */
 export interface DurableDynamicSkillMetadata {
-  readonly name: string;
+  /** SHA-256 over the normalized name, description, ordered paths, and exact bytes. */
+  readonly contentDigest?: string;
   readonly description: string;
+  /** Ordered package-relative paths included in {@link contentDigest}. */
+  readonly relativePaths?: readonly string[];
+  readonly name: string;
 }
 
 /**

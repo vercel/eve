@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
+import { DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE } from "#context/dynamic-skill-materialization-marker.js";
 import {
   PendingSkillAnnouncementKey,
   dispatchDynamicSkillEvent,
@@ -54,12 +55,12 @@ function createResolver(
     | null
     | Promise<SkillPackageDefinition | Record<string, SkillPackageDefinition> | null>,
   extensionNamespace?: string,
+  eventNames: readonly ("session.started" | "turn.started")[] = ["session.started"],
 ): ResolvedDynamicSkillResolver {
+  const events = Object.fromEntries(eventNames.map((eventName) => [eventName, handler]));
   return {
-    eventNames: ["session.started"],
-    events: {
-      "session.started": handler,
-    },
+    eventNames,
+    events,
     exportName: "default",
     extensionNamespace,
     logicalPath: `skills/${slug}.ts`,
@@ -69,18 +70,260 @@ function createResolver(
   };
 }
 
-function makeEvent(): HandleMessageStreamEvent {
-  return { type: "session.started", data: {} } as HandleMessageStreamEvent;
+function makeEvent(
+  type: "session.started" | "turn.started" = "session.started",
+): HandleMessageStreamEvent {
+  return { type, data: {} } as HandleMessageStreamEvent;
 }
 
-function makeSkill(description: string, markdown = description): SkillPackageDefinition {
+function makeSkill(
+  description: string,
+  markdown = description,
+  files?: Readonly<Record<string, string | Uint8Array>>,
+  metadata?: Record<string, string>,
+): SkillPackageDefinition {
   return defineSkill({
     description,
+    files,
     markdown,
+    metadata,
   });
 }
 
 describe("dispatchDynamicSkillEvent", () => {
+  it("writes identical session- and turn-start packages once total", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { ctx, sandbox } = createCtx();
+    let resolverCalls = 0;
+    const resolver = createResolver(
+      "tenant",
+      () => {
+        resolverCalls += 1;
+        return makeSkill("Tenant policy", "Follow tenant policy.");
+      },
+      undefined,
+      ["session.started", "turn.started"],
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent("session.started"),
+      messages: [],
+      resolvers: [resolver],
+    });
+    const writesAfterSessionStart = sandbox.writes.length;
+    const removesAfterSessionStart = sandbox.removedPaths.length;
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent("turn.started"),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(writesAfterSessionStart).toBeGreaterThan(0);
+    expect(sandbox.writes).toHaveLength(writesAfterSessionStart);
+    expect(sandbox.removedPaths).toHaveLength(removesAfterSessionStart);
+    expect(resolverCalls).toBe(2);
+    expect(log.mock.calls.at(-1)?.[1]).toMatchObject({
+      eventType: "turn.started",
+      removeCallCount: 0,
+      unchangedPackageCount: 1,
+      writeByteCount: 0,
+      writeFileCount: 0,
+      writePackageCount: 0,
+    });
+    log.mockRestore();
+  });
+
+  it("removes a sibling that disappears from a changed package", async () => {
+    const { ctx, sandbox } = createCtx();
+    let files: Readonly<Record<string, string>> = {
+      "references/policy.md": "original policy",
+    };
+    const resolver = createResolver("tenant", () =>
+      makeSkill("Tenant policy", "Follow tenant policy.", files),
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    expect(sandbox.files.has("/home/agent/.agents/skills/tenant/references/policy.md")).toBe(true);
+    const removalsBeforeChange = sandbox.removedPaths.length;
+
+    files = {};
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.has("/home/agent/.agents/skills/tenant/references/policy.md")).toBe(false);
+    expect(sandbox.removedPaths.slice(removalsBeforeChange)).toEqual([
+      "/home/agent/.agents/skills/tenant",
+    ]);
+  });
+
+  it("rewrites same-metadata packages when exact body bytes change", async () => {
+    const { ctx, sandbox } = createCtx();
+    let markdown = "Original policy.";
+    const resolver = createResolver("tenant", () =>
+      makeSkill("Tenant policy", markdown, undefined, { contentHash: "application-value" }),
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    const writesBeforeChange = sandbox.writes.length;
+
+    markdown = "Updated policy.";
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe("Updated policy.");
+    expect(
+      sandbox.writes
+        .slice(writesBeforeChange)
+        .filter((write) => write.path.endsWith("/tenant/SKILL.md")),
+    ).toHaveLength(1);
+  });
+
+  it("rematerializes the current package set after the sandbox is recreated", async () => {
+    const { ctx } = createCtx();
+    const resolver = createResolver("tenant", () =>
+      makeSkill("Tenant policy", "Follow tenant policy."),
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    const recreated = mockSandbox({
+      id: "sbx_mock",
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+    ctx.set(SandboxKey, recreated.access);
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(recreated.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe(
+      "Follow tenant policy.",
+    );
+    expect(
+      recreated.files.has(
+        `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["corrupt", "{"],
+    ["old", JSON.stringify({ packages: {}, version: 0 })],
+  ])("safely rematerializes after a %s sandbox marker", async (_label, marker) => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("tenant", () =>
+      makeSkill("Tenant policy", "Follow tenant policy."),
+    );
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    sandbox.files.set(markerPath, marker);
+    sandbox.fileBytes.set(markerPath, Buffer.from(marker));
+    const writesBeforeRecovery = sandbox.writes.length;
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(
+      sandbox.writes
+        .slice(writesBeforeRecovery)
+        .filter((write) => write.path.endsWith("/tenant/SKILL.md")),
+    ).toHaveLength(1);
+    expect(sandbox.files.get(markerPath)).toContain('"version":1');
+  });
+
+  it("writes the sandbox marker only after every package mutation succeeds", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("tenant", () =>
+      makeSkill("Tenant policy", "Follow tenant policy.", {
+        "references/policy.md": "Policy body",
+      }),
+    );
+    const failingSession = {
+      ...sandbox.session,
+      async writeBinaryFile(options: Parameters<typeof sandbox.session.writeBinaryFile>[0]) {
+        if (options.path.endsWith("/references/policy.md")) {
+          throw new Error("injected sibling write failure");
+        }
+        await sandbox.session.writeBinaryFile(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return failingSession;
+      },
+    });
+
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow("injected sibling write failure");
+
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+    expect(sandbox.files.has(markerPath)).toBe(false);
+    expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();
+
+    ctx.set(SandboxKey, sandbox.access);
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.get("/home/agent/.agents/skills/tenant/references/policy.md")).toBe(
+      "Policy body",
+    );
+    expect(sandbox.files.has(markerPath)).toBe(true);
+  });
+
   it("clears removed dynamic skills from the durable announcement", async () => {
     const { ctx, sandbox } = createCtx();
     let enabled = true;
@@ -96,9 +339,17 @@ describe("dispatchDynamicSkillEvent", () => {
     });
 
     expect(ctx.get(PendingSkillAnnouncementKey)).toContain("tenant: Tenant policy");
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      tenant: [{ description: "Tenant policy", name: "tenant" }],
+    expect(ctx.get(DynamicSkillManifestKey)).toMatchObject({
+      tenant: [
+        {
+          contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          description: "Tenant policy",
+          name: "tenant",
+          relativePaths: ["SKILL.md"],
+        },
+      ],
     });
+    const removalsBeforeDisable = sandbox.removedPaths.length;
 
     enabled = false;
     await dispatchDynamicSkillEvent({
@@ -110,7 +361,9 @@ describe("dispatchDynamicSkillEvent", () => {
 
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
     expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
-    expect(sandbox.removedPaths).toEqual(["/home/agent/.agents/skills/tenant"]);
+    expect(sandbox.removedPaths.slice(removalsBeforeDisable)).toEqual([
+      "/home/agent/.agents/skills/tenant",
+    ]);
   });
 
   it("keeps remaining dynamic skills in the announcement when one resolver removes its skill", async () => {
@@ -154,8 +407,15 @@ describe("dispatchDynamicSkillEvent", () => {
       resolvers: [resolver],
     });
 
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      custom: [{ description: "Talk like a dog", name: "talk-like-a-dog" }],
+    expect(ctx.get(DynamicSkillManifestKey)).toMatchObject({
+      custom: [
+        {
+          contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          description: "Talk like a dog",
+          name: "talk-like-a-dog",
+          relativePaths: ["SKILL.md"],
+        },
+      ],
     });
     expect(ctx.get(PendingSkillAnnouncementKey)).toContain("talk-like-a-dog: Talk like a dog");
     expect(
@@ -178,8 +438,15 @@ describe("dispatchDynamicSkillEvent", () => {
       resolvers: [resolver],
     });
 
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      crm__playbooks: [{ description: "Triage an account", name: "crm__triage" }],
+    expect(ctx.get(DynamicSkillManifestKey)).toMatchObject({
+      crm__playbooks: [
+        {
+          contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          description: "Triage an account",
+          name: "crm__triage",
+          relativePaths: ["SKILL.md"],
+        },
+      ],
     });
     expect(ctx.get(PendingSkillAnnouncementKey)).toContain("crm__triage: Triage an account");
     expect(
@@ -201,8 +468,15 @@ describe("dispatchDynamicSkillEvent", () => {
     });
 
     // No throw; the dynamic skill is written to the authored skill's path.
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      custom: [{ description: "Dynamic override", name: "talk-like-a-dog" }],
+    expect(ctx.get(DynamicSkillManifestKey)).toMatchObject({
+      custom: [
+        {
+          contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          description: "Dynamic override",
+          name: "talk-like-a-dog",
+          relativePaths: ["SKILL.md"],
+        },
+      ],
     });
     expect(
       sandbox.writes.some((w) =>
@@ -222,8 +496,15 @@ describe("dispatchDynamicSkillEvent", () => {
       resolvers: [resolver],
     });
 
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      tenant: [{ description: "Tenant policy", name: "tenant" }],
+    expect(ctx.get(DynamicSkillManifestKey)).toMatchObject({
+      tenant: [
+        {
+          contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          description: "Tenant policy",
+          name: "tenant",
+          relativePaths: ["SKILL.md"],
+        },
+      ],
     });
     expect(sandbox.writes.some((w) => w.path.includes("/home/agent/.agents/skills/tenant/"))).toBe(
       true,
