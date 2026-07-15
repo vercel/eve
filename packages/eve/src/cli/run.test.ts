@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
@@ -399,6 +401,44 @@ describe("eve dev local server ownership", () => {
 
     await runInteractiveDev(["dev"], { startHost });
     expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("eve build output ownership", () => {
+  it("resolves the internal service output directory from the build working directory", async () => {
+    const buildHost = vi.fn(async () => "/service/.vercel/output");
+    const configuredDirectory = ".eve/vercel-services/eve/.vercel/output";
+    const configuredHostDirectory = ".vercel/output";
+    vi.stubEnv("EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY", configuredDirectory);
+    vi.stubEnv("EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY", configuredHostDirectory);
+
+    try {
+      await runCli(["build"], { error: () => {}, log: () => {} }, { buildHost });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(buildHost).toHaveBeenCalledWith(process.cwd(), {
+      skipVercelSandboxPrewarm: false,
+      vercelServiceOutput: {
+        hostOutputDirectory: resolve(process.cwd(), configuredHostDirectory),
+        serviceOutputDirectory: resolve(process.cwd(), configuredDirectory),
+      },
+    });
+  });
+
+  it("rejects an incomplete internal Vercel service output contract", async () => {
+    vi.stubEnv("EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY", ".eve/vercel-services/eve/.vercel/output");
+
+    try {
+      await expect(
+        runCli(["build"], { error: () => {}, log: () => {} }, { buildHost: vi.fn() }),
+      ).rejects.toThrow(
+        "EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY and EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY must be set together.",
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

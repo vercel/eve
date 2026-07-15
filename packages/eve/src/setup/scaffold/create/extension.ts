@@ -113,7 +113,6 @@ const GITIGNORE_TEMPLATE = `node_modules
 .env*
 .eve
 .vercel
-.workflow-data
 .output
 .nitro
 dist

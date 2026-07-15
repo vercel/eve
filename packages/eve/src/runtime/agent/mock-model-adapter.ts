@@ -106,6 +106,7 @@ function createMockModelResult(
     }
   } else {
     const toolCallResult =
+      createSubagentDelegationResult(options, modelId) ??
       createSkillLoadResult(options.prompt, modelId) ??
       createAuthoredToolCallResult(options, modelId);
     if (toolCallResult !== null) {
@@ -200,6 +201,49 @@ function createSkillLoadResult(
     outputTokens: estimateTokenCount(skill.name),
     toolCallId: LOAD_SKILL_TOOL_CALL_ID,
     toolName: LOAD_SKILL_TOOL_NAME,
+  });
+}
+
+const SUBAGENT_TOOL_NAME = "agent";
+const SUBAGENT_DELEGATION_DIRECTIVE = /\bdelegate\s+to\s+a\s+subagent\s*:\s*(.+)$/iu;
+
+/**
+ * Emits one built-in `agent` tool call when the current user message uses
+ * the explicit directive `Delegate to a subagent: <message>`, letting
+ * tests exercise a real runtime-action wait. Fires only before the
+ * delegated call resolves; then the reply path takes over.
+ */
+function createSubagentDelegationResult(
+  options: BootstrapGenerateOptions,
+  modelId: string,
+): BootstrapGenerateResult | null {
+  const lastUserMessage = getLastUserPromptText(options.prompt);
+
+  if (lastUserMessage === null) {
+    return null;
+  }
+
+  const directive = SUBAGENT_DELEGATION_DIRECTIVE.exec(lastUserMessage);
+
+  if (directive?.[1] === undefined) {
+    return null;
+  }
+
+  const tool = getAvailableTools(options).find((entry) => entry.name === SUBAGENT_TOOL_NAME);
+
+  if (tool === undefined) {
+    return null;
+  }
+
+  const toolInput = { message: directive[1].trim() };
+
+  return createToolCallGenerateResult({
+    input: toolInput,
+    inputTokens: estimateTokenCount(getPromptText(options.prompt)),
+    modelId,
+    outputTokens: estimateTokenCount(toolInput.message),
+    toolCallId: createToolCallId(SUBAGENT_TOOL_NAME),
+    toolName: SUBAGENT_TOOL_NAME,
   });
 }
 

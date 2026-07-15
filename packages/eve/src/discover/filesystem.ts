@@ -25,7 +25,6 @@ const GENERATED_AGENT_DIRECTORY_NAMES = new Set<string>([
   ".next",
   ".output",
   ".vercel",
-  ".workflow-data",
   "node_modules",
 ]);
 

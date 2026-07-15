@@ -2,6 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 import {
+  EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV,
+  EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
+} from "#internal/application/paths.js";
+import {
   findClosestLinkedVercelDirectory,
   findClosestVercelOutputDirectory,
 } from "#shared/vercel-output-directory.js";
@@ -12,6 +16,7 @@ const VERCEL_BUILD_OUTPUT_VERSION = 3;
 const EVE_SERVICE_NAME = "eve";
 const EVE_SERVICE_ROUTE_SRC = "^/eve/v1/(.*)$";
 const EVE_SERVICE_ROUTE_PATH = "/eve/v1/$1";
+const EVE_VERCEL_SERVICES_DIRECTORY = ".eve/vercel-services";
 
 interface VercelServiceMount {
   readonly path?: string;
@@ -138,6 +143,36 @@ function resolveRelativeEntrypoint(fromRoot: string, toRoot: string): string {
   }
 
   return relativePath.replaceAll("\\", "/");
+}
+
+function quoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function createGeneratedServiceBuild(input: {
+  readonly agent: EnsureVercelOutputConfigAgentInput;
+  readonly hostOutputDirectory: string;
+  readonly nextRoot: string;
+  readonly serviceName: string;
+}): {
+  readonly buildCommand: string;
+  readonly root: string;
+  readonly rootDirectory: string;
+} {
+  const rootDirectory = join(input.nextRoot, EVE_VERCEL_SERVICES_DIRECTORY, input.serviceName);
+  const outputDirectory = join(rootDirectory, ".vercel", "output");
+  const workingDirectory = resolveRelativeEntrypoint(rootDirectory, input.agent.appRoot);
+  const configuredOutputDirectory = resolveRelativeEntrypoint(input.agent.appRoot, outputDirectory);
+  const configuredHostOutputDirectory = resolveRelativeEntrypoint(
+    input.agent.appRoot,
+    input.hostOutputDirectory,
+  );
+
+  return {
+    buildCommand: `cd ${quoteShellArgument(workingDirectory)} && export ${EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteShellArgument(configuredOutputDirectory)} && export ${EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteShellArgument(configuredHostOutputDirectory)} && ${input.agent.buildCommand}`,
+    root: resolveRelativeEntrypoint(input.nextRoot, rootDirectory),
+    rootDirectory,
+  };
 }
 
 async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
@@ -465,11 +500,18 @@ export async function ensureEveVercelOutputConfig(input: {
     const routeSrc = createEveServiceRouteSrc(agent.publicRoutePrefix);
 
     if (configuredEveServiceEntry === undefined) {
+      const generatedServiceBuild = createGeneratedServiceBuild({
+        agent,
+        hostOutputDirectory: dirname(outputConfigPath),
+        nextRoot: input.nextRoot,
+        serviceName,
+      });
+      await mkdir(generatedServiceBuild.rootDirectory, { recursive: true });
       const serviceConfig: MutableGeneratedVercelServiceConfig = {
-        buildCommand: agent.buildCommand,
+        buildCommand: generatedServiceBuild.buildCommand,
         framework: "eve",
         routes: insertEveServiceRequestPathRoute(undefined, routeSrc),
-        root: resolveRelativeEntrypoint(input.nextRoot, agent.appRoot),
+        root: generatedServiceBuild.root,
       };
 
       if (agent.publicRoutePrefix.length > 0) {

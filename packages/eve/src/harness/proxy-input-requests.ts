@@ -80,6 +80,17 @@ export function clearProxyInputRequestsForChild(
 }
 
 /**
+ * Removes every proxy entry. Called when a cancelled turn orphans its
+ * descendants so stale HITL responses no longer route to them.
+ */
+export function clearAllProxyInputRequests(session: HarnessSession): HarnessSession {
+  if (!hasProxyInputRequests(session.state)) {
+    return session;
+  }
+  return writeMap(session, {});
+}
+
+/**
  * Projects a {@link SubagentInputRequestHookPayload} into the
  * `(requestId, childContinuationToken)` tuples the session stores.
  */

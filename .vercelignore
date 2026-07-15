@@ -9,7 +9,6 @@ node_modules
 .output
 .turbo
 .vercel
-.workflow-data
 .workflow-vitest
 coverage
 dist

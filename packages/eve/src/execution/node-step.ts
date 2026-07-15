@@ -14,7 +14,7 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
@@ -66,9 +66,8 @@ export interface CreateExecutionNodeStepInput {
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
   /**
-   * Effective `limits.maxSubagents` cap for Workflow invocations in this run,
-   * materialized on the session at creation (config resolved against any
-   * inherited parent cap).
+   * Effective `maxSubagents` cap configured by the experimental Workflow tool
+   * definition and materialized on the session at creation.
    */
   readonly workflowMaxSubagents?: number;
 }
@@ -90,7 +89,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   return createToolLoopHarness({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
-    workflow: input.node.agent.workflowEnabled === true,
+    workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
     mode: input.mode,
@@ -182,7 +181,7 @@ export function createNodeHarnessTools(input: {
     }
   }
 
-  if (!tools.has("agent")) {
+  if (input.node.nodeId === ROOT_RUNTIME_AGENT_NODE_ID && !tools.has("agent")) {
     tools.set("agent", {
       description: BUILT_IN_AGENT_TOOL_DESCRIPTION,
       inputSchema: jsonSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
@@ -190,6 +189,7 @@ export function createNodeHarnessTools(input: {
       runtimeAction: {
         kind: "subagent-call",
         nodeId: input.node.nodeId,
+        recursive: true,
         subagentName: "agent",
       },
     });

@@ -110,7 +110,10 @@ const firstTurn: HandleMessageStreamEvent[] = [
     type: "step.completed",
     data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "eve:test", wait: "next-user-message" },
+  },
 ];
 
 const firstCallbackTurn: HandleMessageStreamEvent[] = [
@@ -128,7 +131,10 @@ const firstCallbackTurn: HandleMessageStreamEvent[] = [
     type: "step.completed",
     data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "eve:test", wait: "next-user-message" },
+  },
 ];
 
 const secondTurnId = "turn-1";
@@ -153,7 +159,10 @@ const secondTurn: HandleMessageStreamEvent[] = [
     type: "step.completed",
     data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "eve:test", wait: "next-user-message" },
+  },
 ];
 
 const secondCallbackTurn: HandleMessageStreamEvent[] = [
@@ -172,7 +181,10 @@ const secondCallbackTurn: HandleMessageStreamEvent[] = [
     type: "step.completed",
     data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "eve:test", wait: "next-user-message" },
+  },
 ];
 
 process.env.EVE_TUI_UNICODE = "1";

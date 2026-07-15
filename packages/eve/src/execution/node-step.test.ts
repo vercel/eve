@@ -8,7 +8,7 @@ import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
@@ -195,7 +195,7 @@ function createTestNode(
     agent: {} as ResolvedRuntimeAgentNode["agent"],
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
-    nodeId: "root",
+    nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: createStubSandboxRegistry(),
     subagentRegistry: {
       preparedTools: [],
@@ -228,6 +228,15 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.description).toContain("include essential context");
     expect(agentTool?.description).toContain("non-overlapping scopes");
     expect(agentTool?.description).not.toContain("eve");
+    expect(agentTool?.runtimeAction?.recursive).toBe(true);
+  });
+
+  it("does not give declared subagent nodes the recursive agent tool", () => {
+    const tools = createNodeHarnessTools({
+      node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+    });
+
+    expect(tools.has("agent")).toBe(false);
   });
 });
 

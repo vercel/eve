@@ -39,9 +39,14 @@ export function createEve5Renderer(
   ) => {
     const safeWidth = Math.max(1, Math.round(logicalWidth));
     const safeHeight = Math.max(1, Math.round(logicalHeight));
-    const paddingRadius = options.paddingRadius ?? bloomRadiusForDevicePixelRatio(imprint.devicePixelRatio);
+    const paddingRadius =
+      options.paddingRadius ?? bloomRadiusForDevicePixelRatio(imprint.devicePixelRatio);
     const targets = bloomTargets.ensure(safeWidth, safeHeight, paddingRadius);
-    const currentPaintTargets = paintSystem.ensure(safeWidth, safeHeight, imprint.gridScaleMultiplier);
+    const currentPaintTargets = paintSystem.ensure(
+      safeWidth,
+      safeHeight,
+      imprint.gridScaleMultiplier,
+    );
     const backSurfaceDepthView = targets.backSurfaceDepth.createView();
 
     renderBackMaterial(
@@ -133,7 +138,15 @@ export function createEve5Renderer(
       clampUnit(imprint.progress ?? 0),
     );
     renderBlur(device, resources, targets.scene, targets.horizontal, [1, 0], true, paddingRadius);
-    renderBlur(device, resources, targets.horizontal, targets.vertical, [0, 1], false, paddingRadius);
+    renderBlur(
+      device,
+      resources,
+      targets.horizontal,
+      targets.vertical,
+      [0, 1],
+      false,
+      paddingRadius,
+    );
     renderComposite(device, resources, target, targets, targets.vertical, effectiveBloomStrength);
   };
 

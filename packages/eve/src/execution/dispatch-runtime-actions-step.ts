@@ -27,7 +27,9 @@ import {
   timestampHandleMessageStreamEvent,
 } from "#protocol/message.js";
 import type {
+  RuntimeActionRequest,
   RuntimeRemoteAgentCallActionRequest,
+  RuntimeSubagentCallActionRequest,
   RuntimeSubagentResultActionResult,
 } from "#runtime/actions/types.js";
 import {
@@ -44,13 +46,7 @@ import { buildSubagentRunInput, type SubagentInputSource } from "#execution/suba
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
-import {
-  type DelegatedRuntimeActionRequest,
-  getSubagentDelegationName,
-  isSubagentDelegationAction,
-  resolveSubagentDelegationLimit,
-  type SubagentDelegationLimit,
-} from "#harness/subagent-depth.js";
+import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -91,7 +87,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const writer = input.parentWritable.getWriter();
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
-  const delegationLimit = resolveSubagentDelegationLimit(session);
+  const subagentDepth = resolveSubagentDepth(session);
   // Split the parent's remaining token quota across the batch's local
   // subagent calls, the children that actually receive an enforced cap.
   // Remote agents run on their own deployment under their own limits and
@@ -103,15 +99,17 @@ export async function dispatchRuntimeActionsStep(input: {
 
   try {
     for (const action of batch.actions) {
-      if (delegationLimit.reached && isSubagentDelegationAction(action)) {
-        log.warn("subagent depth limit reached; blocking delegated call", {
+      if (
+        isRecursiveAgentAction(action, bundle.subagentRegistry.subagentsByNodeId) &&
+        (session.rootSessionId !== undefined || subagentDepth.currentDepth > 0)
+      ) {
+        log.warn("recursive agent call blocked outside the root session", {
           callId: action.callId,
-          currentDepth: delegationLimit.currentDepth,
-          maxDepth: delegationLimit.maxDepth,
+          currentDepth: subagentDepth.currentDepth,
           nodeId: action.nodeId,
-          subagentName: getSubagentDelegationName(action),
+          subagentName: action.subagentName,
         });
-        results.push(createSubagentDepthLimitResult({ action, delegationLimit }));
+        results.push(createRecursiveAgentRootOnlyResult(action));
         continue;
       }
 
@@ -233,21 +231,28 @@ function createRemoteAgentStartFailureResult(input: {
   };
 }
 
-function createSubagentDepthLimitResult(input: {
-  readonly action: DelegatedRuntimeActionRequest;
-  readonly delegationLimit: SubagentDelegationLimit;
-}): RuntimeSubagentResultActionResult {
-  const subagentName = getSubagentDelegationName(input.action);
+function createRecursiveAgentRootOnlyResult(
+  action: RuntimeSubagentCallActionRequest,
+): RuntimeSubagentResultActionResult {
   return {
-    callId: input.action.callId,
+    callId: action.callId,
     isError: true,
     kind: "subagent-result",
     output: {
-      code: "SUBAGENT_DEPTH_LIMIT_REACHED",
-      currentDepth: input.delegationLimit.currentDepth,
-      maxDepth: input.delegationLimit.maxDepth,
-      message: `Subagent depth limit reached (${input.delegationLimit.maxDepth}); "${subagentName}" was not called.`,
+      code: "RECURSIVE_AGENT_ROOT_ONLY",
+      message: 'The built-in "agent" tool is only available to the root session.',
     },
-    subagentName,
+    subagentName: action.subagentName,
   };
+}
+
+function isRecursiveAgentAction(
+  action: RuntimeActionRequest,
+  subagentsByNodeId: ReadonlyMap<string, unknown>,
+): action is RuntimeSubagentCallActionRequest {
+  return (
+    action.kind === "subagent-call" &&
+    action.subagentName === "agent" &&
+    !subagentsByNodeId.has(action.nodeId)
+  );
 }

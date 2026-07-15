@@ -71,7 +71,7 @@ describe("eveChannel GET stream", () => {
     expect(getSession).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects malformed startIndex values with 400", async () => {
+  it("accepts negative tail-relative startIndex values", async () => {
     const getRoute = createGetHandler();
     const getSession = createMockGetSession(createEvents([]));
 
@@ -82,9 +82,8 @@ describe("eveChannel GET stream", () => {
       createArgs({ getSession, params: { sessionId: "session_xyz" } }),
     );
 
-    expect(response.status).toBe(400);
-    expect(getSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toMatchObject({ ok: false });
+    expect(response.status).toBe(200);
+    expect(getSession).toHaveBeenCalledTimes(1);
   });
 
   it("rejects non-integer startIndex values with 400", async () => {
@@ -130,7 +129,7 @@ describe("eveChannel GET stream", () => {
       },
       {
         type: "session.waiting",
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "eve:test", wait: "next-user-message" },
       },
     ];
     const getSession = createMockGetSession(createEvents(events));

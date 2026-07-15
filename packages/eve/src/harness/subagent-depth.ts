@@ -6,29 +6,22 @@ import type {
   RuntimeSubagentCallActionRequest,
 } from "#runtime/actions/types.js";
 
-export const DEFAULT_SUBAGENT_MAX_DEPTH = 1;
-
 export type DelegatedRuntimeActionRequest =
   | RuntimeRemoteAgentCallActionRequest
   | RuntimeSubagentCallActionRequest;
 
-export type SubagentDelegationLimit = {
+export type ResolvedSubagentDepth = {
   readonly currentDepth: number;
-  readonly maxDepth: number;
   readonly nextChildDepth: number;
-  readonly reached: boolean;
 };
 
-export function resolveSubagentDelegationLimit(
-  session: Pick<HarnessSession, "subagentDepth" | "subagentMaxDepth">,
-): SubagentDelegationLimit {
+export function resolveSubagentDepth(
+  session: Pick<HarnessSession, "subagentDepth">,
+): ResolvedSubagentDepth {
   const currentDepth = parseSubagentDepth(session.subagentDepth);
-  const maxDepth = parseSubagentMaxDepth(session.subagentMaxDepth) ?? DEFAULT_SUBAGENT_MAX_DEPTH;
   return {
     currentDepth,
-    maxDepth,
     nextChildDepth: currentDepth + 1,
-    reached: currentDepth >= maxDepth,
   };
 }
 
@@ -60,8 +53,4 @@ export function getSubagentDelegationName(action: DelegatedRuntimeActionRequest)
 
 function parseSubagentDepth(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : 0;
-}
-
-function parseSubagentMaxDepth(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }

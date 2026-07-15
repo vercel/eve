@@ -1,16 +1,19 @@
-import type { IncomingMessage } from "node:http";
-import type { Socket } from "node:net";
-
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 
-import { build as buildNitro, createDevServer, prepare } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 
-import { createApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
-import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
-import { EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH } from "#protocol/routes.js";
+import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
+import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
+import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
+import {
+  EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
+  EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
+} from "#protocol/routes.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
 import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -34,9 +37,9 @@ import type {
   DevelopmentServerHandle,
   DevelopmentServerOptions,
   StartedDevelopmentServer,
+  PreparedDevelopmentApplicationHost,
 } from "#internal/nitro/host/types.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { pruneDevelopmentRuntimeArtifactsSnapshotsInBackground } from "#internal/nitro/dev-runtime-artifacts.js";
 import {
   DEFAULT_DEVELOPMENT_SERVER_PORT,
   MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS,
@@ -44,38 +47,26 @@ import {
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { eveDevArguments } from "#setup/primitives/index.js";
 import { devBootPhase } from "#internal/dev-boot-progress.js";
+import {
+  activateDevelopmentGeneration,
+  discardDevelopmentGeneration,
+} from "#internal/nitro/development-generation.js";
+import { randomBytes } from "node:crypto";
+import {
+  createDevelopmentWorkflowWorld,
+  installWorkflowLocalQueueEnvironment,
+  installWorkflowTransportEnvironment,
+} from "#internal/nitro/host/dev-workflow-world-setup.js";
+import type { ParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
+import {
+  DEFAULT_DEVELOPMENT_SERVER_HOST,
+  normalizeDevelopmentServerClientUrl,
+} from "#internal/nitro/host/dev-server-url.js";
 
 const MAX_ALLOWED_DEVELOPMENT_SERVER_PORT = 65_535;
-const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 const PORT_ENV = "PORT";
-const DEFAULT_DEVELOPMENT_SERVER_HOST = "127.0.0.1";
-const IPV6_LOOPBACK_HOSTNAME = "[::1]";
 
-/**
- * Hostnames Nitro/srvx surface when listening on an IPv6 wildcard interface.
- * They are valid bind targets but invalid as connect targets.
- */
-const IPV6_WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::"]);
-
-/**
- * Rewrites a server URL whose hostname is a wildcard listen address into a
- * loopback URL on the same address family.
- */
-export function normalizeDevelopmentServerClientUrl(serverUrl: string): string {
-  const url = new URL(serverUrl);
-
-  if (IPV6_WILDCARD_LISTEN_HOSTNAMES.has(url.hostname)) {
-    url.hostname = IPV6_LOOPBACK_HOSTNAME;
-    return url.toString();
-  }
-
-  if (url.hostname === "0.0.0.0") {
-    url.hostname = DEFAULT_DEVELOPMENT_SERVER_HOST;
-    return url.toString();
-  }
-
-  return serverUrl;
-}
+export { normalizeDevelopmentServerClientUrl };
 
 /**
  * Returns whether a supplied URL identifies this app's healthy local development
@@ -109,8 +100,7 @@ function isAddressInUseError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "EADDRINUSE";
 }
 
-type NitroDevelopmentServer = ReturnType<typeof createDevServer>;
-type NitroDevelopmentServerUpgrade = NitroDevelopmentServer["upgrade"];
+type NitroDevelopmentServer = DrainedNitroDevServer;
 
 function resolveDevelopmentServerPort(port: number | string | undefined): number {
   const resolvedPort =
@@ -203,98 +193,34 @@ function resolveDevelopmentServerPorts(input: {
   return ports as [number, ...number[]];
 }
 
-function installWorkflowLocalQueueEnvironment(serverUrl: string): () => void {
-  const previousWorkflowLocalBaseUrl = process.env[WORKFLOW_LOCAL_BASE_URL_ENV];
-  const previousPort = process.env[PORT_ENV];
-  const url = new URL(normalizeDevelopmentServerClientUrl(serverUrl));
-
-  process.env[WORKFLOW_LOCAL_BASE_URL_ENV] = url.origin;
-  if (url.port) {
-    process.env[PORT_ENV] = url.port;
-  }
-
-  return () => {
-    if (previousWorkflowLocalBaseUrl === undefined) {
-      delete process.env[WORKFLOW_LOCAL_BASE_URL_ENV];
-    } else {
-      process.env[WORKFLOW_LOCAL_BASE_URL_ENV] = previousWorkflowLocalBaseUrl;
-    }
-
-    if (previousPort === undefined) {
-      delete process.env[PORT_ENV];
-    } else {
-      process.env[PORT_ENV] = previousPort;
-    }
-  };
-}
-
-function attachTemporarySocketErrorHandler(socket: Socket): () => void {
-  // Keep early socket failures from becoming uncaught EventEmitter errors
-  // while Nitro/httpxy installs its own upgrade-path listeners.
-  const onSocketError = () => {};
-
-  socket.once("error", onSocketError);
-
-  return () => {
-    socket.off("error", onSocketError);
-  };
-}
-
-function shouldProxyDevelopmentServerWebSocketUpgrades(nitro: Nitro): boolean {
-  return nitro.options.features.websocket === true || nitro.options.experimental.websocket === true;
-}
-
-function guardDevelopmentServerWebSocketUpgrades(
-  nitro: Nitro,
-  devServer: NitroDevelopmentServer,
-): void {
-  const originalUpgrade = devServer.upgrade.bind(devServer) as NitroDevelopmentServerUpgrade;
-  const websocketEnabled = shouldProxyDevelopmentServerWebSocketUpgrades(nitro);
-  const guardedUpgrade: NitroDevelopmentServerUpgrade = async (
-    req: IncomingMessage,
-    socket: Socket,
-    head: unknown,
-  ) => {
-    if (!websocketEnabled) {
-      if (!socket.destroyed) {
-        socket.destroy();
-      }
-      return;
-    }
-
-    const removeSocketErrorHandler = attachTemporarySocketErrorHandler(socket);
-
-    try {
-      await originalUpgrade(req, socket, head);
-    } catch {
-      if (!socket.destroyed) {
-        socket.destroy();
-      }
-    } finally {
-      removeSocketErrorHandler();
-    }
-  };
-
-  devServer.upgrade = guardedUpgrade;
-}
-
-function addDevelopmentRuntimeArtifactsRebuildHandler(input: {
+function addDevelopmentControlHandler(input: {
   readonly appRoot: string;
-  readonly nitro: Nitro;
-  readonly watcher: AuthoredSourceWatcherHandle;
+  readonly devServer: DrainedNitroDevServer;
+  readonly getWatcher: () => AuthoredSourceWatcherHandle | undefined;
+  readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 }): void {
-  input.nitro.options.devHandlers.push({
-    route: EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
-    handler: async (event) => {
-      const requestUrl = event.node?.req.url ?? "";
-      const url = new URL(requestUrl, "http://localhost");
-      if (url.searchParams.get("force") === "1") {
-        await input.watcher.rebuild();
-      } else {
-        await input.watcher.flush();
-      }
+  input.devServer.setControlHandler(async (request) => {
+    const worldResponse = await input.workflowWorld?.handleRequest(request);
+    if (worldResponse !== undefined) {
+      return worldResponse;
+    }
+    const url = new URL(request.url);
+    if (url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH && request.method === "GET") {
       return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
-    },
+    }
+    if (url.pathname !== EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH || request.method !== "GET") {
+      return undefined;
+    }
+    const watcher = input.getWatcher();
+    if (watcher === undefined) {
+      return Response.json({ error: "The development server is still starting." }, { status: 503 });
+    }
+    if (url.searchParams.get("force") === "1") {
+      await watcher.rebuild();
+    } else {
+      await watcher.flush();
+    }
+    return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
   });
 }
 
@@ -303,6 +229,7 @@ async function closeDevelopmentServerResources(input: {
   readonly devServer: NitroDevelopmentServer | undefined;
   readonly developmentSandboxRunId: string;
   readonly nitro: Nitro | undefined;
+  readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 }): Promise<{ readonly errors: readonly unknown[]; readonly listenerClosed: boolean }> {
   const errors: unknown[] = [];
   const attempt = async (operation: () => Promise<void>): Promise<boolean> => {
@@ -321,6 +248,10 @@ async function closeDevelopmentServerResources(input: {
   }
   const devServer = input.devServer;
   const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
+  const workflowWorld = input.workflowWorld;
+  if (workflowWorld !== undefined) {
+    await attempt(() => workflowWorld.close());
+  }
   const nitro = input.nitro;
   if (nitro !== undefined) {
     await attempt(() => nitro.close());
@@ -366,7 +297,7 @@ function createDevelopmentServerStartupCleanupError(
 
 async function listenForDevelopmentServer(input: {
   readonly devServer: NitroDevelopmentServer;
-  readonly host?: string;
+  readonly host: string;
   readonly port: number | string | undefined;
   readonly retryOnAddressInUse: boolean;
 }) {
@@ -380,7 +311,6 @@ async function listenForDevelopmentServer(input: {
     const server = input.devServer.listen({
       hostname: input.host,
       port,
-      silent: true,
     });
 
     try {
@@ -453,35 +383,55 @@ async function startNitroDevelopmentServer(
   let nitro: Nitro | undefined;
   let devServer: NitroDevelopmentServer | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
+  let restoreWorkflowTransportEnvironment: (() => void) | undefined;
+  let workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
   let authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
+  let preparedDevelopmentHost: PreparedDevelopmentApplicationHost | undefined;
+  let initialGenerationPublished = false;
+  let initialWorkspaceTransferred = false;
 
   try {
     const preparedHost = await devBootPhase(
       "compiling agent",
-      () => prepareApplicationHost(project.appRoot, { dev: true }),
+      () => prepareDevelopmentApplicationHost(project.appRoot),
       options.onBootProgress,
     );
-    pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(preparedHost.appRoot);
+    preparedDevelopmentHost = preparedHost;
     const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(
-      createNitroArtifactsConfig({
+      createDevelopmentNitroArtifactsConfig({
         appRoot: preparedHost.appRoot,
-        dev: true,
+        configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
       }),
     );
-    startDevelopmentSandboxPrewarmInBackground({
-      appRoot: preparedHost.appRoot,
-      compiledArtifactsSource,
-    });
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
     const activeNitro = await devBootPhase(
       "creating dev server",
-      () => createApplicationNitro(preparedHost, true),
+      () => createDevelopmentApplicationNitro(preparedHost),
       options.onBootProgress,
     );
     nitro = activeNitro;
-    devServer = createDevServer(activeNitro);
+    devServer = new DrainedNitroDevServer(activeNitro.logger);
     const activeDevServer = devServer;
-    guardDevelopmentServerWebSocketUpgrades(activeNitro, devServer);
+    const workflowTransportSecret = randomBytes(32).toString("base64url");
+    activeDevServer.setClientAddressSecret(workflowTransportSecret);
+    restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment(
+      project.appRoot,
+      workflowTransportSecret,
+    );
+    workflowWorld = createDevelopmentWorkflowWorld({
+      appRoot: project.appRoot,
+      preparedHost,
+      transportSecret: workflowTransportSecret,
+    });
+    // Parent-owned control routes must answer before the World starts: queue
+    // redelivery begins at start(), and a delivery's World calls would
+    // otherwise fall through to the worker and 404.
+    addDevelopmentControlHandler({
+      appRoot: project.appRoot,
+      devServer: activeDevServer,
+      getWatcher: () => authoredSourceWatcher,
+      workflowWorld,
+    });
     const hostname =
       options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
     const retryOnAddressInUse = requestedPort === undefined;
@@ -506,11 +456,36 @@ async function startNitroDevelopmentServer(
     await devBootPhase(
       "building dev bundle",
       async () => {
-        await prepare(activeNitro);
-        await buildNitro(activeNitro);
+        const payload = await buildDevelopmentHostCandidate({
+          host: preparedHost,
+          nitro: activeNitro,
+        });
+        nitro = undefined;
+        const workspace = preparedHost.workspace;
+        initialWorkspaceTransferred = true;
+        await activeDevServer.replaceWorker({
+          dispose: async () => await removeDevelopmentHostWorkspace(workspace),
+          entry: payload.entry,
+          workerData: payload.workerData,
+        });
+        await activateDevelopmentGeneration({
+          appRoot: preparedHost.appRoot,
+          generation: preparedHost.generation,
+        });
+        initialGenerationPublished = true;
       },
       options.onBootProgress,
     );
+    await workflowWorld?.start();
+    startDevelopmentSandboxPrewarmInBackground({
+      appRoot: preparedHost.appRoot,
+      compiledArtifactsSource,
+    });
+
+    const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      devServer: activeDevServer,
+      initialHost: preparedHost,
+    });
 
     authoredSourceWatcher = await devBootPhase(
       "starting file watcher",
@@ -518,17 +493,12 @@ async function startNitroDevelopmentServer(
         const { startAuthoredSourceWatcher } =
           await import("#internal/nitro/host/dev-authored-source-watcher.js");
         return startAuthoredSourceWatcher({
-          nitro: activeNitro,
+          coordinator: rebuildCoordinator,
           preparedHost,
         });
       },
       options.onBootProgress,
     );
-    addDevelopmentRuntimeArtifactsRebuildHandler({
-      appRoot: project.appRoot,
-      nitro: activeNitro,
-      watcher: authoredSourceWatcher,
-    });
     await state.write(serverUrl);
     const restoreWorkflowLocalQueueEnvironmentOnClose = restoreWorkflowLocalQueueEnvironment;
     if (restoreWorkflowLocalQueueEnvironmentOnClose === undefined) {
@@ -537,7 +507,8 @@ async function startNitroDevelopmentServer(
 
     const authoredSourceWatcherOnClose = authoredSourceWatcher;
     const devServerOnClose = devServer;
-    const nitroOnClose = activeNitro;
+    const workflowWorldOnClose = workflowWorld;
+    const restoreWorkflowTransportEnvironmentOnClose = restoreWorkflowTransportEnvironment;
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
       closePromise ??= (async () => {
@@ -545,7 +516,8 @@ async function startNitroDevelopmentServer(
           authoredSourceWatcher: authoredSourceWatcherOnClose,
           devServer: devServerOnClose,
           developmentSandboxRunId,
-          nitro: nitroOnClose,
+          nitro: undefined,
+          workflowWorld: workflowWorldOnClose,
         });
         if (cleanup.listenerClosed) {
           await state.remove().catch(() => {});
@@ -559,6 +531,7 @@ async function startNitroDevelopmentServer(
         } finally {
           clearInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId);
           restoreWorkflowLocalQueueEnvironmentOnClose();
+          restoreWorkflowTransportEnvironmentOnClose?.();
           restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
         }
       })();
@@ -574,9 +547,25 @@ async function startNitroDevelopmentServer(
       devServer,
       developmentSandboxRunId,
       nitro,
+      workflowWorld,
     });
     const cleanupErrors = [...cleanup.errors];
+    if (preparedDevelopmentHost !== undefined && !initialGenerationPublished) {
+      await discardDevelopmentGeneration(preparedDevelopmentHost.generation).catch(
+        (cleanupError) => {
+          cleanupErrors.push(cleanupError);
+        },
+      );
+    }
+    if (preparedDevelopmentHost !== undefined && !initialWorkspaceTransferred) {
+      await removeDevelopmentHostWorkspace(preparedDevelopmentHost.workspace).catch(
+        (cleanupError) => {
+          cleanupErrors.push(cleanupError);
+        },
+      );
+    }
     restoreWorkflowLocalQueueEnvironment?.();
+    restoreWorkflowTransportEnvironment?.();
     clearInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId);
     if (cleanup.listenerClosed) {
       await state.remove().catch(() => {});

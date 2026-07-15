@@ -4,6 +4,7 @@ import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
+import { resolveInternalVercelServiceOutput } from "#cli/vercel-service-output.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
@@ -19,6 +20,7 @@ import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
 import { createLogger } from "#internal/logging.js";
 import type {
+  ApplicationBuildOptions,
   DevelopmentServer,
   DevelopmentServerOptions,
   ProductionServerHandle,
@@ -58,13 +60,17 @@ interface ProductionCliOptions {
   port?: number;
 }
 
+interface BuildCliOptions {
+  skipSandboxPrewarm?: boolean;
+}
+
 interface CliRuntimeDependencies {
   isCodingAgentLaunch(): Promise<boolean>;
   isActiveDevelopmentServerForApp(input: {
     readonly appRoot: string;
     readonly serverUrl: string;
   }): Promise<boolean>;
-  buildHost(appRoot: string): Promise<string>;
+  buildHost(appRoot: string, options: ApplicationBuildOptions): Promise<string>;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
@@ -363,13 +369,20 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
   program
     .command("build")
     .description("Build the current eve application.")
-    .action(async () => {
+    .option(
+      "--skip-sandbox-prewarm",
+      "Skip Vercel sandbox template prewarm; output may not be deployable",
+    )
+    .action(async (options: BuildCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
       loadDevelopmentEnvironmentFiles(appRoot);
 
       const buildHost = runtime.buildHost ?? (await loadBuildHost());
-      const outputDir = await buildHost(appRoot);
+      const outputDir = await buildHost(appRoot, {
+        skipVercelSandboxPrewarm: options.skipSandboxPrewarm === true,
+        vercelServiceOutput: resolveInternalVercelServiceOutput(appRoot),
+      });
       logger.log(
         renderCliTaggedLine(theme, {
           message: `built output at ${outputDir}`,

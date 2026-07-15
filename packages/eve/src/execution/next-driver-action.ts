@@ -30,6 +30,13 @@ export type NextDriverAction =
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;
       readonly authorizationNames?: readonly string[];
+      /**
+       * Set when the parked turn was cancelled: the driver runs
+       * `settleCancelledTurnStep` before the normal park playbook. An
+       * optional field rather than a new arm so pinned drivers keep
+       * working.
+       */
+      readonly cancelled?: true;
     }
   | {
       readonly kind: "dispatch-runtime-actions";

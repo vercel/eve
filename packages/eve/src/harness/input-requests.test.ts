@@ -319,6 +319,65 @@ describe("resolvePendingInput", () => {
     expect(hasDeferredStepInput(deferred.session)).toBe(false);
   });
 
+  it("defers channel context until after tool approvals are resolved", () => {
+    const session = setPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "approval-call",
+            input: { command: "pwd" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "deny", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
+        } satisfies InputRequest,
+      ],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: { command: "pwd" },
+              toolCallId: "approval-call",
+              toolName: "bash",
+              type: "tool-call",
+            },
+            {
+              approvalId: "approval-1",
+              toolCallId: "approval-call",
+              type: "tool-approval-request",
+            },
+          ],
+          role: "assistant",
+        } satisfies ModelMessage,
+      ],
+      session: createHarnessSession(),
+    });
+
+    const context = "<linear_context>issue metadata</linear_context>";
+    const result = resolvePendingInput({
+      stepInput: {
+        context: [context],
+        inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
+      },
+      session,
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.messages.at(-1)?.role).toBe("tool");
+    expect(hasDeferredStepInput(result.session)).toBe(true);
+
+    const deferred = consumeDeferredStepInput({ session: result.session });
+    expect(deferred.input).toEqual({ context: [context] });
+    expect(hasDeferredStepInput(deferred.session)).toBe(false);
+  });
+
   it("resolves approval when follow-up text matches an option", () => {
     const session = setPendingInputBatch({
       requests: [

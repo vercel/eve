@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/483
-status: proposed
-last_updated: "2026-07-02"
+status: complete
+last_updated: "2026-07-06"
 ---
 
 # Turn cancellation, layer 0: harness abort propagation
@@ -27,8 +27,8 @@ Cancellation lands bottom-up. Each layer is independently shippable and reviewab
 ```text
 layer 4  clients + channels + evals     MessageResponse.cancel(), channel ops, /new, eval controls
 layer 3  descendants                    subagent inbox cascade, remote cancel POST, adoption races
-layer 2  trigger surface                POST /eve/v1/session/:id/cancel, `${continuationToken}:cancel`
-                                        hook, best-effort 202/409
+layer 2  trigger surface                POST /eve/v1/session/:id/cancel resuming the stable
+                                        `${sessionId}:cancel` hook (optional turnId guard)
 layer 1  turn-workflow ownership        durable AbortController + cancel race in the terminating
                                         turnWorkflow, cancelled-turn finalizer,
                                         turn.cancelled → session.waiting

@@ -33,11 +33,16 @@ export const TEAMS_HITL_FREEFORM_INPUT_ID = "eve_freeform_text";
 /** Renders one input request as a Teams message body containing an Adaptive Card. */
 export function renderInputRequestMessage(
   request: InputRequest,
-  options: { readonly adaptiveCardVersion?: string } = {},
+  options: {
+    readonly adaptiveCardVersion?: string;
+    readonly replyToActivityId?: string;
+  } = {},
 ): TeamsMessageBody {
+  const details = formatApprovalInput(request);
+  const renderedDetails = details ? truncate(details, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH) : null;
   return {
     attachments: [renderInputRequestAttachment(request, options)],
-    text: request.prompt,
+    text: renderedDetails ? `${request.prompt}\n\nTool input:\n${renderedDetails}` : request.prompt,
   };
 }
 
@@ -48,17 +53,31 @@ export function renderInputRequestMessage(
  */
 export function renderInputRequestAttachment(
   request: InputRequest,
-  options: { readonly adaptiveCardVersion?: string } = {},
+  options: {
+    readonly adaptiveCardVersion?: string;
+    readonly replyToActivityId?: string;
+  } = {},
 ): TeamsAttachment {
+  const details = formatApprovalInput(request);
   const card: Record<string, unknown> = {
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-    actions: renderActions(request),
+    actions: renderActions(request, options.replyToActivityId),
     body: [
       {
         text: truncate(request.prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
         type: "TextBlock",
         wrap: true,
       },
+      ...(details
+        ? [
+            {
+              fontType: "Monospace",
+              text: truncate(details, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
+              type: "TextBlock",
+              wrap: true,
+            },
+          ]
+        : []),
       ...renderInputs(request),
     ],
     type: "AdaptiveCard",
@@ -145,6 +164,16 @@ export function deriveTeamsInputResponses(activity: TeamsActivity): readonly Inp
  * Defaults to statusCode 200 and message "Answer received."; `type` is always
  * the Teams activity-message content type.
  */
+/** Reads the recorded thread root carried by an eve HITL card submission. */
+export function readTeamsInputReplyToActivityId(activity: TeamsActivity): string | null {
+  const value = readActivityValue(activity);
+  if (!value) return null;
+  const payload = readHitlPayload(value);
+  return payload && typeof payload.replyToActivityId === "string"
+    ? payload.replyToActivityId
+    : null;
+}
+
 export function teamsInvokeResponse(
   input: {
     readonly message?: string;
@@ -188,15 +217,21 @@ function renderInputs(request: InputRequest): readonly Record<string, unknown>[]
   return [];
 }
 
-function renderActions(request: InputRequest): readonly Record<string, unknown>[] {
+function renderActions(
+  request: InputRequest,
+  replyToActivityId: string | undefined,
+): readonly Record<string, unknown>[] {
+  const payload = (optionId?: string): Record<string, unknown> => {
+    const value: Record<string, unknown> = { requestId: request.requestId };
+    if (replyToActivityId !== undefined) value.replyToActivityId = replyToActivityId;
+    if (optionId !== undefined) value.optionId = optionId;
+    return value;
+  };
   const options = request.options;
   if (options && options.length > 0 && request.display !== "select") {
     return options.slice(0, TEAMS_ADAPTIVE_CARD_ACTION_LIMIT).map((option) => ({
       data: {
-        [TEAMS_HITL_DATA_KEY]: {
-          optionId: option.id,
-          requestId: request.requestId,
-        },
+        [TEAMS_HITL_DATA_KEY]: payload(option.id),
       },
       title: truncate(option.label, TEAMS_ADAPTIVE_CARD_ACTION_TITLE_MAX_LENGTH),
       type: "Action.Submit",
@@ -206,9 +241,7 @@ function renderActions(request: InputRequest): readonly Record<string, unknown>[
   return [
     {
       data: {
-        [TEAMS_HITL_DATA_KEY]: {
-          requestId: request.requestId,
-        },
+        [TEAMS_HITL_DATA_KEY]: payload(),
       },
       title: "Submit",
       type: "Action.Submit",
@@ -241,6 +274,19 @@ function readHitlPayload(value: Record<string, unknown>): Record<string, unknown
   const data = action && isObject(action.data) ? action.data : null;
   const nested = data?.[TEAMS_HITL_DATA_KEY];
   return isObject(nested) ? nested : null;
+}
+
+function formatApprovalInput(request: InputRequest): string | null {
+  if (
+    request.display !== "confirmation" ||
+    request.options?.length !== 2 ||
+    request.options[0]?.id !== "approve" ||
+    request.options[1]?.id !== "deny"
+  ) {
+    return null;
+  }
+  const json = JSON.stringify(request.action.input, null, 2);
+  return json === "{}" ? null : json;
 }
 
 function truncate(value: string, maxLength: number): string {

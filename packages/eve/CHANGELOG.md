@@ -1,5 +1,55 @@
 # eve
 
+## 0.24.3
+
+### Patch Changes
+
+- dddfb20: Fix `eve dev` generation bundling for authored modules whose dependencies use dynamic imports. Development generations now bundle ordinary dependencies directly instead of inheriting a copied server-external package list and tracing dependency closures; Nitro remains the sole owner of hosted dependency packaging.
+- 2494b33: Bound `eve dev` runtime snapshot storage with a World-independent retention policy. Superseded generations remain available for at least 30 minutes, and the five most recently superseded generations are retained as an additional rebuild-rate safety net.
+- 0333a63: Fix the dev-only schedule dispatch route to load compiled artifacts from the active development generation instead of the authored app root, which returned a 500 for every dispatch.
+- 0333a63: Rework `eve dev` structural reloads to never interrupt admitted work: an isolated candidate must compile, bundle, and start before it is promoted atomically, the retired worker keeps serving the responses and sockets it already admitted until they settle, and a failed candidate or crashed worker leaves the server available with shutdown bounded even while streams are open.
+- 5473f76: Keep active local Workflow turns on the development generation they selected across reloads, retries, and server restarts. New turns use the latest successful generation, and `eve dev` stores local Workflow state under `.workflow-data`.
+- 0333a63: Retry transient Windows filesystem contention while atomically releasing build publication locks.
+
+## 0.24.2
+
+### Patch Changes
+
+- 72ccdc0: Compaction now reserves room for its checkpoint prompt before reaching the configured threshold. The prompt asks the compaction model to distinguish completed work from remaining work, and later compactions receive the previous checkpoint intact instead of truncating it with ordinary transcript text.
+- 2c12460: Tool approvals now resolve before channel context is added to the next model request, so approving a tool from channels such as Linear executes the tool instead of leaving a dangling tool call.
+- d810570: Keep generated eve service builds isolated from a colocated Next.js Build Output and preserve host middleware mappings when Vercel collects the generated service.
+
+## 0.24.1
+
+### Patch Changes
+
+- e0b64a5: Keep development runtime generations executable after authored source or dependencies change by bundling ordinary dependencies and materializing configured external dependency closures.
+- c4f5b58: Model calls now merge multiple system instructions into one message, avoiding provider failures when dynamic instructions are combined with array-form user content.
+- 6aac45d: `eve build` now uses invocation-owned compiler, host, Nitro, Workflow, and output workspaces. Concurrent builds can run beside `eve dev`, and failed builds preserve the last successfully published output.
+- 0046308: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+
+## 0.24.0
+
+### Minor Changes
+
+- 1f85922: Replace the `ExperimentalWorkflow` marker with `experimental_workflow(options)` and move the per-program `maxSubagents` setting from `defineAgent({ limits })` to that Workflow tool definition.
+
+### Patch Changes
+
+- ce5c06d: `ToolContext` now exposes `toolName`, the final runtime tool name, so executors can share routing, authorization, and observability logic without duplicating path-derived or qualified names.
+- e0f09b4: The `eve dev` schedule dispatch route now reuses the module loader path resolved when the server is built, preventing module resolution failures in the bundled Windows dev server.
+- d194243: Fix Microsoft Teams HITL cards to show tool arguments, resume the recorded channel thread for message and invoke submissions, and authorize submissions as the Teams user who clicked the card.
+- 4649f70: Local `vercel build` runs now select the hosted Workflow runtime and prewarm sandbox templates, so their output can be deployed with `vercel deploy --prebuilt`. Builds that require templates fail with setup guidance when Vercel OIDC credentials are unavailable instead of emitting broken prebuilt output.
+
+## 0.23.0
+
+### Minor Changes
+
+- e5d142f: Make the built-in `agent` tool root-only, so copies created by it cannot delegate recursively. Declared subagents can still call their own nested subagents, and `limits.maxSubagentDepth` has been removed.
+- 9a594c2: Infer authored channel metadata directly from the channel definition passed to `isChannel`, without compiler-generated declarations. Use `isChannel(...)` whenever you need authored metadata type narrowing; direct `channel:<name>` comparisons continue to identify channels but no longer narrow authored metadata.
+
+  The `.eve/**/*.d.ts` TypeScript include is no longer needed. Existing apps may remove it, but leaving the unmatched glob in place does not change typechecking.
+
 ## 0.22.6
 
 ### Patch Changes

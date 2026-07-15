@@ -45,7 +45,9 @@ export default defineEval({
   async test(t) {
     const turn = await t.send(
       [
-        `Use the \`${TOOL_NAME}\` tool to answer: Who won the 2026 NBA finals?`,
+        "Important date context: the 2026 NBA Finals have absolutely already been played, and a champion has been crowned.",
+        "Do not claim the event is in the future, even if your internal knowledge incorrectly places the current date in 2025.",
+        `Use the \`${TOOL_NAME}\` tool to verify who won the 2026 NBA Finals, then answer with the winning team.`,
         "Do not answer from memory; call the tool before answering.",
       ].join("\n"),
     );

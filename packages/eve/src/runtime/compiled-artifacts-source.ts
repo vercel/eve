@@ -33,6 +33,14 @@ export interface RuntimeDiskCompiledArtifactsSource {
    * while sandbox state should remain scoped to the authored application.
    */
   readonly sandboxAppRoot?: string;
+  /**
+   * How this source is recorded in durable Workflow payloads.
+   * `"development-generation"` stores a logical selector resolved from the
+   * delivery's generation context — valid only where deliveries install
+   * that context (the parent-owned dev World). Absent, the source is stored
+   * verbatim, pinning durable work to this exact path.
+   */
+  readonly durableReference?: "development-generation";
 }
 
 /**
@@ -50,13 +58,19 @@ export function createBundledRuntimeCompiledArtifactsSource(): RuntimeBundledCom
 export function createDiskRuntimeCompiledArtifactsSource(
   appRoot: string,
   options: {
+    readonly durableReference?: "development-generation";
     readonly moduleMapLoaderPath?: string;
     readonly sandboxAppRoot?: string;
   } = {},
 ): RuntimeDiskCompiledArtifactsSource {
-  if (options.moduleMapLoaderPath !== undefined || options.sandboxAppRoot !== undefined) {
+  if (
+    options.moduleMapLoaderPath !== undefined ||
+    options.sandboxAppRoot !== undefined ||
+    options.durableReference !== undefined
+  ) {
     return {
       appRoot,
+      durableReference: options.durableReference,
       kind: "disk",
       moduleMapLoaderPath: options.moduleMapLoaderPath,
       sandboxAppRoot: options.sandboxAppRoot,

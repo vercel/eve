@@ -9,6 +9,7 @@ import {
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { experimental_workflow } from "#public/definitions/tool.js";
 
 const mocks = vi.hoisted(() => ({
   compileAgentConfig: vi.fn(),
@@ -76,6 +77,21 @@ describe("compileAgentManifest", () => {
     await expect(compileAgentManifest(manifest)).rejects.toThrow(
       'Remove "experimental.workflow" from "research"',
     );
+  });
+
+  it("compiles experimental Workflow tool configuration", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      tools: [createModuleSourceRef({ logicalPath: "tools/workflow.ts" })],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue(experimental_workflow({ maxSubagents: 6 }));
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
   });
 });
 

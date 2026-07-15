@@ -44,7 +44,11 @@ export function renderScene(
   });
   writeParams({ ...paramsBase, target: resources.params.wireParams, passKind: PASS_WIREFRAME });
   writeParams({ ...paramsBase, target: resources.params.envBgParams, passKind: PASS_OUTSIDE });
-  writeParams({ ...paramsBase, target: resources.params.opaqueOutsideParams, passKind: PASS_OUTSIDE });
+  writeParams({
+    ...paramsBase,
+    target: resources.params.opaqueOutsideParams,
+    passKind: PASS_OUTSIDE,
+  });
 
   const outsideBindGroup = createParamsBindGroup(
     device,

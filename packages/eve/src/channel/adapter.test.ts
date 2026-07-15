@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { ChannelAdapter, FetchFileResult } from "#channel/adapter.js";
-import { defaultDeliverResult, getAdapterKind } from "#channel/adapter.js";
+import type { ChannelAdapter, ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
+import { callAdapterEventHandler, defaultDeliverResult, getAdapterKind } from "#channel/adapter.js";
+import { createSessionWaitingEvent } from "#protocol/message.js";
 
 describe("ChannelAdapter (fetchFile field)", () => {
   it("treats the fetchFile field as optional", () => {
@@ -98,5 +99,40 @@ describe("ChannelAdapter helpers", () => {
 
   it("defaultDeliverResult returns undefined when the payload is empty", () => {
     expect(defaultDeliverResult({})).toBeUndefined();
+  });
+
+  it("publishes a continuation token re-keyed by the waiting handler", async () => {
+    let continuationToken = "slack:temporary";
+    const context: ChannelAdapterContext = {
+      ctx: {} as ChannelAdapterContext["ctx"],
+      session: {
+        auth: { current: null, initiator: null },
+        get continuationToken() {
+          return continuationToken;
+        },
+        id: "session-1",
+        setContinuationToken(token) {
+          continuationToken = `slack:${token}`;
+        },
+      },
+      state: {},
+    };
+    const adapter: ChannelAdapter = {
+      kind: "slack",
+      "session.waiting"(_data, ctx) {
+        ctx.session.setContinuationToken("C1:T1");
+      },
+    };
+
+    const event = await callAdapterEventHandler(
+      adapter,
+      createSessionWaitingEvent("slack:temporary"),
+      context,
+    );
+
+    expect(event).toEqual({
+      data: { continuationToken: "C1:T1", wait: "next-user-message" },
+      type: "session.waiting",
+    });
   });
 });

@@ -25,6 +25,12 @@ vi.mock("#internal/vercel/project-link.js", () => ({
 const mockedResolveNitroChannelRuntimeBundle = vi.mocked(resolveNitroChannelRuntimeBundle);
 const mockedReadVercelProjectLink = vi.mocked(readVercelProjectLink);
 const runtime = {} as Runtime;
+const DEVELOPMENT_ARTIFACTS_CONFIG = {
+  appRoot: "/app/agent",
+  devRuntimeArtifactsPointerPath: "/app/agent/.eve/dev-runtime/current.json",
+  kind: "development",
+  moduleMapLoaderPath: "/eve/src/internal/authored-module-map-loader.ts",
+} as const;
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -88,12 +94,12 @@ describe("dispatchChannelRequest", () => {
     const response = await dispatchChannelRequest(
       createEvent({ waitUntil: vi.fn() }),
       "POST /eve/v1/session",
-      { appRoot: "/app/agent", dev: true },
+      DEVELOPMENT_ARTIFACTS_CONFIG,
     );
     const nextResponse = await dispatchChannelRequest(
       createEvent({ waitUntil: vi.fn() }),
       "POST /eve/v1/session",
-      { appRoot: "/app/agent", dev: true },
+      DEVELOPMENT_ARTIFACTS_CONFIG,
     );
 
     expect(response.status).toBe(200);

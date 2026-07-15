@@ -32,7 +32,9 @@ export async function* openStreamIterable(
   input: OpenStreamInput,
 ): AsyncGenerator<HandleMessageStreamEvent> {
   let startIndex = input.startIndex;
-  let remainingReconnectAttempts = input.maxReconnectAttempts;
+  // A relative tail cursor cannot be advanced safely after a disconnect
+  // without first resolving it to an absolute stream index.
+  let remainingReconnectAttempts = input.startIndex < 0 ? 0 : input.maxReconnectAttempts;
 
   while (true) {
     const body = await openStreamBody({ ...input, startIndex });
@@ -76,7 +78,7 @@ export async function openStreamBody(
     const url = createClientUrl(
       input.host,
       createEveMessageStreamRoutePath(input.sessionId),
-      input.startIndex > 0 ? { startIndex: String(input.startIndex) } : undefined,
+      input.startIndex !== 0 ? { startIndex: String(input.startIndex) } : undefined,
     );
 
     const headers = await input.resolveHeaders();

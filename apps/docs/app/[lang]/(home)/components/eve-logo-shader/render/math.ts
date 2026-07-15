@@ -5,7 +5,12 @@
 import type { Mat4, Vec3 } from "./types";
 import { BASELINE_CAMERA_FOV, BASELINE_CAMERA_RADIUS } from "./constants";
 
-export function orbitEye(target: Vec3, radius: number, yawRadians: number, pitchRadians: number): Vec3 {
+export function orbitEye(
+  target: Vec3,
+  radius: number,
+  yawRadians: number,
+  pitchRadians: number,
+): Vec3 {
   const cp = Math.cos(pitchRadians);
   return [
     target[0] + radius * cp * Math.sin(yawRadians),

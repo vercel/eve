@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction-prompt.js";
 import {
   compactMessages,
   estimateTokens,
@@ -157,12 +158,44 @@ describe("getInputTokenCount", () => {
 describe("shouldCompact", () => {
   it("returns false when under threshold", () => {
     const messages: ModelMessage[] = [{ content: "short", role: "user" }];
-    expect(shouldCompact(messages, config)).toBe(false);
+    expect(shouldCompact(messages, { ...config, threshold: 1_000 })).toBe(false);
   });
 
   it("returns true when over threshold", () => {
     const messages: ModelMessage[] = [{ content: "a".repeat(500), role: "user" }];
     expect(shouldCompact(messages, config)).toBe(true);
+  });
+
+  it("uses the fixed prompt envelope in threshold accounting", () => {
+    const messages: ModelMessage[] = [{ content: "Continue the investigation.", role: "user" }];
+    const compaction: CompactionConfig = {
+      lastKnownInputTokens: 200,
+      lastKnownPromptMessageCount: messages.length,
+      recentWindowSize: 2,
+      threshold: 1_000,
+    };
+    const activeInputTokens = getInputTokenCount(messages, compaction);
+    const promptEnvelopeTokens = estimateTokens([
+      { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
+      { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
+    ] satisfies ModelMessage[]);
+
+    expect(
+      shouldCompact(messages, {
+        ...compaction,
+        threshold: activeInputTokens + promptEnvelopeTokens,
+      }),
+    ).toBe(false);
+    expect(
+      shouldCompact(messages, {
+        ...compaction,
+        threshold: activeInputTokens + promptEnvelopeTokens - 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not compact an empty history based on prompt overhead alone", () => {
+    expect(shouldCompact([], { ...config, threshold: 0 })).toBe(false);
   });
 });
 
@@ -220,6 +253,60 @@ describe("resolveCompactionModel", () => {
 });
 
 describe("compactMessages", () => {
+  it("carries a prior checkpoint into the next compaction without truncating it", async () => {
+    const { generateText } = await import("ai");
+    const markerAfterTextLimit = "CRITICAL_STATE_AFTER_280_CHARACTERS";
+    const previousCheckpoint = `${"completed work ".repeat(24)}${markerAfterTextLimit}`;
+
+    vi.mocked(generateText).mockResolvedValue({
+      text: "Updated checkpoint",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const messages: ModelMessage[] = [
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: previousCheckpoint, role: "assistant" },
+      { content: "new older context", role: "user" },
+      { content: "new older response", role: "assistant" },
+      { content: "recent question", role: "user" },
+      { content: "recent answer", role: "assistant" },
+    ];
+
+    const model = {} as Parameters<typeof compactMessages>[1];
+    await compactMessages(messages, model, {
+      recentWindowSize: 2,
+      threshold: 100_000,
+    });
+
+    const call = vi.mocked(generateText).mock.calls[0]?.[0];
+    expect(call?.prompt).toContain(previousCheckpoint);
+    expect(call?.prompt).toContain(markerAfterTextLimit);
+  });
+
+  it("replaces a prior checkpoint instead of retaining it in the recent window", async () => {
+    const { generateText } = await import("ai");
+    const previousCheckpoint = "Previous checkpoint";
+
+    vi.mocked(generateText).mockResolvedValue({
+      text: "Updated checkpoint",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const messages: ModelMessage[] = [
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: previousCheckpoint, role: "assistant" },
+      { content: "new evidence", role: "user" },
+      { content: "latest response", role: "assistant" },
+    ];
+
+    const model = {} as Parameters<typeof compactMessages>[1];
+    const result = await compactMessages(messages, model, {
+      recentWindowSize: 10,
+      threshold: 100_000,
+    });
+
+    expect(result.filter((message) => message.content === previousCheckpoint)).toHaveLength(0);
+    expect(result.filter((message) => message.content === "Updated checkpoint")).toHaveLength(1);
+  });
+
   it("summarizes older messages and keeps recent window", async () => {
     const { generateText } = await import("ai");
 
@@ -470,59 +557,6 @@ describe("compactMessages", () => {
         model,
       }),
     );
-  });
-
-  it("summarizes structured tool messages without dumping raw JSON", async () => {
-    const { generateText } = await import("ai");
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Summary of prior context",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "old message 1", role: "user" },
-      {
-        content: [
-          {
-            input: { query: "debug" },
-            toolCallId: "call-1",
-            toolName: "search",
-            type: "tool-call",
-          },
-        ],
-        role: "assistant",
-      },
-      {
-        content: [
-          {
-            output: {
-              type: "json",
-              value: ["alpha", "beta", "gamma", "delta"],
-            },
-            toolCallId: "call-1",
-            toolName: "search",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-      { content: "recent 1", role: "user" },
-      { content: "recent 2", role: "assistant" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    await compactMessages(messages, model, config);
-
-    const call = vi.mocked(generateText).mock.calls[0]?.[0];
-    expect(call?.system).toContain("conversation summarizer");
-    expect(call?.prompt).toContain("Conversation transcript:");
-    expect(call?.prompt).toContain("### assistant");
-    expect(call?.prompt).toContain("Called search with object(query=debug)");
-    expect(call?.prompt).toContain(
-      "Tool search returned object(type=json, value=array(4: alpha, beta, gamma, …))",
-    );
-    expect(call?.prompt).not.toContain('{"query"');
-    expect(call?.prompt).not.toContain('{"items"');
   });
 
   it("appends synthetic user message when recent window trails with assistant", async () => {

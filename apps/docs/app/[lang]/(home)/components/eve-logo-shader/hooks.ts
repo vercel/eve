@@ -37,4 +37,3 @@ export function useResolvedTheme(prefersDarkTheme: boolean) {
 
   return theme;
 }
-
