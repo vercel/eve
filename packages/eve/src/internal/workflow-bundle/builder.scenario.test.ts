@@ -528,6 +528,20 @@ describe("WorkflowBundleBuilder", () => {
       await expect(readFile(join(staleStepFunctionDir, "index.js"), "utf8")).rejects.toThrow();
       await expect(readFile(join(staleWebhookFunctionDir, "index.js"), "utf8")).rejects.toThrow();
       await expect(lstat(intermediateWorkflowOutputDir)).rejects.toThrow();
+
+      builder.buildCalls = 0;
+      measuredPhases.length = 0;
+      await builder.stageVercelOutput({
+        flowNitroOutputDir,
+        measure: async (phase, operation) => {
+          measuredPhases.push(phase);
+          return await operation();
+        },
+        outputDir,
+        runtime: "nodejs24.x",
+      });
+      expect(builder.buildCalls).toBe(0);
+      expect(measuredPhases).toEqual(["function.stage"]);
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }

@@ -129,6 +129,7 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
       manifest: {
         channels: [],
         config: {},
+        connections: [],
         sandbox: null,
         subagents: [],
       },

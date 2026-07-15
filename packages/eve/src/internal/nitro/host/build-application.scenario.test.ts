@@ -70,7 +70,7 @@ const resolveDiscoveryProjectMock = vi.fn(async (appRoot: string) => ({
   layout: "nested" as const,
 }));
 const runVercelBuildPrewarmMock = vi.fn(async () => undefined);
-const workflowBuilderBuildVercelOutputMock = vi.fn(async (_options: unknown) => undefined);
+const workflowBuilderStageVercelOutputMock = vi.fn(async (_options: unknown) => undefined);
 const workflowBuilderConstructors: unknown[] = [];
 
 vi.mock("nitro/builder", () => ({
@@ -102,20 +102,16 @@ vi.mock("../../workflow-bundle/builder.js", () => ({
       workflowBuilderConstructors.push(options);
     }
 
-    async buildVercelOutput(options: unknown): Promise<void> {
+    async stageVercelOutput(options: unknown): Promise<void> {
       const measure = (
         options as {
-          measure?: <T>(
-            phase: "build" | "function.stage",
-            operation: () => Promise<T>,
-          ) => Promise<T>;
+          measure?: <T>(phase: "function.stage", operation: () => Promise<T>) => Promise<T>;
         }
       ).measure;
       if (measure !== undefined) {
-        await measure("build", async () => undefined);
         await measure("function.stage", async () => undefined);
       }
-      await workflowBuilderBuildVercelOutputMock(options);
+      await workflowBuilderStageVercelOutputMock(options);
     }
   },
 }));
@@ -238,7 +234,7 @@ describe("buildApplication", () => {
         2,
       )}\n`,
     );
-    expect(workflowBuilderBuildVercelOutputMock).not.toHaveBeenCalled();
+    expect(workflowBuilderStageVercelOutputMock).not.toHaveBeenCalled();
     expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
     await expect(
       readFile(join(appRoot, ".eve", "compile", "compiled-agent-manifest.json"), "utf8"),
@@ -461,7 +457,7 @@ describe("buildApplication", () => {
     )?.[1]?.outputDir;
     expect(flowOutputDir).toEqual(expect.stringContaining(join(appRoot, ".eve", "builds")));
     expect(workflowBuilderConstructors).toHaveLength(1);
-    expect(workflowBuilderBuildVercelOutputMock).toHaveBeenCalledWith(
+    expect(workflowBuilderStageVercelOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
         flowNitroOutputDir: flowOutputDir,
         measure: expect.any(Function),
@@ -525,9 +521,11 @@ describe("buildApplication", () => {
     expect(profile.phases).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "sandbox.prewarm" }),
-        expect.objectContaining({ name: "workflow.build" }),
         expect.objectContaining({ name: "workflow.function.stage" }),
       ]),
+    );
+    expect(profile.phases).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "workflow.build" })]),
     );
 
     const summary = JSON.parse(
@@ -538,7 +536,7 @@ describe("buildApplication", () => {
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
   });
 
-  it("waits for sandbox prewarm before bundling either Vercel function surface", async () => {
+  it("keeps the last-good output when sandbox prewarm fails after bundling", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-prewarm-failure-");
     const outputDir = join(appRoot, ".vercel", "output");
@@ -563,15 +561,54 @@ describe("buildApplication", () => {
     );
 
     expect(createdNitros).toHaveLength(2);
-    expect(buildNitroMock).not.toHaveBeenCalled();
-    expect(workflowBuilderBuildVercelOutputMock).not.toHaveBeenCalled();
+    expect(buildNitroMock).toHaveBeenCalledTimes(2);
+    expect(workflowBuilderStageVercelOutputMock).not.toHaveBeenCalled();
     for (const nitro of createdNitros) {
       expect(nitro.close).toHaveBeenCalledOnce();
     }
     await expect(readFile(outputMarkerPath, "utf8")).resolves.toBe("last-good-output\n");
   });
 
-  it("bundles the Vercel app and flow surfaces concurrently after prewarm", async () => {
+  it("bundles Vercel surfaces while sandbox prewarm is running", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const appRoot = await createScratchDirectory("eve-build-application-vercel-prewarm-overlap-");
+    const prewarmStarted = Promise.withResolvers<void>();
+    const releasePrewarm = Promise.withResolvers<void>();
+    const releaseSurfaceCreation = Promise.withResolvers<void>();
+    const surfacesCreated = Promise.withResolvers<void>();
+    let createdSurfaceCount = 0;
+
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) => {
+        await releaseSurfaceCreation.promise;
+        createdSurfaceCount += 1;
+        if (createdSurfaceCount === 2) {
+          surfacesCreated.resolve();
+        }
+        return createNitroStub(options.outputDir);
+      },
+    );
+    runVercelBuildPrewarmMock.mockImplementationOnce(async () => {
+      prewarmStarted.resolve();
+      await releasePrewarm.promise;
+    });
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    const build = buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+
+    await prewarmStarted.promise;
+    expect(createProductionApplicationNitroMock).toHaveBeenCalledTimes(2);
+    releaseSurfaceCreation.resolve();
+    await surfacesCreated.promise;
+    await vi.waitFor(() => expect(buildNitroMock).toHaveBeenCalledTimes(2));
+
+    releasePrewarm.resolve();
+    await expect(build).resolves.toBe(join(appRoot, ".vercel", "output"));
+    expect(buildNitroMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bundles the Vercel app and flow surfaces concurrently", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-concurrent-");
     const firstBundleStarted = Promise.withResolvers<void>();
@@ -618,7 +655,7 @@ describe("buildApplication", () => {
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
     expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
-    expect(workflowBuilderBuildVercelOutputMock).toHaveBeenCalledTimes(1);
+    expect(workflowBuilderStageVercelOutputMock).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes eve function output behind a non-Next host service", async () => {

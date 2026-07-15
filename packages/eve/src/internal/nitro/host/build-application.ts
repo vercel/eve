@@ -55,6 +55,14 @@ async function measureBuildPhase<T>(
   return profiler === undefined ? operation() : profiler.measure(name, operation);
 }
 
+async function settleBuildOperation<T>(operation: Promise<T>): Promise<PromiseSettledResult<T>> {
+  const [result] = await Promise.allSettled([operation]);
+  if (result === undefined) {
+    throw new Error("Expected build operation result.");
+  }
+  return result;
+}
+
 function isPathInside(directoryPath: string, candidatePath: string): boolean {
   const relativePath = relative(directoryPath, candidatePath);
   return (
@@ -327,7 +335,7 @@ async function emitVercelWorkflowFunctions(input: {
   });
   const runtime = await readVercelServerRuntime(input.outputDir);
 
-  await builder.buildVercelOutput({
+  await builder.stageVercelOutput({
     flowNitroOutputDir: input.flowNitroOutputDir,
     measure(phase, operation) {
       return measureBuildPhase(input.profiler, `workflow.${phase}`, operation);
@@ -572,15 +580,12 @@ async function buildApplicationInWorkspace(
       preparedHost.compileResult.project.agentRoot,
     ),
   );
-  const nitroSurfaces = await createVercelNitroSurfaces(preparedHost, workspace, profiler);
-
-  try {
-    // Run sandbox prewarm before emitting the workflow functions so a
-    // prewarm failure aborts the build before we spend time bundling either
-    // Vercel function surface. Both Nitro candidates are cheap to create and
-    // can then bundle concurrently after prewarm succeeds.
-    if (!options.skipVercelSandboxPrewarm) {
-      await measureBuildPhase(profiler, "sandbox.prewarm", () =>
+  // These operations share no mutable output, and publication still waits for
+  // all of them so a prewarm failure cannot replace the last-good build.
+  const nitroSurfacesPromise = createVercelNitroSurfaces(preparedHost, workspace, profiler);
+  const sandboxPrewarmPromise = options.skipVercelSandboxPrewarm
+    ? Promise.resolve(false)
+    : measureBuildPhase(profiler, "sandbox.prewarm", () =>
         runVercelBuildPrewarm({
           appRoot: preparedHost.appRoot,
           compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
@@ -597,8 +602,29 @@ async function buildApplicationInWorkspace(
           },
         }),
       );
+  const sandboxPrewarmResultPromise = settleBuildOperation(sandboxPrewarmPromise);
+  let nitroSurfaces: VercelNitroSurfaces;
+
+  try {
+    nitroSurfaces = await nitroSurfacesPromise;
+  } catch (error) {
+    await sandboxPrewarmResultPromise;
+    throw error;
+  }
+
+  try {
+    const [nitroBuildResult, sandboxPrewarmResult] = await Promise.all([
+      settleBuildOperation(buildVercelNitroSurfaces(nitroSurfaces, profiler)),
+      sandboxPrewarmResultPromise,
+    ]);
+    if (nitroBuildResult.status === "rejected") {
+      throw nitroBuildResult.reason;
     }
-    const flowNitroOutputDir = await buildVercelNitroSurfaces(nitroSurfaces, profiler);
+    if (sandboxPrewarmResult.status === "rejected") {
+      throw sandboxPrewarmResult.reason;
+    }
+
+    const flowNitroOutputDir = nitroBuildResult.value;
     await measureBuildPhase(profiler, "workflow.emit", () =>
       emitVercelWorkflowFunctions({
         agentName: preparedHost.compileResult.manifest.config.name,

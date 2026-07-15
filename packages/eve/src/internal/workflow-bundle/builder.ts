@@ -55,6 +55,13 @@ type VercelWorkflowOutputMeasure = <T>(
   operation: () => Promise<T>,
 ) => Promise<T>;
 
+interface VercelWorkflowOutputOptions {
+  readonly flowNitroOutputDir: string;
+  readonly measure?: VercelWorkflowOutputMeasure;
+  readonly outputDir: string;
+  readonly runtime?: string;
+}
+
 const runUnmeasuredVercelWorkflowOutputPhase = async <T>(
   _phase: VercelWorkflowOutputPhase,
   operation: () => Promise<T>,
@@ -367,14 +374,15 @@ export class WorkflowBundleBuilder {
     return manifestJson;
   }
 
-  async buildVercelOutput(options: {
-    flowNitroOutputDir: string;
-    measure?: VercelWorkflowOutputMeasure;
-    outputDir: string;
-    runtime?: string;
-  }): Promise<void> {
+  async buildVercelOutput(options: VercelWorkflowOutputOptions): Promise<void> {
     const measure = options.measure ?? runUnmeasuredVercelWorkflowOutputPhase;
     await measure("build", () => this.build());
+
+    await this.stageVercelOutput(options);
+  }
+
+  async stageVercelOutput(options: VercelWorkflowOutputOptions): Promise<void> {
+    const measure = options.measure ?? runUnmeasuredVercelWorkflowOutputPhase;
 
     const workflowGeneratedDir = join(
       options.outputDir,
