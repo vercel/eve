@@ -1,5 +1,8 @@
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import {
+  type DurableCompiledArtifactsSource,
+  resolveDurableCompiledArtifactsSource,
+} from "#runtime/durable-compiled-artifacts-source.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -26,7 +29,7 @@ export interface CreateSessionStepResult {
  * the root agent.
  */
 export async function createSessionStep(input: {
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly inheritedLimits?: RunSessionLimits;
   readonly outputSchema?: JsonObject;
@@ -38,7 +41,7 @@ export async function createSessionStep(input: {
   "use step";
 
   const bundle = await getCompiledRuntimeAgentBundle({
-    compiledArtifactsSource: input.compiledArtifactsSource,
+    compiledArtifactsSource: resolveDurableCompiledArtifactsSource(input.compiledArtifactsSource),
     nodeId: input.nodeId,
   });
 

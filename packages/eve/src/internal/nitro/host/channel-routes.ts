@@ -1,4 +1,4 @@
-import type { Nitro, NitroEventHandler } from "nitro/types";
+import type { Nitro } from "nitro/types";
 
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
@@ -12,20 +12,12 @@ import {
   resolvePackageSourceFilePath,
 } from "#internal/application/package.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
-import { replaceDevLiveVirtualModules } from "#internal/nitro/host/dev-live-virtual-modules.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
-// Must stay under `#nitro/virtual/` — the dev bundler's virtual plugin
-// freezes its resolveId filter at config creation, and that prefix is the
-// only pattern under which channel routes added while `eve dev` runs can
-// still resolve (see dev-live-virtual-modules.ts).
 const EVE_CHANNEL_VIRTUAL_ID_PREFIX = "#nitro/virtual/eve-channel/";
 
 interface ChannelRouteNitro {
-  options: Pick<Nitro["options"], "handlers" | "virtual">;
-  routing: {
-    sync(): void;
-  };
+  readonly options: Pick<Nitro["options"], "handlers" | "virtual">;
 }
 
 /**
@@ -112,48 +104,6 @@ export function registerChannelVirtualHandlers(
       route: registration.route,
     });
   }
-}
-
-/**
- * Replaces the currently-mounted eve channel virtual handlers when the route
- * set changes.
- */
-export function syncChannelVirtualHandlers(
-  nitro: ChannelRouteNitro,
-  input: {
-    readonly artifactsConfig: NitroArtifactsConfig;
-    readonly next: readonly NitroChannelRouteRegistration[];
-    readonly previous: readonly NitroChannelRouteRegistration[];
-  },
-): boolean {
-  if (areChannelRouteRegistrationsEqual(input.previous, input.next)) {
-    return false;
-  }
-
-  removeChannelVirtualHandlers(nitro);
-  registerChannelVirtualHandlers(nitro, {
-    artifactsConfig: input.artifactsConfig,
-    registrations: input.next,
-  });
-
-  const channelVirtualEntries: Record<string, string> = {};
-  for (const [virtualId, template] of Object.entries(nitro.options.virtual)) {
-    if (virtualId.startsWith(EVE_CHANNEL_VIRTUAL_ID_PREFIX) && typeof template === "string") {
-      channelVirtualEntries[virtualId] = template;
-    }
-  }
-  const mirrored = replaceDevLiveVirtualModules(nitro, {
-    entries: channelVirtualEntries,
-    prefix: EVE_CHANNEL_VIRTUAL_ID_PREFIX,
-  });
-  if (!mirrored) {
-    console.warn(
-      "[eve:dev] channel routes changed but the dev bundler's virtual-module map was not captured; restart `eve dev` to mount the new routes.",
-    );
-  }
-
-  nitro.routing.sync();
-  return true;
 }
 
 function createChannelRouteKey(registration: NitroChannelRouteRegistration): string {
@@ -257,58 +207,4 @@ function addChannelCorsPreflightHandler(
     `  return new Response(null, { status: 204 });`,
     `};`,
   ].join("\n");
-}
-
-function removeChannelVirtualHandlers(nitro: Pick<ChannelRouteNitro, "options">): void {
-  for (let index = nitro.options.handlers.length - 1; index >= 0; index -= 1) {
-    const handler = nitro.options.handlers[index];
-    if (handler !== undefined && isChannelVirtualHandler(handler)) {
-      nitro.options.handlers.splice(index, 1);
-    }
-  }
-
-  for (const virtualId of Object.keys(nitro.options.virtual)) {
-    if (virtualId.startsWith(EVE_CHANNEL_VIRTUAL_ID_PREFIX)) {
-      delete nitro.options.virtual[virtualId];
-    }
-  }
-}
-
-function isChannelVirtualHandler(handler: NitroEventHandler): boolean {
-  return handler.handler.startsWith(EVE_CHANNEL_VIRTUAL_ID_PREFIX);
-}
-
-function areChannelRouteRegistrationsEqual(
-  left: readonly NitroChannelRouteRegistration[],
-  right: readonly NitroChannelRouteRegistration[],
-): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.length; index += 1) {
-    const leftRegistration = left[index];
-    const rightRegistration = right[index];
-
-    if (leftRegistration === undefined || rightRegistration === undefined) {
-      return false;
-    }
-
-    if (
-      leftRegistration.method !== rightRegistration.method ||
-      leftRegistration.route !== rightRegistration.route ||
-      !areChannelCorsOptionsEqual(leftRegistration.cors, rightRegistration.cors)
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function areChannelCorsOptionsEqual(
-  left: NormalizedChannelCorsOptions | undefined,
-  right: NormalizedChannelCorsOptions | undefined,
-): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }

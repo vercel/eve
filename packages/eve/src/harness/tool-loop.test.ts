@@ -6726,6 +6726,99 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("keeps channel context after the approval-response model call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Approved.", role: "assistant" }] },
+      text: "Approved.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const readGenerateMessages = (index: number) => {
+      const agent = vi.mocked(ToolLoopAgent).mock.results[index]?.value;
+      if (agent === undefined) {
+        throw new Error(`ToolLoopAgent mock did not return instance ${String(index)}.`);
+      }
+      const call = vi.mocked(agent.generate).mock.calls[0]?.[0];
+      if (call === undefined) {
+        throw new Error(`ToolLoopAgent instance ${String(index)} did not generate.`);
+      }
+      return call.messages;
+    };
+
+    const readPreparedMessages = async (index: number) => {
+      const settings = vi.mocked(ToolLoopAgent).mock.calls[index]?.[0];
+      if (settings === undefined) {
+        throw new Error(`ToolLoopAgent mock did not receive settings ${String(index)}.`);
+      }
+      const messages = readGenerateMessages(index);
+      const prepareStep = getPrepareStep<ModelMessage[], { messages?: ModelMessage[] }>(
+        settings.prepareStep,
+      );
+      const prepared = await prepareStep({
+        context: undefined,
+        messages,
+        model: undefined,
+        stepNumber: 0,
+        steps: [],
+      });
+      return prepared.messages ?? [];
+    };
+
+    const config = createTestConfig("conversation", undefined, {
+      resolveModel: vi.fn().mockResolvedValue(
+        new MockLanguageModelV3({
+          modelId: "claude-sonnet-4-5",
+          provider: "anthropic.messages",
+        }),
+      ),
+      tools: new Map([
+        [
+          "bash",
+          {
+            description: "Run shell commands",
+            execute: vi.fn().mockResolvedValue("ok"),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "bash",
+          },
+        ],
+      ]),
+    });
+    const harness = createToolLoopHarness(config);
+    const context = "<linear_context>issue metadata</linear_context>";
+
+    const firstResult = await harness(createPendingBashApprovalSession(), {
+      context: [context],
+      inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
+    });
+
+    const firstMessages = readGenerateMessages(0);
+    expect(typeof firstResult.next).toBe("function");
+    expect(firstMessages.at(-1)?.role).toBe("tool");
+    expect(firstMessages).not.toContainEqual({ content: context, role: "user" });
+    expect((await readPreparedMessages(0)).at(-1)).toMatchObject({
+      providerOptions: {
+        anthropic: { cacheControl: { type: "ephemeral" } },
+      },
+      role: "tool",
+    });
+
+    const secondResult = await harness(firstResult.session);
+
+    const secondMessages = readGenerateMessages(1);
+    expect(secondResult.next).toBeNull();
+    expect(secondMessages.slice(0, firstMessages.length)).toEqual(firstMessages);
+    expect(secondMessages.at(-1)).toEqual({ content: context, role: "user" });
+    expect((await readPreparedMessages(1)).at(-1)).toMatchObject({
+      content: context,
+      providerOptions: {
+        anthropic: { cacheControl: { type: "ephemeral" } },
+      },
+      role: "user",
+    });
+  });
+
   it("deferred message lands as last non-system message after explicit approval denial", async () => {
     // Step 1: pending approval + user sends a follow-up message. The approval
     // remains pending and the message is deferred. Step 2: the user denies the

@@ -1,18 +1,17 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash } from "node:crypto";
-import { watch, type FSWatcher } from "node:fs";
+import { watch } from "node:fs";
 import {
   lstat,
   mkdir,
   readFile,
   readdir,
   readlink,
-  realpath,
   rename,
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
@@ -320,50 +319,32 @@ async function observeConcurrentBuildWorkspaces(input: {
   });
 }
 
-async function watchStableDevBuildSurfaces(appRoot: string): Promise<{
+async function watchActiveDevHostWorkspace(appRoot: string): Promise<{
   readonly events: readonly string[];
+  readonly initialHash: string;
+  readonly name: string;
+  readonly path: string;
   close(): void;
 }> {
-  const installedEveRoot = await realpath(join(appRoot, "node_modules", "eve"));
-  const candidates = [
-    join(appRoot, ".eve", "compile"),
-    join(appRoot, ".eve", "host"),
-    join(appRoot, ".eve", "nitro"),
-    join(installedEveRoot, ".eve", "workflow-cache"),
-  ];
-  const paths: string[] = [];
-  const missingPaths: string[] = [];
-  for (const path of candidates) {
-    try {
-      if ((await lstat(path)).isDirectory()) {
-        paths.push(path);
-      }
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-        missingPaths.push(path);
-      } else {
-        throw error;
-      }
-    }
-  }
-  if (missingPaths.length > 0) {
-    throw new Error(
-      `Expected eve dev to prepare every stable build surface before readiness:\n${missingPaths.join("\n")}`,
-    );
-  }
-  const events: string[] = [];
-  const watchers: FSWatcher[] = paths.map((path) =>
-    watch(path, { recursive: true }, (eventType, filename) => {
-      events.push(`${relative(appRoot, path)}:${eventType}:${filename?.toString() ?? ""}`);
-    }),
+  const devHostsRoot = join(appRoot, ".eve", "dev-hosts");
+  const workspaces = (await readdir(devHostsRoot, { withFileTypes: true })).filter((entry) =>
+    entry.isDirectory(),
   );
+  expect(workspaces.map((entry) => entry.name)).toHaveLength(1);
+  const name = workspaces[0]!.name;
+  const path = join(devHostsRoot, name);
+  const events: string[] = [];
+  const watcher = watch(path, { recursive: true }, (eventType, filename) => {
+    events.push(`${eventType}:${filename?.toString() ?? ""}`);
+  });
 
   return {
     events,
+    initialHash: await hashPath(path),
+    name,
+    path,
     close() {
-      for (const watcher of watchers) {
-        watcher.close();
-      }
+      watcher.close();
     },
   };
 }
@@ -453,11 +434,11 @@ describe("production build isolation", () => {
       const processes: RunningProcess[] = [];
       let continueProbing = false;
       let healthProbe: Promise<number> | undefined;
-      let stableSurfaceWatcher: Awaited<ReturnType<typeof watchStableDevBuildSurfaces>> | undefined;
+      let devHostWatcher: Awaited<ReturnType<typeof watchActiveDevHostWorkspace>> | undefined;
 
       try {
         await expectHealthy(server);
-        stableSurfaceWatcher = await watchStableDevBuildSurfaces(app.appRoot);
+        devHostWatcher = await watchActiveDevHostWorkspace(app.appRoot);
         const builds = [
           startEveProcess({ appRoot: app.appRoot, args: ["build"] }),
           startEveProcess({ appRoot: app.appRoot, args: ["build"] }),
@@ -488,19 +469,25 @@ describe("production build isolation", () => {
         ]);
         continueProbing = false;
         const healthChecks = await healthProbe;
-        stableSurfaceWatcher.close();
+        devHostWatcher.close();
 
         expect(workspaces).toHaveLength(2);
         expect(results.map((result) => result.code)).toEqual([0, 0]);
         expect(results.map((result) => result.signal)).toEqual([null, null]);
         expect(healthChecks).toBeGreaterThan(0);
-        expect(stableSurfaceWatcher.events).toEqual([]);
+        expect(devHostWatcher.events).toEqual([]);
+        expect(await hashPath(devHostWatcher.path)).toBe(devHostWatcher.initialHash);
+        expect(
+          (await readdir(join(app.appRoot, ".eve", "dev-hosts"), { withFileTypes: true }))
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name),
+        ).toEqual([devHostWatcher.name]);
         expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
         await expectHealthy(server);
       } finally {
         continueProbing = false;
         await healthProbe?.catch(() => undefined);
-        stableSurfaceWatcher?.close();
+        devHostWatcher?.close();
         await Promise.all(processes.map((processHandle) => processHandle.stop()));
         await server.stop();
       }

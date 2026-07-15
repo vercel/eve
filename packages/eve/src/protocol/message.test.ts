@@ -12,6 +12,7 @@ import {
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
+  createTurnCancelledEvent,
   encodeMessageStreamEvent,
   timestampHandleMessageStreamEvent,
 } from "#protocol/message.js";
@@ -29,6 +30,13 @@ describe("message stream protocol", () => {
         wait: "next-user-message",
       },
       type: "session.waiting",
+    });
+  });
+
+  it("creates turn.cancelled events", () => {
+    expect(createTurnCancelledEvent({ sequence: 2, turnId: "turn_2" })).toEqual({
+      data: { sequence: 2, turnId: "turn_2" },
+      type: "turn.cancelled",
     });
   });
 

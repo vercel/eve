@@ -228,6 +228,7 @@ export interface ChannelEvents<TCtx = void> {
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
   readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
+  readonly "turn.cancelled"?: ChannelEventHandler<"turn.cancelled", TCtx>;
   readonly "session.failed"?: ChannelSessionFailedHandler<TCtx>;
   readonly "session.completed"?: ChannelEventHandler<"session.completed", TCtx>;
   readonly "session.waiting"?: ChannelEventHandler<"session.waiting", TCtx>;
@@ -317,6 +318,29 @@ export function defineChannel<
   return compiled;
 }
 
+// The Record type fails to compile if this map drifts from the ChannelEvents
+// keys in either direction.
+const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  "turn.started": null,
+  "actions.requested": null,
+  "action.result": null,
+  "message.completed": null,
+  "message.appended": null,
+  "reasoning.appended": null,
+  "reasoning.completed": null,
+  "input.requested": null,
+  "turn.failed": null,
+  "turn.completed": null,
+  "turn.cancelled": null,
+  "session.failed": null,
+  "session.completed": null,
+  "session.waiting": null,
+  "authorization.required": null,
+  "authorization.completed": null,
+};
+
+const eventTypes = Object.keys(channelEventTypes) as readonly (keyof ChannelEvents)[];
+
 function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<string, unknown>>(
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,
 ): ChannelAdapter<any> {
@@ -329,24 +353,6 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
-
-  const eventTypes = [
-    "turn.started",
-    "actions.requested",
-    "action.result",
-    "message.completed",
-    "message.appended",
-    "reasoning.appended",
-    "reasoning.completed",
-    "input.requested",
-    "turn.failed",
-    "turn.completed",
-    "session.failed",
-    "session.completed",
-    "session.waiting",
-    "authorization.required",
-    "authorization.completed",
-  ] as const;
 
   const events = definition.events;
   for (const eventType of eventTypes) {

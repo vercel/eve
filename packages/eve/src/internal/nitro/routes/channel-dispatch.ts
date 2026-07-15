@@ -9,6 +9,8 @@ import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createSendFn } from "#channel/send.js";
 import { createGetSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import { attachAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
@@ -167,7 +169,7 @@ function buildRouteArgs(
   config: NitroArtifactsConfig,
 ): BuiltRouteArgs {
   const requestId = readVercelRequestId(event.req.headers);
-  const requestIp = extractSocketIp(event);
+  const requestIp = extractRequestIp(event, config);
   const backgroundTasks: Promise<unknown>[] = [];
   const rawParams = (event.context.params as Record<string, string>) ?? {};
   const params: Record<string, string> = {};
@@ -268,6 +270,21 @@ function flushBackgroundTasks(
       }
     }),
   );
+}
+
+function extractRequestIp(event: H3Event, config: NitroArtifactsConfig): string | null {
+  if (config.kind === "development") {
+    // In the proxied dev topology the socket peer is the parent's loopback
+    // hop; the original client address arrives as parent-signed metadata.
+    const trusted = readTrustedDevelopmentClientAddress(
+      event.req.headers,
+      process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],
+    );
+    if (trusted !== undefined) {
+      return trusted;
+    }
+  }
+  return extractSocketIp(event);
 }
 
 function extractSocketIp(event: H3Event): string | null {

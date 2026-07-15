@@ -27,6 +27,7 @@ import type {
   NitroArtifactsConfig,
 } from "#internal/nitro/routes/runtime-artifacts.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
+import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import {
   computeChannelRouteRegistrations,
   registerChannelVirtualHandlers,
@@ -369,8 +370,7 @@ async function registerWorkflowRoute(
 
 /**
  * Wires eve's package-owned app, channel, workflow inspection, dev-control,
- * and Workflow SDK endpoints into the watch-mode Nitro host, rebuilding
- * workflow bundles on reload.
+ * and Workflow SDK endpoints into one development Nitro candidate.
  */
 export async function configureDevelopmentNitroRoutes(
   nitro: Nitro,
@@ -385,8 +385,6 @@ export async function configureDevelopmentNitroRoutes(
     rootDir: resolvePackageRoot(),
     watch: true,
   });
-  // Overlapping `build:before` and `dev:reload` syncs are serialized by
-  // `builder.build`'s per-output-directory queue.
   const syncWorkflowArtifacts = async () => {
     await builder.build({
       nitroStepOutfile: join(workflowBuildDirectory, "steps.mjs"),
@@ -395,18 +393,24 @@ export async function configureDevelopmentNitroRoutes(
   };
 
   await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
-  nitro.hooks.hook("dev:reload", syncWorkflowArtifacts);
 
   const artifactsConfig = createDevelopmentNitroArtifactsConfig({
     appRoot: preparedHost.appRoot,
+    configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
   });
   registerApplicationRoutes(nitro, preparedHost, artifactsConfig);
   registerDevelopmentControlRoutes(nitro, artifactsConfig);
 
   const workflowBundlePath = join(workflowBuildDirectory, "workflows.mjs");
-  await registerWorkflowRoute(nitro, preparedHost, workflowBundlePath, [
-    createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath),
-  ]);
+  const directHandlers: WorkflowDirectHandlerEntry[] = [];
+  if (
+    !usesParentDevelopmentWorkflowWorld(
+      preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
+    )
+  ) {
+    directHandlers.push(createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath));
+  }
+  await registerWorkflowRoute(nitro, preparedHost, workflowBundlePath, directHandlers);
   nitro.routing.sync();
 }
 

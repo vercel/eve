@@ -1,18 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { translations } from "@/geistdocs";
-import { type Resource, resources, type ResourceKind } from "@/lib/resources/data";
+import { type Resource, resources } from "@/lib/resources/data";
 
-const title = "Resources";
-const description = "Guides, templates, and examples to help you build with eve.";
-
-const kindClassName: Record<ResourceKind, string> = {
-  Community: "border-transparent bg-gray-300 text-gray-1000",
-  Example: "border-transparent bg-gray-300 text-gray-1000",
-  Guide: "border-transparent bg-gray-300 text-gray-1000",
-  Reference: "border-transparent bg-gray-300 text-gray-1000",
-  Template: "border-transparent bg-gray-300 text-gray-1000",
-};
+const title = "Templates";
+const description = "Templates for building and deploying eve agents.";
 
 export const metadata: Metadata = {
   title,
@@ -27,10 +19,8 @@ const ResourceCard = ({ resource }: { resource: Resource }) => {
     "flex h-full flex-col gap-3 rounded-xl border border-gray-alpha-400 bg-background-100 p-6 no-underline shadow-none transition-colors hover:bg-gray-100 dark:bg-gray-100 dark:hover:bg-gray-200";
   const content = (
     <>
-      <span
-        className={`inline-flex w-fit shrink-0 items-center justify-center rounded-full border px-2 py-0.5 font-medium text-xs ${kindClassName[resource.kind]}`}
-      >
-        {resource.kind}
+      <span className="inline-flex w-fit shrink-0 items-center justify-center rounded-full border border-transparent bg-gray-300 px-2 py-0.5 font-medium text-gray-1000 text-xs">
+        Template
       </span>
       <h2 className="line-clamp-2 text-balance font-medium text-base text-gray-1000 leading-snug">
         {resource.title}
@@ -54,7 +44,7 @@ const ResourceCard = ({ resource }: { resource: Resource }) => {
   );
 };
 
-const ResourcesPage = () => (
+const TemplatesPage = () => (
   <main className="mx-auto w-full max-w-5xl px-4 pt-16 pb-16 sm:pt-24">
     <header className="space-y-4 pb-8">
       <h1 className="text-balance font-semibold text-[40px] text-gray-1000 leading-[1.1] tracking-tight sm:text-5xl">
@@ -70,4 +60,4 @@ const ResourcesPage = () => (
   </main>
 );
 
-export default ResourcesPage;
+export default TemplatesPage;

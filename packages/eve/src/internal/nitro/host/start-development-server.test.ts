@@ -1,6 +1,3 @@
-import { EventEmitter } from "node:events";
-import type { IncomingMessage } from "node:http";
-import type { Socket } from "node:net";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +18,11 @@ const mocks = vi.hoisted(() => {
     flush: vi.fn(async () => undefined),
     rebuild: vi.fn(async () => undefined),
   };
+  const mocksWorldInstance = {
+    close: vi.fn(async () => undefined),
+    handleRequest: vi.fn(async () => undefined),
+    start: vi.fn(async () => undefined),
+  };
   const listenerServer = {
     close: vi.fn(async () => undefined),
     ready: vi.fn(async () => undefined),
@@ -28,8 +30,13 @@ const mocks = vi.hoisted(() => {
   };
   const devServer = {
     close: vi.fn(async () => undefined),
+    discardCandidate: vi.fn(async () => undefined),
     listen: vi.fn(() => listenerServer),
+    replaceWorker: vi.fn(async () => undefined),
+    setClientAddressSecret: vi.fn(),
+    setControlHandler: vi.fn(),
     upgrade: vi.fn(async (_req: unknown, _socket: unknown, _head: unknown) => undefined),
+    waitForActiveRunner: vi.fn(async () => undefined),
   };
   const files = new Map<string, string>();
   const devHandlers: Nitro["options"]["devHandlers"] = [];
@@ -49,9 +56,20 @@ const mocks = vi.hoisted(() => {
 
   return {
     authoredSourceWatcher,
-    buildNitro: vi.fn(async () => undefined),
+    buildDevelopmentHostCandidate: vi.fn(async (input: { nitro: { close(): Promise<void> } }) => {
+      await input.nitro.close();
+      return {
+        entry: "/tmp/eve-test/.eve/dev-hosts/test/output/server/index.mjs",
+        workerData: {},
+      };
+    }),
+    createDevelopmentAuthoredRebuildCoordinator: vi.fn(async () => ({
+      rebuild: vi.fn(),
+    })),
     createDevelopmentApplicationNitro: vi.fn(async () => nitro),
-    createDevServer: vi.fn(() => devServer),
+    createDevServer: vi.fn(function createDevServerMock() {
+      return devServer;
+    }),
     devServer,
     fetch: vi.fn(async () => new Response(null, { status: 200 })),
     files,
@@ -59,8 +77,32 @@ const mocks = vi.hoisted(() => {
     listenerServer,
     mkdir: vi.fn(async () => undefined),
     nitro,
-    prepareDevelopmentApplicationHost: vi.fn(async () => ({ appRoot: "/tmp/eve-test" })),
-    prepareNitro: vi.fn(async () => undefined),
+    prepareDevelopmentApplicationHost: vi.fn(async () => ({
+      appRoot: "/tmp/eve-test",
+      compileResult: {
+        manifest: { config: { name: "test-agent" } },
+      },
+      generation: {
+        fingerprint: "test",
+        runtimeAppRoot: "/tmp/eve-test/.eve/dev-runtime/snapshots/test/source/app",
+        snapshotRoot: "/tmp/eve-test/.eve/dev-runtime/snapshots/test",
+        snapshotSourceRoot: "/tmp/eve-test/.eve/dev-runtime/snapshots/test/source",
+        sourceRoot: "/tmp/eve-test",
+      },
+      workspace: {
+        artifactsDir: "/tmp/eve-test/.eve/dev-hosts/test/artifacts",
+        compilerArtifactsDir: "/tmp/eve-test/.eve/dev-hosts/test/compiler",
+        nitroBuildDir: "/tmp/eve-test/.eve/dev-hosts/test/nitro",
+        nitroOutputDir: "/tmp/eve-test/.eve/dev-hosts/test/output",
+        rootDir: "/tmp/eve-test/.eve/dev-hosts/test",
+        workflowBuildDir: "/tmp/eve-test/.eve/dev-hosts/test/workflow",
+      },
+    })),
+    activateDevelopmentGeneration: vi.fn(async () => undefined),
+    createParentDevelopmentWorkflowWorld: vi.fn(() => mocksWorldInstance),
+    worldInstance: mocksWorldInstance,
+    discardDevelopmentGeneration: vi.fn(async () => undefined),
+    removeDevelopmentHostWorkspace: vi.fn(async () => undefined),
     readFile: vi.fn(async (path: string) => {
       if (
         path.endsWith("/.eve/dev-server-state.v1.json") &&
@@ -83,7 +125,6 @@ const mocks = vi.hoisted(() => {
     startDevelopmentSandboxPrewarmInBackground: vi.fn(() => undefined),
     pruneLocalSandboxTemplatesInBackground: vi.fn(() => undefined),
     stopDevelopmentSandboxResources: vi.fn(async () => undefined),
-    pruneDevelopmentRuntimeArtifactsSnapshotsInBackground: vi.fn(() => undefined),
     resolveDiscoveryProject: vi.fn(async () => ({
       agentRoot: "/tmp/eve-test/agent",
       appRoot: "/tmp/eve-test",
@@ -114,10 +155,29 @@ vi.mock("node:fs/promises", () => ({
   writeFile: mocks.writeFile,
 }));
 
-vi.mock("nitro/builder", () => ({
-  build: mocks.buildNitro,
-  createDevServer: mocks.createDevServer,
-  prepare: mocks.prepareNitro,
+vi.mock("./drained-nitro-dev-server.js", () => ({
+  DrainedNitroDevServer: mocks.createDevServer,
+}));
+
+vi.mock("./dev-host-candidate.js", () => ({
+  buildDevelopmentHostCandidate: mocks.buildDevelopmentHostCandidate,
+}));
+
+vi.mock("./dev-authored-rebuild-coordinator.js", () => ({
+  createDevelopmentAuthoredRebuildCoordinator: mocks.createDevelopmentAuthoredRebuildCoordinator,
+}));
+
+vi.mock("./dev-host-workspace.js", () => ({
+  removeDevelopmentHostWorkspace: mocks.removeDevelopmentHostWorkspace,
+}));
+
+vi.mock("#internal/workflow/development-world-server.js", () => ({
+  createParentDevelopmentWorkflowWorld: mocks.createParentDevelopmentWorkflowWorld,
+}));
+
+vi.mock("#internal/nitro/development-generation.js", () => ({
+  activateDevelopmentGeneration: mocks.activateDevelopmentGeneration,
+  discardDevelopmentGeneration: mocks.discardDevelopmentGeneration,
 }));
 
 vi.mock("./create-application-nitro.js", () => ({
@@ -153,41 +213,6 @@ vi.mock("#execution/sandbox/bindings/local.js", async (importOriginal) => {
     stopDevelopmentSandboxResources: mocks.stopDevelopmentSandboxResources,
   };
 });
-
-vi.mock("#internal/nitro/dev-runtime-artifacts.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("#internal/nitro/dev-runtime-artifacts.js")>();
-
-  return {
-    ...actual,
-    pruneDevelopmentRuntimeArtifactsSnapshotsInBackground:
-      mocks.pruneDevelopmentRuntimeArtifactsSnapshotsInBackground,
-  };
-});
-
-function createRequest(): IncomingMessage {
-  return {
-    headers: {
-      upgrade: "websocket",
-    },
-    method: "GET",
-  } as IncomingMessage;
-}
-
-function createSocket(): Socket {
-  const socket = new EventEmitter() as Socket;
-  Object.defineProperty(socket, "destroyed", {
-    configurable: true,
-    value: false,
-  });
-  socket.destroy = vi.fn(() => {
-    Object.defineProperty(socket, "destroyed", {
-      configurable: true,
-      value: true,
-    });
-    return socket;
-  });
-  return socket;
-}
 
 const developmentServerStatePath = join("/tmp/eve-test", ".eve", "dev-server-state.v1.json");
 
@@ -253,15 +278,6 @@ async function loadStartDevelopmentServer(): Promise<
     const handle = await server.start();
     return Object.assign({ ...handle }, { close: () => server.close() });
   };
-}
-
-async function startServer(): Promise<{
-  close(): Promise<void>;
-  url: string;
-}> {
-  const startDevelopmentServer = await loadStartDevelopmentServer();
-
-  return await startDevelopmentServer("/tmp/eve-test");
 }
 
 describe("normalizeDevelopmentServerClientUrl", () => {
@@ -369,9 +385,6 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test");
-    expect(mocks.pruneDevelopmentRuntimeArtifactsSnapshotsInBackground).toHaveBeenCalledWith(
-      "/tmp/eve-test",
-    );
     expect(mocks.startDevelopmentSandboxPrewarmInBackground).toHaveBeenCalledWith({
       appRoot: "/tmp/eve-test",
       compiledArtifactsSource: {
@@ -381,6 +394,12 @@ describe("createDevelopmentServer", () => {
       },
     });
     expect(mocks.pruneLocalSandboxTemplatesInBackground).toHaveBeenCalledWith("/tmp/eve-test");
+    expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledWith(
+      expect.objectContaining({ agentName: "test-agent", appRoot: "/tmp/eve-test" }),
+    );
+    expect(mocks.worldInstance.start).toHaveBeenCalledOnce();
+    expect(process.env.EVE_DEV_WORKFLOW_TRANSPORT_SECRET).toEqual(expect.any(String));
+    expect(process.env.EVE_DEV_WORKER_APP_ROOT).toBe("/tmp/eve-test");
     expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBe("http://127.0.0.1:42123");
     expect(process.env.PORT).toBe("42123");
 
@@ -393,7 +412,57 @@ describe("createDevelopmentServer", () => {
     });
     expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBeUndefined();
     expect(process.env.PORT).toBeUndefined();
+    expect(process.env.EVE_DEV_WORKFLOW_TRANSPORT_SECRET).toBeUndefined();
+    expect(process.env.EVE_DEV_WORKER_APP_ROOT).toBeUndefined();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
+    expect(mocks.worldInstance.close).toHaveBeenCalledOnce();
+  });
+
+  it("serves the parent World for an explicitly local Workflow World", async () => {
+    const preparedHost = await mocks.prepareDevelopmentApplicationHost();
+    mocks.prepareDevelopmentApplicationHost.mockClear();
+    mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce({
+      ...preparedHost,
+      compileResult: {
+        manifest: {
+          config: {
+            experimental: { workflow: { world: "local" } },
+            name: "test-agent",
+          },
+        },
+      },
+    } as never);
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    // Explicit "local" resolves to the same vendored world as an absent
+    // config; the worker plugin wires the parent RPC client for it, so the
+    // parent must create the World that serves those calls.
+    expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledOnce();
+    await server.close();
+  });
+
+  it("keeps an explicitly configured Workflow World inside the worker", async () => {
+    const preparedHost = await mocks.prepareDevelopmentApplicationHost();
+    mocks.prepareDevelopmentApplicationHost.mockClear();
+    mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce({
+      ...preparedHost,
+      compileResult: {
+        manifest: {
+          config: {
+            experimental: { workflow: { world: "@workflow/world-postgres" } },
+            name: "test-agent",
+          },
+        },
+      },
+    } as never);
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.createParentDevelopmentWorkflowWorld).not.toHaveBeenCalled();
+    await server.close();
   });
 
   it("uses Eve's default port when no port is requested", async () => {
@@ -407,7 +476,6 @@ describe("createDevelopmentServer", () => {
     expect(mocks.devServer.listen).toHaveBeenCalledWith({
       hostname: "127.0.0.1",
       port: 2000,
-      silent: true,
     });
 
     await server.close();
@@ -448,12 +516,10 @@ describe("createDevelopmentServer", () => {
     expect(mocks.devServer.listen).toHaveBeenNthCalledWith(1, {
       hostname: "127.0.0.1",
       port: 2000,
-      silent: true,
     });
     expect(mocks.devServer.listen).toHaveBeenNthCalledWith(2, {
       hostname: "127.0.0.1",
       port: 2001,
-      silent: true,
     });
     expect(server.url).toBe("http://127.0.0.1:2001/");
 
@@ -473,27 +539,44 @@ describe("createDevelopmentServer", () => {
     expect(mocks.files.has(developmentServerStatePath)).toBe(false);
   });
 
-  async function callDevHandler(
-    handler: Nitro["options"]["devHandlers"][number]["handler"],
-    url: string,
-  ): Promise<unknown> {
-    if (typeof handler !== "function") throw new Error("Expected a callable dev handler.");
-    return await handler({
-      node: { req: { url } },
-    } as Parameters<typeof handler>[0]);
+  async function callControlHandler(url: string): Promise<Response | undefined> {
+    const call = mocks.devServer.setControlHandler.mock.calls.at(-1);
+    const handler = call?.[0] as ((request: Request) => Promise<Response | undefined>) | undefined;
+    if (handler === undefined) throw new Error("Missing runtime rebuild handler.");
+    return await handler(new Request(url));
   }
+
+  it("serves runtime artifact state from the parent-owned control handler", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+    const response = await callControlHandler("http://localhost/eve/v1/dev/runtime-artifacts");
+
+    if (!(response instanceof Response)) throw new Error("Expected a Response.");
+    await expect(response.json()).resolves.toEqual({ revision: "/tmp/eve-test" });
+    expect(mocks.authoredSourceWatcher.flush).not.toHaveBeenCalled();
+    expect(mocks.authoredSourceWatcher.rebuild).not.toHaveBeenCalled();
+
+    await server.close();
+  });
+
+  it("registers the control handler before the workflow World starts delivering", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    const handlerOrder = mocks.devServer.setControlHandler.mock.invocationCallOrder[0];
+    const startOrder = mocks.worldInstance.start.mock.invocationCallOrder[0];
+    expect(handlerOrder).toBeDefined();
+    expect(startOrder).toBeDefined();
+    expect(handlerOrder ?? Infinity).toBeLessThan(startOrder ?? 0);
+
+    await server.close();
+  });
 
   it("registers a host-owned runtime rebuild handler that forces the live watcher", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     const server = await startDevelopmentServer("/tmp/eve-test");
-    const rebuildHandler = mocks.nitro.options.devHandlers.find(
-      (handler) => handler.route === "/eve/v1/dev/runtime-artifacts/rebuild",
-    );
-    if (rebuildHandler === undefined) throw new Error("Missing runtime rebuild handler.");
-
-    const response = await callDevHandler(
-      rebuildHandler.handler,
-      "/eve/v1/dev/runtime-artifacts/rebuild?force=1",
+    const response = await callControlHandler(
+      "http://localhost/eve/v1/dev/runtime-artifacts/rebuild?force=1",
     );
 
     expect(mocks.authoredSourceWatcher.rebuild).toHaveBeenCalledOnce();
@@ -507,12 +590,7 @@ describe("createDevelopmentServer", () => {
   it("registers a host-owned runtime rebuild handler that flushes queued changes", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     const server = await startDevelopmentServer("/tmp/eve-test");
-    const rebuildHandler = mocks.nitro.options.devHandlers.find(
-      (handler) => handler.route === "/eve/v1/dev/runtime-artifacts/rebuild",
-    );
-    if (rebuildHandler === undefined) throw new Error("Missing runtime rebuild handler.");
-
-    await callDevHandler(rebuildHandler.handler, "/eve/v1/dev/runtime-artifacts/rebuild");
+    await callControlHandler("http://localhost/eve/v1/dev/runtime-artifacts/rebuild");
 
     expect(mocks.authoredSourceWatcher.flush).toHaveBeenCalledOnce();
     expect(mocks.authoredSourceWatcher.rebuild).not.toHaveBeenCalled();
@@ -820,77 +898,5 @@ describe("createDevelopmentServer", () => {
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow(
       /Invalid PORT environment variable/,
     );
-  });
-
-  it("swallows websocket upgrade rejections from the Nitro dev server", async () => {
-    const originalUpgrade = vi.fn(
-      async (_req: unknown, _socket: unknown, _head: unknown): Promise<undefined> => {
-        throw new Error("Upstream server did not upgrade the connection");
-      },
-    );
-    Object.assign(mocks.nitro.options.features, { websocket: true });
-    mocks.devServer.upgrade = originalUpgrade;
-
-    const server = await startServer();
-
-    try {
-      const socket = createSocket();
-      await expect(
-        mocks.devServer.upgrade(createRequest(), socket, Buffer.alloc(0)),
-      ).resolves.toBeUndefined();
-
-      expect(originalUpgrade).toHaveBeenCalledTimes(1);
-      expect(socket.destroy).toHaveBeenCalledTimes(1);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("rejects websocket upgrades before Nitro proxying when websocket support is disabled", async () => {
-    const originalUpgrade = vi.fn(
-      async (_req: unknown, _socket: unknown, _head: unknown): Promise<undefined> => undefined,
-    );
-    mocks.devServer.upgrade = originalUpgrade;
-
-    const server = await startServer();
-
-    try {
-      const socket = createSocket();
-      await expect(
-        mocks.devServer.upgrade(createRequest(), socket, Buffer.alloc(0)),
-      ).resolves.toBeUndefined();
-
-      expect(originalUpgrade).not.toHaveBeenCalled();
-      expect(socket.destroy).toHaveBeenCalledTimes(1);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("handles socket errors emitted during websocket upgrade handling", async () => {
-    const originalUpgrade = vi.fn(
-      async (_req: unknown, socket: unknown, _head: unknown): Promise<undefined> => {
-        const upgradeSocket = socket as Socket;
-
-        upgradeSocket.emit("error", new Error("socket failure"));
-        throw new Error("socket failure");
-      },
-    );
-    Object.assign(mocks.nitro.options.features, { websocket: true });
-    mocks.devServer.upgrade = originalUpgrade;
-
-    const server = await startServer();
-
-    try {
-      const socket = createSocket();
-      await expect(
-        mocks.devServer.upgrade(createRequest(), socket, Buffer.alloc(0)),
-      ).resolves.toBeUndefined();
-
-      expect(originalUpgrade).toHaveBeenCalledTimes(1);
-      expect(socket.destroy).toHaveBeenCalledTimes(1);
-    } finally {
-      await server.close();
-    }
   });
 });

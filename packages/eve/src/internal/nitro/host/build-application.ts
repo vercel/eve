@@ -24,6 +24,7 @@ import { normalizeEveVercelFunctionOutput } from "#internal/workflow-bundle/verc
 import { createProductionApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
+import { copyHostMiddlewareFunctions } from "#internal/nitro/host/copy-host-middleware.js";
 import { prepareProductionApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
 import type {
@@ -322,7 +323,10 @@ export async function buildApplication(
   }
 
   const project = await resolveDiscoveryProject(rootDir);
-  const workspace = await createApplicationBuildWorkspace(project.appRoot);
+  const workspace = await createApplicationBuildWorkspace(
+    project.appRoot,
+    options.vercelServiceOutput?.serviceOutputDirectory,
+  );
 
   // A recoverable publication failure leaves the lock journal pointing at
   // staged artifacts inside this workspace; the next build's recovery
@@ -415,6 +419,12 @@ async function buildApplicationInWorkspace(
     if (servicePrefix !== undefined) {
       await normalizeEveVercelFunctionOutput(workspace.publication.output.stagedDir, {
         servicePrefix,
+      });
+    }
+    if (options.vercelServiceOutput !== undefined) {
+      await copyHostMiddlewareFunctions({
+        hostOutputDirectory: options.vercelServiceOutput.hostOutputDirectory,
+        serviceOutputDirectory: workspace.publication.output.stagedDir,
       });
     }
     await emitVercelAgentSummary({

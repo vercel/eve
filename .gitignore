@@ -50,7 +50,6 @@ Thumbs.db
 # Vercel/Temp build output
 .output/
 .eve/
-.workflow-data/
 
 # Geist
 .source

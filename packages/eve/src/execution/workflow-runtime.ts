@@ -15,6 +15,7 @@ import {
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   getRun,
@@ -220,15 +221,12 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
 }
 
 /**
- * Latest-deployment routing only applies on Vercel production: the platform
- * resolves "latest" through the deployment's git branch reference, which
- * only production deployments carry. Preview and CLI deployments have no
- * branch and fail with HTTP 400 ("Source deployment has no git branch"), so
- * they pin workflow runs to their own immutable deployment — which is also
- * the correct isolation semantic for previews.
+ * Local development resolves "latest" to the active promoted generation.
+ * Vercel resolves it only for production deployments; previews and CLI
+ * deployments have no branch reference and remain pinned to themselves.
  */
 function shouldRouteToLatestDeployment(): boolean {
-  return process.env.VERCEL_ENV === "production";
+  return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
 }
 
 function isLatestDeploymentUnsupportedError(error: unknown): boolean {

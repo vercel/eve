@@ -73,7 +73,7 @@ async function requestAgentInfo(appRoot: string, request: Request): Promise<Resp
   return await dispatchChannelRequest(
     createInfoEvent(request),
     INFO_ROUTE_KEY,
-    createDevelopmentNitroArtifactsConfig({ appRoot }),
+    createDevelopmentNitroArtifactsConfig({ configuredWorld: undefined, appRoot }),
   );
 }
 

@@ -23,8 +23,8 @@ import {
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import {
-  createDevelopmentRuntimeArtifactSessionRefresher,
-  type DevelopmentRuntimeArtifactSessionRefresher,
+  createDevelopmentRuntimeArtifactRefresher,
+  type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
@@ -352,8 +352,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   formatTransportError?: (error: unknown) => string;
   /**
    * Local `eve dev` server URL. When present, normal prompts refresh the
-   * active session after HMR so the next prompt uses the latest authored
-   * artifacts; input-response resumes keep the current session.
+   * runtime artifacts after HMR so the next prompt uses the latest authored
+   * artifacts while retaining its logical session.
    */
   serverUrl?: string;
   /** Absolute local application root; omitted for remote `--url` sessions. */
@@ -403,7 +403,7 @@ export class EveTUIRunner {
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #contextSize?: number;
   readonly #formatTransportError: (error: unknown) => string;
-  readonly #runtimeArtifacts?: DevelopmentRuntimeArtifactSessionRefresher;
+  readonly #runtimeArtifacts?: DevelopmentRuntimeArtifactRefresher;
   readonly #serverUrl?: string;
   readonly #appRoot?: string;
   /**
@@ -542,7 +542,7 @@ export class EveTUIRunner {
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
     if (options.serverUrl !== undefined && options.remote === undefined) {
-      this.#runtimeArtifacts = createDevelopmentRuntimeArtifactSessionRefresher({
+      this.#runtimeArtifacts = createDevelopmentRuntimeArtifactRefresher({
         serverUrl: options.serverUrl,
       });
     }
@@ -896,9 +896,8 @@ export class EveTUIRunner {
     }
 
     const prompt = this.#renderer.readPrompt(options);
-    const client = this.#client;
     const runtimeArtifacts = this.#runtimeArtifacts;
-    if (client === undefined || runtimeArtifacts === undefined) {
+    if (runtimeArtifacts === undefined) {
       return await prompt;
     }
 
@@ -912,10 +911,8 @@ export class EveTUIRunner {
 
       refreshing = true;
       try {
-        this.#session = await runtimeArtifacts.refreshIdle({
-          createSession: () => client.session(),
+        await runtimeArtifacts.refreshIdle({
           onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
-          session: this.#session,
         });
       } finally {
         refreshing = false;
@@ -970,14 +967,11 @@ export class EveTUIRunner {
 
     let response: Awaited<ReturnType<ClientSession["send"]>>;
     try {
-      const client = this.#client;
-      if (client !== undefined && this.#runtimeArtifacts !== undefined) {
-        this.#session = await this.#runtimeArtifacts.refresh({
-          createSession: () => client.session(),
+      if (this.#runtimeArtifacts !== undefined) {
+        await this.#runtimeArtifacts.refresh({
           inputResponses: sendInput.inputResponses,
           message: sendInput.message,
           onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
-          session: this.#session,
         });
       }
 
@@ -1196,14 +1190,11 @@ export class EveTUIRunner {
   }
 
   async #refreshConnectionRuntime(): Promise<void> {
-    const client = this.#client;
     const runtimeArtifacts = this.#runtimeArtifacts;
-    if (client === undefined || runtimeArtifacts === undefined) return;
+    if (runtimeArtifacts === undefined) return;
 
-    this.#session = await runtimeArtifacts.refreshAfterSourceChange({
-      createSession: () => client.session(),
+    await runtimeArtifacts.refreshAfterSourceChange({
       onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
-      session: this.#session,
     });
   }
 

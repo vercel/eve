@@ -4,6 +4,7 @@ import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
+import { resolveInternalVercelServiceOutput } from "#cli/vercel-service-output.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
@@ -380,6 +381,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       const buildHost = runtime.buildHost ?? (await loadBuildHost());
       const outputDir = await buildHost(appRoot, {
         skipVercelSandboxPrewarm: options.skipSandboxPrewarm === true,
+        vercelServiceOutput: resolveInternalVercelServiceOutput(appRoot),
       });
       logger.log(
         renderCliTaggedLine(theme, {

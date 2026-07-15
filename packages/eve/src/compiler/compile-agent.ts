@@ -85,13 +85,11 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
 }
 
 /**
- * Compiles an agent for a production build. Artifacts are written to the
- * invocation-owned `writeRoot` (a throwaway build workspace), while the
- * metadata and module map record paths under the stable `publishedRoot`
- * where publication later installs them — so the recorded paths stay
- * relocatable and identical across builds of the same source.
+ * Compiles an agent into a caller-owned workspace. Artifacts are written to
+ * `writeRoot`, while metadata and module maps record paths under the stable
+ * `publishedRoot` where the caller will expose them.
  */
-export async function compileAgentInBuildWorkspace(input: {
+export async function compileAgentInWorkspace(input: {
   readonly artifactLocations: CompilerArtifactLocations;
   readonly startPath: string;
 }): Promise<CompileAgentResult> {

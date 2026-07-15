@@ -1,5 +1,5 @@
 import type { DevelopmentNitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
-import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedule.js";
 
@@ -67,9 +67,9 @@ export async function dispatchScheduleInDev(input: {
     );
   }
 
-  const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot, {
-    moduleMapLoaderPath,
-  });
+  // Resolve the active generation once and reuse it for the task dispatch so
+  // a rebuild between the two loads cannot split them across generations.
+  const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(input.artifactsConfig);
   const schedules = await loadResolvedCompiledSchedules({ compiledArtifactsSource });
   const registrations = createScheduleRegistrations(schedules);
   const registration = registrations.find((candidate) => candidate.scheduleId === input.scheduleId);
@@ -81,8 +81,12 @@ export async function dispatchScheduleInDev(input: {
     );
   }
 
-  const { dispatchScheduleTask } = await import("#internal/nitro/routes/schedule-task.js");
-  const result = await dispatchScheduleTask(registration.taskName, input.artifactsConfig);
+  const { dispatchScheduleTaskFromArtifacts } =
+    await import("#internal/nitro/routes/schedule-task.js");
+  const result = await dispatchScheduleTaskFromArtifacts(
+    registration.taskName,
+    compiledArtifactsSource,
+  );
 
   return {
     scheduleId: result.scheduleId,

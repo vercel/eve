@@ -111,6 +111,7 @@ export type {
   SubagentChildEventStreamEvent,
   SubagentCompletedStreamEvent,
   SubagentStartedStreamEvent,
+  TurnCancelledStreamEvent,
   TurnCompletedStreamEvent,
   TurnFailedStreamEvent,
   TurnStartedStreamEvent,
