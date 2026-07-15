@@ -262,7 +262,7 @@ function connectWorkerToWorld(world: ParentDevelopmentWorkflowWorld, appRoot: st
   process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = SECRET;
   process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = appRoot;
   process.env.WORKFLOW_LOCAL_BASE_URL = "http://eve-dev.local";
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = new Request(input, init);
     const response = await world.handleRequest(request);
     if (response === undefined) {
