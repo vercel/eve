@@ -405,6 +405,27 @@ describe("eve dev local server ownership", () => {
 });
 
 describe("eve build output ownership", () => {
+  it("forwards a profile path relative to the application root and reports it", async () => {
+    const buildHost = vi.fn(async () => "/app/.output");
+    const output: string[] = [];
+    const profilePath = ".eve/build-profiles/notes.json";
+
+    await runCli(
+      ["build", "--profile", profilePath],
+      { error: () => {}, log: (message) => output.push(message) },
+      { buildHost },
+    );
+
+    expect(buildHost).toHaveBeenCalledWith(process.cwd(), {
+      profileOutputPath: resolve(process.cwd(), profilePath),
+      skipVercelSandboxPrewarm: false,
+      vercelServiceOutput: undefined,
+    });
+    expect(output.join("\n")).toContain(
+      `wrote build profile to ${resolve(process.cwd(), profilePath)}`,
+    );
+  });
+
   it("resolves the internal service output directory from the build working directory", async () => {
     const buildHost = vi.fn(async () => "/service/.vercel/output");
     const configuredDirectory = ".eve/vercel-services/eve/.vercel/output";

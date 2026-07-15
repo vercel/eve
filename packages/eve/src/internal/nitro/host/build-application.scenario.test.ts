@@ -5,6 +5,10 @@ import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
+  type ApplicationBuildProfile,
+} from "#internal/application/build-profile.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -231,6 +235,66 @@ describe("buildApplication", () => {
     expect(summary.kind).toBe(VERCEL_EVE_AGENT_SUMMARY_KIND);
     expect(summary.schemaVersion).toBe(VERCEL_EVE_AGENT_SUMMARY_VERSION);
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
+  });
+
+  it("writes a versioned timing and output-size profile outside the published output", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-profile-");
+    const profilePath = join(appRoot, ".eve", "profiles", "build.json");
+
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementationOnce(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    await buildApplication(appRoot, {
+      profileOutputPath: profilePath,
+      skipVercelSandboxPrewarm: false,
+    });
+
+    const profile = JSON.parse(await readFile(profilePath, "utf8")) as ApplicationBuildProfile;
+
+    expect(profile).toMatchObject({
+      kind: "eve-build-profile",
+      schemaVersion: APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
+      target: "local",
+    });
+    expect(profile.durationMs).toBeGreaterThanOrEqual(0);
+    expect(profile.phases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "host.prepare" }),
+        expect.objectContaining({ name: "nitro.all.bundle" }),
+        expect.objectContaining({ name: "output.publish" }),
+        expect.objectContaining({ name: "workspace.remove" }),
+      ]),
+    );
+    expect(profile.phases.every((phase) => phase.durationMs >= 0)).toBe(true);
+    expect(profile.output.files).toBeGreaterThan(0);
+    expect(profile.output.rawBytes).toBeGreaterThan(0);
+    expect(profile.output.gzipBytes).toBeGreaterThan(0);
+    expect(profile.output.functionBundles).toEqual([
+      expect.objectContaining({
+        files: 2,
+        path: "functions/__server.func",
+      }),
+    ]);
+  });
+
+  it("rejects a profile path inside the published output", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-profile-output-");
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    await expect(
+      buildApplication(appRoot, {
+        profileOutputPath: join(appRoot, ".output", "build-profile.json"),
+        skipVercelSandboxPrewarm: false,
+      }),
+    ).rejects.toThrow("must be outside the published output directory");
+
+    expect(prepareProductionApplicationHostMock).not.toHaveBeenCalled();
   });
 
   it("keeps the last-good output when Nitro mutates its target before failing", async () => {
