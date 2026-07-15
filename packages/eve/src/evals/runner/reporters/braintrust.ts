@@ -172,7 +172,7 @@ class BraintrustReporter implements EvalReporter {
       id: result.id,
       input: evaluation?.description ?? "",
       output: result.result.output,
-      error: result.error ?? undefined,
+      error: result.error,
       scores,
       metadata,
       metrics,

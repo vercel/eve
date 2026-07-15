@@ -32,7 +32,10 @@ export async function writeArtifacts(
   const resultsLines = summary.results
     .map((result) => JSON.stringify(buildResultLine(result)))
     .join("\n");
-  await writeFile(join(artifactDir, "results.jsonl"), `${resultsLines}\n`);
+  await writeFile(
+    join(artifactDir, "results.jsonl"),
+    resultsLines.length > 0 ? `${resultsLines}\n` : "",
+  );
 
   await Promise.all(
     summary.results.map(async (result) => {
