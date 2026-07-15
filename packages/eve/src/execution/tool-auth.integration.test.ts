@@ -288,6 +288,57 @@ describe("tool-hosted authorization", () => {
     expect(result.challenges[0]?.hookUrl).toBe(receivedCallbackUrl);
   });
 
+  it("includes the per-agent public route prefix in the callback URL (multi-agent mode)", async () => {
+    let receivedCallbackUrl: string | undefined;
+    const inlineAuth: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "mcp.notion.com/notion" },
+      async getToken(): Promise<TokenResult> {
+        throw requiredError();
+      },
+      async startAuthorization({ callbackUrl }) {
+        receivedCallbackUrl = callbackUrl;
+        return { challenge: { url: "https://idp.example/auth" } };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        return { token: "after-signin" };
+      },
+    };
+    const tool = authoredTool({
+      name: "search_notion",
+      async execute(_input, ctx) {
+        return await ctx.getToken(inlineAuth);
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const previousPrefix = process.env.EVE_PUBLIC_ROUTE_PREFIX;
+    process.env.EVE_PUBLIC_ROUTE_PREFIX = "/eve/agents/researcher";
+    try {
+      const result = await runtime.runAsSession(
+        { sessionId: "session_prefixed_callback" },
+        async () => {
+          seedUserPrincipal();
+          loadContext().set(CallbackBaseUrlKey, "https://app.example");
+          return runtime.executeTool(tool, {});
+        },
+      );
+
+      expect(isAuthorizationSignal(result)).toBe(true);
+      if (!isAuthorizationSignal(result)) throw new Error("expected signal");
+      expect(result.challenges[0]?.hookUrl).toBe(
+        "https://app.example/eve/agents/researcher/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/session_auth%3Aauth",
+      );
+      expect(receivedCallbackUrl).toBe(result.challenges[0]?.hookUrl);
+    } finally {
+      if (previousPrefix === undefined) {
+        delete process.env.EVE_PUBLIC_ROUTE_PREFIX;
+      } else {
+        process.env.EVE_PUBLIC_ROUTE_PREFIX = previousPrefix;
+      }
+    }
+  });
+
   it("parks the turn with a challenge when getToken throws Required", async () => {
     const auth: AuthorizationDefinition = {
       principalType: "user",

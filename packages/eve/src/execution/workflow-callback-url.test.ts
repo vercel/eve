@@ -35,6 +35,15 @@ describe("resolveVercelProductionCallbackBaseUrl", () => {
     );
   });
 
+  it("preserves a per-agent public route prefix folded into the callback path", () => {
+    expect(
+      createWorkflowCallbackUrl(
+        "https://app.example",
+        "/eve/agents/researcher/eve/v1/callback/eve%3Aparent-token",
+      ),
+    ).toBe("https://app.example/eve/agents/researcher/eve/v1/callback/eve%3Aparent-token");
+  });
+
   it("preserves existing callback query params when adding the Vercel bypass query param", () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret");
 

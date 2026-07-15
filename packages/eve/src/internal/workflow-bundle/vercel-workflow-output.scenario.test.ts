@@ -8,6 +8,7 @@ import { resolvePackageRoot } from "#internal/application/package.js";
 import {
   copyNitroFunctionDirectory,
   emitBundledWorkflowFunctionDirectory,
+  normalizeEveVercelFunctionOutput,
   retargetNitroFunctionDirectoryToWorkflowRoute,
 } from "#internal/workflow-bundle/vercel-workflow-output.js";
 
@@ -425,5 +426,60 @@ describe("emitBundledWorkflowFunctionDirectory", () => {
       "function",
     );
     await expect(response.text()).resolves.toBe("function");
+  });
+});
+
+describe("normalizeEveVercelFunctionOutput", () => {
+  async function seedEveFunction(): Promise<{
+    readonly configPath: string;
+    readonly outputDir: string;
+  }> {
+    const root = await mkdtemp(join(resolvePackageRoot(), ".eve-vercel-workflow-normalize-"));
+    temporaryDirectories.push(root);
+
+    const outputDir = join(root, "output");
+    const functionDir = join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func");
+    await mkdir(functionDir, { recursive: true });
+    const configPath = join(functionDir, ".vc-config.json");
+    await writeFile(
+      configPath,
+      `${JSON.stringify(
+        { environment: { NODE_OPTIONS: "--experimental-require-module" }, handler: "index.js" },
+        null,
+        2,
+      )}\n`,
+    );
+
+    return { configPath, outputDir };
+  }
+
+  async function readEnvironment(configPath: string): Promise<Record<string, unknown> | undefined> {
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      environment?: Record<string, unknown>;
+    };
+    return config.environment;
+  }
+
+  it("bakes the public route prefix into eve function environments for a named agent", async () => {
+    const { configPath, outputDir } = await seedEveFunction();
+
+    await normalizeEveVercelFunctionOutput(outputDir, {
+      servicePrefix: "/eve/agents/researcher",
+    });
+
+    expect(await readEnvironment(configPath)).toEqual({
+      NODE_OPTIONS: "--experimental-require-module",
+      EVE_PUBLIC_ROUTE_PREFIX: "/eve/agents/researcher",
+    });
+  });
+
+  it("leaves function environments untouched when there is no service prefix", async () => {
+    const { configPath, outputDir } = await seedEveFunction();
+
+    await normalizeEveVercelFunctionOutput(outputDir);
+
+    expect(await readEnvironment(configPath)).toEqual({
+      NODE_OPTIONS: "--experimental-require-module",
+    });
   });
 });

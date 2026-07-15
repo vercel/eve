@@ -37,6 +37,7 @@ import type { ConnectionAuthorizationChallenge } from "#public/connections/error
 import type { AuthorizationCallback } from "#runtime/connections/types.js";
 import type { JsonValue } from "#public/types/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
+import { prefixFrameworkCallbackPath } from "#protocol/public-route-prefix.js";
 
 const AUTHORIZATION_BRAND = "__eveAuthorization" as const;
 const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
@@ -142,7 +143,7 @@ export function getHookUrl(name: string): string | undefined {
   const baseUrl = ctx.get(CallbackBaseUrlKey);
   if (!sessionId || !baseUrl) return undefined;
   const token = authHookToken(sessionId);
-  return `${baseUrl}${createEveConnectionCallbackRoutePath(name, token)}`;
+  return `${baseUrl}${prefixFrameworkCallbackPath(createEveConnectionCallbackRoutePath(name, token))}`;
 }
 
 export function isAuthorizationSignal(value: unknown): value is AuthorizationSignal {

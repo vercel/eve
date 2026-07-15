@@ -1,6 +1,7 @@
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#protocol/routes.js";
+import { prefixFrameworkCallbackPath } from "#protocol/public-route-prefix.js";
 import type { CancelTurnResult } from "#channel/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { formatSubagentInput } from "#execution/subagent-invocation.js";
@@ -43,7 +44,7 @@ export async function startRemoteAgentSession(input: {
         token: callbackToken,
         url: createWorkflowCallbackUrl(
           input.callbackBaseUrl,
-          createEveCallbackRoutePath(callbackToken),
+          prefixFrameworkCallbackPath(createEveCallbackRoutePath(callbackToken)),
         ),
       },
       message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),

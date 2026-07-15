@@ -18,6 +18,7 @@ import {
   isEveVercelFunctionPath,
   normalizeEveVercelRoutes,
 } from "#internal/workflow-bundle/eve-service-route-output.js";
+import { PUBLIC_ROUTE_PREFIX_ENV } from "#protocol/public-route-prefix.js";
 
 // just-bash and microsandbox are optional peer dependencies (the
 // opt-in local sandbox engines) loaded lazily from the application's
@@ -135,6 +136,81 @@ export async function normalizeEveVercelFunctionOutput(
   }
   await pruneNonEveFunctionEntries(functionsDir, functionsDir);
   await pruneNonEveVercelRoutes(outputDir, options.servicePrefix);
+
+  // Named agents mount under `/eve/agents/<name>/eve/v1/*`, but the request
+  // reaches the function with that prefix stripped — so the running function
+  // cannot recover its own public prefix. Bake it into the function's runtime
+  // environment so callback URLs minted mid-turn resolve back to the agent's
+  // own mount instead of a bare `/eve/v1/*` path nothing serves.
+  if (options.servicePrefix !== undefined && options.servicePrefix.length > 0) {
+    await injectEvePublicRoutePrefixEnv(functionsDir, options.servicePrefix);
+  }
+}
+
+async function injectEvePublicRoutePrefixEnv(
+  functionsDir: string,
+  publicRoutePrefix: string,
+  directoryPath: string = functionsDir,
+): Promise<void> {
+  let entries: Dirent<string>[];
+
+  try {
+    entries = await readdir(directoryPath, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = join(directoryPath, entry.name);
+      const relativeFunctionPath = normalizeVercelOutputPath(relative(functionsDir, entryPath));
+
+      if (entry.name.endsWith(".func")) {
+        // Route aliases are symlinks onto the shared server function, which is
+        // patched through its own concrete directory — skip the aliases so we
+        // neither follow the link nor double-write.
+        if (!entry.isSymbolicLink() && isEveVercelFunctionPath(relativeFunctionPath)) {
+          await patchFunctionPublicRoutePrefixEnv(entryPath, publicRoutePrefix);
+        }
+        return;
+      }
+
+      if (entry.isDirectory()) {
+        await injectEvePublicRoutePrefixEnv(functionsDir, publicRoutePrefix, entryPath);
+      }
+    }),
+  );
+}
+
+async function patchFunctionPublicRoutePrefixEnv(
+  functionDir: string,
+  publicRoutePrefix: string,
+): Promise<void> {
+  const configPath = join(functionDir, ".vc-config.json");
+  let config: unknown;
+
+  try {
+    config = JSON.parse(await readFile(configPath, "utf8"));
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  if (!isRecord(config)) {
+    return;
+  }
+
+  const environment = isRecord(config.environment) ? { ...config.environment } : {};
+  environment[PUBLIC_ROUTE_PREFIX_ENV] = publicRoutePrefix;
+  config.environment = environment;
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
 async function prepareSharedEveServerFunction(functionsDir: string): Promise<string | null> {
