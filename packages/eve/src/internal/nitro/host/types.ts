@@ -13,6 +13,8 @@ export type NitroBuildSurface = "all" | "app" | "flow";
 
 /** Options for one production application build. */
 export interface ApplicationBuildOptions {
+  /** Absolute path for an optional machine-readable profile of a successful build. */
+  readonly profileOutputPath?: string;
   readonly skipVercelSandboxPrewarm: boolean;
   readonly vercelServiceOutput?: {
     readonly hostOutputDirectory: string;
