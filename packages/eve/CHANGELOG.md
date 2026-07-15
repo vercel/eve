@@ -1,5 +1,16 @@
 # eve
 
+## 0.24.3
+
+### Patch Changes
+
+- dddfb20: Fix `eve dev` generation bundling for authored modules whose dependencies use dynamic imports. Development generations now bundle ordinary dependencies directly instead of inheriting a copied server-external package list and tracing dependency closures; Nitro remains the sole owner of hosted dependency packaging.
+- 2494b33: Bound `eve dev` runtime snapshot storage with a World-independent retention policy. Superseded generations remain available for at least 30 minutes, and the five most recently superseded generations are retained as an additional rebuild-rate safety net.
+- 0333a63: Fix the dev-only schedule dispatch route to load compiled artifacts from the active development generation instead of the authored app root, which returned a 500 for every dispatch.
+- 0333a63: Rework `eve dev` structural reloads to never interrupt admitted work: an isolated candidate must compile, bundle, and start before it is promoted atomically, the retired worker keeps serving the responses and sockets it already admitted until they settle, and a failed candidate or crashed worker leaves the server available with shutdown bounded even while streams are open.
+- 5473f76: Keep active local Workflow turns on the development generation they selected across reloads, retries, and server restarts. New turns use the latest successful generation, and `eve dev` stores local Workflow state under `.workflow-data`.
+- 0333a63: Retry transient Windows filesystem contention while atomically releasing build publication locks.
+
 ## 0.24.2
 
 ### Patch Changes
