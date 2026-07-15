@@ -38,11 +38,7 @@ async function postJson<T>(
   return { payload, status: response.status };
 }
 
-/**
- * Reads the session's live NDJSON stream until an `actions.requested`
- * event names the hanging tool — the proof the cancel lands mid-turn.
- */
-async function waitForToolCall(t: EveEvalContext, sessionId: string): Promise<void> {
+async function waitForCancellation(t: EveEvalContext, sessionId: string): Promise<void> {
   const controller = new AbortController();
   const signal = AbortSignal.any([controller.signal, t.signal]);
 
@@ -52,6 +48,8 @@ async function waitForToolCall(t: EveEvalContext, sessionId: string): Promise<vo
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffered = "";
+    let sawToolCall = false;
+    let sawTurnCancelled = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -72,17 +70,22 @@ async function waitForToolCall(t: EveEvalContext, sessionId: string): Promise<vo
             (action) => action.kind === "tool-call" && action.toolName === TOOL_NAME,
           ) === true
         ) {
-          return;
+          sawToolCall = true;
+        }
+        if (event.type === "turn.cancelled") {
+          sawTurnCancelled = true;
         }
         if (event.type === "turn.failed" || event.type === "session.failed") {
-          throw new Error(`Turn failed before the ${TOOL_NAME} tool was called.`);
+          throw new Error("Turn failed instead of cancelling.");
         }
         if (event.type === "session.waiting") {
-          throw new Error(`Turn settled before the ${TOOL_NAME} tool was called.`);
+          if (!sawToolCall) throw new Error(`The ${TOOL_NAME} tool was not called.`);
+          if (!sawTurnCancelled) throw new Error("Turn settled without turn.cancelled.");
+          return;
         }
       }
     }
-    throw new Error(`Stream closed before the ${TOOL_NAME} tool was called.`);
+    throw new Error("Stream closed before the cancelled turn settled.");
   } finally {
     controller.abort();
   }
@@ -113,8 +116,8 @@ async function openSessionStream(
 /**
  * Cancel an in-flight turn over the eve HTTP channel.
  *
- * Flow: start a turn that hangs mid-tool, POST
- * `/eve/v1/session/:id/cancel`, and assert the turn settles as
+ * Flow: the tool POSTs `/eve/v1/session/:id/cancel` after execution starts,
+ * and the eval asserts the turn settles as
  * `turn.cancelled` followed by `session.waiting` with zero failure
  * events — then prove the session accepts a follow-up message normally
  * and a late duplicate cancel reports the benign `no_active_turn`.
@@ -125,7 +128,9 @@ export default defineEval({
 
   async test(t) {
     const created = await postJson<CreateSessionResponse>(t.target, "/eve/v1/session", {
-      message: "Please wait for cancellation.",
+      message:
+        `Call the \`${TOOL_NAME}\` tool exactly once with baseUrl ` +
+        `${JSON.stringify(t.target.url)}.`,
     });
     await t.require(
       created,
@@ -140,26 +145,14 @@ export default defineEval({
     const sessionId = created.payload.sessionId!;
     const cancelPath = `/eve/v1/session/${encodeURIComponent(sessionId)}/cancel`;
 
-    await waitForToolCall(t, sessionId);
-    t.log(`Tool call observed mid-turn; cancelling session ${sessionId}.`);
-
-    const cancelled = await postJson<CancelTurnResponse>(t.target, cancelPath);
-    await t.require(
-      cancelled,
-      satisfies(
-        (value: typeof cancelled) =>
-          value.status === 202 &&
-          value.payload.ok === true &&
-          value.payload.sessionId === sessionId &&
-          value.payload.status === "cancelling",
-        "cancel route accepts the cancel with status 'cancelling'",
-      ),
-    );
+    await waitForCancellation(t, sessionId);
+    t.log(`Tool cancelled session ${sessionId} through the HTTP channel.`);
 
     // The cancelled turn: turn.cancelled → session.waiting, never a failure.
     // The attach recovers the continuation token from the cancelled turn's
     // `session.waiting` boundary, so the same handle can send follow-ups.
     const session = await t.target.attachSession(sessionId, { startIndex: 0 });
+    session.calledTool(TOOL_NAME, { count: 1 });
     session.event("turn.cancelled", { count: 1 });
     session.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
     session.notEvent("turn.failed");
