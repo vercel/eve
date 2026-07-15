@@ -179,7 +179,6 @@ export function createWorkflowRuntime(config: {
         if (isInactiveCancelTarget(error)) {
           return { status: "no_active_turn" };
         }
-        logError(log, "failed to cancel active turn", error, { sessionId: input.sessionId });
         throw error;
       }
     },

@@ -114,8 +114,9 @@ retarget a newer turn.
 
 Task-mode and hook-conflict-degraded turns may have no current cancellation
 hook. Superseding delivery still succeeds in that case and behaves like plain
-queueing. Partial model output and already-executed tool or channel side
-effects remain in history; cancellation is not rollback.
+queueing. Partial model output remains on the event stream, while durable model
+history keeps only content that had already settled. Already-executed tool or
+channel side effects remain; cancellation is not rollback.
 
 ## Runtime boundary
 

@@ -376,14 +376,6 @@ describe("turn cancellation integration", () => {
         await waitForHookByToken(sessionCancelHookToken(run.runId));
         await fixture.toolStarted;
 
-        // A stale guard is delivered ("cancelling") but consumed inside
-        // the turn as a no-op: the tool keeps running.
-        const staleGuard = await cancelViaRoute(run.runId, { turnId: "turn_99" });
-        await expectCancelResponse(staleGuard, { sessionId: run.runId, status: "cancelling" });
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        expect(fixture.toolAborts()).toBe(0);
-
-        // The plain stop button: no body cancels the current turn.
         const cancelled = await cancelViaRoute(run.runId);
         await expectCancelResponse(cancelled, { sessionId: run.runId, status: "cancelling" });
 

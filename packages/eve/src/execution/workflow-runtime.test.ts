@@ -173,12 +173,10 @@ describe("createWorkflowRuntime#cancelTurn", () => {
   });
 
   it("rethrows unexpected runtime failures", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const failure = new Error("transient backing-store outage");
     resumeHookMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).rejects.toBe(failure);
-    errorSpy.mockRestore();
   });
 });
 

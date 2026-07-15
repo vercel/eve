@@ -49,8 +49,10 @@ return `no_active_turn`.
   turn.
 - Missing hooks, missing owner runs, terminal-run expiry, and terminal-state
   conflicts map to `"no_active_turn"`; other errors become 500s.
-- Cancellation retains partial content and completed side effects, emits no
-  failure event, and leaves the session ready for a follow-up.
+- Cancellation leaves partial content on the event stream and retains completed
+  side effects; durable model history keeps only content that had already
+  settled. It emits no failure event and leaves the session ready for a
+  follow-up.
 
 ## Data flow
 
