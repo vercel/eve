@@ -10,6 +10,7 @@ import {
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
+  resolveVercelHostFrameworkPreset,
   scaffoldBaseProject,
   scaffoldExtensionProject,
   type WebPackageVersions,
@@ -679,6 +680,42 @@ describe("hasVercelHostFramework", () => {
     );
 
     await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+});
+
+describe("resolveVercelHostFrameworkPreset", () => {
+  test("reads as no host framework when package.json is missing", async () => {
+    const projectRoot = await createTempDir();
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
+  });
+
+  test.each([
+    ["Next.js", { next: "16.2.6" }, "nextjs"],
+    ["Nuxt", { nuxt: "4.3.3" }, "nuxtjs"],
+    ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
+    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
+    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
+  ])("maps %s to its Vercel Framework Preset slug", async (_label, dependencies, preset) => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", devDependencies: dependencies }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
+  });
+
+  test("returns undefined for a standalone eve project", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
   });
 });
 

@@ -36,14 +36,6 @@ const DEFAULT_TYPES_REACT_PACKAGE_VERSION = "__TYPES_REACT_VERSION__";
 const DEFAULT_TYPES_REACT_DOM_PACKAGE_VERSION = "__TYPES_REACT_DOM_VERSION__";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
-const VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES = [
-  "@sveltejs/kit",
-  NEXT_PACKAGE_NAME,
-  "nuxt",
-  "nuxt3",
-  "nuxt-edge",
-  "nuxt-nightly",
-] as const;
 const PACKAGE_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
 const USER_AUTHORED_CHANNEL_DIR = "agent/channels";
 const WEB_CHANNEL_PATH = "agent/channels/eve.ts";
@@ -128,12 +120,25 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Read and parse a project's `package.json` into a plain object, or `undefined`
+ * when it is missing or does not parse to a JSON object.
+ */
+async function readPackageJsonObject(
+  packageJsonPath: string,
+): Promise<Record<string, unknown> | undefined> {
+  if (!(await pathExists(packageJsonPath))) return undefined;
+
+  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  return isJsonObject(parsed) ? parsed : undefined;
+}
+
 async function readDependencyVersion(
   packageJsonPath: string,
   dependencyName: string,
 ): Promise<string | undefined> {
-  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
-  if (!isJsonObject(parsed) || !isJsonObject(parsed.dependencies)) return undefined;
+  const parsed = await readPackageJsonObject(packageJsonPath);
+  if (parsed === undefined || !isJsonObject(parsed.dependencies)) return undefined;
 
   const version = parsed.dependencies[dependencyName];
   return typeof version === "string" ? version : undefined;
@@ -156,22 +161,8 @@ async function hasPackageDependency(
   packageJsonPath: string,
   dependencyName: string,
 ): Promise<boolean> {
-  if (!(await pathExists(packageJsonPath))) return false;
-
-  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
-  return isJsonObject(parsed) && packageJsonHasDependency(parsed, dependencyName);
-}
-
-async function hasAnyPackageDependency(
-  packageJsonPath: string,
-  dependencyNames: readonly string[],
-): Promise<boolean> {
-  if (!(await pathExists(packageJsonPath))) return false;
-
-  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
-  if (!isJsonObject(parsed)) return false;
-
-  return dependencyNames.some((dependencyName) => packageJsonHasDependency(parsed, dependencyName));
+  const parsed = await readPackageJsonObject(packageJsonPath);
+  return parsed !== undefined && packageJsonHasDependency(parsed, dependencyName);
 }
 
 /**
@@ -187,15 +178,44 @@ export async function isNextJsProject(projectRoot: string): Promise<boolean> {
 }
 
 /**
+ * Host-framework dependency → the Vercel Framework Preset slug it must deploy
+ * under (so the framework owns the top-level build and eve runs as a sibling).
+ * Single source of truth for which dependencies mark a host framework;
+ * {@link hasVercelHostFramework} derives from it.
+ */
+const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
+  "@sveltejs/kit": "sveltekit",
+  [NEXT_PACKAGE_NAME]: "nextjs",
+  nuxt: "nuxtjs",
+  nuxt3: "nuxtjs",
+  "nuxt-edge": "nuxtjs",
+  "nuxt-nightly": "nuxtjs",
+};
+
+/**
+ * The Vercel Framework Preset slug for the host framework a project declares, or
+ * `undefined` when it declares none (a missing `package.json` reads as none).
+ */
+export async function resolveVercelHostFrameworkPreset(
+  projectRoot: string,
+): Promise<string | undefined> {
+  const parsed = await readPackageJsonObject(join(projectRoot, "package.json"));
+  if (parsed === undefined) return undefined;
+
+  for (const [dependencyName, preset] of Object.entries(VERCEL_HOST_FRAMEWORK_PRESETS)) {
+    if (packageJsonHasDependency(parsed, dependencyName)) return preset;
+  }
+  return undefined;
+}
+
+/**
  * Whether the root app declares a Vercel framework that should own the
  * top-level deployment while eve runs as a sibling service. These match Eve's
- * current framework integrations: Next.js, Nuxt, and SvelteKit.
+ * current framework integrations: Next.js, Nuxt, and SvelteKit. Derived from
+ * {@link resolveVercelHostFrameworkPreset} so the two share one dependency list.
  */
 export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
-  return hasAnyPackageDependency(
-    join(projectRoot, "package.json"),
-    VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES,
-  );
+  return (await resolveVercelHostFrameworkPreset(projectRoot)) !== undefined;
 }
 
 async function ensurePackageDependency(
