@@ -103,6 +103,18 @@ vi.mock("../../workflow-bundle/builder.js", () => ({
     }
 
     async buildVercelOutput(options: unknown): Promise<void> {
+      const measure = (
+        options as {
+          measure?: <T>(
+            phase: "build" | "function.stage",
+            operation: () => Promise<T>,
+          ) => Promise<T>;
+        }
+      ).measure;
+      if (measure !== undefined) {
+        await measure("build", async () => undefined);
+        await measure("function.stage", async () => undefined);
+      }
       await workflowBuilderBuildVercelOutputMock(options);
     }
   },
@@ -449,11 +461,14 @@ describe("buildApplication", () => {
     )?.[1]?.outputDir;
     expect(flowOutputDir).toEqual(expect.stringContaining(join(appRoot, ".eve", "builds")));
     expect(workflowBuilderConstructors).toHaveLength(1);
-    expect(workflowBuilderBuildVercelOutputMock).toHaveBeenCalledWith({
-      flowNitroOutputDir: flowOutputDir,
-      outputDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
-      runtime: "nodejs24.x",
-    });
+    expect(workflowBuilderBuildVercelOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flowNitroOutputDir: flowOutputDir,
+        measure: expect.any(Function),
+        outputDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
+        runtime: "nodejs24.x",
+      }),
+    );
     const nestedFunctionStats = await lstat(
       join(appRoot, ".vercel", "output", "functions", "eve", "v1", "health.func"),
     );
@@ -508,7 +523,11 @@ describe("buildApplication", () => {
     const profile = JSON.parse(await readFile(profilePath, "utf8")) as ApplicationBuildProfile;
     expect(profile.target).toBe("vercel");
     expect(profile.phases).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "sandbox.prewarm" })]),
+      expect.arrayContaining([
+        expect.objectContaining({ name: "sandbox.prewarm" }),
+        expect.objectContaining({ name: "workflow.build" }),
+        expect.objectContaining({ name: "workflow.function.stage" }),
+      ]),
     );
 
     const summary = JSON.parse(

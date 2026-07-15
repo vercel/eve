@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
 import {
@@ -47,6 +47,18 @@ import {
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
+
+type VercelWorkflowOutputPhase = "build" | "function.stage";
+
+type VercelWorkflowOutputMeasure = <T>(
+  phase: VercelWorkflowOutputPhase,
+  operation: () => Promise<T>,
+) => Promise<T>;
+
+const runUnmeasuredVercelWorkflowOutputPhase = async <T>(
+  _phase: VercelWorkflowOutputPhase,
+  operation: () => Promise<T>,
+): Promise<T> => await operation();
 
 export class WorkflowBundleBuilder {
   readonly #agentName: string;
@@ -357,20 +369,13 @@ export class WorkflowBundleBuilder {
 
   async buildVercelOutput(options: {
     flowNitroOutputDir: string;
+    measure?: VercelWorkflowOutputMeasure;
     outputDir: string;
     runtime?: string;
   }): Promise<void> {
-    await this.build();
+    const measure = options.measure ?? runUnmeasuredVercelWorkflowOutputPhase;
+    await measure("build", () => this.build());
 
-    const stagedWorkflowGeneratedDir = join(
-      this.#outDir,
-      "vercel-build-output",
-      "functions",
-      ".well-known",
-      "workflow",
-      "v1",
-    );
-    const stagedFlowFunctionDir = join(stagedWorkflowGeneratedDir, "flow.func");
     const workflowGeneratedDir = join(
       options.outputDir,
       "functions",
@@ -395,48 +400,37 @@ export class WorkflowBundleBuilder {
     const staleStepFunctionDir = join(workflowGeneratedDir, "step.func");
     const staleWebhookFunctionDir = join(workflowGeneratedDir, "webhook", "[token].func");
 
-    await copyNitroFunctionDirectory({
-      fallbackPath: nitroFlowServerFunctionDir,
-      sourcePath: nitroFlowFunctionDir,
-      targetPath: stagedFlowFunctionDir,
+    await measure("function.stage", async () => {
+      await Promise.all([
+        rm(staleStepFunctionDir, {
+          force: true,
+          recursive: true,
+        }),
+        rm(staleWebhookFunctionDir, {
+          force: true,
+          recursive: true,
+        }),
+      ]);
+      await mkdir(workflowGeneratedDir, { recursive: true });
+      await copyNitroFunctionDirectory({
+        fallbackPath: nitroFlowServerFunctionDir,
+        sourcePath: nitroFlowFunctionDir,
+        targetPath: flowFunctionDir,
+      });
+      await Promise.all([
+        this.#patchVercelFunctionConfig(flowFunctionDir, {
+          experimentalTriggers: [createEveWorkflowQueueTrigger(this.#agentName)],
+          maxDuration: "max",
+          runtime: options.runtime ?? null,
+          shouldAddHelpers: false,
+        }),
+        copyFile(join(this.#outDir, "manifest.json"), join(workflowGeneratedDir, "manifest.json")),
+      ]);
+      await retargetNitroFunctionDirectoryToWorkflowRoute({
+        functionDirectoryPath: flowFunctionDir,
+        workflowRoutePath: "/.well-known/workflow/v1/flow",
+      });
     });
-
-    await Promise.all([
-      this.#patchVercelFunctionConfig(stagedFlowFunctionDir, {
-        experimentalTriggers: [createEveWorkflowQueueTrigger(this.#agentName)],
-        maxDuration: "max",
-        runtime: options.runtime ?? null,
-        shouldAddHelpers: false,
-      }),
-      cp(join(this.#outDir, "manifest.json"), join(stagedWorkflowGeneratedDir, "manifest.json")),
-    ]);
-    await retargetNitroFunctionDirectoryToWorkflowRoute({
-      functionDirectoryPath: stagedFlowFunctionDir,
-      workflowRoutePath: "/.well-known/workflow/v1/flow",
-    });
-
-    await Promise.all([
-      rm(flowFunctionDir, {
-        force: true,
-        recursive: true,
-      }),
-      rm(staleStepFunctionDir, {
-        force: true,
-        recursive: true,
-      }),
-      rm(staleWebhookFunctionDir, {
-        force: true,
-        recursive: true,
-      }),
-    ]);
-    await mkdir(workflowGeneratedDir, { recursive: true });
-    await Promise.all([
-      cp(stagedFlowFunctionDir, flowFunctionDir, { recursive: true }),
-      cp(
-        join(stagedWorkflowGeneratedDir, "manifest.json"),
-        join(workflowGeneratedDir, "manifest.json"),
-      ),
-    ]);
   }
 
   async #getBuildInputFiles(): Promise<string[]> {

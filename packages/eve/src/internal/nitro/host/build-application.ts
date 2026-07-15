@@ -314,6 +314,7 @@ async function emitVercelWorkflowFunctions(input: {
   compiledArtifactsBootstrapPath: string;
   flowNitroOutputDir: string;
   outputDir: string;
+  profiler: ApplicationBuildProfiler | undefined;
   workflowBuildDir: string;
 }): Promise<void> {
   const builder = new WorkflowBundleBuilder({
@@ -328,6 +329,9 @@ async function emitVercelWorkflowFunctions(input: {
 
   await builder.buildVercelOutput({
     flowNitroOutputDir: input.flowNitroOutputDir,
+    measure(phase, operation) {
+      return measureBuildPhase(input.profiler, `workflow.${phase}`, operation);
+    },
     outputDir: input.outputDir,
     runtime,
   });
@@ -602,6 +606,7 @@ async function buildApplicationInWorkspace(
         compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
         flowNitroOutputDir,
         outputDir: workspace.publication.output.stagedDir,
+        profiler,
         workflowBuildDir: workspace.workflow.buildDir,
       }),
     );

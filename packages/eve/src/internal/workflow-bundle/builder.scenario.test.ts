@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -413,9 +413,14 @@ describe("WorkflowBundleBuilder", () => {
         rootDir,
         watch: false,
       });
+      const measuredPhases: string[] = [];
 
       await builder.buildVercelOutput({
         flowNitroOutputDir,
+        measure: async (phase, operation) => {
+          measuredPhases.push(phase);
+          return await operation();
+        },
         outputDir,
         runtime: "nodejs24.x",
       });
@@ -428,11 +433,13 @@ describe("WorkflowBundleBuilder", () => {
         "v1",
         "flow.func",
       );
+      const intermediateWorkflowOutputDir = join(outDir, "vercel-build-output");
       const flowConfig = JSON.parse(
         await readFile(join(generatedFlowFunctionDir, ".vc-config.json"), "utf8"),
       ) as { environment?: Record<string, unknown> };
 
       expect(builder.buildCalls).toBe(1);
+      expect(measuredPhases).toEqual(["build", "function.stage"]);
       expect(flowConfig.environment).toEqual({
         EVE_EXISTING_FLAG: "kept",
         NODE_OPTIONS: "--experimental-require-module",
@@ -520,6 +527,7 @@ describe("WorkflowBundleBuilder", () => {
       ).resolves.toContain('"rolldown": "1.0.0-rc.18"');
       await expect(readFile(join(staleStepFunctionDir, "index.js"), "utf8")).rejects.toThrow();
       await expect(readFile(join(staleWebhookFunctionDir, "index.js"), "utf8")).rejects.toThrow();
+      await expect(lstat(intermediateWorkflowOutputDir)).rejects.toThrow();
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
