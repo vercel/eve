@@ -1,24 +1,11 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
+import {
+  sessionCancelHookToken,
+  type TurnCancelPayload,
+} from "#execution/turn-cancellation-token.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
-
-/**
- * Derives the session-scoped cancel hook token. Stable for the session's
- * lifetime, so a cancel trigger can address it from the session id alone.
- */
-export function sessionCancelHookToken(sessionId: string): string {
-  return `${sessionId}:cancel`;
-}
-
-/**
- * Payload accepted by the session cancel hook. The optional `turnId`
- * guard scopes the cancel to the turn the caller observed; a mismatch is
- * consumed as a benign no-op. Omitting it cancels the current turn.
- */
-export interface TurnCancelPayload {
-  readonly turnId?: string;
-}
 
 /**
  * Owns one turn's cancellation surface inside the turn workflow: the

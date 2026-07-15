@@ -315,10 +315,12 @@ describe("runChannelsAddCommand", () => {
     const nextConfig = await readFile(join(projectRoot, "next.config.ts"), "utf8");
     expect(nextConfig).toContain("export default withEve(nextConfig);");
     // configureVercelServices stays pinned on for this command (R5): the
-    // scaffold writes the services config even in an unlinked directory.
-    await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toContain(
-      "experimentalServices",
-    );
+    // scaffold writes a minimal vercel.json even in an unlinked directory.
+    // withEve() owns eve service generation, so no services block is written.
+    const vercelJson = JSON.parse(
+      await readFile(join(projectRoot, "vercel.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(vercelJson).toEqual({ $schema: "https://openapi.vercel.sh/vercel.json" });
     await expect(readFile(join(projectRoot, "agent/channels/web.ts"), "utf8")).rejects.toThrow();
     await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.not.toContain(
       "@vercel/connect",

@@ -369,7 +369,13 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
   dispatchSchedule(scheduleId: string): Promise<EveEvalScheduleDispatchResult>;
   /** Authenticated fetch against the target base URL. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
-  /** Attach to a pre-existing session and consume one turn boundary. */
+  /**
+   * Attach to a pre-existing session and consume one turn boundary.
+   *
+   * When that boundary is `session.waiting`, the attached session recovers
+   * the current continuation token from the stream, so `session.send(...)`
+   * and `session.respond(...)` continue the same durable session.
+   */
   attachSession(
     sessionId: string,
     opts?: { readonly startIndex?: number },

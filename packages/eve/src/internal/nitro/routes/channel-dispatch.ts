@@ -11,7 +11,10 @@ import { createGetSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
-import { attachAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  attachAgentInfoRouteResponse,
+  attachRouteAgent,
+} from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
@@ -190,19 +193,22 @@ function buildRouteArgs(
     toCrossChannelTargets(bundle.channels),
   );
 
-  const args = attachAgentInfoRouteResponse(
-    {
-      send,
-      getSession,
-      receive,
-      params,
-      waitUntil,
-      requestIp,
-    },
-    async () => {
-      const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-      return await handleAgentInfoRequest(config);
-    },
+  const args = attachRouteAgent(
+    attachAgentInfoRouteResponse(
+      {
+        send,
+        getSession,
+        receive,
+        params,
+        waitUntil,
+        requestIp,
+      },
+      async () => {
+        const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+        return await handleAgentInfoRequest(config);
+      },
+    ),
+    agent,
   );
 
   return {
@@ -214,6 +220,9 @@ function buildRouteArgs(
 
 function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agent {
   return {
+    async cancelTurn(input) {
+      return await runtime.cancelTurn(input);
+    },
     async deliver(input) {
       const deliverInput: DeliverInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
       return await runtime.deliver(deliverInput);

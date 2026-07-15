@@ -360,6 +360,59 @@ describe("executeTask", () => {
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
 
+  it("sends a follow-up on an attached session via the stream-recovered continuation token", async () => {
+    // The attached stream parks with a token the eval never saw from a POST
+    // response: the only way the follow-up can carry it is recovery from the
+    // `session.waiting` boundary event.
+    const server = createScriptedServer(
+      [
+        {
+          sessionId: "channel-session",
+          events: [
+            turnStarted("turn_2"),
+            messageCompleted("follow-up done", "turn_2"),
+            turnCompleted("turn_2"),
+            sessionWaiting("eve:channel-rekeyed"),
+          ],
+        },
+      ],
+      {
+        streams: [
+          {
+            sessionId: "channel-session",
+            events: [
+              turnStarted("turn_1"),
+              messageCompleted("channel done", "turn_1"),
+              turnCompleted("turn_1"),
+              sessionWaiting("eve:channel-rekeyed"),
+            ],
+          },
+        ],
+      },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const session = await t.target.attachSession("channel-session");
+        const followUp = await session.send("continue please");
+        followUp.expectOk();
+        followUp.messageIncludes("follow-up done");
+      }, "attach-send"),
+    });
+
+    expect(outcome.error).toBeUndefined();
+    expect(server.posts).toHaveLength(1);
+    expect(new URL(server.posts[0]!.url).pathname).toBe("/eve/v1/session/channel-session");
+    expect(server.posts[0]?.body).toEqual({
+      continuationToken: "eve:channel-rekeyed",
+      message: "continue please",
+    });
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
   it("uses structured turn data as the scoped and aggregate output", async () => {
     const server = createScriptedServer([
       {
@@ -498,9 +551,9 @@ function turnCompleted(turnId: string): HandleMessageStreamEvent {
   return { data: { sequence: 3, turnId }, type: "turn.completed" };
 }
 
-function sessionWaiting(): HandleMessageStreamEvent {
+function sessionWaiting(continuationToken = "eve:session_1"): HandleMessageStreamEvent {
   return {
-    data: { continuationToken: "eve:session_1", wait: "next-user-message" },
+    data: { continuationToken, wait: "next-user-message" },
     type: "session.waiting",
   };
 }

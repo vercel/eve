@@ -18,6 +18,18 @@ export type RunSessionLimits = Pick<
   "maxInputTokensPerSession" | "maxOutputTokensPerSession"
 >;
 
+/** Identifies the session turn to cancel. */
+export interface CancelTurnInput {
+  readonly sessionId: string;
+  /** Limits the request to the turn the caller observed. */
+  readonly turnId?: string;
+}
+
+/** Result of requesting turn cancellation. Both statuses are successful. */
+export interface CancelTurnResult {
+  readonly status: "cancelling" | "no_active_turn";
+}
+
 // ---------------------------------------------------------------------------
 // Lineage
 // ---------------------------------------------------------------------------
@@ -366,6 +378,9 @@ export interface Runtime {
    * completion.
    */
   run(input: RunInput): Promise<RunHandle>;
+
+  /** Requests cancellation of a session's in-flight turn. */
+  cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
 
   /**
    * Delivers a follow-up message to a parked session.

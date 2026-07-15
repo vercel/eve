@@ -1,10 +1,13 @@
 import { type FilePart, type TextPart, type UserContent } from "ai";
 
-import type { SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { readAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  readAgentInfoRouteResponse,
+  readRouteAgent,
+} from "#internal/nitro/routes/channel-route-context.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -13,7 +16,7 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
-import { EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_CANCEL_TURN_ROUTE_PATTERN, EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
@@ -154,7 +157,8 @@ export interface EveChannel extends Channel {}
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
  * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session, POST
- * delivers a follow-up, GET streams a session's NDJSON event feed). Every route
+ * delivers a follow-up, POST cancels the in-flight turn, GET streams a session's
+ * NDJSON event feed). Every route
  * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
@@ -310,6 +314,45 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               [EVE_SESSION_ID_HEADER]: session.id,
             },
             status: 200,
+          },
+        );
+      }),
+
+      POST(EVE_CANCEL_TURN_ROUTE_PATTERN, async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const sessionId = args.params.sessionId;
+        if (!sessionId) {
+          return Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
+        }
+
+        const body = await parseCancelTurnBody(req);
+        if (body instanceof Response) return body;
+
+        let result: CancelTurnResult;
+        try {
+          const agent = readRouteAgent(args);
+          if (agent === undefined) {
+            throw new Error("Missing route agent.");
+          }
+          result = await agent.cancelTurn({ sessionId, turnId: body.turnId });
+        } catch (error) {
+          const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
+          return Response.json(
+            { error: "Failed to cancel the turn.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+
+        return Response.json(
+          { ok: true, sessionId, status: result.status },
+          {
+            headers: {
+              "cache-control": "no-store",
+              [EVE_SESSION_ID_HEADER]: sessionId,
+            },
+            status: 202,
           },
         );
       }),
@@ -545,6 +588,44 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
   }
 
   return { message, continuationToken, inputResponses, context, outputSchema };
+}
+
+interface ParsedCancelTurnBody {
+  turnId?: string;
+}
+
+async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody | Response> {
+  let text: string;
+  try {
+    text = await req.text();
+  } catch {
+    return Response.json({ error: "Unreadable request body.", ok: false }, { status: 400 });
+  }
+  if (text.trim().length === 0) {
+    return {};
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
+  }
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
+  }
+
+  const turnId = (payload as { turnId?: unknown }).turnId;
+  if (turnId === undefined) {
+    return {};
+  }
+  if (typeof turnId !== "string" || turnId.length === 0) {
+    return Response.json(
+      { error: "Expected 'turnId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+  return { turnId };
 }
 
 function createSendPayload(

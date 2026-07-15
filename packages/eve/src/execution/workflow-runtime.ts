@@ -1,6 +1,13 @@
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  EntityConflictError,
+  HookNotFoundError,
+  RunExpiredError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 
 import type {
+  CancelTurnInput,
+  CancelTurnResult,
   DeliverInput,
   GetEventStreamOptions,
   HookPayload,
@@ -34,6 +41,10 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import {
+  sessionCancelHookToken,
+  type TurnCancelPayload,
+} from "#execution/turn-cancellation-token.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -158,6 +169,20 @@ export function createWorkflowRuntime(config: {
       };
     },
 
+    async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
+      const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
+
+      try {
+        await resumeHook(sessionCancelHookToken(input.sessionId), payload);
+        return { status: "cancelling" };
+      } catch (error) {
+        if (isInactiveCancelTarget(error)) {
+          return { status: "no_active_turn" };
+        }
+        throw error;
+      }
+    },
+
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
       const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
@@ -190,6 +215,15 @@ export function createWorkflowRuntime(config: {
       );
     },
   };
+}
+
+function isInactiveCancelTarget(error: unknown): boolean {
+  return (
+    HookNotFoundError.is(error) ||
+    WorkflowRunNotFoundError.is(error) ||
+    RunExpiredError.is(error) ||
+    EntityConflictError.is(error)
+  );
 }
 
 /**

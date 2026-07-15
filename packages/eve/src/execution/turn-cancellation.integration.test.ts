@@ -10,11 +10,18 @@ import {
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { sessionCancelHookToken } from "#execution/turn-cancellation-control.js";
+import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createEveCancelTurnRoutePath } from "#protocol/routes.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { RouteHandlerArgs } from "#channel/routes.js";
+import { none } from "#public/channels/auth.js";
+import { eveChannel } from "#public/channels/eve.js";
+import type { Agent } from "#public/definitions/channel.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
 
 /**
  * Layer-1 turn cancellation: resuming a session's `{sessionId}:cancel`
@@ -120,6 +127,18 @@ async function waitForRunCompletion(runId: string, timeout = 15_000): Promise<vo
   throw new Error(`Timed out waiting for run "${runId}" to complete.`);
 }
 
+/** Polls the world until a hook token is swept (terminal-run cleanup). */
+async function waitForHookSweep(token: string, timeout = 15_000): Promise<void> {
+  const world = await getWorld();
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const hook = await world.hooks.getByToken(token).catch(() => null);
+    if (hook === null || hook === undefined) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for hook token "${token}" to be swept.`);
+}
+
 /** Polls the world for a hook row by token (hooks are per-run; the token is global). */
 async function waitForHookByToken(token: string, timeout = 15_000): Promise<{ runId: string }> {
   const world = await getWorld();
@@ -181,6 +200,78 @@ function expectNoFailureEvents(events: readonly HandleMessageStreamEvent[]): voi
   for (const failureType of FAILURE_EVENT_TYPES) {
     expect(types).not.toContain(failureType);
   }
+}
+
+/** Builds a cancel-route caller backed by the workflow runtime. */
+function createCancelRouteCaller(): (
+  sessionId: string,
+  body?: { readonly turnId?: string },
+) => Promise<Response> {
+  const channel = eveChannel({ auth: none() });
+  const cancelRoute = (
+    channel.routes as readonly { method: string; path: string; handler?: unknown }[]
+  ).find((route) => route.method === "POST" && route.path === "/eve/v1/session/:sessionId/cancel");
+  if (cancelRoute?.handler === undefined) {
+    throw new Error("Expected eveChannel() to register the cancel-turn route.");
+  }
+  const handler = cancelRoute.handler as (
+    req: Request,
+    args: RouteHandlerArgs,
+  ) => Promise<Response>;
+  const runtime = createWorkflowRuntime({
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+  });
+  const agent: Agent = {
+    cancelTurn: (input) => runtime.cancelTurn(input),
+    async deliver() {
+      throw new Error("cancel route must not deliver");
+    },
+    async getEventStream() {
+      throw new Error("cancel route must not read events");
+    },
+    async run() {
+      throw new Error("cancel route must not start a session");
+    },
+  };
+
+  return async (sessionId, body) => {
+    const request = new Request(`https://example.com${createEveCancelTurnRoutePath(sessionId)}`, {
+      method: "POST",
+      ...(body === undefined
+        ? {}
+        : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+    });
+    const args = attachRouteAgent(
+      {
+        send: () => {
+          throw new Error("cancel route must not send");
+        },
+        getSession: () => {
+          throw new Error("cancel route must not get a session");
+        },
+        receive: () => {
+          throw new Error("cancel route must not receive");
+        },
+        params: { sessionId },
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      } satisfies RouteHandlerArgs,
+      agent,
+    );
+    return await handler(request, args);
+  };
+}
+
+async function expectCancelResponse(
+  response: Response,
+  expected: { readonly sessionId: string; readonly status: "cancelling" | "no_active_turn" },
+): Promise<void> {
+  expect(response.status).toBe(202);
+  await expect(response.json()).resolves.toEqual({
+    ok: true,
+    sessionId: expected.sessionId,
+    status: expected.status,
+  });
 }
 
 describe("turn cancellation integration", () => {
@@ -257,6 +348,83 @@ describe("turn cancellation integration", () => {
       }
     });
   });
+
+  it("cancels a turn through the eve channel cancel route", async () => {
+    const fixture = createWaitToolRuntime("turn-cancel-route");
+    const continuationToken = "http:turn-cancel-route";
+    const cancelViaRoute = createCancelRouteCaller();
+
+    await fixture.runtime.run(async () => {
+      await expectCancelResponse(await cancelViaRoute("missing-session"), {
+        sessionId: "missing-session",
+        status: "no_active_turn",
+      });
+
+      const run = await start(workflowEntry, [
+        {
+          input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await waitForHookByToken(sessionCancelHookToken(run.runId));
+        await fixture.toolStarted;
+
+        const cancelled = await cancelViaRoute(run.runId);
+        await expectCancelResponse(cancelled, { sessionId: run.runId, status: "cancelling" });
+
+        const cancelledTurn = await stream.nextTurn();
+
+        expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
+        expect(
+          containsEventSequence(cancelledTurn, [
+            "turn.started",
+            "turn.cancelled",
+            "session.waiting",
+          ]),
+        ).toBe(true);
+        expect(filterEventsByType(cancelledTurn, "turn.cancelled")).toHaveLength(1);
+        expectNoFailureEvents(cancelledTurn);
+        expect(fixture.toolAborts()).toBe(1);
+
+        // With the turn settled and its cancel hook swept from the
+        // world, a duplicate cancel is the benign "nothing to cancel"
+        // success. (Between settle and sweep a duplicate may still be
+        // accepted as "cancelling" and land unconsumed — also benign.)
+        await waitForHookSweep(sessionCancelHookToken(run.runId));
+        const duplicate = await cancelViaRoute(run.runId);
+        await expectCancelResponse(duplicate, { sessionId: run.runId, status: "no_active_turn" });
+
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          kind: "deliver",
+          payloads: [{ message: "follow up after route cancel" }],
+        });
+
+        const followUpTurn = await stream.nextTurn();
+
+        expect(followUpTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(followUpTurn, "turn.cancelled")).toHaveLength(0);
+        expectNoFailureEvents(followUpTurn);
+        expect(
+          followUpTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("follow up after route cancel") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
 
   it("cancels a turn waiting on an in-flight subagent and does not re-dispatch it", async () => {
     const fixture = createWaitToolRuntime("turn-cancel-subagent");

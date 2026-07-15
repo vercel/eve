@@ -79,6 +79,8 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
+Use `agent/tools/agent.ts` to remove the root-only `agent` delegation tool. The root session then receives no recursive delegation capability, and the model never sees the tool.
+
 If the filename matches no known framework tool, resolution fails instead of silently doing nothing, so a typo surfaces at build time rather than removing the wrong tool.
 
 ## When to override, disable, or author a new tool

@@ -1,3 +1,4 @@
+import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
 import { ASK_QUESTION_TOOL_DEFINITION } from "#runtime/framework-tools/ask-question.js";
 import { BASH_TOOL_DEFINITION } from "#runtime/framework-tools/bash.js";
 import { GLOB_TOOL_DEFINITION } from "#runtime/framework-tools/glob.js";
@@ -53,5 +54,5 @@ export function getFrameworkToolDefinitions(_config?: {
  * as an authoring error rather than silently dropping the request.
  */
 export function getAllFrameworkToolNames(): ReadonlySet<string> {
-  return new Set(ALL_FRAMEWORK_TOOLS.map((def) => def.name));
+  return new Set([...ALL_FRAMEWORK_TOOLS.map((def) => def.name), AGENT_TOOL_NAME]);
 }
