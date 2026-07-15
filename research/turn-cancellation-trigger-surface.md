@@ -1,6 +1,6 @@
 ---
 issue: https://github.com/vercel/eve/issues/483
-status: proposed
+status: in-review
 last_updated: "2026-07-15"
 ---
 

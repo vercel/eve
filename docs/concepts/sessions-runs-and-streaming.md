@@ -89,6 +89,17 @@ If the session is waiting on a human-in-the-loop approval, a matching text reply
 
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
+## Cancel the in-flight turn
+
+POST to the session's cancel endpoint to stop the turn that is currently running. The body is optional; pass `turnId` (stamped on every turn-scoped stream event) to scope the cancel to the turn you observed:
+
+```bash
+curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel
+# {"ok":true,"sessionId":"<sessionId>","status":"cancelling"}
+```
+
+`"cancelling"` means the cancel was delivered — the turn then settles on the stream as `turn.cancelled` followed by `session.waiting`, and the session accepts the next message normally. `"no_active_turn"` means there was nothing to cancel (no turn in flight, or it already settled); both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+
 ## Reconnect and rewind
 
 The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. Pass `startIndex` to reconnect by event count and pick up where you dropped off, or rewind to the start:
