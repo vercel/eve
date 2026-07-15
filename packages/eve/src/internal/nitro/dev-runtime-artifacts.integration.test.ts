@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -18,7 +18,6 @@ import {
   activateDevelopmentRuntimeArtifactsSnapshot,
   activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   pruneDevelopmentRuntimeArtifactsSnapshots,
-  readActivatedDevelopmentRuntimeArtifactGenerations,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   readDevelopmentRuntimeArtifactsRevision,
   resolveDevelopmentRuntimeArtifactsPointerPath,
@@ -149,51 +148,15 @@ describe("development runtime artifact snapshots", () => {
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: appRoot,
     });
+    expect(
+      JSON.parse(await readFile(join(snapshot.snapshotRoot, "generation.json"), "utf8")),
+    ).toEqual({ runtimeAppRoot: snapshot.runtimeAppRoot });
 
     await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
 
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: snapshot.runtimeAppRoot,
     });
-  });
-
-  it("restores complete activated generations and ignores snapshots from older formats", async () => {
-    const appRoot = await createScratchDirectory("eve-dev-runtime-generation-registry-");
-    const compileDirectoryPath = join(appRoot, ".eve", "compile");
-    await mkdir(compileDirectoryPath, { recursive: true });
-    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
-    await writeFile(
-      join(compileDirectoryPath, "compiled-agent-manifest.json"),
-      `${JSON.stringify({ agentRoot: appRoot, appRoot })}\n`,
-    );
-    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
-      paths: { compileDirectoryPath },
-      project: { appRoot },
-    } as CompileAgentResult);
-    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
-    const nextSnapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
-      paths: { compileDirectoryPath },
-      project: { appRoot },
-    } as CompileAgentResult);
-    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot: nextSnapshot });
-    const legacySnapshotRoot = join(appRoot, ".eve", "dev-runtime", "snapshots", "legacy");
-    await mkdir(legacySnapshotRoot, { recursive: true });
-    await writeFile(join(legacySnapshotRoot, "activated"), "");
-
-    const generations = await readActivatedDevelopmentRuntimeArtifactGenerations(appRoot);
-    expect(generations).toHaveLength(2);
-    expect(generations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: basename(snapshot.snapshotRoot),
-          runtimeAppRoot: snapshot.runtimeAppRoot,
-        }),
-        expect.objectContaining({
-          id: basename(nextSnapshot.snapshotRoot),
-          runtimeAppRoot: nextSnapshot.runtimeAppRoot,
-        }),
-      ]),
-    );
   });
 
   it("restores the prior runtime pointer when activation is rolled back", async () => {

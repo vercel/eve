@@ -42,12 +42,6 @@ export interface DevelopmentRuntimeArtifactsSnapshot {
   readonly sourceRoot: string;
 }
 
-export interface ActivatedDevelopmentRuntimeArtifactsGeneration {
-  readonly id: string;
-  readonly runtimeAppRoot: string;
-  readonly snapshotRoot: string;
-}
-
 export interface ActiveDevelopmentRuntimeArtifactsSnapshot {
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
@@ -128,67 +122,6 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
     snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
     sourceRoot: sourceSnapshotPlan.sourceRoot,
   };
-}
-
-export async function readActivatedDevelopmentRuntimeArtifactGenerations(
-  appRoot: string,
-): Promise<readonly ActivatedDevelopmentRuntimeArtifactsGeneration[]> {
-  const snapshotsDirectory = resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot);
-  let entries: Dirent<string>[];
-  try {
-    entries = await readdir(snapshotsDirectory, { withFileTypes: true });
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return [];
-    }
-    throw error;
-  }
-  const generations = await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory())
-      .map(async (entry): Promise<ActivatedDevelopmentRuntimeArtifactsGeneration | undefined> => {
-        const snapshotRoot = join(snapshotsDirectory, entry.name);
-        if (!existsSync(join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_ACTIVATED_MARKER))) {
-          return undefined;
-        }
-        const metadataSource = await readGenerationMetadata(snapshotRoot);
-        if (metadataSource === undefined) {
-          return undefined;
-        }
-        const metadata = parseJsonObject(metadataSource);
-        if (metadata === undefined || typeof metadata.runtimeAppRoot !== "string") {
-          throw new Error(`Activated development generation "${entry.name}" has invalid metadata.`);
-        }
-        if (
-          !isPathInsideOrEqual(metadata.runtimeAppRoot, snapshotRoot) ||
-          !existsSync(
-            join(metadata.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
-          )
-        ) {
-          throw new Error(`Activated development generation "${entry.name}" is incomplete.`);
-        }
-        return {
-          id: entry.name,
-          runtimeAppRoot: metadata.runtimeAppRoot,
-          snapshotRoot,
-        };
-      }),
-  );
-  return generations.filter(
-    (generation): generation is ActivatedDevelopmentRuntimeArtifactsGeneration =>
-      generation !== undefined,
-  );
-}
-
-async function readGenerationMetadata(snapshotRoot: string): Promise<string | undefined> {
-  try {
-    return await readFile(join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA), "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
 }
 
 /**

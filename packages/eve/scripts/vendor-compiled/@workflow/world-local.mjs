@@ -37,13 +37,18 @@ const workflowWorldLocalVersion = resolveWorkflowWorldLocalVersion();
 const workflowWorldLocalVersionPlugin = {
   name: "eve-workflow-world-local-version",
   transform(source, id) {
-    if (!id.endsWith("/@workflow/world-local/dist/init.js")) {
+    if (!id.replaceAll("\\", "/").endsWith("/@workflow/world-local/dist/init.js")) {
       return undefined;
+    }
+
+    const bundledVersionSource = "version: 'bundled',";
+    if (!source.includes(bundledVersionSource)) {
+      throw new Error("Failed to find the bundled @workflow/world-local version fallback.");
     }
 
     return {
       code: source.replace(
-        "version: 'bundled',",
+        bundledVersionSource,
         `version: ${JSON.stringify(workflowWorldLocalVersion)},`,
       ),
       map: null,
