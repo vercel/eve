@@ -6,6 +6,10 @@ import { createWorld } from "#compiled/@workflow/world-local/index.js";
 import { turnWorkflowReference } from "#execution/workflow-runtime.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
+  LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH,
+  resolveLocalWorkflowWorldDataDirectory,
+} from "#internal/workflow/local-world-data-directory.js";
+import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
   serializeDevelopmentWorldError,
@@ -74,7 +78,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
     this.#transportSecret = input.transportSecret;
     this.#world = createWorld({
-      dataDir: join(input.appRoot, ".workflow-data"),
+      dataDir: resolveLocalWorkflowWorldDataDirectory(input.appRoot),
       recoverActiveRuns: false,
     });
   }
@@ -96,7 +100,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       console.error(
         `[eve:dev] ${String(missingGenerationIds.size)} active local Workflow run(s) reference development generations that no longer exist ` +
           `(${[...missingGenerationIds].join(", ")}). Their deliveries are quarantined; ` +
-          `remove ".workflow-data" to discard the app's active local Workflow runs.`,
+          `remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard the app's active local Workflow runs.`,
       );
     }
     await this.#world.start?.();
@@ -144,7 +148,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         } catch (error) {
           throw new Error(
             `Failed to read the app's active local Workflow runs. ` +
-              `Remove ".workflow-data" to discard them.`,
+              `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard them.`,
             { cause: error },
           );
         }
@@ -301,7 +305,7 @@ async function reenqueueActiveDevelopmentRuns(input: {
       } catch (error) {
         throw new Error(
           `Failed to read the app's active local Workflow runs. ` +
-            `Remove ".workflow-data" to discard them.`,
+            `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard them.`,
           { cause: error },
         );
       }
