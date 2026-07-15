@@ -379,10 +379,10 @@ export interface Runtime {
    * event-streaming route. Backed by the workflow API's per-session durable
    * stream.
    *
-   * `options.startIndex` is the zero-based position of the first event to
-   * yield, dropping earlier events. The framework HTTP session-stream route
-   * forwards the `startIndex` query parameter so a reconnecting client resumes
-   * after the events it already consumed without replaying the prior turn.
+   * Nonnegative `options.startIndex` values are the zero-based position of the
+   * first event to yield. Negative values read relative to the current tail.
+   * The framework HTTP session-stream route forwards the `startIndex` query
+   * parameter unchanged.
    */
   getEventStream(
     sessionId: string,
@@ -395,8 +395,9 @@ export interface Runtime {
  */
 export interface GetEventStreamOptions {
   /**
-   * Zero-based index of the first event to emit. Events before this index
-   * are dropped. Defaults to `0` (replay the entire stream).
+   * Zero-based index of the first event to emit. Negative values read from
+   * the current tail (`-1` starts at the latest event). Defaults to `0`
+   * (replay the entire stream).
    */
   readonly startIndex?: number;
 }

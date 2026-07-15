@@ -84,6 +84,7 @@ function createEagerStreamResponse(events: readonly unknown[]): Response {
 }
 
 function singleTurnEvents(input: {
+  continuationToken?: string;
   message: string;
   sequence: number;
   turnId: string;
@@ -102,7 +103,7 @@ function singleTurnEvents(input: {
       turnId: input.turnId,
     }),
     createTurnCompletedEvent({ sequence: input.sequence, turnId: input.turnId }),
-    createSessionWaitingEvent(),
+    createSessionWaitingEvent(`eve:${input.continuationToken ?? "http:session_001"}`),
   ];
 }
 
@@ -456,7 +457,7 @@ describe("Session.send (result)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_001"),
     ];
 
     const fetchMock = vi
@@ -488,6 +489,7 @@ describe("Session.send (result)", () => {
       createSessionCompletedEvent(),
     ];
     const secondEvents = singleTurnEvents({
+      continuationToken: "http:session_002",
       message: "New conversation",
       sequence: 1,
       turnId: "turn_001",
@@ -554,7 +556,7 @@ describe("Session.send (stream)", () => {
           turnId: "turn_001",
         }),
       );
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
     }, 0);
 
     await iterationPromise;
@@ -578,7 +580,7 @@ describe("Session.send (stream)", () => {
     expect(res.sessionId).toBe("session_001");
 
     setTimeout(() => {
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
     }, 0);
 
     for await (const _ of res) {
@@ -622,7 +624,7 @@ describe("Session.send (reconnection)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_001"),
     ];
 
     const fetchMock = vi
@@ -730,8 +732,18 @@ describe("Session state", () => {
   });
 
   it("allows multiple independent sessions on the same client", async () => {
-    const eventsA = singleTurnEvents({ message: "A", sequence: 1, turnId: "turn_a" });
-    const eventsB = singleTurnEvents({ message: "B", sequence: 1, turnId: "turn_b" });
+    const eventsA = singleTurnEvents({
+      continuationToken: "http:session_a",
+      message: "A",
+      sequence: 1,
+      turnId: "turn_a",
+    });
+    const eventsB = singleTurnEvents({
+      continuationToken: "http:session_b",
+      message: "B",
+      sequence: 1,
+      turnId: "turn_b",
+    });
 
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_a", "http:session_a"))
@@ -755,6 +767,7 @@ describe("Session state", () => {
   it("creating a new session starts a fresh conversation", async () => {
     const firstEvents = singleTurnEvents({ message: "Hello", sequence: 1, turnId: "turn_001" });
     const secondEvents = singleTurnEvents({
+      continuationToken: "http:session_002",
       message: "Fresh start",
       sequence: 1,
       turnId: "turn_001",
@@ -802,7 +815,7 @@ describe("Session.stream", () => {
         stepIndex: 0,
         turnId: "turn_002",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_001"),
     ];
 
     const fetchMock = vi

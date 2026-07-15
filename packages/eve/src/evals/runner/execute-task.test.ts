@@ -499,7 +499,10 @@ function turnCompleted(turnId: string): HandleMessageStreamEvent {
 }
 
 function sessionWaiting(): HandleMessageStreamEvent {
-  return { data: { wait: "next-user-message" }, type: "session.waiting" };
+  return {
+    data: { continuationToken: "eve:session_1", wait: "next-user-message" },
+    type: "session.waiting",
+  };
 }
 
 function sessionCompleted(): HandleMessageStreamEvent {

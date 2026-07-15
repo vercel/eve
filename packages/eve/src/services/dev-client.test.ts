@@ -297,7 +297,17 @@ function createDevFetchMock(input: {
     return new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(encoder.encode('{"type":"session.waiting"}\n'));
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({
+                data: {
+                  continuationToken: `token-${nextSessionIndex}`,
+                  wait: "next-user-message",
+                },
+                type: "session.waiting",
+              })}\n`,
+            ),
+          );
           controller.close();
         },
       }),

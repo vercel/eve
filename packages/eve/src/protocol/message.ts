@@ -9,6 +9,7 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
 export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
@@ -551,6 +552,8 @@ export interface AuthorizationCompletedStreamEvent {
  */
 export interface SessionWaitingStreamEvent {
   data: {
+    /** Channel-owned resume handle for the next user turn. */
+    continuationToken: string;
     wait: "next-user-message";
   };
   type: "session.waiting";
@@ -1361,9 +1364,12 @@ export function createCompactionCompletedEvent(input: {
  * Creates the `session.waiting` event for the only supported between-turn
  * wait.
  */
-export function createSessionWaitingEvent(): SessionWaitingStreamEvent {
+export function createSessionWaitingEvent(
+  namespacedContinuationToken: string,
+): SessionWaitingStreamEvent {
   return {
     data: {
+      continuationToken: toChannelLocalContinuationToken(namespacedContinuationToken),
       wait: "next-user-message",
     },
     type: "session.waiting",

@@ -83,8 +83,10 @@ export class ClientSession {
    * Opens this session's event stream for the current session ID.
    *
    * Resumes from the session's stored stream cursor unless `options.startIndex`
-   * overrides it. The returned iterable reconnects on transient socket
-   * disconnects, up to the client's `maxReconnectAttempts`.
+   * overrides it. Negative indices read relative to the current tail and do
+   * not reconnect or advance the stored absolute cursor. Other streams
+   * reconnect on transient socket disconnects, up to the client's
+   * `maxReconnectAttempts`.
    *
    * @throws {Error} If the session has no session ID (no message has been sent
    *   yet).
@@ -258,13 +260,15 @@ export class ClientSession {
         yield event;
       }
     } finally {
-      this.#state = advanceSession({
-        continuationToken: initialState.continuationToken,
-        events,
-        preserveCompletedSessions: this.#context.preserveCompletedSessions,
-        session: { ...initialState, sessionId, streamIndex },
-        sessionId,
-      });
+      if (streamIndex >= 0) {
+        this.#state = advanceSession({
+          continuationToken: initialState.continuationToken,
+          events,
+          preserveCompletedSessions: this.#context.preserveCompletedSessions,
+          session: { ...initialState, sessionId, streamIndex },
+          sessionId,
+        });
+      }
     }
   }
 }

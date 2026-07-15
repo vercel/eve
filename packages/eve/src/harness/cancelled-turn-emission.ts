@@ -15,6 +15,7 @@ import type { HarnessEmissionState } from "#harness/emission.js";
 export async function emitCancelledTurn(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
+  continuationToken: string,
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCancelledEvent({
@@ -22,7 +23,7 @@ export async function emitCancelledTurn(
       turnId: activeTurnId(state),
     }),
   );
-  await emitFn(createSessionWaitingEvent());
+  await emitFn(createSessionWaitingEvent(continuationToken));
 
   return {
     sessionStarted: true,
