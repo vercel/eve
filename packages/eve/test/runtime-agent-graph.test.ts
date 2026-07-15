@@ -744,6 +744,34 @@ describe("resolveRuntimeAgentGraph", () => {
     ]);
   });
 
+  it("accepts the runtime-owned agent tool in disabledFrameworkTools", async () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "weather-agent",
+      },
+      disabledFrameworkTools: ["agent"],
+    });
+
+    const graph = await resolveRuntimeAgentGraph({
+      manifest,
+      moduleMap: {
+        nodes: {
+          [ROOT_COMPILED_AGENT_NODE_ID]: {
+            modules: {},
+          },
+        },
+      },
+    });
+
+    expect(graph.root.agent.disabledFrameworkTools).toContain("agent");
+  });
+
   it("combines replacement and disable in one agent", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

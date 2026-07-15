@@ -14,6 +14,7 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
@@ -24,13 +25,6 @@ import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 
 const log = createLogger("execution.node-step");
-
-const BUILT_IN_AGENT_TOOL_DESCRIPTION = [
-  "Delegate a focused subtask to a fresh copy of yourself.",
-  "Use it to isolate complex work or split a large task into independent pieces.",
-  "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
-  "Each child has fresh history and state but shares your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
-].join(" ");
 
 /**
  * Factory that creates a {@link Runtime} for the given compiled
@@ -181,16 +175,20 @@ export function createNodeHarnessTools(input: {
     }
   }
 
-  if (input.node.nodeId === ROOT_RUNTIME_AGENT_NODE_ID && !tools.has("agent")) {
-    tools.set("agent", {
-      description: BUILT_IN_AGENT_TOOL_DESCRIPTION,
+  if (
+    input.node.nodeId === ROOT_RUNTIME_AGENT_NODE_ID &&
+    !input.node.agent.disabledFrameworkTools.includes(AGENT_TOOL_NAME) &&
+    !tools.has(AGENT_TOOL_NAME)
+  ) {
+    tools.set(AGENT_TOOL_NAME, {
+      description: AGENT_TOOL_DESCRIPTION,
       inputSchema: jsonSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
-      name: "agent",
+      name: AGENT_TOOL_NAME,
       runtimeAction: {
         kind: "subagent-call",
         nodeId: input.node.nodeId,
         recursive: true,
-        subagentName: "agent",
+        subagentName: AGENT_TOOL_NAME,
       },
     });
   }

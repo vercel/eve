@@ -191,8 +191,13 @@ function createTestNode(
   turnAgent?: RuntimeTurnAgent,
   overrides: Partial<ResolvedRuntimeAgentNode> = {},
 ): ResolvedRuntimeAgentNode {
+  const agent = {} as ResolvedRuntimeAgentNode["agent"];
+
   return {
-    agent: {} as ResolvedRuntimeAgentNode["agent"],
+    agent: {
+      ...agent,
+      disabledFrameworkTools: [],
+    },
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
@@ -234,6 +239,21 @@ describe("createNodeHarnessTools", () => {
   it("does not give declared subagent nodes the recursive agent tool", () => {
     const tools = createNodeHarnessTools({
       node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+    });
+
+    expect(tools.has("agent")).toBe(false);
+  });
+
+  it("does not give the root node a recursive agent tool when it is disabled", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          disabledFrameworkTools: ["agent"],
+        },
+      },
     });
 
     expect(tools.has("agent")).toBe(false);
