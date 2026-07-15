@@ -821,7 +821,7 @@ describe("scaffoldBaseProject", () => {
     // artifacts and a bare .env must be excluded here or a source deploy
     // ships them (and `.eve` alone can blow the upload size limit).
     const vercelignore = await readFile(join(projectRoot, ".vercelignore"), "utf8");
-    for (const entry of [".env*", ".eve", ".workflow-data", ".output", ".nitro", "dist"]) {
+    for (const entry of [".env*", ".eve", ".output", ".nitro", "dist"]) {
       expect(vercelignore.split("\n")).toContain(entry);
     }
   });

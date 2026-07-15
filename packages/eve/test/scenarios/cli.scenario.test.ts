@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { access, mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +9,7 @@ import { runCli } from "../../src/cli/run.js";
 import { resolveInstalledPackageInfo } from "../../src/internal/application/package.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
+import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workflow/local-world-data-directory.js";
 import {
   EVE_CONTINUE_SESSION_ROUTE_PATTERN,
   EVE_CREATE_SESSION_ROUTE_PATH,
@@ -396,7 +397,7 @@ describe("runCli", () => {
     }
   });
 
-  it("starts an existing built app and serves the health route", async () => {
+  it("starts an existing built app with local Workflow data under .eve", async () => {
     const { buildApplication } = await import("../../src/internal/nitro/host.js");
     const appRoot = await createMinimalAppRoot("eve-cli-start-health-");
 
@@ -413,6 +414,12 @@ describe("runCli", () => {
       expect(response.status).toBe(200);
       expect(responseJson).toMatchObject({ ok: true, status: "ready" });
       expect(server.stdout()).toContain("[START] server listening at");
+      await expect(
+        access(join(resolveLocalWorkflowWorldDataDirectory(appRoot), "version.txt")),
+      ).resolves.toBeUndefined();
+      await expect(access(join(appRoot, ".workflow-data"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     } finally {
       await server.stop();
     }

@@ -56,7 +56,6 @@ const IGNORED_INPUT_DIRECTORIES = new Set([
   ".nuxt",
   ".output",
   ".vercel",
-  ".workflow-data",
   ".workflow-vitest",
   ".well-known",
   ".svelte-kit",

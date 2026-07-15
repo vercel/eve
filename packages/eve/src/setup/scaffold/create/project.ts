@@ -245,7 +245,6 @@ const SHARED_TEMPLATE_FILES: Record<string, string> = {
 .env*
 .eve
 .vercel
-.workflow-data
 .next
 .output
 .nitro
@@ -258,7 +257,6 @@ dist
   ".vercelignore": `node_modules
 .env*
 .eve
-.workflow-data
 .next
 .output
 .nitro

@@ -12,7 +12,6 @@ const IGNORED_DIRECTORY_NAMES = new Set([
   ".output",
   ".swc",
   ".turbo",
-  ".workflow-data",
   "coverage",
   "dist",
   "node_modules",

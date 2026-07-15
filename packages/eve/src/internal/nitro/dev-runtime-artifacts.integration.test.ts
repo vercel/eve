@@ -14,6 +14,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
+import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
   activateDevelopmentRuntimeArtifactsSnapshotTransaction,
@@ -499,7 +500,7 @@ describe("development runtime artifact snapshots", () => {
         sourceRoot: appRoot,
       },
     });
-    const runsDirectory = join(appRoot, ".workflow-data", "default", "runs");
+    const runsDirectory = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "default", "runs");
     await mkdir(runsDirectory, { recursive: true });
     await writeFile(
       join(runsDirectory, "active-turn.json"),
