@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
@@ -23,18 +24,21 @@ describe("framework-tools/index", () => {
     expect(names.has("connection_search")).toBe(false);
   });
 
-  it("never returns undefined entries", () => {
-    for (const config of [{ hasConnections: true }, { hasConnections: false }] as const) {
-      const tools = getFrameworkToolDefinitions(config);
-      for (const tool of tools) {
-        expect(tool, `framework tool entry is undefined`).toBeDefined();
-        expect(tool.name).toBeTypeOf("string");
-        expect(tool.name.length).toBeGreaterThan(0);
-      }
+  it("contains every framework tool exactly once", () => {
+    const tools = getAllFrameworkToolDefinitions();
+    const names = tools.map((tool) => tool.name);
+
+    expect(new Set(names).size).toBe(names.length);
+    for (const tool of tools) {
+      expect(tool.name).toBeTypeOf("string");
+      expect(tool.name.length).toBeGreaterThan(0);
     }
+
+    expect(names).toContain("agent");
+    expect(getFrameworkToolDefinitions().map((tool) => tool.name)).not.toContain("agent");
   });
 
-  it("declares an output schema for every statically shaped framework tool", () => {
+  it("declares an output schema for every statically shaped registered tool", () => {
     const tools = getFrameworkToolDefinitions();
     for (const tool of tools) {
       if (tool.name === "web_search") {
@@ -46,9 +50,12 @@ describe("framework-tools/index", () => {
     }
   });
 
-  it("returns the same tools regardless of hasConnections", () => {
+  it("returns the same registered tools regardless of hasConnections", () => {
     const withConnections = getFrameworkToolDefinitions({ hasConnections: true });
     const withoutConnections = getFrameworkToolDefinitions({ hasConnections: false });
-    expect(withConnections.map((t) => t.name)).toEqual(withoutConnections.map((t) => t.name));
+
+    expect(withConnections.map((tool) => tool.name)).toEqual(
+      withoutConnections.map((tool) => tool.name),
+    );
   });
 });

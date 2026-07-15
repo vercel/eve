@@ -22,7 +22,7 @@ The copy uses the root's instructions, connections, auth, and sandbox. It receiv
 
 The parent transfers data to the child through the `message` input it gives the subagent. Do not include sensitive data in a subagent request unless that child and its inherited tools, connections, sandbox, and telemetry path are appropriate for that data.
 
-To prevent the root session from delegating, disable `agent` the same way as any other built-in tool:
+To prevent the root session from delegating to a fresh copy of itself, disable `agent` the same way as any other built-in tool:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";

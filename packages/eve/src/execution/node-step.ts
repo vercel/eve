@@ -18,8 +18,8 @@ import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#runtime/framework-tool
 import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
-import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#runtime/subagents/registry.js";
+import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
@@ -187,7 +187,6 @@ export function createNodeHarnessTools(input: {
       runtimeAction: {
         kind: "subagent-call",
         nodeId: input.node.nodeId,
-        recursive: true,
         subagentName: AGENT_TOOL_NAME,
       },
     });

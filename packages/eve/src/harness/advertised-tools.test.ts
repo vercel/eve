@@ -5,13 +5,14 @@ import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { buildToolSet } from "#harness/tools.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
 describe("getAdvertisedTools", () => {
-  it("keeps the recursive agent tool in the root session", () => {
+  it("keeps the built-in agent tool in the root session", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["agent", createRecursiveAgentTool()],
+      ["agent", createBuiltInAgentTool()],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({ session: {}, tools });
@@ -33,10 +34,10 @@ describe("getAdvertisedTools", () => {
     expect([...advertisedTools.keys()]).toEqual(["add", "delegate"]);
   });
 
-  it("removes the recursive agent tool from delegated sessions", () => {
+  it("removes the built-in agent tool from delegated sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["agent", createRecursiveAgentTool()],
+      ["agent", createBuiltInAgentTool()],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
@@ -64,7 +65,7 @@ describe("getAdvertisedTools", () => {
   it("removes the built-in agent tool when depth identifies a delegated session", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["agent", createRecursiveAgentTool()],
+      ["agent", createBuiltInAgentTool()],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
@@ -125,10 +126,10 @@ describe("getAdvertisedTools", () => {
 });
 
 describe("getAdvertisedTools for definition arrays", () => {
-  it("removes recursive agent tool definitions from delegated sessions", () => {
+  it("removes built-in agent tool definitions from delegated sessions", () => {
     const advertisedTools = getAdvertisedTools({
       session: { rootSessionId: "root-session", subagentDepth: 1 },
-      tools: [createTool("add"), createSubagentTool("delegate"), createRecursiveAgentTool()],
+      tools: [createTool("add"), createSubagentTool("delegate"), createBuiltInAgentTool()],
     });
 
     expect(advertisedTools.map((tool) => tool.name)).toEqual(["add", "delegate"]);
@@ -154,13 +155,12 @@ function createSubagentTool(name: string): HarnessToolDefinition {
   };
 }
 
-function createRecursiveAgentTool(): HarnessToolDefinition {
+function createBuiltInAgentTool(): HarnessToolDefinition {
   return {
     ...createSubagentTool("agent"),
     runtimeAction: {
       kind: "subagent-call",
-      nodeId: "root",
-      recursive: true,
+      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       subagentName: "agent",
     },
   };

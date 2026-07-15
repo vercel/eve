@@ -682,7 +682,11 @@ describe("compileAgent", () => {
 
     // The disable sentinel reaches the compiled manifest as a name in the
     // dedicated array, not as a tool entry.
-    expect([...result.manifest.disabledFrameworkTools].sort()).toEqual(["web_fetch", "web_search"]);
+    expect([...result.manifest.disabledFrameworkTools].sort()).toEqual([
+      "agent",
+      "web_fetch",
+      "web_search",
+    ]);
 
     // Both the wrapped bash and the replacement todo land in `tools` as
     // ordinary CompiledToolDefinitions. The web_fetch override is intentionally

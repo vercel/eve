@@ -6,6 +6,7 @@ import {
 } from "../src/compiler/manifest.js";
 import type { CompiledModuleMap } from "../src/compiler/module-map.js";
 import { defineAgent } from "../src/public/definitions/agent.js";
+import { createNodeHarnessTools } from "../src/execution/node-step.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "../src/runtime/graph.js";
 import { resolveRuntimeAgentGraph } from "../src/runtime/resolve-agent-graph.js";
@@ -770,6 +771,7 @@ describe("resolveRuntimeAgentGraph", () => {
     });
 
     expect(graph.root.agent.disabledFrameworkTools).toContain("agent");
+    expect(createNodeHarnessTools({ node: graph.root }).has("agent")).toBe(false);
   });
 
   it("combines replacement and disable in one agent", async () => {

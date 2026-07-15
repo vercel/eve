@@ -2,7 +2,7 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
 /**
  * Scenario-tier descriptor exercising every framework-tool override pattern:
- * wrap (`bash`), replace (`todo`), and disable (`web_fetch`, `web_search`).
+ * wrap (`bash`), replace (`todo`), and disable (`agent`, `web_fetch`, `web_search`).
  * The compile pipeline must preserve the override semantics end-to-end.
  */
 export const TOOL_OVERRIDES_DESCRIPTOR: ScenarioAppDescriptor = {
@@ -19,6 +19,11 @@ export default defineAgent({
 });
 `,
     "agent/instructions.md": `A fixture agent that exercises every framework-tool override pattern: wrap, disable, and replace.
+`,
+    "agent/tools/agent.ts": `import { disableTool } from "eve/tools";
+
+// Removes the root-only recursive self-copy tool.
+export default disableTool();
 `,
     "agent/tools/bash.ts": `import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
