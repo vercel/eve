@@ -886,6 +886,9 @@ importers:
 
   e2e/fixtures/agent-tools:
     dependencies:
+      '@eve-e2e/dynamic-import-dependency':
+        specifier: file:./fixtures/dynamic-import-dependency
+        version: file:e2e/fixtures/agent-tools/fixtures/dynamic-import-dependency
       '@opentelemetry/core':
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -2515,6 +2518,9 @@ packages:
   '@eslint/plugin-kit@0.7.2':
     resolution: {integrity: sha512-+CNAzxglkrpNf/kKywqQfk74QjtceuOE7Qm+AF8miRvPF/wmmK5+OJOgVh3AVTT3RP2mH3+FOaxlE5v72owk0A==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
+
+  '@eve-e2e/dynamic-import-dependency@file:e2e/fixtures/agent-tools/fixtures/dynamic-import-dependency':
+    resolution: {directory: e2e/fixtures/agent-tools/fixtures/dynamic-import-dependency, type: directory}
 
   '@fastify/busboy@2.1.1':
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
@@ -14833,6 +14839,8 @@ snapshots:
     dependencies:
       '@eslint/core': 1.2.1
       levn: 0.4.1
+
+  '@eve-e2e/dynamic-import-dependency@file:e2e/fixtures/agent-tools/fixtures/dynamic-import-dependency': {}
 
   '@fastify/busboy@2.1.1': {}
 
