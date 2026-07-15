@@ -17,6 +17,7 @@ import {
 } from "#internal/application/cache-metadata.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
+import { createConnectionRuntimePrunePlugin } from "#internal/nitro/host/connection-runtime-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import {
   configureDevelopmentNitroRoutes,
@@ -166,6 +167,25 @@ export function shouldPruneLocalSandboxBackends(input: {
     ![...input.configuredBackendNames].some((backendName) =>
       LOCAL_SANDBOX_BACKEND_NAMES.has(backendName),
     )
+  );
+}
+
+/**
+ * Vercel functions can omit connection-only runtime paths when no local agent
+ * node in the compiled manifest declares a connection. Development builds
+ * deliberately keep them: their compiler artifacts can change in place while
+ * the Nitro process remains alive.
+ */
+export function shouldPruneConnectionRuntime(input: {
+  readonly manifest: CompiledAgentManifest;
+  readonly preset: "vercel" | undefined;
+}): boolean {
+  if (input.preset !== "vercel") {
+    return false;
+  }
+
+  return ![input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].some(
+    (node) => node.connections.length > 0,
   );
 }
 
@@ -637,6 +657,12 @@ function createApplicationNitroBundlerConfiguration(
   })
     ? createCompiledSandboxBackendPrunePlugin()
     : null;
+  const connectionRuntimePrunePlugin = shouldPruneConnectionRuntime({
+    manifest: preparedHost.compileResult.manifest,
+    preset,
+  })
+    ? createConnectionRuntimePrunePlugin()
+    : null;
   const configuredOptionalEnginePackages: string[] = [];
   const unconfiguredOptionalEnginePackages: string[] = [];
   for (const [backendName, packageName] of Object.entries(
@@ -655,6 +681,7 @@ function createApplicationNitroBundlerConfiguration(
   );
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
+    connectionRuntimePrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);

@@ -9,6 +9,7 @@ import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
 } from "../../src/internal/application/package.js";
+import type { ApplicationBuildProfile } from "../../src/internal/application/build-profile.js";
 import { buildApplication } from "../../src/internal/nitro/host.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
@@ -769,6 +770,61 @@ describe("app runtime dependency tracing", () => {
     expect(vercelFunctionsSource).not.toContain("rollup:reload");
     expect(vercelFunctionsSource).not.toContain("WORKFLOW_LOCAL_DATA_DIR");
     expect(vercelFunctionsSource).not.toContain("DataDirAccessError");
+  }, 30_000);
+
+  it("prunes connection-only runtime code from a hosted app without connections", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+
+    const appRoot = await createScratchDirectory("eve-app-hosted-no-connections-build-");
+    const profilePath = join(appRoot, "build-profile.json");
+
+    await mkdir(join(appRoot, "agent"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(appRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "hosted-no-connections-build-test",
+          private: true,
+          type: "module",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(appRoot, "agent", "agent.ts"),
+      ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
+    );
+    await writeFile(join(appRoot, "agent", "instructions.md"), "No connections here.\n");
+
+    const outputDir = await buildApplication(appRoot, {
+      ...DEPLOYABLE_BUILD_OPTIONS,
+      profileOutputPath: profilePath,
+    });
+    const flowFunctionSource = await readJavaScriptModulesRecursively(
+      join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func"),
+    );
+    const profile = JSON.parse(await readFile(profilePath, "utf8")) as ApplicationBuildProfile;
+    const flowBundle = profile.output.functionBundles.find(
+      (bundle) => bundle.path === "functions/.well-known/workflow/v1/flow.func",
+    );
+
+    expect(flowFunctionSource).not.toContain("McpConnectionClient");
+    expect(flowFunctionSource).not.toContain("OpenApiConnectionClient");
+    expect(flowFunctionSource).not.toContain("framework.connection-search-dynamic");
+    expect(flowBundle).toBeDefined();
+
+    if (flowBundle === undefined) {
+      throw new Error("Expected the deployable build profile to include the flow function.");
+    }
+
+    // This leaves deliberate headroom for ordinary bundled-code changes while
+    // keeping the MCP/OpenAPI dependency regression visible in CI.
+    expect(flowBundle.rawBytes).toBeLessThan(6_400_000);
+    expect(flowBundle.gzipBytes).toBeLessThan(1_550_000);
   }, 30_000);
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {
