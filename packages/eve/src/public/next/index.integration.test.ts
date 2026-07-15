@@ -14,6 +14,20 @@ async function createTempAppRoot(): Promise<string> {
   return await mkdtemp(join(tmpdir(), "eve-next-config-"));
 }
 
+// Simulate an installed eve package under a directory's node_modules (the
+// layout pnpm produces app-locally via symlink). Tests that assert the default
+// build command need a real install to resolve against, since withEve locates
+// the eve binary through module resolution.
+async function installEve(root: string): Promise<void> {
+  const eveRoot = join(root, "node_modules", "eve");
+  await mkdir(join(eveRoot, "bin"), { recursive: true });
+  await writeFile(
+    join(eveRoot, "package.json"),
+    JSON.stringify({ name: "eve", version: "0.0.0", bin: { eve: "./bin/eve.js" } }),
+  );
+  await writeFile(join(eveRoot, "bin", "eve.js"), "#!/usr/bin/env node\n");
+}
+
 async function readJsonFile(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8")) as unknown;
 }
@@ -52,6 +66,7 @@ describe("withEve Vercel config", () => {
 
   it("writes Build Output config in Vercel even when no linked project is detected", async () => {
     const appRoot = await createTempAppRoot();
+    await installEve(appRoot);
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
@@ -98,6 +113,7 @@ describe("withEve Vercel config", () => {
 
   it("isolates a colocated generated eve service from the Next.js Build Output", async () => {
     const appRoot = await createTempAppRoot();
+    await installEve(appRoot);
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
@@ -126,6 +142,7 @@ describe("withEve Vercel config", () => {
     await mkdir(join(projectRoot, ".vercel"), { recursive: true });
     await writeFile(join(projectRoot, ".vercel", "project.json"), "{}\n");
     await mkdir(appRoot, { recursive: true });
+    await installEve(appRoot);
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
@@ -309,8 +326,37 @@ describe("withEve Vercel config", () => {
     });
   });
 
+  it("resolves the eve binary from a hoisted node_modules (npm workspaces)", async () => {
+    // npm workspaces hoist eve to the workspace root instead of creating an
+    // app-local node_modules/eve (which pnpm symlinks). The generated build
+    // command must point at the hoisted install, not a nonexistent app-local
+    // path.
+    const workspaceRoot = await createTempAppRoot();
+    await installEve(workspaceRoot);
+
+    const appRoot = join(workspaceRoot, "apps", "web");
+    await mkdir(appRoot, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), JSON.stringify({ name: "web" }));
+
+    process.chdir(appRoot);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    await resolveConfig(withEve<TestConfig>({}));
+    const outputConfig = (await readJsonFile(
+      join(appRoot, ".vercel", "output", "config.json"),
+    )) as { services: { eve: { buildCommand: string } } };
+
+    // The hoisted eve lives two levels up from apps/web at the workspace root.
+    expect(outputConfig.services.eve.buildCommand).toContain(
+      "node '../../node_modules/eve/bin/eve.js' build",
+    );
+  });
+
   it("writes one Build Output service and route for each named agent", async () => {
     const appRoot = await createTempAppRoot();
+    await installEve(appRoot);
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
@@ -398,6 +444,7 @@ describe("withEve Vercel config", () => {
 
   it("normalizes existing Build Output service arrays before adding named agents", async () => {
     const appRoot = await createTempAppRoot();
+    await installEve(appRoot);
     process.chdir(appRoot);
     await mkdir(join(appRoot, ".vercel", "output"), { recursive: true });
     await writeFile(join(appRoot, ".vercel", "project.json"), "{}\n");

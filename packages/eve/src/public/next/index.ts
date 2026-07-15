@@ -1,4 +1,5 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import type { NextConfig } from "next";
 
@@ -325,12 +326,27 @@ function toPosixPath(path: string): string {
   return path.replaceAll("\\", "/");
 }
 
+function resolveEveBinaryPath(nextRoot: string): string {
+  // Resolve where eve is actually installed from the app's perspective rather
+  // than assuming an app-local `node_modules/eve`. npm workspaces hoist eve to
+  // the workspace root, so the app-local path does not exist there; module
+  // resolution follows the hoisted (or pnpm-symlinked) install instead. eve
+  // does not export `./bin/eve.js`, but it does export `./package.json`, so we
+  // resolve that and derive the bin path from the package root.
+  try {
+    const require = createRequire(join(nextRoot, "package.json"));
+    return join(dirname(require.resolve("eve/package.json")), "bin", "eve.js");
+  } catch {
+    return join(nextRoot, "node_modules", "eve", "bin", "eve.js");
+  }
+}
+
 function createDefaultBuildCommand(input: {
   readonly agentRoot: string;
   readonly nextRoot: string;
 }): string {
   const eveBinaryPath = toPosixPath(
-    relative(input.agentRoot, join(input.nextRoot, "node_modules", "eve", "bin", "eve.js")),
+    relative(input.agentRoot, resolveEveBinaryPath(input.nextRoot)),
   );
   return `node ${quoteShellArg(eveBinaryPath)} build`;
 }
