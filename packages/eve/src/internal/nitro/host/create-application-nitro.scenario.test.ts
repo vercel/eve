@@ -511,7 +511,7 @@ describe("application Nitro creation", () => {
     ).toBeNull();
   });
 
-  it("merges default server external packages with configured hosted dependencies", async () => {
+  it("merges framework and configured hosted dependencies", async () => {
     const allNitroStub = createNitroStub();
     const appNitroStub = createNitroStub();
     const flowNitroStub = createNitroStub();
@@ -546,7 +546,7 @@ describe("application Nitro creation", () => {
     for (const call of createNitroMock.mock.calls.slice(0, 3)) {
       const traceDeps = call[0].traceDeps;
       expect(traceDeps).toEqual(
-        expect.arrayContaining(["@napi-rs/keyring", "@prisma/client", "sharp", "fixture-external"]),
+        expect.arrayContaining(["@napi-rs/keyring", "sharp", "fixture-external"]),
       );
       expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
         1,
@@ -600,7 +600,7 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("traces framework and server defaults even when no externals are configured", async () => {
+  it("leaves Nitro to classify unconfigured hosted dependencies", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -613,17 +613,7 @@ describe("application Nitro creation", () => {
       createProductionOptions(preparedHost, "all"),
     );
 
-    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(
-      expect.arrayContaining([
-        "@aws-sdk/client-kms",
-        "@aws-sdk/client-sso",
-        "@datadog/flagging-core",
-        "@napi-rs/keyring",
-        "@prisma/client",
-        "@smithy/util-stream",
-        "dd-trace",
-      ]),
-    );
+    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(["@napi-rs/keyring"]);
   });
 
   it("includes the Workflow sandbox runtime plugin only when Workflow is enabled", async () => {

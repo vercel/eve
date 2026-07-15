@@ -22,7 +22,6 @@ import {
   buildWithNitroRolldown,
   getSingleRolldownChunk,
 } from "#internal/bundler/nitro-rolldown.js";
-import type { ResolvedAuthoredExternalModule } from "#internal/materialize-authored-external-dependencies.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
@@ -42,11 +41,6 @@ export interface AuthoredModuleLoadOptions {
    * dependencies bundled with it) are scoped to this namespace at bundle time.
    */
   readonly extensionScopeNamespace?: string;
-}
-
-export interface AuthoredGenerationModuleBundle {
-  readonly code: string;
-  readonly externalModules: readonly ResolvedAuthoredExternalModule[];
 }
 
 function getChannelModuleCache(): Map<string, unknown> | undefined {
@@ -158,15 +152,13 @@ export async function bundleAuthoredModuleCode(
 /**
  * Bundles one authored entry for an immutable development generation. Ordinary
  * package dependencies are inlined so the emitted code stays executable after
- * the original workspace changes; framework runtime imports and configured
- * external dependencies stay external, and every configured external the
- * bundle references is reported for closure materialization.
+ * the original workspace changes; framework runtime imports and explicitly
+ * configured external dependencies keep their normal runtime resolution.
  */
 export async function bundleAuthoredModuleForGeneration(
   modulePath: string,
   options: AuthoredModuleLoadOptions = {},
-): Promise<AuthoredGenerationModuleBundle> {
-  const externalModules = new Map<string, ResolvedAuthoredExternalModule>();
+): Promise<string> {
   const code = await buildAuthoredModuleBundle(modulePath, options, {
     // Generation bundles must not reference process state: the channel
     // identity plugin emits reads of a process-global cache keyed by live
@@ -175,25 +167,12 @@ export async function bundleAuthoredModuleForGeneration(
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot: resolveAuthoredPackageRoot(modulePath),
-      recordExternalModule(externalModule) {
-        externalModules.set(
-          `${externalModule.packageName}\0${externalModule.resolvedId}`,
-          externalModule,
-        );
-      },
     }),
     plugins: [createAuthoredDirectiveGuardPlugin()],
     sourcemap: false,
   });
 
-  return {
-    code: removeRolldownModuleRegionComments(code),
-    externalModules: [...externalModules.values()].sort((left, right) =>
-      `${left.packageName}\0${left.resolvedId}`.localeCompare(
-        `${right.packageName}\0${right.resolvedId}`,
-      ),
-    ),
-  };
+  return removeRolldownModuleRegionComments(code);
 }
 
 async function buildAuthoredModuleBundle(
@@ -284,6 +263,7 @@ async function buildAuthoredModuleBundle(
       tsconfig: tsconfigPath,
       write: false,
       output: {
+        codeSplitting: false,
         comments: false,
         format: "esm",
         sourcemap: configuration.sourcemap,

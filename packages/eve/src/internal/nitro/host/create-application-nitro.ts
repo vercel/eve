@@ -30,7 +30,6 @@ import {
 } from "#internal/nitro/host/optional-engine-dependency-plugin.js";
 import { addNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
 import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
-import { SERVER_EXTERNAL_PACKAGES } from "#internal/nitro/host/server-external-packages.js";
 import type {
   NitroBuildSurface,
   PreparedApplicationHost,
@@ -121,6 +120,9 @@ function collectHostedTraceDependencies(
   const configuredExternalDependencies = agentNodes.flatMap(
     (node) => node.config.build?.externalDependencies ?? [],
   );
+  // Nitro already classifies known native and non-bundleable packages through
+  // its nf3 database. traceDeps is only for eve-owned or author-configured
+  // additions to that upstream policy.
   const merged = new Set<string>([
     ...FRAMEWORK_HOSTED_EXTERNAL_PACKAGES,
     // Optional engine packages (just-bash, microsandbox) join the
@@ -130,7 +132,6 @@ function collectHostedTraceDependencies(
     // so a resolvable-but-unrequested install adds nothing to hosted
     // output.
     ...configuredOptionalEnginePackages,
-    ...SERVER_EXTERNAL_PACKAGES,
     ...configuredExternalDependencies,
   ]);
   return [...merged].filter((dependencyName) => dependencyName !== EVE_PACKAGE_NAME);

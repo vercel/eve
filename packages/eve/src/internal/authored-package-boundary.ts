@@ -1,9 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
-import type { ResolvedAuthoredExternalModule } from "#internal/materialize-authored-external-dependencies.js";
-import { SERVER_EXTERNAL_PACKAGES } from "#internal/nitro/host/server-external-packages.js";
-
 export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
 export const RESOLVE_EXTENSIONS = [
@@ -30,10 +27,14 @@ export type RolldownResolveContext = {
   ): Promise<RolldownResolveResult | null>;
 };
 
+interface ResolvedAuthoredExternalModule {
+  readonly packageName: string;
+  readonly resolvedId: string;
+}
+
 export function createGenerationPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
-  readonly recordExternalModule: (externalModule: ResolvedAuthoredExternalModule) => void;
 }): Record<string, unknown> {
   return {
     name: "eve-generation-package-boundary",
@@ -65,7 +66,6 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return undefined;
       }
 
-      input.recordExternalModule(externalModule);
       return { external: true, id: source };
     },
   };
@@ -191,7 +191,10 @@ async function resolveConfiguredExternalModule(
 export function normalizeExternalDependencies(
   externalDependencies: readonly string[] = [],
 ): string[] {
-  return [...new Set([...SERVER_EXTERNAL_PACKAGES, ...externalDependencies])].sort();
+  // This is intentionally explicit-only. Nitro owns hosted dependency
+  // classification; applying its trace set to authored generation bundles
+  // would turn bundleable packages into a second dev-only packaging graph.
+  return [...new Set(externalDependencies)].sort();
 }
 
 function resolveConfiguredExternalDependency(

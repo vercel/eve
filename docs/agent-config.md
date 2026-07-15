@@ -214,6 +214,8 @@ installed package must stay external in hosted output, list it in
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 
+During `eve dev`, ordinary dependencies are bundled into each retained runtime generation. Packages listed in `externalDependencies` keep normal Node.js resolution instead, so replacing one of those packages requires restarting the dev server.
+
 ## Where adjacent settings live
 
 | Concern                       | Lives in                                                                         |

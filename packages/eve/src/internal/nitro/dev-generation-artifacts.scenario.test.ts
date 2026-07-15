@@ -17,7 +17,75 @@ import { useScenarioApp } from "#internal/testing/scenario-app.js";
 describe("development generation artifacts", () => {
   const scenarioApp = useScenarioApp();
 
-  it("executes its ESM external closure after the original source and dependencies are removed", async () => {
+  it("executes dynamic imports after the original bundled dependency is removed", async () => {
+    const evaluationMarker = "__eveGenerationDynamicImportEvaluated__";
+    const globals = globalThis as Record<string, unknown>;
+    delete globals[evaluationMarker];
+    const app = await scenarioApp({
+      dependencies: {
+        pg: "1.0.0",
+      },
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Use the available tools.",
+        "agent/tools/read_dynamic.mjs": [
+          'import { readDynamicValue } from "pg";',
+          "",
+          "export default {",
+          '  description: "Read a dynamically imported value.",',
+          "  execute: readDynamicValue,",
+          "};",
+          "",
+        ].join("\n"),
+      },
+      name: "generation-dynamic-import",
+    });
+    const dependencyRoot = join(app.appRoot, "node_modules", "pg");
+    await mkdir(dependencyRoot, { recursive: true });
+    await writeFile(
+      join(dependencyRoot, "package.json"),
+      `${JSON.stringify({ exports: "./index.mjs", name: "pg", type: "module" })}\n`,
+    );
+    await writeFile(
+      join(dependencyRoot, "index.mjs"),
+      [
+        "export async function readDynamicValue() {",
+        '  return (await import("./dynamic.mjs")).value;',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(dependencyRoot, "dynamic.mjs"),
+      [
+        `globalThis[${JSON.stringify(evaluationMarker)}] = true;`,
+        'export const value = "original";',
+        "",
+      ].join("\n"),
+    );
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+
+    await rm(join(app.appRoot, "node_modules"), { force: true, recursive: true });
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        snapshot.runtimeAppRoot,
+      ),
+    });
+    const toolSourceId = compileResult.manifest.tools[0]?.sourceId;
+    expect(toolSourceId).toBeDefined();
+    const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
+      default: { execute(): Promise<string> };
+    };
+
+    expect(globals[evaluationMarker]).toBeUndefined();
+    await expect(tool.default.execute()).resolves.toBe("original");
+    expect(globals[evaluationMarker]).toBe(true);
+    delete globals[evaluationMarker];
+  });
+
+  it("bundles ordinary dependencies while configured externals keep runtime resolution", async () => {
     const app = await scenarioApp({
       dependencies: {
         "fixture-bundled": "1.0.0",
@@ -52,25 +120,17 @@ describe("development generation artifacts", () => {
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const snapshot = await stageDevelopmentGeneration(compileResult);
     const externalPackagePath = join(snapshot.runtimeAppRoot, "node_modules", "fixture-external");
-    const materializedExternalPath = await realpath(externalPackagePath);
+    const resolvedExternalPath = await realpath(externalPackagePath);
     const canonicalSnapshotRoot = await realpath(snapshot.snapshotRoot);
 
-    expect(relative(canonicalSnapshotRoot, materializedExternalPath)).not.toMatch(
-      /^\.\.(?:[\\/]|$)/u,
-    );
-    expect(existsSync(join(materializedExternalPath, "binding.node"))).toBe(true);
+    expect(relative(canonicalSnapshotRoot, resolvedExternalPath)).toMatch(/^\.\.(?:[\\/]|$)/u);
+    expect(existsSync(join(resolvedExternalPath, "binding.node"))).toBe(true);
 
-    await writeFile(
-      join(externalFixtureRoot, "fixture-transitive", "index.mjs"),
-      'export const transitiveValue = "external-changed";\n',
-    );
-    const changedDependencies = await stageDevelopmentGeneration(
-      await compileAgent({ startPath: app.appRoot }),
-    );
-    expect(changedDependencies.fingerprint).not.toBe(snapshot.fingerprint);
-
-    await rm(join(app.appRoot, "node_modules"), { force: true, recursive: true });
-    await rm(externalFixtureRoot, { force: true, recursive: true });
+    await rm(join(app.appRoot, "node_modules", "fixture-bundled"), {
+      force: true,
+      recursive: true,
+    });
+    await rm(join(app.appRoot, "node_modules", "@workflow"), { force: true, recursive: true });
     await writeFile(
       join(app.appRoot, "agent", "tools", "read_value.mjs"),
       'throw new Error("mutated source loaded");\n',
@@ -90,6 +150,7 @@ describe("development generation artifacts", () => {
     expect(tool.default.execute()).toBe(
       "bundled-original:serde-original:external-original:payload-original",
     );
+    await rm(externalFixtureRoot, { force: true, recursive: true });
   });
 
   it("uses a path-independent fingerprint that includes instrumentation", async () => {

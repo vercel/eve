@@ -28,10 +28,7 @@ export async function stageDevelopmentGeneration(
 
   try {
     const materialized = await materializeAuthoredModules({
-      appRoot: compileResult.project.appRoot,
       runtimeAppRoot: snapshot.runtimeAppRoot,
-      snapshotSourceRoot: snapshot.snapshotSourceRoot,
-      sourceRoot: snapshot.sourceRoot,
     });
 
     return {

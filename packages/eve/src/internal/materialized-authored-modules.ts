@@ -8,10 +8,6 @@ import { COMPILED_AGENT_MANIFEST_KIND, ROOT_COMPILED_AGENT_NODE_ID } from "#comp
 import { collectModuleRefsForManifest } from "#compiler/module-map.js";
 import { bundleAuthoredModuleForGeneration } from "#internal/authored-module-loader.js";
 import { serializeCompiledManifestForFingerprint } from "#internal/compiled-manifest-fingerprint.js";
-import {
-  materializeAuthoredExternalDependencies,
-  type ResolvedAuthoredExternalModule,
-} from "#internal/materialize-authored-external-dependencies.js";
 
 const MATERIALIZED_MODULES_DIRECTORY = "authored-modules";
 const MATERIALIZED_MODULES_INDEX = "authored-modules.json";
@@ -25,17 +21,13 @@ export interface MaterializedAuthoredModuleIndex {
 }
 
 export async function materializeAuthoredModules(input: {
-  readonly appRoot: string;
   readonly runtimeAppRoot: string;
-  readonly snapshotSourceRoot: string;
-  readonly sourceRoot: string;
 }): Promise<MaterializedAuthoredModuleIndex> {
   const compileRoot = join(input.runtimeAppRoot, ".eve", "compile");
   const manifest = await readCompiledManifest(join(compileRoot, "compiled-agent-manifest.json"));
   const modulesRoot = join(compileRoot, MATERIALIZED_MODULES_DIRECTORY);
   const scopeIndex = createExtensionScopeIndex(manifest);
   const nodes: Record<string, { modules: Record<string, string> }> = {};
-  const externalModules: ResolvedAuthoredExternalModule[] = [];
   const fingerprint = createHash("sha256");
 
   await mkdir(modulesRoot, { recursive: true });
@@ -54,24 +46,20 @@ export async function materializeAuthoredModules(input: {
     for (const ref of collectModuleRefsForManifest(node.manifest).sort((left, right) =>
       left.sourceId.localeCompare(right.sourceId),
     )) {
-      const bundle = await bundleAuthoredModuleForGeneration(
-        join(node.agentRoot, ref.logicalPath),
-        {
-          externalDependencies: node.manifest.config.build?.externalDependencies ?? [],
-          extensionScopeNamespace: extensionNamespaceForSourceId(ref.sourceId, scopeIndex),
-        },
-      );
-      const fileName = createMaterializedModuleFileName(node.nodeId, ref.sourceId, bundle.code);
+      const code = await bundleAuthoredModuleForGeneration(join(node.agentRoot, ref.logicalPath), {
+        externalDependencies: node.manifest.config.build?.externalDependencies ?? [],
+        extensionScopeNamespace: extensionNamespaceForSourceId(ref.sourceId, scopeIndex),
+      });
+      const fileName = createMaterializedModuleFileName(node.nodeId, ref.sourceId, code);
 
-      await writeFile(join(modulesRoot, fileName), bundle.code);
-      externalModules.push(...bundle.externalModules);
+      await writeFile(join(modulesRoot, fileName), code);
       fingerprint
         .update("module\0")
         .update(node.nodeId)
         .update("\0")
         .update(ref.sourceId)
         .update("\0")
-        .update(bundle.code)
+        .update(code)
         .update("\0");
       modules[ref.sourceId] = join(MATERIALIZED_MODULES_DIRECTORY, fileName);
     }
@@ -83,19 +71,18 @@ export async function materializeAuthoredModules(input: {
   let instrumentationPath: string | undefined;
 
   if (instrumentation !== undefined) {
-    const bundle = await bundleAuthoredModuleForGeneration(instrumentation, {
+    const code = await bundleAuthoredModuleForGeneration(instrumentation, {
       externalDependencies: manifest.config.build?.externalDependencies ?? [],
     });
     const fileName = createMaterializedModuleFileName(
       ROOT_COMPILED_AGENT_NODE_ID,
       "instrumentation",
-      bundle.code,
+      code,
     );
 
-    await writeFile(join(modulesRoot, fileName), bundle.code);
-    externalModules.push(...bundle.externalModules);
+    await writeFile(join(modulesRoot, fileName), code);
     instrumentationPath = join(MATERIALIZED_MODULES_DIRECTORY, fileName);
-    fingerprint.update("instrumentation\0").update(bundle.code).update("\0");
+    fingerprint.update("instrumentation\0").update(code).update("\0");
   }
 
   await hashDirectoryIfPresent({
@@ -103,18 +90,6 @@ export async function materializeAuthoredModules(input: {
     path: join(compileRoot, "workspace-resources"),
     root: join(compileRoot, "workspace-resources"),
   });
-  fingerprint
-    .update("external-dependencies\0")
-    .update(
-      await materializeAuthoredExternalDependencies({
-        appRoot: input.appRoot,
-        externalModules,
-        snapshotSourceRoot: input.snapshotSourceRoot,
-        sourceRoot: input.sourceRoot,
-      }),
-    )
-    .update("\0");
-
   const index: {
     fingerprint: string;
     instrumentation?: string;
