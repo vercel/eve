@@ -7,7 +7,7 @@ import {
 
 describe("buildNodeEsmCompatBanner", () => {
   it("emits both path globals when the chunk declares neither", () => {
-    const banner = buildNodeEsmCompatBanner('console.log("noop");');
+    const banner = buildNodeEsmCompatBanner("export const value = __dirname;");
 
     expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
     expect(banner).toContain("const __dirname = __eveDirname(__filename);");
@@ -15,7 +15,9 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("includes the require shim when requested", () => {
-    const banner = buildNodeEsmCompatBanner('console.log("noop");', { includeRequire: true });
+    const banner = buildNodeEsmCompatBanner('export const value = require("noop");', {
+      includeRequire: true,
+    });
 
     expect(banner).toContain("const require = __eveCreateRequire(import.meta.url);");
   });
@@ -43,13 +45,17 @@ describe("buildNodeEsmCompatBanner", () => {
   });
 
   it("emits only the missing path global", () => {
-    const chunk = ["var __dirname = somethingElse;", 'export const value = "noop";'].join("\n");
+    const chunk = ["var __dirname = somethingElse;", "export const value = __filename;"].join("\n");
 
     const banner = buildNodeEsmCompatBanner(chunk);
 
     expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
     expect(banner).not.toContain("const __dirname = __eveDirname(__filename);");
     expect(banner).not.toContain('from "node:path"');
+  });
+
+  it("emits nothing when the chunk does not use compatibility globals", () => {
+    expect(buildNodeEsmCompatBanner('export const value = "noop";')).toBe("");
   });
 
   it("omits the require shim when the chunk binds require", () => {
@@ -86,12 +92,12 @@ describe("buildNodeEsmCompatBanner", () => {
 describe("createNodeEsmCompatBannerPlugin", () => {
   it("prepends the banner to chunks that need it", () => {
     const plugin = createNodeEsmCompatBannerPlugin();
-    const code = 'export const value = "noop";';
+    const code = "export const value = __dirname;";
     const result = plugin.renderChunk(code, { fileName: "agent.mjs" });
 
     expect(result).not.toBeNull();
     expect(result?.code).toMatch(/^import \{ fileURLToPath as __eveFileURLToPath \}/);
-    expect(result?.code).toContain('export const value = "noop";');
+    expect(result?.code).toContain("export const value = __dirname;");
     expect(result?.map).toEqual({
       version: 3,
       sources: ["agent.mjs"],
@@ -103,7 +109,7 @@ describe("createNodeEsmCompatBannerPlugin", () => {
 
   it("maps original chunk lines after the prepended banner", () => {
     const plugin = createNodeEsmCompatBannerPlugin();
-    const code = ['const value = "noop";', "export { value };"].join("\n");
+    const code = ["const value = __dirname;", "export { value };"].join("\n");
     const result = plugin.renderChunk(code);
 
     expect(result?.map.mappings).toBe(";;;;AAAA;AACA");

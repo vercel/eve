@@ -5,8 +5,8 @@
  * Bundle output that re-declares one of the CJS path globals at the top
  * level would otherwise collide with the banner, producing
  * `SyntaxError: Identifier '__dirname' has already been declared` at load
- * time. The banner builder omits any line whose binding the chunk already
- * provides.
+ * time. The banner builder includes only referenced globals and omits any
+ * line whose binding the chunk already provides.
  */
 interface NodeEsmCompatBannerOptions {
   /** Whether to expose a CommonJS `require` shim alongside the path globals. */
@@ -17,6 +17,7 @@ interface BannerLine {
   readonly importLine: string;
   readonly declarationLine: string;
   readonly bindingPattern: RegExp;
+  readonly usagePattern: RegExp;
 }
 
 // Match `const|let|var <name>` at the literal start of a line. Bundler
@@ -28,11 +29,13 @@ const BANNER_LINES: readonly BannerLine[] = [
     importLine: 'import { fileURLToPath as __eveFileURLToPath } from "node:url";',
     declarationLine: "const __filename = __eveFileURLToPath(import.meta.url);",
     bindingPattern: /^(?:const|let|var)\s+__filename\b/m,
+    usagePattern: /\b__(?:dir|file)name\b/,
   },
   {
     importLine: 'import { dirname as __eveDirname } from "node:path";',
     declarationLine: "const __dirname = __eveDirname(__filename);",
     bindingPattern: /^(?:const|let|var)\s+__dirname\b/m,
+    usagePattern: /\b__dirname\b/,
   },
 ];
 
@@ -40,6 +43,7 @@ const REQUIRE_LINE: BannerLine = {
   importLine: 'import { createRequire as __eveCreateRequire } from "node:module";',
   declarationLine: "const require = __eveCreateRequire(import.meta.url);",
   bindingPattern: /^(?:const|let|var)\s+require\b/m,
+  usagePattern: /\brequire\b/,
 };
 
 /**
@@ -48,7 +52,7 @@ const REQUIRE_LINE: BannerLine = {
  * level (e.g. `const __dirname = ...` emitted by an inlined module) are
  * skipped so the prepended banner never re-declares them.
  *
- * Returns an empty string when the chunk already provides every binding.
+ * Returns an empty string when the chunk needs no compatibility binding.
  */
 export function buildNodeEsmCompatBanner(
   code: string,
@@ -64,7 +68,7 @@ export function buildNodeEsmCompatBanner(
   const declarations: string[] = [];
 
   for (const line of lines) {
-    if (line.bindingPattern.test(code)) {
+    if (!line.usagePattern.test(code) || line.bindingPattern.test(code)) {
       continue;
     }
 
@@ -97,8 +101,9 @@ interface SourceMap {
 
 /**
  * Creates a bundler plugin that prepends the Node ESM compatibility
- * banner to each output chunk, skipping any banner line whose binding
- * the chunk already provides. Compatible with both Rollup and Rolldown.
+ * banner to each output chunk that references a compatibility global,
+ * skipping any line whose binding the chunk already provides. Compatible
+ * with both Rollup and Rolldown.
  */
 export function createNodeEsmCompatBannerPlugin(
   options: NodeEsmCompatBannerOptions = {},
@@ -133,44 +138,18 @@ function createPrependedLineSourceMap({
   source: string;
   sourceContent: string;
 }): SourceMap {
-  const originalLineCount = sourceContent.split("\n").length;
-  const lineMappings = Array.from({ length: originalLineCount }, (_, index) =>
-    encodeVlqFields(index === 0 ? [0, 0, 0, 0] : [0, 0, 1, 0]),
-  );
+  let originalLineCount = 1;
+  let newlineIndex = sourceContent.indexOf("\n");
+  while (newlineIndex !== -1) {
+    originalLineCount += 1;
+    newlineIndex = sourceContent.indexOf("\n", newlineIndex + 1);
+  }
 
   return {
     version: 3,
     sources: [source],
     sourcesContent: [sourceContent],
     names: [],
-    mappings: `${";".repeat(insertedLineCount)}${lineMappings.join(";")}`,
+    mappings: `${";".repeat(insertedLineCount)}AAAA${";AACA".repeat(originalLineCount - 1)}`,
   };
-}
-
-const BASE64_VLQ_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const VLQ_BASE_SHIFT = 5;
-const VLQ_BASE = 1 << VLQ_BASE_SHIFT;
-const VLQ_BASE_MASK = VLQ_BASE - 1;
-const VLQ_CONTINUATION_BIT = VLQ_BASE;
-
-function encodeVlqFields(fields: readonly number[]): string {
-  return fields.map((field) => encodeVlqInteger(field)).join("");
-}
-
-function encodeVlqInteger(value: number): string {
-  let vlq = value < 0 ? (-value << 1) + 1 : value << 1;
-  let encoded = "";
-
-  do {
-    let digit = vlq & VLQ_BASE_MASK;
-    vlq >>>= VLQ_BASE_SHIFT;
-
-    if (vlq > 0) {
-      digit |= VLQ_CONTINUATION_BIT;
-    }
-
-    encoded += BASE64_VLQ_CHARS[digit];
-  } while (vlq > 0);
-
-  return encoded;
 }
