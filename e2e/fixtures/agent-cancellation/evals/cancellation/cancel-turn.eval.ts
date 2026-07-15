@@ -4,7 +4,6 @@ import { satisfies } from "eve/evals/expect";
 const TOOL_NAME = "wait-for-cancellation";
 
 interface CreateSessionResponse {
-  readonly continuationToken?: string;
   readonly ok: boolean;
   readonly sessionId?: string;
 }
@@ -115,13 +114,11 @@ export default defineEval({
         (value: typeof created) =>
           value.status === 202 &&
           value.payload.ok === true &&
-          typeof value.payload.sessionId === "string" &&
-          typeof value.payload.continuationToken === "string",
-        "create session returns a session id and continuation token",
+          typeof value.payload.sessionId === "string",
+        "create session returns a session id",
       ),
     );
     const sessionId = created.payload.sessionId!;
-    const continuationToken = created.payload.continuationToken!;
     const cancelPath = `/eve/v1/session/${encodeURIComponent(sessionId)}/cancel`;
 
     await waitForToolCall(t, sessionId);
@@ -141,33 +138,22 @@ export default defineEval({
     );
 
     // The cancelled turn: turn.cancelled → session.waiting, never a failure.
-    const cancelledTurn = await t.target.attachSession(sessionId, { startIndex: 0 });
-    cancelledTurn.event("turn.cancelled", { count: 1 });
-    cancelledTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelledTurn.notEvent("turn.failed");
-    cancelledTurn.notEvent("step.failed");
-    cancelledTurn.notEvent("session.failed");
-    const consumedEvents = cancelledTurn.events.length;
+    // The attach recovers the continuation token from the cancelled turn's
+    // `session.waiting` boundary, so the same handle can send follow-ups.
+    const session = await t.target.attachSession(sessionId, { startIndex: 0 });
+    session.event("turn.cancelled", { count: 1 });
+    session.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
+    session.notEvent("turn.failed");
+    session.notEvent("step.failed");
+    session.notEvent("session.failed");
 
     // The session accepts the next message normally.
-    const followUp = await postJson<{ ok: boolean }>(
-      t.target,
-      `/eve/v1/session/${encodeURIComponent(sessionId)}`,
-      { continuationToken, message: "Reply with exactly CANCELLATION-FOLLOW-UP-OK." },
-    );
-    await t.require(
-      followUp,
-      satisfies(
-        (value: typeof followUp) => value.status === 200 && value.payload.ok === true,
-        "cancelled session accepts a follow-up message",
-      ),
-    );
-
-    const followUpTurn = await t.target.attachSession(sessionId, { startIndex: consumedEvents });
-    followUpTurn.notEvent("turn.cancelled");
-    followUpTurn.notEvent("turn.failed");
-    followUpTurn.notEvent("session.failed");
-    followUpTurn.messageIncludes(/CANCELLATION-FOLLOW-UP-OK/i);
+    const followUp = await session.send("Reply with exactly CANCELLATION-FOLLOW-UP-OK.");
+    followUp.expectOk();
+    followUp.notEvent("turn.cancelled");
+    followUp.notEvent("turn.failed");
+    followUp.notEvent("session.failed");
+    followUp.messageIncludes(/CANCELLATION-FOLLOW-UP-OK/i);
 
     // With the session parked and the settled turn's hook swept, a
     // duplicate cancel is the benign "nothing to cancel" success. The
