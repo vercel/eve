@@ -136,7 +136,7 @@ describe("turn cancellation descendant cascade", () => {
           await expect(cancelResponse.json()).resolves.toMatchObject({
             ok: true,
             sessionId: response.sessionId,
-            status: "cancelling",
+            status: "accepted",
           });
 
           const remoteEvents = await readThroughBoundary({

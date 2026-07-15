@@ -103,7 +103,7 @@ export default defineEval({
 
 - `t.send(input)` sends a turn and waits for it to settle. It accepts the same input as `ClientSession.send()` (a string or a structured message) and resolves to a turn carrying `.message` and `.expectOk()`.
 - `t.start(input)` starts a turn but returns as soon as the server accepts it. The returned live turn exposes `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()` for coordinating with work that is still running.
-- `t.cancel()` requests cooperative cancellation of the primary session's active turn. Both `cancelling` and `no_active_turn` are successful outcomes.
+- `t.cancel()` requests cooperative cancellation of the primary session's active turn. Both `accepted` and `no_active_turn` are successful outcomes.
 - `t.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
 - `t.requireInputRequest(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
 - `t.respond(...responses)` answers specific pending input requests and sends them as the next turn.

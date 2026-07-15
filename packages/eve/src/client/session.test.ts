@@ -66,7 +66,7 @@ describe("ClientSession", () => {
       });
       if (new URL(url).pathname.endsWith("/cancel")) {
         return Response.json(
-          { ok: true, sessionId: "session_1", status: "cancelling" },
+          { ok: true, sessionId: "session_1", status: "accepted" },
           { status: 202 },
         );
       }
@@ -88,7 +88,7 @@ describe("ClientSession", () => {
 
     expect(turn.sessionId).toBe("session_1");
     expect(session.state.sessionId).toBe("session_1");
-    expect(cancelled).toEqual({ sessionId: "session_1", status: "cancelling" });
+    expect(cancelled).toEqual({ sessionId: "session_1", status: "accepted" });
     expect(requests).toHaveLength(2);
     expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/session/session_1/cancel");
     expect(requests[1]!.method).toBe("POST");
@@ -97,6 +97,18 @@ describe("ClientSession", () => {
 
   it("rejects cancellation before a session has started", async () => {
     await expect(createSession().cancel()).rejects.toThrow("Session has no session ID");
+  });
+
+  it("rejects a cancel response for a different session", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { ok: true, sessionId: "another-session", status: "accepted" },
+        { status: 202 },
+      ),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
   });
 
   it("serializes clientContext when sending a create-session message", async () => {

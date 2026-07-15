@@ -28,7 +28,7 @@ durable state, events, or workflow behavior is introduced.
 
 | Status  | Body                                                | Meaning                                                                                            |
 | ------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 202     | `{ ok: true, sessionId, status: "cancelling" }`     | A registered cancellation hook accepted the request. Observe the stream for the effective outcome. |
+| 202     | `{ ok: true, sessionId, status: "accepted" }`       | A registered cancellation hook accepted the request. Observe the stream for the effective outcome. |
 | 202     | `{ ok: true, sessionId, status: "no_active_turn" }` | No resumable cancellation target exists, including unknown and already-settled sessions.           |
 | 400     | `{ ok: false, error }`                              | Malformed body or missing session id.                                                              |
 | 401/403 | —                                                   | Authentication rejected the request.                                                               |
@@ -40,9 +40,9 @@ return `no_active_turn`.
 
 ## Semantics
 
-- `"cancelling"` is acceptance, not settlement. Confirm an effective cancel by
+- `"accepted"` is acceptance, not settlement. Confirm an effective cancel by
   observing `turn.cancelled` and `session.waiting`.
-- A guarded mismatch returns `"cancelling"` because the hook accepted and
+- A guarded mismatch returns `"accepted"` because the hook accepted and
   discarded the payload.
 - A hook-conflict-degraded current turn is uncancellable. A stale prior owner
   may accept the request, so HTTP status alone cannot identify the affected
@@ -66,7 +66,7 @@ POST /eve/v1/session/:sessionId/cancel { turnId? }
        └─ runtime.cancelTurn
             └─ resumeHook(`${sessionId}:cancel`, { turnId? })
                  ├─ missing / terminal target → no_active_turn
-                 └─ accepted payload → cancelling
+                 └─ accepted payload → accepted
 ```
 
 The token helper lives in `execution/turn-cancellation-token.ts`; the HTTP

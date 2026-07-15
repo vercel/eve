@@ -35,11 +35,11 @@ export interface RouteHandlerArgs<TState> {
 }
 
 export interface CancelTurnResult {
-  status: "cancelling" | "no_active_turn";
+  status: "accepted" | "no_active_turn";
 }
 ```
 
-`"cancelling"` means a registered cancellation hook accepted the request, not
+`"accepted"` means a registered cancellation hook accepted the request, not
 that cancellation has settled or necessarily matched the caller's guarded
 turn. `"no_active_turn"` covers unknown, idle, parked, swept, and otherwise
 uncancellable sessions. Both are successful outcomes.

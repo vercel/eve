@@ -190,8 +190,18 @@ describe("cancelRemoteAgentTurn", () => {
       .mockResolvedValueOnce({ headers: { authorization: "Bearer second" } });
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(Response.json({ ok: true, status: "no_active_turn" }, { status: 202 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, status: "cancelling" }, { status: 202 }));
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "remote/session id", status: "no_active_turn" },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "remote/session id", status: "accepted" },
+          { status: 202 },
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const remote = { ...createRemoteAgent(), auth };
 
@@ -200,7 +210,7 @@ describe("cancelRemoteAgentTurn", () => {
     ).resolves.toEqual({ status: "no_active_turn" });
     await expect(
       cancelRemoteAgentTurn({ remote, sessionId: "remote/session id" }),
-    ).resolves.toEqual({ status: "cancelling" });
+    ).resolves.toEqual({ status: "accepted" });
 
     expect(auth).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -218,6 +228,28 @@ describe("cancelRemoteAgentTurn", () => {
       authorization: "Bearer second",
       "x-static": "yes",
     });
+  });
+
+  it("rejects responses for a different session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { ok: true, sessionId: "another-session", status: "accepted" },
+            { status: 202 },
+          ),
+        ),
+    );
+
+    const error = await cancelRemoteAgentTurn({
+      remote: createRemoteAgent(),
+      sessionId: "remote-session",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isRetryableRemoteAgentCancelError(error)).toBe(false);
   });
 
   it("classifies only propagation and transient HTTP failures as retryable", async () => {

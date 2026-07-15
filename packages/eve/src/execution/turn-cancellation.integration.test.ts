@@ -262,7 +262,7 @@ function createCancelRouteCaller(): (
 
 async function expectCancelResponse(
   response: Response,
-  expected: { readonly sessionId: string; readonly status: "cancelling" | "no_active_turn" },
+  expected: { readonly sessionId: string; readonly status: "accepted" | "no_active_turn" },
 ): Promise<void> {
   expect(response.status).toBe(202);
   await expect(response.json()).resolves.toEqual({
@@ -375,7 +375,7 @@ describe("turn cancellation integration", () => {
         await fixture.toolStarted;
 
         const cancelled = await cancelViaRoute(run.runId);
-        await expectCancelResponse(cancelled, { sessionId: run.runId, status: "cancelling" });
+        await expectCancelResponse(cancelled, { sessionId: run.runId, status: "accepted" });
 
         const cancelledTurn = await stream.nextTurn();
 
@@ -394,7 +394,7 @@ describe("turn cancellation integration", () => {
         // With the turn settled and its cancel hook swept from the
         // world, a duplicate cancel is the benign "nothing to cancel"
         // success. (Between settle and sweep a duplicate may still be
-        // accepted as "cancelling" and land unconsumed — also benign.)
+        // accepted as "accepted" and land unconsumed — also benign.)
         await waitForHookSweep(sessionCancelHookToken(run.runId));
         const duplicate = await cancelViaRoute(run.runId);
         await expectCancelResponse(duplicate, { sessionId: run.runId, status: "no_active_turn" });

@@ -25,7 +25,7 @@ export default defineEval({
     await t.require(
       cancelled,
       satisfies(
-        (value: typeof cancelled) => value.status === "cancelling",
+        (value: typeof cancelled) => value.status === "accepted",
         "parent cancel request is accepted",
       ),
     );

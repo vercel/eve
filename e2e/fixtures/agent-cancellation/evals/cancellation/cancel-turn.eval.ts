@@ -31,8 +31,8 @@ export default defineEval({
       cancelled,
       satisfies(
         (value: typeof cancelled) =>
-          value.sessionId === live.sessionId && value.status === "cancelling",
-        "cancel request is accepted with status 'cancelling'",
+          value.sessionId === live.sessionId && value.status === "accepted",
+        "cancel request is accepted with status 'accepted'",
       ),
     );
 
@@ -50,7 +50,7 @@ export default defineEval({
     followUp.notEvent("session.failed");
     followUp.messageIncludes(/CANCELLATION-FOLLOW-UP-OK/i);
 
-    let lateStatus: "cancelling" | "no_active_turn" | undefined;
+    let lateStatus: "accepted" | "no_active_turn" | undefined;
     for (let attempt = 0; attempt < 30; attempt += 1) {
       lateStatus = (await t.cancel()).status;
       if (lateStatus === "no_active_turn") break;

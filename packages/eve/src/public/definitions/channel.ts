@@ -128,7 +128,7 @@ export interface Agent {
    * Requests cancellation of a session's in-flight turn. A `turnId` limits
    * the request to the turn the caller observed.
    *
-   * `"cancelling"` means a cancellation hook accepted the request; observe
+   * `"accepted"` means a cancellation hook accepted the request; observe
    * the event stream for `turn.cancelled` to confirm that it affected the
    * current turn. `"no_active_turn"` means no cancellable hook was active.
    * Both outcomes are successful.

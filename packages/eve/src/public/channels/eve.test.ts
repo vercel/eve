@@ -132,7 +132,7 @@ function createEveCancelHandler(input: EveChannelInput) {
   if (!cancelRoute) throw new Error("No cancel POST route found");
 
   const agent = createMockAgent();
-  agent.cancelTurn.mockResolvedValue({ status: "cancelling" });
+  agent.cancelTurn.mockResolvedValue({ status: "accepted" });
 
   return {
     cancelTurn: agent.cancelTurn,
@@ -1253,7 +1253,7 @@ describe("eveChannel — auth array shape", () => {
 });
 
 describe("eveChannel — cancel turn", () => {
-  it("cancels the current turn with no body and reports 'cancelling'", async () => {
+  it("cancels the current turn with no body and reports 'accepted'", async () => {
     const handler = createEveCancelHandler({ auth: none() });
 
     const response = await handler.fetch(cancelRequest());
@@ -1264,7 +1264,7 @@ describe("eveChannel — cancel turn", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       sessionId: "test-session-id",
-      status: "cancelling",
+      status: "accepted",
     });
     expect(handler.cancelTurn).toHaveBeenCalledTimes(1);
     expect(handler.cancelTurn).toHaveBeenCalledWith({

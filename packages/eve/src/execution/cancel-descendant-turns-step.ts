@@ -40,34 +40,35 @@ export async function cancelDescendantTurnsStep(input: {
 
   if (batch?.childSessionIds === undefined) return;
 
-  const remoteRegistry = batch.actions.some(
-    (action) =>
-      action.kind === "remote-agent-call" && batch.childSessionIds?.[action.callId] !== undefined,
-  )
-    ? deserializeContext(input.serializedContext).then(
-        (ctx) => ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
-      )
-    : undefined;
+  const cancellations: Promise<void>[] = [];
+  const remoteChildren: Array<{
+    readonly action: RuntimeRemoteAgentCallActionRequest;
+    readonly childSessionId: string;
+  }> = [];
 
-  await Promise.all(
-    batch.actions.map(async (action) => {
-      const childSessionId = batch.childSessionIds?.[action.callId];
-      if (childSessionId === undefined) return;
+  for (const action of batch.actions) {
+    const childSessionId = batch.childSessionIds[action.callId];
+    if (childSessionId === undefined) continue;
 
-      if (action.kind === "subagent-call") {
-        await cancelLocalDescendant({ action, childSessionId });
-        return;
-      }
+    if (action.kind === "subagent-call") {
+      cancellations.push(cancelLocalDescendant({ action, childSessionId }));
+    } else if (action.kind === "remote-agent-call") {
+      remoteChildren.push({ action, childSessionId });
+    }
+  }
 
-      if (action.kind === "remote-agent-call") {
-        await cancelRemoteDescendant({
-          action,
-          childSessionId,
-          remoteRegistry,
-        });
-      }
-    }),
-  );
+  if (remoteChildren.length > 0) {
+    const remoteRegistry = deserializeContext(input.serializedContext).then(
+      (ctx) => ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
+    );
+    cancellations.push(
+      ...remoteChildren.map(({ action, childSessionId }) =>
+        cancelRemoteDescendant({ action, childSessionId, remoteRegistry }),
+      ),
+    );
+  }
+
+  await Promise.all(cancellations);
 }
 
 async function cancelLocalDescendant(input: {
@@ -91,12 +92,9 @@ async function cancelLocalDescendant(input: {
 async function cancelRemoteDescendant(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
   readonly childSessionId: string;
-  readonly remoteRegistry: Promise<RuntimeSubagentRegistry["subagentsByNodeId"]> | undefined;
+  readonly remoteRegistry: Promise<RuntimeSubagentRegistry["subagentsByNodeId"]>;
 }): Promise<void> {
   try {
-    if (input.remoteRegistry === undefined) {
-      throw new Error("Remote subagent registry was unavailable during cancellation.");
-    }
     const registry = await input.remoteRegistry;
     const remote = resolveRemoteAgentForAction({
       nodeId: input.action.nodeId,
@@ -124,7 +122,7 @@ async function requestCancellationWithRetry(input: {
   for (let attempt = 1; attempt <= CANCEL_ATTEMPTS; attempt += 1) {
     try {
       const result = await input.request();
-      if (result.status === "cancelling" || attempt === CANCEL_ATTEMPTS) return;
+      if (result.status === "accepted" || attempt === CANCEL_ATTEMPTS) return;
     } catch (error) {
       if (!input.shouldRetryError(error) || attempt === CANCEL_ATTEMPTS) throw error;
     }

@@ -350,7 +350,7 @@ describe("executeTask", () => {
         },
       ],
       {
-        cancelStatus: "cancelling",
+        cancelStatus: "accepted",
         streams: [
           {
             sessionId: "child-session",
@@ -391,7 +391,7 @@ describe("executeTask", () => {
         expect(requested.data.actions).toHaveLength(1);
         await expect(parent.cancel()).resolves.toEqual({
           sessionId: "parent-session",
-          status: "cancelling",
+          status: "accepted",
         });
 
         const [parentTurn, childTurn] = await Promise.all([parent.result(), child.result()]);
@@ -598,7 +598,7 @@ describe("executeTask", () => {
 function createScriptedServer(
   turns: readonly { events: readonly HandleMessageStreamEvent[]; sessionId: string }[],
   options: {
-    readonly cancelStatus?: "cancelling" | "no_active_turn";
+    readonly cancelStatus?: "accepted" | "no_active_turn";
     readonly streams?: readonly {
       readonly events: readonly HandleMessageStreamEvent[];
       readonly sessionId: string;

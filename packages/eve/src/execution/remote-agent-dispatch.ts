@@ -1,4 +1,5 @@
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#protocol/routes.js";
 import type { CancelTurnResult } from "#channel/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -99,9 +100,9 @@ export async function cancelRemoteAgentTurn(input: {
     );
   }
 
-  let status: unknown;
+  let body: unknown;
   try {
-    status = ((await response.json()) as { readonly status?: unknown }).status;
+    body = await response.json();
   } catch {
     throw new RemoteAgentCancelRequestError(
       `Remote agent "${input.remote.name}" cancel-turn response was not valid JSON.`,
@@ -109,14 +110,15 @@ export async function cancelRemoteAgentTurn(input: {
     );
   }
 
-  if (status !== "cancelling" && status !== "no_active_turn") {
+  const result = CancelTurnResponseSchema.safeParse(body);
+  if (!result.success || result.data.sessionId !== input.sessionId) {
     throw new RemoteAgentCancelRequestError(
-      `Remote agent "${input.remote.name}" cancel-turn response did not include a valid status.`,
+      `Remote agent "${input.remote.name}" cancel-turn response was invalid.`,
       { retryable: false },
     );
   }
 
-  return { status };
+  return { status: result.data.status };
 }
 
 export function isRetryableRemoteAgentCancelError(error: unknown): boolean {

@@ -68,8 +68,8 @@ describe("cancelDescendantTurnsStep", () => {
   it("cancels every adopted local and remote child in parallel", async () => {
     installRemoteRegistry();
     vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote);
-    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "cancelling" });
-    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({ status: "cancelling" });
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({ status: "accepted" });
 
     await cancelDescendantTurnsStep({
       serializedContext: { context: "parent" },
@@ -96,10 +96,10 @@ describe("cancelDescendantTurnsStep", () => {
     vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote);
     vi.mocked(requestWorkflowTurnCancellation)
       .mockResolvedValueOnce({ status: "no_active_turn" })
-      .mockResolvedValueOnce({ status: "cancelling" });
+      .mockResolvedValueOnce({ status: "accepted" });
     vi.mocked(cancelRemoteAgentTurn)
       .mockResolvedValueOnce({ status: "no_active_turn" })
-      .mockResolvedValueOnce({ status: "cancelling" });
+      .mockResolvedValueOnce({ status: "accepted" });
 
     const cancellation = cancelDescendantTurnsStep({
       serializedContext: {},

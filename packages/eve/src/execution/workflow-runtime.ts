@@ -215,7 +215,7 @@ export async function requestWorkflowTurnCancellation(
 
   try {
     await resumeHook(sessionCancelHookToken(input.sessionId), payload);
-    return { status: "cancelling" };
+    return { status: "accepted" };
   } catch (error) {
     if (isInactiveCancelTarget(error)) {
       return { status: "no_active_turn" };

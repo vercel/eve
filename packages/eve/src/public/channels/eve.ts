@@ -1,6 +1,7 @@
 import { type FilePart, type TextPart, type UserContent } from "ai";
 
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -346,7 +347,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         return Response.json(
-          { ok: true, sessionId, status: result.status },
+          { ok: true, sessionId, status: result.status } satisfies CancelTurnResponse,
           {
             headers: {
               "cache-control": "no-store",

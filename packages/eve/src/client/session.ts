@@ -1,5 +1,6 @@
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
+import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
   createEveCancelTurnRoutePath,
@@ -91,7 +92,7 @@ export class ClientSession {
   /**
    * Requests cooperative cancellation of this session's active turn.
    *
-   * Both `cancelling` and `no_active_turn` are successful outcomes. The latter
+   * Both `accepted` and `no_active_turn` are successful outcomes. The latter
    * means the active turn settled before the request arrived or the session is
    * already parked. Credentials are resolved immediately before the request.
    *
@@ -123,12 +124,12 @@ export class ClientSession {
       throw new Error(`Cancel route returned invalid JSON (${response.status}).`);
     }
 
-    const status = readCancelStatus(payload);
-    if (status === undefined) {
+    const result = CancelTurnResponseSchema.safeParse(payload);
+    if (!result.success || result.data.sessionId !== sessionId) {
       throw new Error(`Cancel route returned an invalid response (${response.status}).`);
     }
 
-    return { sessionId, status };
+    return { sessionId: result.data.sessionId, status: result.data.status };
   }
 
   /**
@@ -425,12 +426,6 @@ function createHandleMessageBody(input: {
   }
 
   return body;
-}
-
-function readCancelStatus(value: unknown): CancelSessionResult["status"] | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const status = (value as { readonly status?: unknown }).status;
-  return status === "cancelling" || status === "no_active_turn" ? status : undefined;
 }
 
 function withRedirectPolicy(init: RequestInit, redirect?: ClientRedirectPolicy): RequestInit {

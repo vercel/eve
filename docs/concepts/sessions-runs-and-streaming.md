@@ -95,10 +95,10 @@ POST to the session's cancel endpoint to stop the turn that is currently running
 
 ```bash
 curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel
-# {"ok":true,"sessionId":"<sessionId>","status":"cancelling"}
+# {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
-`"cancelling"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+`"accepted"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
 ## Reconnect and rewind
 

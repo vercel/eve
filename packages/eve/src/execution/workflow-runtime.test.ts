@@ -141,7 +141,7 @@ describe("createWorkflowRuntime#cancelTurn", () => {
 
     await expect(
       buildRuntime().cancelTurn({ sessionId: "session-1", turnId: "turn-2" }),
-    ).resolves.toEqual({ status: "cancelling" });
+    ).resolves.toEqual({ status: "accepted" });
     expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", { turnId: "turn-2" });
   });
 
@@ -149,7 +149,7 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     resumeHookMock.mockResolvedValue({ runId: "turn-run" });
 
     await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).resolves.toEqual({
-      status: "cancelling",
+      status: "accepted",
     });
     expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {});
   });
