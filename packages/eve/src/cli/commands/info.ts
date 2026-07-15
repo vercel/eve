@@ -178,6 +178,10 @@ export async function printApplicationInfo(
         value: pluralize(compiledState.manifest.skills.length, "skill"),
       },
       {
+        label: "Tools",
+        value: pluralize(compiledState.manifest.tools.length, "tool"),
+      },
+      {
         label: "Subagents",
         value: pluralize(compiledState.manifest.subagents.length, "subagent"),
       },
