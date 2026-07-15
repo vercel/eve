@@ -547,7 +547,11 @@ describe("EveTUIRunner development session continuity", () => {
         return new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
-              controller.enqueue(encoder.encode('{"type":"session.waiting"}\n'));
+              controller.enqueue(
+                encoder.encode(
+                  '{"type":"session.waiting","data":{"continuationToken":"token-session-1","wait":"next-user-message"}}\n',
+                ),
+              );
               controller.close();
             },
           }),
