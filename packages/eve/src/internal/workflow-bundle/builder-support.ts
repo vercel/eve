@@ -5,10 +5,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
 import {
   applyWorkflowTransform,
@@ -323,7 +320,7 @@ export async function bundleWorkflowStepRegistrations(input: {
     ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, input.workingDir)),
     "export const __steps_registered = true;",
   ].join("\n");
-  const output = await buildWithNitroRolldown({
+  const chunk = await buildSingleRolldownChunk(`step registrations bundle for "${input.outfile}"`, {
     cwd: input.workingDir,
     input: WORKFLOW_VIRTUAL_ENTRY_ID,
     // Optional runtime packages (the just-bash sandbox engine and its
@@ -351,15 +348,12 @@ export async function bundleWorkflowStepRegistrations(input: {
       mainFields: ["module", "main"],
     },
     tsconfig: input.tsconfigPath ?? false,
-    write: false,
     output: {
-      codeSplitting: false,
       comments: false,
       format: "esm",
       sourcemap: "inline",
     },
   });
-  const chunk = getSingleRolldownChunk(output, `step registrations bundle for "${input.outfile}"`);
   await writeWorkflowBundleAtomically(input.outfile, chunk.code);
 }
 
@@ -414,20 +408,18 @@ export const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringi
     return;
   }
 
-  const output = await buildWithNitroRolldown({
+  const chunk = await buildSingleRolldownChunk(`final workflow bundle for "${input.outfile}"`, {
     cwd: input.workingDir,
     input: WORKFLOW_VIRTUAL_ENTRY_ID,
     external: (source: string) => source === "@aws-sdk/credential-provider-web-identity",
     platform: "node",
     plugins: [createWorkflowVirtualEntryPlugin(workflowFunctionCode)],
-    write: false,
     output: {
       comments: false,
       format: input.format,
       sourcemap: false,
     },
   });
-  const chunk = getSingleRolldownChunk(output, `final workflow bundle for "${input.outfile}"`);
   await writeWorkflowBundleAtomically(input.outfile, chunk.code);
 }
 

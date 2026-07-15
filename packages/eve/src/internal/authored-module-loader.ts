@@ -18,10 +18,7 @@ import {
   type RolldownResolveContext,
 } from "#internal/authored-package-boundary.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
@@ -252,7 +249,7 @@ async function buildAuthoredModuleBundle(
   ].filter((plugin) => plugin !== null);
 
   try {
-    const result = await buildWithNitroRolldown({
+    const chunk = await buildSingleRolldownChunk(`authored module for "${modulePath}"`, {
       cwd: packageRoot,
       input: modulePath,
       platform: "node",
@@ -261,15 +258,13 @@ async function buildAuthoredModuleBundle(
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: tsconfigPath,
-      write: false,
       output: {
-        codeSplitting: false,
         comments: false,
         format: "esm",
         sourcemap: configuration.sourcemap,
       },
     });
-    return getSingleRolldownChunk(result, `authored module for "${modulePath}"`).code;
+    return chunk.code;
   } catch (error) {
     throw createAuthoredModuleBundleError(modulePath, error);
   }
