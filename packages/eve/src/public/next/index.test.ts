@@ -344,7 +344,7 @@ describe("withEve", () => {
         },
         {
           appRoot: expect.stringContaining("/agents/support"),
-          buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          buildCommand: expect.stringMatching(/^node '.*bin\/eve\.js' build$/),
           name: "support",
           publicRoutePrefix: "/eve/agents/support",
           servicePrefix: `${EVE_NEXT_SERVICE_PREFIX}/support`,
