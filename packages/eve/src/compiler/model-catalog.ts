@@ -80,6 +80,13 @@ const builtInCompiledRuntimeModelLimitsById = new Map<string, CompiledRuntimeMod
       maxOutputTokens: 128_000,
     },
   ],
+  [
+    "anthropic/claude-sonnet-5",
+    {
+      contextWindowTokens: 200_000,
+      maxOutputTokens: 64_000,
+    },
+  ],
 ]);
 
 /**
