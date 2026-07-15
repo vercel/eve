@@ -7,6 +7,8 @@ import type { TypedReceiveTarget } from "#channel/receive-target.js";
 import type { RouteDefinition, SendFn } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type {
+  CancelTurnInput,
+  CancelTurnResult,
   DeliverInput,
   DeliverPayload,
   GetEventStreamOptions,
@@ -20,7 +22,7 @@ import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/chan
 
 declare const CHANNEL_METADATA_TYPE: unique symbol;
 
-export type { GetEventStreamOptions } from "#channel/types.js";
+export type { CancelTurnInput, CancelTurnResult, GetEventStreamOptions } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
@@ -61,17 +63,16 @@ export type ChannelRouteMethod = ChannelMethod | "WEBSOCKET";
  * framework constructs this per request and passes it as the second
  * argument.
  *
- * Routes call into the agent to start new sessions (`agent.run`),
- * deliver follow-up messages to existing sessions (`agent.deliver`), or
- * read events from a previously-started session (`agent.getEventStream`).
+ * Routes call into the agent to start sessions, deliver follow-ups,
+ * cancel turns, and read events.
  */
 export interface RouteContext {
   /**
    * Handle to the agent that this route sends inbound requests to.
    * Conceptually the runtime + harness combined: routes call `run`,
-   * `deliver`, and `getEventStream` to drive sessions of this agent
-   * without knowing about the workflow runtime, the harness, or any
-   * other execution-layer detail.
+   * `deliver`, `cancelTurn`, and `getEventStream` to drive sessions of
+   * this agent without knowing about the workflow runtime, the harness,
+   * or any other execution-layer detail.
    *
    * Every route speaks the same `RunInput` shape regardless of which
    * webhook it serves — `agent` is platform-agnostic.
@@ -109,8 +110,9 @@ export interface RouteContext {
  *
  * `Agent` is conceptually the workflow runtime plus the tool-loop harness:
  * routes call `run` to start a new session of the agent, `deliver` to
- * send a follow-up to a parked session, and `getEventStream` to read events
- * from a previously-started session. The framework's internal `Runtime`
+ * send a follow-up to a parked session, `cancelTurn` to stop in-flight work,
+ * and `getEventStream` to read events from a previously-started session.
+ * The framework's internal `Runtime`
  * interface (in `channel/types.ts`) is the underlying primitive — `Agent`
  * is the *public* shape exposed on `RouteContext` so route authors
  * speak in terms of the agent rather than the runtime.
@@ -122,6 +124,16 @@ export interface Agent {
    * with the same token resume the same session.
    */
   run(input: RunInput): Promise<RunHandle>;
+  /**
+   * Requests cancellation of a session's in-flight turn. A `turnId` limits
+   * the request to the turn the caller observed.
+   *
+   * `"cancelling"` means a cancellation hook accepted the request; observe
+   * the event stream for `turn.cancelled` to confirm that it affected the
+   * current turn. `"no_active_turn"` means no cancellable hook was active.
+   * Both outcomes are successful.
+   */
+  cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
   /**
    * Sends a follow-up message to a session that is currently parked waiting
    * for input. Throws if no parked session exists for the supplied

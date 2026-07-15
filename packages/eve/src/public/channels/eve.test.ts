@@ -1,10 +1,11 @@
 import type { FilePart, UserContent } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { createJsonMessageRequest } from "#internal/testing/route-harness.js";
+import { createJsonMessageRequest, createMockAgent } from "#internal/testing/route-harness.js";
+import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -19,11 +20,6 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
-import { requestTurnCancellation } from "#execution/request-turn-cancellation.js";
-
-vi.mock("#execution/request-turn-cancellation.js", () => ({
-  requestTurnCancellation: vi.fn(),
-}));
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -128,40 +124,30 @@ function createEveContinueHandler(input: EveChannelInput) {
  * Creates a POST handler test harness for the cancel-turn route
  * (POST /eve/v1/session/:sessionId/cancel).
  */
-function createEveCancelHandler(
-  input: EveChannelInput,
-  options: { readonly sessionExists?: boolean } = {},
-) {
+function createEveCancelHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const cancelRoute = channel.routes.find(
     (r) => r.method === "POST" && r.path === "/eve/v1/session/:sessionId/cancel",
   );
   if (!cancelRoute) throw new Error("No cancel POST route found");
 
-  const mockGetSession =
-    options.sessionExists === false
-      ? vi.fn(() => {
-          throw new Error("Session not found.");
-        })
-      : vi.fn().mockReturnValue({
-          id: "test-session-id",
-          continuationToken: "eve:test",
-          async getEventStream() {
-            return new ReadableStream();
-          },
-        } satisfies ChannelSession);
+  const agent = createMockAgent();
+  agent.cancelTurn.mockResolvedValue({ status: "cancelling" });
 
   return {
-    getSession: mockGetSession,
+    cancelTurn: agent.cancelTurn,
     async fetch(req: Request) {
-      const args: RouteHandlerArgs = {
-        send: vi.fn(),
-        getSession: mockGetSession,
-        receive: vi.fn() as any,
-        params: { sessionId: "test-session-id" },
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
-      };
+      const args = attachRouteAgent(
+        {
+          send: vi.fn(),
+          getSession: vi.fn(),
+          receive: vi.fn() as any,
+          params: { sessionId: "test-session-id" },
+          waitUntil: () => undefined,
+          requestIp: "127.0.0.1",
+        } satisfies RouteHandlerArgs,
+        agent,
+      );
       return (cancelRoute as any).handler(req, args);
     },
   };
@@ -1267,13 +1253,6 @@ describe("eveChannel — auth array shape", () => {
 });
 
 describe("eveChannel — cancel turn", () => {
-  const requestTurnCancellationMock = vi.mocked(requestTurnCancellation);
-
-  beforeEach(() => {
-    requestTurnCancellationMock.mockReset();
-    requestTurnCancellationMock.mockResolvedValue("cancelling");
-  });
-
   it("cancels the current turn with no body and reports 'cancelling'", async () => {
     const handler = createEveCancelHandler({ auth: none() });
 
@@ -1287,8 +1266,8 @@ describe("eveChannel — cancel turn", () => {
       sessionId: "test-session-id",
       status: "cancelling",
     });
-    expect(requestTurnCancellationMock).toHaveBeenCalledTimes(1);
-    expect(requestTurnCancellationMock).toHaveBeenCalledWith({
+    expect(handler.cancelTurn).toHaveBeenCalledTimes(1);
+    expect(handler.cancelTurn).toHaveBeenCalledWith({
       sessionId: "test-session-id",
       turnId: undefined,
     });
@@ -1300,7 +1279,7 @@ describe("eveChannel — cancel turn", () => {
     const response = await handler.fetch(cancelRequest({}));
 
     expect(response.status).toBe(202);
-    expect(requestTurnCancellationMock).toHaveBeenCalledWith({
+    expect(handler.cancelTurn).toHaveBeenCalledWith({
       sessionId: "test-session-id",
       turnId: undefined,
     });
@@ -1312,15 +1291,15 @@ describe("eveChannel — cancel turn", () => {
     const response = await handler.fetch(cancelRequest({ turnId: "turn_2" }));
 
     expect(response.status).toBe(202);
-    expect(requestTurnCancellationMock).toHaveBeenCalledWith({
+    expect(handler.cancelTurn).toHaveBeenCalledWith({
       sessionId: "test-session-id",
       turnId: "turn_2",
     });
   });
 
   it("reports 'no_active_turn' as success when nothing is cancellable", async () => {
-    requestTurnCancellationMock.mockResolvedValue("no_active_turn");
     const handler = createEveCancelHandler({ auth: none() });
+    handler.cancelTurn.mockResolvedValue({ status: "no_active_turn" });
 
     const response = await handler.fetch(cancelRequest());
 
@@ -1332,67 +1311,31 @@ describe("eveChannel — cancel turn", () => {
     });
   });
 
-  it("rejects unknown sessions with 404 before requesting cancellation", async () => {
-    const handler = createEveCancelHandler({ auth: none() }, { sessionExists: false });
-
-    const response = await handler.fetch(cancelRequest());
-
-    expect(response.status).toBe(404);
-    expect(requestTurnCancellationMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects unauthenticated requests before touching the session", async () => {
+  it("rejects unauthenticated requests before requesting cancellation", async () => {
     const handler = createEveCancelHandler({ auth: [] });
 
     const response = await handler.fetch(cancelRequest());
 
     expect(response.status).toBe(401);
-    expect(handler.getSession).not.toHaveBeenCalled();
-    expect(requestTurnCancellationMock).not.toHaveBeenCalled();
+    expect(handler.cancelTurn).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed JSON bodies with 400", async () => {
+  it.each([
+    ["malformed JSON", "not-json"],
+    ["a non-object body", [1, 2]],
+    ["a non-string turnId", { turnId: 7 }],
+    ["an empty turnId", { turnId: "" }],
+  ])("rejects %s with 400", async (_description, body) => {
     const handler = createEveCancelHandler({ auth: none() });
-
-    const response = await handler.fetch(cancelRequest("not-json"));
+    const response = await handler.fetch(cancelRequest(body));
 
     expect(response.status).toBe(400);
-    expect(requestTurnCancellationMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects non-object JSON bodies with 400", async () => {
-    const handler = createEveCancelHandler({ auth: none() });
-
-    const response = await handler.fetch(cancelRequest([1, 2]));
-
-    expect(response.status).toBe(400);
-    expect(requestTurnCancellationMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects a non-string turnId with 400", async () => {
-    const handler = createEveCancelHandler({ auth: none() });
-
-    const response = await handler.fetch(cancelRequest({ turnId: 7 }));
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: expect.stringContaining("turnId"),
-    });
-    expect(requestTurnCancellationMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects an empty-string turnId with 400", async () => {
-    const handler = createEveCancelHandler({ auth: none() });
-
-    const response = await handler.fetch(cancelRequest({ turnId: "" }));
-
-    expect(response.status).toBe(400);
-    expect(requestTurnCancellationMock).not.toHaveBeenCalled();
+    expect(handler.cancelTurn).not.toHaveBeenCalled();
   });
 
   it("returns 500 when the cancellation request fails unexpectedly", async () => {
-    requestTurnCancellationMock.mockRejectedValue(new Error("backing store outage"));
     const handler = createEveCancelHandler({ auth: none() });
+    handler.cancelTurn.mockRejectedValue(new Error("backing store outage"));
 
     const response = await handler.fetch(cancelRequest());
 

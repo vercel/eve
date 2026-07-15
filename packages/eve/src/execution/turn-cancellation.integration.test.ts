@@ -12,13 +12,16 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createEveCancelTurnRoutePath } from "#protocol/routes.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
+import type { Agent } from "#public/definitions/channel.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
 
 /**
  * Layer-1 turn cancellation: resuming a session's `{sessionId}:cancel`
@@ -199,13 +202,7 @@ function expectNoFailureEvents(events: readonly HandleMessageStreamEvent[]): voi
   }
 }
 
-/**
- * Builds a caller for the eve channel's cancel-turn route
- * (`POST /eve/v1/session/:sessionId/cancel`) wired to the real route
- * handler. Only `getSession` is stubbed — the resume itself goes
- * through the production `requestTurnCancellation` path against the
- * live test world.
- */
+/** Builds a cancel-route caller backed by the workflow runtime. */
 function createCancelRouteCaller(): (
   sessionId: string,
   body?: { readonly turnId?: string },
@@ -221,6 +218,21 @@ function createCancelRouteCaller(): (
     req: Request,
     args: RouteHandlerArgs,
   ) => Promise<Response>;
+  const runtime = createWorkflowRuntime({
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+  });
+  const agent: Agent = {
+    cancelTurn: (input) => runtime.cancelTurn(input),
+    async deliver() {
+      throw new Error("cancel route must not deliver");
+    },
+    async getEventStream() {
+      throw new Error("cancel route must not read events");
+    },
+    async run() {
+      throw new Error("cancel route must not start a session");
+    },
+  };
 
   return async (sessionId, body) => {
     const request = new Request(`https://example.com${createEveCancelTurnRoutePath(sessionId)}`, {
@@ -229,24 +241,23 @@ function createCancelRouteCaller(): (
         ? {}
         : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
     });
-    const args: RouteHandlerArgs = {
-      send: () => {
-        throw new Error("cancel route must not send");
-      },
-      getSession: () => ({
-        id: sessionId,
-        continuationToken: sessionId,
-        async getEventStream() {
-          return new ReadableStream<HandleMessageStreamEvent>();
+    const args = attachRouteAgent(
+      {
+        send: () => {
+          throw new Error("cancel route must not send");
         },
-      }),
-      receive: () => {
-        throw new Error("cancel route must not receive");
-      },
-      params: { sessionId },
-      waitUntil: () => undefined,
-      requestIp: "127.0.0.1",
-    };
+        getSession: () => {
+          throw new Error("cancel route must not get a session");
+        },
+        receive: () => {
+          throw new Error("cancel route must not receive");
+        },
+        params: { sessionId },
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      } satisfies RouteHandlerArgs,
+      agent,
+    );
     return await handler(request, args);
   };
 }
@@ -344,6 +355,11 @@ describe("turn cancellation integration", () => {
     const cancelViaRoute = createCancelRouteCaller();
 
     await fixture.runtime.run(async () => {
+      await expectCancelResponse(await cancelViaRoute("missing-session"), {
+        sessionId: "missing-session",
+        status: "no_active_turn",
+      });
+
       const run = await start(workflowEntry, [
         {
           input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },

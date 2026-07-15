@@ -210,6 +210,7 @@ function createTestNode(
 
 function createNoopRuntime(): Runtime {
   return {
+    cancelTurn: vi.fn(),
     deliver: vi.fn(),
     run: vi.fn().mockRejectedValue(new Error("runtime.run should not be called in this test")),
     getEventStream: vi

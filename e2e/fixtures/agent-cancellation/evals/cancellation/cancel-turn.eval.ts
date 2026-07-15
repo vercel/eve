@@ -2,6 +2,9 @@ import { defineEval, type EveEvalContext, type EveEvalTargetHandle } from "eve/e
 import { satisfies } from "eve/evals/expect";
 
 const TOOL_NAME = "wait-for-cancellation";
+const STREAM_OPEN_ATTEMPTS = 12;
+const STREAM_OPEN_RETRY_DELAY_MS = 250;
+const STREAM_OPEN_RETRYABLE_STATUS = new Set([404, 409, 425, 500, 502, 503, 504]);
 
 interface CreateSessionResponse {
   readonly ok: boolean;
@@ -44,13 +47,7 @@ async function waitForToolCall(t: EveEvalContext, sessionId: string): Promise<vo
   const signal = AbortSignal.any([controller.signal, t.signal]);
 
   try {
-    const response = await t.target.fetch(
-      `/eve/v1/session/${encodeURIComponent(sessionId)}/stream?startIndex=0`,
-      { method: "GET", signal },
-    );
-    if (!response.ok || response.body === null) {
-      throw new Error(`Stream request failed (${response.status}).`);
-    }
+    const response = await openSessionStream(t, sessionId, signal);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -89,6 +86,31 @@ async function waitForToolCall(t: EveEvalContext, sessionId: string): Promise<vo
   } finally {
     controller.abort();
   }
+}
+
+async function openSessionStream(
+  t: EveEvalContext,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<Response & { readonly body: ReadableStream<Uint8Array> }> {
+  const path = `/eve/v1/session/${encodeURIComponent(sessionId)}/stream?startIndex=0`;
+
+  for (let attempt = 0; attempt < STREAM_OPEN_ATTEMPTS; attempt += 1) {
+    const response = await t.target.fetch(path, { method: "GET", signal });
+    if (response.ok && response.body !== null) {
+      return response as Response & { readonly body: ReadableStream<Uint8Array> };
+    }
+
+    const canRetry =
+      STREAM_OPEN_RETRYABLE_STATUS.has(response.status) && attempt + 1 < STREAM_OPEN_ATTEMPTS;
+    if (!canRetry) {
+      throw new Error(`Stream request failed (${response.status}).`);
+    }
+    await response.body?.cancel();
+    await t.sleep(STREAM_OPEN_RETRY_DELAY_MS);
+  }
+
+  throw new Error("Stream request failed after retries.");
 }
 
 /**

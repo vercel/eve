@@ -98,7 +98,7 @@ curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"cancelling"}
 ```
 
-`"cancelling"` means the cancel was delivered — the turn then settles on the stream as `turn.cancelled` followed by `session.waiting`, and the session accepts the next message normally. `"no_active_turn"` means there was nothing to cancel (no turn in flight, or it already settled); both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+`"cancelling"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
 ## Reconnect and rewind
 

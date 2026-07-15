@@ -1,14 +1,13 @@
 import { type FilePart, type TextPart, type UserContent } from "ai";
 
-import type { SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
-import {
-  requestTurnCancellation,
-  type TurnCancellationRequestStatus,
-} from "#execution/request-turn-cancellation.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { readAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  readAgentInfoRouteResponse,
+  readRouteAgent,
+} from "#internal/nitro/routes/channel-route-context.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -319,27 +318,25 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
       }),
 
-      POST(EVE_CANCEL_TURN_ROUTE_PATTERN, async (req, { getSession, params }) => {
+      POST(EVE_CANCEL_TURN_ROUTE_PATTERN, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
-        const sessionId = params.sessionId;
+        const sessionId = args.params.sessionId;
         if (!sessionId) {
           return Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
-        }
-
-        try {
-          getSession(sessionId);
-        } catch {
-          return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
         }
 
         const body = await parseCancelTurnBody(req);
         if (body instanceof Response) return body;
 
-        let status: TurnCancellationRequestStatus;
+        let result: CancelTurnResult;
         try {
-          status = await requestTurnCancellation({ sessionId, turnId: body.turnId });
+          const agent = readRouteAgent(args);
+          if (agent === undefined) {
+            throw new Error("Missing route agent.");
+          }
+          result = await agent.cancelTurn({ sessionId, turnId: body.turnId });
         } catch (error) {
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
@@ -348,12 +345,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        // Both outcomes are success: cancellation is asynchronous, and a
-        // duplicate/late cancel is benign. "cancelling" means delivered —
-        // settlement is observed on the session stream as `turn.cancelled`
-        // followed by `session.waiting`.
         return Response.json(
-          { ok: true, sessionId, status },
+          { ok: true, sessionId, status: result.status },
           {
             headers: {
               "cache-control": "no-store",
@@ -601,11 +594,6 @@ interface ParsedCancelTurnBody {
   turnId?: string;
 }
 
-/**
- * Parses the optional cancel-turn body. An absent or empty body cancels
- * whatever turn is currently running; a `turnId` scopes the cancel to
- * the turn the caller observed.
- */
 async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody | Response> {
   let text: string;
   try {
