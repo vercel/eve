@@ -224,9 +224,9 @@ export function noFailedActions(): RunAssertion {
 }
 
 /**
- * Asserts a subagent delegation to `name` occurred. `remoteUrl` matches the
- * `subagent.called` remote metadata, `output` matches the `subagent.completed`
- * output.
+ * Asserts a subagent delegation to `name` occurred. Identity and remote
+ * metadata come from `subagent.called`; `output` comes from
+ * `subagent.completed`.
  */
 export function calledSubagent(
   name: string,

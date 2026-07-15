@@ -319,6 +319,8 @@ describe("deriveRunFacts", () => {
     const facts = deriveRunFacts(events, { sessionId: "s0" });
     expect(facts.subagentCalls).toEqual([
       {
+        callId: "c1",
+        childSessionId: "s1",
         name: "weather",
         remoteUrl: "http://127.0.0.1:4001",
         output: "Sunny, 72F",
@@ -343,6 +345,7 @@ describe("deriveRunFacts", () => {
 
     expect(facts.subagentCalls).toEqual([
       {
+        callId: "c1",
         name: "weather",
         output: { code: "REMOTE_AGENT_START_FAILED" },
         status: "failed",

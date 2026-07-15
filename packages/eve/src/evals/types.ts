@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
-import type { SendTurnInput, SessionState } from "#client/types.js";
+import type { CancelSessionResult, SendTurnInput, SessionState } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
@@ -42,6 +42,10 @@ export interface EveEvalToolCall {
  * (`subagent.called` / `subagent.started`, joined with `subagent.completed`).
  */
 export interface EveEvalSubagentCall {
+  /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
+  readonly callId?: string;
+  /** Durable child session id for local and remote workflow delegations. */
+  readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
   /** Remote agent URL for remote delegations (`subagent.called` remote metadata). */
@@ -212,6 +216,41 @@ export interface EveEvalOutputAssertions {
   outputMatches(schema: StandardSchemaV1): AssertionHandle;
 }
 
+/** Typed stream event returned by {@link EveEvalLiveTurn.waitForEvent}. */
+export type EveEvalStreamEvent<
+  TType extends HandleMessageStreamEvent["type"] = HandleMessageStreamEvent["type"],
+> = Extract<HandleMessageStreamEvent, { type: TType }>;
+
+/** Matcher options for waiting until one live turn emits a specific event. */
+export type EveEvalWaitForEventOptions<TType extends HandleMessageStreamEvent["type"]> = Omit<
+  Extract<EveEvalEventMatch, { type: TType }>,
+  "count" | "type"
+>;
+
+/**
+ * One accepted turn whose event stream is still in progress.
+ *
+ * The handle owns the stream consumer: event waiters observe its buffer and
+ * {@link result} settles and records that same stream exactly once.
+ */
+export interface EveEvalLiveTurn {
+  /** Events observed on this turn so far. */
+  readonly events: readonly HandleMessageStreamEvent[];
+  /** Session driver that started or owns this turn. */
+  readonly session: EveEvalSession;
+  /** Durable session id available as soon as the turn is accepted or attached. */
+  readonly sessionId: string;
+  /** Request cooperative cancellation of this turn's session. */
+  cancel(): Promise<CancelSessionResult>;
+  /** Wait for the turn boundary and return the recorded immutable result. */
+  result(): Promise<EveEvalTurn>;
+  /** Wait until the live stream emits one typed event matching `options`. */
+  waitForEvent<TType extends HandleMessageStreamEvent["type"]>(
+    type: TType,
+    options?: EveEvalWaitForEventOptions<TType>,
+  ): Promise<EveEvalStreamEvent<TType>>;
+}
+
 /** Operations and state shared by the primary eval context and independent sessions. */
 export interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
@@ -222,6 +261,8 @@ export interface EveEvalSessionDriver {
   readonly state: SessionState;
   /** eve session id after the first successful send. */
   readonly sessionId: string | undefined;
+  /** Request cooperative cancellation of this session's active turn. */
+  cancel(): Promise<CancelSessionResult>;
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
   requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */
@@ -230,6 +271,8 @@ export interface EveEvalSessionDriver {
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */
   send(input: SendTurnInput): Promise<EveEvalTurn>;
+  /** Start one turn and return as soon as its session is accepted. */
+  start(input: SendTurnInput): Promise<EveEvalLiveTurn>;
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
 }
@@ -380,6 +423,12 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
     sessionId: string,
     opts?: { readonly startIndex?: number },
   ): Promise<EveEvalSession>;
+  /**
+   * Observe one in-progress turn from a session created outside the eval.
+   * The returned live-turn handle starts consuming immediately and owns the
+   * stream through its next turn boundary.
+   */
+  watchTurn(sessionId: string, opts?: { readonly startIndex?: number }): EveEvalLiveTurn;
 }
 
 // ---------------------------------------------------------------------------

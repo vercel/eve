@@ -186,6 +186,14 @@ export interface StreamOptions {
   readonly signal?: AbortSignal;
 }
 
+/** Result of requesting cancellation for a client session's active turn. */
+export interface CancelSessionResult {
+  /** Session whose active turn was targeted. */
+  readonly sessionId: string;
+  /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
+  readonly status: "cancelling" | "no_active_turn";
+}
+
 /**
  * Aggregated result of one message turn, returned by
  * {@link MessageResponse.result}.

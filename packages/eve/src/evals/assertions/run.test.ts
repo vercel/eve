@@ -35,6 +35,8 @@ function completedToolCall(name: string): EveEvalToolCall {
 
 function subagentCall(name: string, status: EveEvalSubagentCall["status"]): EveEvalSubagentCall {
   return {
+    callId: `call-${status}`,
+    childSessionId: `session-${status}`,
     name,
     output: status === "completed" ? "ok" : undefined,
     status,
@@ -243,6 +245,16 @@ describe("run assertions", () => {
     ).toBe(0);
     expect(
       (await Run.calledSubagent("child", { count: (count) => count === 1 }).evaluate(result)).score,
+    ).toBe(1);
+    expect(
+      (
+        await Run.calledSubagent("child", {
+          callId: "call-completed",
+          childSessionId: "session-completed",
+          count: 1,
+          status: "completed",
+        }).evaluate(result)
+      ).score,
     ).toBe(1);
   });
 
