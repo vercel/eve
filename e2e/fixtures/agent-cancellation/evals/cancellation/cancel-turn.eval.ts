@@ -2,9 +2,6 @@ import { defineEval, type EveEvalContext, type EveEvalTargetHandle } from "eve/e
 import { satisfies } from "eve/evals/expect";
 
 const TOOL_NAME = "wait-for-cancellation";
-const STREAM_OPEN_RETRY_DELAY_MS = 250;
-const STREAM_OPEN_RETRY_TIMEOUT_MS = 60_000;
-const STREAM_OPEN_RETRYABLE_STATUS = new Set([404, 409, 425, 500, 502, 503, 504]);
 
 interface CreateSessionResponse {
   readonly ok: boolean;
@@ -38,18 +35,22 @@ async function postJson<T>(
   return { payload, status: response.status };
 }
 
-async function waitForCancellation(t: EveEvalContext, sessionId: string): Promise<void> {
+async function waitForToolCall(t: EveEvalContext, sessionId: string): Promise<void> {
   const controller = new AbortController();
   const signal = AbortSignal.any([controller.signal, t.signal]);
 
   try {
-    const response = await openSessionStream(t, sessionId, signal);
+    const response = await t.target.fetch(
+      `/eve/v1/session/${encodeURIComponent(sessionId)}/stream`,
+      { method: "GET", signal },
+    );
+    if (!response.ok || response.body === null) {
+      throw new Error(`Stream request failed (${response.status}).`);
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffered = "";
-    let sawToolCall = false;
-    let sawTurnCancelled = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -70,54 +71,27 @@ async function waitForCancellation(t: EveEvalContext, sessionId: string): Promis
             (action) => action.kind === "tool-call" && action.toolName === TOOL_NAME,
           ) === true
         ) {
-          sawToolCall = true;
-        }
-        if (event.type === "turn.cancelled") {
-          sawTurnCancelled = true;
+          return;
         }
         if (event.type === "turn.failed" || event.type === "session.failed") {
-          throw new Error("Turn failed instead of cancelling.");
+          throw new Error(`Turn failed before the ${TOOL_NAME} tool was called.`);
         }
         if (event.type === "session.waiting") {
-          if (!sawToolCall) throw new Error(`The ${TOOL_NAME} tool was not called.`);
-          if (!sawTurnCancelled) throw new Error("Turn settled without turn.cancelled.");
-          return;
+          throw new Error(`Turn settled before the ${TOOL_NAME} tool was called.`);
         }
       }
     }
-    throw new Error("Stream closed before the cancelled turn settled.");
+    throw new Error(`Stream closed before the ${TOOL_NAME} tool was called.`);
   } finally {
     controller.abort();
-  }
-}
-
-async function openSessionStream(
-  t: EveEvalContext,
-  sessionId: string,
-  signal: AbortSignal,
-): Promise<Response & { readonly body: ReadableStream<Uint8Array> }> {
-  const path = `/eve/v1/session/${encodeURIComponent(sessionId)}/stream?startIndex=0`;
-  const deadline = Date.now() + STREAM_OPEN_RETRY_TIMEOUT_MS;
-
-  while (true) {
-    const response = await t.target.fetch(path, { method: "GET", signal });
-    if (response.ok && response.body !== null) {
-      return response as Response & { readonly body: ReadableStream<Uint8Array> };
-    }
-
-    if (!STREAM_OPEN_RETRYABLE_STATUS.has(response.status) || Date.now() >= deadline) {
-      throw new Error(`Stream request failed (${response.status}).`);
-    }
-    await response.body?.cancel();
-    await t.sleep(STREAM_OPEN_RETRY_DELAY_MS);
   }
 }
 
 /**
  * Cancel an in-flight turn over the eve HTTP channel.
  *
- * Flow: the tool POSTs `/eve/v1/session/:id/cancel` after execution starts,
- * and the eval asserts the turn settles as
+ * Flow: start a turn that hangs mid-tool, POST
+ * `/eve/v1/session/:id/cancel`, and assert the turn settles as
  * `turn.cancelled` followed by `session.waiting` with zero failure
  * events — then prove the session accepts a follow-up message normally
  * and a late duplicate cancel reports the benign `no_active_turn`.
@@ -128,9 +102,7 @@ export default defineEval({
 
   async test(t) {
     const created = await postJson<CreateSessionResponse>(t.target, "/eve/v1/session", {
-      message:
-        `Call the \`${TOOL_NAME}\` tool exactly once with baseUrl ` +
-        `${JSON.stringify(t.target.url)}.`,
+      message: "Please wait for cancellation.",
     });
     await t.require(
       created,
@@ -145,8 +117,21 @@ export default defineEval({
     const sessionId = created.payload.sessionId!;
     const cancelPath = `/eve/v1/session/${encodeURIComponent(sessionId)}/cancel`;
 
-    await waitForCancellation(t, sessionId);
-    t.log(`Tool cancelled session ${sessionId} through the HTTP channel.`);
+    await waitForToolCall(t, sessionId);
+    t.log(`Tool call observed mid-turn; cancelling session ${sessionId}.`);
+
+    const cancelled = await postJson<CancelTurnResponse>(t.target, cancelPath);
+    await t.require(
+      cancelled,
+      satisfies(
+        (value: typeof cancelled) =>
+          value.status === 202 &&
+          value.payload.ok === true &&
+          value.payload.sessionId === sessionId &&
+          value.payload.status === "cancelling",
+        "cancel route accepts the cancel with status 'cancelling'",
+      ),
+    );
 
     // The cancelled turn: turn.cancelled → session.waiting, never a failure.
     // The attach recovers the continuation token from the cancelled turn's
