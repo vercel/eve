@@ -115,7 +115,7 @@ describe("eve dist single-chunk module evaluation", () => {
     });
 
     const loaded = await import(pathToFileURL(outfile).href);
-    const tools = loaded.default.getFrameworkToolDefinitions({ hasConnections: true });
+    const tools = loaded.default.getAllFrameworkToolDefinitions();
     expect(tools.length).toBeGreaterThan(0);
     for (const tool of tools) {
       expect(tool, "framework tool entry must be defined").toBeDefined();

@@ -4,8 +4,18 @@ type Vec3 = [number, number, number];
 
 type GltfDocument = {
   buffers?: Array<{ uri: string }>;
-  bufferViews: Array<{ buffer: number; byteOffset?: number; byteLength: number; byteStride?: number }>;
-  accessors: Array<{ bufferView: number; byteOffset?: number; componentType: number; count: number }>;
+  bufferViews: Array<{
+    buffer: number;
+    byteOffset?: number;
+    byteLength: number;
+    byteStride?: number;
+  }>;
+  accessors: Array<{
+    bufferView: number;
+    byteOffset?: number;
+    componentType: number;
+    count: number;
+  }>;
   meshes?: Array<{
     primitives?: Array<{
       mode?: number;
@@ -37,12 +47,19 @@ export async function decodeGltfMesh(
       if (primitive.mode !== undefined && primitive.mode !== GLTF_MODE_TRIANGLES) continue;
 
       const positionAccessorIndex = primitive.attributes?.POSITION;
-      const positionAccessor = positionAccessorIndex === undefined ? undefined : gltf.accessors[positionAccessorIndex];
+      const positionAccessor =
+        positionAccessorIndex === undefined ? undefined : gltf.accessors[positionAccessorIndex];
       if (!positionAccessor) continue;
 
       const normalAccessorIndex = primitive.attributes?.NORMAL;
-      const normalAccessor = normalAccessorIndex === undefined ? undefined : gltf.accessors[normalAccessorIndex];
-      const primitivePositions = readFloatAccessor(buffers, gltf, positionAccessor, POSITION_COMPONENTS);
+      const normalAccessor =
+        normalAccessorIndex === undefined ? undefined : gltf.accessors[normalAccessorIndex];
+      const primitivePositions = readFloatAccessor(
+        buffers,
+        gltf,
+        positionAccessor,
+        POSITION_COMPONENTS,
+      );
       const primitiveNormals = normalAccessor
         ? readFloatAccessor(buffers, gltf, normalAccessor, NORMAL_COMPONENTS)
         : fallbackNormals(primitivePositions);
@@ -52,15 +69,21 @@ export async function decodeGltfMesh(
       for (const value of primitiveNormals) normals.push(value);
 
       if (primitive.indices !== undefined) {
-        const primitiveIndices = readIndexAccessor(buffers, gltf, gltf.accessors[primitive.indices]!);
+        const primitiveIndices = readIndexAccessor(
+          buffers,
+          gltf,
+          gltf.accessors[primitive.indices]!,
+        );
         for (const index of primitiveIndices) indices.push(vertexOffset + index);
       } else {
-        for (let i = 0; i < primitivePositions.length / POSITION_COMPONENTS; i++) indices.push(vertexOffset + i);
+        for (let i = 0; i < primitivePositions.length / POSITION_COMPONENTS; i++)
+          indices.push(vertexOffset + i);
       }
     }
   }
 
-  if (!positions.length || !indices.length) throw new Error("No triangle mesh data found in glTF asset.");
+  if (!positions.length || !indices.length)
+    throw new Error("No triangle mesh data found in glTF asset.");
 
   const positionArray = new Float32Array(positions);
   return {
@@ -77,11 +100,17 @@ export function meshAspect(mesh: MeshData) {
   return width / height;
 }
 
-function readFloatAccessor(buffers: ArrayBufferLike[], gltf: GltfDocument, accessor: GltfDocument["accessors"][number], components: number) {
+function readFloatAccessor(
+  buffers: ArrayBufferLike[],
+  gltf: GltfDocument,
+  accessor: GltfDocument["accessors"][number],
+  components: number,
+) {
   const view = gltf.bufferViews[accessor.bufferView]!;
   const buffer = buffers[view.buffer]!;
   const byteOffset = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
-  if (accessor.componentType !== GL_FLOAT) throw new Error(`Unsupported float accessor component type ${accessor.componentType}`);
+  if (accessor.componentType !== GL_FLOAT)
+    throw new Error(`Unsupported float accessor component type ${accessor.componentType}`);
   if (!view.byteStride || view.byteStride === components * Float32Array.BYTES_PER_ELEMENT) {
     return new Float32Array(buffer, byteOffset, accessor.count * components);
   }
@@ -90,19 +119,29 @@ function readFloatAccessor(buffers: ArrayBufferLike[], gltf: GltfDocument, acces
   const out = new Float32Array(accessor.count * components);
   for (let i = 0; i < accessor.count; i++) {
     for (let component = 0; component < components; component++) {
-      out[i * components + component] = source.getFloat32(i * view.byteStride + component * Float32Array.BYTES_PER_ELEMENT, true);
+      out[i * components + component] = source.getFloat32(
+        i * view.byteStride + component * Float32Array.BYTES_PER_ELEMENT,
+        true,
+      );
     }
   }
   return out;
 }
 
-function readIndexAccessor(buffers: ArrayBufferLike[], gltf: GltfDocument, accessor: GltfDocument["accessors"][number]) {
+function readIndexAccessor(
+  buffers: ArrayBufferLike[],
+  gltf: GltfDocument,
+  accessor: GltfDocument["accessors"][number],
+) {
   const view = gltf.bufferViews[accessor.bufferView]!;
   const buffer = buffers[view.buffer]!;
   const byteOffset = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
-  if (accessor.componentType === GL_UNSIGNED_BYTE) return new Uint8Array(buffer, byteOffset, accessor.count);
-  if (accessor.componentType === GL_UNSIGNED_SHORT) return new Uint16Array(buffer, byteOffset, accessor.count);
-  if (accessor.componentType === GL_UNSIGNED_INT) return new Uint32Array(buffer, byteOffset, accessor.count);
+  if (accessor.componentType === GL_UNSIGNED_BYTE)
+    return new Uint8Array(buffer, byteOffset, accessor.count);
+  if (accessor.componentType === GL_UNSIGNED_SHORT)
+    return new Uint16Array(buffer, byteOffset, accessor.count);
+  if (accessor.componentType === GL_UNSIGNED_INT)
+    return new Uint32Array(buffer, byteOffset, accessor.count);
   throw new Error(`Unsupported index accessor component type ${accessor.componentType}`);
 }
 

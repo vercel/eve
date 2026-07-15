@@ -17,7 +17,7 @@ type RolldownOutput = {
   readonly output: readonly [RolldownOutputChunk, ...(RolldownOutputChunk | RolldownOutputAsset)[]];
 };
 
-export type RolldownBuild = (options: Record<string, unknown>) => Promise<RolldownOutput>;
+type RolldownBuild = (options: Record<string, unknown>) => Promise<RolldownOutput>;
 type RolldownParseAst = (
   sourceText: string,
   options?: Record<string, unknown> | null,
@@ -90,6 +90,11 @@ export async function parseWithNitroRolldownAst(
   );
 }
 
+/**
+ * Runs a raw Rolldown build. Prefer {@link buildSingleRolldownChunk} for any
+ * bundle whose consumer expects one in-memory file; use this directly only
+ * for multi-file, written-to-disk output.
+ */
 export async function buildWithNitroRolldown(
   options: Record<string, unknown>,
 ): Promise<RolldownOutput> {
@@ -97,10 +102,29 @@ export async function buildWithNitroRolldown(
   return await build(options);
 }
 
-export function getSingleRolldownChunk(
-  output: RolldownOutput,
+/**
+ * Runs a Rolldown build whose contract is exactly one in-memory chunk:
+ * code splitting is disabled and the result is asserted to contain a
+ * single JavaScript chunk, so dynamic imports are inlined rather than
+ * split into lazy chunks. Every eve single-file bundle (the authored-module
+ * evaluator, immutable development generations, and workflow step/function
+ * bundles) goes through this helper so the single-file policy and its
+ * assertion cannot drift apart. The final Nitro production server build
+ * does not use it and keeps code splitting enabled.
+ */
+export async function buildSingleRolldownChunk(
   description: string,
-): RolldownOutputChunk {
+  options: Record<string, unknown> & { readonly output?: Record<string, unknown> },
+): Promise<RolldownOutputChunk> {
+  const result = await buildWithNitroRolldown({
+    ...options,
+    write: false,
+    output: { ...options.output, codeSplitting: false },
+  });
+  return getSingleRolldownChunk(result, description);
+}
+
+function getSingleRolldownChunk(output: RolldownOutput, description: string): RolldownOutputChunk {
   const chunks = output.output.filter((item) => item.type === "chunk");
   const chunk = chunks[0];
 

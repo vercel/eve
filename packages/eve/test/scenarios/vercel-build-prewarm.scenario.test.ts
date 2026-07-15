@@ -5,10 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { prewarmAppSandboxes } from "../../src/execution/sandbox/prewarm.js";
-import {
-  runVercelBuildPrewarm,
-  shouldPrewarmVercelBuild,
-} from "../../src/internal/nitro/host/vercel-build-prewarm.js";
+import { runVercelBuildPrewarm } from "../../src/internal/nitro/host/vercel-build-prewarm.js";
 import type {
   SandboxBackendPrewarmInput,
   SandboxBackendPrewarmResult,
@@ -54,7 +51,8 @@ describe("Vercel build-time sandbox prewarm", () => {
 
   it("fails the hosted build when sandbox bootstrap fails during prewarm", async () => {
     vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_test_build_prewarm");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", createVercelOidcToken("prj_hosted_build"));
 
     const appRoot = await createScenarioAppRoot();
 
@@ -70,29 +68,70 @@ describe("Vercel build-time sandbox prewarm", () => {
     ).rejects.toThrow("bootstrap command failed");
   });
 
-  it("only enables prewarm when both Vercel env variables are present", () => {
-    expect(shouldPrewarmVercelBuild()).toBe(false);
-
-    vi.stubEnv("VERCEL", "1");
-    expect(shouldPrewarmVercelBuild()).toBe(false);
-
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_test_build_prewarm");
-    expect(shouldPrewarmVercelBuild()).toBe(true);
-  });
-
-  it("warns when a Vercel build cannot prewarm sandbox templates", async () => {
-    vi.stubEnv("VERCEL", "1");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
+  it("skips sandbox prewarm outside a Vercel build", async () => {
     await expect(
       runVercelBuildPrewarm({
         appRoot: "/unused",
       }),
     ).resolves.toBe(false);
+  });
 
-    expect(warn).toHaveBeenCalledWith(
-      '[eve] WARNING: Skipped Vercel sandbox template prewarm because VERCEL_DEPLOYMENT_ID is missing. The generated .vercel/output may reference sandbox templates that were not provisioned. Do not deploy it with "vercel deploy --prebuilt"; use "vercel deploy" so Vercel builds from source.',
+  it("rejects Vercel output that requires sandbox templates without an OIDC token", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+
+    const appRoot = await createScenarioAppRoot();
+
+    await compileAgent({
+      startPath: appRoot,
+    });
+
+    await expect(
+      runVercelBuildPrewarm({
+        appRoot,
+      }),
+    ).rejects.toThrow(
+      "Cannot build deployable Vercel output because this app requires sandbox templates and VERCEL_OIDC_TOKEN is missing. Run `vercel link` and `vercel pull`, then retry `vercel build`. Do not deploy the generated .vercel/output.",
     );
+  });
+
+  it("allows a Vercel build without OIDC when no sandbox template is required", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+
+    const appRoot = await createTemplateFreeScenarioAppRoot();
+
+    await compileAgent({
+      startPath: appRoot,
+    });
+
+    await expect(
+      runVercelBuildPrewarm({
+        appRoot,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("prewarms sandbox templates for a local Vercel build without a deployment id", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", createVercelOidcToken("prj_local_build"));
+
+    const appRoot = await createScenarioAppRoot();
+    const events = createPrewarmEvents();
+
+    await compileAgent({
+      startPath: appRoot,
+    });
+
+    await expect(
+      runVercelBuildPrewarm({
+        appRoot,
+        dispatch: createRecordingDispatch(events),
+      }),
+    ).resolves.toBe(true);
+    expect(events.templateKeys).toHaveLength(2);
   });
 
   it("prewarms sandbox templates with per-agent skill seed files", async () => {
@@ -119,6 +158,28 @@ describe("Vercel build-time sandbox prewarm", () => {
     ]);
   });
 });
+
+function createVercelOidcToken(projectId: string): string {
+  const payload = Buffer.from(
+    JSON.stringify({ owner_id: "team_test", project_id: projectId }),
+  ).toString("base64url");
+  return `header.${payload}.signature`;
+}
+
+async function createTemplateFreeScenarioAppRoot(): Promise<string> {
+  const appRoot = await createScratchDirectory("eve-vercel-build-without-prewarm-");
+  const agentRoot = join(appRoot, "agent");
+
+  await mkdir(agentRoot, { recursive: true });
+  await writeFile(
+    join(appRoot, "package.json"),
+    JSON.stringify({ name: "vercel-build-without-prewarm", type: "module" }, null, 2),
+  );
+  await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
+  await writeFile(join(agentRoot, "instructions.md"), "Root system prompt.\n");
+
+  return appRoot;
+}
 
 async function createScenarioAppRoot(
   input: { readonly withSkills?: boolean } = {},

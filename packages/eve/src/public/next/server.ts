@@ -14,7 +14,8 @@ const DEV_SERVER_STALE_LOCK_MS = 30_000;
 const EVE_CACHE_DIRECTORY_NAME = ".eve";
 const EVE_NEXT_DEV_SERVER_FILE_NAME = "next-dev-server.json";
 const EVE_NEXT_DEV_SERVER_LOCK_FILE_NAME = "next-dev-server.lock";
-const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
 const SERVER_URL_CANDIDATE_PATTERN = /https?:\/\/[^\s"'<>]+/g;
 const NEXT_PHASE_PRODUCTION_BUILD = "phase-production-build";
 
@@ -292,7 +293,7 @@ function formatEveDevOutputLine(line: string, logLabel: string | undefined): str
     trimmedLine.length === 0 ||
     /^☰eve\b/.test(trimmedLine) ||
     trimmedLine === "CONFIGURATION_FIELD_CONFLICT" ||
-    /^\[CONFIGURATION_FIELD_CONFLICT\]/.test(trimmedLine)
+    trimmedLine.startsWith("[CONFIGURATION_FIELD_CONFLICT]")
   ) {
     return undefined;
   }

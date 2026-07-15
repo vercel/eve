@@ -1,6 +1,13 @@
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  EntityConflictError,
+  HookNotFoundError,
+  RunExpiredError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 
 import type {
+  CancelTurnInput,
+  CancelTurnResult,
   DeliverInput,
   GetEventStreamOptions,
   HookPayload,
@@ -15,6 +22,7 @@ import {
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   getRun,
@@ -33,6 +41,10 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import {
+  sessionCancelHookToken,
+  type TurnCancelPayload,
+} from "#execution/turn-cancellation-token.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -157,6 +169,20 @@ export function createWorkflowRuntime(config: {
       };
     },
 
+    async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
+      const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
+
+      try {
+        await resumeHook(sessionCancelHookToken(input.sessionId), payload);
+        return { status: "cancelling" };
+      } catch (error) {
+        if (isInactiveCancelTarget(error)) {
+          return { status: "no_active_turn" };
+        }
+        throw error;
+      }
+    },
+
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
       const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
@@ -191,6 +217,15 @@ export function createWorkflowRuntime(config: {
   };
 }
 
+function isInactiveCancelTarget(error: unknown): boolean {
+  return (
+    HookNotFoundError.is(error) ||
+    WorkflowRunNotFoundError.is(error) ||
+    RunExpiredError.is(error) ||
+    EntityConflictError.is(error)
+  );
+}
+
 /**
  * Starts a workflow on the latest deployment when latest routing applies,
  * while preserving local/dev worlds that do not implement latest routing.
@@ -220,15 +255,12 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
 }
 
 /**
- * Latest-deployment routing only applies on Vercel production: the platform
- * resolves "latest" through the deployment's git branch reference, which
- * only production deployments carry. Preview and CLI deployments have no
- * branch and fail with HTTP 400 ("Source deployment has no git branch"), so
- * they pin workflow runs to their own immutable deployment — which is also
- * the correct isolation semantic for previews.
+ * Local development resolves "latest" to the active promoted generation.
+ * Vercel resolves it only for production deployments; previews and CLI
+ * deployments have no branch reference and remain pinned to themselves.
  */
 function shouldRouteToLatestDeployment(): boolean {
-  return process.env.VERCEL_ENV === "production";
+  return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
 }
 
 function isLatestDeploymentUnsupportedError(error: unknown): boolean {

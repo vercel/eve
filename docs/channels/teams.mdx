@@ -45,7 +45,11 @@ Replies post as Markdown (`textFormat: "markdown"`), with oversized text split a
 
 ### Human-in-the-loop (HITL)
 
-A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. When the user submits, the activity converts to eve `inputResponses` for you. For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
+A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. Approval cards show the tool input in the card and fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. Teams may return a submission as a message or invoke; eve handles both before the normal message mention gate and resumes the thread recorded in the card.
+
+By default, submissions use the Teams identity of the user who clicked the card. If you customize `onMessage` for an allowlist, configure the same policy in `onInputResponse`; eve otherwise rejects HITL submissions rather than bypassing the message gate.
+
+For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
 
 ### Proactive sessions
 

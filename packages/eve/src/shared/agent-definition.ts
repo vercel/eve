@@ -150,34 +150,6 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
-   * Maximum number of delegated child-session levels from the root session.
-   *
-   * Root sessions are depth 0. A `maxSubagentDepth` of 3 allows child sessions at
-   * depths 1, 2, and 3; sessions already at depth 3 cannot delegate again.
-   *
-   * Delegated subagent sessions resolve this against the cap inherited from
-   * the delegating parent; the tighter value wins.
-   *
-   * @default 1
-   */
-  readonly maxSubagentDepth?: number;
-  /**
-   * Maximum number of subagent calls one `Workflow` tool invocation may
-   * dispatch.
-   *
-   * Applies to the opt-in `Workflow` orchestration tool: a single
-   * model-authored workflow program may spawn at most this many subagent or
-   * remote-agent calls, counted across the whole program (sequential and
-   * parallel calls alike). Calls beyond the limit fail with an error result
-   * instead of starting a child session.
-   *
-   * Delegated subagent sessions resolve this against the cap inherited from
-   * the delegating parent; the tighter value wins.
-   *
-   * @default 100
-   */
-  readonly maxSubagents?: number;
-  /**
    * Maximum provider-reported input tokens accumulated by one durable session.
    *
    * eve checks this before starting each model call. The model call that crosses

@@ -53,7 +53,12 @@ export function createBloomTargetCache(device: Device) {
           padded.width,
           padded.height,
         ),
-        horizontal: createBloomTexture(device, "eve-5-bloom-horizontal", padded.width, padded.height),
+        horizontal: createBloomTexture(
+          device,
+          "eve-5-bloom-horizontal",
+          padded.width,
+          padded.height,
+        ),
         vertical: createBloomTexture(device, "eve-5-bloom-vertical", padded.width, padded.height),
       };
       return targets;

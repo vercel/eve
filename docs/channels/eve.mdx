@@ -18,12 +18,13 @@ export default eveChannel({
 
 ## Routes
 
-The application exposes a health route plus eve channel routes that inspect the agent, create sessions, send follow-ups, and stream events:
+The application exposes a health route plus eve channel routes that inspect the agent, create sessions, send follow-ups, cancel turns, and stream events:
 
 - `GET /eve/v1/health`
 - `GET /eve/v1/info`
 - `POST /eve/v1/session` (start a session)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
+- `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
 - `GET /eve/v1/session/:sessionId/stream` (stream events, NDJSON)
 
 Start a session with a minimal body. The response returns `sessionId` and the `continuationToken` you reuse for follow-ups:
@@ -43,6 +44,15 @@ curl -N https://<deployment>/eve/v1/session/ses_01h.../stream
 # {"type":"message.appended","data":{"messageDelta":"It is ",...}}
 # {"type":"message.completed",...}
 ```
+
+Cancel a session's in-flight turn with an empty body, or scope the cancel to the turn you observed by passing the `turnId` stamped on that turn's stream events:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session/ses_01h.../cancel
+# {"ok":true,"sessionId":"ses_01h...","status":"cancelling"}
+```
+
+Cancellation is asynchronous: `"cancelling"` means a cancellation hook accepted the request. Confirm the effective outcome on the stream as `turn.cancelled` followed by `session.waiting` — never as a failure. Content emitted before the cancel stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally. When there is no resumable cancellation target (including an unknown session, a settled turn, or a duplicate cancel), the route responds with `"no_active_turn"` — also a success, so a stop button can fire and forget. A `turnId` naming any other turn is accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
 
 See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the full request and stream flow, including the complete event set.
 

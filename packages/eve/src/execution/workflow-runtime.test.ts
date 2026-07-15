@@ -131,6 +131,55 @@ describe("createWorkflowRuntime#deliver", () => {
   });
 });
 
+describe("createWorkflowRuntime#cancelTurn", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("resumes the session cancel hook with an optional turn guard", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "turn-run" });
+
+    await expect(
+      buildRuntime().cancelTurn({ sessionId: "session-1", turnId: "turn-2" }),
+    ).resolves.toEqual({ status: "cancelling" });
+    expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", { turnId: "turn-2" });
+  });
+
+  it("uses an empty payload for an unguarded cancel", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "turn-run" });
+
+    await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).resolves.toEqual({
+      status: "cancelling",
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {});
+  });
+
+  it("maps missing and terminal targets to 'no_active_turn'", async () => {
+    const { EntityConflictError, HookNotFoundError, RunExpiredError, WorkflowRunNotFoundError } =
+      await import("#compiled/@workflow/errors/index.js");
+    const errors = [
+      new HookNotFoundError("session-1:cancel"),
+      new WorkflowRunNotFoundError("turn-run"),
+      new RunExpiredError("turn already completed"),
+      new EntityConflictError("turn completed during cancellation"),
+    ];
+
+    for (const error of errors) {
+      resumeHookMock.mockRejectedValueOnce(error);
+      await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).resolves.toEqual({
+        status: "no_active_turn",
+      });
+    }
+  });
+
+  it("rethrows unexpected runtime failures", async () => {
+    const failure = new Error("transient backing-store outage");
+    resumeHookMock.mockRejectedValue(failure);
+
+    await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).rejects.toBe(failure);
+  });
+});
+
 describe("createWorkflowRuntime#run", () => {
   const adapter: ChannelAdapter = { kind: "http" };
 

@@ -10,7 +10,7 @@ import type {
 import { coalesceDeliveries } from "#harness/messages.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
 import {
   createDelegatedSubagentErrorResult,
@@ -22,9 +22,10 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
-import { emitTerminalSessionFailureStep } from "#execution/workflow-steps.js";
+import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
+import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
-import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
+import { disposeHook } from "#execution/hook-ownership.js";
 import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
@@ -74,7 +75,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     | SessionCapabilities
     | undefined;
   const serializedBundle = input.serializedContext["eve.bundle"] as {
-    source: RuntimeCompiledArtifactsSource;
+    source: DurableCompiledArtifactsSource;
     nodeId?: string;
   };
 
@@ -167,19 +168,36 @@ async function runDriverLoop(input: {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
 
+  // Control-hook disposal is deferred one turn — see DispatchedTurn.
+  let disposeSettledTurnControl: (() => Promise<void>) | undefined;
+  const runTurn = async (args: {
+    readonly delivery: HookPayload;
+    readonly serializedContext: Record<string, unknown>;
+    readonly sessionState: DurableSessionState;
+  }): Promise<NextDriverAction> => {
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries,
+      capabilities: input.capabilities,
+      controlToken: nextTurnControlToken(),
+      delivery: args.delivery,
+      deliveryHook,
+      mode: input.mode,
+      parentWritable: input.driverWritable,
+      serializedContext: args.serializedContext,
+      sessionState: args.sessionState,
+    });
+    await disposeSettledTurnControl?.();
+    disposeSettledTurnControl = turn.dispose;
+    return turn.action;
+  };
+
   try {
     if (input.sessionState.continuationToken) {
       await deliveryHook.rekey(input.sessionState.continuationToken);
     }
 
-    let action: NextDriverAction = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
-      capabilities: input.capabilities,
-      controlToken: nextTurnControlToken(),
+    let action: NextDriverAction = await runTurn({
       delivery: input.initialInput,
-      deliveryHook,
-      mode: input.mode,
-      parentWritable: input.driverWritable,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     });
@@ -197,6 +215,19 @@ async function runDriverLoop(input: {
         // report `done`/`park`. The driver-owned `dispatch-*` arms exist
         // solely for pre-change pinned drivers, which run their own code.
         throw new Error(`Driver received unexpected turn action "${action.kind}".`);
+      }
+
+      if (action.cancelled === true) {
+        const settled = await settleCancelledTurnStep({
+          parentWritable: input.driverWritable,
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        action = {
+          ...action,
+          serializedContext: settled.serializedContext,
+          sessionState: settled.sessionState,
+        };
       }
 
       if (!action.sessionState.continuationToken) {
@@ -224,17 +255,11 @@ async function runDriverLoop(input: {
           }
         }
 
-        action = await dispatchAndAwaitTurn({
-          bufferedDeliveries,
-          capabilities: input.capabilities,
-          controlToken: nextTurnControlToken(),
+        action = await runTurn({
           delivery: {
             kind: "deliver",
             payloads: allPayloads,
           },
-          deliveryHook,
-          mode: input.mode,
-          parentWritable: input.driverWritable,
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
@@ -262,26 +287,23 @@ async function runDriverLoop(input: {
         continue;
       }
 
-      action = await dispatchAndAwaitTurn({
-        bufferedDeliveries,
-        capabilities: input.capabilities,
-        controlToken: nextTurnControlToken(),
+      action = await runTurn({
         delivery: {
           auth: nextDeliver.auth,
           kind: "deliver",
           payloads: [remainder],
           requestId: nextDeliver.requestId,
         },
-        deliveryHook,
-        mode: input.mode,
-        parentWritable: input.driverWritable,
         serializedContext: action.serializedContext,
         sessionState: action.sessionState,
       });
     }
   } finally {
+    await disposeSettledTurnControl?.();
     await deliveryHook.dispose();
-    await closeHookIterator(authIterator);
+    // Dispose without closing the iterator: a session cancelled while
+    // awaiting authorization can leave a durable read in flight, and an
+    // async iterator only honors `return()` after that read settles.
     await disposeHook(authHook);
   }
 }

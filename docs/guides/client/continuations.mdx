@@ -64,7 +64,7 @@ The shorthand can send a follow-up, but it doesn't know the previous stream curs
 
 ## Waiting, completed, and failed sessions
 
-When a turn ends with `session.waiting`, the client preserves the state so the next send continues the conversation.
+When a turn ends with `session.waiting`, the event carries the current channel-owned `data.continuationToken` and the client preserves the state so the next send continues the conversation.
 
 When a turn ends with `session.completed` or `session.failed`, the client resets its local state. The next send starts a fresh durable session:
 
@@ -114,6 +114,19 @@ for await (const event of session.stream()) {
 ```
 
 `stream()` attaches to an existing run; to send new user input, use `send()`. For overriding the cursor with `startIndex` and the full reconnection model, see [Streaming](./streaming#open-a-stream-manually).
+
+If you only persisted `sessionId`, read the latest durable event to recover the current token from a waiting session:
+
+```ts
+const session = client.session({ sessionId, streamIndex: 0 });
+
+for await (const event of session.stream({ startIndex: -1 })) {
+  if (event.type === "session.waiting") {
+    await saveContinuationToken(event.data.continuationToken);
+  }
+  break;
+}
+```
 
 ## What to read next
 

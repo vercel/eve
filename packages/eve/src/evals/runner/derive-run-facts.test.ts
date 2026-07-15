@@ -405,7 +405,10 @@ describe("deriveRunFacts", () => {
       turnStarted("t1", 0),
       inputRequested(["r1"]),
       { type: "turn.completed", data: { sequence: 1, turnId: "t1" } },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "eve:test", wait: "next-user-message" },
+      },
     ] as HandleMessageStreamEvent[];
 
     const facts = deriveRunFacts(events);
@@ -421,7 +424,10 @@ describe("deriveRunFacts", () => {
         data: { finishReason: "stop", message: "done", stepIndex: 1, turnId: "t1", sequence: 2 },
       },
       { type: "turn.completed", data: { sequence: 3, turnId: "t1" } },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "eve:test", wait: "next-user-message" },
+      },
     ] as HandleMessageStreamEvent[];
 
     const facts = deriveRunFacts(events);

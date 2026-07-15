@@ -9,11 +9,14 @@ afterEach(() => {
 
 function createSession(
   state: SessionState = { streamIndex: 0 },
-  options: { readonly preserveCompletedSessions?: boolean } = {},
+  options: {
+    readonly maxReconnectAttempts?: number;
+    readonly preserveCompletedSessions?: boolean;
+  } = {},
 ) {
   const context: ConstructorParameters<typeof ClientSession>[0] = {
     host: "https://eve.test",
-    maxReconnectAttempts: 0,
+    maxReconnectAttempts: options.maxReconnectAttempts ?? 0,
     preserveCompletedSessions: options.preserveCompletedSessions ?? false,
     async resolveHeaders() {
       return new Headers();
@@ -121,7 +124,10 @@ describe("ClientSession", () => {
       }
 
       return createStreamResponse([
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:rekeyed", wait: "next-user-message" },
+        },
       ]);
     });
     const session = createSession();
@@ -136,7 +142,7 @@ describe("ClientSession", () => {
     const postRequests = requests.filter((request) => request.method === "POST");
     expect(new URL(postRequests[1]!.url).pathname).toBe("/eve/v1/session/session_1");
     expect(postRequests[1]!.body).toEqual({
-      continuationToken: "eve:test",
+      continuationToken: "eve:rekeyed",
       message: "second",
     });
   });
@@ -148,7 +154,10 @@ describe("ClientSession", () => {
       start(controller) {
         controller.enqueue(
           encoder.encode(
-            `${JSON.stringify({ type: "session.waiting", data: { wait: "next-user-message" } })}\n`,
+            `${JSON.stringify({
+              type: "session.waiting",
+              data: { continuationToken: "eve:test", wait: "next-user-message" },
+            })}\n`,
           ),
         );
       },
@@ -256,7 +265,10 @@ describe("ClientSession", () => {
             turnId: "turn_1",
           },
         },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:test", wait: "next-user-message" },
+        },
       ]);
     });
     const session = createSession();
@@ -264,5 +276,69 @@ describe("ClientSession", () => {
     const result = await (await session.send("first")).result();
 
     expect(result.inputRequests.map((request) => request.requestId)).toEqual(["approval_1"]);
+  });
+
+  it("opens a one-shot tail-relative stream without advancing the absolute cursor", async () => {
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      requests.push(
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url,
+      );
+      return createStreamResponse([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:test", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const initialState = {
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 7,
+    };
+    const session = createSession(initialState);
+
+    for await (const _event of session.stream({ startIndex: -1 })) {
+      // Drain the finite test stream.
+    }
+
+    expect(new URL(requests[0]!).searchParams.get("startIndex")).toBe("-1");
+    expect(session.state).toEqual(initialState);
+  });
+
+  it("does not reconnect a tail-relative stream after a disconnect", async () => {
+    const encoder = new TextEncoder();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      let emitted = false;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!emitted) {
+              emitted = true;
+              controller.enqueue(
+                encoder.encode(
+                  `${JSON.stringify({
+                    type: "session.waiting",
+                    data: { continuationToken: "eve:test", wait: "next-user-message" },
+                  })}\n`,
+                ),
+              );
+              return;
+            }
+            controller.error(new Error("socket disconnected"));
+          },
+        }),
+      );
+    });
+    const session = createSession(
+      { sessionId: "session_1", streamIndex: 0 },
+      { maxReconnectAttempts: 3 },
+    );
+
+    for await (const _event of session.stream({ startIndex: -1 })) {
+      // Drain until the simulated disconnect.
+    }
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

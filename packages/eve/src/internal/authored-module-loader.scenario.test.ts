@@ -477,7 +477,7 @@ describe("loadAuthoredModuleNamespace", () => {
     }
   });
 
-  it("keeps default external dependencies external when imported from workspace packages", async () => {
+  it("bundles unconfigured dependencies imported from workspace packages", async () => {
     const app = await scenarioApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
@@ -487,9 +487,9 @@ describe("loadAuthoredModuleNamespace", () => {
           "",
         ].join("\n"),
       },
-      name: "workspace-package-default-external",
+      name: "workspace-package-bundled-dependency",
     });
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-default-external-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-bundled-dependency-"));
 
     try {
       const packageRoot = join(workspaceRoot, "packages", "enrichment");
@@ -532,7 +532,7 @@ describe("loadAuthoredModuleNamespace", () => {
       );
       await writeFile(
         join(externalPackageRoot, "runtimeConfig.shared.js"),
-        "module.exports = { value: 'default-externalized' };\n",
+        "module.exports = { value: 'bundled-dependency' };\n",
       );
 
       await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
@@ -546,7 +546,7 @@ describe("loadAuthoredModuleNamespace", () => {
         join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
       );
 
-      expect(moduleNamespace.result).toBe("default-externalized");
+      expect(moduleNamespace.result).toBe("bundled-dependency");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

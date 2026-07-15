@@ -9,27 +9,45 @@ import {
   type TurnStepInput,
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
-import {
-  claimHookOwnership,
-  closeHookIterator,
-  disposeHook,
-  isHookConflictError,
-} from "#execution/hook-ownership.js";
+import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import {
+  createTurnCancellationControl,
+  type TurnCancellationControl,
+} from "#execution/turn-cancellation-control.js";
 import { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import { resolveRuntimeActionResultsForKeys } from "#harness/runtime-actions.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
+// A cancelled turn settles by parking the session, so the cancel hook is
+// only claimed where a park can land: conversation sessions always accept
+// follow-up input, and task sessions can park only when a continuation
+// token anchors them to a waiting parent (delegated subagents always have
+// one). A root task run without one is unparkable, so it stays
+// uncancellable rather than settling a cancel as `session.failed`.
+function canSettleCancelledTurnAsPark(input: TurnWorkflowInput): boolean {
+  return input.mode === "conversation" || input.stepInput.sessionState.continuationToken !== "";
+}
+
 export type { TurnWorkflowInput };
 
-/** Runs one complete logical turn, including child-agent waits when supported. */
+/**
+ * Runs one complete logical turn, including child-agent waits when supported.
+ *
+ * The turn-owned path also owns turn cancellation: resuming the
+ * session-scoped cancel hook (`{sessionId}:cancel`) mid-turn aborts the
+ * signal serialized into every `turnStep` and settles the turn as
+ * `turn.cancelled` → `session.waiting` — never as a failure. A late or
+ * guard-mismatched cancel is a benign no-op.
+ */
 export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
 
@@ -62,6 +80,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   let nextStepInput = input.stepInput.input;
   let ownsInbox = false;
+  let cancellation: TurnCancellationControl | undefined;
 
   try {
     try {
@@ -72,10 +91,40 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       throw error;
     }
 
+    // Claimed after the inbox claim so a losing duplicate run never
+    // contends for the session cancel token.
+    if (
+      input.driverCapabilities?.cancelledTurnSettle === true &&
+      canSettleCancelledTurnAsPark(input)
+    ) {
+      cancellation = await createTurnCancellationControl({
+        expectedTurnId: activeTurnId(input.stepInput.sessionState.emissionState),
+        sessionId: input.stepInput.sessionState.sessionId,
+      });
+    }
+
     while (true) {
-      const result = await turnStep(cursor.createStepInput(nextStepInput));
+      const result = await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal));
+
+      if (result.action === "cancelled") {
+        // No `canPark` check here: that gate rejects model-authored waits
+        // (`next: null`) in task mode, whereas a cancelled turn parks by
+        // design and its parkability was already established when the
+        // cancel hook was claimed (`canSettleCancelledTurnAsPark`). The
+        // epilogue runs in the driver (`settleCancelledTurnStep`), not as
+        // a step in this run, where queued cancel wakes could re-dispatch
+        // it.
+        await cancellation?.dispose();
+        await cursor.finish(
+          { sessionState: cursor.sessionState },
+          { cancelled: true, kind: "park" },
+          bufferedDeliveries,
+        );
+        return;
+      }
 
       if (result.action === "done") {
+        await cancellation?.dispose();
         await cursor.finish(
           result,
           {
@@ -114,6 +163,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
         const results = await waitForRuntimeActionResults({
           bufferedDeliveries,
+          cancellation,
           cursor,
           inboxToken: inbox.token,
           initialResults: dispatchResult.results,
@@ -121,6 +171,12 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           nextDeliveryRequestId,
           pendingActionKeys,
         });
+        if (results === "cancelled") {
+          // The next turnStep observes the aborted signal and settles
+          // through the `cancelled` arm above.
+          nextStepInput = undefined;
+          continue;
+        }
         nextStepInput = { kind: "runtime-action-result", results };
         continue;
       }
@@ -133,6 +189,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
 
+        await cancellation?.dispose();
         await cursor.finish(
           result,
           {
@@ -151,20 +208,30 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     await cursor.send({ error: normalizeSerializableError(error), kind: "turn-error" });
     throw error;
   } finally {
-    await closeHookIterator(iterator);
+    // Dispose-only teardown: `iterator.return()` would await a pending
+    // durable read that never settles, leaving this run `running` forever
+    // and its hooks unswept. The cancel token is disposed *before* each
+    // terminal result publishes so the next turn's claim never races this
+    // run's teardown; this backstop covers the error path.
+    if (cancellation !== undefined) await cancellation.dispose();
     if (ownsInbox) await disposeHook(inbox);
   }
 }
 
+// `"cancelled"` stays a sentinel rather than a `RuntimeActionResult`
+// variant: that union is the schema-validated wire type projected into
+// harness resume calls, while cancellation is a control-flow outcome of
+// this wait that never leaves the workflow.
 async function waitForRuntimeActionResults(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly cancellation: TurnCancellationControl | undefined;
   readonly cursor: TurnExecutionCursor;
   readonly inboxToken: string;
   readonly initialResults: readonly RuntimeActionResult[];
   readonly iterator: AsyncIterator<TurnInboxPayload>;
   readonly nextDeliveryRequestId: () => string;
   readonly pendingActionKeys: readonly string[];
-}): Promise<readonly RuntimeActionResult[]> {
+}): Promise<readonly RuntimeActionResult[] | "cancelled"> {
   let pendingDeliveryRequest: string | undefined;
   const results: RuntimeActionResult[] = [...input.initialResults];
 
@@ -195,7 +262,25 @@ async function waitForRuntimeActionResults(input: {
       });
     }
 
-    const next = await input.iterator.next();
+    const nextPromise = input.iterator.next();
+    // When a cancel wins the race, the dangling inbox `next()` is dropped
+    // by disposal in teardown; pre-attach a handler so a late rejection
+    // never surfaces as unhandled.
+    nextPromise.catch(() => {});
+    const next = await (input.cancellation === undefined
+      ? nextPromise
+      : Promise.race([nextPromise, input.cancellation.requested]));
+    if (next === "cancel") {
+      if (pendingDeliveryRequest !== undefined) {
+        // Release the raced public input back to the driver so it stays
+        // available for the next turn.
+        await input.cursor.send({
+          kind: "turn-delivery-cancelled",
+          requestId: pendingDeliveryRequest,
+        });
+      }
+      return "cancelled";
+    }
     if (next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
     const value = next.value;

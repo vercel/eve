@@ -56,9 +56,7 @@ import extension from "../extension";
 
 export default defineTool({
   description: "Search the CRM.",
-  inputSchema: {
-    /* ... */
-  },
+  inputSchema: {/* ... */},
   async execute({ query }) {
     const { apiKey, baseUrl } = extension.config; // validated, defaults applied
   },

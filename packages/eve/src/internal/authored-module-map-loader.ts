@@ -1,11 +1,18 @@
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { CompiledAgentManifest, CompiledAgentNodeManifest } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { collectModuleRefsForManifest, type CompiledModuleMap } from "#compiler/module-map.js";
+import {
+  collectModuleRefsForManifest,
+  compiledModuleMapSchema,
+  type CompiledModuleMap,
+} from "#compiler/module-map.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { formatValidationError } from "#runtime/validation.js";
 import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 
 /**
  * Ambient namespace read by `defineExtension` when it is evaluated from a module
@@ -28,7 +35,10 @@ export async function loadCompiledModuleMapFromAuthoredSource(input: {
     compiledArtifactsSource: input.compiledArtifactsSource,
   });
 
-  return await hydrateCompiledModuleMapFromManifest(manifest);
+  return await hydrateCompiledModuleMapFromManifest(
+    manifest,
+    input.compiledArtifactsSource.appRoot,
+  );
 }
 
 interface ExtensionScopeIndex {
@@ -40,7 +50,16 @@ interface ExtensionScopeIndex {
 
 async function hydrateCompiledModuleMapFromManifest(
   manifest: CompiledAgentManifest,
+  runtimeAppRoot: string,
 ): Promise<CompiledModuleMap> {
+  const materializedIndex = await readMaterializedAuthoredModuleIndex(runtimeAppRoot);
+  if (materializedIndex !== undefined) {
+    return await loadMaterializedCompiledModuleMap({
+      moduleMapPath: materializedIndex.moduleMap,
+      runtimeAppRoot,
+    });
+  }
+
   const nodes: CompiledModuleMap["nodes"] = {};
   const nodeManifests: Array<{
     agentRoot: string;
@@ -69,7 +88,6 @@ async function hydrateCompiledModuleMapFromManifest(
       manifest.extensionMounts.map((mount) => [mount.mountSourceId, mount.packageNamespace]),
     ),
   };
-
   for (const nodeManifest of nodeManifests) {
     nodes[nodeManifest.nodeId] = {
       modules: await hydrateCompiledNodeScope({
@@ -83,6 +101,27 @@ async function hydrateCompiledModuleMapFromManifest(
   return {
     nodes,
   };
+}
+
+async function loadMaterializedCompiledModuleMap(input: {
+  readonly moduleMapPath: string;
+  readonly runtimeAppRoot: string;
+}): Promise<CompiledModuleMap> {
+  const moduleMapPath = join(input.runtimeAppRoot, ".eve", "compile", input.moduleMapPath);
+  const moduleNamespace = (await import(
+    `${pathToFileURL(moduleMapPath).href}?generation=${encodeURIComponent(input.moduleMapPath)}`
+  )) as { readonly default?: unknown; readonly moduleMap?: unknown };
+  const parsed = compiledModuleMapSchema.safeParse(
+    moduleNamespace.moduleMap ?? moduleNamespace.default,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      `Expected materialized authored module map "${moduleMapPath}" to export a valid compiled eve module map. ${formatValidationError(parsed.error)}`,
+    );
+  }
+
+  return parsed.data;
 }
 
 /**

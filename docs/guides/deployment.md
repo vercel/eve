@@ -99,9 +99,9 @@ For a self-deployed process, leave `defaultBackend()` in place or choose an expl
 
 ## 5. Build-time sandbox prewarm
 
-During hosted builds, eve prewarms reusable Vercel sandbox templates so the first session doesn't pay the cold-start cost:
+During Vercel-targeted builds, eve prewarms reusable Vercel sandbox templates so the first session doesn't pay the cold-start cost. This includes hosted builds and local `vercel build` runs:
 
-- Prewarm runs only when both `VERCEL` and `VERCEL_DEPLOYMENT_ID` are present.
+- Prewarm runs for hosted Vercel builds and linked local `vercel build` runs.
 - A sandbox with no `bootstrap()` and no workspace seed files gets skipped.
 - Seed-only templates are keyed by skills and workspace file contents, so unchanged seeds reuse a template across deploys.
 - Templates with a `bootstrap()` are keyed by the optional resolved `revalidationKey()` plus the authored sandbox source and seed contents, so matching inputs reuse a template across deploys.
@@ -109,7 +109,7 @@ During hosted builds, eve prewarms reusable Vercel sandbox templates so the firs
 - Prewarming only covers template construction. `onSession()` still runs at runtime, once per session.
 - **If build-time prewarm fails, the build fails.**
 
-If `VERCEL` is set but `VERCEL_DEPLOYMENT_ID` is missing, eve warns that it skipped prewarming. Do not deploy that build with `vercel deploy --prebuilt`; its output may reference sandbox templates that were never provisioned. Run `vercel deploy` instead so Vercel builds the source in its hosted build environment.
+Local builds must be linked to a Vercel project with credentials that can provision Vercel Sandbox templates. If authentication or template provisioning fails, eve fails the build rather than emitting output that would fail after deployment.
 
 ## 6. Auth
 
@@ -140,7 +140,7 @@ Eve writes the standard Nitro output under `.output/` instead of Vercel Build Ou
 
 Self-deployed agents should make the Vercel-specific choices explicit:
 
-- Let the Workflow SDK use its default local world, which stores workflow state under `.workflow-data`, configure your host so that directory is on persistent storage, or select another world with `experimental.workflow.world` in the root `agent.ts`. When you select a custom world, install a world package built against the same `@workflow/*` line as your eve release (currently the `5.0.0-beta` line). The npm `latest` tag may lag, so pin the version explicitly, for example `pnpm add @workflow/world-postgres@5.0.0-beta.x`. The Workflow SDK rejects worlds with an incompatible runtime protocol during initialization.
+- Let the Workflow SDK use its default local world, which stores workflow state under `.eve/.workflow-data`; configure your host so that directory is on persistent storage, or select another world with `experimental.workflow.world` in the root `agent.ts`. When you select a custom world, install a world package built against the same `@workflow/*` line as your eve release (currently the `5.0.0-beta` line). The npm `latest` tag may lag, so pin the version explicitly, for example `pnpm add @workflow/world-postgres@5.0.0-beta.x`. The Workflow SDK rejects worlds with an incompatible runtime protocol during initialization.
 - If you put a reverse proxy or ingress in front of eve, forward **both** `/eve/` and `/.well-known/workflow/`. The workflow world delivers run callbacks to `/.well-known/workflow/v1/flow`; a proxy restricted to `/eve/` lets sessions start but silently stalls runs forever, because the callbacks never reach eve.
 - Install the AI SDK package for your provider, then use a direct provider model object and `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` when you want no Gateway dependency.
 - Use `AI_GATEWAY_API_KEY` if you still want Gateway routing from a non-Vercel host.

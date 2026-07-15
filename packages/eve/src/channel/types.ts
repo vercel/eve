@@ -15,8 +15,20 @@ import type { ChannelInstrumentationProjection } from "#channel/instrumentation.
 
 export type RunSessionLimits = Pick<
   AgentLimitsDefinition,
-  "maxInputTokensPerSession" | "maxOutputTokensPerSession" | "maxSubagentDepth" | "maxSubagents"
+  "maxInputTokensPerSession" | "maxOutputTokensPerSession"
 >;
+
+/** Identifies the session turn to cancel. */
+export interface CancelTurnInput {
+  readonly sessionId: string;
+  /** Limits the request to the turn the caller observed. */
+  readonly turnId?: string;
+}
+
+/** Result of requesting turn cancellation. Both statuses are successful. */
+export interface CancelTurnResult {
+  readonly status: "cancelling" | "no_active_turn";
+}
 
 // ---------------------------------------------------------------------------
 // Lineage
@@ -367,6 +379,9 @@ export interface Runtime {
    */
   run(input: RunInput): Promise<RunHandle>;
 
+  /** Requests cancellation of a session's in-flight turn. */
+  cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+
   /**
    * Delivers a follow-up message to a parked session.
    */
@@ -379,10 +394,10 @@ export interface Runtime {
    * event-streaming route. Backed by the workflow API's per-session durable
    * stream.
    *
-   * `options.startIndex` is the zero-based position of the first event to
-   * yield, dropping earlier events. The framework HTTP session-stream route
-   * forwards the `startIndex` query parameter so a reconnecting client resumes
-   * after the events it already consumed without replaying the prior turn.
+   * Nonnegative `options.startIndex` values are the zero-based position of the
+   * first event to yield. Negative values read relative to the current tail.
+   * The framework HTTP session-stream route forwards the `startIndex` query
+   * parameter unchanged.
    */
   getEventStream(
     sessionId: string,
@@ -395,8 +410,9 @@ export interface Runtime {
  */
 export interface GetEventStreamOptions {
   /**
-   * Zero-based index of the first event to emit. Events before this index
-   * are dropped. Defaults to `0` (replay the entire stream).
+   * Zero-based index of the first event to emit. Negative values read from
+   * the current tail (`-1` starts at the latest event). Defaults to `0`
+   * (replay the entire stream).
    */
   readonly startIndex?: number;
 }

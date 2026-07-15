@@ -62,19 +62,23 @@ export const DEFAULT_PAINT_DT = 1 / 60;
 export const PAINT_STROKE_MOVEMENT_EPSILON_CELLS = 0.05;
 
 function safeDevicePixelRatioOrDefault(devicePixelRatio: number | undefined) {
-  const ratio = typeof devicePixelRatio === "number" && Number.isFinite(devicePixelRatio)
-    ? devicePixelRatio
-    : DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO;
+  const ratio =
+    typeof devicePixelRatio === "number" && Number.isFinite(devicePixelRatio)
+      ? devicePixelRatio
+      : DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO;
 
   return Math.max(0.001, ratio);
 }
 
 export function imprintCellSizeForLogicalHeight(logicalHeight: number) {
-  const safeLogicalHeight = typeof logicalHeight === "number" && Number.isFinite(logicalHeight)
-    ? logicalHeight
-    : REFERENCE_IMPRINT_LOGICAL_HEIGHT;
+  const safeLogicalHeight =
+    typeof logicalHeight === "number" && Number.isFinite(logicalHeight)
+      ? logicalHeight
+      : REFERENCE_IMPRINT_LOGICAL_HEIGHT;
 
-  return DEFAULT_IMPRINT_CELL_SIZE * (Math.max(1, safeLogicalHeight) / REFERENCE_IMPRINT_LOGICAL_HEIGHT);
+  return (
+    DEFAULT_IMPRINT_CELL_SIZE * (Math.max(1, safeLogicalHeight) / REFERENCE_IMPRINT_LOGICAL_HEIGHT)
+  );
 }
 
 export function imprintGridSizeForLogicalSize(
@@ -83,7 +87,8 @@ export function imprintGridSizeForLogicalSize(
   gridScaleMultiplier = DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
 ) {
   const cellSize = imprintCellSizeForLogicalHeight(logicalHeight);
-  const multiplierScale = Math.max(0.001, gridScaleMultiplier) / DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER;
+  const multiplierScale =
+    Math.max(0.001, gridScaleMultiplier) / DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER;
   return {
     cols: Math.max(1, Math.ceil((logicalWidth / cellSize) * multiplierScale)),
     rows: Math.max(1, Math.ceil((logicalHeight / cellSize) * multiplierScale)),

@@ -238,14 +238,13 @@ const SHARED_TEMPLATE_FILES: Record<string, string> = {
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["agent/**/*.ts", "evals/**/*.ts", ".eve/**/*.d.ts"]
+  "include": ["agent/**/*.ts", "evals/**/*.ts"]
 }
 `,
   ".gitignore": `node_modules
 .env*
 .eve
 .vercel
-.workflow-data
 .next
 .output
 .nitro
@@ -258,7 +257,6 @@ dist
   ".vercelignore": `node_modules
 .env*
 .eve
-.workflow-data
 .next
 .output
 .nitro

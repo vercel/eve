@@ -151,8 +151,7 @@ export default defineEval({
 /** Builds the fixture and repoints the alias at the fresh deployment. */
 async function deployToAlias(t: EveEvalContext, alias: string, phase: string): Promise<void> {
   // Mirror the workflow's build env. Sandbox templates key on
-  // VERCEL_PROJECT_ID (already in the environment); the deployment id is
-  // deliberately ignored by sandbox keys but must be present at build.
+  // VERCEL_PROJECT_ID, which is already present in the environment.
   await execFileAsync("pnpm", ["exec", "eve", "build"], {
     ...EXEC_OPTIONS,
     env: {
@@ -160,19 +159,22 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
       VERCEL: "1",
       VERCEL_ENV: "preview",
       VERCEL_TARGET_ENV: "preview",
-      VERCEL_DEPLOYMENT_ID: `dpl_eve_e2e_redeploy_${phase}_${Date.now()}`,
     },
   });
 
   const tokenArgs =
     process.env.VERCEL_TOKEN === undefined ? [] : ["--token", process.env.VERCEL_TOKEN];
+  const modelArgs =
+    process.env.EVE_E2E_MODEL === undefined
+      ? []
+      : ["--env", `EVE_E2E_MODEL=${process.env.EVE_E2E_MODEL}`];
   // vc alias does not infer the team from the project link the way deploy
   // does, so pass the scope explicitly.
   const scopeArgs =
     process.env.VERCEL_ORG_ID === undefined ? [] : ["--scope", process.env.VERCEL_ORG_ID];
   const deploy = await execFileAsync(
     "pnpm",
-    ["exec", "vc", "deploy", "--prebuilt", "--yes", "--target=preview", ...tokenArgs],
+    ["exec", "vc", "deploy", "--prebuilt", "--yes", "--target=preview", ...modelArgs, ...tokenArgs],
     EXEC_OPTIONS,
   );
   const deploymentUrl = deploy.stdout.trim().split("\n").at(-1)?.trim();
