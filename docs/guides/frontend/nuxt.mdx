@@ -108,7 +108,10 @@ When `vercel.json` declares [`services`](https://vercel.com/docs/services), the 
 
 ### Migrating from experimentalServices
 
-Earlier versions of the module wrote the legacy `experimentalServices` field into `vercel.json`. Vercel no longer routes that model — deployments build both services but every `/eve/v1/*` request returns a platform NOT_FOUND — so the module now ignores the field and warns when it sees one. Delete `experimentalServices` from `vercel.json` (or the whole file if that was all it held), and if your Vercel project's Framework Preset was set to "Services" for the legacy setup, set it back to Nuxt.js.
+Earlier versions of the module wrote the legacy `experimentalServices` field into `vercel.json`. Vercel no longer routes that model — deployments build both services but every `/eve/v1/*` request returns a platform NOT_FOUND — so the module now ignores the field and warns when it sees one. Migrate either way:
+
+- **Generated (default).** Delete `vercel.json` (or just its `experimentalServices` block) and set the project's Framework Preset back to Nuxt.js. The module generates the eve service and its routing on every Vercel build.
+- **Hand-maintained.** Replace `experimentalServices` with the stable `services` and `rewrites` shown above, and keep the "Services" Framework Preset.
 
 ## What to read next
 
