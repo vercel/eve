@@ -33,7 +33,7 @@ catalog:
   "@vercel/connect": "0.2.2"
   "@vercel/sandbox": "2.3.0"
   ai: "^7.0.26"
-  next: "16.2.6"
+  next: "16.3.0-preview.6"
   phase: "0.0.1"
   picocolors: "1.1.1"
   react: "19.2.6"
