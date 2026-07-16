@@ -1245,6 +1245,77 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.setLogDisplayMode("all");
     expect(screen.snapshot()).toContain("at fourth");
     expect(screen.snapshot()).not.toContain("details: .eve/logs/dev.log");
+
+    process.stdout.write("server listening on 3000\n");
+    expect(append).toHaveBeenCalledWith({ source: "stdout", detail: "server listening on 3000" });
+    renderer.shutdown();
+  });
+
+  it("records tool failures in the diagnostic log even when tools are hidden", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const append = vi.fn();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      tools: "hidden",
+      unicode: true,
+      diagnostics: {
+        path: "/app/.eve/logs/dev.log",
+        displayPath: ".eve/logs/dev.log",
+        append,
+        close: async () => {},
+      },
+    });
+
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "c1",
+          toolName: "bash",
+          input: { command: "curl https://example.com" },
+        },
+        { type: "tool-error", toolCallId: "c1", errorText: "exit code 7: connection refused" },
+        { type: "error", errorText: "Turn failed." },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "fetch it", continueSession: false },
+    );
+
+    expect(append).toHaveBeenCalledWith({
+      source: "tool",
+      summary: expect.stringContaining("failed"),
+      detail: "exit code 7: connection refused",
+    });
+    expect(append).toHaveBeenCalledWith({
+      source: "workflow",
+      summary: "Error: Turn failed.",
+      detail: "Turn failed.",
+    });
+    renderer.shutdown();
+  });
+
+  it("records sandbox log lines in the diagnostic log", () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const append = vi.fn();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      diagnostics: {
+        path: "/app/.eve/logs/dev.log",
+        displayPath: ".eve/logs/dev.log",
+        append,
+        close: async () => {},
+      },
+    });
+
+    renderer.renderSandboxLog('eve: sandbox template "root" (microsandbox): apt-get update');
+    expect(append).toHaveBeenCalledWith({ source: "sandbox", detail: expect.any(String) });
     renderer.shutdown();
   });
 

@@ -1,7 +1,7 @@
 import { chmod, mkdir, open, type FileHandle } from "node:fs/promises";
 import { join, relative } from "node:path";
 
-export type DevDiagnosticSource = "stderr" | "workflow" | "transport";
+export type DevDiagnosticSource = "stderr" | "stdout" | "sandbox" | "workflow" | "tool";
 
 export interface DevDiagnosticEntry {
   readonly source: DevDiagnosticSource;

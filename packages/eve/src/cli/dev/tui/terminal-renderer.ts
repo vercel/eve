@@ -970,6 +970,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   upsertSubagentTool(update: SubagentToolUpdate): void {
+    if (update.status === "failed" && update.errorText !== undefined) {
+      // Captured before the display guards: hidden or collapsed subagent
+      // views must not keep tool failures out of the diagnostic log.
+      this.#diagnostics?.append({
+        source: "tool",
+        summary: `${update.toolName} failed (subagent ${update.subagentName})`,
+        detail: update.errorText,
+      });
+    }
     if (this.#subagents === "hidden") return;
     this.#ensureSubagentHeader(update.callId, update.subagentName);
     if (this.#subagents === "collapsed") {
@@ -1108,6 +1117,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const content = stripTerminalControls(text);
     const sandboxMessage = parseSandboxLogLine(content);
     if (sandboxMessage === undefined) return;
+    this.#diagnostics?.append({ source: "sandbox", detail: sandboxMessage });
     this.#start();
     this.#pushBlock({ kind: "sandbox", body: sandboxMessage, live: false });
     this.#paint();
@@ -2241,20 +2251,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #addErrorBlock(title: string, content: string, detail?: string) {
+    const cleanTitle = stripTerminalControls(title);
+    const cleanBody = stripTerminalControls(content);
+    const cleanDetail = detail === undefined ? undefined : stripTerminalControls(detail);
+    // Every error block lands in the log, detail or not, so the file is a
+    // complete failure record for the session.
+    this.#diagnostics?.append({
+      source: "workflow",
+      summary: `${cleanTitle}: ${cleanBody}`,
+      detail: cleanDetail ?? cleanBody,
+    });
     const block: Block = {
       kind: "error",
-      title: stripTerminalControls(title),
-      body: stripTerminalControls(content),
+      title: cleanTitle,
+      body: cleanBody,
       live: false,
     };
-    if (detail !== undefined) {
-      const cleanDetail = stripTerminalControls(detail);
-      if (this.#diagnostics === undefined) {
-        block.detail = cleanDetail;
-      } else {
-        this.#diagnostics.append({ source: "workflow", summary: content, detail: cleanDetail });
-        block.detail = `details: ${this.#diagnostics.displayPath}`;
-      }
+    if (cleanDetail !== undefined) {
+      block.detail =
+        this.#diagnostics === undefined ? cleanDetail : `details: ${this.#diagnostics.displayPath}`;
     }
     this.#pushBlock(block);
     this.#paint();
@@ -2399,8 +2414,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
 
       case "tool-error": {
-        if (displayModes.tools === "hidden") break;
         const existing = this.#resolveNativeToolState(event.toolCallId, turnState);
+        // Tool failures reach the log even when tool display is hidden.
+        this.#diagnostics?.append({
+          source: "tool",
+          summary: `${existing?.toolName ?? event.toolCallId} failed`,
+          detail: event.errorText,
+        });
+        if (displayModes.tools === "hidden") break;
         if (existing === undefined) break;
         turnState.hasPendingToolResults = true;
         this.#setStreamStatus(STATUS.toolResults);
@@ -2963,6 +2984,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     restore();
 
     if (this.#stdoutLogBuffer.length > 0) {
+      this.#diagnostics?.append({ source: "stdout", detail: this.#stdoutLogBuffer });
       if (this.#shouldRenderLog("stdout")) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
       this.#stdoutLogBuffer = "";
     }
@@ -2998,6 +3020,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // applied at render time, so `/loglevel` can reveal them later. The dev
     // server's rebuild lifecycle lines are the one exception — they cycle
     // through a single in-place status block instead of stacking.
+    // Capture at the dispatch point so every captured line — including
+    // sandbox and rebuild lines riding stdout — reaches the diagnostic log.
+    this.#diagnostics?.append({ source, detail: content });
     if (source === "stdout") this.#handleCapturedStdout(content);
     else this.#handleCapturedStderr(content);
     this.#paint();
@@ -3039,7 +3064,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #handleCapturedStderr(content: string): void {
-    this.#diagnostics?.append({ source: "stderr", detail: content });
     const lines = content.split("\n");
     const failedIndex = lines.findIndex((line) => {
       return parseDevRebuildLogLine(line.trimEnd())?.kind === "failed";
