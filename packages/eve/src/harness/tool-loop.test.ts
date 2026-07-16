@@ -36,7 +36,11 @@ import {
   modelFacingAuthorizationOutput,
   requestAuthorization,
 } from "#harness/authorization.js";
-import { hasDeferredStepInput, setPendingInputBatch } from "#harness/input-requests.js";
+import {
+  hasDeferredStepInput,
+  hasPendingInputBatch,
+  setPendingInputBatch,
+} from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -7049,6 +7053,232 @@ describe("createToolLoopHarness", () => {
         turnId: "turn_0",
       },
       type: "input.requested",
+    });
+  });
+
+  it("delivers a stale ask_question selection as a new user turn while another question is pending", async () => {
+    const nextQuestionInput = {
+      allowFreeform: false,
+      options: [
+        { id: "alpha", label: "Use alpha" },
+        { id: "beta", label: "Use beta" },
+      ],
+      prompt: "Which new context should I use?",
+    };
+    setupMockAgent({
+      content: [],
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: nextQuestionInput,
+                toolCallId: "question-2",
+                toolName: "ask_question",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: nextQuestionInput,
+          toolCallId: "question-2",
+          toolName: "ask_question",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+    const nextQuestionImplementation = vi.mocked(ToolLoopAgent).getMockImplementation();
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "I will use the candidate.", role: "assistant" }] },
+      text: "I will use the candidate.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    vi.mocked(ToolLoopAgent).mockImplementationOnce(nextQuestionImplementation!);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const questionInput = {
+      allowFreeform: true,
+      options: [
+        {
+          description: "Use the current conversation context.",
+          id: "current",
+          label: "Use current context",
+        },
+        {
+          description: "Use the candidate from the earlier question.",
+          id: "candidate",
+          label: "Use STALE-CANDIDATE-7Q4M",
+        },
+      ],
+      prompt: "Which context should I use?",
+    };
+    const session = setPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "question-1",
+            input: questionInput,
+            kind: "tool-call",
+            toolName: "ask_question",
+          },
+          allowFreeform: true,
+          display: "select",
+          options: questionInput.options,
+          prompt: questionInput.prompt,
+          requestId: "question-1",
+        },
+      ],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: questionInput,
+              toolCallId: "question-1",
+              toolName: "ask_question",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: createTestSession({
+        history: [{ content: "Help me choose.", role: "user" }],
+      }),
+    });
+
+    const followupResult = await runStep(session, {
+      message: "Use current context instead.",
+    });
+
+    expect(followupResult.next).toBeNull();
+    expect(hasPendingInputBatch(followupResult.session.state)).toBe(true);
+
+    const secondTurnEventIndex = events.length;
+    const result = await runStep(followupResult.session, {
+      inputResponses: [{ requestId: "question-1", optionId: "candidate" }],
+    });
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
+    if (agent === undefined) {
+      throw new Error("ToolLoopAgent mock did not return an instance.");
+    }
+    const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages;
+
+    expect(result.next).toBeNull();
+    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(modelMessages?.at(-1)).toEqual({
+      content: expect.stringContaining("STALE-CANDIDATE-7Q4M"),
+      role: "user",
+    });
+    expect(
+      events.slice(secondTurnEventIndex).find((event) => event.type === "message.received"),
+    ).toMatchObject({
+      data: {
+        message: "Use STALE-CANDIDATE-7Q4M",
+      },
+    });
+  });
+
+  it("delivers a stale ask_question selection as a new user turn when nothing is pending", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Understood.", role: "assistant" }] },
+      text: "Understood.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const questionInput = {
+      allowFreeform: true,
+      options: [
+        { id: "current", label: "Use current context" },
+        { id: "candidate", label: "Use STALE-CANDIDATE-7Q4M" },
+      ],
+      prompt: "Which context should I use?",
+    };
+    const session = setPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "question-1",
+            input: questionInput,
+            kind: "tool-call",
+            toolName: "ask_question",
+          },
+          allowFreeform: true,
+          display: "select",
+          options: questionInput.options,
+          prompt: questionInput.prompt,
+          requestId: "question-1",
+        },
+      ],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: questionInput,
+              toolCallId: "question-1",
+              toolName: "ask_question",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: createTestSession({
+        history: [{ content: "Help me choose.", role: "user" }],
+      }),
+    });
+
+    // The follow-up resolves question-1 as freeform; the turn completes with
+    // nothing pending.
+    const followupResult = await runStep(session, {
+      message: "Use current context instead.",
+    });
+
+    expect(followupResult.next).toBeNull();
+    expect(hasPendingInputBatch(followupResult.session.state)).toBe(false);
+
+    const secondTurnEventIndex = events.length;
+    const result = await runStep(followupResult.session, {
+      inputResponses: [{ requestId: "question-1", optionId: "candidate" }],
+    });
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
+    if (agent === undefined) {
+      throw new Error("ToolLoopAgent mock did not return an instance.");
+    }
+    const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages;
+
+    expect(result.next).toBeNull();
+    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(modelMessages?.at(-1)).toEqual({
+      content: expect.stringContaining("STALE-CANDIDATE-7Q4M"),
+      role: "user",
+    });
+    // The stale selection must not append a second tool result for
+    // question-1: only the freeform answer from the follow-up turn exists.
+    expect(modelMessages?.filter((message: ModelMessage) => message.role === "tool")).toHaveLength(
+      1,
+    );
+    expect(
+      events.slice(secondTurnEventIndex).find((event) => event.type === "message.received"),
+    ).toMatchObject({
+      data: {
+        message: "Use STALE-CANDIDATE-7Q4M",
+      },
     });
   });
 

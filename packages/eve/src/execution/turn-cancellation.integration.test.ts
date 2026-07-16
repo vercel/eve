@@ -637,13 +637,15 @@ describe("turn cancellation integration", () => {
         expect(followUpTurn.at(-1)?.type).toBe("session.waiting");
         expect(filterEventsByType(followUpTurn, "turn.cancelled")).toHaveLength(0);
         expect(filterEventsByType(followUpTurn, "turn.started")).toHaveLength(1);
+        expect(filterEventsByType(followUpTurn, "step.completed")).toHaveLength(1);
         expect(filterEventsByType(followUpTurn, "session.waiting")).toHaveLength(1);
         expectNoFailureEvents(followUpTurn);
         expect(
           followUpTurn.some(
             (event) =>
-              event.type === "message.completed" &&
-              event.data.message?.includes("answer after hitl cancel") === true,
+              event.type === "message.received" &&
+              typeof event.data.message === "string" &&
+              event.data.message.includes("answer after hitl cancel"),
           ),
         ).toBe(true);
 

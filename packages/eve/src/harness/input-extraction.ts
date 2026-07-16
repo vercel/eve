@@ -1,8 +1,18 @@
-import type { ContentPart, ToolApprovalRequestOutput, ToolSet, TypedToolCall } from "ai";
+import type { ContentPart, ModelMessage, ToolSet, TypedToolCall } from "ai";
 
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/input-requests.js";
+
+interface ToolCallDescriptor {
+  readonly input: unknown;
+  readonly toolCallId: string;
+  readonly toolName: string;
+}
+
+interface PersistedToolCall extends ToolCallDescriptor {
+  readonly type: "tool-call";
+}
 
 /**
  * Extracts question input requests from tool calls that target the
@@ -11,6 +21,13 @@ import { createRuntimeToolCallActionFromToolCall } from "#harness/input-requests
 export function extractQuestionInputRequests(input: {
   readonly excludedCallIds: ReadonlySet<string>;
   readonly toolCalls: readonly TypedToolCall<ToolSet>[];
+}): InputRequest[] {
+  return extractQuestionRequests(input);
+}
+
+function extractQuestionRequests(input: {
+  readonly excludedCallIds: ReadonlySet<string>;
+  readonly toolCalls: readonly ToolCallDescriptor[];
 }): InputRequest[] {
   const requests: InputRequest[] = [];
 
@@ -66,34 +83,43 @@ export function extractToolApprovalInputRequests(input: {
   readonly content: readonly ContentPart<ToolSet>[];
   readonly excludedCallIds?: ReadonlySet<string>;
 }): InputRequest[] {
+  return extractApprovalRequests(input);
+}
+
+// Persisted history parts lose AI SDK typing, so this core narrows each part
+// at runtime. The exported wrapper above keeps live call sites compile-checked
+// against the AI SDK shapes.
+function extractApprovalRequests(input: {
+  readonly content: readonly unknown[];
+  readonly excludedCallIds?: ReadonlySet<string>;
+  readonly includedRequestIds?: ReadonlySet<string>;
+}): InputRequest[] {
   const requests: InputRequest[] = [];
-  const toolCallsById = new Map<string, TypedToolCall<ToolSet>>();
+  const toolCallsById = new Map<string, ToolCallDescriptor>();
 
   for (const part of input.content) {
-    if (part.type === "tool-call") {
+    if (isPersistedToolCall(part)) {
       toolCallsById.set(part.toolCallId, part);
     }
   }
 
   for (const part of input.content) {
-    if (part.type !== "tool-approval-request") {
+    if (!isToolApprovalRequest(part)) {
       continue;
     }
 
-    const approvalRequest = part as ToolApprovalRequestOutput<ToolSet> & {
-      readonly toolCall?: TypedToolCall<ToolSet>;
-      readonly toolCallId?: string;
-    };
+    if (input.includedRequestIds !== undefined && !input.includedRequestIds.has(part.approvalId)) {
+      continue;
+    }
+
     // AI SDK records automatic decisions as request/response pairs for history;
     // only unresolved requests should become eve input.
-    if (approvalRequest.isAutomatic === true) {
+    if (part.isAutomatic === true) {
       continue;
     }
     const toolCall =
-      approvalRequest.toolCall ??
-      (approvalRequest.toolCallId === undefined
-        ? undefined
-        : toolCallsById.get(approvalRequest.toolCallId));
+      (isToolCallDescriptor(part.toolCall) ? part.toolCall : undefined) ??
+      (typeof part.toolCallId !== "string" ? undefined : toolCallsById.get(part.toolCallId));
     if (toolCall === undefined) {
       continue;
     }
@@ -115,8 +141,83 @@ export function extractToolApprovalInputRequests(input: {
         { id: "deny", label: "No" },
       ],
       prompt: `Approve tool call: ${toolCall.toolName}`,
-      requestId: approvalRequest.approvalId,
+      requestId: part.approvalId,
     });
+  }
+
+  return requests;
+}
+
+function isToolCallDescriptor(value: unknown): value is ToolCallDescriptor {
+  return (
+    isRecord(value) &&
+    typeof value.toolCallId === "string" &&
+    typeof value.toolName === "string" &&
+    "input" in value
+  );
+}
+
+function isPersistedToolCall(value: unknown): value is PersistedToolCall {
+  return isRecord(value) && value.type === "tool-call" && isToolCallDescriptor(value);
+}
+
+function isToolApprovalRequest(value: unknown): value is {
+  readonly approvalId: string;
+  readonly isAutomatic?: unknown;
+  readonly toolCall?: unknown;
+  readonly toolCallId?: unknown;
+  readonly type: "tool-approval-request";
+} {
+  return (
+    isRecord(value) &&
+    value.type === "tool-approval-request" &&
+    typeof value.approvalId === "string"
+  );
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Recovers request metadata for submitted input response IDs from model
+ * history. The newest occurrence wins so compacted or repeated history does
+ * not replace the request that is closest to the current turn.
+ */
+export function extractHistoricalInputRequests(input: {
+  readonly history: readonly ModelMessage[];
+  readonly requestIds: ReadonlySet<string>;
+}): ReadonlyMap<string, InputRequest> {
+  const requests = new Map<string, InputRequest>();
+
+  for (let index = input.history.length - 1; index >= 0; index -= 1) {
+    const message = input.history[index];
+    if (message?.role !== "assistant" || !Array.isArray(message.content)) {
+      continue;
+    }
+
+    const toolCalls = message.content
+      .filter(isPersistedToolCall)
+      .filter((toolCall) => input.requestIds.has(toolCall.toolCallId));
+    const candidates = [
+      ...extractQuestionRequests({ excludedCallIds: new Set(), toolCalls }),
+      ...extractApprovalRequests({
+        content: message.content,
+        includedRequestIds: input.requestIds,
+      }),
+    ];
+
+    for (const request of candidates) {
+      if (!input.requestIds.has(request.requestId) || requests.has(request.requestId)) {
+        continue;
+      }
+
+      requests.set(request.requestId, request);
+    }
+
+    if (requests.size === input.requestIds.size) {
+      break;
+    }
   }
 
   return requests;

@@ -101,11 +101,13 @@ import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-c
 import {
   consumeDeferredStepInput,
   getApprovedTools,
+  getPendingInputRequestIds,
   hasDeferredStepInput,
   hasStepInput,
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
+import { convertStaleResponsesToUserMessage } from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
@@ -540,17 +542,28 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = resolvedRuntimeActions.session;
 
+    const staleConversion = convertStaleResponsesToUserMessage({
+      history: resolvedRuntimeActions.messages,
+      pendingRequestIds: getPendingInputRequestIds(session.state),
+      stepInput: stepInput.input,
+    });
+    const effectiveStepInput = staleConversion.stepInput;
+    const preambleStepInput =
+      staleConversion.kind === "converted"
+        ? { ...effectiveStepInput, message: staleConversion.displayMessage }
+        : effectiveStepInput;
+
     const pending = resolvePendingInput({
       history: resolvedRuntimeActions.messages,
       resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
       session,
-      stepInput: stepInput.input,
+      stepInput: effectiveStepInput,
     });
     if (pending.outcome === "unresolved") {
       if (emit && pending.deferredMessage === true && hasStepInput(input)) {
         emissionState = await emitTurnPreamble(
           emit,
-          input ?? {},
+          preambleStepInput ?? {},
           emissionState,
           config.runtimeIdentity,
         );
@@ -592,7 +605,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (emit && hasStepInput(input)) {
       emissionState = await emitTurnPreamble(
         emit,
-        input ?? {},
+        preambleStepInput ?? {},
         emissionState,
         config.runtimeIdentity,
       );
@@ -620,14 +633,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    if (stepInput.input?.context !== undefined && pending.deferredContext !== true) {
-      for (const entry of stepInput.input.context) {
+    if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
+      for (const entry of effectiveStepInput.context) {
         messages.push({ content: entry, role: "user" });
       }
     }
 
     if (
-      stepInput.input?.message !== undefined &&
+      effectiveStepInput?.message !== undefined &&
       !pending.deferredMessage &&
       !pending.consumedMessage
     ) {
@@ -636,7 +649,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // `messages` array — and everything that flows into
       // `session.history` from it — therefore never carries raw
       // attachment bytes across step boundaries.
-      const content = await stageAttachmentsToSandbox(stepInput.input.message);
+      const content = await stageAttachmentsToSandbox(effectiveStepInput.message);
       messages.push({ content, role: "user" });
     }
 
@@ -1008,7 +1021,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Workflow continuations replay the sandbox after step.started so nested
     // action lifecycle events keep the active turn's emission coordinates.
     const pendingWorkflowInterrupt = await continuePendingWorkflowInterrupt({
-      childResults: stepInput.input?.runtimeActionResults,
+      childResults: effectiveStepInput?.runtimeActionResults,
       config,
       emit,
       emissionState,
