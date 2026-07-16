@@ -141,18 +141,37 @@ export async function dispatchRuntimeActionsStep(input: {
             session,
             source,
           });
-          const handle = await childRuntime.run(runInput);
+          try {
+            const handle = await childRuntime.run(runInput);
+            childSessionId = handle.sessionId;
+          } catch (error) {
+            logError(log, "local subagent start failed", error, {
+              callId: action.callId,
+              nodeId: action.nodeId,
+              subagentName: action.subagentName,
+            });
+            results.push({
+              callId: action.callId,
+              isError: true,
+              kind: "subagent-result",
+              output: {
+                code: "SUBAGENT_START_FAILED",
+                message: toErrorMessage(error),
+              },
+              subagentName: action.subagentName,
+            });
+            continue;
+          }
 
           nextSession = recordPendingSubagentChild({
             callId: action.callId,
             child: {
               continuationToken: childContinuationToken,
               kind: "local",
-              sessionId: handle.sessionId,
+              sessionId: childSessionId,
             },
             session: nextSession,
           });
-          childSessionId = handle.sessionId;
           name = action.name;
           toolName = action.subagentName;
           break;

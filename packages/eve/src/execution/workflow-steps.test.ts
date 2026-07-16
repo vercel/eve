@@ -299,7 +299,7 @@ describe("dispatchTurnStep", () => {
 });
 
 describe("dispatchRuntimeActionsStep", () => {
-  it("starts a declared subagent named agent in a deeply nested session", async () => {
+  it("preserves a started local child when a later start fails", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as never;
     const compiledBundle = {
@@ -333,7 +333,9 @@ describe("dispatchRuntimeActionsStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    startMock.mockResolvedValue({ runId: "child-run" });
+    startMock
+      .mockResolvedValueOnce({ runId: "child-run" })
+      .mockRejectedValueOnce(new Error("child start failed"));
     getRunMock.mockReturnValue({
       getReadable: () =>
         new ReadableStream<Uint8Array>({
@@ -349,6 +351,15 @@ describe("dispatchRuntimeActionsStep", () => {
           callId: "call-1",
           description: "Runtime action event description.",
           input: { message: "investigate latest routing" },
+          kind: "subagent-call",
+          name: "agent",
+          nodeId: "subagents/agent",
+          subagentName: "agent",
+        },
+        {
+          callId: "call-2",
+          description: "Second runtime action event description.",
+          input: { message: "investigate fallback routing" },
           kind: "subagent-call",
           name: "agent",
           nodeId: "subagents/agent",
@@ -378,7 +389,21 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionState,
     });
 
-    expect(result).toEqual({ results: [], sessionState: expect.any(Object) });
+    expect(result).toEqual({
+      results: [
+        {
+          callId: "call-2",
+          isError: true,
+          kind: "subagent-result",
+          output: {
+            code: "SUBAGENT_START_FAILED",
+            message: "child start failed",
+          },
+          subagentName: "agent",
+        },
+      ],
+      sessionState: expect.any(Object),
+    });
     expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
       {
         childContinuationTokens: {
