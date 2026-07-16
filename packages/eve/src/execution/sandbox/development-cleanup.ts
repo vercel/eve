@@ -4,10 +4,7 @@ import {
   DOCKER_SANDBOX_LABEL,
   stopDockerContainerIfRunning,
 } from "#execution/sandbox/bindings/docker-container.js";
-import {
-  createDockerCli,
-  isDockerDaemonAvailableSync,
-} from "#execution/sandbox/bindings/docker-cli.js";
+import { createDockerCli, DockerUnavailableError } from "#execution/sandbox/bindings/docker-cli.js";
 import {
   MICROSANDBOX_METADATA_VERSION,
   readSessionMetadata,
@@ -30,15 +27,10 @@ export async function stopDevelopmentSandboxResources(input: {
   readonly devRunId: string;
   readonly log?: (message: string) => void;
 }): Promise<void> {
-  const cleanupTasks: Promise<void>[] = [];
-
-  if (isDockerDaemonAvailableSync()) {
-    cleanupTasks.push(stopDevelopmentDockerResources(input.devRunId));
-  }
-
-  cleanupTasks.push(stopDevelopmentMicrosandboxResources(input.appRoot, input.devRunId, input.log));
-
-  const errors = await Promise.allSettled(cleanupTasks);
+  const errors = await Promise.allSettled([
+    stopDevelopmentDockerResources(input.devRunId),
+    stopDevelopmentMicrosandboxResources(input.appRoot, input.devRunId, input.log),
+  ]);
 
   for (const error of errors) {
     if (error.status === "rejected") {
@@ -53,11 +45,19 @@ async function stopDevelopmentDockerResources(devRunId: string): Promise<void> {
     `label=${DOCKER_SANDBOX_LABEL}=1`,
     `label=${DOCKER_SANDBOX_LABEL}.tag.${EVE_DEVELOPMENT_SANDBOX_RUN_ID_TAG}=${devRunId}`,
   ];
-  const running = await cli.run([
-    "ps",
-    "-q",
-    ...labelFilters.flatMap((filter) => ["--filter", filter]),
-  ]);
+  let running;
+  try {
+    running = await cli.run([
+      "ps",
+      "-q",
+      ...labelFilters.flatMap((filter) => ["--filter", filter]),
+    ]);
+  } catch (error) {
+    if (error instanceof DockerUnavailableError) {
+      return;
+    }
+    throw error;
+  }
   if (running.exitCode !== 0) {
     return;
   }

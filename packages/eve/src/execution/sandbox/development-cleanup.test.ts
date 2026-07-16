@@ -31,7 +31,6 @@ const state = vi.hoisted(() => {
     },
   };
   return {
-    dockerAvailable: true,
     dockerCli,
     loadMicrosandboxWithoutInstall: vi.fn(async () => microsandboxModule),
     microsandboxModule,
@@ -43,10 +42,13 @@ const state = vi.hoisted(() => {
   };
 });
 
-vi.mock("#execution/sandbox/bindings/docker-cli.js", () => ({
-  createDockerCli: () => state.dockerCli,
-  isDockerDaemonAvailableSync: () => state.dockerAvailable,
-}));
+vi.mock("#execution/sandbox/bindings/docker-cli.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#execution/sandbox/bindings/docker-cli.js")>();
+  return {
+    ...actual,
+    createDockerCli: () => state.dockerCli,
+  };
+});
 
 vi.mock("#execution/sandbox/bindings/microsandbox-runtime.js", () => ({
   createProviderName: (prefix: string, key: string) => `${prefix}-${key}`,
@@ -68,7 +70,6 @@ vi.mock("#execution/sandbox/bindings/microsandbox-metadata.js", async (importOri
 describe("stopDevelopmentSandboxResources", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    state.dockerAvailable = true;
     state.dockerCli.run.mockReset();
   });
 
@@ -127,16 +128,19 @@ describe("stopDevelopmentSandboxResources", () => {
     expect(state.microsandboxStopWithTimeout).toHaveBeenCalledWith(10_000);
   });
 
-  it("loads microsandbox from the app without probing unavailable Docker", async () => {
-    state.dockerAvailable = false;
+  it("continues microsandbox cleanup when the Docker CLI is unavailable", async () => {
+    const { DockerUnavailableError } = await import("#execution/sandbox/bindings/docker-cli.js");
+    state.dockerCli.run.mockRejectedValue(new DockerUnavailableError());
     state.microsandboxModule.Sandbox.listWith.mockResolvedValueOnce([]);
+    const log = vi.fn();
 
     await stopDevelopmentSandboxResources({
       appRoot: "/tmp/eve-test",
       devRunId: "run-123",
+      log,
     });
 
-    expect(state.dockerCli.run).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
     expect(state.loadMicrosandboxWithoutInstall).toHaveBeenCalledWith("/tmp/eve-test");
     expect(state.microsandboxModule.Sandbox.listWith).toHaveBeenCalledWith({
       labels: {
