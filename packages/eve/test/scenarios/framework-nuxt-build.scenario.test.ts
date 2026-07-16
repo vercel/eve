@@ -87,9 +87,21 @@ describe("framework-nuxt build", () => {
   it("routes the eve service when Vercel assembles the generated Build Output", async () => {
     const app = await scenarioApp(NUXT_EVE_VERCEL_DESCRIPTOR);
 
+    // On real Vercel infra the build container always sets VERCEL/VERCEL_ENV,
+    // which is how Nitro selects its Vercel preset (and how the eve module
+    // knows to generate services). `vercel build` run in CI is unauthenticated
+    // and cannot pull those system env vars, so set them explicitly to emulate
+    // the deployment environment; otherwise Nitro falls back to the node-server
+    // preset and never emits Build Output.
     await runPnpmCommand({
       args: ["exec", "vercel", "build", "--yes"],
       cwd: app.appRoot,
+      env: {
+        ...process.env,
+        VERCEL: "1",
+        VERCEL_ENV: "production",
+        VERCEL_TARGET_ENV: "production",
+      },
     });
 
     const outputRoot = join(app.appRoot, ".vercel", "output");
