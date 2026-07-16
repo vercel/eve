@@ -344,6 +344,7 @@
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.0.1",
+    "marked": "catalog:",
     "microsandbox": "0.5.5",
     "next": "catalog:",
     "picocolors": "catalog:",

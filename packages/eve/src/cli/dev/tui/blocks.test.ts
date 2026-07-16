@@ -5,7 +5,7 @@ import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const theme = createTheme({ color: false, unicode: true });
-const ctx = { spinner: "⠋" };
+const ctx = { activityPulse: "▪" };
 
 function render(block: Block, width = 60): string[] {
   return renderBlockLines(block, width, theme, ctx).map(stripAnsi);
@@ -33,9 +33,19 @@ describe("renderBlockLines", () => {
     expect(lines[1]).toBe("  → 73°F");
   });
 
-  it("shows a spinner while a tool runs", () => {
+  it("shows the shared square pulse while a tool runs", () => {
     const lines = render({ kind: "tool", title: "search", status: "running", live: true });
-    expect(lines[0]).toBe("⠋ search");
+    expect(lines[0]).toBe("▪ search");
+  });
+
+  it("renders a coalesced tool presentation as one header with independent items", () => {
+    const lines = render({
+      kind: "tool",
+      title: "Fetch 2 URLs",
+      status: "done",
+      toolGroupItems: ["https://one.example", "https://two.example"],
+    });
+    expect(lines).toEqual(["✓ Fetch 2 URLs", "  https://one.example", "  https://two.example"]);
   });
 
   it("nests subagent tools under the orange rule", () => {
@@ -122,7 +132,7 @@ describe("renderBlockLines", () => {
       },
       80,
       theme,
-      { spinner: "⠋", previous: { kind: "sandbox" } },
+      { activityPulse: "▪", previous: { kind: "sandbox" } },
     ).map(stripAnsi);
     expect(lines).toEqual([`│ ${indent}sandbox template "root" (microsandbox): apt-get update`]);
   });
@@ -133,14 +143,14 @@ describe("renderBlockLines", () => {
       { kind: "log", title: "stdout", body: "weather lookup { city: 'LA' }" },
       60,
       theme,
-      { spinner: "⠋", previous: { kind: "log", title: "stdout" } },
+      { activityPulse: "▪", previous: { kind: "log", title: "stdout" } },
     ).map(stripAnsi);
     expect(lines).toEqual([`│ ${indent}weather lookup { city: 'LA' }`]);
   });
 
   it("keeps the label when the previous log block has a different source", () => {
     const lines = renderBlockLines({ kind: "log", title: "stderr", body: "boom" }, 60, theme, {
-      spinner: "⠋",
+      activityPulse: "▪",
       previous: { kind: "log", title: "stdout" },
     }).map(stripAnsi);
     expect(lines).toEqual(["│ stderr · boom"]);

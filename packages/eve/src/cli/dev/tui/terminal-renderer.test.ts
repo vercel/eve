@@ -222,6 +222,90 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("It's 73°F in SF.");
   });
 
+  it("renders rejected tools as denied", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "c1",
+          toolName: "bash",
+          input: { command: "rm something" },
+        },
+        { type: "tool-rejected", toolCallId: "c1", reason: "Denied by user." },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "remove it", continueSession: false },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("bash");
+    expect(snapshot).toContain("denied");
+    expect(snapshot).not.toContain("✓ bash");
+    renderer.shutdown();
+  });
+
+  it("renders web_fetch as a concise semantic activity", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "fetch-1",
+          toolName: "web_fetch",
+          input: {
+            format: "markdown",
+            url: "https://github.com/vercel/eve/issues/648",
+          },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "fetch-1",
+          output: { content: "large fetched page" },
+        },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "fetch the issue", continueSession: false },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Fetch https://github.com/vercel/eve/issues/648");
+    expect(snapshot).not.toContain("format=markdown");
+    expect(snapshot).not.toContain("large fetched page");
+    renderer.shutdown();
+  });
+
+  it("coalesces a same-status fetch cohort without merging call state", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "fetch-1",
+          toolName: "web_fetch",
+          input: { url: "https://one.example" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "fetch-2",
+          toolName: "web_fetch",
+          input: { url: "https://two.example" },
+        },
+        { type: "tool-result", toolCallId: "fetch-1", output: { content: "one" } },
+        { type: "tool-result", toolCallId: "fetch-2", output: { content: "two" } },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "call fetch twice in parallel", continueSession: false },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("▌ call fetch twice in parallel\n\n✓ Fetch 2 URLs");
+    expect(snapshot).toContain("✓ Fetch 2 URLs");
+    expect(snapshot).toContain("https://one.example");
+    expect(snapshot).toContain("https://two.example");
+    renderer.shutdown();
+  });
+
   it("renders interleaved tool lifecycles in arrival order", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(

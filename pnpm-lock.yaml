@@ -45,6 +45,9 @@ catalogs:
     ai:
       specifier: ^7.0.26
       version: 7.0.26
+    marked:
+      specifier: 17.0.6
+      version: 17.0.6
     next:
       specifier: 16.3.0-preview.6
       version: 16.3.0-preview.6
@@ -1292,6 +1295,9 @@ importers:
       just-bash:
         specifier: 3.0.1
         version: 3.0.1
+      marked:
+        specifier: 'catalog:'
+        version: 17.0.6
       microsandbox:
         specifier: 0.5.5
         version: 0.5.5

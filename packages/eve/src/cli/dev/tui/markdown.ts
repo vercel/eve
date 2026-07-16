@@ -1,227 +1,234 @@
-import { visibleLength } from "#cli/ui/terminal-text.js";
+import { lexer, type TableCell, type Token } from "#compiled/marked/index.js";
+
+import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
 type TableAlignment = "left" | "center" | "right";
 
 const ansi = {
   bold: "\x1b[1m",
   boldOff: "\x1b[22m",
+  cyan: "\x1b[36m",
+  cyanOff: "\x1b[39m",
+  dim: "\x1b[2m",
+  dimOff: "\x1b[22m",
   italic: "\x1b[3m",
   italicOff: "\x1b[23m",
+  strike: "\x1b[9m",
+  strikeOff: "\x1b[29m",
 };
 
 const tableSeparator = "─";
 
-export function renderMarkdown(input: string): string {
-  const lines = input.split("\n");
-  const output: string[] = [];
+/** Renders parsed GFM blocks to terminal text, fitting tables to `width`. */
+export function renderMarkdown(input: string, width = Number.POSITIVE_INFINITY): string {
+  return trimTrailingBlankRows(renderBlocks(lexer(input), width)).join("\n");
+}
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const table = parseTable(lines, index);
-
-    if (table != null) {
-      output.push(...renderTable(table));
-      index = table.endIndex - 1;
-      continue;
+function renderBlocks(tokens: readonly Token[], width: number): string[] {
+  const rows: string[] = [];
+  for (const token of tokens) {
+    switch (token.type) {
+      case "space":
+        pushBlankRow(rows);
+        break;
+      case "heading": {
+        const glyph = token.depth === 1 ? "█" : token.depth === 2 ? "■" : "▶";
+        rows.push(`${glyph} ${ansi.bold}${renderInline(token.tokens)}${ansi.boldOff}`);
+        break;
+      }
+      case "paragraph":
+      case "text":
+        rows.push(...renderInline(token.tokens, token.text).split("\n"));
+        break;
+      case "code":
+        rows.push(...renderCodeBlock(token));
+        break;
+      case "blockquote":
+        rows.push(
+          ...renderBlocks(token.tokens ?? [], Math.max(8, width - 2)).map(
+            (row) => `${ansi.dim}│${ansi.dimOff} ${row}`,
+          ),
+        );
+        break;
+      case "list":
+        rows.push(...renderList(token, width));
+        break;
+      case "table":
+        rows.push(...renderTable(token, width));
+        break;
+      case "hr":
+        rows.push(ansi.dim + tableSeparator.repeat(horizontalRuleWidth(width)) + ansi.dimOff);
+        break;
+      case "html":
+        rows.push(...(token.text ?? token.raw ?? "").split("\n"));
+        break;
+      case "def":
+        break;
+      default:
+        if (token.tokens !== undefined) {
+          rows.push(...renderBlocks(token.tokens, width));
+        } else if (token.text !== undefined) {
+          rows.push(token.text);
+        }
+        break;
     }
-
-    output.push(renderMarkdownLine(lines[index] ?? ""));
   }
-
-  return output.join("\n");
+  return rows;
 }
 
-function renderMarkdownLine(line: string): string {
-  if (line.startsWith("### ")) {
-    return renderInlineMarkdown(`▶ ${line.slice(4)}`);
+function renderCodeBlock(token: Token): string[] {
+  const rows: string[] = [];
+  if (token.lang?.trim()) rows.push(`  ${ansi.dim}${token.lang.trim()}${ansi.dimOff}`);
+  const codeRows = (token.text ?? "").replace(/\n$/u, "").split("\n");
+  for (const row of codeRows) {
+    rows.push(`${ansi.dim}│${ansi.dimOff} ${ansi.cyan}${row}${ansi.cyanOff}`);
   }
-
-  if (line.startsWith("## ")) {
-    return renderInlineMarkdown(`■ ${line.slice(3)}`);
-  }
-
-  if (line.startsWith("# ")) {
-    return renderInlineMarkdown(`█ ${line.slice(2)}`);
-  }
-
-  const unorderedListItem = line.match(/^(\s*)[-+*]\s+(.*)$/);
-  if (unorderedListItem) {
-    const [, indentation, text = ""] = unorderedListItem;
-    return renderInlineMarkdown(`${indentation}•${text.length > 0 ? ` ${text}` : ""}`);
-  }
-
-  if (/^\d+\. /.test(line)) {
-    return renderInlineMarkdown(line.replace(/^(\d+)\. /, "$1. "));
-  }
-
-  if (line.startsWith("> ")) {
-    return renderInlineMarkdown(`│ ${line.slice(2)}`);
-  }
-
-  return renderInlineMarkdown(line);
+  return rows;
 }
 
-function renderInlineMarkdown(input: string): string {
-  // Shield URLs before applying emphasis so underscores/asterisks inside a
-  // link (e.g. a Vercel Connect `sca_…` token or a hook callback path) are not
-  // misread as markdown emphasis and silently stripped from the rendered URL.
-  // Sentinels use Unicode Private Use Area characters, which never appear in
-  // real input and are not control characters (avoids no-control-regex).
-  const urls: string[] = [];
-  const shielded = input.replaceAll(/https?:\/\/\S+/g, (match) => {
-    const token = `\uE000${urls.length}\uE001`;
-    urls.push(match);
-    return token;
-  });
-
-  const styled = shielded
-    .replaceAll(/`([^`]+)`/g, "$1")
-    .replaceAll(/\*\*([^*\n]+)\*\*/g, `${ansi.bold}$1${ansi.boldOff}`)
-    .replaceAll(/__([^_\n]+)__/g, `${ansi.bold}$1${ansi.boldOff}`)
-    .replaceAll(/\*([^*\n]+)\*/g, `${ansi.italic}$1${ansi.italicOff}`)
-    .replaceAll(/_([^_\n]+)_/g, `${ansi.italic}$1${ansi.italicOff}`);
-
-  return styled.replaceAll(/\uE000(\d+)\uE001/g, (_match, index) => urls[Number(index)] ?? "");
+function renderList(token: Token, width: number): string[] {
+  const rows: string[] = [];
+  let ordinal = typeof token.start === "number" ? token.start : 1;
+  for (const item of token.items ?? []) {
+    const marker = token.ordered ? `${ordinal}.` : "•";
+    const task = item.checked === true ? "☑ " : item.checked === false ? "☐ " : "";
+    const itemRows = renderBlocks(item.tokens ?? [], Math.max(8, width - marker.length - 1));
+    const nonemptyRows = itemRows.length === 0 ? [""] : itemRows;
+    nonemptyRows.forEach((row, index) => {
+      rows.push(index === 0 ? `${marker} ${task}${row}` : `${" ".repeat(marker.length + 1)}${row}`);
+    });
+    ordinal += 1;
+  }
+  return rows;
 }
 
-type ParsedTable = {
-  alignments: TableAlignment[];
-  endIndex: number;
-  header: string[];
-  rows: string[][];
-};
+function renderInline(tokens: readonly Token[] | undefined, fallback = ""): string {
+  if (tokens === undefined) return fallback;
+  return tokens.map(renderInlineToken).join("");
+}
 
-function parseTable(lines: string[], startIndex: number): ParsedTable | undefined {
-  const header = parseTableCells(lines[startIndex] ?? "");
-  if (header == null || header.length < 2) {
-    return undefined;
-  }
-
-  const separatorCells = parseTableCells(lines[startIndex + 1] ?? "");
-  if (separatorCells == null || separatorCells.length !== header.length) {
-    return undefined;
-  }
-
-  const alignments = parseTableAlignments(separatorCells);
-  if (alignments == null) {
-    return undefined;
-  }
-
-  const rows: string[][] = [];
-  let endIndex = startIndex + 2;
-
-  while (endIndex < lines.length) {
-    const row = parseTableCells(lines[endIndex] ?? "");
-    if (row == null) {
-      break;
+function renderInlineToken(token: Token): string {
+  switch (token.type) {
+    case "text":
+      return renderInline(token.tokens, token.text ?? "");
+    case "strong":
+      return `${ansi.bold}${renderInline(token.tokens, token.text)}${ansi.boldOff}`;
+    case "em":
+      return `${ansi.italic}${renderInline(token.tokens, token.text)}${ansi.italicOff}`;
+    case "del":
+      return `${ansi.strike}${renderInline(token.tokens, token.text)}${ansi.strikeOff}`;
+    case "codespan":
+      return `${ansi.cyan}${token.text ?? ""}${ansi.cyanOff}`;
+    case "link": {
+      const label = renderInline(token.tokens, token.text);
+      const href = token.href ?? "";
+      if (href.length === 0 || label === href) return `${ansi.cyan}${label}${ansi.cyanOff}`;
+      return `${label} (${ansi.cyan}${href}${ansi.cyanOff})`;
     }
-
-    rows.push(normalizeTableRow(row, header.length));
-    endIndex += 1;
-  }
-
-  return {
-    alignments,
-    endIndex,
-    header,
-    rows,
-  };
-}
-
-function parseTableCells(line: string): string[] | undefined {
-  if (!line.includes("|")) {
-    return undefined;
-  }
-
-  let tableLine = line.trim();
-  if (tableLine.startsWith("|")) {
-    tableLine = tableLine.slice(1);
-  }
-  if (tableLine.endsWith("|") && !tableLine.endsWith("\\|")) {
-    tableLine = tableLine.slice(0, -1);
-  }
-
-  const cells: string[] = [];
-  let cell = "";
-
-  for (let index = 0; index < tableLine.length; index += 1) {
-    const character = tableLine[index];
-    const nextCharacter = tableLine[index + 1];
-
-    if (character === "\\" && nextCharacter === "|") {
-      cell += "|";
-      index += 1;
-      continue;
+    case "image": {
+      const label = token.text?.trim() || "image";
+      const href = token.href ?? "";
+      return href.length === 0 ? `[${label}]` : `[${label}] (${ansi.cyan}${href}${ansi.cyanOff})`;
     }
-
-    if (character === "|") {
-      cells.push(cell.trim());
-      cell = "";
-      continue;
-    }
-
-    cell += character;
+    case "br":
+      return "\n";
+    case "checkbox":
+      return token.checked ? "☑ " : "☐ ";
+    case "escape":
+      return token.text ?? "";
+    case "html":
+      return token.text ?? token.raw ?? "";
+    default:
+      return renderInline(token.tokens, token.text ?? token.raw ?? "");
   }
-
-  cells.push(cell.trim());
-
-  return cells;
 }
 
-function parseTableAlignments(cells: string[]): TableAlignment[] | undefined {
-  const alignments: TableAlignment[] = [];
-
-  for (const cell of cells) {
-    const match = cell.match(/^(:)?-{3,}(:)?$/);
-    if (match == null) {
-      return undefined;
-    }
-
-    const [, left, right] = match;
-    alignments.push(left != null && right != null ? "center" : right != null ? "right" : "left");
-  }
-
-  return alignments;
-}
-
-function normalizeTableRow(row: string[], length: number): string[] {
-  return Array.from({ length }, (_, index) => row[index] ?? "");
-}
-
-function renderTable(table: ParsedTable): string[] {
-  const header = table.header.map(
-    (cell) => `${ansi.bold}${renderInlineMarkdown(cell)}${ansi.boldOff}`,
+function renderTable(token: Token, width: number): string[] {
+  const header = token.header ?? [];
+  if (header.length === 0) return [];
+  const alignments = header.map((_, index) => normalizeAlignment(token.align?.[index]));
+  const renderedHeader = header.map(renderTableCell);
+  const renderedRows = (token.rows ?? []).map((row) =>
+    normalizeTableRow(row, header.length).map(renderTableCell),
   );
-  const rows = table.rows.map((row) => row.map(renderInlineMarkdown));
-  const tableRows = [header, ...rows];
-  const widths = table.alignments.map((_, columnIndex) =>
-    Math.max(3, ...tableRows.map((row) => visibleLength(row[columnIndex] ?? ""))),
+  const allRows = [renderedHeader, ...renderedRows];
+  const widths = alignments.map((_, column) =>
+    Math.max(3, ...allRows.map((row) => visibleLength(row[column] ?? ""))),
   );
+  fitTableWidths(widths, width);
 
+  const boldHeader = renderedHeader.map((cell) => `${ansi.bold}${cell}${ansi.boldOff}`);
   return [
-    formatTableRow(header, widths, table.alignments),
-    widths.map((width) => tableSeparator.repeat(width)).join("  "),
-    ...rows.map((row) => formatTableRow(row, widths, table.alignments)),
+    formatTableRow(boldHeader, widths, alignments),
+    widths.map((columnWidth) => tableSeparator.repeat(columnWidth)).join("  "),
+    ...renderedRows.map((row) => formatTableRow(row, widths, alignments)),
   ];
 }
 
-function formatTableRow(row: string[], widths: number[], alignments: TableAlignment[]): string {
+function renderTableCell(cell: TableCell): string {
+  return renderInline(cell.tokens, cell.text).replaceAll("\n", " ");
+}
+
+function normalizeTableRow(row: readonly TableCell[], length: number): TableCell[] {
+  return Array.from({ length }, (_, index) => row[index] ?? { text: "", tokens: [] });
+}
+
+function normalizeAlignment(value: "center" | "left" | "right" | null | undefined): TableAlignment {
+  return value ?? "left";
+}
+
+function fitTableWidths(widths: number[], width: number): void {
+  if (!Number.isFinite(width)) return;
+  const separators = Math.max(0, widths.length - 1) * 2;
+  const budget = Math.max(widths.length * 3, Math.floor(width) - separators);
+  while (widths.reduce((sum, value) => sum + value, 0) > budget) {
+    const widest = Math.max(...widths);
+    const index = widths.findIndex((value) => value === widest && value > 3);
+    if (index === -1) return;
+    widths[index] = widest - 1;
+  }
+}
+
+function formatTableRow(
+  row: readonly string[],
+  widths: readonly number[],
+  alignments: readonly TableAlignment[],
+): string {
   return row
-    .map((cell, index) => alignTableCell(cell, widths[index] ?? 0, alignments[index] ?? "left"))
+    .map((cell, index) =>
+      alignTableCell(
+        fitTableCell(cell, widths[index] ?? 3),
+        widths[index] ?? 3,
+        alignments[index] ?? "left",
+      ),
+    )
     .join("  ");
+}
+
+function fitTableCell(cell: string, width: number): string {
+  if (visibleLength(cell) <= width) return cell;
+  return `${sliceVisible(cell, Math.max(1, width - 1))}…`;
 }
 
 function alignTableCell(cell: string, width: number, alignment: TableAlignment): string {
   const paddingWidth = Math.max(0, width - visibleLength(cell));
-
-  if (alignment === "right") {
-    return `${" ".repeat(paddingWidth)}${cell}`;
-  }
-
+  if (alignment === "right") return `${" ".repeat(paddingWidth)}${cell}`;
   if (alignment === "center") {
     const leftPadding = Math.floor(paddingWidth / 2);
-    const rightPadding = paddingWidth - leftPadding;
-    return `${" ".repeat(leftPadding)}${cell}${" ".repeat(rightPadding)}`;
+    return `${" ".repeat(leftPadding)}${cell}${" ".repeat(paddingWidth - leftPadding)}`;
   }
-
   return `${cell}${" ".repeat(paddingWidth)}`;
+}
+
+function horizontalRuleWidth(width: number): number {
+  return Number.isFinite(width) ? Math.max(3, Math.min(40, Math.floor(width))) : 40;
+}
+
+function pushBlankRow(rows: string[]): void {
+  if (rows.length > 0 && rows.at(-1) !== "") rows.push("");
+}
+
+function trimTrailingBlankRows(rows: string[]): string[] {
+  while (rows.at(-1) === "") rows.pop();
+  return rows;
 }

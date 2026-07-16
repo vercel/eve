@@ -1392,6 +1392,64 @@ describe("EveTUIRunner replay guards", () => {
       },
     ]);
   });
+
+  it("preserves a rejected action result instead of rendering it as success", async () => {
+    const prompts: Array<string | undefined> = ["run the tool", undefined];
+    const emitted: AgentTUIStreamEvent[] = [];
+    const session = sessionYielding([
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "call-rejected",
+              input: { command: "rm something" },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          error: { code: "USER_REJECTED", message: "Denied by user." },
+          result: {
+            callId: "call-rejected",
+            kind: "tool-result",
+            output: null,
+          },
+          sequence: 0,
+          status: "rejected",
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ]);
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          emitted.push(event);
+        }
+      }),
+    };
+
+    await new EveTUIRunner({ session, renderer, name: "Weather Agent" }).run();
+
+    expect(emitted.filter((event) => event.type === "tool-result")).toEqual([]);
+    expect(emitted.filter((event) => event.type === "tool-rejected")).toEqual([
+      {
+        type: "tool-rejected",
+        toolCallId: "call-rejected",
+        reason: "Denied by user.",
+      },
+    ]);
+  });
 });
 
 describe("parsePromptCommand", () => {

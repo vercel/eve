@@ -121,6 +121,7 @@ export type AgentTUIStreamEvent =
   | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
   | { type: "tool-result"; toolCallId: string; output: unknown }
   | { type: "tool-error"; toolCallId: string; errorText: string }
+  | { type: "tool-rejected"; toolCallId: string; reason: string }
   | { type: "error"; errorText: string; hint?: string; detail?: string }
   | { type: "finish"; usage?: AgentTUIStreamUsage };
 
@@ -1522,6 +1523,7 @@ export class EveTUIRunner {
         executing: 1,
         done: 2,
         failed: 2,
+        rejected: 2,
       };
       if (priority[request.status] > priority[existing.status]) {
         existing.status = request.status;
@@ -1666,12 +1668,19 @@ export class EveTUIRunner {
         if (result.kind !== "tool-result") break;
         const tool = run.tools.get(result.callId);
         if (!tool) break;
-        if (event.data.status === "failed") {
-          tool.status = "failed";
-          tool.errorText = formatActionResultError(event);
-        } else {
-          tool.status = "done";
-          tool.output = result.output;
+        switch (event.data.status) {
+          case "completed":
+            tool.status = "done";
+            tool.output = result.output;
+            break;
+          case "failed":
+            tool.status = "failed";
+            tool.errorText = formatActionResultError(event);
+            break;
+          case "rejected":
+            tool.status = "rejected";
+            tool.errorText = formatActionResultError(event);
+            break;
         }
         const update: SubagentToolUpdate = {
           callId,
@@ -2011,18 +2020,28 @@ async function* eveEventsToTUIStream(
           // have no tool block to attach to.
           break;
         }
-        if (resultEvent.data.status === "failed") {
-          yield {
-            type: "tool-error",
-            toolCallId: callId,
-            errorText: formatActionResultError(resultEvent),
-          };
-        } else {
-          yield {
-            type: "tool-result",
-            toolCallId: callId,
-            output: resultEvent.data.result.output,
-          };
+        switch (resultEvent.data.status) {
+          case "completed":
+            yield {
+              type: "tool-result",
+              toolCallId: callId,
+              output: resultEvent.data.result.output,
+            };
+            break;
+          case "failed":
+            yield {
+              type: "tool-error",
+              toolCallId: callId,
+              errorText: formatActionResultError(resultEvent),
+            };
+            break;
+          case "rejected":
+            yield {
+              type: "tool-rejected",
+              toolCallId: callId,
+              reason: formatActionResultError(resultEvent),
+            };
+            break;
         }
         break;
       }
@@ -2343,7 +2362,7 @@ type SubagentChildStep = {
 type SubagentToolState = {
   toolName: string;
   input: unknown;
-  status: "approval-requested" | "executing" | "done" | "failed";
+  status: "approval-requested" | "executing" | "done" | "failed" | "rejected";
   output?: unknown;
   errorText?: string;
 };
@@ -2384,7 +2403,7 @@ export type SubagentToolUpdate = {
   childCallId: string;
   toolName: string;
   input: unknown;
-  status: "approval-requested" | "executing" | "done" | "failed";
+  status: "approval-requested" | "executing" | "done" | "failed" | "rejected";
   output?: unknown;
   errorText?: string;
 };
