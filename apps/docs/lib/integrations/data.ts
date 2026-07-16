@@ -4,6 +4,7 @@ import {
   channelEntries,
   connectionEntries,
   connectionProtocols as protocolsForIdentity,
+  instrumentationEntries,
 } from "@vercel/eve-catalog";
 import type { LogoKey } from "./logos";
 
@@ -16,7 +17,7 @@ import type { LogoKey } from "./logos";
  * keyed by slug.
  */
 
-export type IntegrationType = "channel" | "connection";
+export type IntegrationType = "channel" | "connection" | "instrumentation";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
 export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@vercel/eve-catalog";
@@ -536,6 +537,234 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
   },
 };
 
+/**
+ * Instrumentation overlay: presentation plus hand-authored setup markdown.
+ * Instrumentation providers are OpenTelemetry backends configured in
+ * `agent/instrumentation.ts`, so they follow the channel shape (markdown)
+ * rather than the generated connection shape.
+ */
+type InstrumentationPresentation = ChannelPresentation;
+
+const instrumentationPresentations: Record<string, InstrumentationPresentation> = {
+  braintrust: {
+    logo: "braintrust",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "evals", "monitoring"],
+    install: `Install the framework, the Vercel OpenTelemetry wrapper, and Braintrust's exporter:
+
+\`\`\`bash
+npm install eve@latest @vercel/otel @braintrust/otel
+\`\`\``,
+    quickStart: `Create \`agent/instrumentation.ts\`. eve auto-discovers it and runs it at server startup, and its presence enables telemetry:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { BraintrustExporter } from "@braintrust/otel";
+import { defineInstrumentation } from "eve/instrumentation";
+import { registerOTel } from "@vercel/otel";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      traceExporter: new BraintrustExporter({
+        parent: \`project_name:\${agentName}\`,
+        filterAISpans: true,
+      }),
+    }),
+});
+\`\`\``,
+    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
+  "sentry-instrumentation": {
+    logo: "sentry",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "otlp", "errors"],
+    install: `Install the framework and the Vercel OpenTelemetry wrapper. Sentry ingests OTLP directly, so no Sentry SDK is required:
+
+\`\`\`bash
+npm install eve@latest @vercel/otel
+\`\`\``,
+    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at your project's Sentry traces endpoint:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { defineInstrumentation } from "eve/instrumentation";
+import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      traceExporter: new OTLPHttpProtoTraceExporter({
+        url: process.env.SENTRY_OTLP_TRACES_ENDPOINT!,
+        headers: {
+          "x-sentry-auth": \`sentry sentry_key=\${process.env.SENTRY_PUBLIC_KEY}\`,
+        },
+      }),
+    }),
+});
+\`\`\``,
+    configure: `Copy the OTLP traces endpoint and public key from your Sentry project under **Settings → Client Keys (DSN)** and expose them as environment variables. Sentry's OTLP intake accepts traces only, and span events are dropped at ingestion. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
+  "datadog-instrumentation": {
+    logo: "datadog",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "apm", "otlp"],
+    install: `Install the framework and the Vercel OpenTelemetry wrapper:
+
+\`\`\`bash
+npm install eve@latest @vercel/otel
+\`\`\``,
+    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at Datadog's intake for your site, authenticated with your API key:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { defineInstrumentation } from "eve/instrumentation";
+import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      traceExporter: new OTLPHttpProtoTraceExporter({
+        url: process.env.DATADOG_OTLP_TRACES_ENDPOINT!,
+        headers: { "dd-api-key": process.env.DD_API_KEY! },
+      }),
+    }),
+});
+\`\`\``,
+    configure: `Datadog's direct OTLP trace intake is site-specific (for example \`datadoghq.com\` vs \`datadoghq.eu\`) and currently in Preview; look up the endpoint for your site in Datadog's OTLP intake docs. For production, Datadog recommends routing through an OpenTelemetry Collector with the Datadog exporter instead. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
+  "honeycomb-instrumentation": {
+    logo: "honeycomb",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "queries", "otlp"],
+    install: `Install the framework and the Vercel OpenTelemetry wrapper. Honeycomb ingests OTLP directly:
+
+\`\`\`bash
+npm install eve@latest @vercel/otel
+\`\`\``,
+    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Honeycomb's OTLP endpoint with your ingest key:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { defineInstrumentation } from "eve/instrumentation";
+import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      traceExporter: new OTLPHttpProtoTraceExporter({
+        url: "https://api.honeycomb.io/v1/traces",
+        headers: { "x-honeycomb-team": process.env.HONEYCOMB_API_KEY! },
+      }),
+    }),
+});
+\`\`\``,
+    configure: `Create an ingest key under your Honeycomb environment settings and expose it as \`HONEYCOMB_API_KEY\`. Spans arrive in a dataset named after your agent (the OTel service name). EU teams use \`https://api.eu1.honeycomb.io/v1/traces\`. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
+  arize: {
+    logo: "arize",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "llm observability", "evaluation", "otlp"],
+    install: `Install the framework and the Vercel OpenTelemetry wrapper. Arize AX ingests OTLP directly:
+
+\`\`\`bash
+npm install eve@latest @vercel/otel
+\`\`\``,
+    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Arize's OTLP endpoint with your space ID and API key:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { defineInstrumentation } from "eve/instrumentation";
+import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      attributes: { "openinference.project.name": agentName },
+      traceExporter: new OTLPHttpProtoTraceExporter({
+        url: "https://otlp.arize.com/v1/traces",
+        headers: {
+          space_id: process.env.ARIZE_SPACE_ID!,
+          api_key: process.env.ARIZE_API_KEY!,
+        },
+      }),
+    }),
+});
+\`\`\``,
+    configure: `Copy the space ID and API key from your Arize AX space settings and expose them as \`ARIZE_SPACE_ID\` and \`ARIZE_API_KEY\`. The \`openinference.project.name\` resource attribute routes spans to a project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
+  raindrop: {
+    logo: "raindrop",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "ai issues", "otlp"],
+    install: `Install the framework and the Vercel OpenTelemetry wrapper. Raindrop ingests OTLP directly:
+
+\`\`\`bash
+npm install eve@latest @vercel/otel
+\`\`\``,
+    quickStart: `Create \`agent/instrumentation.ts\` and send traces to Raindrop's OTLP endpoint with your write key:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { defineInstrumentation } from "eve/instrumentation";
+import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      traceExporter: new OTLPHttpProtoTraceExporter({
+        url: "https://api.raindrop.ai/v1/traces",
+        headers: {
+          Authorization: \`Bearer \${process.env.RAINDROP_WRITE_KEY}\`,
+        },
+      }),
+    }),
+});
+\`\`\``,
+    configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
+  jaeger: {
+    logo: "jaeger",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "local", "self-hosted"],
+    install: `Install the framework and the Vercel OpenTelemetry wrapper:
+
+\`\`\`bash
+npm install eve@latest @vercel/otel
+\`\`\``,
+    quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at your Jaeger collector:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { defineInstrumentation } from "eve/instrumentation";
+import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      traceExporter: new OTLPHttpProtoTraceExporter({
+        url: "http://localhost:4318/v1/traces",
+      }),
+    }),
+});
+\`\`\``,
+    configure: `Run Jaeger locally with Docker and open the UI at \`http://localhost:16686\`:
+
+\`\`\`bash
+docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:latest
+\`\`\`
+
+Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
+};
+
 function buildChannel(entry: IntegrationEntry): Integration {
   const presentation = channelPresentations[entry.slug];
   if (presentation === undefined) {
@@ -589,6 +818,27 @@ function buildConnection(entry: IntegrationEntry): Integration {
   };
 }
 
+function buildInstrumentation(entry: IntegrationEntry): Integration {
+  const presentation = instrumentationPresentations[entry.slug];
+  if (presentation === undefined) {
+    throw new Error(
+      `Instrumentation provider "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
+    );
+  }
+  return {
+    slug: entry.slug,
+    name: entry.name,
+    type: "instrumentation",
+    tagline: entry.tagline,
+    logo: presentation.logo,
+    docsHref: presentation.docsHref,
+    keywords: presentation.keywords,
+    install: presentation.install,
+    quickStart: presentation.quickStart,
+    configure: presentation.configure,
+  };
+}
+
 const channels: Integration[] = channelEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildChannel);
@@ -596,6 +846,10 @@ const channels: Integration[] = channelEntries()
 const connections: Integration[] = connectionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildConnection);
+
+const instrumentation: Integration[] = instrumentationEntries()
+  .filter((entry) => entry.surfaces.gallery)
+  .map(buildInstrumentation);
 
 /** Display label for each connection protocol. */
 export const protocolLabel: Record<ConnectionProtocol, string> = {
@@ -616,7 +870,7 @@ export const authModeLabel: Record<AuthMode, string> = {
   jwtBearer: "JWT bearer",
 };
 
-export const integrations: Integration[] = [...channels, ...connections];
+export const integrations: Integration[] = [...channels, ...connections, ...instrumentation];
 
 export const getIntegration = (slug: string): Integration | undefined =>
   integrations.find((integration) => integration.slug === slug);

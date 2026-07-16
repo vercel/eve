@@ -5,6 +5,7 @@ import { logos } from "@/lib/integrations/logos";
 const typeLabel: Record<Integration["type"], string> = {
   channel: "Channel",
   connection: "Connection",
+  instrumentation: "Instrumentation",
 };
 
 interface IntegrationCardProps {

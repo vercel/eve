@@ -6,6 +6,7 @@ import {
   connectionEntries,
   connectionProtocols,
   getIntegrationEntry,
+  instrumentationEntries,
 } from "./index.js";
 
 describe("integration catalog", () => {
@@ -14,8 +15,10 @@ describe("integration catalog", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it("partitions cleanly into channels and connections", () => {
-    expect(channelEntries().length + connectionEntries().length).toBe(INTEGRATIONS.length);
+  it("partitions cleanly into channels, connections, and instrumentation", () => {
+    expect(
+      channelEntries().length + connectionEntries().length + instrumentationEntries().length,
+    ).toBe(INTEGRATIONS.length);
   });
 
   it("gives every connection a transport and description", () => {
@@ -28,6 +31,13 @@ describe("integration catalog", () => {
 
   it("keeps channels free of connection identity", () => {
     for (const entry of channelEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
+  it("keeps instrumentation providers free of connection identity", () => {
+    expect(instrumentationEntries().length).toBeGreaterThan(0);
+    for (const entry of instrumentationEntries()) {
       expect(entry.connection).toBeUndefined();
     }
   });

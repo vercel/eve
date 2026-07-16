@@ -1,6 +1,7 @@
 import {
   SiAirtable,
   SiBitly,
+  SiBraintrust,
   SiBrex,
   SiClickhouse,
   SiCloudinary,
@@ -8,6 +9,7 @@ import {
   SiDatadog,
   SiEgnyte,
   SiHuggingface,
+  SiJaeger,
   SiMake,
   SiMiro,
   SiMixpanel,
@@ -287,6 +289,32 @@ export const ticketTailorLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const braintrustLogo = (props: LogoProps) => <SiBraintrust {...props} />;
+
+export const jaegerLogo = (props: LogoProps) => <SiJaeger color="default" {...props} />;
+
+export const arizeLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 50 54.1" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M25.01 5.71c1.37-.05 2.65.64 3.37 1.81 6.87 9.89 13.73 19.79 20.56 29.69 1.35 1.79 1 4.33-.78 5.69l-.22.15c-1.92 1.29-4.53.77-5.81-1.15l-.09-.14c-4.73-6.8-9.43-13.61-14.1-20.42l-.28-.34c-1.88-2.67-3.74-2.67-5.57 0-4.77 6.84-9.53 13.7-14.29 20.57-.67 1.16-1.84 1.94-3.16 2.13-1.61.25-3.2-.52-4-1.94-.91-1.41-.84-3.24.17-4.58 2.28-3.31 4.59-6.61 6.89-9.92 4.54-6.51 9.07-13.03 13.6-19.55.78-1.29 2.2-2.05 3.71-2Z"
+      fill="#FF008C"
+    />
+    <path
+      d="M24.84 44.06c2.76-.06 5.04 2.14 5.1 4.9v.04c.02 2.78-2.22 5.05-5 5.06-2.78.02-5.05-2.22-5.07-4.99-.04-2.72 2.13-4.97 4.85-5.01h.12Z"
+      fill="#FF008C"
+    />
+  </svg>
+);
+
+export const raindropLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M12 2.25c3.93 4.92 6.55 8.58 6.55 11.7a6.55 6.55 0 1 1-13.1 0c0-3.12 2.62-6.78 6.55-11.7Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const logos = {
   eve: eveLogo,
   web: webLogo,
@@ -301,7 +329,9 @@ export const logos = {
   datadog: datadogLogo,
   honeycomb: honeycombLogo,
   airtable: airtableLogo,
+  arize: arizeLogo,
   bitly: bitlyLogo,
+  braintrust: braintrustLogo,
   brex: brexLogo,
   candid: candidLogo,
   clickhouse: clickhouseLogo,
@@ -310,6 +340,7 @@ export const logos = {
   egnyte: egnyteLogo,
   embat: embatLogo,
   "hugging-face": huggingFaceLogo,
+  jaeger: jaegerLogo,
   "local-falcon": localFalconLogo,
   make: makeLogo,
   manufact: manufactLogo,
@@ -321,6 +352,7 @@ export const logos = {
   planetscale: planetscaleLogo,
   posthog: posthogLogo,
   postman: postmanLogo,
+  raindrop: raindropLogo,
   razorpay: razorpayLogo,
   sentry: sentryLogo,
   similarweb: similarwebLogo,

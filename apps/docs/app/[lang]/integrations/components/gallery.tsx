@@ -14,6 +14,7 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "channel", label: "Channels" },
   { value: "connection", label: "Connections" },
+  { value: "instrumentation", label: "Instrumentation" },
 ];
 
 const TYPE_DESCRIPTIONS: Record<IntegrationType, string> = {
@@ -21,6 +22,8 @@ const TYPE_DESCRIPTIONS: Record<IntegrationType, string> = {
     "Channels are the surfaces where users talk to your agent: Slack, Discord, web chat, and more.",
   connection:
     "Connections are the tools your agent calls during a run: services reached over MCP or OpenAPI.",
+  instrumentation:
+    "Instrumentation providers are OpenTelemetry backends that receive your agent's traces: every model call, tool execution, and turn.",
 };
 
 interface GalleryProps {

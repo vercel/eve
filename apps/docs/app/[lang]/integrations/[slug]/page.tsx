@@ -22,6 +22,7 @@ import { SetupTabs } from "../components/setup-tabs";
 const typeLabel = {
   channel: "Channel",
   connection: "Connection",
+  instrumentation: "Instrumentation",
 } as const;
 
 const languages = Object.keys(translations);
