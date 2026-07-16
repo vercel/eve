@@ -12,11 +12,11 @@ import { dirname, join } from "node:path";
  * derive the bin path from the package root. Falls back to the conventional
  * app-local path when eve cannot be resolved (e.g. before install).
  */
-export function resolveEveBinaryPath(nextRoot: string): string {
+export function resolveEveBinaryPath(appRoot: string): string {
   try {
-    const require = createRequire(join(nextRoot, "package.json"));
+    const require = createRequire(join(appRoot, "package.json"));
     return join(dirname(require.resolve("eve/package.json")), "bin", "eve.js");
   } catch {
-    return join(nextRoot, "node_modules", "eve", "bin", "eve.js");
+    return join(appRoot, "node_modules", "eve", "bin", "eve.js");
   }
 }
