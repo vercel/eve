@@ -8,7 +8,6 @@ const VUE_VERSION = "^3.5.0";
 
 export interface NuxtEveServiceDescriptorOptions {
   readonly installDependencies?: boolean;
-  readonly vercelVersion?: string;
 }
 
 /**
@@ -17,16 +16,11 @@ export interface NuxtEveServiceDescriptorOptions {
 export function createNuxtEveServiceDescriptor(
   options: NuxtEveServiceDescriptorOptions = {},
 ): ScenarioAppDescriptor {
-  const dependencies: Record<string, string> = {
-    nuxt: NUXT_VERSION,
-    vue: VUE_VERSION,
-  };
-  if (options.vercelVersion !== undefined) {
-    dependencies.vercel = options.vercelVersion;
-  }
-
   return {
-    dependencies,
+    dependencies: {
+      nuxt: NUXT_VERSION,
+      vue: VUE_VERSION,
+    },
     files: {
       "agent/agent.mjs": `import { defineAgent } from "eve";
 

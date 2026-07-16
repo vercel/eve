@@ -1,48 +1,24 @@
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import type { ScenarioAppDescriptor } from "../../src/internal/testing/scenario-app.js";
 import { createNuxtEveServiceDescriptor } from "../../src/internal/testing/scenario-apps/nuxt-eve-service.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
-const VERCEL_GENERATED_SERVICES_VERSION = "55.0.0";
-const VERCEL_PNPM_10_PROJECT_CREATED_AT = Date.UTC(2026, 6, 13);
 const scenarioApp = useScenarioApp();
 
 const NUXT_EVE_SERVICE_DESCRIPTOR = createNuxtEveServiceDescriptor({
   installDependencies: true,
-  vercelVersion: VERCEL_GENERATED_SERVICES_VERSION,
 });
-const NUXT_EVE_VERCEL_DESCRIPTOR = {
-  ...NUXT_EVE_SERVICE_DESCRIPTOR,
-  files: {
-    ...NUXT_EVE_SERVICE_DESCRIPTOR.files,
-    ".vercel/project.json": `${JSON.stringify(
-      {
-        orgId: "team_eve_scenario",
-        projectId: "prj_eve_scenario",
-        projectName: "nuxt-eve-service",
-        settings: {
-          buildCommand: "pnpm exec nuxt build",
-          createdAt: VERCEL_PNPM_10_PROJECT_CREATED_AT,
-          framework: "nuxtjs",
-          nodeVersion: "24.x",
-          outputDirectory: null,
-          rootDirectory: null,
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  },
-} satisfies ScenarioAppDescriptor;
 
-async function readVercelOutputRoutes(outputRoot: string): Promise<readonly unknown[]> {
+async function readVercelOutputConfig(outputRoot: string): Promise<{
+  readonly routes: readonly unknown[];
+  readonly services: Record<string, unknown>;
+}> {
   const config: unknown = JSON.parse(await readFile(join(outputRoot, "config.json"), "utf8"));
 
   if (
@@ -54,7 +30,12 @@ async function readVercelOutputRoutes(outputRoot: string): Promise<readonly unkn
     throw new Error("Expected Vercel Build Output config.json to contain a routes array.");
   }
 
-  return config.routes;
+  const services =
+    "services" in config && typeof config.services === "object" && config.services !== null
+      ? (config.services as Record<string, unknown>)
+      : {};
+
+  return { routes: config.routes, services };
 }
 
 function isEveServiceRoute(route: unknown): boolean {
@@ -84,28 +65,31 @@ describe("framework-nuxt build", () => {
     });
   }, 300_000);
 
-  it("routes the eve service when Vercel assembles the generated Build Output", async () => {
-    const app = await scenarioApp(NUXT_EVE_VERCEL_DESCRIPTOR);
+  it("emits the eve service and route into the Vercel Build Output", async () => {
+    const app = await scenarioApp(NUXT_EVE_SERVICE_DESCRIPTOR);
 
-    // On real Vercel infra the build container always sets VERCEL/VERCEL_ENV,
-    // which is how Nitro selects its Vercel preset (and how the eve module
-    // knows to generate services). `vercel build` run in CI is unauthenticated
-    // and cannot pull those system env vars, so set them explicitly to emulate
-    // the deployment environment; otherwise Nitro falls back to the node-server
-    // preset and never emits Build Output.
+    // Build the Nuxt app directly with the env a real Vercel build container
+    // always provides. `VERCEL` triggers both Nitro's Vercel preset (via
+    // std-env provider detection) and the eve module's service generation;
+    // `NITRO_PRESET` pins the preset so the assertion does not depend on
+    // detection heuristics. `vercel build` is intentionally not used here: run
+    // unauthenticated it strips these system env vars, so Nitro would fall back
+    // to the node-server preset and emit no Build Output. Vercel's own
+    // assembly of the generated service is covered by the Next.js scenario.
     await runPnpmCommand({
-      args: ["exec", "vercel", "build", "--yes"],
+      args: ["exec", "nuxt", "build"],
       cwd: app.appRoot,
       env: {
         ...process.env,
+        NITRO_PRESET: "vercel",
         VERCEL: "1",
         VERCEL_ENV: "production",
-        VERCEL_TARGET_ENV: "production",
       },
     });
 
-    const outputRoot = join(app.appRoot, ".vercel", "output");
-    const routes = await readVercelOutputRoutes(outputRoot);
+    const { routes, services } = await readVercelOutputConfig(
+      join(app.appRoot, ".vercel", "output"),
+    );
     const eveRouteIndex = routes.findIndex(isEveServiceRoute);
     const filesystemIndex = routes.findIndex(isFilesystemHandle);
 
@@ -118,8 +102,11 @@ describe("framework-nuxt build", () => {
     if (filesystemIndex !== -1) {
       expect(eveRouteIndex).toBeLessThan(filesystemIndex);
     }
-    await expect(
-      access(join(outputRoot, "services", "eve", "functions", "__server.func", ".vc-config.json")),
-    ).resolves.toBeUndefined();
-  }, 360_000);
+    expect(services.eve).toEqual(
+      expect.objectContaining({
+        framework: "eve",
+        root: ".eve/vercel-services/eve",
+      }),
+    );
+  }, 300_000);
 });
