@@ -112,21 +112,31 @@ export async function collectInboundFileParts(input: {
   return [];
 }
 
+/**
+ * Drops Slack "remote files" (`mode: "external"` — Google Drive, Dropbox,
+ * Box, etc. shared via an external integration) before building attachment
+ * parts. Their `url_private` points at the third-party service, not Slack,
+ * so `createSlackFetchFile`'s bot-token auth doesn't apply and any generic
+ * download attempt fails (typically with a 401), taking down the whole
+ * turn over a file that was never Slack-hosted to begin with.
+ */
 function extractAttachmentsFromRaw(
   files: readonly Record<string, unknown>[] | undefined,
 ): SlackAttachment[] {
   if (!Array.isArray(files)) return [];
-  return files.map((file) => {
-    const mimeType = typeof file.mimetype === "string" ? file.mimetype : undefined;
-    return {
-      id: typeof file.id === "string" ? file.id : "",
-      type: inferAttachmentType(mimeType),
-      url: typeof file.url_private === "string" ? file.url_private : undefined,
-      name: typeof file.name === "string" ? file.name : undefined,
-      mimeType,
-      size: typeof file.size === "number" ? file.size : undefined,
-    };
-  });
+  return files
+    .filter((file) => file.mode !== "external")
+    .map((file) => {
+      const mimeType = typeof file.mimetype === "string" ? file.mimetype : undefined;
+      return {
+        id: typeof file.id === "string" ? file.id : "",
+        type: inferAttachmentType(mimeType),
+        url: typeof file.url_private === "string" ? file.url_private : undefined,
+        name: typeof file.name === "string" ? file.name : undefined,
+        mimeType,
+        size: typeof file.size === "number" ? file.size : undefined,
+      };
+    });
 }
 
 function inferAttachmentType(mimeType: string | undefined): "image" | "file" | "video" | "audio" {

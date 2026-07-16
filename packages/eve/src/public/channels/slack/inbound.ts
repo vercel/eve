@@ -236,11 +236,17 @@ function parseAuthor(event: SlackAppMentionEvent | SlackMessageEvent): SlackAuth
   };
 }
 
+/**
+ * Drops Slack "remote files" (`mode: "external"` — Google Drive, Dropbox,
+ * Box, etc. shared via an external integration) before mapping. Their
+ * `url_private` points at the third-party service, not Slack, so no
+ * fetcher this channel owns can authenticate to it.
+ */
 function parseAttachments(
   files: readonly Record<string, unknown>[] | undefined,
 ): SlackAttachment[] {
   if (!Array.isArray(files)) return [];
-  return files.map(toAttachment);
+  return files.filter((file) => file.mode !== "external").map(toAttachment);
 }
 
 function toAttachment(file: Record<string, unknown>): SlackAttachment {
@@ -289,9 +295,10 @@ function parsePayloadAuthor(
   };
 }
 
+/** Same external-file exclusion as {@link parseAttachments}, applied to the shared Chat SDK's `SlackFile` shape (the original file's `mode` survives on `.raw`). */
 function parsePayloadAttachments(files: readonly SlackFile[] | undefined): SlackAttachment[] {
   if (!Array.isArray(files)) return [];
-  return files.map(toPayloadAttachment);
+  return files.filter((file) => file.raw.mode !== "external").map(toPayloadAttachment);
 }
 
 /**
