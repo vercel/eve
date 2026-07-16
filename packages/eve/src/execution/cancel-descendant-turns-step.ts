@@ -38,35 +38,34 @@ export async function cancelDescendantTurnsStep(input: {
     return;
   }
 
-  if (batch?.childSessionIds === undefined) return;
+  if (batch === undefined) return;
+  const childSessionIds = batch.childSessionIds;
+  if (childSessionIds === undefined) return;
 
-  const cancellations: Promise<void>[] = [];
-  const remoteChildren: Array<{
-    readonly action: RuntimeRemoteAgentCallActionRequest;
-    readonly childSessionId: string;
-  }> = [];
+  let remoteRegistry: Promise<RuntimeSubagentRegistry["subagentsByNodeId"]> | undefined;
+  const getRemoteRegistry = () =>
+    (remoteRegistry ??= deserializeContext(input.serializedContext).then(
+      (ctx) => ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
+    ));
 
-  for (const action of batch.actions) {
-    const childSessionId = batch.childSessionIds[action.callId];
-    if (childSessionId === undefined) continue;
+  const cancellations = batch.actions.flatMap((action): Promise<void>[] => {
+    const childSessionId = childSessionIds[action.callId];
+    if (childSessionId === undefined) return [];
 
     if (action.kind === "subagent-call") {
-      cancellations.push(cancelLocalDescendant({ action, childSessionId }));
-    } else if (action.kind === "remote-agent-call") {
-      remoteChildren.push({ action, childSessionId });
+      return [cancelLocalDescendant({ action, childSessionId })];
     }
-  }
-
-  if (remoteChildren.length > 0) {
-    const remoteRegistry = deserializeContext(input.serializedContext).then(
-      (ctx) => ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
-    );
-    cancellations.push(
-      ...remoteChildren.map(({ action, childSessionId }) =>
-        cancelRemoteDescendant({ action, childSessionId, remoteRegistry }),
-      ),
-    );
-  }
+    if (action.kind === "remote-agent-call") {
+      return [
+        cancelRemoteDescendant({
+          action,
+          childSessionId,
+          remoteRegistry: getRemoteRegistry(),
+        }),
+      ];
+    }
+    return [];
+  });
 
   await Promise.all(cancellations);
 }

@@ -89,6 +89,20 @@ describe("cancelDescendantTurnsStep", () => {
     });
   });
 
+  it("does not deserialize remote context for local-only descendants", async () => {
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
+
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createPendingState({ includeRemote: false }),
+    });
+
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({
+      sessionId: "local-child",
+    });
+    expect(deserializeContext).not.toHaveBeenCalled();
+  });
+
   it("retries no-active-turn responses during the child adoption window", async () => {
     vi.useFakeTimers();
     installRemoteRegistry();
@@ -168,9 +182,10 @@ function installRemoteRegistry(): void {
   } as never);
 }
 
-function createPendingState() {
+function createPendingState(input: { readonly includeRemote?: boolean } = {}) {
+  const includeRemote = input.includeRemote ?? true;
   let session = setPendingRuntimeActionBatch({
-    actions: [localAction, remoteAction],
+    actions: includeRemote ? [localAction, remoteAction] : [localAction],
     event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
     responseMessages: [],
     session: createSession(),
@@ -184,11 +199,13 @@ function createPendingState() {
     },
     session,
   });
-  session = recordPendingSubagentChild({
-    callId: remoteAction.callId,
-    child: { kind: "remote", sessionId: "remote-child" },
-    session,
-  });
+  if (includeRemote) {
+    session = recordPendingSubagentChild({
+      callId: remoteAction.callId,
+      child: { kind: "remote", sessionId: "remote-child" },
+      session,
+    });
+  }
   return createDurableSessionState({ session });
 }
 
