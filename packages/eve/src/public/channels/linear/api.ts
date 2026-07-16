@@ -7,13 +7,7 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export type LinearFetch = typeof fetch;
 
-/**
- * Selection set for an Agent Session, shared by the create-on-issue and
- * create-on-comment mutations. Linear's schema exposes the session's
- * associations only as nested relations (`appUser`, `comment`, `issue`,
- * `sourceComment`); the flat `*Id` scalars were removed, so selecting them
- * returns HTTP 400. There is no `organization` relation on `AgentSession`.
- */
+/** Shared Agent Session selection for the create-on-issue and create-on-comment mutations. */
 const AGENT_SESSION_FIELDS = `
   fragment AgentSessionFields on AgentSession {
     id
@@ -82,7 +76,6 @@ export interface LinearAgentSessionRecord {
     url?: string;
   } | null;
   issueId?: string | null;
-  organizationId?: string;
   sourceCommentId?: string | null;
   status?: string;
   url?: string | null;
