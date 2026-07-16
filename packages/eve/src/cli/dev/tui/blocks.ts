@@ -75,6 +75,8 @@ export interface Block {
   collapsed?: boolean;
   /** When true, expand tool input/output instead of summarizing. */
   expanded?: boolean;
+  /** Captured-log visibility used for concise-vs-raw diagnostic replay. */
+  logVisibility?: "stderr-only" | "all-only";
   /** Raw tool input / output for the expanded view. */
   toolInput?: unknown;
   toolOutput?: unknown;

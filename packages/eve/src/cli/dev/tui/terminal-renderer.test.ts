@@ -1209,6 +1209,45 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
   });
 
+  it("stores long stderr diagnostics and shows concise copy by default", () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const append = vi.fn();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      logs: "stderr",
+      unicode: true,
+      diagnostics: {
+        path: "/app/.eve/logs/dev.log",
+        displayPath: ".eve/logs/dev.log",
+        append,
+        close: async () => {},
+      },
+    });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    const detail = [
+      "Error: request returned 403",
+      "  at first",
+      "  at second",
+      "  at third",
+      "  at fourth",
+    ].join("\n");
+
+    process.stderr.write(`${detail}\n`);
+
+    expect(append).toHaveBeenCalledWith({ source: "stderr", detail });
+    expect(screen.snapshot()).toContain("Error: request returned 403");
+    expect(screen.snapshot()).toContain("details: .eve/logs/dev.log");
+    expect(screen.snapshot()).not.toContain("at fourth");
+
+    renderer.setLogDisplayMode("all");
+    expect(screen.snapshot()).toContain("at fourth");
+    expect(screen.snapshot()).not.toContain("details: .eve/logs/dev.log");
+    renderer.shutdown();
+  });
+
   it("hides logs by default, then reveals buffered lines at their original positions", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();

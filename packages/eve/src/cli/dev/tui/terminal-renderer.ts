@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+import type { DevDiagnosticSink } from "../diagnostic-sink.js";
 
 import type {
   AgentTUIInputOption,
@@ -112,6 +113,7 @@ import {
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
+import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
   isProgressPulseVisible,
@@ -228,6 +230,7 @@ export type TerminalRendererOptions = {
   logs?: LogDisplayMode;
   color?: boolean;
   unicode?: boolean;
+  diagnostics?: DevDiagnosticSink;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
 };
@@ -297,6 +300,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #defaultContextSize?: number;
   readonly #captureForeignOutput: boolean;
+  readonly #diagnostics?: DevDiagnosticSink;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   /** Which captured log sources render. Mutable via {@link setLogDisplayMode}. */
   #logs: LogDisplayMode;
@@ -442,6 +446,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#defaultContextSize = options?.contextSize;
     this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
+    this.#diagnostics = options?.diagnostics;
     this.#logs = options?.logs ?? "none";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
@@ -2242,7 +2247,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
       body: stripTerminalControls(content),
       live: false,
     };
-    if (detail !== undefined) block.detail = stripTerminalControls(detail);
+    if (detail !== undefined) {
+      const cleanDetail = stripTerminalControls(detail);
+      if (this.#diagnostics === undefined) {
+        block.detail = cleanDetail;
+      } else {
+        this.#diagnostics.append({ source: "workflow", summary: content, detail: cleanDetail });
+        block.detail = `details: ${this.#diagnostics.displayPath}`;
+      }
+    }
     this.#pushBlock(block);
     this.#paint();
   }
@@ -2954,6 +2967,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#stdoutLogBuffer = "";
     }
     if (this.#stderrLogBuffer.length > 0) {
+      this.#diagnostics?.append({ source: "stderr", detail: this.#stderrLogBuffer });
       if (this.#shouldRenderLog("stderr")) process.stderr.write(`${this.#stderrLogBuffer}\n`);
       this.#stderrLogBuffer = "";
     }
@@ -3025,12 +3039,35 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #handleCapturedStderr(content: string): void {
+    this.#diagnostics?.append({ source: "stderr", detail: content });
     const lines = content.split("\n");
     const failedIndex = lines.findIndex((line) => {
       return parseDevRebuildLogLine(line.trimEnd())?.kind === "failed";
     });
     if (failedIndex === -1) {
-      this.#pushBlock({ kind: "log", title: "stderr", body: content, live: false });
+      if (this.#diagnostics === undefined) {
+        this.#pushBlock({ kind: "log", title: "stderr", body: content, live: false });
+        return;
+      }
+      const presentation = presentDiagnostic(content, this.#diagnostics.displayPath);
+      if (presentation.kind === "inline") {
+        this.#pushBlock({ kind: "log", title: "stderr", body: presentation.text, live: false });
+        return;
+      }
+      this.#pushBlock({
+        kind: "log",
+        title: "stderr",
+        body: formatStoredDiagnostic(presentation),
+        logVisibility: "stderr-only",
+        live: false,
+      });
+      this.#pushBlock({
+        kind: "log",
+        title: "stderr",
+        body: content,
+        logVisibility: "all-only",
+        live: false,
+      });
       return;
     }
 
@@ -3135,6 +3172,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #isHiddenLog(block: Block): boolean {
     if (block.kind === "sandbox") return !this.#shouldRenderLog("sandbox");
     if (block.kind !== "log") return false;
+    if (block.logVisibility === "stderr-only") return this.#logs !== "stderr";
+    if (block.logVisibility === "all-only") return this.#logs !== "all";
     return !this.#shouldRenderLog(block.title === "stderr" ? "stderr" : "stdout");
   }
 }
