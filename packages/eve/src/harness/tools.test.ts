@@ -720,6 +720,12 @@ describe("buildToolSet", () => {
       {},
       'Tool "screenshot" call "call_1" returned a non-JSON-serializable model output. Expected content model output to include an array "value".',
     ],
+    ["an empty parts array", [], "Expected content model output to include at least one part."],
+    [
+      "empty file data",
+      [{ ...contentFilePart, data: { type: "data", data: "" } }],
+      "Expected content file part data to be non-empty.",
+    ],
     [
       "an unknown part",
       [{ type: "audio" }],

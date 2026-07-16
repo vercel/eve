@@ -258,6 +258,9 @@ function normalizeToolModelOutput(input: {
         if (!Array.isArray(output.value)) {
           throw new TypeError('Expected content model output to include an array "value".');
         }
+        if (output.value.length === 0) {
+          throw new TypeError("Expected content model output to include at least one part.");
+        }
 
         return {
           type: "content",
@@ -287,6 +290,12 @@ function normalizeToolModelContentPart(part: unknown): ToolModelContentPart {
   }
   if (!isObject(part.data) || part.data.type !== "data" || !isBase64Data(part.data.data)) {
     throw new TypeError("Expected content file part to include base64 string data.");
+  }
+  // "" is valid base64 (it encodes zero bytes), but a zero-byte file part is
+  // always a caller bug — e.g. Buffer.alloc(0).toString("base64") from a
+  // broken capture tool — and would otherwise fail opaquely at the provider.
+  if (part.data.data.length === 0) {
+    throw new TypeError("Expected content file part data to be non-empty.");
   }
   if (typeof part.mediaType !== "string") {
     throw new TypeError('Expected content file part to include a string "mediaType".');
