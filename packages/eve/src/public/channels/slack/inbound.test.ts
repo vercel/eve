@@ -111,6 +111,38 @@ describe("parseAppMentionEvent", () => {
       size: 1024,
     });
   });
+
+  it("drops external (mode: external) files — Google Drive/Dropbox/etc. shared via a Slack integration, whose url_private points at the third-party service rather than Slack", () => {
+    const message = parseAppMentionEvent({
+      type: "event_callback",
+      event: {
+        type: "app_mention",
+        user: "U01",
+        text: "see this",
+        channel: "C01",
+        ts: "1.0",
+        files: [
+          {
+            id: "F1",
+            name: "Q3 plan",
+            mimetype: "application/vnd.google-apps.spreadsheet",
+            url_private: "https://docs.google.com/spreadsheets/d/abc/edit",
+            mode: "external",
+            external_type: "gsheet",
+          },
+          {
+            id: "F2",
+            name: "chart.png",
+            mimetype: "image/png",
+            url_private: "https://files.slack.com/a/chart.png",
+            size: 1024,
+          },
+        ],
+      },
+    });
+    expect(message?.attachments).toHaveLength(1);
+    expect(message?.attachments[0]?.id).toBe("F2");
+  });
 });
 
 describe("parseDirectMessageEvent", () => {
@@ -308,5 +340,46 @@ describe("parseDirectMessageEvent", () => {
         size: 2048,
       },
     ]);
+  });
+
+  it("drops external (mode: external) files from the shared Slack webhook payload path too", () => {
+    const payload = parseSlackWebhookBody(
+      JSON.stringify({
+        type: "event_callback",
+        team_id: "T01",
+        event: {
+          type: "message",
+          channel_type: "im",
+          subtype: "file_share",
+          user: "U01",
+          text: "here is a file",
+          channel: "D01",
+          ts: "1700000000.000100",
+          files: [
+            {
+              id: "F01",
+              mimetype: "application/vnd.google-apps.spreadsheet",
+              url_private: "https://docs.google.com/spreadsheets/d/abc/edit",
+              name: "Sheet",
+              mode: "external",
+              external_type: "gsheet",
+            },
+            {
+              id: "F02",
+              mimetype: "image/png",
+              url_private: "https://files.slack.com/F02/diagram.png",
+              name: "diagram.png",
+              size: 2048,
+            },
+          ],
+        },
+      }),
+    );
+    if (payload.kind !== "direct_message") throw new Error("expected direct_message");
+
+    const message = slackMessageFromWebhookPayload(payload);
+
+    expect(message?.attachments).toHaveLength(1);
+    expect(message?.attachments[0]?.id).toBe("F02");
   });
 });

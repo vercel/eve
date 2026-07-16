@@ -407,6 +407,43 @@ describe("collectInboundFileParts", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("drops external (Google Drive/Dropbox/etc.) remote files — their url_private points at the third-party service, not Slack, so fetching it with the bot token fails", async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const thread = makeSlackThread({
+      refresh,
+      recentMessages: [
+        {
+          isMe: false,
+          raw: {
+            files: [
+              {
+                id: "F500",
+                name: "Q3 plan",
+                mimetype: "application/vnd.google-apps.spreadsheet",
+                url_private: "https://docs.google.com/spreadsheets/d/abc/edit",
+                mode: "external",
+              },
+              {
+                id: "F501",
+                mimetype: "text/csv",
+                url_private: "https://files.slack.com/a/b/real.csv",
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const parts = await collectInboundFileParts({
+      mention: emptyMention,
+      thread,
+      policy: DEFAULT_UPLOAD_POLICY,
+    });
+
+    expect(parts).toHaveLength(1);
+    expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/real.csv");
+  });
+
   it("returns an empty array when refresh throws", async () => {
     const refresh = vi.fn().mockRejectedValue(new Error("Slack 500"));
     const thread = makeSlackThread({ refresh });
