@@ -8093,6 +8093,7 @@ describe("createToolLoopHarness", () => {
 
         const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
         expect(agentCall?.headers).toEqual({
+          "user-agent": "eve/0.0.0 (Weather Agent)",
           "x-title": "Weather Agent",
           "http-referer": "https://my-agent.vercel.app",
         });
@@ -8101,6 +8102,39 @@ describe("createToolLoopHarness", () => {
           delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
         } else {
           process.env.VERCEL_PROJECT_PRODUCTION_URL = originalProductionUrl;
+        }
+      }
+    });
+
+    it("sets a versioned user-agent suffixed with the agent name", async () => {
+      setupStopResultForAttribution();
+      const originalProductionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+      delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+      const originalUrl = process.env.VERCEL_URL;
+      delete process.env.VERCEL_URL;
+      try {
+        const config: ToolLoopHarnessConfig = {
+          mode: "conversation",
+          resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
+          runtimeIdentity: {
+            agentId: "weather-agent",
+            agentName: "Weather Agent",
+            eveVersion: "9.9.9",
+            modelId: "anthropic/claude-sonnet-4-5",
+          },
+          tools: new Map(),
+        };
+        const runStep = createToolLoopHarness(config);
+        await runStep(createTestSession(), { message: "hi" });
+
+        const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+        expect(agentCall?.headers?.["user-agent"]).toBe("eve/9.9.9 (Weather Agent)");
+      } finally {
+        if (originalProductionUrl !== undefined) {
+          process.env.VERCEL_PROJECT_PRODUCTION_URL = originalProductionUrl;
+        }
+        if (originalUrl !== undefined) {
+          process.env.VERCEL_URL = originalUrl;
         }
       }
     });
@@ -8127,6 +8161,7 @@ describe("createToolLoopHarness", () => {
 
         const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
         expect(agentCall?.headers).toEqual({
+          "user-agent": "eve/0.0.0 (weather-agent)",
           "x-title": "weather-agent",
         });
       } finally {
@@ -8162,6 +8197,7 @@ describe("createToolLoopHarness", () => {
 
         const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
         expect(agentCall?.headers).toEqual({
+          "user-agent": "eve/0.0.0 (My Agent)",
           "x-title": "My Agent",
           "http-referer": "https://preview-123.vercel.app",
         });
@@ -8257,6 +8293,7 @@ describe("createToolLoopHarness", () => {
 
         const compactCall = vi.mocked(compactMessages).mock.calls[0];
         expect(compactCall?.[5]).toEqual({
+          "user-agent": "eve/0.0.0 (Weather Agent)",
           "x-title": "Weather Agent",
           "http-referer": "https://my-agent.vercel.app",
         });

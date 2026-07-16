@@ -19,6 +19,7 @@ import {
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
   createErrorId,
   createLogger,
@@ -294,8 +295,15 @@ function mergeSystemInstructions(
  * Builds AI Gateway app attribution headers when the model is gateway-routed.
  *
  * Gateway routing is detected by `typeof model === "string"` — the same
- * condition used for the `gateway-auto` cache path. Returns `undefined`
- * for non-gateway models or when no meaningful attribution is available.
+ * condition used for the `gateway-auto` cache path. Sets a leading
+ * `user-agent` product token (`eve/<version> (<agent>)`); the AI SDK then
+ * appends its own `ai/<v> ai-sdk/provider-utils/<v> runtime/node.js/<v>`
+ * tokens after it (via `withUserAgentSuffix`), so the gateway sees both the
+ * eve and SDK versions without eve reconstructing the SDK's. The agent name
+ * rides in a UA comment so a spaced display name stays a valid User-Agent.
+ * Also sets the OpenRouter-style `x-title` (agent name) and `http-referer`
+ * (deployment host). Returns `undefined` for non-gateway models or when no
+ * meaningful attribution is available.
  */
 function buildGatewayAttributionHeaders(
   model: LanguageModel,
@@ -305,18 +313,20 @@ function buildGatewayAttributionHeaders(
     return undefined;
   }
 
+  const version = runtimeIdentity?.eveVersion;
   const title = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
   const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
   const referer = deploymentHost ? `https://${deploymentHost}` : undefined;
 
-  if (!title && !referer) {
-    return undefined;
-  }
-
   const headers: Record<string, string> = {};
+  if (version) {
+    headers["user-agent"] = title
+      ? `${EVE_PACKAGE_NAME}/${version} (${title})`
+      : `${EVE_PACKAGE_NAME}/${version}`;
+  }
   if (title) headers["x-title"] = title;
   if (referer) headers["http-referer"] = referer;
-  return headers;
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
 async function resolveActiveRuntimeModel(input: {
