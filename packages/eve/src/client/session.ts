@@ -109,12 +109,19 @@ export class ClientSession {
 
     const url = createClientUrl(this.#context.host, createEveCancelTurnRoutePath(sessionId));
     const headers = await this.#context.resolveHeaders();
-    const init: RequestInit = { headers, method: "POST" };
-    if (options?.turnId !== undefined) {
-      headers.set("content-type", "application/json");
-      init.body = JSON.stringify({ turnId: options.turnId });
-    }
-    const response = await fetch(url, withRedirectPolicy(init, this.#context.redirect));
+    headers.set("content-type", "application/json");
+
+    const response = await fetch(
+      url,
+      withRedirectPolicy(
+        {
+          headers,
+          method: "POST",
+          body: options ? JSON.stringify(options) : undefined,
+        },
+        this.#context.redirect,
+      ),
+    );
     const body = await response.text();
 
     if (!response.ok) {

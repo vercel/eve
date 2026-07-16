@@ -108,7 +108,7 @@ const createRunner: DevelopmentRunnerFactory = () => {
   return {
     close: async () => {
       closed = true;
-      for (const listener of [...closedListeners]) {
+      for (const listener of closedListeners) {
         listener();
       }
       closedListeners.clear();
