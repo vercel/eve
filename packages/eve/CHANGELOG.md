@@ -1,5 +1,12 @@
 # eve
 
+## 0.24.6
+
+### Patch Changes
+
+- 3029647: Update the generated Web Chat template for Next.js 16.3 preview type declarations.
+- b97f1d1: Custom channel routes can now cancel a session's in-flight turn: route handlers receive a `cancel({ continuationToken, turnId? })` helper addressed by the channel-local continuation token, and `Session` handles returned by `send()` and `getSession()` expose `cancel({ turnId? })` for session-id-addressed cancellation. `ClientSession.cancel()` accepts the same optional `turnId` stale-request guard.
+
 ## 0.24.5
 
 ### Patch Changes
