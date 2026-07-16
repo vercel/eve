@@ -37,11 +37,18 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
     readCurrentModel: vi.fn(async () => ({
       id: "anthropic/claude-sonnet-5",
       routing: { kind: "gateway", target: "anthropic" } as const,
+      reasoning: null,
+      serviceTier: { kind: "standard" } as const,
       editable: true,
+      settingsEditable: true,
     })),
-    applyModel: vi.fn(
-      async ({ slug }: { appRoot: string; slug: string }) =>
-        ({ kind: "changed", to: slug }) as const,
+    applySettings: vi.fn(
+      async ({ patch }: Parameters<ModelFlowDeps["applySettings"]>[0]) =>
+        ({
+          kind: "changed",
+          changed: ["model"],
+          model: patch.model.kind === "set" ? patch.model.value : undefined,
+        }) as const,
     ),
     selectModel: { fetchModels: async () => CATALOG },
     detectProviderStatus: vi.fn(
@@ -113,6 +120,18 @@ describe("runModelFlow", () => {
             description: "The model your agent uses",
           },
           {
+            value: "reasoning",
+            label: "Reasoning",
+            hint: "Provider default",
+            description: "Effort level; exact support depends on the model and provider",
+          },
+          {
+            value: "fast-mode",
+            label: "Fast mode",
+            hint: "Off (standard)",
+            description: "Requests faster Gateway processing at increased cost",
+          },
+          {
             value: "provider",
             label: "Change provider",
             hint: `AI Gateway (Linked to ${pc.bold("my-agent")})`,
@@ -133,7 +152,10 @@ describe("runModelFlow", () => {
       readCurrentModel: vi.fn(async () => ({
         id: "anthropic/claude-sonnet-5",
         routing: { kind: "external", provider: "anthropic" } as const,
+        reasoning: null,
+        serviceTier: { kind: "standard" } as const,
         editable: false,
+        settingsEditable: true,
       })),
       // Even though detection finds nothing, external routing must NOT surface
       // the "Configure model access" gateway UX.
@@ -154,6 +176,19 @@ describe("runModelFlow", () => {
             description: "Set via an SDK model call in agent.ts; edit the source to change it",
           },
           {
+            value: "reasoning",
+            label: "Reasoning",
+            hint: "Provider default",
+            description: "Effort level; exact support depends on the model and provider",
+          },
+          {
+            value: "fast-mode",
+            label: "Fast mode",
+            hint: "Off (standard)",
+            disabled: true,
+            description: "Disabled for a direct external provider",
+          },
+          {
             value: "provider",
             label: "Change provider",
             disabled: true,
@@ -164,11 +199,11 @@ describe("runModelFlow", () => {
         notices: [
           {
             tone: "warning",
-            text: "`agent.ts` specifies a model provider directly. In-TUI configuration is restricted to AI Gateway endpoints.",
+            text: "`agent.ts` specifies the model provider directly. Model, provider, and Fast mode changes stay source-owned; reasoning remains configurable here.",
           },
         ],
         hintLayout: "stacked",
-        initialValue: "done",
+        initialValue: "reasoning",
       },
     ]);
   });
@@ -180,7 +215,10 @@ describe("runModelFlow", () => {
       readCurrentModel: vi.fn(async () => ({
         id: "anthropic/claude-sonnet-5",
         routing: { kind: "gateway", target: "anthropic" } as const,
+        reasoning: null,
+        serviceTier: { kind: "standard" } as const,
         editable: false,
+        settingsEditable: true,
       })),
       detectProviderStatus: vi.fn(
         async () =>
@@ -196,6 +234,18 @@ describe("runModelFlow", () => {
         label: "Change model",
         disabled: true,
         description: "Set via an SDK model call in agent.ts; edit the source to change it",
+      },
+      {
+        value: "reasoning",
+        label: "Reasoning",
+        hint: "Provider default",
+        description: "Effort level; exact support depends on the model and provider",
+      },
+      {
+        value: "fast-mode",
+        label: "Fast mode",
+        hint: "Off (standard)",
+        description: "Requests faster Gateway processing at increased cost",
       },
       {
         value: "provider",
@@ -229,7 +279,7 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options[1]).toEqual({
+    expect(menuPaints[0]?.options[3]).toEqual({
       value: "provider",
       label: "Change provider",
       hint: `AI Gateway (Linked to ${pc.bold("my-agent")} in ${pc.bold("my-team")})`,
@@ -252,7 +302,7 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options[1]).toEqual({
+    expect(menuPaints[0]?.options[3]).toEqual({
       value: "provider",
       label: "Change provider",
       hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)",
@@ -262,7 +312,7 @@ describe("runModelFlow", () => {
 
   it("applies the model and returns to the prompt", async () => {
     const { prompter, menuPaints, selectMessages } = scriptedPrompter({
-      menu: ["model"],
+      menu: ["model", "done"],
       picker: ["openai/gpt-5.5"],
     });
     const deps = flowDeps();
@@ -272,19 +322,30 @@ describe("runModelFlow", () => {
       modelMessage: `Model changed to ${pc.bold("openai/gpt-5.5")}. Live on your next prompt.`,
     });
 
-    expect(selectMessages).toEqual([MODEL_MENU_MESSAGE, "Which model should your agent use?"]);
-    expect(menuPaints).toHaveLength(1);
-    expect(deps.applyModel).toHaveBeenCalledWith({ appRoot: APP_ROOT, slug: "openai/gpt-5.5" });
+    expect(selectMessages).toEqual([
+      MODEL_MENU_MESSAGE,
+      "Which model should your agent use?",
+      MODEL_MENU_MESSAGE,
+    ]);
+    expect(menuPaints).toHaveLength(2);
+    expect(deps.applySettings).toHaveBeenCalledWith({
+      appRoot: APP_ROOT,
+      patch: {
+        model: { kind: "set", value: "openai/gpt-5.5" },
+        reasoning: { kind: "keep" },
+        gatewayServiceTier: { kind: "keep" },
+      },
+    });
     expect(deps.readCurrentModel).toHaveBeenCalledTimes(1);
   });
 
   it("returns a rejected model result without claiming the model changed", async () => {
     const { prompter, menuPaints } = scriptedPrompter({
-      menu: ["model"],
+      menu: ["model", "done"],
       picker: ["openai/gpt-5.5"],
     });
     const deps = flowDeps({
-      applyModel: vi.fn(
+      applySettings: vi.fn(
         async () => ({ kind: "rejected", message: "Couldn't confirm the id." }) as const,
       ),
     });
@@ -294,7 +355,76 @@ describe("runModelFlow", () => {
       modelMessage: "Couldn't confirm the id.",
     });
 
-    expect(menuPaints).toHaveLength(1);
+    expect(menuPaints).toHaveLength(2);
+  });
+
+  it("drafts reasoning and Fast mode, then applies both once on Done", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({
+      menu: ["reasoning", "fast-mode", "done"],
+      picker: ["high", "priority"],
+    });
+    const deps = flowDeps({
+      applySettings: vi.fn<ModelFlowDeps["applySettings"]>(async () => ({
+        kind: "changed" as const,
+        changed: ["reasoning", "fast-mode"] as const,
+        reasoning: "high" as const,
+        fastMode: true,
+      })),
+    });
+
+    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
+      kind: "done",
+      modelMessage:
+        "Model settings updated: reasoning high, Fast mode on. Live on your next prompt.",
+    });
+
+    expect(menuPaints).toHaveLength(3);
+    expect(deps.applySettings).toHaveBeenCalledTimes(1);
+    expect(deps.applySettings).toHaveBeenCalledWith({
+      appRoot: APP_ROOT,
+      patch: {
+        model: { kind: "keep" },
+        reasoning: { kind: "set", value: "high" },
+        gatewayServiceTier: { kind: "set", value: "priority" },
+      },
+    });
+  });
+
+  it("discards a model-settings draft when the root menu is cancelled", async () => {
+    const { prompter } = scriptedPrompter({
+      menu: ["reasoning", "esc"],
+      picker: ["low"],
+    });
+    const deps = flowDeps();
+
+    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
+      kind: "cancelled",
+    });
+    expect(deps.applySettings).not.toHaveBeenCalled();
+  });
+
+  it("shows a custom Gateway service tier without allowing the binary toggle to erase it", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "anthropic/claude-sonnet-5",
+        routing: { kind: "gateway", target: "anthropic" } as const,
+        reasoning: "medium" as const,
+        serviceTier: { kind: "custom", value: "flex" } as const,
+        editable: true,
+        settingsEditable: true,
+      })),
+    });
+
+    await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
+
+    expect(menuPaints[0]?.options[2]).toEqual({
+      value: "fast-mode",
+      label: "Fast mode",
+      hint: "Custom (flex)",
+      description: "Custom service tier is authored in agent.ts; edit it there",
+      disabled: true,
+    });
   });
 
   it("opens provider setup directly when none is configured", async () => {
@@ -416,7 +546,7 @@ describe("runModelFlow", () => {
     expect(deps.detectProviderStatus).toHaveBeenCalledTimes(1);
     expect(menuPaints).toHaveLength(2);
     expect(menuPaints[1]?.notices).toEqual([]);
-    expect(deps.applyModel).not.toHaveBeenCalled();
+    expect(deps.applySettings).not.toHaveBeenCalled();
   });
 
   it("folds a cancelled picker without touching the source", async () => {
@@ -431,7 +561,7 @@ describe("runModelFlow", () => {
     });
     // The cancelled picker lands back on the menu before the empty exit.
     expect(menuPaints).toHaveLength(2);
-    expect(deps.applyModel).not.toHaveBeenCalled();
+    expect(deps.applySettings).not.toHaveBeenCalled();
   });
 
   describe("cursor pre-selection", () => {

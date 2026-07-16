@@ -6,17 +6,18 @@ import type { SetupBox } from "../step.js";
 
 const AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/models";
 const FETCH_TIMEOUT_MS = 5000;
-const POPULAR_PROVIDERS: readonly string[] = ["anthropic", "openai", "google"];
 const WEB_SEARCH_TAG = "web-search";
 const MODEL_PROMPT_MESSAGE = "Which model should your agent use?";
 
 /** One model entry from the AI Gateway catalog response. */
 export interface GatewayCatalogModel {
-  id: string;
-  name: string;
-  type: string;
-  owned_by: string;
-  tags?: readonly string[];
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+  readonly owned_by: string;
+  /** Public release timestamp in Unix seconds. Missing values sort last. */
+  readonly released?: number;
+  readonly tags?: readonly string[];
 }
 
 function modelOption(
@@ -51,11 +52,6 @@ function providerLabel(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-function providerPriority(provider: string): number {
-  const index = POPULAR_PROVIDERS.indexOf(provider);
-  return index === -1 ? POPULAR_PROVIDERS.length : index;
-}
-
 /** Fetches the raw AI Gateway catalog. The default for {@link SelectModelDeps}. */
 export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<GatewayCatalogModel[]> {
   const controller = new AbortController();
@@ -65,11 +61,48 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
     const requestSignal =
       signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
     const res = await fetch(AI_GATEWAY_URL, { signal: requestSignal });
-    const json = (await res.json()) as { data: GatewayCatalogModel[] };
-    return json.data;
+    if (!res.ok) throw new Error(`AI Gateway model catalog request failed (${res.status}).`);
+    return parseGatewayCatalog(await res.json());
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function parseGatewayCatalog(input: unknown): GatewayCatalogModel[] {
+  if (!isRecord(input) || !Array.isArray(input.data)) {
+    throw new Error("AI Gateway returned an invalid model catalog.");
+  }
+
+  return input.data.map((entry) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.id !== "string" ||
+      typeof entry.name !== "string" ||
+      typeof entry.type !== "string" ||
+      typeof entry.owned_by !== "string"
+    ) {
+      throw new Error("AI Gateway returned an invalid model catalog entry.");
+    }
+
+    return {
+      id: entry.id,
+      name: entry.name,
+      type: entry.type,
+      owned_by: entry.owned_by,
+      ...(typeof entry.released === "number" && Number.isFinite(entry.released)
+        ? { released: entry.released }
+        : {}),
+      ...(isStringArray(entry.tags) ? { tags: entry.tags } : {}),
+    };
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 /** Position in the curated shortlist, or its length for everything else. */
@@ -81,7 +114,7 @@ function featuredPriority(id: string): number {
 /**
  * Builds the picker options from the catalog (filtered to language models with
  * the `web-search` tag), with the curated shortlist first in its own order and
- * the rest sorted popular providers first. Catalog entries on the shortlist
+ * the rest sorted newest release first. Catalog entries on the shortlist
  * are marked `featured`, so the picker opens on just them and scrolling or
  * filtering reaches the rest. Falls back to a static shortlist when the fetch
  * fails or yields nothing.
@@ -102,16 +135,18 @@ async function buildModelOptions(
           label: m.name,
           hint: providerLabel(provider),
           provider,
+          released: m.released,
         };
       })
       .sort((a, b) => {
         const featuredDiff = featuredPriority(a.value) - featuredPriority(b.value);
         if (featuredDiff !== 0) return featuredDiff;
-        const priorityDiff = providerPriority(a.provider) - providerPriority(b.provider);
-        if (priorityDiff !== 0) return priorityDiff;
-        const providerDiff = a.provider.localeCompare(b.provider);
-        if (providerDiff !== 0) return providerDiff;
-        return a.label.localeCompare(b.label);
+        const releasedDiff =
+          (b.released ?? Number.NEGATIVE_INFINITY) - (a.released ?? Number.NEGATIVE_INFINITY);
+        if (releasedDiff !== 0) return releasedDiff;
+        const labelDiff = a.label.localeCompare(b.label);
+        if (labelDiff !== 0) return labelDiff;
+        return a.value.localeCompare(b.value);
       });
 
     if (models.length === 0) return FALLBACK_MODELS;

@@ -18,6 +18,7 @@ const CATALOG: GatewayCatalogModel[] = [
     name: "GLM 4.6",
     type: "language",
     owned_by: "zai",
+    released: 300,
     tags: ["web-search"],
   },
   {
@@ -25,6 +26,7 @@ const CATALOG: GatewayCatalogModel[] = [
     name: "GPT-5 mini",
     type: "language",
     owned_by: "openai",
+    released: 200,
     tags: ["web-search"],
   },
   {
@@ -32,6 +34,7 @@ const CATALOG: GatewayCatalogModel[] = [
     name: "Claude Sonnet 5",
     type: "language",
     owned_by: "anthropic",
+    released: 100,
     tags: ["web-search"],
   },
   // Filtered out: not a language model.
@@ -90,7 +93,7 @@ describe("selectModel box", () => {
     expect(deps.fetchModels).not.toHaveBeenCalled();
   });
 
-  it("offers a searchable picker over the filtered, popularity-sorted catalog", async () => {
+  it("offers a searchable picker over the filtered, release-sorted catalog", async () => {
     let captured: SingleSelectOptions<PrompterValue> | undefined;
     const { prompter } = createSelectPrompter((opts) => {
       captured = opts;
@@ -104,11 +107,11 @@ describe("selectModel box", () => {
     if (result.kind !== "done") return;
     expect(result.state.modelId).toBe("anthropic/claude-sonnet-5");
     expect(captured?.search).toBe(true);
-    // Language + web-search models only, anthropic/openai/google sorted first.
+    // The featured default remains first; the rest are newest release first.
     expect(captured?.options.map((option) => option.value)).toEqual([
       "anthropic/claude-sonnet-5",
-      "openai/gpt-5-mini",
       "zai/glm-4.6",
+      "openai/gpt-5-mini",
     ]);
     // Cursor defaults to the top catalog entry when no default is configured.
     expect(captured?.initialValue).toBe("anthropic/claude-sonnet-5");
@@ -128,6 +131,7 @@ describe("selectModel box", () => {
         name: "Claude Opus 4.8",
         type: "language",
         owned_by: "anthropic",
+        released: 400,
         tags: ["web-search"],
       },
       ...CATALOG,
@@ -141,8 +145,8 @@ describe("selectModel box", () => {
     expect(captured?.options.map((option) => option.value)).toEqual([
       "anthropic/claude-sonnet-5",
       "anthropic/claude-opus-4.8",
-      "openai/gpt-5-mini",
       "zai/glm-4.6",
+      "openai/gpt-5-mini",
     ]);
     // Only the curated entries are featured: the picker's default view shows
     // them alone, and scrolling or search surfaces the rest of the catalog.
@@ -151,6 +155,60 @@ describe("selectModel box", () => {
       "anthropic/claude-opus-4.8",
     ]);
     expect(captured?.initialValue).toBe(DEFAULT_AGENT_MODEL_ID);
+  });
+
+  it("sorts undated models after dated models with deterministic ties", async () => {
+    let captured: SingleSelectOptions<PrompterValue> | undefined;
+    const { prompter } = createSelectPrompter((opts) => {
+      captured = opts;
+      return "acme/newer";
+    });
+    const models: GatewayCatalogModel[] = [
+      {
+        id: "acme/undated",
+        name: "Undated",
+        type: "language",
+        owned_by: "acme",
+        tags: ["web-search"],
+      },
+      {
+        id: "acme/zeta",
+        name: "Same release Zeta",
+        type: "language",
+        owned_by: "acme",
+        released: 100,
+        tags: ["web-search"],
+      },
+      {
+        id: "acme/alpha",
+        name: "Same release Alpha",
+        type: "language",
+        owned_by: "acme",
+        released: 100,
+        tags: ["web-search"],
+      },
+      {
+        id: "acme/newer",
+        name: "Newer",
+        type: "language",
+        owned_by: "acme",
+        released: 200,
+        tags: ["web-search"],
+      },
+    ];
+
+    await runInteractive(
+      [selectModel({ asker: interactiveAsker(prompter), deps: catalogDeps(models) })],
+      createDefaultSetupState(),
+      silentSink,
+    );
+
+    expect(captured?.options.map((option) => option.value)).toEqual([
+      "acme/newer",
+      "acme/alpha",
+      "acme/zeta",
+      "acme/undated",
+    ]);
   });
 
   it("pre-selects the configured default model when present in the catalog", async () => {
