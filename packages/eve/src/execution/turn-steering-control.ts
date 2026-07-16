@@ -1,22 +1,18 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
-
 import type { TurnSteeringPayload } from "#execution/turn-control-protocol.js";
-import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import { createTurnHookInbox } from "#execution/turn-hook-inbox.js";
 
 /** Owns the active turn's durable steering inbox and step-boundary signal. */
 export interface TurnSteeringControl {
   readonly requested: Promise<TurnSteeringPayload>;
   readonly signal: AbortSignal;
   readonly token: string;
-  accept(options?: { readonly rearm?: boolean }): Promise<TurnSteeringPayload>;
+  accept(): Promise<TurnSteeringPayload>;
   dispose(): Promise<void>;
 }
 
 /** Creates the private, single-flight steering inbox for one active turn. */
 export async function createTurnSteeringControl(token: string): Promise<TurnSteeringControl> {
-  const hook = createHook<TurnSteeringPayload>({ token });
-  const iterator = hook[Symbol.asyncIterator]();
-  await claimHookOwnership(hook);
+  const inbox = await createTurnHookInbox<TurnSteeringPayload>({ conflict: "throw", token });
 
   let controller: AbortController;
   let requested: Promise<TurnSteeringPayload>;
@@ -24,12 +20,10 @@ export async function createTurnSteeringControl(token: string): Promise<TurnStee
 
   const arm = (): void => {
     controller = new AbortController();
-    requested = iterator.next().then((next) => {
-      if (next.done) return new Promise<never>(() => {});
+    requested = inbox.next().then((value) => {
       controller.abort();
-      return next.value;
+      return value;
     });
-    requested.catch(() => {});
   };
   arm();
 
@@ -40,16 +34,16 @@ export async function createTurnSteeringControl(token: string): Promise<TurnStee
     get signal() {
       return controller.signal;
     },
-    token: hook.token,
-    async accept(options) {
+    token: inbox.token,
+    async accept() {
       const value = await requested;
-      if (options?.rearm !== false) arm();
+      arm();
       return value;
     },
     async dispose() {
       if (disposed) return;
       disposed = true;
-      await disposeHook(hook);
+      await inbox.dispose();
     },
   };
 }

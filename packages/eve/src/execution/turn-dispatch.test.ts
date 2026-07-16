@@ -4,6 +4,7 @@ import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
+import type { SessionInputQueue } from "#execution/session-input-queue.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 
@@ -40,10 +41,9 @@ describe("dispatchAndAwaitTurn", () => {
     const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
 
     await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook,
+      inputQueue: createInputQueue([], deliveryHook),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -73,10 +73,9 @@ describe("dispatchAndAwaitTurn", () => {
     const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
 
     await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook,
+      inputQueue: createInputQueue([], deliveryHook),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -128,16 +127,16 @@ describe("dispatchAndAwaitTurn", () => {
     );
 
     const bufferedDeliveries: DeliverHookPayload[] = [];
+    const deliveryHook = createDeliveryHook({
+      next: async () => ({
+        done: false,
+        value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
+      }),
+    });
     await dispatchAndAwaitTurn({
-      bufferedDeliveries,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook({
-        next: async () => ({
-          done: false,
-          value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
-        }),
-      }),
+      inputQueue: createInputQueue(bufferedDeliveries, deliveryHook),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -174,10 +173,9 @@ describe("dispatchAndAwaitTurn", () => {
 
     const bufferedDeliveries: DeliverHookPayload[] = [delivery];
     const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook(),
+      inputQueue: createInputQueue(bufferedDeliveries, createDeliveryHook()),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -199,10 +197,9 @@ describe("dispatchAndAwaitTurn", () => {
     ]);
 
     const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook(),
+      inputQueue: createInputQueue([], createDeliveryHook()),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -224,6 +221,37 @@ function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): Sessi
     next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),
     rekey: vi.fn(),
     ...overrides,
+  };
+}
+
+function createInputQueue(
+  buffered: DeliverHookPayload[],
+  deliveryHook: SessionDeliveryHook,
+): SessionInputQueue {
+  return {
+    appendQueued(delivery): void {
+      buffered.push(delivery);
+    },
+    consumeAdmission: () => deliveryHook.consumeNext(),
+    dispose: vi.fn(),
+    nextAdmission: () => deliveryHook.next(),
+    prependReturned(delivery): void {
+      buffered.unshift(delivery);
+    },
+    prependTurnRemainders(deliveries): void {
+      buffered.unshift(...deliveries);
+    },
+    rekey: (token) => deliveryHook.rekey(token),
+    returnSteering(delivery): void {
+      buffered.push({ ...delivery, turnPolicy: "queue" });
+    },
+    takeExplicitResponse(): DeliverHookPayload | undefined {
+      const index = buffered.findIndex((delivery) =>
+        delivery.payloads.some((payload) => (payload.inputResponses?.length ?? 0) > 0),
+      );
+      return index < 0 ? undefined : buffered.splice(index, 1)[0];
+    },
+    takeNextTurn: vi.fn(async () => null),
   };
 }
 

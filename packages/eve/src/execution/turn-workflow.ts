@@ -117,13 +117,13 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     }
 
     while (true) {
-      const forcedSteering = pendingSteering.length === 0 ? undefined : new AbortController();
-      forcedSteering?.abort();
       const result = await turnStep(
         cursor.createStepInput(
           nextStepInput,
           cancellation?.signal,
-          forcedSteering?.signal ?? steering?.signal,
+          steering === undefined
+            ? undefined
+            : { pending: pendingSteering.length > 0, signal: steering.signal },
         ),
       );
 
@@ -139,7 +139,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         // epilogue runs in the driver (`settleCancelledTurnStep`), not as
         // a step in this run, where queued cancel wakes could re-dispatch
         // it.
-        await settleSteeringAtTerminal(steering, cursor, bufferedDeliveries, pendingSteering);
+        await settleSteeringAtTerminal(steering, bufferedDeliveries, pendingSteering);
         await cancelDescendantTurnsStep({
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
@@ -154,7 +154,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       }
 
       if (result.action === "done") {
-        await settleSteeringAtTerminal(steering, cursor, bufferedDeliveries, pendingSteering);
+        await settleSteeringAtTerminal(steering, bufferedDeliveries, pendingSteering);
         await cancellation?.dispose();
         await cursor.finish(
           result,
@@ -228,7 +228,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
 
-        await settleSteeringAtTerminal(steering, cursor, bufferedDeliveries, pendingSteering);
+        await settleSteeringAtTerminal(steering, bufferedDeliveries, pendingSteering);
         await cancellation?.dispose();
         await cursor.finish(
           result,
@@ -408,21 +408,12 @@ function takePendingSteering(deliveries: DeliverHookPayload[]): DeliverHookPaylo
 
 async function settleSteeringAtTerminal(
   steering: TurnSteeringControl | undefined,
-  cursor: TurnExecutionCursor,
   bufferedDeliveries: DeliverHookPayload[],
   pendingSteering: DeliverHookPayload[],
 ): Promise<void> {
-  if (steering !== undefined) {
-    await steering.dispose();
-    await Promise.resolve();
-    if (steering.signal.aborted) {
-      const accepted = await steering.accept({ rearm: false });
-      await cursor.send({ kind: "turn-steering-accepted", requestId: accepted.requestId });
-      pendingSteering.push(accepted.delivery);
-    }
-  }
+  await steering?.dispose();
   if (pendingSteering.length > 0) {
-    bufferedDeliveries.push({ ...takePendingSteering(pendingSteering), turnPolicy: "queue" });
+    bufferedDeliveries.push(takePendingSteering(pendingSteering));
   }
 }
 

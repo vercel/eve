@@ -1290,6 +1290,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   return runStep;
 }
 
+function hasPendingSteering(steering: ToolLoopHarnessConfig["steering"]): boolean {
+  return steering?.pending === true || steering?.signal?.aborted === true;
+}
+
 function extractTokenUsageDelta(input: {
   readonly costUsd: number | undefined;
   readonly usage: HarnessStepResult["usage"] | undefined;
@@ -1925,7 +1929,7 @@ async function handleStepResult(input: {
         }),
       );
 
-      if (config.mode === "conversation" && config.steerSignal?.aborted !== true) {
+      if (config.mode === "conversation" && !hasPendingSteering(config.steering)) {
         emissionState = await emitTurnEpilogue(
           emit,
           emissionState,
@@ -1937,7 +1941,7 @@ async function handleStepResult(input: {
     }
 
     return {
-      next: config.steerSignal?.aborted === true ? runStep : null,
+      next: hasPendingSteering(config.steering) ? runStep : null,
       session: parkedSession,
     };
   }
@@ -1998,7 +2002,7 @@ async function handleStepResult(input: {
     (continuationMessages.at(-1)?.role === "tool" ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasDeferredStepInput(nextSession) ||
-      config.steerSignal?.aborted === true);
+      hasPendingSteering(config.steering));
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);

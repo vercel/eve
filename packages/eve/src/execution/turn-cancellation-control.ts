@@ -1,10 +1,8 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
-
-import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   sessionCancelHookToken,
   type TurnCancelPayload,
 } from "#execution/turn-cancellation-token.js";
+import { createTurnHookInbox, type TurnHookInbox } from "#execution/turn-hook-inbox.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
 /**
@@ -35,53 +33,36 @@ export async function createTurnCancellationControl(input: {
   readonly expectedTurnId: string;
   readonly sessionId: string;
 }): Promise<TurnCancellationControl | undefined> {
-  const hook = createHook<TurnCancelPayload>({
+  const inbox = await createTurnHookInbox<TurnCancelPayload>({
+    conflict: "return-undefined",
     token: sessionCancelHookToken(input.sessionId),
   });
-  // Hook promises and iterators share one durable cursor. Create the
-  // iterator before claiming so conflict replay is consumed by
-  // getConflict(), not a later iterator read.
-  const iterator = hook[Symbol.asyncIterator]();
-
-  try {
-    await claimHookOwnership(hook);
-  } catch (error) {
-    if (isHookConflictError(error)) return undefined;
-    throw error;
-  }
+  if (inbox === undefined) return undefined;
 
   const controller = new AbortController();
   // The durable abort fires in the read's continuation so its call site
   // is reached deterministically on every replay.
-  const requested = consumeMatchingCancel(iterator, input.expectedTurnId).then(() => {
+  const requested = consumeMatchingCancel(inbox, input.expectedTurnId).then(() => {
     controller.abort(new TurnCancelledError());
     return "cancel" as const;
   });
 
-  let disposed = false;
   return {
     signal: controller.signal,
     requested,
-    async dispose(): Promise<void> {
-      if (disposed) return;
-      disposed = true;
-      // Never `iterator.return()`: it would await the pending durable
-      // read forever, leaving the run `running` and its hooks unswept.
-      await disposeHook(hook);
-    },
+    dispose: () => inbox.dispose(),
   };
 }
 
 // Mismatched turn guards are consumed as no-ops; each read is durable,
 // so the skip sequence replays deterministically.
 async function consumeMatchingCancel(
-  iterator: AsyncIterator<TurnCancelPayload>,
+  inbox: TurnHookInbox<TurnCancelPayload>,
   expectedTurnId: string,
 ): Promise<void> {
   while (true) {
-    const next = await iterator.next();
-    if (next.done) return await new Promise<never>(() => {});
-    if (matchesActiveTurn(next.value, expectedTurnId)) return;
+    const payload = await inbox.next();
+    if (matchesActiveTurn(payload, expectedTurnId)) return;
   }
 }
 

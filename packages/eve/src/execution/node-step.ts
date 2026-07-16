@@ -4,7 +4,7 @@ import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
+import type { HandleEventFn, HarnessToolMap, StepFn, TurnSteeringState } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
@@ -43,8 +43,8 @@ export type CreateRuntime = (config: {
 export interface CreateExecutionNodeStepInput {
   /** Cancellation signal forwarded to the tool-loop harness. */
   readonly abortSignal?: AbortSignal;
-  /** Signals replacement input waiting at the next safe harness boundary. */
-  readonly steerSignal?: AbortSignal;
+  /** Prevents settlement while replacement input is waiting. */
+  readonly steering?: TurnSteeringState;
   /**
    * Session-level capabilities propagated from the runtime. The
    * harness passes this through to `buildToolSet` so `ask_question`
@@ -93,7 +93,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
-    steerSignal: input.steerSignal,
+    steering: input.steering,
     tools,
   });
 }

@@ -1,34 +1,37 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { forwardTurnSteeringStep } from "#execution/forward-turn-steering-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
+import type { SessionInputQueue } from "#execution/session-input-queue.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
 type DeliveryRequest = Extract<TurnControlPayload, { readonly kind: "turn-delivery-request" }>;
 
+interface OutstandingDelivery {
+  readonly delivery: DeliverHookPayload;
+  readonly requestId: string;
+}
+
 /** Owns one turn's driver-side control hook and public-delivery relay state. */
 export class TurnControlReceiver {
-  private readonly bufferedDeliveries: DeliverHookPayload[];
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
-  private readonly deliveryHook: SessionDeliveryHook;
-  private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
+  private readonly inputQueue: SessionInputQueue;
+  private deliveryRequest: DeliveryRequest | undefined;
+  private outstandingDelivery: OutstandingDelivery | undefined;
+  private outstandingSteering: OutstandingDelivery | undefined;
+  private pendingControl: Promise<IteratorResult<TurnControlPayload>> | undefined;
   private steeringSequence = 0;
+  private steeringToken: string | undefined;
 
-  constructor(input: {
-    readonly bufferedDeliveries: DeliverHookPayload[];
-    readonly deliveryHook: SessionDeliveryHook;
-    readonly token: string;
-  }) {
-    this.bufferedDeliveries = input.bufferedDeliveries;
+  constructor(input: { readonly inputQueue: SessionInputQueue; readonly token: string }) {
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
-    this.deliveryHook = input.deliveryHook;
+    this.inputQueue = input.inputQueue;
   }
 
   /** Token passed to the turn workflow so it can publish control messages. */
@@ -42,218 +45,34 @@ export class TurnControlReceiver {
     await disposeHook(this.control);
   }
 
-  /** Services control messages until the active turn returns its terminal driver action. */
+  /** Services the active turn until it returns one terminal driver action. */
   async waitForAction(): Promise<NextDriverAction> {
     while (true) {
-      const payload = await this.nextControl(
-        "Turn control hook closed before delivering a result.",
-      );
-      if (payload.kind === "turn-steering-ready") {
-        return await this.waitForSteerableAction(payload.steeringToken);
-      }
-
-      const terminal = await this.handleControl(payload);
-      if (terminal !== undefined) return terminal;
-    }
-  }
-
-  private async waitForSteerableAction(steeringToken: string): Promise<NextDriverAction> {
-    while (true) {
-      const winner = await Promise.race([
-        this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
-        this.deliveryHook.next().then((value) => ({ kind: "delivery" as const, value })),
-      ]);
-
-      if (winner.kind === "delivery") {
-        if (winner.value.done) {
-          throw new Error("Session delivery hook closed while a turn was active.");
-        }
-        const value = winner.value.value;
-        if (value.kind !== "deliver") {
-          this.deliveryHook.consumeNext();
-          continue;
-        }
-        if (value.turnPolicy !== "steer") {
-          this.deliveryHook.consumeNext();
-          this.bufferedDeliveries.push(value);
-          continue;
-        }
-
-        const terminal = await this.forwardSteering(value, steeringToken);
+      const event = await this.nextEvent();
+      if (event.kind === "control") {
+        const terminal = await this.handleControl(event.payload);
         if (terminal !== undefined) return terminal;
-        continue;
+      } else {
+        await this.handleAdmission(event.result);
       }
-
-      this.consumeControl();
-      if (winner.value.done) {
-        throw new Error("Turn control hook closed before delivering a result.");
-      }
-      const terminal = await this.handleControl(winner.value.value, steeringToken);
-      if (terminal !== undefined) return terminal;
     }
   }
 
-  private async handleControl(
-    payload: TurnControlPayload,
-    steeringToken?: string,
-  ): Promise<NextDriverAction | undefined> {
-    const terminal = this.readTerminalControl(payload);
-    if (terminal !== undefined) return terminal;
-
-    if (payload.kind === "turn-continuation-token") {
-      await this.deliveryHook.rekey(payload.continuationToken);
-      return undefined;
+  private canAdmitDelivery(): boolean {
+    if (this.outstandingDelivery !== undefined || this.outstandingSteering !== undefined) {
+      return false;
     }
-
-    if (payload.kind === "turn-delivery-request") {
-      return await this.serviceDeliveryRequest(payload, steeringToken);
-    }
-    return undefined;
-  }
-
-  private bufferTurnDeliveries(
-    payload: Extract<TurnControlPayload, { readonly kind: "turn-result" }>,
-  ): void {
-    if (payload.bufferedDeliveries !== undefined) {
-      this.bufferedDeliveries.unshift(...payload.bufferedDeliveries);
-    }
+    return this.steeringToken !== undefined || this.deliveryRequest !== undefined;
   }
 
   private consumeControl(): void {
-    this.pendingControl = null;
+    this.pendingControl = undefined;
   }
 
-  private getControlPromise(): Promise<IteratorResult<TurnControlPayload>> {
-    this.pendingControl ??= this.controlIterator.next();
-    return this.pendingControl;
-  }
+  private async forwardDelivery(delivery: DeliverHookPayload): Promise<void> {
+    const request = this.deliveryRequest;
+    if (request === undefined) return;
 
-  private async nextControl(
-    onClosed: string,
-  ): Promise<
-    Exclude<TurnControlPayload, { readonly kind: "turn-error" | "turn-continuation-token" }>
-  > {
-    while (true) {
-      const next = await this.getControlPromise();
-      this.consumeControl();
-      if (next.done) throw new Error(onClosed);
-      const payload = next.value;
-      if (payload.kind === "turn-error") throw rebuildSerializableError(payload.error);
-      if (payload.kind === "turn-continuation-token") {
-        await this.deliveryHook.rekey(payload.continuationToken);
-        continue;
-      }
-      return payload;
-    }
-  }
-
-  private readTerminalControl(payload: TurnControlPayload): NextDriverAction | undefined {
-    if (payload.kind === "turn-error") throw rebuildSerializableError(payload.error);
-    if (payload.kind !== "turn-result") return undefined;
-    this.bufferTurnDeliveries(payload);
-    return payload.action;
-  }
-
-  private async forwardSteering(
-    delivery: DeliverHookPayload,
-    steeringToken: string,
-  ): Promise<NextDriverAction | undefined> {
-    const requestId = `${this.control.token}:steer:${String(this.steeringSequence++)}`;
-    try {
-      await forwardTurnSteeringStep({
-        payload: { delivery, requestId },
-        steeringToken,
-      });
-    } catch (error) {
-      if (!(error instanceof Error && error.name === "HookNotFoundError")) throw error;
-      this.deliveryHook.consumeNext();
-      this.bufferedDeliveries.push({ ...delivery, turnPolicy: "queue" });
-      return undefined;
-    }
-
-    this.deliveryHook.consumeNext();
-    return await this.awaitForwardedSteering(requestId, delivery, steeringToken);
-  }
-
-  private async awaitForwardedSteering(
-    requestId: string,
-    outstanding: DeliverHookPayload,
-    steeringToken: string,
-  ): Promise<NextDriverAction | undefined> {
-    while (true) {
-      const payload = await this.nextControl(
-        "Turn control hook closed before resolving a steering delivery.",
-      );
-      if (payload.kind === "turn-steering-accepted" && payload.requestId === requestId) {
-        return undefined;
-      }
-      if (payload.kind === "turn-result") {
-        this.bufferedDeliveries.push({ ...outstanding, turnPolicy: "queue" });
-      }
-      const terminal = await this.handleControl(payload, steeringToken);
-      if (terminal !== undefined) return terminal;
-    }
-  }
-
-  private async serviceDeliveryRequest(
-    request: DeliveryRequest,
-    steeringToken?: string,
-  ): Promise<NextDriverAction | undefined> {
-    await this.deliveryHook.rekey(request.continuationToken);
-
-    // Only an explicitly addressed response may cross a request that was
-    // raised after the delivery was admitted. Freeform input already buffered
-    // for `queue` belongs to the next parent turn; input arriving after this
-    // request is armed may answer it below.
-    let delivery = takeExplicitInputResponse(this.bufferedDeliveries);
-    while (delivery === undefined) {
-      const winner = await Promise.race([
-        this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
-        this.deliveryHook.next().then((value) => ({ kind: "delivery" as const, value })),
-      ]);
-
-      if (winner.kind === "control") {
-        this.consumeControl();
-        if (winner.value.done) {
-          throw new Error("Turn control hook closed during a delivery request.");
-        }
-        if (winner.value.value.kind === "turn-continuation-token") {
-          await this.deliveryHook.rekey(winner.value.value.continuationToken);
-          continue;
-        }
-        const terminal = this.readTerminalControl(winner.value.value);
-        if (terminal !== undefined) return terminal;
-        if (
-          winner.value.value.kind === "turn-delivery-cancelled" &&
-          winner.value.value.requestId === request.requestId
-        ) {
-          return undefined;
-        }
-        continue;
-      }
-
-      if (winner.value.done) {
-        throw new Error("Session delivery hook closed during a turn delivery request.");
-      }
-
-      const value = winner.value.value;
-      if (value.kind !== "deliver") {
-        this.deliveryHook.consumeNext();
-        continue;
-      }
-      if (value.turnPolicy === "steer" && steeringToken !== undefined) {
-        const terminal = await this.forwardSteering(value, steeringToken);
-        if (terminal !== undefined) return terminal;
-        continue;
-      }
-
-      this.deliveryHook.consumeNext();
-      delivery = value;
-    }
-
-    // Forwarding is provisional until the turn acknowledges it. If the inbox is
-    // already gone (the turn ended or was replaced), the turn's terminal or
-    // cancellation still re-buffers the delivery for the next parent turn.
     try {
       await forwardTurnDeliveryStep({
         inboxToken: request.inboxToken,
@@ -267,50 +86,166 @@ export class TurnControlReceiver {
       if (!(error instanceof Error && error.name === "HookNotFoundError")) throw error;
     }
 
-    return await this.awaitForwardedDelivery(request.requestId, delivery);
+    this.outstandingDelivery = { delivery, requestId: request.requestId };
   }
 
-  /**
-   * Waits for the active turn to resolve a forwarded delivery. The turn either
-   * accepts it (consumed) or releases it on cancellation or termination, in
-   * which case the delivery returns to the buffer ahead of the turn's own
-   * remainders so the next parent turn still observes it in arrival order.
-   */
-  private async awaitForwardedDelivery(
-    requestId: string,
-    outstanding: DeliverHookPayload,
-  ): Promise<NextDriverAction | undefined> {
-    while (true) {
-      const payload = await this.nextControl(
-        "Turn control hook closed before resolving a forwarded delivery.",
-      );
-
-      if (payload.kind === "turn-delivery-accepted") {
-        if (payload.requestId === requestId) return undefined;
-        continue;
-      }
-
-      if (payload.kind === "turn-delivery-cancelled" && payload.requestId === requestId) {
-        this.bufferedDeliveries.unshift(outstanding);
-        return undefined;
-      }
-
-      if (payload.kind === "turn-result") {
-        this.bufferedDeliveries.unshift(outstanding);
-      }
-
-      const terminal = this.readTerminalControl(payload);
-      if (terminal !== undefined) return terminal;
+  private async forwardBufferedResponse(): Promise<void> {
+    if (
+      this.deliveryRequest === undefined ||
+      this.outstandingDelivery !== undefined ||
+      this.outstandingSteering !== undefined
+    ) {
+      return;
     }
-  }
-}
 
-function takeExplicitInputResponse(
-  deliveries: DeliverHookPayload[],
-): DeliverHookPayload | undefined {
-  const index = deliveries.findIndex((delivery) =>
-    delivery.payloads.some((payload) => (payload.inputResponses?.length ?? 0) > 0),
-  );
-  if (index < 0) return undefined;
-  return deliveries.splice(index, 1)[0];
+    const buffered = this.inputQueue.takeExplicitResponse();
+    if (buffered !== undefined) await this.forwardDelivery(buffered);
+  }
+
+  private async forwardSteering(delivery: DeliverHookPayload): Promise<void> {
+    const steeringToken = this.steeringToken;
+    if (steeringToken === undefined) return;
+
+    const requestId = `${this.control.token}:steer:${String(this.steeringSequence++)}`;
+    try {
+      await forwardTurnSteeringStep({
+        payload: { delivery, requestId },
+        steeringToken,
+      });
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "HookNotFoundError")) throw error;
+      this.inputQueue.consumeAdmission();
+      this.inputQueue.returnSteering(delivery);
+      return;
+    }
+
+    this.inputQueue.consumeAdmission();
+    this.outstandingSteering = { delivery, requestId };
+  }
+
+  private getControlPromise(): Promise<IteratorResult<TurnControlPayload>> {
+    this.pendingControl ??= this.controlIterator.next();
+    return this.pendingControl;
+  }
+
+  private async handleAdmission(result: IteratorResult<HookPayload>): Promise<void> {
+    if (result.done) {
+      throw new Error("Session delivery hook closed while a turn was active.");
+    }
+
+    const delivery = result.value;
+    if (delivery.kind !== "deliver") {
+      this.inputQueue.consumeAdmission();
+      return;
+    }
+
+    if (delivery.turnPolicy === "steer" && this.steeringToken !== undefined) {
+      await this.forwardSteering(delivery);
+      return;
+    }
+
+    if (this.deliveryRequest !== undefined) {
+      this.inputQueue.consumeAdmission();
+      await this.forwardDelivery(delivery);
+      return;
+    }
+
+    this.inputQueue.consumeAdmission();
+    this.inputQueue.appendQueued(delivery);
+  }
+
+  private async handleControl(payload: TurnControlPayload): Promise<NextDriverAction | undefined> {
+    if (payload.kind === "turn-error") {
+      throw rebuildSerializableError(payload.error);
+    }
+
+    if (payload.kind === "turn-result") {
+      if (this.outstandingDelivery !== undefined) {
+        this.inputQueue.prependReturned(this.outstandingDelivery.delivery);
+      }
+      if (this.outstandingSteering !== undefined) {
+        this.inputQueue.returnSteering(this.outstandingSteering.delivery);
+      }
+      if (payload.bufferedDeliveries !== undefined) {
+        this.inputQueue.prependTurnRemainders(payload.bufferedDeliveries);
+      }
+      this.deliveryRequest = undefined;
+      this.outstandingDelivery = undefined;
+      this.outstandingSteering = undefined;
+      return payload.action;
+    }
+
+    if (payload.kind === "turn-continuation-token") {
+      await this.inputQueue.rekey(payload.continuationToken);
+      return undefined;
+    }
+
+    if (payload.kind === "turn-steering-ready") {
+      this.steeringToken = payload.steeringToken;
+      return undefined;
+    }
+
+    if (payload.kind === "turn-steering-accepted") {
+      if (payload.requestId === this.outstandingSteering?.requestId) {
+        this.outstandingSteering = undefined;
+        await this.forwardBufferedResponse();
+      }
+      return undefined;
+    }
+
+    if (payload.kind === "turn-delivery-request") {
+      this.deliveryRequest = payload;
+      await this.inputQueue.rekey(payload.continuationToken);
+      await this.forwardBufferedResponse();
+      return undefined;
+    }
+
+    if (payload.kind === "turn-delivery-accepted") {
+      if (payload.requestId === this.outstandingDelivery?.requestId) {
+        this.deliveryRequest = undefined;
+        this.outstandingDelivery = undefined;
+      }
+      return undefined;
+    }
+
+    if (
+      payload.kind === "turn-delivery-cancelled" &&
+      payload.requestId === this.deliveryRequest?.requestId
+    ) {
+      if (payload.requestId === this.outstandingDelivery?.requestId) {
+        this.inputQueue.prependReturned(this.outstandingDelivery.delivery);
+        this.outstandingDelivery = undefined;
+      }
+      this.deliveryRequest = undefined;
+    }
+
+    return undefined;
+  }
+
+  private async nextEvent(): Promise<
+    | { readonly kind: "control"; readonly payload: TurnControlPayload }
+    | { readonly kind: "delivery"; readonly result: IteratorResult<HookPayload> }
+  > {
+    const control = this.getControlPromise().then((result) => ({
+      kind: "control" as const,
+      result,
+    }));
+    const winner = this.canAdmitDelivery()
+      ? await Promise.race([
+          control,
+          this.inputQueue.nextAdmission().then((result) => ({
+            kind: "delivery" as const,
+            result,
+          })),
+        ])
+      : await control;
+
+    if (winner.kind === "delivery") return winner;
+
+    this.consumeControl();
+    if (winner.result.done) {
+      throw new Error("Turn control hook closed before delivering a result.");
+    }
+    return { kind: "control", payload: winner.result.value };
+  }
 }

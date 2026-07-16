@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/483
 status: implemented
-last_updated: "2026-07-15"
+last_updated: "2026-07-16"
 ---
 
 # Active-turn control for channel authors
@@ -78,7 +78,7 @@ cancelling a newer turn.
 
 ```text
 public continuation hook
-  ├─ queue ───────────────► driver buffer ─────► next turn
+  ├─ queue ───────────────► session input queue ─────► next turn
   ├─ steer ─► private turn inbox ─► next safe step in active turn
   └─ resolve command ─────► session id ────────► cancel hook
 ```
@@ -86,6 +86,19 @@ public continuation hook
 The active turn acknowledges each forwarded steering delivery. This handshake
 is the ownership boundary that prevents completion, re-key, and hook-disposal
 races from dropping input or creating a second session.
+
+Cancellation and steering intentionally use separate hooks. Cancellation is
+session-addressed, one-shot, and claimed only when the turn can settle as
+waiting. Steering is repeatable and uses a unique per-turn token; its
+`turn-steering-ready` message proves that the active turn owns that token. The
+two controls share low-level hook mechanics but retain separate hard-cancel and
+soft-steering state.
+
+The session input queue owns live admission, buffering, ordering, and the sole
+transition from steer policy back to queue policy. The driver retains an
+unacknowledged forward; the turn owns only acknowledged steering. Therefore a
+terminal race needs no timing-based drain: the side that still owns the
+delivery returns it to the queue exactly once.
 
 ## HITL rules
 

@@ -186,7 +186,10 @@ describe("turnWorkflow", () => {
 
     await turnWorkflow(input);
 
-    expect(vi.mocked(turnStep).mock.calls[0]?.[0].steerSignal?.aborted).toBe(true);
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].steering).toMatchObject({
+      pending: false,
+      signal: expect.objectContaining({ aborted: true }),
+    });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual(steeringDelivery);
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       kind: "turn-steering-ready",
@@ -196,6 +199,63 @@ describe("turnWorkflow", () => {
       kind: "turn-steering-accepted",
       requestId: "steer-1",
     });
+  });
+
+  it("does not acknowledge steering that commits during terminal teardown", async () => {
+    const activeState = createSessionState({
+      emissionState: { sequence: 0, sessionStarted: true, stepIndex: 1, turnId: "turn_0" },
+    });
+    const steeringDelivery = {
+      kind: "deliver",
+      payloads: [{ message: "change course" }],
+      turnPolicy: "steer",
+    } as const;
+    const inbox = createInboxMock([]);
+    let resolveSteering:
+      | ((value: IteratorResult<{ delivery: typeof steeringDelivery; requestId: string }>) => void)
+      | undefined;
+    const pendingSteering = new Promise<
+      IteratorResult<{ delivery: typeof steeringDelivery; requestId: string }>
+    >((resolve) => {
+      resolveSteering = resolve;
+    });
+    const steeringHook = {
+      token: "turn-token:steer",
+      getConflict: vi.fn(async () => null),
+      dispose: vi.fn(async () => {
+        resolveSteering?.({
+          done: false,
+          value: { delivery: steeringDelivery, requestId: "steer-raced-terminal" },
+        });
+      }),
+      [Symbol.asyncIterator]() {
+        return { next: vi.fn(() => pendingSteering) };
+      },
+    };
+    createHookMock.mockImplementation((input: { token: string }) =>
+      input.token.endsWith(":steer") ? steeringHook : inbox.hook,
+    );
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "finished first",
+      serializedContext: { state: "done" },
+      sessionState: activeState,
+    });
+    const { input } = createInput({
+      driverCapabilities: { steering: true, turnInbox: true },
+      sessionState: activeState,
+    });
+
+    await turnWorkflow(input);
+
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-steering-accepted" }),
+    );
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ bufferedDeliveries: undefined, kind: "turn-result" }),
+    );
   });
 
   it("parks when an authorization is pending", async () => {

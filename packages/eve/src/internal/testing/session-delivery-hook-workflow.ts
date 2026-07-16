@@ -1,8 +1,5 @@
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
-import {
-  createSessionDeliveryHook,
-  type SessionDeliveryHook,
-} from "#execution/session-delivery-hook.js";
+import { createSessionInputQueue, type SessionInputQueue } from "#execution/session-input-queue.js";
 
 export async function sessionDeliveryHookWorkflow(input: {
   readonly nextToken: string;
@@ -10,39 +7,34 @@ export async function sessionDeliveryHookWorkflow(input: {
 }): Promise<string[]> {
   "use workflow";
 
-  const bufferedDeliveries: DeliverHookPayload[] = [];
-  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+  const inputQueue = createSessionInputQueue();
 
   try {
-    await deliveryHook.rekey(input.token);
-    const pendingDelivery = deliveryHook.next();
-    await deliveryHook.rekey(input.nextToken);
+    await inputQueue.rekey(input.token);
+    const pendingDelivery = inputQueue.nextAdmission();
+    await inputQueue.rekey(input.nextToken);
 
     const messages: string[] = [];
-    collectMessages(await pendingDelivery, deliveryHook, messages);
+    collectMessages(await pendingDelivery, inputQueue, messages);
 
     while (messages.length < 2) {
-      const buffered = bufferedDeliveries.shift();
-      if (buffered !== undefined) {
-        appendMessages(buffered, messages);
-        continue;
-      }
-
-      collectMessages(await deliveryHook.next(), deliveryHook, messages);
+      const next = await inputQueue.takeNextTurn();
+      if (next === null) break;
+      appendMessages(next, messages);
     }
 
     return messages;
   } finally {
-    await deliveryHook.dispose();
+    await inputQueue.dispose();
   }
 }
 
 function collectMessages(
   result: IteratorResult<HookPayload>,
-  deliveryHook: SessionDeliveryHook,
+  inputQueue: SessionInputQueue,
   messages: string[],
 ): void {
-  deliveryHook.consumeNext();
+  inputQueue.consumeAdmission();
   if (!result.done && result.value.kind === "deliver") {
     appendMessages(result.value, messages);
   }

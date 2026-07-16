@@ -40,7 +40,7 @@ export interface SessionDeliveryHookHandle extends SessionDeliveryHook {
  * to `hook_disposed` and receives `HookNotFoundError` from the Workflow SDK.
  */
 export function createSessionDeliveryHook(
-  bufferedDeliveries: DeliverHookPayload[],
+  onBufferedDelivery: (delivery: DeliverHookPayload) => void,
 ): SessionDeliveryHookHandle {
   let active: SessionDeliveryHookState | undefined;
   const retired: SessionDeliveryHookState[] = [];
@@ -114,7 +114,7 @@ export function createSessionDeliveryHook(
       if (read.result.done) {
         read.state.closed = true;
       } else if (read.result.value.kind === "deliver") {
-        bufferedDeliveries.push(read.result.value);
+        onBufferedDelivery(read.result.value);
       }
 
       arm(read.state);

@@ -1,13 +1,6 @@
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
-import type {
-  DeliverHookPayload,
-  DeliverPayload,
-  HookPayload,
-  RunInput,
-  SessionCapabilities,
-} from "#channel/types.js";
-import { coalesceDeliveries } from "#harness/messages.js";
+import type { DeliverPayload, HookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
@@ -26,10 +19,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import {
-  createSessionDeliveryHook,
-  type SessionDeliveryHook,
-} from "#execution/session-delivery-hook.js";
+import { createSessionInputQueue } from "#execution/session-input-queue.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
@@ -165,8 +155,7 @@ async function runDriverLoop(input: {
   const nextTurnControlToken = (): string =>
     `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
 
-  const bufferedDeliveries: DeliverHookPayload[] = [];
-  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+  const inputQueue = createSessionInputQueue();
 
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
@@ -176,11 +165,10 @@ async function runDriverLoop(input: {
     readonly sessionState: DurableSessionState;
   }): Promise<NextDriverAction> => {
     const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
       capabilities: input.capabilities,
       controlToken: nextTurnControlToken(),
       delivery: args.delivery,
-      deliveryHook,
+      inputQueue,
       mode: input.mode,
       parentWritable: input.driverWritable,
       serializedContext: args.serializedContext,
@@ -193,7 +181,7 @@ async function runDriverLoop(input: {
 
   try {
     if (input.sessionState.continuationToken) {
-      await deliveryHook.rekey(input.sessionState.continuationToken);
+      await inputQueue.rekey(input.sessionState.continuationToken);
     }
 
     let action: NextDriverAction = await runTurn({
@@ -241,7 +229,7 @@ async function runDriverLoop(input: {
 
       // Rekey to the parked turn's continuation token before awaiting the next
       // delivery — covers both the first turn's anchor and any later rekey.
-      await deliveryHook.rekey(action.sessionState.continuationToken);
+      await inputQueue.rekey(action.sessionState.continuationToken);
 
       if (action.authorizationNames && action.authorizationNames.length > 0) {
         const expected = action.authorizationNames.length;
@@ -266,10 +254,7 @@ async function runDriverLoop(input: {
         continue;
       }
 
-      const nextDeliver = await waitForNextDeliver({
-        bufferedDeliveries,
-        deliveryHook,
-      });
+      const nextDeliver = await inputQueue.takeNextTurn();
 
       if (nextDeliver === null) {
         return { output: "" };
@@ -300,7 +285,7 @@ async function runDriverLoop(input: {
     }
   } finally {
     await disposeSettledTurnControl?.();
-    await deliveryHook.dispose();
+    await inputQueue.dispose();
     // Dispose without closing the iterator: a session cancelled while
     // awaiting authorization can leave a durable read in flight, and an
     // async iterator only honors `return()` after that read settles.
@@ -330,57 +315,4 @@ async function finalizeDone(input: {
     usage: failed ? undefined : input.action.usage,
   });
   return { output };
-}
-
-async function waitForNextDeliver(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly deliveryHook: SessionDeliveryHook;
-}): Promise<DeliverHookPayload | null> {
-  if (input.bufferedDeliveries.length > 0) {
-    return coalesceDeliveries(input.bufferedDeliveries.splice(0));
-  }
-
-  while (true) {
-    const first = await input.deliveryHook.next();
-    input.deliveryHook.consumeNext();
-
-    if (first.done) {
-      return null;
-    }
-
-    if (first.value.kind !== "deliver") {
-      continue;
-    }
-
-    let coalesced = first.value;
-
-    while (true) {
-      const ready = await takeReadyPayload(input.deliveryHook.next());
-
-      if (ready === NO_READY_MESSAGE) {
-        break;
-      }
-
-      input.deliveryHook.consumeNext();
-
-      if (ready.done) {
-        break;
-      }
-
-      if (ready.value.kind !== "deliver") {
-        continue;
-      }
-
-      coalesced = coalesceDeliveries([coalesced, ready.value]);
-    }
-
-    return coalesced;
-  }
-}
-
-const NO_READY_MESSAGE = Symbol("no-ready-message");
-
-async function takeReadyPayload<T>(promise: Promise<T>): Promise<T | typeof NO_READY_MESSAGE> {
-  await Promise.resolve();
-  return await Promise.race([promise, Promise.resolve(NO_READY_MESSAGE)]);
 }

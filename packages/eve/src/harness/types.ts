@@ -214,14 +214,22 @@ export type HandleEventFn = (
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
+/** Steering state observed by one active harness step. */
+export interface TurnSteeringState {
+  /** True when replacement input was already accepted before the step began. */
+  readonly pending: boolean;
+  /** Aborts when replacement input arrives while the step is running. */
+  readonly signal?: AbortSignal;
+}
+
 /**
  * Dependencies injected into the tool-loop harness at construction time.
  */
 export interface ToolLoopHarnessConfig {
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
-  /** Signals that replacement input must be consumed before the turn settles. */
-  readonly steerSignal?: AbortSignal;
+  /** Prevents settlement while replacement input is waiting. */
+  readonly steering?: TurnSteeringState;
   /**
    * Session-level capabilities. The harness reads
    * {@link SessionCapabilities.requestInput} when assembling the

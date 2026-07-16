@@ -4,6 +4,7 @@ import { sendTurnControlStep } from "#execution/turn-control-protocol.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { TurnSteeringState } from "#harness/types.js";
 
 interface TurnTransition {
   readonly serializedContext?: Record<string, unknown>;
@@ -70,7 +71,7 @@ export class TurnExecutionCursor {
   createStepInput(
     input: HookPayload | undefined,
     abortSignal?: AbortSignal,
-    steerSignal?: AbortSignal,
+    steering?: TurnSteeringState,
   ): TurnStepInput {
     return {
       abortSignal,
@@ -78,7 +79,7 @@ export class TurnExecutionCursor {
       parentWritable: this.parentWritable,
       serializedContext: this.currentSerializedContext,
       sessionState: this.currentSessionState,
-      steerSignal,
+      steering,
     };
   }
 

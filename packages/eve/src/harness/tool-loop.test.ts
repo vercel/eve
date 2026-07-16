@@ -580,7 +580,9 @@ describe("createToolLoopHarness", () => {
     controller.abort();
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, { steerSignal: controller.signal }),
+      createTestConfig("conversation", emit, {
+        steering: { pending: false, signal: controller.signal },
+      }),
     );
     const session = setHarnessEmissionState(createTestSession(), {
       sequence: 0,
@@ -602,6 +604,31 @@ describe("createToolLoopHarness", () => {
     });
     expect(events.filter((event) => event.type === "message.received")).toHaveLength(1);
     expect(events.some((event) => event.type === "turn.started")).toBe(false);
+    expect(events.some((event) => event.type === "turn.completed")).toBe(false);
+  });
+
+  it("continues when steering was already pending before the step", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "old direction", role: "assistant" }] },
+      text: "old direction",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { steering: { pending: true } }),
+    );
+    const session = setHarnessEmissionState(createTestSession(), {
+      sequence: 0,
+      sessionStarted: true,
+      stepIndex: 1,
+      turnId: "turn_0",
+    });
+
+    const result = await runStep(session, { message: "runtime result" });
+
+    expect(typeof result.next).toBe("function");
     expect(events.some((event) => event.type === "turn.completed")).toBe(false);
   });
 

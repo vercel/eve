@@ -13,6 +13,7 @@
 import type { HookPayload, SessionCapabilities } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { TurnSteeringState } from "#harness/types.js";
 
 import { runMigrationChain, type VersionMigration } from "./chain.js";
 import { turnWorkflowInputV0ToV1 } from "./turn-workflow-v0-to-v1.js";
@@ -22,8 +23,8 @@ export const TURN_WORKFLOW_INPUT_VERSION = 1;
 export interface TurnStepInput {
   /** Cancellation signal forwarded into the turn step. */
   readonly abortSignal?: AbortSignal;
-  /** Live signal set when replacement input is waiting at the next boundary. */
-  readonly steerSignal?: AbortSignal;
+  /** Replacement-input state observed at the next safe boundary. */
+  readonly steering?: TurnSteeringState;
   readonly input: HookPayload | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;

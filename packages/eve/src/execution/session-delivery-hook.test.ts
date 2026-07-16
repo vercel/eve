@@ -23,7 +23,7 @@ describe("createSessionDeliveryHook", () => {
       token: "replacement",
     });
     installHooks(oldHook, replacementHook);
-    const deliveryHook = createSessionDeliveryHook([]);
+    const deliveryHook = createSessionDeliveryHook(vi.fn());
 
     await deliveryHook.rekey("old");
     const pending = deliveryHook.next();
@@ -53,7 +53,7 @@ describe("createSessionDeliveryHook", () => {
       token: "replacement",
     });
     installHooks(oldHook, replacementHook);
-    const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+    const deliveryHook = createSessionDeliveryHook((delivery) => bufferedDeliveries.push(delivery));
 
     await deliveryHook.rekey("old");
     await deliveryHook.rekey("replacement");
@@ -73,7 +73,7 @@ describe("createSessionDeliveryHook", () => {
       token: "candidate",
     });
     installHooks(oldHook, candidateHook);
-    const deliveryHook = createSessionDeliveryHook([]);
+    const deliveryHook = createSessionDeliveryHook(vi.fn());
 
     await deliveryHook.rekey("old");
     await expect(deliveryHook.rekey("candidate")).rejects.toMatchObject({
@@ -98,7 +98,7 @@ describe("createSessionDeliveryHook", () => {
     });
     const candidateHook = createMockHook({ token: "candidate" });
     installHooks(oldHook, candidateHook);
-    const deliveryHook = createSessionDeliveryHook([]);
+    const deliveryHook = createSessionDeliveryHook(vi.fn());
 
     await deliveryHook.rekey("old");
     await expect(deliveryHook.rekey("candidate")).rejects.toBe(failure);
@@ -118,7 +118,7 @@ describe("createSessionDeliveryHook", () => {
       createCursorHook({ committed: [], token: "replacement" }),
       createCursorHook({ committed: [], token: "third" }),
     );
-    const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+    const deliveryHook = createSessionDeliveryHook((delivery) => bufferedDeliveries.push(delivery));
 
     await deliveryHook.rekey("old");
     await deliveryHook.rekey("replacement");
@@ -133,7 +133,7 @@ describe("createSessionDeliveryHook", () => {
   it("disposes without closing or settling a pending read", async () => {
     const hook = createMockHook({ token: "active" });
     installHooks(hook);
-    const deliveryHook = createSessionDeliveryHook([]);
+    const deliveryHook = createSessionDeliveryHook(vi.fn());
 
     await deliveryHook.rekey("active");
     void deliveryHook.next();
