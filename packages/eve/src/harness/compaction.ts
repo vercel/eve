@@ -27,7 +27,44 @@ interface CompactionTranscriptMessage {
 type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 
 /**
- * Rough token estimate: serialized JSON length / 4. Good enough for
+ * Providers bill a file part (image, PDF) at a roughly fixed rate on the
+ * order of a thousand tokens, regardless of how long its base64 payload is.
+ * Estimating file parts by serialized length instead would overcount a
+ * typical screenshot by two orders of magnitude and trigger compaction on
+ * content that is cheap for the model.
+ */
+const FILE_DATA_ESTIMATED_TOKENS = 1_600;
+const FILE_DATA_ESTIMATE_PLACEHOLDER = ".".repeat(FILE_DATA_ESTIMATED_TOKENS * 4);
+
+/** Serialization replacer: cap file-part `data` payloads at the fixed estimate. */
+function capFileDataForEstimate(this: unknown, key: string, value: unknown): unknown {
+  if (
+    key === "data" &&
+    typeof value === "string" &&
+    value.length > FILE_DATA_ESTIMATE_PLACEHOLDER.length &&
+    isFileDataContainer(this)
+  ) {
+    return FILE_DATA_ESTIMATE_PLACEHOLDER;
+  }
+  return value;
+}
+
+/**
+ * The two shapes that carry file payloads under a `data` key: a message-level
+ * file part (`{type: "file", data}`) and a tool-result content file part's
+ * nested data object (`{type: "data", data}`).
+ */
+function isFileDataContainer(container: unknown): boolean {
+  if (typeof container !== "object" || container === null) {
+    return false;
+  }
+  const type = (container as { type?: unknown }).type;
+  return type === "file" || type === "data";
+}
+
+/**
+ * Rough token estimate: serialized JSON length / 4, with file-part payloads
+ * capped at {@link FILE_DATA_ESTIMATED_TOKENS}. Good enough for
  * deciding whether compaction is needed; the real token count comes back
  * from the model each step via {@link CompactionConfig.lastKnownInputTokens}.
  *
@@ -35,7 +72,7 @@ type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
  * to whole message arrays or individual content parts on one consistent ruler.
  */
 export function estimateTokens(value: unknown): number {
-  return JSON.stringify(value).length / 4;
+  return JSON.stringify(value, capFileDataForEstimate).length / 4;
 }
 
 /**
@@ -323,9 +360,55 @@ function summarizeToolResultPart(part: {
   output?: unknown;
   isError?: boolean;
 }): string {
-  const output = part.output !== undefined ? summarizeCompactValue(part.output) : "";
+  const output = part.output !== undefined ? summarizeToolResultOutput(part.output) : "";
   const status = part.isError ? "errored" : "returned";
   return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
+}
+
+/**
+ * A content output carries the model-facing text and file parts of a tool
+ * result. Summarize those like message content — file parts become the same
+ * filename+mediaType stub {@link summarizeCompactionContentPart} uses — so
+ * the summary keeps the text and names the file instead of reducing both to
+ * an anonymous `object(N keys)` via the generic JSON walk.
+ */
+function summarizeToolResultOutput(output: unknown): string {
+  if (
+    typeof output === "object" &&
+    output !== null &&
+    (output as { type?: unknown }).type === "content" &&
+    Array.isArray((output as { value?: unknown }).value)
+  ) {
+    const parts = (output as { value: readonly unknown[] }).value
+      .map((part) => summarizeContentOutputPart(part))
+      .filter((summary) => summary.length > 0);
+    if (parts.length > 0) {
+      return parts.join("; ");
+    }
+  }
+  return summarizeCompactValue(output);
+}
+
+function summarizeContentOutputPart(part: unknown): string {
+  if (typeof part !== "object" || part === null) {
+    return "";
+  }
+  const candidate = part as {
+    type?: unknown;
+    text?: unknown;
+    filename?: unknown;
+    mediaType?: unknown;
+  };
+  if (candidate.type === "text" && typeof candidate.text === "string") {
+    return summarizeText(candidate.text);
+  }
+  if (candidate.type === "file") {
+    const mediaType = typeof candidate.mediaType === "string" ? candidate.mediaType : "unknown";
+    return typeof candidate.filename === "string"
+      ? `Attached file ${candidate.filename} (${mediaType})`
+      : `Attached file attachment (${mediaType})`;
+  }
+  return "";
 }
 
 function summarizeCompactValue(value: unknown, depth = 0): string {

@@ -53,6 +53,67 @@ describe("estimateTokens", () => {
     expect(estimateTokens(structured)).toBeGreaterThan(estimateTokens(plain));
   });
 
+  it("caps tool-result file-part payloads at a fixed estimate instead of their base64 length", () => {
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                { type: "text", text: "Inspect the screenshot." },
+                {
+                  type: "file",
+                  data: { type: "data", data: "A".repeat(1_000_000) },
+                  filename: "screenshot.png",
+                  mediaType: "image/png",
+                },
+              ],
+            },
+            toolCallId: "call-1",
+            toolName: "screenshot",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+
+    // ~1MB of base64 would naively estimate at ~250k tokens and trip every
+    // compaction threshold on its own; the cap keeps the estimate near the
+    // fixed per-file cost a provider actually bills.
+    expect(estimateTokens(messages)).toBeLessThan(3_000);
+  });
+
+  it("caps message-level file parts the same way", () => {
+    const messages: ModelMessage[] = [
+      {
+        content: [{ data: "A".repeat(1_000_000), mediaType: "image/png", type: "file" }],
+        role: "user",
+      },
+    ];
+
+    expect(estimateTokens(messages)).toBeLessThan(3_000);
+  });
+
+  it("does not cap large strings under a `data` key outside file parts", () => {
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            output: { type: "json", value: { data: "A".repeat(1_000_000) } },
+            toolCallId: "call-1",
+            toolName: "search",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+
+    expect(estimateTokens(messages)).toBeGreaterThan(200_000);
+  });
+
   it("counts structured tool-result payloads when they grow", () => {
     const small: ModelMessage[] = [
       {
@@ -378,6 +439,52 @@ describe("compactMessages", () => {
       { content: "Continue.", role: "user" },
     ]);
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
+  });
+
+  it("summarizes tool-result content outputs keeping the text and stubbing file parts", async () => {
+    const { generateText } = await import("ai");
+
+    vi.mocked(generateText).mockResolvedValue({
+      text: "Summary of prior context",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                { type: "text", text: "Screenshot captured. Inspect the attached image." },
+                {
+                  type: "file",
+                  data: { type: "data", data: "iVBORw0KGgo=".repeat(200) },
+                  filename: "screenshot.png",
+                  mediaType: "image/png",
+                },
+              ],
+            },
+            toolCallId: "call-1",
+            toolName: "screenshot",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      { content: "recent 1", role: "user" },
+      { content: "recent 2", role: "assistant" },
+    ];
+
+    const model = {} as Parameters<typeof compactMessages>[1];
+    await compactMessages(messages, model, { recentWindowSize: 2, threshold: 100 });
+
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          "Screenshot captured. Inspect the attached image.; Attached file screenshot.png (image/png)",
+        ),
+      }),
+    );
   });
 
   it("drops tool results and strips assistant tool calls from the kept tail", async () => {
