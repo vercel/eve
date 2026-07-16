@@ -21,11 +21,6 @@ import {
   countActiveSandboxHandles,
   shutdownActiveSandboxHandles,
 } from "#execution/sandbox/active-handles.js";
-import {
-  clearInitializedDevelopmentSandboxBackendNames,
-  EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV,
-  getInitializedDevelopmentSandboxBackendNames,
-} from "#execution/sandbox/development-run.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import type { SandboxState } from "#sandbox/state.js";
 
@@ -386,22 +381,6 @@ describe("ensureSandboxAccess", () => {
     expect(countActiveSandboxHandles()).toBe(1);
     await shutdownActiveSandboxHandles();
     expect(countActiveSandboxHandles()).toBe(0);
-  });
-
-  it("records the backend after a development sandbox is initialized", async () => {
-    process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = "dev-run-test";
-    const backend = createBackend();
-    const registry = createTestRegistry({}, backend);
-
-    try {
-      const access = await ensure({ registry });
-      await access.get();
-
-      expect(getInitializedDevelopmentSandboxBackendNames("dev-run-test")).toEqual(["test"]);
-    } finally {
-      clearInitializedDevelopmentSandboxBackendNames("dev-run-test");
-      delete process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
-    }
   });
 });
 

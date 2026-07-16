@@ -26,7 +26,6 @@ import {
 } from "#execution/sandbox/bindings/docker-templates.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
 import { writeSandboxSeedFiles } from "#execution/sandbox/bindings/local-backend-utils.js";
-import { markDevelopmentSandboxBackendInitialized } from "#execution/sandbox/development-run.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import type {
@@ -189,7 +188,6 @@ export function createDockerSandboxBackend(
     },
     async create(createInput: SandboxBackendCreateInput): Promise<SandboxBackendHandle> {
       await ensureDaemon();
-      markDevelopmentSandboxBackendInitialized(DOCKER_BACKEND_NAME);
       const containerName =
         getDockerContainerName(createInput.existingMetadata) ?? createInput.sessionKey;
 

@@ -4,8 +4,10 @@ import {
   DOCKER_SANDBOX_LABEL,
   stopDockerContainerIfRunning,
 } from "#execution/sandbox/bindings/docker-container.js";
-import { DOCKER_BACKEND_NAME } from "#execution/sandbox/bindings/docker.js";
-import { createDockerCli } from "#execution/sandbox/bindings/docker-cli.js";
+import {
+  createDockerCli,
+  isDockerDaemonAvailableSync,
+} from "#execution/sandbox/bindings/docker-cli.js";
 import {
   MICROSANDBOX_METADATA_VERSION,
   readSessionMetadata,
@@ -17,7 +19,6 @@ import {
   removeSnapshotIfExists,
   stopAndSnapshotMicrosandboxSandbox,
 } from "#execution/sandbox/bindings/microsandbox-runtime.js";
-import { MICROSANDBOX_BACKEND_NAME } from "#execution/sandbox/bindings/microsandbox.js";
 import {
   EVE_DEVELOPMENT_SANDBOX_METADATA_PATH_TAG,
   EVE_DEVELOPMENT_SANDBOX_RUN_ID_TAG,
@@ -25,20 +26,17 @@ import {
 import { toErrorMessage } from "#shared/errors.js";
 
 export async function stopDevelopmentSandboxResources(input: {
-  readonly backendNames?: readonly string[];
+  readonly appRoot: string;
   readonly devRunId: string;
   readonly log?: (message: string) => void;
 }): Promise<void> {
-  const backendNames = input.backendNames === undefined ? null : new Set(input.backendNames);
   const cleanupTasks: Promise<void>[] = [];
 
-  if (backendNames === null || backendNames.has(DOCKER_BACKEND_NAME)) {
+  if (isDockerDaemonAvailableSync()) {
     cleanupTasks.push(stopDevelopmentDockerResources(input.devRunId));
   }
 
-  if (backendNames === null || backendNames.has(MICROSANDBOX_BACKEND_NAME)) {
-    cleanupTasks.push(stopDevelopmentMicrosandboxResources(input.devRunId, input.log));
-  }
+  cleanupTasks.push(stopDevelopmentMicrosandboxResources(input.appRoot, input.devRunId, input.log));
 
   const errors = await Promise.allSettled(cleanupTasks);
 
@@ -71,10 +69,11 @@ async function stopDevelopmentDockerResources(devRunId: string): Promise<void> {
 }
 
 async function stopDevelopmentMicrosandboxResources(
+  appRoot: string,
   devRunId: string,
   log: ((message: string) => void) | undefined,
 ): Promise<void> {
-  const module = await loadMicrosandboxWithoutInstall();
+  const module = await loadMicrosandboxWithoutInstall(appRoot);
   if (module === null) {
     return;
   }

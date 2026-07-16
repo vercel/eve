@@ -31,6 +31,7 @@ const state = vi.hoisted(() => {
     },
   };
   return {
+    dockerAvailable: true,
     dockerCli,
     loadMicrosandboxWithoutInstall: vi.fn(async () => microsandboxModule),
     microsandboxModule,
@@ -44,6 +45,7 @@ const state = vi.hoisted(() => {
 
 vi.mock("#execution/sandbox/bindings/docker-cli.js", () => ({
   createDockerCli: () => state.dockerCli,
+  isDockerDaemonAvailableSync: () => state.dockerAvailable,
 }));
 
 vi.mock("#execution/sandbox/bindings/microsandbox-runtime.js", () => ({
@@ -66,6 +68,7 @@ vi.mock("#execution/sandbox/bindings/microsandbox-metadata.js", async (importOri
 describe("stopDevelopmentSandboxResources", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    state.dockerAvailable = true;
     state.dockerCli.run.mockReset();
   });
 
@@ -84,7 +87,7 @@ describe("stopDevelopmentSandboxResources", () => {
       version: 2,
     });
 
-    await stopDevelopmentSandboxResources({ devRunId: "run-123" });
+    await stopDevelopmentSandboxResources({ appRoot: "/tmp/eve-test", devRunId: "run-123" });
 
     expect(state.dockerCli.run).toHaveBeenCalledWith([
       "ps",
@@ -124,25 +127,17 @@ describe("stopDevelopmentSandboxResources", () => {
     expect(state.microsandboxStopWithTimeout).toHaveBeenCalledWith(10_000);
   });
 
-  it("skips every backend when no development sandbox was initialized", async () => {
-    await stopDevelopmentSandboxResources({
-      backendNames: [],
-      devRunId: "run-123",
-    });
-
-    expect(state.dockerCli.run).not.toHaveBeenCalled();
-    expect(state.loadMicrosandboxWithoutInstall).not.toHaveBeenCalled();
-  });
-
-  it("does not probe Docker when only microsandbox was initialized", async () => {
+  it("loads microsandbox from the app without probing unavailable Docker", async () => {
+    state.dockerAvailable = false;
     state.microsandboxModule.Sandbox.listWith.mockResolvedValueOnce([]);
 
     await stopDevelopmentSandboxResources({
-      backendNames: ["microsandbox"],
+      appRoot: "/tmp/eve-test",
       devRunId: "run-123",
     });
 
     expect(state.dockerCli.run).not.toHaveBeenCalled();
+    expect(state.loadMicrosandboxWithoutInstall).toHaveBeenCalledWith("/tmp/eve-test");
     expect(state.microsandboxModule.Sandbox.listWith).toHaveBeenCalledWith({
       labels: {
         "eve.backend": "microsandbox",
