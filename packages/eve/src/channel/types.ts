@@ -389,6 +389,13 @@ export interface Runtime {
   deliver(input: DeliverInput): Promise<{ sessionId: string }>;
 
   /**
+   * Resolves the session that currently owns a continuation token without
+   * delivering input or starting a run. Returns `undefined` when no session
+   * owns the token.
+   */
+  resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined>;
+
+  /**
    * Returns a readable stream of lifecycle events for an existing session.
    *
    * Called by the framework's HTTP session-stream route and any user-authored

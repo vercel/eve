@@ -15,7 +15,9 @@ import { workflowEntry } from "#execution/workflow-entry.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createEveCancelTurnRoutePath } from "#protocol/routes.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { createCancelFn } from "#channel/cancel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
+import { createSession } from "#channel/session.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
 import type { Agent } from "#public/definitions/channel.js";
@@ -26,8 +28,9 @@ import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.j
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
  * zero failure events, no step retries, and a session that accepts the next
- * message normally. Coverage exercises direct hooks, the HTTP trigger, and
- * layer-3 cancellation of adopted local descendants.
+ * message normally. Coverage exercises direct hooks, the HTTP trigger, the
+ * continuation-addressed channel helper, and layer-3 cancellation of adopted
+ * local descendants.
  */
 
 const FAILURE_EVENT_TYPES = ["step.failed", "turn.failed", "session.failed"] as const;
@@ -244,6 +247,9 @@ function createCancelRouteCaller(): (
         send: () => {
           throw new Error("cancel route must not send");
         },
+        cancel: () => {
+          throw new Error("cancel route must not use the channel cancel helper");
+        },
         getSession: () => {
           throw new Error("cancel route must not get a session");
         },
@@ -415,6 +421,87 @@ describe("turn cancellation integration", () => {
             (event) =>
               event.type === "message.completed" &&
               event.data.message?.includes("follow up after route cancel") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  it("cancels a turn from a channel route helper addressed by continuation token", async () => {
+    const fixture = createWaitToolRuntime("turn-cancel-helper");
+    const rawToken = "turn-cancel-helper";
+    const continuationToken = `http:${rawToken}`;
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    const cancel = createCancelFn(workflowRuntime, "http");
+
+    await fixture.runtime.run(async () => {
+      // A token no session owns is the benign "nothing to cancel" success
+      // and must never start a session.
+      await expect(cancel({ continuationToken: "no-such-thread" })).resolves.toEqual({
+        status: "no_active_turn",
+      });
+
+      const run = await start(workflowEntry, [
+        {
+          input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await waitForHookByToken(continuationToken);
+        await fixture.toolStarted;
+
+        await expect(cancel({ continuationToken: rawToken })).resolves.toEqual({
+          status: "accepted",
+        });
+
+        const cancelledTurn = await stream.nextTurn();
+
+        expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
+        expect(
+          containsEventSequence(cancelledTurn, [
+            "turn.started",
+            "turn.cancelled",
+            "session.waiting",
+          ]),
+        ).toBe(true);
+        expect(filterEventsByType(cancelledTurn, "turn.cancelled")).toHaveLength(1);
+        expectNoFailureEvents(cancelledTurn);
+        expect(fixture.toolAborts()).toBe(1);
+
+        // Session.cancel() addresses the same session by id. With the turn
+        // settled and its cancel hook swept, it reports the benign status.
+        await waitForHookSweep(sessionCancelHookToken(run.runId));
+        const session = createSession(run.runId, rawToken, workflowRuntime);
+        await expect(session.cancel()).resolves.toEqual({ status: "no_active_turn" });
+
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          kind: "deliver",
+          payloads: [{ message: "follow up after helper cancel" }],
+        });
+
+        const followUpTurn = await stream.nextTurn();
+
+        expect(followUpTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(followUpTurn, "turn.cancelled")).toHaveLength(0);
+        expectNoFailureEvents(followUpTurn);
+        expect(
+          followUpTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("follow up after helper cancel") === true,
           ),
         ).toBe(true);
       } finally {

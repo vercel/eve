@@ -558,6 +558,9 @@ describe("defineChannel", () => {
         return {
           id: channelId,
           continuationToken: channelId,
+          async cancel() {
+            return { status: "no_active_turn" as const };
+          },
           async getEventStream() {
             return new ReadableStream();
           },

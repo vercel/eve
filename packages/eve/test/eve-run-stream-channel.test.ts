@@ -170,6 +170,9 @@ function createMockGetSession(events: ReadableStream<HandleMessageStreamEvent>) 
   return vi.fn<GetSessionFn>().mockReturnValue({
     id: "session_xyz",
     continuationToken: "",
+    async cancel() {
+      return { status: "no_active_turn" };
+    },
     async getEventStream() {
       return events;
     },
@@ -182,6 +185,7 @@ function createArgs(input: {
 }): RouteHandlerArgs {
   return {
     send: vi.fn(),
+    cancel: vi.fn(),
     getSession: input.getSession,
     receive: vi.fn() as any,
     params: input.params,
