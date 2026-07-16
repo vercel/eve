@@ -29,14 +29,6 @@ Turn cancellation remains separate: it stops active work without replacement
 input and emits `turn.cancelled`. Steering keeps the same turn alive and does
 not emit a cancellation boundary.
 
-## Current state
-
-Turn cancellation is already implemented on `main`. Turn steering is not: the
-previous steering pull request was closed without merging, and none of its
-private hooks, signals, or control-flow structure are prerequisites for this
-plan. This document starts from the current queue-only delivery path and the
-public API and semantics below.
-
 ## Public authoring API
 
 ### Custom channels
@@ -341,8 +333,7 @@ and migration tests. Rollout uses additive capability negotiation:
 
 ## Implementation sequence
 
-Land this as small internal boundaries rather than another all-at-once feature
-branch.
+Land this through independently reviewable boundaries.
 
 1. **Workflow spike:** prove one per-turn input command can arrive while
    `turnStep` is active, drive the soft notification signal live, replay once,

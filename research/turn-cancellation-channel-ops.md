@@ -62,7 +62,7 @@ precise `cancelTurn` name because it is addressed by runtime session id.
   statuses are successful outcomes.
 - `turnId` is an optional stale-request guard. A mismatch is consumed as a
   benign no-op and cannot cancel a newer turn.
-- The helper never starts a session, sends input, resets history, or falls back
+- The helper never starts a session, sends input, clears history, or falls back
   to `runtime.run()`.
 - Cancellation stops work without replacement input. It is not an alias for
   `turnPolicy: "steer"`.

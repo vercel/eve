@@ -8,36 +8,30 @@ last_updated: "2026-07-16"
 
 ## Summary
 
-Active-turn cancellation is already implemented end to end. The eve HTTP
-channel exposes `POST /eve/v1/session/:sessionId/cancel`, the TypeScript client
-exposes `ClientSession.cancel()`, and the runtime exposes `Agent.cancelTurn()`.
-It stops the active turn and adopted descendants, emits `turn.cancelled`
-followed by `session.waiting`, and leaves the session resumable.
+Active-turn cancellation stops the active turn and adopted descendants, emits
+`turn.cancelled` followed by `session.waiting`, and leaves the session
+resumable. It is available through `POST
+/eve/v1/session/:sessionId/cancel`, `ClientSession.cancel()`, and
+`Agent.cancelTurn()`.
 
 Identity-based channels such as Telegram private chats and Twilio
 conversations also need a terminal form of cancellation. A `/new` command must
 release the channel continuation identity from the old session, cancel the old
 execution tree, and allow the next message to create a fresh session with
-empty history and authored state.
-
-Extend the shipped cancellation API for this second scope. Do not add a
-`resetSession()` method, `/reset` route, or parallel reset result type. Reset is
-the user-visible outcome of whole-session cancellation, not another control
-primitive.
+empty history and authored state. This is whole-session cancellation.
 
 ## Public API
 
 ### HTTP
 
-Keep the existing route:
+Both cancellation scopes use the same route:
 
 ```http
 POST /eve/v1/session/:sessionId/cancel
 ```
 
-Existing empty bodies and `{ "turnId": "..." }` bodies retain their current
-active-turn behavior. Add one strictly distinguishable body for whole-session
-cancellation:
+An empty body or `{ "turnId": "..." }` cancels the active turn. A scoped body
+cancels the whole session:
 
 ```json
 { "scope": "session" }
@@ -57,7 +51,7 @@ identity is inspected.
 
 ### TypeScript client
 
-Preserve the shipped call exactly:
+Cancel the active turn and keep the session resumable:
 
 ```ts
 await session.cancel(); // Cancel the active turn and keep the session resumable.
@@ -71,16 +65,15 @@ await session.cancel({ scope: "session" });
 
 The client supplies its current session id. After an accepted session
 cancellation, the handle clears its session id, continuation token, and stream
-cursor so a later `send()` cannot resume the cancelled session. The
-no-argument call and its result type do not change.
+cursor so a later `send()` cannot resume the cancelled session.
 
 Aborting a request or stream with `AbortSignal` remains local transport
 cancellation; it does not invoke either server-side cancellation scope.
 
 ### Custom channels
 
-The continuation-addressed channel helper is `cancel`, matching the shipped
-client verb. Whole-session cancellation extends it with a scoped overload:
+The continuation-addressed channel helper is `cancel`. Whole-session
+cancellation uses a scoped overload:
 
 ```ts
 export interface RouteHandlerArgs<TState> {
@@ -108,18 +101,16 @@ The first promise resolves only after the continuation identity is durably
 available, so the following `send()` cannot resume the old session. Authors do
 not call workflow hooks or reproduce the release barrier themselves.
 
-The low-level `RouteContext.agent.cancelTurn({ sessionId, turnId? })` API keeps
-its precise shipped name and active-turn-only semantics.
+The low-level `RouteContext.agent.cancelTurn({ sessionId, turnId? })` API is
+active-turn-only.
 
 ### Frontends and evals
 
 - Frontend stores call the client session's async `cancel({ scope: "session" })`
-  for server-side cancellation. A synchronous local-state `reset()` remains a
-  UI concern and must not imply server cancellation.
-- Eval sessions extend the shipped `t.cancel()` control with
-  `t.cancel({ scope: "session" })`. Tests can observe `session.cancelled`, then
-  send again and prove the replacement has a new session id and fresh state.
-- No public API introduced by this plan contains `reset` in its name.
+  for server-side cancellation.
+- Eval sessions expose `t.cancel({ scope: "session" })`. Tests can observe
+  `session.cancelled`, then send again and prove the replacement has a new
+  session id and fresh state.
 
 ## Lifecycle and ordering
 
@@ -184,17 +175,15 @@ continuation identity. The driver owns the closing flag, continuation release,
 and terminal session event. The landed turn-cancellation mechanism remains the
 primitive for stopping active work below that boundary.
 
-Represent terminal cancellation as a stable session command. Do not simulate
-it by cancelling the active turn, disposing a hook, and racing the next
-delivery. Audit the durable session input version and pinned-driver
-compatibility explicitly. Older drivers that cannot process terminal
-cancellation return `"no_active_session"`; they must not treat the command as
-user input.
+The driver processes terminal cancellation as a stable session command. Audit
+the durable session input version and pinned-driver compatibility explicitly.
+Older drivers that cannot process terminal cancellation return
+`"no_active_session"`.
 
 ## Verification and delivery
 
-- Preserve every existing no-argument `ClientSession.cancel()` and empty-body
-  HTTP cancellation test.
+- Keep coverage for no-argument `ClientSession.cancel()` and empty-body HTTP
+  cancellation.
 - Race session cancellation against active delivery, turn completion,
   continuation rekeying, duplicate cancellation, and replacement `send()`.
 - Prove old cleanup cannot reclaim the continuation or mutate the replacement
