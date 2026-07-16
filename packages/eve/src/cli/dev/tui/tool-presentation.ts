@@ -1,3 +1,4 @@
+import { stripTerminalControls } from "./terminal-text.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */
@@ -22,13 +23,16 @@ export interface ToolGroupPresentation {
  */
 export function presentTool(toolName: string, input: unknown): ToolPresentation {
   if (toolBaseName(toolName) === "web_fetch") {
+    // `group.item` renders verbatim in aggregated rows, so a model-controlled
+    // URL must lose its terminal controls here, not at the render call sites.
     const url = stringField(input, "url");
-    if (url !== undefined) {
+    const safeUrl = url === undefined ? undefined : stripTerminalControls(url);
+    if (safeUrl !== undefined && safeUrl.length > 0) {
       return {
-        title: `Fetch ${url}`,
+        title: `Fetch ${safeUrl}`,
         subtitle: "",
         summarizeResult: () => undefined,
-        group: { verb: "Fetch", singularNoun: "URL", pluralNoun: "URLs", item: url },
+        group: { verb: "Fetch", singularNoun: "URL", pluralNoun: "URLs", item: safeUrl },
       };
     }
   }

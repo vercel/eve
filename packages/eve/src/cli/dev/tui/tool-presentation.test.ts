@@ -26,6 +26,18 @@ describe("presentTool", () => {
     );
   });
 
+  it("neutralizes terminal controls in a model-controlled URL", () => {
+    const presentation = presentTool("web_fetch", {
+      url: "https://example.com/\u001b[2J\u0007path",
+    });
+
+    // Control code points are removed; printable remnants are harmless.
+    expect(presentation.title).toBe("Fetch https://example.com/[2Jpath");
+    expect(presentation.group?.item).toBe("https://example.com/[2Jpath");
+    expect(presentation.group?.item).not.toContain("\u001b");
+    expect(presentation.group?.item).not.toContain("\u0007");
+  });
+
   it("falls back to the generic formatter for malformed input", () => {
     const presentation = presentTool("web_fetch", { format: "markdown" });
 
