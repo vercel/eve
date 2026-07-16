@@ -1,5 +1,29 @@
 # eve
 
+## 0.24.5
+
+### Patch Changes
+
+- bfbbe92: Add `eve build --profile <path>` for a machine-readable build-timing and final-output-size report. Profile collection is best-effort, so reporting failures do not fail an otherwise successful build.
+- dab9889: Allow agents to remove the root-only built-in `agent` delegation tool with `disableTool()` from `agent/tools/agent.ts`.
+- e1cb505: Retry transient network failures while reopening client session streams so active turns remain attached.
+- 2568387: Cancel active local, nested, and remote subagent turns when their parent turn is cancelled. Client and eval sessions can now cancel active turns directly, and eval live-turn handles can wait for typed mid-turn events before cancellation or settlement.
+- 20cd9a1: Added `POST /eve/v1/session/:sessionId/cancel` to the eve HTTP channel for requesting cancellation of an in-flight turn. The optional `{ turnId }` body limits the request to the turn the caller observed; the response reports `"accepted"` when a cancellation hook accepts it or the benign `"no_active_turn"` when no resumable target exists.
+- 02698fd: Fix Vercel deploys for the Next.js web channel. `eve` no longer scaffolds a
+  `vercel.json` `experimentalServices` block, which the Vercel platform now
+  rejects (it requires the `services` key and a stricter schema). For Next.js the
+  block was also redundant — `withEve()` generates the eve service and
+  `/eve/v1/*` routes into the Build Output at build time — so the scaffold now
+  writes a minimal `vercel.json`.
+- e45a066: `eve link` now lets you create a Vercel project or link an existing one, matching the project setup available through `/model` usage.
+- 5f8818b: `eve channels add web` now updates the Vercel Framework Preset when adding a
+  Next.js web channel to an already-linked eve project to prevent deployment
+  failures.
+- 887908c: Bundle authored modules in each development generation as one shared graph, avoiding repeated parsing and emission of dependencies for every tool.
+- 376a82f: Report the root-only `agent` action alongside other framework tools in agent info, including whether it is active, disabled, or replaced.
+- 4f2863d: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- d9d3226: Fix `withEve` producing a broken Vercel build command in npm workspaces, where the `eve` module is located in the workspace root.
+
 ## 0.24.4
 
 ### Patch Changes
