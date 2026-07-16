@@ -400,4 +400,63 @@ describe("ClientSession", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it("retries a transient fetch failure while reopening an active turn stream", async () => {
+    const encoder = new TextEncoder();
+    const streamUrls: string[] = [];
+    let streamRequest = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      streamUrls.push(
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url,
+      );
+      streamRequest += 1;
+
+      if (streamRequest === 1) {
+        let emitted = false;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (!emitted) {
+                emitted = true;
+                controller.enqueue(
+                  encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+                );
+                return;
+              }
+              controller.error(new Error("socket disconnected"));
+            },
+          }),
+        );
+      }
+
+      if (streamRequest === 2) {
+        throw new TypeError("fetch failed");
+      }
+
+      return createStreamResponse([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:test", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession(undefined, { maxReconnectAttempts: 2 });
+
+    const eventTypes: string[] = [];
+    for await (const event of await session.send("first")) {
+      eventTypes.push(event.type);
+    }
+
+    expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(streamUrls.map((url) => new URL(url).searchParams.get("startIndex"))).toEqual([
+      null,
+      "1",
+      "1",
+    ]);
+  });
 });
