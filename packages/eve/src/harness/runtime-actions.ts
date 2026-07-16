@@ -117,11 +117,21 @@ export function setPendingRuntimeActionBatch(input: {
   return { ...input.session, state };
 }
 
-/** Records one successfully dispatched local child's durable identities. */
-export function recordPendingLocalSubagentChild(input: {
+type PendingSubagentChildIdentity =
+  | {
+      readonly continuationToken: string;
+      readonly kind: "local";
+      readonly sessionId: string;
+    }
+  | {
+      readonly kind: "remote";
+      readonly sessionId: string;
+    };
+
+/** Records one successfully dispatched child's durable identities. */
+export function recordPendingSubagentChild(input: {
   readonly callId: string;
-  readonly childContinuationToken: string;
-  readonly childSessionId: string;
+  readonly child: PendingSubagentChildIdentity;
   readonly session: HarnessSession;
 }): HarnessSession {
   const batch = getPendingRuntimeActionBatch(input.session.state);
@@ -133,37 +143,17 @@ export function recordPendingLocalSubagentChild(input: {
   const state = { ...input.session.state };
   state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
     ...batch,
-    childContinuationTokens: {
-      ...batch.childContinuationTokens,
-      [input.callId]: input.childContinuationToken,
-    },
+    ...(input.child.kind === "local"
+      ? {
+          childContinuationTokens: {
+            ...batch.childContinuationTokens,
+            [input.callId]: input.child.continuationToken,
+          },
+        }
+      : {}),
     childSessionIds: {
       ...batch.childSessionIds,
-      [input.callId]: input.childSessionId,
-    },
-  } satisfies PendingRuntimeActionBatch;
-
-  return { ...input.session, state };
-}
-
-/** Records one successfully dispatched remote child's durable session identity. */
-export function recordPendingRemoteAgentChild(input: {
-  readonly callId: string;
-  readonly childSessionId: string;
-  readonly session: HarnessSession;
-}): HarnessSession {
-  const batch = getPendingRuntimeActionBatch(input.session.state);
-
-  if (batch === undefined) {
-    return input.session;
-  }
-
-  const state = { ...input.session.state };
-  state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
-    ...batch,
-    childSessionIds: {
-      ...batch.childSessionIds,
-      [input.callId]: input.childSessionId,
+      [input.callId]: input.child.sessionId,
     },
   } satisfies PendingRuntimeActionBatch;
 

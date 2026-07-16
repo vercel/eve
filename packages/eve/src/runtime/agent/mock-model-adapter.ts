@@ -106,6 +106,7 @@ function createMockModelResult(
     }
   } else {
     const toolCallResult =
+      createParallelAuthoredToolCallsResult(options, modelId) ??
       createSubagentDelegationResult(options, modelId) ??
       createSkillLoadResult(options.prompt, modelId) ??
       createAuthoredToolCallResult(options, modelId);
@@ -206,6 +207,52 @@ function createSkillLoadResult(
 
 const SUBAGENT_TOOL_NAME = "agent";
 const SUBAGENT_DELEGATION_DIRECTIVE = /\bdelegate\s+to\s+a\s+subagent\s*:\s*(.+)$/iu;
+const PARALLEL_AUTHORED_TOOLS_DIRECTIVE = /^call tools in parallel:\s*(.+)$/imu;
+
+function createParallelAuthoredToolCallsResult(
+  options: BootstrapGenerateOptions,
+  modelId: string,
+): BootstrapGenerateResult | null {
+  const lastUserMessage = getLastUserPromptText(options.prompt);
+  if (lastUserMessage === null) {
+    return null;
+  }
+
+  const directive = PARALLEL_AUTHORED_TOOLS_DIRECTIVE.exec(lastUserMessage);
+  const requestedNames = directive?.[1]
+    ?.split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+
+  if (requestedNames === undefined || requestedNames.length < 2) {
+    return null;
+  }
+  if (new Set(requestedNames).size !== requestedNames.length) {
+    return null;
+  }
+
+  const availableTools = new Map(getAvailableTools(options).map((tool) => [tool.name, tool]));
+  const requestedTools: AvailableBootstrapTool[] = [];
+  for (const name of requestedNames) {
+    const tool = availableTools.get(name);
+    if (tool === undefined) {
+      return null;
+    }
+    requestedTools.push(tool);
+  }
+
+  const city = resolveWeatherCity(lastUserMessage);
+  return createToolCallsGenerateResult({
+    calls: requestedTools.map((tool) => ({
+      input: createMockAuthoredToolInput(tool, lastUserMessage, city),
+      toolCallId: createToolCallId(tool.name),
+      toolName: tool.name,
+    })),
+    inputTokens: estimateTokenCount(getPromptText(options.prompt)),
+    modelId,
+    outputTokens: estimateTokenCount(lastUserMessage),
+  });
+}
 
 /**
  * Emits one built-in `agent` tool call when the current user message uses
@@ -362,15 +409,37 @@ function createToolCallGenerateResult(input: {
   readonly toolCallId: string;
   readonly toolName: string;
 }): BootstrapGenerateResult {
-  return {
-    content: [
+  return createToolCallsGenerateResult({
+    calls: [
       {
-        input: JSON.stringify(input.input),
+        input: input.input,
         toolCallId: input.toolCallId,
         toolName: input.toolName,
-        type: "tool-call",
       },
     ],
+    inputTokens: input.inputTokens,
+    modelId: input.modelId,
+    outputTokens: input.outputTokens,
+  });
+}
+
+function createToolCallsGenerateResult(input: {
+  readonly calls: readonly {
+    readonly input: unknown;
+    readonly toolCallId: string;
+    readonly toolName: string;
+  }[];
+  readonly inputTokens: number;
+  readonly modelId: string;
+  readonly outputTokens: number;
+}): BootstrapGenerateResult {
+  return {
+    content: input.calls.map((call) => ({
+      input: JSON.stringify(call.input),
+      toolCallId: call.toolCallId,
+      toolName: call.toolName,
+      type: "tool-call",
+    })),
     finishReason: { raw: undefined, unified: "tool-calls" },
     response: {
       id: "bootstrap-response",

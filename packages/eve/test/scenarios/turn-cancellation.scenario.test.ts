@@ -61,12 +61,37 @@ export default defineTool({
 
 function createParentDescriptor(remoteUrl: string): ScenarioAppDescriptor {
   return {
+    dependencies: { zod: "^4.3.6" },
     files: {
       "agent/agent.ts": `import { defineAgent } from "eve";
 
 export default defineAgent({ model: "openai/gpt-5.4-mini" });
 `,
-      "agent/instructions.md": "Delegate to explicitly requested subagents.\n",
+      "agent/instructions.md": "Delegate cancellation waits as requested.\n",
+      "agent/subagents/local-sleeper/agent.ts": `import { defineAgent } from "eve";
+
+export default defineAgent({
+  description: "Runs the wait-for-cancel tool and waits for cancellation.",
+  model: "openai/gpt-5.4-mini",
+});
+`,
+      "agent/subagents/local-sleeper/instructions.md":
+        "Call wait-for-cancel immediately and do nothing else.\n",
+      "agent/subagents/local-sleeper/tools/wait-for-cancel.ts": `import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Wait until the current turn is cancelled.",
+  inputSchema: z.object({}),
+  execute(_input, ctx) {
+    return new Promise((_resolve, reject) => {
+      const abort = () => reject(ctx.abortSignal.reason);
+      if (ctx.abortSignal.aborted) return abort();
+      ctx.abortSignal.addEventListener("abort", abort, { once: true });
+    });
+  },
+});
+`,
       "agent/subagents/remote-sleeper.ts": `import { defineRemoteAgent } from "eve";
 import { bearer } from "eve/agents/auth";
 
@@ -78,13 +103,13 @@ export default defineRemoteAgent({
 `,
     },
     installDependencies: true,
-    name: "remote-cancellation-parent",
+    name: "mixed-cancellation-parent",
   };
 }
 
 describe("turn cancellation descendant cascade", () => {
   it(
-    "cancels an authenticated remote child and continues the parent session",
+    "cancels racing local and authenticated remote children then continues the parent",
     async () => {
       const remoteApp = await scenarioApp(REMOTE_DESCRIPTOR);
       const remoteServer = await startEveDev(remoteApp.appRoot);
@@ -97,36 +122,49 @@ describe("turn cancellation descendant cascade", () => {
           const parentClient = new Client({ host: parentServer.url });
           const parentSession = parentClient.session();
           const response = await parentSession.send(
-            "Use remote-sleeper with message 'use wait-for-cancel'.",
+            [
+              "Call tools in parallel: local-sleeper, remote-sleeper",
+              'message: "Use wait-for-cancel."',
+            ].join("\n"),
           );
           const parentIterator = response[Symbol.asyncIterator]();
-          const called = await readUntil({
+          const called = await readSubagentCalls({
+            count: 2,
             iterator: parentIterator,
-            label: "remote subagent dispatch",
-            matches: (event) => event.type === "subagent.called",
+            label: "local and remote subagent dispatch",
           });
-          if (called.event.type !== "subagent.called") {
-            throw new Error("Expected a remote subagent.called event.");
+          const localCalled = called.find((event) => event.data.remote === undefined);
+          const remoteCalled = called.find((event) => event.data.remote !== undefined);
+          if (localCalled === undefined || remoteCalled === undefined) {
+            throw new Error("Expected one local and one remote subagent.called event.");
           }
-          expect(called.event.data.remote?.url).toBe(remoteServer.url);
+          expect(remoteCalled.data.remote?.url).toBe(remoteServer.url);
+
+          const localIterator = parentClient
+            .session({ sessionId: localCalled.data.childSessionId, streamIndex: 0 })
+            .stream()
+            [Symbol.asyncIterator]();
 
           const remoteClient = new Client({
             auth: { bearer: REMOTE_TOKEN },
             host: remoteServer.url,
           });
           const remoteIterator = remoteClient
-            .session({ sessionId: called.event.data.childSessionId, streamIndex: 0 })
+            .session({ sessionId: remoteCalled.data.childSessionId, streamIndex: 0 })
             .stream()
             [Symbol.asyncIterator]();
-          await readUntil({
-            iterator: remoteIterator,
-            label: "remote wait-for-cancel tool call",
-            matches: (event) =>
-              event.type === "actions.requested" &&
-              event.data.actions.some(
-                (action) => action.kind === "tool-call" && action.toolName === "wait-for-cancel",
-              ),
-          });
+          await Promise.all([
+            readUntil({
+              iterator: localIterator,
+              label: "local wait-for-cancel tool call",
+              matches: isWaitForCancelToolCall,
+            }),
+            readUntil({
+              iterator: remoteIterator,
+              label: "remote wait-for-cancel tool call",
+              matches: isWaitForCancelToolCall,
+            }),
+          ]);
 
           const cancelResponse = await parentClient.fetch(
             createEveCancelTurnRoutePath(response.sessionId),
@@ -139,15 +177,22 @@ describe("turn cancellation descendant cascade", () => {
             status: "accepted",
           });
 
-          const remoteEvents = await readThroughBoundary({
-            iterator: remoteIterator,
-            label: "remote cancellation boundary",
-          });
+          const [localEvents, remoteEvents] = await Promise.all([
+            readThroughBoundary({
+              iterator: localIterator,
+              label: "local cancellation boundary",
+            }),
+            readThroughBoundary({
+              iterator: remoteIterator,
+              label: "remote cancellation boundary",
+            }),
+          ]);
           const parentEvents = await readThroughBoundary({
             iterator: parentIterator,
             label: "parent cancellation boundary",
           });
 
+          expectCancellationBoundary(localEvents);
           expectCancellationBoundary(remoteEvents);
           expectCancellationBoundary(parentEvents);
           expect(parentEvents.some((event) => event.type === "subagent.completed")).toBe(false);
@@ -179,6 +224,36 @@ describe("turn cancellation descendant cascade", () => {
     SCENARIO_TIMEOUT_MS,
   );
 });
+
+type SubagentCalledEvent = Extract<HandleMessageStreamEvent, { type: "subagent.called" }>;
+
+async function readSubagentCalls(input: {
+  readonly count: number;
+  readonly iterator: AsyncIterator<HandleMessageStreamEvent>;
+  readonly label: string;
+}): Promise<readonly SubagentCalledEvent[]> {
+  return await withinEventDeadline(
+    (async () => {
+      const events: SubagentCalledEvent[] = [];
+      while (events.length < input.count) {
+        const next = await input.iterator.next();
+        if (next.done) throw new Error(`Stream ended before ${input.label}.`);
+        if (next.value.type === "subagent.called") events.push(next.value);
+      }
+      return events;
+    })(),
+    input.label,
+  );
+}
+
+function isWaitForCancelToolCall(event: HandleMessageStreamEvent): boolean {
+  return (
+    event.type === "actions.requested" &&
+    event.data.actions.some(
+      (action) => action.kind === "tool-call" && action.toolName === "wait-for-cancel",
+    )
+  );
+}
 
 async function readUntil(input: {
   readonly iterator: AsyncIterator<HandleMessageStreamEvent>;

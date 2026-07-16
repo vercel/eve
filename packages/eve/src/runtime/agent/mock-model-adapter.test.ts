@@ -660,6 +660,39 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  it("calls an explicit list of authored tools in parallel", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: [
+            "Call tools in parallel: local-sleeper, remote-sleeper",
+            'message: "Use wait-for-cancel."',
+          ].join("\n"),
+          role: "user",
+        },
+      ],
+      ["local-sleeper", "remote-sleeper"].map((name) => ({
+        inputSchema: {
+          properties: { message: { type: "string" } },
+          required: ["message"],
+          type: "object",
+        },
+        name,
+        type: "function",
+      })),
+    );
+
+    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
+    expect(result.content).toEqual(
+      ["local-sleeper", "remote-sleeper"].map((name) => ({
+        input: JSON.stringify({ message: "Use wait-for-cancel." }),
+        toolCallId: `call_${name.replaceAll("-", "_")}`,
+        toolName: name,
+        type: "tool-call",
+      })),
+    );
+  });
+
   it("calls final_output with a schema-shaped sample when the tool is offered", async () => {
     const result = await generateWithPrompt(
       [{ content: "Summarize this", role: "user" }],

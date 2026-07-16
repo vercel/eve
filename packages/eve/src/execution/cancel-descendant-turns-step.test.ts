@@ -10,8 +10,7 @@ import {
 } from "#execution/remote-agent-dispatch.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import {
-  recordPendingLocalSubagentChild,
-  recordPendingRemoteAgentChild,
+  recordPendingSubagentChild,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -176,15 +175,18 @@ function createPendingState() {
     responseMessages: [],
     session: createSession(),
   });
-  session = recordPendingLocalSubagentChild({
+  session = recordPendingSubagentChild({
     callId: localAction.callId,
-    childContinuationToken: "subagent:parent:call-local",
-    childSessionId: "local-child",
+    child: {
+      continuationToken: "subagent:parent:call-local",
+      kind: "local",
+      sessionId: "local-child",
+    },
     session,
   });
-  session = recordPendingRemoteAgentChild({
+  session = recordPendingSubagentChild({
     callId: remoteAction.callId,
-    childSessionId: "remote-child",
+    child: { kind: "remote", sessionId: "remote-child" },
     session,
   });
   return createDurableSessionState({ session });
