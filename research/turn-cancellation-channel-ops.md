@@ -14,9 +14,9 @@ recursive cancellation of active descendants. The remaining custom-channel
 gap is addressing: a `defineChannel` route normally knows its channel-local
 continuation token, not the runtime session id required by `Agent.cancelTurn`.
 
-Add one route helper that resolves the token without starting a session and
-then delegates to the existing cancellation primitive. Steering replacement
-input is separate and is specified in
+Add one `cancel` route helper that resolves the token without starting a
+session and then delegates to the existing cancellation primitive. Steering
+replacement input is separate and is specified in
 [Channel turn steering](./channel-turn-steering.md).
 
 ## Authoring API
@@ -24,7 +24,7 @@ input is separate and is specified in
 ```ts
 export interface RouteHandlerArgs<TState> {
   // Existing helpers omitted.
-  cancelTurn(options: { continuationToken: string; turnId?: string }): Promise<CancelTurnResult>;
+  cancel(options: { continuationToken: string; turnId?: string }): Promise<CancelTurnResult>;
 }
 
 export interface CancelTurnResult {
@@ -38,8 +38,8 @@ The continuation token uses the same channel-local, unprefixed format as
 ```ts
 export default defineChannel({
   routes: [
-    POST("/threads/:threadId/stop", async (_request, { cancelTurn, params }) => {
-      const result = await cancelTurn({ continuationToken: params.threadId });
+    POST("/threads/:threadId/stop", async (_request, { cancel, params }) => {
+      const result = await cancel({ continuationToken: params.threadId });
       return Response.json(result);
     }),
   ],
@@ -48,8 +48,9 @@ export default defineChannel({
 
 Authors who already have a session id can continue using the public
 `RouteContext.agent.cancelTurn({ sessionId, turnId? })` primitive in authored
-filesystem routes. The new helper is the continuation-addressed convenience
-surface for `defineChannel`.
+filesystem routes. The new `cancel` helper is the continuation-addressed
+convenience surface for `defineChannel`. The lower-level agent method keeps the
+precise `cancelTurn` name because it is addressed by runtime session id.
 
 ## Semantics
 

@@ -82,7 +82,7 @@ await send(message, {
 Use cancellation for a stop button with no replacement message:
 
 ```ts
-await cancelTurn({ continuationToken: threadId, turnId });
+await cancel({ continuationToken: threadId, turnId });
 ```
 
 The continuation-addressed cancellation helper is specified separately in
@@ -221,7 +221,7 @@ Steering and cancellation are independent operations:
 | --------------------- | ----------------- | ------------- | --------------------------------------- |
 | `turnPolicy: "queue"` | Next turn         | New turn      | Current turn settles normally           |
 | `turnPolicy: "steer"` | Active turn       | Same turn     | No cancellation event                   |
-| `cancelTurn(...)`     | None              | Ends turn     | `turn.cancelled` then `session.waiting` |
+| `cancel(...)`         | None              | Ends turn     | `turn.cancelled` then `session.waiting` |
 
 If cancellation wins before a steering delivery is consumed, that delivery
 remains queued for the next conversation turn. If the turn consumes the input
@@ -408,7 +408,7 @@ fixture.
 
 ## Out of scope
 
-- Whole-session reset or `/new`.
+- Whole-session cancellation or `/new`.
 - Retraction of streamed output or completed side effects.
 - A public `interrupt`, `replace`, `supersede`, or priority enum.
 - Multiple concurrent leases to one turn.
@@ -420,7 +420,7 @@ fixture.
 ## Success criteria
 
 - Channel authors choose only between standard `queue` and `steer` input
-  policies and use `cancelTurn()` for a stop action.
+  policies and use `cancel()` for a stop action.
 - Every successfully admitted delivery is either durably consumed by the
   active turn or retained by the driver for a later turn, never both and never
   neither.
