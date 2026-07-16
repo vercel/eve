@@ -104,7 +104,11 @@ export interface ModelProviderOutcome {
 }
 
 export type ModelFlowResult =
-  | { kind: "cancelled" }
+  | {
+      kind: "cancelled";
+      /** True when Esc dropped drafted setting changes that Done would commit. */
+      discardedDraft?: boolean;
+    }
   | {
       kind: "done";
       /** The last apply line, when the model was changed this session. */
@@ -389,6 +393,9 @@ export async function runModelFlow(input: {
         });
       } catch (error) {
         if (!(error instanceof WizardCancelledError)) throw error;
+        // Esc discards the draft. Say so: before drafts existed, a completed
+        // model pick applied immediately, so a silent drop reads as success.
+        if (hasModelSettingsChanges(patch)) return { kind: "cancelled", discardedDraft: true };
         break;
       }
     }

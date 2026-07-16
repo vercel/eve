@@ -68,12 +68,17 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
   }
 }
 
-function parseGatewayCatalog(input: unknown): GatewayCatalogModel[] {
+/**
+ * Validates a Gateway catalog response. A malformed payload throws (the
+ * picker then falls back to the static shortlist), but a malformed entry is
+ * skipped: one experimental entry shape must not take down the whole catalog.
+ */
+export function parseGatewayCatalog(input: unknown): GatewayCatalogModel[] {
   if (!isRecord(input) || !Array.isArray(input.data)) {
     throw new Error("AI Gateway returned an invalid model catalog.");
   }
 
-  return input.data.map((entry) => {
+  return input.data.flatMap((entry) => {
     if (
       !isRecord(entry) ||
       typeof entry.id !== "string" ||
@@ -81,19 +86,21 @@ function parseGatewayCatalog(input: unknown): GatewayCatalogModel[] {
       typeof entry.type !== "string" ||
       typeof entry.owned_by !== "string"
     ) {
-      throw new Error("AI Gateway returned an invalid model catalog entry.");
+      return [];
     }
 
-    return {
-      id: entry.id,
-      name: entry.name,
-      type: entry.type,
-      owned_by: entry.owned_by,
-      ...(typeof entry.released === "number" && Number.isFinite(entry.released)
-        ? { released: entry.released }
-        : {}),
-      ...(isStringArray(entry.tags) ? { tags: entry.tags } : {}),
-    };
+    return [
+      {
+        id: entry.id,
+        name: entry.name,
+        type: entry.type,
+        owned_by: entry.owned_by,
+        ...(typeof entry.released === "number" && Number.isFinite(entry.released)
+          ? { released: entry.released }
+          : {}),
+        ...(isStringArray(entry.tags) ? { tags: entry.tags } : {}),
+      },
+    ];
   });
 }
 

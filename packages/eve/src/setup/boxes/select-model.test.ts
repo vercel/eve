@@ -8,7 +8,12 @@ import type { Prompter, PrompterValue, SingleSelectOptions } from "../prompter.j
 import { createDefaultSetupState } from "../state.js";
 import type { OutputSink } from "../step.js";
 import { runHeadless, runInteractive } from "../runner.js";
-import { selectModel, type GatewayCatalogModel, type SelectModelDeps } from "./select-model.js";
+import {
+  parseGatewayCatalog,
+  selectModel,
+  type GatewayCatalogModel,
+  type SelectModelDeps,
+} from "./select-model.js";
 
 const silentSink: OutputSink = { write: () => {} };
 
@@ -226,6 +231,23 @@ describe("selectModel box", () => {
     await runInteractive([box], createDefaultSetupState(), silentSink);
 
     expect(captured?.initialValue).toBe("openai/gpt-5-mini");
+  });
+
+  it("skips malformed catalog entries instead of rejecting the whole catalog", () => {
+    const models = parseGatewayCatalog({
+      data: [
+        CATALOG[0],
+        { id: "vendor/experimental", shape: "unrecognized" },
+        "not even an object",
+        CATALOG[1],
+      ],
+    });
+
+    expect(models.map((model) => model.id)).toEqual(["zai/glm-4.6", "openai/gpt-5-mini"]);
+  });
+
+  it("rejects a catalog payload without a data array", () => {
+    expect(() => parseGatewayCatalog({ models: [] })).toThrow("invalid model catalog");
   });
 
   it("falls back to the static shortlist when the catalog fetch fails", async () => {

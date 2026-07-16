@@ -390,7 +390,7 @@ describe("runModelFlow", () => {
     });
   });
 
-  it("discards a model-settings draft when the root menu is cancelled", async () => {
+  it("discards a model-settings draft when the root menu is cancelled, and says so", async () => {
     const { prompter } = scriptedPrompter({
       menu: ["reasoning", "esc"],
       picker: ["low"],
@@ -399,6 +399,7 @@ describe("runModelFlow", () => {
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "cancelled",
+      discardedDraft: true,
     });
     expect(deps.applySettings).not.toHaveBeenCalled();
   });

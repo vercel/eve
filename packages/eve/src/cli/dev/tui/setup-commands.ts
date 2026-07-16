@@ -193,7 +193,13 @@ async function executeSetupCommand(
         }
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
-          return { message: "/model cancelled.", preserveFlowDiagnostics: false };
+          return {
+            message:
+              result.discardedDraft === true
+                ? "/model cancelled. Drafted changes were discarded; Done commits them."
+                : "/model cancelled.",
+            preserveFlowDiagnostics: false,
+          };
         }
         // One line per completed menu action: the apply line (it already
         // distinguishes success from a rejected slug), then the provider
