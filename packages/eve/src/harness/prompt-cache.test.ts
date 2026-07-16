@@ -150,7 +150,7 @@ describe("applyLastToolCacheBreakpoint", () => {
     });
   });
 
-  it("merges existing providerOptions on the last tool", () => {
+  it("deep-merges existing Anthropic options on the last tool", () => {
     const tools = {
       only: {
         description: "one",
@@ -163,11 +163,55 @@ describe("applyLastToolCacheBreakpoint", () => {
       { providerOptions: Record<string, unknown> } | undefined
     >;
 
-    // The marker's anthropic namespace overrides the existing one.
     expect(result.only?.providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
+      anthropic: { cacheControl: { type: "ephemeral" }, other: 1 },
       openai: { something: 2 },
     });
+  });
+
+  it("marks the last eager tool when deferred tools follow it", () => {
+    const tools = {
+      eager: {
+        description: "available immediately",
+        providerOptions: { anthropic: { other: 1 } },
+      },
+      deferredOne: {
+        description: "loaded after search",
+        providerOptions: { anthropic: { deferLoading: true } },
+      },
+      deferredTwo: {
+        description: "also loaded after search",
+        providerOptions: { anthropic: { deferLoading: true } },
+      },
+    } as unknown as ToolSet;
+
+    expect(applyLastToolCacheBreakpoint(tools, marker)).toEqual({
+      eager: {
+        description: "available immediately",
+        providerOptions: {
+          anthropic: { cacheControl: { type: "ephemeral" }, other: 1 },
+        },
+      },
+      deferredOne: {
+        description: "loaded after search",
+        providerOptions: { anthropic: { deferLoading: true } },
+      },
+      deferredTwo: {
+        description: "also loaded after search",
+        providerOptions: { anthropic: { deferLoading: true } },
+      },
+    });
+  });
+
+  it("does not place a cache breakpoint when every tool is deferred", () => {
+    const tools = {
+      deferred: {
+        description: "loaded after search",
+        providerOptions: { anthropic: { deferLoading: true } },
+      },
+    } as unknown as ToolSet;
+
+    expect(applyLastToolCacheBreakpoint(tools, marker)).toBe(tools);
   });
 
   it("does not mutate the input tool set or its tools", () => {

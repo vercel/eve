@@ -22,6 +22,7 @@ import {
 } from "#context/keys.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import { copyToolActivation } from "#harness/tool-activation.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -30,7 +31,7 @@ const log = createLogger("dynamic-tools");
 // ---------------------------------------------------------------------------
 
 function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): HarnessToolDefinition {
-  return {
+  return copyToolActivation(entry, {
     description: entry.description,
     execute: (input: unknown, options) =>
       entry.execute(
@@ -44,7 +45,7 @@ function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): Harness
     ...(entry.toModelOutput !== undefined
       ? { toModelOutput: entry.toModelOutput as (output: unknown) => unknown }
       : {}),
-  };
+  });
 }
 
 function convertInputSchema(schema: unknown): FlexibleSchema {

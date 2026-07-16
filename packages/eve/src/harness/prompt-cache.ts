@@ -89,13 +89,14 @@ export function mergeGatewayAutoCaching(
 }
 
 /**
- * Returns a new ToolSet where the last tool entry carries the Anthropic
- * cache marker on `providerOptions`. Used on the `anthropic-direct` path
- * to place a stable breakpoint at the end of the tools block, caching the
- * full tool definitions across every turn.
+ * Returns a new ToolSet where the last non-deferred tool entry carries the
+ * Anthropic cache marker on `providerOptions`. Used on the
+ * `anthropic-direct` path to place a stable breakpoint at the end of the
+ * eager tools block without combining `cache_control` and `defer_loading`,
+ * which Anthropic rejects.
  *
- * No-op when `tools` has no entries. Preserves existing `providerOptions`
- * on tools (merges the cache marker in via spread).
+ * No-op when `tools` has no eligible entries. Preserves existing
+ * `providerOptions`, including other Anthropic options.
  */
 export function applyLastToolCacheBreakpoint(
   tools: ToolSet,
@@ -106,19 +107,40 @@ export function applyLastToolCacheBreakpoint(
     return tools;
   }
 
+  const breakpointIndex = entries.findLastIndex(([, tool]) => {
+    const providerOptions = (tool as { readonly providerOptions?: unknown }).providerOptions;
+    if (providerOptions === null || typeof providerOptions !== "object") return true;
+    const anthropic = (providerOptions as Record<string, unknown>).anthropic;
+    if (anthropic === null || typeof anthropic !== "object") return true;
+    return (anthropic as Record<string, unknown>).deferLoading !== true;
+  });
+
+  if (breakpointIndex === -1) {
+    return tools;
+  }
+
   const result: Record<string, unknown> = {};
   for (let i = 0; i < entries.length; i++) {
     const [name, tool] = entries[i] as [string, Record<string, unknown>];
-    if (i === entries.length - 1) {
+    if (i === breakpointIndex) {
       const existingProviderOptions =
         tool.providerOptions !== undefined && typeof tool.providerOptions === "object"
           ? (tool.providerOptions as Record<string, unknown>)
+          : undefined;
+      const existingAnthropic =
+        existingProviderOptions?.anthropic !== undefined &&
+        typeof existingProviderOptions.anthropic === "object" &&
+        existingProviderOptions.anthropic !== null
+          ? (existingProviderOptions.anthropic as Record<string, unknown>)
           : undefined;
       result[name] = {
         ...tool,
         providerOptions: {
           ...existingProviderOptions,
-          ...marker,
+          anthropic: {
+            ...existingAnthropic,
+            ...marker.anthropic,
+          },
         },
       };
     } else {

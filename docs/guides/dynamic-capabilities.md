@@ -74,6 +74,30 @@ A dynamic tool or skill whose name matches an **authored** one **overrides** it 
 | `turn.started`    | Once per turn          | Every model call in the turn    |
 | `step.started`    | Before each model call | That model call                 |
 
+### Prompt caching
+
+Anthropic serializes tools before the system prompt and messages. Changing a
+tool's name, description, input schema, or presence therefore changes every
+cache prefix after that position, although an unchanged earlier tool breakpoint
+may still match. Recreating an identical model-facing definition is harmless.
+Resolve at the earliest scope that matches the capability's lifetime: prefer
+`session.started` for a session-stable catalog and `turn.started` for a per-turn
+catalog. Use `step.started` only when the model-visible definition must change
+between calls.
+
+eve preserves this prefix for connection tools on supported models reached
+through a direct Anthropic Messages adapter: `connection_search` introduces the
+matched definitions at its result position, and an introduced name keeps its
+first model-visible definition for the session. Other dynamic tools, OpenAI
+models, and models reached through AI Gateway currently use eager tool catalogs;
+changing those definitions still invalidates the provider's prompt cache.
+
+This provider split follows Anthropic's
+[`defer_loading` and prompt-caching contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference#defer_loading-and-prompt-caching).
+OpenAI documents the equivalent positional mechanism as
+[`additional_tools`](https://developers.openai.com/api/docs/guides/tools-tool-search#add-tools-at-a-specific-point-in-the-input),
+but the AI SDK request interface used by eve does not yet expose that input item.
+
 ### Execution order
 
 When a stream event fires, three things happen in order.

@@ -109,6 +109,7 @@ import {
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import { applyProviderToolActivations } from "#harness/provider-tool-activation.js";
 import {
   type AuthorizationSignal,
   isAuthorizationSignal,
@@ -856,8 +857,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
       session = advertisedModelTools.session;
       const modelTools = advertisedModelTools.modelTools;
-
-      const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
+      const activatedModelTools = applyProviderToolActivations({ model, tools: modelTools });
+      const effectiveTools = marker
+        ? applyLastToolCacheBreakpoint(activatedModelTools, marker)
+        : activatedModelTools;
 
       const hooks = buildStepHooks({
         cachePath,

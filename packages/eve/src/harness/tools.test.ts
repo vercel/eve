@@ -14,6 +14,11 @@ import {
 } from "#runtime/framework-tools/web-search.js";
 import type { JsonObject } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import {
+  attachToolActivation,
+  createToolActivationId,
+  getToolActivation,
+} from "#harness/tool-activation.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
@@ -98,6 +103,28 @@ async function projectSdkToolOutput(input: {
 }
 
 describe("buildToolSet", () => {
+  it("preserves internal tool activation metadata", () => {
+    const activation = {
+      id: createToolActivationId("connection_search"),
+      kind: "target" as const,
+    };
+    const definition = attachToolActivation(
+      {
+        description: "List issues",
+        execute: () => [],
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "linear__list_issues",
+      },
+      activation,
+    );
+
+    const result = buildToolSet({
+      tools: new Map([[definition.name, definition]]),
+    });
+
+    expect(getToolActivation(result.linear__list_issues)).toBe(activation);
+  });
+
   it("forwards the AI SDK execute options to the tool definition", async () => {
     const abortController = new AbortController();
     let receivedOptions: ToolExecuteOptions | undefined;

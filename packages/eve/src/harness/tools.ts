@@ -27,6 +27,7 @@ import {
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { copyToolActivation } from "#harness/tool-activation.js";
 
 type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
@@ -130,6 +131,7 @@ export function buildToolSet(input: {
             }
           : {}),
     });
+    copyToolActivation(definition, aiTool);
     tools[definition.name] = aiTool;
     if (definition.approval !== undefined) {
       toolApprovals.set(aiTool, approval);

@@ -39,6 +39,7 @@ import {
 import { hasDeferredStepInput, setPendingInputBatch } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { attachToolActivation, createToolActivationId } from "#harness/tool-activation.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
@@ -7870,6 +7871,66 @@ describe("createToolLoopHarness", () => {
       const lastTool = toolEntries[toolEntries.length - 1]?.[1];
       expect(lastTool?.providerOptions).toEqual({
         anthropic: { cacheControl: { type: "ephemeral" } },
+      });
+    });
+
+    it("anthropic-direct path: activates loaded tools before placing the cache marker", async () => {
+      setupStopResult();
+      const activationId = createToolActivationId("connection_search");
+      const search = attachToolActivation(
+        {
+          description: "Search connection tools",
+          execute: vi.fn(),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "connection_search",
+        },
+        {
+          id: activationId,
+          kind: "loader",
+          project: () => ({
+            tools: [
+              {
+                description: "List issues",
+                inputSchema: { type: "object" },
+                name: "linear__list_issues",
+              },
+            ],
+          }),
+        },
+      );
+      const target = attachToolActivation(
+        {
+          description: "List issues",
+          execute: vi.fn(),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "linear__list_issues",
+        },
+        { id: activationId, kind: "target" },
+      );
+      const config: ToolLoopHarnessConfig = {
+        mode: "conversation",
+        resolveModel: vi.fn().mockResolvedValue({
+          provider: "anthropic.messages",
+          modelId: "claude-sonnet-4-6",
+          specificationVersion: "v4",
+        } as LanguageModel),
+        tools: new Map([
+          [search.name, search],
+          [target.name, target],
+        ]),
+      };
+      const runStep = createToolLoopHarness(config);
+      await runStep(createTestSession(), { message: "hi" });
+
+      const toolsPassed = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]?.tools as Record<
+        string,
+        { providerOptions?: Record<string, unknown> }
+      >;
+      expect(toolsPassed.connection_search?.providerOptions).toEqual({
+        anthropic: { cacheControl: { type: "ephemeral" } },
+      });
+      expect(toolsPassed.linear__list_issues?.providerOptions).toEqual({
+        anthropic: { deferLoading: true },
       });
     });
 

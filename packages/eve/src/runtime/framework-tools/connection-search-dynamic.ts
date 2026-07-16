@@ -31,10 +31,16 @@ import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { DynamicToolEvents, DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { ModelMessage } from "ai";
+import {
+  attachToolActivation,
+  createToolActivationId,
+  type ToolActivationProjection,
+} from "#harness/tool-activation.js";
 
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
+const CONNECTION_SEARCH_ACTIVATION_ID = createToolActivationId("connection_search");
 
 const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA: JsonObject = {
   additionalProperties: false,
@@ -88,6 +94,32 @@ interface ConnectionSearchResultItem {
   readonly outputSchema?: Record<string, unknown>;
   readonly tool?: string;
   readonly qualifiedName?: string;
+}
+
+/** Projects successful search results into provider-neutral tool activations. */
+export function projectConnectionSearchActivation(output: unknown): ToolActivationProjection {
+  if (!Array.isArray(output)) return { tools: [] };
+
+  return {
+    tools: output.flatMap((candidate) => {
+      if (candidate === null || typeof candidate !== "object") return [];
+      const item = candidate as ConnectionSearchResultItem;
+      if (
+        item.tool === undefined ||
+        item.qualifiedName === undefined ||
+        typeof item.description !== "string"
+      ) {
+        return [];
+      }
+      return [
+        {
+          description: item.description,
+          inputSchema: (item.inputSchema ?? { type: "object" }) as JsonObject,
+          name: item.qualifiedName,
+        },
+      ];
+    }),
+  };
 }
 
 function tokenize(text: string): string[] {
@@ -299,14 +331,23 @@ async function executeConnectionSearch(
   const matched = results.slice(0, limit).map((r) => r.item);
 
   if (matched.length > 0) {
-    const allResults = [...matched, ...failedConnections];
     const existing = ctx.get(ConnectionSearchResultsKey) ?? [];
-    const merged = new Map(existing.map((r) => [r.qualifiedName, r]));
+    const merged = new Map(
+      existing.flatMap((result) =>
+        result.qualifiedName === undefined ? [] : [[result.qualifiedName, result] as const],
+      ),
+    );
+    const canonicalMatched = matched.map((result) => {
+      if (result.qualifiedName === undefined) return result;
+      return merged.get(result.qualifiedName) ?? result;
+    });
     for (const r of matched) {
-      if (r.qualifiedName) merged.set(r.qualifiedName, r);
+      if (r.qualifiedName !== undefined && !merged.has(r.qualifiedName)) {
+        merged.set(r.qualifiedName, r);
+      }
     }
     ctx.set(ConnectionSearchResultsKey, [...merged.values()]);
-    return allResults;
+    return [...canonicalMatched, ...failedConnections];
   }
 
   const summaries: ConnectionSearchResultItem[] = targetConnections.map((c) => {
@@ -324,7 +365,8 @@ async function executeConnectionSearch(
 /**
  * Extracts connection search results from conversation history.
  * Scans tool-result messages for `connection_search` results and
- * returns deduplicated tool metadata (latest result wins per qualifiedName).
+ * returns deduplicated tool metadata. The first definition for a qualified
+ * name wins so a result replay cannot rewrite an earlier activation point.
  */
 export function extractDiscoveredTools(
   messages: readonly ModelMessage[],
@@ -340,16 +382,12 @@ export function extractDiscoveredTools(
     }>;
     for (const part of parts) {
       if (part.type !== "tool-result" || part.toolName !== "connection_search") continue;
-      const output = part.output;
-      if (output === undefined || output === null) continue;
-      const items = (
-        typeof output === "object" && "type" in output && "value" in output
-          ? (output as { value: unknown }).value
-          : output
-      ) as unknown;
-      if (!Array.isArray(items)) continue;
-      for (const item of items as ConnectionSearchResultItem[]) {
-        if (item.tool && item.qualifiedName) {
+      const items = extractConnectionSearchItems(part.output);
+      if (items === undefined) continue;
+      for (const candidate of items) {
+        if (candidate === null || typeof candidate !== "object") continue;
+        const item = candidate as ConnectionSearchResultItem;
+        if (item.tool && item.qualifiedName && !byQualifiedName.has(item.qualifiedName)) {
           byQualifiedName.set(item.qualifiedName, item);
         }
       }
@@ -359,13 +397,35 @@ export function extractDiscoveredTools(
   return [...byQualifiedName.values()];
 }
 
+function extractConnectionSearchItems(output: unknown): readonly unknown[] | undefined {
+  if (Array.isArray(output)) return output;
+  if (output === null || typeof output !== "object") return undefined;
+
+  const result = output as { readonly type?: unknown; readonly value?: unknown };
+  if (result.type === "json" && Array.isArray(result.value)) return result.value;
+  if (result.type !== "content" || !Array.isArray(result.value)) return undefined;
+
+  for (const candidate of result.value) {
+    if (candidate === null || typeof candidate !== "object") continue;
+    const part = candidate as { readonly text?: unknown; readonly type?: unknown };
+    if (part.type !== "text" || typeof part.text !== "string") continue;
+    try {
+      const parsed: unknown = JSON.parse(part.text);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // The ordinary connection_search result is the only JSON text part.
+    }
+  }
+  return undefined;
+}
+
 /**
  * Creates the connection search dynamic tool resolver events.
  *
- * The resolver subscribes to `step.started` so it re-derives the tool
- * set from conversation history on every step. After compaction, old
- * `connection_search` results disappear from messages and discovered
- * tools naturally drop from the toolset.
+ * The resolver subscribes to `step.started` so it re-derives the tool set
+ * from durable search results and conversation history on every step. After
+ * compaction removes an introducing result, its durable definition remains
+ * callable but is advertised eagerly because no tool reference remains.
  */
 export function createConnectionSearchEvents(): DynamicToolEvents {
   return {
@@ -376,13 +436,20 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
       const connections = registry.getConnections();
       const connectionNames = connections.map((c) => c.connectionName);
       const fromMessages = extractDiscoveredTools(ctx.messages);
+      const referencedNames = new Set(
+        fromMessages.flatMap((result) =>
+          result.qualifiedName === undefined ? [] : [result.qualifiedName],
+        ),
+      );
       const fromContext = loadContext().get(ConnectionSearchResultsKey) ?? [];
       const mergedMap = new Map<string, ConnectionSearchResultItem>();
       for (const r of fromContext) {
         if (r.qualifiedName) mergedMap.set(r.qualifiedName, r);
       }
       for (const r of fromMessages) {
-        if (r.qualifiedName) mergedMap.set(r.qualifiedName, r);
+        if (r.qualifiedName && !mergedMap.has(r.qualifiedName)) {
+          mergedMap.set(r.qualifiedName, r);
+        }
       }
       const discovered = [...mergedMap.values()];
 
@@ -420,13 +487,19 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
         },
         outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
       };
+      attachToolActivation(tools["connection_search"], {
+        id: CONNECTION_SEARCH_ACTIVATION_ID,
+        kind: "loader",
+        project: projectConnectionSearchActivation,
+      });
 
       for (const result of discovered) {
         const connectionName = result.connection;
         const toolName = result.tool!;
         const approval = registry.getConnectionApproval(connectionName);
+        const qualifiedName = qualifiedConnectionToolName(connectionName, toolName);
 
-        tools[qualifiedConnectionToolName(connectionName, toolName)] = {
+        tools[qualifiedName] = {
           description: result.description,
           inputSchema: (result.inputSchema ?? {
             type: "object",
@@ -504,6 +577,12 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
             }
           },
         };
+        if (referencedNames.has(qualifiedName)) {
+          attachToolActivation(tools[qualifiedName], {
+            id: CONNECTION_SEARCH_ACTIVATION_ID,
+            kind: "target",
+          });
+        }
       }
 
       return tools;

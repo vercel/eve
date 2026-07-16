@@ -4,6 +4,11 @@ import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import type { ApprovalContext } from "#public/definitions/approval.js";
 import { defineTool } from "#public/definitions/tool.js";
+import {
+  attachToolActivation,
+  createToolActivationId,
+  getToolActivation,
+} from "#harness/tool-activation.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
   buildCallbackContext: () => ({
@@ -497,6 +502,27 @@ function createReplayableTool(
 }
 
 describe("dispatchDynamicToolEvent", () => {
+  it("preserves internal activation metadata on step-scoped tools", async () => {
+    const ctx = createCtx();
+    const activation = {
+      id: createToolActivationId("connection_search"),
+      kind: "target" as const,
+    };
+    const entry = attachToolActivation(createReplayableTool(), activation);
+    const resolver = createResolver("connection", ["step.started"], () => ({
+      linear__list_issues: entry,
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    expect(getToolActivation(buildDynamicTools(ctx)[0])).toBe(activation);
+  });
+
   it("resolves tools for matching event and stores on scoped durable key", async () => {
     const ctx = createCtx();
     const resolver = createResolver("weather", ["session.started"], () => ({
