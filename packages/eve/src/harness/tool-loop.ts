@@ -1790,6 +1790,9 @@ async function handleStepResult(input: {
   });
   const invalidInputToolCallIds = new Set([
     ...(result.invalidInputToolCallIds ?? []),
+    ...result.toolCalls
+      .filter((toolCall) => toolCall.invalid === true)
+      .map((toolCall) => toolCall.toolCallId),
     ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
   ]);
   const rawResponseMessages = emptyDelivery
@@ -2044,8 +2047,9 @@ const OUTPUT_SCHEMA_NOT_FULFILLED = {
  * `final_output` tool, or `undefined` when the terminal turn ended in prose.
  */
 function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
-  return (result.toolCalls ?? []).find((call) => call.toolName === FINAL_OUTPUT_TOOL_NAME)
-    ?.input as JsonValue | undefined;
+  return (result.toolCalls ?? []).find(
+    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && call.invalid !== true,
+  )?.input as JsonValue | undefined;
 }
 
 /**

@@ -479,11 +479,11 @@ async function consumeStreamContent(
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
-    if (
-      options === undefined ||
-      toolCall.invalid === true ||
-      options.excludedActionToolNames.has(toolCall.toolName)
-    ) {
+    if (toolCall.invalid === true) {
+      invalidInputToolCallIds.add(toolCall.toolCallId);
+      return;
+    }
+    if (options === undefined || options.excludedActionToolNames.has(toolCall.toolName)) {
       return;
     }
 

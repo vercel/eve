@@ -2445,6 +2445,87 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("does not park an invalid ask_question call and continues with its tool error", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { prompt: 42 },
+                toolCallId: "question-invalid",
+                toolName: "ask_question",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output: { type: "error-text", value: "Expected string, received number" },
+                toolCallId: "question-invalid",
+                toolName: "ask_question",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      },
+      toolCalls: [
+        {
+          dynamic: true,
+          error: new Error("Expected string, received number"),
+          input: { prompt: 42 },
+          invalid: true,
+          toolCallId: "question-invalid",
+          toolName: "ask_question",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        capabilities: { requestInput: true },
+        tools: new Map([
+          [
+            "ask_question",
+            {
+              description: "Ask the user a question.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "ask_question",
+            },
+          ],
+        ]),
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [
+          {
+            description: "Ask the user a question.",
+            inputSchema: { type: "object" },
+            name: "ask_question",
+          },
+        ],
+      },
+    });
+
+    const result = await runStep(session, { message: "Ask me a question." });
+
+    expect(typeof result.next).toBe("function");
+    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(events.some((event) => event.type === "input.requested")).toBe(false);
+    expect(result.session.history.at(-1)?.role).toBe("tool");
+  });
+
   it("feeds non-object tool call input back to the model as a failed tool result", async () => {
     const invalidInput = "not an object";
     const errorMessage =

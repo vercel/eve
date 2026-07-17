@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
 import { createRuntimeToolRegistry } from "../src/runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "../src/runtime/types.js";
+import { toEveSchema } from "../src/shared/eve-schema.js";
 
 describe("createRuntimeToolRegistry", () => {
   it("lowers authored tool schemas into serializable runtime descriptors", async () => {
@@ -10,7 +11,7 @@ describe("createRuntimeToolRegistry", () => {
       tools: [
         createResolvedToolDefinition({
           description: "Get the current weather for one city.",
-          inputSchema: {
+          inputSchema: toEveSchema({
             properties: {
               city: {
                 type: "string",
@@ -18,7 +19,7 @@ describe("createRuntimeToolRegistry", () => {
             },
             required: ["city"],
             type: "object",
-          },
+          }),
           logicalPath: "tools/get-weather.ts",
           name: "get_weather",
           sourceId: "tools/get-weather.ts",

@@ -1,4 +1,4 @@
-import { jsonSchema, zodSchema, type FlexibleSchema, type ModelMessage } from "ai";
+import type { ModelMessage } from "ai";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalContext } from "#public/definitions/approval.js";
@@ -11,6 +11,7 @@ import {
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
+import { toEveSchema, type EveSchemaSource } from "#shared/eve-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import type { ContextContainer } from "#context/container.js";
@@ -47,19 +48,13 @@ function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): Harness
   };
 }
 
-function convertInputSchema(schema: unknown): FlexibleSchema {
-  if (typeof schema === "object" && schema !== null && "~standard" in schema) {
-    return zodSchema(schema as Parameters<typeof zodSchema>[0]);
-  }
-  return jsonSchema(schema as Parameters<typeof jsonSchema>[0]);
+function convertInputSchema(schema: unknown) {
+  return toEveSchema(schema as EveSchemaSource);
 }
 
-function convertOptionalOutputSchema(schema: unknown): FlexibleSchema | undefined {
+function convertOptionalOutputSchema(schema: unknown) {
   if (schema === undefined) return undefined;
-  if (typeof schema === "object" && schema !== null && "~standard" in schema) {
-    return zodSchema(schema as Parameters<typeof zodSchema>[0]);
-  }
-  return jsonSchema(schema as Parameters<typeof jsonSchema>[0]);
+  return toEveSchema(schema as EveSchemaSource, "output");
 }
 
 function qualifyDynamicToolNames(
@@ -128,9 +123,10 @@ export function replayDynamicSessionTools(
       description: m.description,
       execute: (input: unknown, options) =>
         stepFn(m.closureVars, input, buildBaseToolContext({ options, toolName: m.name })),
-      inputSchema: jsonSchema(m.inputSchema),
+      inputSchema: toEveSchema(m.inputSchema),
       name: m.name,
-      outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),
+      outputSchema:
+        m.outputSchema === undefined ? undefined : toEveSchema(m.outputSchema, "output"),
     });
   }
 

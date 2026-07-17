@@ -1,9 +1,9 @@
 import type { ModelMessage } from "ai";
+import { z } from "#compiled/zod/index.js";
 
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import type { JsonObject } from "#shared/json.js";
 
 // ---------------------------------------------------------------------------
 // Durable context key
@@ -109,51 +109,32 @@ export function executeTodoTool(input: TodoToolInput): unknown {
 // Tool definition
 // ---------------------------------------------------------------------------
 
-const TODO_ITEM_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    content: {
-      description: "Brief description of the task.",
-      type: "string",
-    },
-    priority: {
-      description: "Priority level of the task.",
-      enum: ["high", "medium", "low"],
-      type: "string",
-    },
-    status: {
-      description: "Current status of the task.",
-      enum: ["pending", "in_progress", "completed", "cancelled"],
-      type: "string",
-    },
-  },
-  required: ["content", "status", "priority"],
-  type: "object",
-};
+const TODO_ITEM_SCHEMA = z.strictObject({
+  content: z.string().describe("Brief description of the task."),
+  priority: z.enum(["high", "medium", "low"]).describe("Priority level of the task."),
+  status: z
+    .enum(["pending", "in_progress", "completed", "cancelled"])
+    .describe("Current status of the task."),
+});
 
-export const TODO_OUTPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    counts: {
-      additionalProperties: false,
-      properties: {
-        cancelled: { minimum: 0, type: "integer" },
-        completed: { minimum: 0, type: "integer" },
-        in_progress: { minimum: 0, type: "integer" },
-        pending: { minimum: 0, type: "integer" },
-        total: { minimum: 0, type: "integer" },
-      },
-      required: ["cancelled", "completed", "in_progress", "pending", "total"],
-      type: "object",
-    },
-    todos: {
-      items: TODO_ITEM_SCHEMA,
-      type: "array",
-    },
-  },
-  required: ["counts", "todos"],
-  type: "object",
-};
+export const TODO_INPUT_SCHEMA = z.strictObject({
+  todos: z
+    .array(TODO_ITEM_SCHEMA)
+    .describe("The updated todo list. Omit to read the current list without modifying it.")
+    .optional(),
+});
+
+const countSchema = z.number().int().min(0);
+export const TODO_OUTPUT_SCHEMA = z.strictObject({
+  counts: z.strictObject({
+    cancelled: countSchema,
+    completed: countSchema,
+    in_progress: countSchema,
+    pending: countSchema,
+    total: countSchema,
+  }),
+  todos: z.array(TODO_ITEM_SCHEMA),
+});
 
 export const TODO_TOOL_DEFINITION: ResolvedToolDefinition = {
   description: [
@@ -178,17 +159,7 @@ export const TODO_TOOL_DEFINITION: ResolvedToolDefinition = {
     "- Only have ONE task in_progress at a time",
   ].join("\n"),
   execute: async (input) => executeTodoTool((input ?? {}) as TodoToolInput),
-  inputSchema: {
-    additionalProperties: false,
-    properties: {
-      todos: {
-        description: "The updated todo list. Omit to read the current list without modifying it.",
-        items: TODO_ITEM_SCHEMA,
-        type: "array",
-      },
-    },
-    type: "object",
-  },
+  inputSchema: TODO_INPUT_SCHEMA,
   logicalPath: "eve:framework/todo",
   name: "todo",
   outputSchema: TODO_OUTPUT_SCHEMA,

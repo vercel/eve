@@ -1,7 +1,9 @@
+import { z } from "#compiled/zod/index.js";
+
 import { RuntimeRegistry, RuntimeRegistryError } from "#internal/runtime-registry.js";
-import type { JsonObject } from "#shared/json.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { ResolvedRuntimeDelegationNode } from "#runtime/types.js";
+import { serializeEveSchema } from "#shared/eve-schema.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -24,23 +26,19 @@ export interface RuntimeSubagentRegistry {
  * Stable JSON Schema lowered onto every subagent tool. Subagents always
  * accept one free-form `message` string from the parent agent.
  */
-export const SUBAGENT_TOOL_INPUT_SCHEMA: JsonObject = Object.freeze({
-  type: "object",
-  properties: Object.freeze({
-    message: Object.freeze({
-      type: "string",
-      description:
-        "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
-    }),
-    outputSchema: Object.freeze({
-      type: "object",
-      description:
-        "When provided, the subagent runs in task mode and must produce structured output matching this JSON Schema. The structured output becomes the tool result.",
-    }),
-  }),
-  required: Object.freeze(["message"]),
-  additionalProperties: false,
-}) as JsonObject;
+export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
+  message: z
+    .string()
+    .describe(
+      "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
+    ),
+  outputSchema: z
+    .looseObject({})
+    .describe(
+      "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The subagent must match a provided schema, and that structured output becomes the tool result.",
+    )
+    .optional(),
+});
 
 /**
  * Builds the runtime-owned registry for the resolved subagents visible from one
@@ -99,7 +97,7 @@ function createPreparedRuntimeSubagentTool(
 ): PreparedRuntimeDelegationTool {
   return {
     description: definition.description,
-    inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
+    inputSchema: serializeEveSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
     kind: definition.kind,
     logicalPath: definition.logicalPath,
     name: definition.name,
