@@ -63,6 +63,16 @@ export function createSendFn<TState = undefined>(
       );
     }
 
+    if (
+      message === undefined &&
+      (context === undefined || context.length === 0) &&
+      outputSchema === undefined
+    ) {
+      throw new Error(
+        "Cannot start a session without a message, trusted context, or output schema.",
+      );
+    }
+
     const sessionAdapter = state
       ? { ...adapter, state: { ...adapter.state, ...(state as Record<string, unknown>) } }
       : adapter;

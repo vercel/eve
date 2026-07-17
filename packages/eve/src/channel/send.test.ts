@@ -83,6 +83,32 @@ describe("createSendFn", () => {
     expect(runtime.run).not.toHaveBeenCalled();
   });
 
+  it("rejects clientContext-only input when no active session exists", async () => {
+    const runtime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
+    const send = createSendFn(runtime, ADAPTER, "test");
+
+    await expect(
+      send({ clientContext: ["selected word: jazz"] }, { auth: null, continuationToken: "token" }),
+    ).rejects.toThrow(/Cannot start a session/);
+    expect(runtime.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["trusted context", { context: ["reply in the current channel"] }],
+    [
+      "an output schema",
+      { outputSchema: { properties: {}, required: [], type: "object" as const } },
+    ],
+  ])("starts a new session from %s without a message", async (_label, input) => {
+    const runtime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
+    const send = createSendFn(runtime, ADAPTER, "test");
+
+    await send(input, { auth: null, continuationToken: "token" });
+
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(runtime.run).mock.calls[0]![0].input).toMatchObject(input);
+  });
+
   it("keeps client and channel context separate through deliver and run payloads", async () => {
     const clientContext = ["selected word: jazz"];
     const context = ["thread background"];

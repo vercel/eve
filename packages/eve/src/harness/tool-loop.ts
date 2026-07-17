@@ -513,7 +513,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const result = parentContext
         ? await otelContext.with(parentContext, executeStep)
         : await executeStep();
-      return typeof result.next === "function"
+      return typeof result.next === "function" ||
+        getPendingWorkflowInterrupt(result.session.state) !== undefined
         ? result
         : { ...result, session: clearTurnContext(result.session) };
     } finally {

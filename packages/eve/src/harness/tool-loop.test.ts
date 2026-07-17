@@ -43,6 +43,8 @@ import {
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { getTurnClientContext, getTurnDeliveryContext } from "#harness/turn-delivery-context.js";
+import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
+import { WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND } from "#harness/workflow-runtime-action-state.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -92,6 +94,12 @@ vi.mock("./compaction.js", () => ({
     }),
   ),
   shouldCompact: vi.fn().mockReturnValue(false),
+}));
+
+const mockGetWorkflowSandboxInterrupt = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("#shared/workflow-sandbox.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#shared/workflow-sandbox.js")>()),
+  getWorkflowSandboxInterrupt: (...args: unknown[]) => mockGetWorkflowSandboxInterrupt(...args),
 }));
 
 afterEach(() => {
@@ -9251,6 +9259,88 @@ describe("createToolLoopHarness", () => {
       });
       expect(dynamicModelMessages[2]).not.toContainEqual({ role: "user", content: clientContext });
       expect(dynamicToolMessages[2]).not.toContainEqual({ role: "user", content: clientContext });
+    });
+
+    it("keeps transient context while a workflow child is parked", async () => {
+      setupMockAgent(defaultModelResult());
+      const interruptId = "workflow-call:tool-1:interrupt";
+      const toolCallId = "workflow-call:tool-1";
+      const interruptPayload = {
+        kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
+        runtimeAction: {
+          kind: "subagent-call" as const,
+          nodeId: "workers",
+          subagentName: "worker",
+        },
+        toolInput: { message: "delegate" },
+        toolName: "delegate",
+      };
+      const continuation = {
+        auth: {
+          alg: "HMAC-SHA256" as const,
+          expiresAtMs: 2,
+          issuedAtMs: 1,
+          nonce: "nonce",
+          signature: "signature",
+        },
+        determinism: {
+          dateNowMs: 1,
+          randomSeed: "00000000000000000000000000000000",
+        },
+        js: "return delegate({ message: 'delegate' })",
+        ledger: [
+          {
+            inputJson: JSON.stringify({ message: "delegate" }),
+            interruptId,
+            interruptPayload,
+            kind: "tool" as const,
+            name: "delegate",
+            status: "interrupted" as const,
+            toolCallId,
+          },
+        ],
+        outerToolCallId: "workflow-call",
+        version: 1 as const,
+      };
+      mockGetWorkflowSandboxInterrupt.mockResolvedValueOnce({
+        continuation,
+        input: { message: "delegate" },
+        interruptId,
+        outerToolCallId: continuation.outerToolCallId,
+        payload: interruptPayload,
+        toolCallId,
+        toolName: "delegate",
+        type: "code-mode-interrupt",
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          tools: createDelegationToolMap(),
+          workflow: true,
+        }),
+      );
+      const clientContext = "selected issue text";
+      const deliveryContext = "reply in the current channel";
+
+      const result = await runStep(
+        createTestSession({
+          state: {
+            "eve.harness.workflowContinuationSecurity": {
+              signingKey: "a".repeat(43),
+              version: 1,
+            },
+          },
+        }),
+        {
+          clientContext: [clientContext],
+          context: [deliveryContext],
+          message: "Delegate this",
+        },
+      );
+
+      expect(result.next).toBeNull();
+      expect(getPendingWorkflowInterrupt(result.session.state)).toBeDefined();
+      expect(getTurnClientContext(result.session)).toEqual([clientContext]);
+      expect(getTurnDeliveryContext(result.session)).toEqual([deliveryContext]);
     });
 
     it("routes role:system durable history into instructions, not messages", async () => {
