@@ -347,23 +347,28 @@ export async function dispatchDynamicSkillEvent(input: {
       const metadata: DurableDynamicSkillMetadata[] = [];
       for (const skill of skills) {
         const previousSkill = previousSkillsByName.get(skill.name);
-        let authoredBaseline = previousSkill?.authoredBaseline;
-        let authoredBaselineSandboxId = previousSkill?.authoredBaselineSandboxId;
+        const authoredIdentity = authoredPackageIdentities.get(skill.name);
+        let authoredBaseline =
+          authoredIdentity === undefined ? undefined : previousSkill?.authoredBaseline;
+        let authoredBaselineSandboxId =
+          authoredIdentity === undefined ? undefined : previousSkill?.authoredBaselineSandboxId;
         if (
-          authoredPackageIdentities.has(skill.name) &&
+          authoredIdentity !== undefined &&
           sandbox !== null &&
           sandbox !== undefined &&
           (authoredBaseline === undefined || authoredBaselineSandboxId !== sandbox.id)
         ) {
-          const identity = authoredPackageIdentities.get(skill.name);
-          if (identity === undefined) {
-            throw new Error(
-              `Cannot overlay authored skill "${skill.name}" without its compiled package identity.`,
-            );
-          }
           authoredBaseline =
-            (await recoverCapturedAuthoredSkillBaseline({ identity, name: skill.name, sandbox })) ??
-            (await captureAuthoredSkillBaseline({ identity, name: skill.name, sandbox }));
+            (await recoverCapturedAuthoredSkillBaseline({
+              identity: authoredIdentity,
+              name: skill.name,
+              sandbox,
+            })) ??
+            (await captureAuthoredSkillBaseline({
+              identity: authoredIdentity,
+              name: skill.name,
+              sandbox,
+            }));
           authoredBaselineSandboxId = sandbox.id;
         }
         metadata.push({

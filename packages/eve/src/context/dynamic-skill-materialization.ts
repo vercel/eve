@@ -181,6 +181,7 @@ export async function materializeDynamicSkillUpdates(input: {
   );
   const restorePackages = await Promise.all(
     [...filesystemRemovePackages].flatMap((name) => {
+      if (!input.authoredPackageIdentities.has(name)) return [];
       const baseline = desired.get(name)?.authoredBaseline ?? previous.get(name)?.authoredBaseline;
       return baseline === undefined
         ? []

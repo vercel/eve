@@ -875,6 +875,46 @@ describe("dispatchDynamicSkillEvent", () => {
     ).toBe("Authored reference");
   });
 
+  it("drops a stale authored baseline when the rebuilt bundle no longer authors the skill", async () => {
+    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+    sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
+    const resolver = createResolver("custom", () => ({
+      "talk-like-a-dog": makeSkill("Dynamic override", "Woof."),
+    }));
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    expect(ctx.get(DynamicSkillManifestKey)?.custom?.[0]?.authoredBaseline).toBeDefined();
+
+    const recreated = mockSandbox({
+      id: "sbx_recreated_without_authored_skill",
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+    ctx.set(BundleKey, createMockBundle());
+    ctx.set(SandboxKey, recreated.access);
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(recreated.files.get(skillPath)).toBe("Woof.");
+    expect(ctx.get(DynamicSkillManifestKey)?.custom?.[0]?.authoredBaseline).toBeUndefined();
+    expect(
+      ctx.get(DynamicSkillManifestKey)?.custom?.[0]?.authoredBaselineSandboxId,
+    ).toBeUndefined();
+  });
+
   it("reuses the captured authored baseline when sandbox replacement retries before serialization", async () => {
     const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
     const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
