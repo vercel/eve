@@ -132,27 +132,53 @@ describe("dynamic skill materialization recovery", () => {
     expect(sandbox.writes.length).toBeGreaterThan(writesBeforeValidation);
   });
 
-  it("preserves an existing legacy manifest until its resolver can migrate it", async () => {
-    const { ctx, sandbox } = createCtx();
-    const resolver = createResolver(
-      "session-policy",
-      () => makeSkill("Session policy", "Follow session policy."),
-      ["session.started"],
-    );
-    const skillPath = "/home/agent/.agents/skills/session-policy/SKILL.md";
-    sandbox.files.set(skillPath, "Follow session policy.");
-    sandbox.fileBytes.set(skillPath, Buffer.from("Follow session policy."));
-    ctx.set(DynamicSkillManifestKey, {
-      "session-policy": [{ description: "Session policy", name: "session-policy" }],
-    });
+  it.each(["mutated", "symlink"] as const)(
+    "drops a %s legacy package on an unmatched event",
+    async (state) => {
+      const { ctx, sandbox } = createCtx();
+      const resolver = createResolver(
+        "session-policy",
+        () => makeSkill("Session policy", "Follow session policy."),
+        ["session.started"],
+      );
+      const skillPath = "/home/agent/.agents/skills/session-policy/SKILL.md";
+      sandbox.files.set(skillPath, "Mutated session policy.");
+      sandbox.fileBytes.set(skillPath, Buffer.from("Mutated session policy."));
+      ctx.set(DynamicSkillManifestKey, {
+        "session-policy": [{ description: "Session policy", name: "session-policy" }],
+      });
 
-    await dispatch({ ctx, event: "turn.started", resolvers: [resolver] });
+      if (state === "symlink") {
+        const symlinkAwareSession = {
+          ...sandbox.session,
+          async run(options: Parameters<typeof sandbox.session.run>[0]) {
+            if (options.command.includes("find '/home/agent/.agents/skills/session-policy'")) {
+              return {
+                exitCode: 0,
+                stderr: "",
+                stdout: `l\0${skillPath}\0`,
+              };
+            }
+            return sandbox.session.run(options);
+          },
+        };
+        ctx.set(SandboxKey, {
+          async captureState() {
+            return { initialized: false, session: null };
+          },
+          async get() {
+            return symlinkAwareSession;
+          },
+        });
+      }
 
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      "session-policy": [{ description: "Session policy", name: "session-policy" }],
-    });
-    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("session-policy: Session policy");
-  });
+      await dispatch({ ctx, event: "turn.started", resolvers: [resolver] });
+
+      expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
+      expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
+      expect(sandbox.files.has(skillPath)).toBe(false);
+    },
+  );
 
   it("migrates exact pre-marker packages instead of dropping them on an unmatched event", async () => {
     const { ctx, sandbox } = createCtx();

@@ -123,8 +123,18 @@ export async function dispatchDynamicSkillEvent(input: {
   let trustedMarkerReadLoaded = false;
   let previousManifest = ctx.get(DynamicSkillManifestKey) ?? {};
   let activeManifest = previousManifest;
-  const authoredPackageNames = new Set(
-    (ctx.get(BundleKey)?.resolvedAgent.skills ?? []).map((skill) => skill.name),
+  const authoredPackageIdentities = new Map(
+    (ctx.get(BundleKey)?.resolvedAgent.skills ?? []).map((skill) => [
+      skill.name,
+      skill.contentDigest === undefined || skill.relativePaths === undefined
+        ? undefined
+        : {
+            contentDigest: skill.contentDigest,
+            description: skill.description,
+            name: skill.name,
+            relativePaths: skill.relativePaths,
+          },
+    ]),
   );
 
   const loadMaterializationState = async (): Promise<void> => {
@@ -198,11 +208,17 @@ export async function dispatchDynamicSkillEvent(input: {
     Object.keys(previousManifest).length > 0
   ) {
     const markerRead = await loadTrustedMarker();
-    if (
-      sandbox !== null &&
-      isFullRematerialization(markerRead) &&
-      markerRead?.status !== "legacy"
-    ) {
+    if (sandbox !== null && isFullRematerialization(markerRead)) {
+      if (sandbox !== undefined && markerRead !== undefined) {
+        await materializeDynamicSkillUpdates({
+          markerMs,
+          markerRead,
+          nextManifest: {},
+          previousManifest,
+          sandbox,
+          updates: [],
+        });
+      }
       activeManifest = {};
       ctx.set(DynamicSkillManifestKey, activeManifest);
       ctx.setVirtualContext(PendingSkillAnnouncementKey, "");
@@ -305,14 +321,20 @@ export async function dispatchDynamicSkillEvent(input: {
         let authoredBaseline = previousSkill?.authoredBaseline;
         let authoredBaselineSandboxId = previousSkill?.authoredBaselineSandboxId;
         if (
-          authoredPackageNames.has(skill.name) &&
+          authoredPackageIdentities.has(skill.name) &&
           sandbox !== null &&
           sandbox !== undefined &&
           (authoredBaseline === undefined || authoredBaselineSandboxId !== sandbox.id)
         ) {
+          const identity = authoredPackageIdentities.get(skill.name);
+          if (identity === undefined) {
+            throw new Error(
+              `Cannot overlay authored skill "${skill.name}" without its compiled package identity.`,
+            );
+          }
           authoredBaseline =
-            (await recoverCapturedAuthoredSkillBaseline({ name: skill.name, sandbox })) ??
-            (await captureAuthoredSkillBaseline({ name: skill.name, sandbox }));
+            (await recoverCapturedAuthoredSkillBaseline({ identity, name: skill.name, sandbox })) ??
+            (await captureAuthoredSkillBaseline({ identity, name: skill.name, sandbox }));
           authoredBaselineSandboxId = sandbox.id;
         }
         metadata.push({

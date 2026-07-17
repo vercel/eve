@@ -10,7 +10,11 @@ import type {
 } from "#compiler/manifest.js";
 import { deriveResourceRootEntries, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
-import { normalizeSkillPackage, writeSkillPackageDirectory } from "#shared/skill-package.js";
+import {
+  digestMaterializedSkillPackage,
+  normalizeSkillPackage,
+  writeSkillPackageDirectory,
+} from "#shared/skill-package.js";
 
 const RESOURCES_DIRECTORY = "workspace-resources";
 const RESOURCE_WORKSPACE_DIRECTORY = "workspace";
@@ -97,7 +101,9 @@ async function materializeNode(input: {
 
   return {
     ...input.manifest,
-    skills: input.manifest.skills.map(stripSkillPackageFiles),
+    skills: await Promise.all(
+      input.manifest.skills.map((skill) => stripSkillPackageFiles({ nodeRoot, skill })),
+    ),
     workspaceResourceRoot: createResourceRoot(input.manifest, input.nodeId, contentHash),
   };
 }
@@ -119,9 +125,33 @@ async function materializeSkill(input: {
   });
 }
 
-function stripSkillPackageFiles(skill: CompiledSkillDefinition): CompiledSkillDefinition {
-  const { files: _files, ...manifestSkill } = skill;
-  return manifestSkill;
+async function stripSkillPackageFiles(input: {
+  readonly nodeRoot: string;
+  readonly skill: CompiledSkillDefinition;
+}): Promise<CompiledSkillDefinition> {
+  const { files: _files, ...manifestSkill } = input.skill;
+  const materializedFiles = await listWorkspaceResourceFiles({
+    logicalDirectoryPath: ".",
+    sourceDirectoryPath: join(input.nodeRoot, RESOURCE_SKILLS_DIRECTORY, input.skill.name),
+  });
+  materializedFiles.sort((left, right) =>
+    left.logicalPath < right.logicalPath ? -1 : left.logicalPath > right.logicalPath ? 1 : 0,
+  );
+  const files = await Promise.all(
+    materializedFiles.map(async (file) => ({
+      content: await readFile(file.sourcePath),
+      relativePath: file.logicalPath,
+    })),
+  );
+  return {
+    ...manifestSkill,
+    contentDigest: digestMaterializedSkillPackage({
+      description: input.skill.description,
+      files,
+      name: input.skill.name,
+    }),
+    relativePaths: files.map((file) => file.relativePath),
+  };
 }
 
 async function copyDirectoryContents(input: {

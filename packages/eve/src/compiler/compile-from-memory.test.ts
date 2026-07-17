@@ -72,6 +72,8 @@ describe("compileFromMemory", () => {
     expect(skill?.markdown).toBe("# greet\n");
     expect(skill?.sourceKind).toBe("markdown");
     expect(skill?.logicalPath).toBe("skills/greetings.md");
+    expect(skill?.contentDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(skill?.relativePaths).toEqual(["SKILL.md"]);
   });
 
   it("produces a manifest that passes the versioned schema validation", () => {

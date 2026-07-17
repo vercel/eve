@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
@@ -17,10 +19,20 @@ import { defineSkill } from "#public/definitions/skill.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
+import { normalizeSkillPackage } from "#shared/skill-package.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
-function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledBundle {
+interface MockAuthoredSkillDefinition {
+  readonly description: string;
+  readonly files?: Readonly<Record<string, string | Uint8Array>>;
+  readonly markdown: string;
+}
+
+function createMockBundle(
+  authoredSkillNames: readonly string[] = [],
+  authoredSkills: Readonly<Record<string, MockAuthoredSkillDefinition>> = {},
+): CompiledBundle {
   return {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
@@ -30,11 +42,19 @@ function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledB
     nodeId: undefined,
     resolvedAgent: {
       config: { name: "test-agent" },
-      skills: authoredSkillNames.map((name) => ({
-        description: `Authored ${name}`,
-        markdown: `Authored ${name} body.`,
-        name,
-      })),
+      skills: authoredSkillNames.map((name) => {
+        const definition = authoredSkills[name] ?? {
+          description: `Authored ${name}`,
+          markdown: `Authored ${name} body.`,
+        };
+        const normalized = normalizeSkillPackage({ ...definition, name });
+        return {
+          ...definition,
+          contentDigest: normalized.contentDigest,
+          name,
+          relativePaths: normalized.files.map((file) => file.relativePath),
+        };
+      }),
     } as never,
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
@@ -42,7 +62,10 @@ function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledB
   };
 }
 
-function createCtx(authoredSkillNames: readonly string[] = []) {
+function createCtx(
+  authoredSkillNames: readonly string[] = [],
+  authoredSkills: Readonly<Record<string, MockAuthoredSkillDefinition>> = {},
+) {
   const ctx = new ContextContainer();
   const sandbox = mockSandbox({
     commands: {
@@ -51,8 +74,18 @@ function createCtx(authoredSkillNames: readonly string[] = []) {
   });
   ctx.set(SessionIdKey, "test-session");
   ctx.set(SandboxKey, sandbox.access);
-  ctx.set(BundleKey, createMockBundle(authoredSkillNames));
+  ctx.set(BundleKey, createMockBundle(authoredSkillNames, authoredSkills));
   return { ctx, sandbox };
+}
+
+function createCtxWithAuthoredDogReference() {
+  return createCtx(["talk-like-a-dog"], {
+    "talk-like-a-dog": {
+      description: "Authored talk-like-a-dog",
+      files: { "references/authored.md": "Authored reference" },
+      markdown: "Authored talk-like-a-dog body.",
+    },
+  });
 }
 
 function createResolver(
@@ -465,7 +498,7 @@ describe("dispatchDynamicSkillEvent", () => {
   });
 
   it("lets a dynamic skill override a same-named authored skill instead of throwing", async () => {
-    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const { ctx, sandbox } = createCtxWithAuthoredDogReference();
     let enabled = true;
     const authoredSkill = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
     const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
@@ -533,7 +566,7 @@ describe("dispatchDynamicSkillEvent", () => {
   });
 
   it("restores the exact authored baseline when a dynamic override retires", async () => {
-    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const { ctx, sandbox } = createCtxWithAuthoredDogReference();
     const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
     const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
     const dynamicReference = "/home/agent/.agents/skills/talk-like-a-dog/references/dynamic.md";
@@ -572,7 +605,7 @@ describe("dispatchDynamicSkillEvent", () => {
   });
 
   it("rebuilds a changed dynamic override over the exact authored baseline", async () => {
-    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const { ctx, sandbox } = createCtxWithAuthoredDogReference();
     const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
     const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
     const staleReference = "/home/agent/.agents/skills/talk-like-a-dog/references/stale.md";
@@ -612,7 +645,8 @@ describe("dispatchDynamicSkillEvent", () => {
   });
 
   it("recaptures the authored baseline after sandbox replacement", async () => {
-    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const { ctx, sandbox } = createCtxWithAuthoredDogReference();
+    const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
     sandbox.files.set(
       "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md",
       "Authored talk-like-a-dog body.",
@@ -621,6 +655,8 @@ describe("dispatchDynamicSkillEvent", () => {
       "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md",
       Buffer.from("Authored talk-like-a-dog body."),
     );
+    sandbox.files.set(authoredReference, "Authored reference");
+    sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
     const resolver = createResolver("custom", () => ({
       "talk-like-a-dog": makeSkill("Dynamic override", "Woof."),
     }));
@@ -662,8 +698,8 @@ describe("dispatchDynamicSkillEvent", () => {
   it("reuses the captured authored baseline when sandbox replacement retries before serialization", async () => {
     const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
     const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
-    sandbox.files.set(skillPath, "Authored body from sandbox A.");
-    sandbox.fileBytes.set(skillPath, Buffer.from("Authored body from sandbox A."));
+    sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
     let enabled = true;
     const resolver = createResolver("custom", () =>
       enabled ? { "talk-like-a-dog": makeSkill("Dynamic override", "Woof.") } : null,
@@ -683,7 +719,7 @@ describe("dispatchDynamicSkillEvent", () => {
         [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
       },
       initialFiles: {
-        [skillPath]: "Authored body from sandbox B.",
+        [skillPath]: "Authored talk-like-a-dog body.",
       },
     });
     const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
@@ -732,19 +768,133 @@ describe("dispatchDynamicSkillEvent", () => {
       resolvers: [resolver],
     });
 
-    expect(recreated.files.get(skillPath)).toBe("Authored body from sandbox B.");
+    expect(recreated.files.get(skillPath)).toBe("Authored talk-like-a-dog body.");
   });
+
+  it.each(["deleted", "forged"] as const)(
+    "rejects a %s same-generation authored baseline after a post-overlay retry",
+    async (state) => {
+      const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+      const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+      sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+      sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
+      const resolver = createResolver("custom", () => ({
+        "talk-like-a-dog": makeSkill("Dynamic override", "Woof."),
+      }));
+
+      await dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      });
+      const durableSandboxAManifest = structuredClone(ctx.get(DynamicSkillManifestKey)!);
+
+      const recreated = mockSandbox({
+        id: "sbx_recreated_corrupt",
+        commands: {
+          [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+        },
+        initialFiles: {
+          [skillPath]: "Authored talk-like-a-dog body.",
+        },
+      });
+      const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+      const failingSession = {
+        ...recreated.session,
+        async writeTextFile(options: Parameters<typeof recreated.session.writeTextFile>[0]) {
+          if (options.path === markerPath) throw new Error("injected post-overlay failure");
+          await recreated.session.writeTextFile(options);
+        },
+      };
+      ctx.set(SandboxKey, {
+        async captureState() {
+          return { initialized: false, session: null };
+        },
+        async get() {
+          return failingSession;
+        },
+      });
+
+      await expect(
+        dispatchDynamicSkillEvent({
+          ctx,
+          event: makeEvent(),
+          messages: [],
+          resolvers: [resolver],
+        }),
+      ).rejects.toThrow("injected post-overlay failure");
+
+      const baselineRoot =
+        "/home/agent/.agents/skills/.eve-dynamic-skill-authored-baselines/talk-like-a-dog";
+      const baselineSkillPath = `${baselineRoot}/SKILL.md`;
+      const receiptPath = `${baselineRoot}.receipt.json`;
+      if (state === "deleted") {
+        recreated.files.delete(baselineSkillPath);
+        recreated.fileBytes.delete(baselineSkillPath);
+        recreated.files.delete(receiptPath);
+        recreated.fileBytes.delete(receiptPath);
+      } else {
+        const forgedBody = Buffer.from("Woof.");
+        const forgedReceipt = `${JSON.stringify({
+          baseline: [
+            {
+              contentDigest: createHash("sha256").update(forgedBody).digest("hex"),
+              relativePath: "SKILL.md",
+            },
+          ],
+          sandboxId: "sbx_recreated_corrupt",
+          version: 1,
+        })}\n`;
+        recreated.files.set(baselineSkillPath, "Woof.");
+        recreated.fileBytes.set(baselineSkillPath, forgedBody);
+        recreated.files.set(receiptPath, forgedReceipt);
+        recreated.fileBytes.set(receiptPath, Buffer.from(forgedReceipt));
+      }
+
+      ctx.set(DynamicSkillManifestKey, durableSandboxAManifest);
+      ctx.set(SandboxKey, recreated.access);
+      await expect(
+        dispatchDynamicSkillEvent({
+          ctx,
+          event: makeEvent(),
+          messages: [],
+          resolvers: [resolver],
+        }),
+      ).rejects.toThrow(/authored skill baseline/iu);
+    },
+  );
 
   it.each(["deleted", "tampered"] as const)(
     "fails closed when the same-generation baseline receipt is %s",
     async (state) => {
-      const { sandbox } = createCtx(["talk-like-a-dog"]);
+      const { sandbox } = createCtx(["talk-like-a-dog"], {
+        "talk-like-a-dog": {
+          description: "Authored talk-like-a-dog",
+          markdown: "Authored body.",
+        },
+      });
       const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
       const receiptPath =
         "/home/agent/.agents/skills/.eve-dynamic-skill-authored-baselines/talk-like-a-dog.receipt.json";
       sandbox.files.set(skillPath, "Authored body.");
       sandbox.fileBytes.set(skillPath, Buffer.from("Authored body."));
-      await captureAuthoredSkillBaseline({ name: "talk-like-a-dog", sandbox: sandbox.session });
+      const normalized = normalizeSkillPackage({
+        description: "Authored talk-like-a-dog",
+        markdown: "Authored body.",
+        name: "talk-like-a-dog",
+      });
+      const identity = {
+        contentDigest: normalized.contentDigest,
+        description: normalized.description,
+        name: normalized.name,
+        relativePaths: normalized.files.map((file) => file.relativePath),
+      };
+      await captureAuthoredSkillBaseline({
+        identity,
+        name: "talk-like-a-dog",
+        sandbox: sandbox.session,
+      });
       sandbox.files.set(skillPath, "Dynamic body.");
       sandbox.fileBytes.set(skillPath, Buffer.from("Dynamic body."));
 
@@ -758,6 +908,7 @@ describe("dispatchDynamicSkillEvent", () => {
 
       await expect(
         recoverCapturedAuthoredSkillBaseline({
+          identity,
           name: "talk-like-a-dog",
           sandbox: sandbox.session,
         }),

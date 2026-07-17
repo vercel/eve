@@ -21,7 +21,15 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const AUTHORED_BASELINES_DIRECTORY = ".eve-dynamic-skill-authored-baselines";
 
+export interface AuthoredSkillPackageIdentity {
+  readonly contentDigest: string;
+  readonly description: string;
+  readonly name: string;
+  readonly relativePaths: readonly string[];
+}
+
 export async function captureAuthoredSkillBaseline(input: {
+  readonly identity: AuthoredSkillPackageIdentity;
   readonly name: string;
   readonly sandbox: SandboxSession;
 }): Promise<readonly DurableDynamicSkillBaselineFileMetadata[]> {
@@ -31,6 +39,7 @@ export async function captureAuthoredSkillBaseline(input: {
   if (!files.some((file) => file.relativePath === "SKILL.md")) {
     throw new Error(`Cannot overlay authored skill "${input.name}" without its baseline SKILL.md.`);
   }
+  assertMatchesAuthoredSkillPackageIdentity({ files, identity: input.identity });
 
   const baselineRoot = `${skillRoot}/${AUTHORED_BASELINES_DIRECTORY}/${input.name}`;
   await input.sandbox.removePath({ force: true, path: baselineRoot, recursive: true });
@@ -53,6 +62,7 @@ export async function captureAuthoredSkillBaseline(input: {
 }
 
 export async function recoverCapturedAuthoredSkillBaseline(input: {
+  readonly identity: AuthoredSkillPackageIdentity;
   readonly name: string;
   readonly sandbox: SandboxSession;
 }): Promise<readonly DurableDynamicSkillBaselineFileMetadata[] | undefined> {
@@ -84,8 +94,34 @@ export async function recoverCapturedAuthoredSkillBaseline(input: {
   if (baseline === undefined) {
     throw new Error(`Authored skill baseline receipt for "${input.name}" is invalid.`);
   }
-  await readVerifiedAuthoredSkillBaseline({ baseline, name: input.name, sandbox: input.sandbox });
+  const files = await readVerifiedAuthoredSkillBaseline({
+    baseline,
+    name: input.name,
+    sandbox: input.sandbox,
+  });
+  assertMatchesAuthoredSkillPackageIdentity({ files, identity: input.identity });
   return baseline;
+}
+
+function assertMatchesAuthoredSkillPackageIdentity(input: {
+  readonly files: readonly NormalizedSkillPackageFile[];
+  readonly identity: AuthoredSkillPackageIdentity;
+}): void {
+  if (
+    !pathsEqual(
+      input.files.map((file) => file.relativePath),
+      input.identity.relativePaths,
+    ) ||
+    digestMaterializedSkillPackage({
+      description: input.identity.description,
+      files: input.files,
+      name: input.identity.name,
+    }) !== input.identity.contentDigest
+  ) {
+    throw new Error(
+      `Authored skill baseline for "${input.identity.name}" does not match its compiled package identity.`,
+    );
+  }
 }
 
 export async function readVerifiedAuthoredSkillBaseline(input: {

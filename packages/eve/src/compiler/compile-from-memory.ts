@@ -9,6 +9,7 @@ import {
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import { normalizeSkillPackage } from "#shared/skill-package.js";
 
 /**
  * Declarative description of an in-memory authored agent used by the test
@@ -109,14 +110,23 @@ export function compileFromMemory(input: CompileFromMemoryInput): CompileFromMem
     sourceKind: "module",
   }));
 
-  const skills: CompiledSkillDefinition[] = (input.skills ?? []).map((skillInput) => ({
-    description: skillInput.description,
-    logicalPath: `skills/${skillInput.name}.md`,
-    markdown: skillInput.markdown ?? `# ${skillInput.name}\n`,
-    name: skillInput.name,
-    sourceId: createMemorySourceId(`skills/${skillInput.name}.md`),
-    sourceKind: "markdown",
-  }));
+  const skills: CompiledSkillDefinition[] = (input.skills ?? []).map((skillInput) => {
+    const skill = normalizeSkillPackage({
+      description: skillInput.description,
+      markdown: skillInput.markdown ?? `# ${skillInput.name}\n`,
+      name: skillInput.name,
+    });
+    return {
+      contentDigest: skill.contentDigest,
+      description: skill.description,
+      logicalPath: `skills/${skill.name}.md`,
+      markdown: skill.markdown,
+      name: skill.name,
+      relativePaths: skill.files.map((file) => file.relativePath),
+      sourceId: createMemorySourceId(`skills/${skill.name}.md`),
+      sourceKind: "markdown",
+    };
+  });
 
   const manifest = createCompiledAgentManifest({
     agentRoot,

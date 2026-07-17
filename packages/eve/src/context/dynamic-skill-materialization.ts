@@ -17,7 +17,6 @@ import {
   removeSkillPackageFromSandbox,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
-import { resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
 
 type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
 
@@ -103,39 +102,6 @@ export async function dynamicSkillManifestMatchesSandbox(input: {
   }
 
   return true;
-}
-
-/** Returns whether a legacy manifest still has every package entry in this sandbox. */
-export async function legacyDynamicSkillManifestExistsInSandbox(input: {
-  readonly manifest: DynamicSkillManifest;
-  readonly sandbox: SandboxSession;
-}): Promise<boolean> {
-  let hasLegacyMetadata = false;
-
-  for (const [name, metadata] of indexManifest(input.manifest)) {
-    if (metadata.contentDigest !== undefined && metadata.relativePaths !== undefined) {
-      if (
-        !(await dynamicSkillPackageMatchesSandbox({
-          metadata: { ...metadata, name },
-          sandbox: input.sandbox,
-        }))
-      )
-        return false;
-      continue;
-    }
-
-    hasLegacyMetadata = true;
-    const skillBody = await input.sandbox.readBinaryFile({
-      path: await resolveSandboxSkillWritePath({
-        name,
-        relativePath: "SKILL.md",
-        sandbox: input.sandbox,
-      }),
-    });
-    if (skillBody === null) return false;
-  }
-
-  return hasLegacyMetadata;
 }
 
 /** Applies one dynamic-skill delta and commits its sandbox marker last. */

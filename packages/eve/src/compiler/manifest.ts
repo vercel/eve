@@ -41,7 +41,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 36;
+export const COMPILED_AGENT_MANIFEST_VERSION = 37;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -141,7 +141,10 @@ export type CompiledInstructionsDefinition = InternalInstructionsDefinition &
  * Normalized authored skill preserved in the compiled manifest.
  */
 export type CompiledSkillDefinition = NamedSkillDefinition &
-  (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef | SkillPackageSourceRef);
+  (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef | SkillPackageSourceRef) & {
+    readonly contentDigest?: string;
+    readonly relativePaths?: readonly string[];
+  };
 
 /**
  * Normalized authored schedule preserved in the compiled manifest.
@@ -446,11 +449,13 @@ const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z
   .strict();
 
 const compiledSkillBaseFields = {
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   name: z.string(),
   description: z.string(),
   license: z.string().optional(),
   markdown: z.string(),
   metadata: z.record(z.string(), z.string()).optional(),
+  relativePaths: z.array(z.string()),
   sourceId: z.string(),
   logicalPath: z.string(),
 };

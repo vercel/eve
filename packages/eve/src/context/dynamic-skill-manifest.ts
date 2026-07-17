@@ -4,7 +4,6 @@ import {
   dynamicSkillManifestMatchesSandbox,
   dynamicSkillMarkerFromManifest,
   dynamicSkillMarkerMatchesManifest,
-  legacyDynamicSkillManifestExistsInSandbox,
 } from "#context/dynamic-skill-materialization.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
@@ -27,12 +26,6 @@ export async function trustDynamicSkillMarker(input: {
     ) {
       const marker = dynamicSkillMarkerFromManifest(manifest);
       return marker === null ? markerRead : { ...markerRead, marker };
-    }
-    if (
-      markerRead.status === "missing" &&
-      (await legacyDynamicSkillManifestExistsInSandbox({ manifest, sandbox }))
-    ) {
-      return { ...markerRead, status: "legacy" };
     }
     return markerRead;
   }
