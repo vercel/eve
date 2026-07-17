@@ -194,7 +194,7 @@ export async function materializeDynamicSkillUpdates(input: {
   const packageMutationNeeded =
     filesystemRemovePackages.size > 0 || restorePackages.length > 0 || writeSkills.length > 0;
   if (packageMutationNeeded) {
-    await input.sandbox.removePath({ force: true, path: input.markerRead.path });
+    await input.sandbox.removePath({ force: true, path: input.markerRead.path, recursive: true });
   }
 
   const removeStartedAt = performance.now();

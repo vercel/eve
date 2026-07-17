@@ -280,6 +280,46 @@ describe("dynamic skill materialization recovery", () => {
     expect(sandbox.files.get(authoredPath)).toBe("Authored body.");
   });
 
+  it("replaces a non-file marker node before rematerializing packages", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("tenant", () => makeSkill("Tenant policy", "Tenant body."));
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+    const markerChild = `${markerPath}/injected`;
+
+    await dispatch({ ctx, resolvers: [resolver] });
+    sandbox.files.delete(markerPath);
+    sandbox.fileBytes.delete(markerPath);
+    sandbox.files.set(markerChild, "Injected node.");
+    sandbox.fileBytes.set(markerChild, Buffer.from("Injected node."));
+    const directoryMarkerSession = {
+      ...sandbox.session,
+      async readTextFile(options: Parameters<typeof sandbox.session.readTextFile>[0]) {
+        if (options.path === markerPath) throw new Error("EISDIR: marker is a directory");
+        return await sandbox.session.readTextFile(options);
+      },
+      async removePath(options: Parameters<typeof sandbox.session.removePath>[0]) {
+        if (options.path === markerPath && !options.recursive) {
+          throw new Error("EISDIR: recursive removal required");
+        }
+        await sandbox.session.removePath(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return directoryMarkerSession;
+      },
+    });
+
+    await dispatch({ ctx, resolvers: [resolver] });
+
+    expect(sandbox.files.has(markerChild)).toBe(false);
+    expect(sandbox.files.get(markerPath)).toContain('"version":1');
+    expect(sandbox.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe("Tenant body.");
+  });
+
   it.each(["modified", "missing"] as const)(
     "repairs %s managed package bytes instead of trusting a warm marker",
     async (state) => {
