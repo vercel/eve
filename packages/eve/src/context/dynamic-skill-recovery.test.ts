@@ -474,7 +474,7 @@ describe("dynamic skill materialization recovery", () => {
     },
   );
 
-  it("clears stale siblings when retrying a partial first materialization", async () => {
+  it("clears stale siblings after a partial first materialization rolls back durable context", async () => {
     const { ctx, sandbox } = createCtx();
     let files: Readonly<Record<string, string>> = {
       "references/stale.md": "Stale body",
@@ -508,13 +508,31 @@ describe("dynamic skill materialization recovery", () => {
     expect(ctx.get(DynamicSkillManifestKey)).toHaveProperty("tenant");
 
     files = {};
+    ctx.set(DynamicSkillManifestKey, {});
     ctx.set(SandboxKey, sandbox.access);
     await dispatch({ ctx, resolvers: [resolver] });
 
     expect(sandbox.files.has("/home/agent/.agents/skills/tenant/references/stale.md")).toBe(false);
+    expect(sandbox.files.has("/home/agent/.agents/skills/tenant/scripts/fail.sh")).toBe(false);
     expect(sandbox.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe(
       "Follow tenant policy.",
     );
+    expect(
+      JSON.parse(
+        sandbox.files.get(
+          `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`,
+        )!,
+      ),
+    ).toEqual({
+      packages: {
+        tenant: {
+          contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          relativePaths: ["SKILL.md"],
+          resolverSlug: "tenant",
+        },
+      },
+      version: 1,
+    });
   });
 
   it("replaces one dynamic skill name with another", async () => {

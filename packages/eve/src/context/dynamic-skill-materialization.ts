@@ -142,10 +142,11 @@ export async function materializeDynamicSkillUpdates(input: {
       continue;
     }
 
-    // Replace a changed package as one unit. Besides deleting stale siblings,
-    // this handles path topology changes such as `references/x.md` becoming a
-    // file named `references`, which cannot be reconciled file-by-file safely.
-    if (!fullRematerialization && currentEntry !== undefined) removePackages.add(name);
+    // Replace every fully rematerialized or changed package as one unit. Besides
+    // deleting stale siblings, this handles path topology changes such as
+    // `references/x.md` becoming a file named `references`, which cannot be
+    // reconciled file-by-file safely.
+    if (fullRematerialization || currentEntry !== undefined) removePackages.add(name);
 
     writeSkills.push(update.skill);
     nextPackages[name] = nextEntry;
