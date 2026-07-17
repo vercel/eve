@@ -112,6 +112,7 @@ import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import {
   buildTurnClientContextView,
+  buildTurnContextAccountingView,
   clearTurnContext,
   getTurnDeliveryContext,
   setTurnClientContext,
@@ -702,8 +703,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Runs before `agent.stream()` so the compacted messages flow through
     // `messages` (which the harness uses to rebuild session history).
     const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
+    const accountingMessages = buildTurnContextAccountingView(session, messages);
 
     ({ messages, session } = await maybeCompact({
+      accountingMessages,
       abortSignal: config.abortSignal,
       emit,
       emissionState,
@@ -1309,6 +1312,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       result,
       runStep,
       session,
+      hasTransientContext: buildTurnContextAccountingView(session, []).length > 0,
     });
   }
 
@@ -1797,8 +1801,9 @@ async function handleStepResult(input: {
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
   readonly session: HarnessSession;
+  readonly hasTransientContext: boolean;
 }): Promise<StepResult> {
-  const { config, emit, promptMessages, result, runStep } = input;
+  const { config, emit, hasTransientContext, promptMessages, result, runStep } = input;
   let { emissionState, session } = input;
 
   const resolvedStepOutput = resolveAssistantStepText(result.response.messages, result.text);
@@ -1840,7 +1845,12 @@ async function handleStepResult(input: {
 
   const baseSession: HarnessSession = {
     ...session,
-    compaction: createNextCompactionConfig(session.compaction, promptMessages, result),
+    compaction: createNextCompactionConfig(
+      session.compaction,
+      promptMessages,
+      result,
+      hasTransientContext,
+    ),
   };
 
   const workflowContinuationSecurity =
@@ -2375,6 +2385,7 @@ function createNextCompactionConfig(
   current: CompactionConfig,
   promptMessages: readonly ModelMessage[],
   result: HarnessStepResult,
+  hasTransientContext: boolean,
 ): CompactionConfig {
   const next: {
     lastKnownInputTokens?: number;
@@ -2386,7 +2397,13 @@ function createNextCompactionConfig(
     threshold: current.threshold,
   };
 
-  if (result.usage?.inputTokens !== undefined) {
+  // A provider count that includes ephemeral context cannot seed the next
+  // durable-history checkpoint: that context may disappear or move relative
+  // to newly appended messages. Fall back to full prompt estimation instead.
+  if (hasTransientContext) {
+    next.lastKnownInputTokens = undefined;
+    next.lastKnownPromptMessageCount = undefined;
+  } else if (result.usage?.inputTokens !== undefined) {
     next.lastKnownInputTokens = result.usage.inputTokens;
     next.lastKnownPromptMessageCount = promptMessages.length;
   }
@@ -2404,6 +2421,7 @@ function createNextCompactionConfig(
  * harness uses to rebuild `session.history` after the step.
  */
 async function maybeCompact(input: {
+  readonly accountingMessages: readonly ModelMessage[];
   readonly abortSignal?: AbortSignal;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
@@ -2419,7 +2437,7 @@ async function maybeCompact(input: {
   let messages = input.messages;
   const session = input.session;
 
-  if (!shouldCompact(messages, session.compaction)) {
+  if (!shouldCompact(input.accountingMessages, session.compaction)) {
     return { messages, session };
   }
 
@@ -2437,7 +2455,7 @@ async function maybeCompact(input: {
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         turnId: emissionState.turnId,
-        usageInputTokens: getInputTokenCount(messages, session.compaction),
+        usageInputTokens: getInputTokenCount(input.accountingMessages, session.compaction),
       }),
     );
   }

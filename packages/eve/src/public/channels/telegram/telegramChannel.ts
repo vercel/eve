@@ -107,6 +107,7 @@ export interface TelegramReceiveTarget {
 /** Result of an inbound Telegram message hook. Return `null` to drop the update. */
 export type TelegramInboundResult = {
   readonly auth: SessionAuthContext | null;
+  /** Trusted model instructions authored by the hook. */
   readonly context?: readonly string[];
 } | null;
 
@@ -505,8 +506,6 @@ async function dispatchMessage(input: {
     userId: input.message.from?.id,
     username: input.message.from?.username,
   });
-  const channelContext = result.context ?? [];
-
   const replyText = input.message.text || input.message.caption;
   const replyInputResponses =
     input.message.replyToMessage?.from?.isBot === true && replyText.trim().length > 0
@@ -521,9 +520,10 @@ async function dispatchMessage(input: {
   try {
     await input.send(
       {
+        clientContext: [contextBlock],
+        context: result.context,
         inputResponses: replyInputResponses,
         message: turnMessage,
-        context: [contextBlock, ...channelContext],
       },
       {
         auth: result.auth,

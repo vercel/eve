@@ -209,13 +209,20 @@ describe("twilioChannel() inbound text pipeline", () => {
     expect(await response.text()).toBe("<Response></Response>");
     expect(send).toHaveBeenCalledTimes(1);
     const [payload, options] = send.mock.calls[0]!;
-    const { message, context } = payload as { message: string; context: string[] };
-    const contextBlock = context[0]!;
-    expect(contextBlock).toContain("<twilio_context>");
-    expect(contextBlock).toContain("channel: text");
-    expect(contextBlock).toContain("response_medium: sms");
-    expect(contextBlock).toContain("Reply for SMS in plain text.");
-    expect(contextBlock).toContain("avoid Markdown formatting");
+    const { clientContext, context, message } = payload as {
+      clientContext: string[];
+      context: string[];
+      message: string;
+    };
+    expect(clientContext[0]).toContain("<twilio_context>");
+    expect(clientContext[0]).toContain("channel: text");
+    expect(clientContext[0]).toContain("from: +15551234567");
+    expect(clientContext[0]).not.toContain("response_medium");
+    expect(context[0]).toContain("<twilio_delivery>");
+    expect(context[0]).toContain("response_medium: sms");
+    expect(context[0]).toContain("Reply for SMS in plain text.");
+    expect(context[0]).toContain("avoid Markdown formatting");
+    expect(context[0]).not.toContain("+15551234567");
     expect(message).toBe("hello");
     expect(options).toMatchObject({
       auth: {
@@ -523,11 +530,17 @@ describe("twilioChannel() voice pipeline", () => {
     expect(await response.text()).toContain("Thanks. I&apos;ll follow up by text.");
     expect(send).toHaveBeenCalledTimes(1);
     const [payload, options] = send.mock.calls[0]!;
-    const { message, context } = payload as { message: string; context: string[] };
-    const contextBlock = context[0]!;
-    expect(contextBlock).toContain("channel: voice");
-    expect(contextBlock).toContain("response_medium: sms");
-    expect(contextBlock).toContain("Reply for SMS in plain text.");
+    const { clientContext, context, message } = payload as {
+      clientContext: string[];
+      context: string[];
+      message: string;
+    };
+    expect(clientContext[0]).toContain("channel: voice");
+    expect(clientContext[0]).toContain("call_sid: CA123");
+    expect(clientContext[0]).not.toContain("response_medium");
+    expect(context[0]).toContain("response_medium: sms");
+    expect(context[0]).toContain("Reply for SMS in plain text.");
+    expect(context[0]).not.toContain("CA123");
     expect(message).toBe("book a table");
     expect(options).toMatchObject({
       continuationToken: "+15551234567:+15557654321",

@@ -79,6 +79,7 @@ describe("teamsChannel", () => {
             principalId: "USER",
             principalType: "user",
           },
+          context: ["trusted Teams hook instruction"],
         };
       },
     });
@@ -98,7 +99,11 @@ describe("teamsChannel", () => {
         serviceUrl: "https://smba.example.test/teams",
       },
     });
-    expect(send.mock.calls[0]![0].context[0]).toContain("<teams_context>");
+    expect(send.mock.calls[0]![0]).toMatchObject({
+      clientContext: [expect.stringContaining("<teams_context>")],
+      context: ["trusted Teams hook instruction"],
+    });
+    expect(send.mock.calls[0]![0].context[0]).not.toContain("<teams_context>");
   });
 
   it("default dispatch ignores unmentioned group messages", async () => {

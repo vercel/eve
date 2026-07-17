@@ -102,7 +102,7 @@ export interface DiscordReceiveTarget {
  * interaction without dispatching the agent.
  * - `auth`: session auth context for the dispatched turn, or `null` for anonymous.
  * - `ephemeral`: when `true`, the deferred reply is visible only to the invoking user.
- * - `context`: model-visible context lines appended after the Discord context block.
+ * - `context`: trusted model instructions authored by the hook.
  */
 export type DiscordCommandResult = {
   readonly auth: SessionAuthContext | null;
@@ -590,13 +590,12 @@ async function dispatchCommand(input: {
     userId: input.interaction.user.id,
     username: input.interaction.user.username,
   });
-  const channelContext = input.result.context ?? [];
-
   try {
     await input.send(
       {
+        clientContext: [contextBlock],
+        context: input.result.context,
         message: turnMessage,
-        context: [contextBlock, ...channelContext],
       },
       {
         auth: input.result.auth,

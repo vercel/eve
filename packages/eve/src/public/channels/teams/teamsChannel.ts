@@ -128,6 +128,7 @@ export interface TeamsReceiveTarget {
 /** Result of an inbound Teams message hook. Return `null` to acknowledge without dispatching. */
 export type TeamsInboundResult = {
   readonly auth: SessionAuthContext | null;
+  /** Trusted model instructions authored by the hook. */
   readonly context?: readonly string[];
 } | null;
 
@@ -582,13 +583,12 @@ async function dispatchMessage(input: {
     userId: input.activity.from.id,
     userName: input.activity.from.name,
   };
-  const channelContext = result.context ?? [];
-
   try {
     await input.send(
       {
+        clientContext: [formatTeamsContextBlock(inboundContext)],
+        context: result.context,
         message: turnMessage,
-        context: [formatTeamsContextBlock(inboundContext), ...channelContext],
       },
       {
         auth: result.auth,

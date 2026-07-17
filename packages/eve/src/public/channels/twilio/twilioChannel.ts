@@ -23,6 +23,7 @@ import {
 } from "#public/channels/twilio/defaults.js";
 import {
   formatTwilioContextBlock,
+  formatTwilioDeliveryContext,
   parseTwilioTextMessage,
   parseTwilioVoiceCall,
   parseTwilioVoiceTranscription,
@@ -560,8 +561,9 @@ async function dispatchText(input: {
   try {
     await input.send(
       {
+        clientContext: [contextBlock],
+        context: [formatTwilioDeliveryContext()],
         message: message.body,
-        context: [contextBlock],
       },
       {
         auth: result.auth,
@@ -637,8 +639,9 @@ async function dispatchVoiceTranscription(input: {
   try {
     await input.send(
       {
+        clientContext: [contextBlock],
+        context: [formatTwilioDeliveryContext()],
         message: transcription.text,
-        context: [contextBlock],
       },
       {
         auth: result.auth,

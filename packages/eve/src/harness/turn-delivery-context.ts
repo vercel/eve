@@ -21,6 +21,17 @@ export function buildTurnClientContextView(
   ];
 }
 
+/** Builds the full active-turn prompt view used only for token accounting. */
+export function buildTurnContextAccountingView(
+  session: HarnessSession,
+  messages: readonly ModelMessage[],
+): ModelMessage[] {
+  return [
+    ...buildTurnClientContextView(session, messages),
+    ...getTurnDeliveryContext(session).map((content) => ({ role: "system" as const, content })),
+  ];
+}
+
 /** Replaces the active turn's caller context without adding it to model history. */
 export function setTurnClientContext(
   session: HarnessSession,

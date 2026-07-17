@@ -112,13 +112,11 @@ export function parseTwilioVoiceTranscription(
   };
 }
 
-/** Renders a deterministic `<twilio_context>` block for the model. */
+/** Renders provider-authored identity metadata for the model as user context. */
 export function formatTwilioContextBlock(context: TwilioInboundContext): string {
   const lines = [
     "<twilio_context>",
     `channel: ${context.channel}`,
-    "response_medium: sms",
-    `response_instructions: ${TWILIO_SMS_RESPONSE_INSTRUCTIONS}`,
     `from: ${context.from}`,
     ...(context.to ? [`to: ${context.to}`] : []),
     ...(context.messageSid ? [`message_sid: ${context.messageSid}`] : []),
@@ -126,4 +124,14 @@ export function formatTwilioContextBlock(context: TwilioInboundContext): string 
     "</twilio_context>",
   ];
   return lines.join("\n");
+}
+
+/** Renders trusted, channel-authored SMS delivery instructions for the model. */
+export function formatTwilioDeliveryContext(): string {
+  return [
+    "<twilio_delivery>",
+    "response_medium: sms",
+    `response_instructions: ${TWILIO_SMS_RESPONSE_INSTRUCTIONS}`,
+    "</twilio_delivery>",
+  ].join("\n");
 }

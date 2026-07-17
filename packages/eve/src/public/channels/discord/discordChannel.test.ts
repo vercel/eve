@@ -190,7 +190,13 @@ describe("discordChannel() inbound route", () => {
 
   it("dispatches verified application commands with Discord auth and state", async () => {
     const { privateKey, publicKeyHex } = testKeys();
-    const channel = discordChannel({ credentials: { publicKey: publicKeyHex } });
+    const channel = discordChannel({
+      credentials: { publicKey: publicKeyHex },
+      onCommand: (_ctx, interaction) => ({
+        auth: defaultDiscordAuth(interaction),
+        context: ["trusted Discord hook instruction"],
+      }),
+    });
 
     const { response, send } = await firePost(
       channel,
@@ -201,8 +207,12 @@ describe("discordChannel() inbound route", () => {
     await expect(response.json()).resolves.toEqual({ type: 5 });
     expect(send).toHaveBeenCalledTimes(1);
     const [payload, options] = send.mock.calls[0]!;
-    expect((payload as { context: string[] }).context[0]).toContain("<discord_context>");
-    expect(String((payload as { message: string }).message)).toContain("hello discord");
+    expect(payload).toMatchObject({
+      clientContext: [expect.stringContaining("<discord_context>")],
+      context: ["trusted Discord hook instruction"],
+      message: expect.stringContaining("hello discord"),
+    });
+    expect((payload as { context: string[] }).context[0]).not.toContain("<discord_context>");
     expect(options).toMatchObject({
       auth: {
         authenticator: "discord-interaction",

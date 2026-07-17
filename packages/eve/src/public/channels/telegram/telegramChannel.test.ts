@@ -7,7 +7,11 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import { telegramChannel, type TelegramChannelState } from "#public/channels/telegram/index.js";
+import {
+  defaultTelegramAuth,
+  telegramChannel,
+  type TelegramChannelState,
+} from "#public/channels/telegram/index.js";
 
 const SECRET = "telegram-secret";
 
@@ -140,6 +144,10 @@ describe("telegramChannel() inbound route", () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },
       credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
+      onMessage: (_ctx, message) => ({
+        auth: defaultTelegramAuth(message),
+        context: ["trusted Telegram hook instruction"],
+      }),
     });
 
     const { response, send } = await firePost(channel, {
@@ -155,8 +163,12 @@ describe("telegramChannel() inbound route", () => {
     expect(response.status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
     const [payload, options] = send.mock.calls[0]!;
-    expect((payload as { context: string[] }).context[0]).toContain("<telegram_context>");
-    expect(String((payload as { message: string }).message)).toContain("hello");
+    expect(payload).toMatchObject({
+      clientContext: [expect.stringContaining("<telegram_context>")],
+      context: ["trusted Telegram hook instruction"],
+      message: expect.stringContaining("hello"),
+    });
+    expect((payload as { context: string[] }).context[0]).not.toContain("<telegram_context>");
     expect(options).toMatchObject({
       auth: {
         authenticator: "telegram-webhook",

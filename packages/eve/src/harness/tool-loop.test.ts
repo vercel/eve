@@ -7338,7 +7338,35 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    await runStep(session, { message: "Hi" });
+    const result = await runStep(session, {
+      clientContext: ["selected PR text"],
+      context: ["trusted channel instruction"],
+      message: "Hi",
+    });
+
+    expect(shouldCompact).toHaveBeenCalledWith(
+      [
+        { content: "old message", role: "user" },
+        { content: "old reply", role: "assistant" },
+        { content: "Hi", role: "user" },
+        { content: "selected PR text", role: "user" },
+        { content: "trusted channel instruction", role: "system" },
+      ],
+      expect.objectContaining({ threshold: 100_000 }),
+    );
+    expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual([
+      { content: "old message", role: "user" },
+      { content: "old reply", role: "assistant" },
+      { content: "Hi", role: "user" },
+    ]);
+    expect(result.session.history).not.toContainEqual({
+      content: "selected PR text",
+      role: "user",
+    });
+    expect(result.session.history).not.toContainEqual({
+      content: "trusted channel instruction",
+      role: "system",
+    });
 
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
@@ -7584,6 +7612,29 @@ describe("createToolLoopHarness", () => {
       lastKnownInputTokens: 321,
       lastKnownPromptMessageCount: 1,
     });
+  });
+
+  it("does not checkpoint provider token counts that include transient context", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 321 },
+    });
+
+    const result = await createToolLoopHarness(createTestConfig("conversation"))(
+      createTestSession(),
+      {
+        clientContext: ["selected PR text"],
+        context: ["trusted channel instruction"],
+        message: "Hi",
+      },
+    );
+
+    expect(result.session.compaction.lastKnownInputTokens).toBeUndefined();
+    expect(result.session.compaction.lastKnownPromptMessageCount).toBeUndefined();
   });
 
   it("invokes onCompaction callback after compaction", async () => {
