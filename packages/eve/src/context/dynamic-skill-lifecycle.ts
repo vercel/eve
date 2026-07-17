@@ -18,6 +18,7 @@ import {
   SandboxKey,
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import { readDynamicSkillMaterializationMarker } from "#context/dynamic-skill-materialization-marker.js";
 import { materializeDynamicSkillUpdates } from "#context/dynamic-skill-materialization.js";
 import { logDynamicSkillMaterializationTelemetry } from "#context/dynamic-skill-telemetry.js";
 import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
@@ -164,7 +165,19 @@ export async function dispatchDynamicSkillEvent(input: {
 
   if (updates.length === 0) return;
 
-  const newManifest = { ...manifest };
+  const sandboxStartedAt = performance.now();
+  const sandbox = await ctx.require(SandboxKey).get();
+  const sandboxMs = performance.now() - sandboxStartedAt;
+  const markerStartedAt = performance.now();
+  const markerRead =
+    sandbox === null ? undefined : await readDynamicSkillMaterializationMarker({ sandbox });
+  const markerMs = performance.now() - markerStartedAt;
+
+  // Without a trustworthy marker, package bodies from resolvers that did not
+  // run for this event cannot be proven present. Fail closed by retaining only
+  // the packages resolved now, then remove every previously announced package
+  // before writing the current set.
+  const newManifest = markerRead?.marker === null ? {} : { ...manifest };
   for (const { resolver, skills } of updates) {
     if (skills.length === 0) {
       delete newManifest[resolver.slug];
@@ -195,13 +208,12 @@ export async function dispatchDynamicSkillEvent(input: {
     }
   }
 
-  const sandboxStartedAt = performance.now();
-  const sandbox = await ctx.require(SandboxKey).get();
-  const sandboxMs = performance.now() - sandboxStartedAt;
   const materialization =
-    sandbox === null
+    sandbox === null || markerRead === undefined
       ? undefined
       : await materializeDynamicSkillUpdates({
+          markerMs,
+          markerRead,
           nextManifest: newManifest,
           previousManifest: manifest,
           sandbox,

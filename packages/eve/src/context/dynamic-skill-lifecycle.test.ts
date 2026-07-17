@@ -237,6 +237,68 @@ describe("dispatchDynamicSkillEvent", () => {
     ).toBe(true);
   });
 
+  it("invalidates unresolvable manifest packages after the sandbox is recreated", async () => {
+    const { ctx } = createCtx();
+    const sessionResolver = createResolver(
+      "session-policy",
+      () => makeSkill("Session policy", "Follow session policy."),
+      undefined,
+      ["session.started"],
+    );
+    const turnResolver = createResolver(
+      "turn-policy",
+      () => makeSkill("Turn policy", "Follow turn policy."),
+      undefined,
+      ["turn.started"],
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent("session.started"),
+      messages: [],
+      resolvers: [sessionResolver, turnResolver],
+    });
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent("turn.started"),
+      messages: [],
+      resolvers: [sessionResolver, turnResolver],
+    });
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("session-policy: Session policy");
+
+    const recreated = mockSandbox({
+      id: "sbx_recreated",
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+    ctx.set(SandboxKey, recreated.access);
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent("turn.started"),
+      messages: [],
+      resolvers: [sessionResolver, turnResolver],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      "turn-policy": [
+        {
+          contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          description: "Turn policy",
+          name: "turn-policy",
+          relativePaths: ["SKILL.md"],
+        },
+      ],
+    });
+    expect(ctx.get(PendingSkillAnnouncementKey)).not.toContain("session-policy: Session policy");
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("turn-policy: Turn policy");
+    expect(recreated.files.has("/home/agent/.agents/skills/session-policy/SKILL.md")).toBe(false);
+    expect(recreated.files.get("/home/agent/.agents/skills/turn-policy/SKILL.md")).toBe(
+      "Follow turn policy.",
+    );
+  });
+
   it.each([
     ["corrupt", "{"],
     ["old", JSON.stringify({ packages: {}, version: 0 })],

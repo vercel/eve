@@ -2,8 +2,8 @@ import type { DurableDynamicSkillMetadata } from "#context/keys.js";
 import {
   type DynamicSkillMaterializationMarker,
   type DynamicSkillMaterializationMarkerEntry,
+  type DynamicSkillMaterializationMarkerRead,
   type DynamicSkillMaterializationMarkerStatus,
-  readDynamicSkillMaterializationMarker,
   writeDynamicSkillMaterializationMarker,
 } from "#context/dynamic-skill-materialization-marker.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
@@ -41,30 +41,25 @@ export interface DynamicSkillMaterializationResult {
 /** Applies one dynamic-skill delta and commits its sandbox marker last. */
 export async function materializeDynamicSkillUpdates(input: {
   readonly nextManifest: DynamicSkillManifest;
+  readonly markerMs: number;
+  readonly markerRead: DynamicSkillMaterializationMarkerRead;
   readonly previousManifest: DynamicSkillManifest;
   readonly sandbox: SandboxSession;
   readonly updates: readonly DynamicSkillMaterializationUpdate[];
 }): Promise<DynamicSkillMaterializationResult> {
-  const markerStartedAt = performance.now();
-  const markerRead = await readDynamicSkillMaterializationMarker({ sandbox: input.sandbox });
-  const markerMs = performance.now() - markerStartedAt;
-  const currentMarker = markerRead.marker;
+  const currentMarker = input.markerRead.marker;
   const fullRematerialization = currentMarker === null;
 
   const previous = indexManifest(input.previousManifest);
   const desired = indexManifest(input.nextManifest);
   const updates = indexUpdates(input.updates);
-  const updatedResolvers = new Set(input.updates.map((update) => update.resolverSlug));
-
   const nextPackages: Record<string, DynamicSkillMaterializationMarkerEntry> =
     currentMarker === null ? {} : { ...currentMarker.packages };
   const removePackages = new Set<string>();
   const writeSkills: MaterializableSkillPackage[] = [];
 
   if (fullRematerialization) {
-    for (const [name, metadata] of previous) {
-      if (updatedResolvers.has(metadata.resolverSlug)) removePackages.add(name);
-    }
+    for (const name of previous.keys()) removePackages.add(name);
     for (const name of updates.keys()) {
       removePackages.add(name);
     }
@@ -113,7 +108,7 @@ export async function materializeDynamicSkillUpdates(input: {
   if (markerChanged) {
     await writeDynamicSkillMaterializationMarker({
       marker: nextMarker,
-      path: markerRead.path,
+      path: input.markerRead.path,
       sandbox: input.sandbox,
     });
   }
@@ -125,8 +120,8 @@ export async function materializeDynamicSkillUpdates(input: {
   return {
     ...classification,
     fullRematerialization,
-    markerMs,
-    markerStatus: markerRead.status,
+    markerMs: input.markerMs,
+    markerStatus: input.markerRead.status,
     markerWriteCount: markerChanged ? 1 : 0,
     markerWriteMs,
     removeCallCount: removePackages.size,

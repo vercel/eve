@@ -28,13 +28,15 @@ export type DynamicSkillMaterializationMarkerStatus =
   | "old"
   | "unreadable";
 
-export async function readDynamicSkillMaterializationMarker(input: {
-  readonly sandbox: SandboxSession;
-}): Promise<{
+export interface DynamicSkillMaterializationMarkerRead {
   readonly marker: DynamicSkillMaterializationMarker | null;
   readonly path: string;
   readonly status: DynamicSkillMaterializationMarkerStatus;
-}> {
+}
+
+export async function readDynamicSkillMaterializationMarker(input: {
+  readonly sandbox: SandboxSession;
+}): Promise<DynamicSkillMaterializationMarkerRead> {
   const path = await resolveMarkerPath(input.sandbox);
   let raw: string | null;
 
