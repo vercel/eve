@@ -150,6 +150,23 @@ export function formatTeamsContextBlock(context: TeamsInboundContext): string {
   return lines.join("\n");
 }
 
+/** Renders provider metadata shared by message and interactive-resume turns. */
+export function formatTeamsActivityContextBlock(
+  activity: TeamsMessageActivity | TeamsInvokeActivity,
+): string {
+  return formatTeamsContextBlock({
+    activityId: activity.id,
+    channelId: activity.teamsChannelId,
+    conversationId: activity.conversation.id,
+    conversationType: activity.conversationType,
+    scope: activity.scope,
+    teamId: activity.teamId,
+    tenantId: activity.tenantId,
+    userId: activity.from.id,
+    userName: activity.from.name,
+  });
+}
+
 /** Renders trusted, channel-authored Teams delivery instructions. */
 export function formatTeamsDeliveryContext(): string {
   return [

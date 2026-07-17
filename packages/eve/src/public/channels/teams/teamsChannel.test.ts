@@ -139,7 +139,11 @@ describe("teamsChannel", () => {
 
     expect(await response.json()).toMatchObject({ statusCode: 200 });
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "approve", requestId: "REQ" }] },
+      {
+        clientContext: [expect.stringContaining("<teams_context>")],
+        context: [expect.stringContaining("<teams_delivery>")],
+        inputResponses: [{ optionId: "approve", requestId: "REQ" }],
+      },
       expect.objectContaining({
         auth: expect.objectContaining({ subject: "AAD_USER" }),
         continuationToken: "TENANT:CONV:THREAD_ROOT",
@@ -169,7 +173,11 @@ describe("teamsChannel", () => {
 
     expect(onMessage).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "deny", requestId: "REQ" }] },
+      {
+        clientContext: [expect.stringContaining("<teams_context>")],
+        context: [expect.stringContaining("<teams_delivery>")],
+        inputResponses: [{ optionId: "deny", requestId: "REQ" }],
+      },
       expect.objectContaining({ continuationToken: "TENANT:CONV:THREAD_ROOT" }),
     );
   });

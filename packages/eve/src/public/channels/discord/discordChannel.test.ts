@@ -300,7 +300,11 @@ describe("discordChannel() inbound route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ type: 6 });
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "approve", requestId: "call_1" }] },
+      {
+        clientContext: [expect.stringContaining("<discord_context>")],
+        context: [expect.stringContaining("<discord_delivery>")],
+        inputResponses: [{ optionId: "approve", requestId: "call_1" }],
+      },
       expect.objectContaining({
         auth: null,
         continuationToken: "C01:M01",
@@ -372,7 +376,11 @@ describe("discordChannel() inbound route", () => {
       type: 4,
     });
     expect(submit.send).toHaveBeenCalledWith(
-      { inputResponses: [{ requestId: "call_1", text: "freeform answer" }] },
+      {
+        clientContext: [expect.stringContaining("<discord_context>")],
+        context: [expect.stringContaining("<discord_delivery>")],
+        inputResponses: [{ requestId: "call_1", text: "freeform answer" }],
+      },
       expect.objectContaining({
         continuationToken: "C01:M01",
       }),

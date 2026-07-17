@@ -240,7 +240,11 @@ describe("telegramChannel() inbound route", () => {
     });
 
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "selected", requestId: "telegram_callback:eve:0" }] },
+      {
+        clientContext: [expect.stringContaining("<telegram_context>")],
+        context: [expect.stringContaining("<telegram_delivery>")],
+        inputResponses: [{ optionId: "selected", requestId: "telegram_callback:eve:0" }],
+      },
       expect.objectContaining({
         auth: null,
         continuationToken: "-1001::55",

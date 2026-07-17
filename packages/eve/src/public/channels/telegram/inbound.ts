@@ -138,6 +138,24 @@ export function formatTelegramContextBlock(context: TelegramInboundContext): str
   return lines.join("\n");
 }
 
+/** Renders provider metadata for an interactive callback resume. */
+export function formatTelegramCallbackContext(
+  query: TelegramCallbackQuery,
+  botUsername: string | undefined,
+): string {
+  if (!query.message) throw new Error("Telegram callback context requires a message.");
+  return formatTelegramContextBlock({
+    botUsername,
+    chatId: query.message.chat.id,
+    chatTitle: query.message.chat.title,
+    chatType: query.message.chat.type,
+    messageId: query.message.messageId,
+    messageThreadId: query.message.messageThreadId,
+    userId: query.from.id,
+    username: query.from.username,
+  });
+}
+
 /** Renders trusted, channel-authored Telegram delivery instructions. */
 export function formatTelegramDeliveryContext(): string {
   return [

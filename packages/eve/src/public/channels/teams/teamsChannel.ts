@@ -45,12 +45,11 @@ import {
   teamsInvokeResponse,
 } from "#public/channels/teams/hitl.js";
 import {
-  formatTeamsContextBlock,
+  formatTeamsActivityContextBlock,
   formatTeamsDeliveryContext,
   parseTeamsActivity,
   teamsThreadRootActivityId,
   type TeamsActivity,
-  type TeamsInboundContext,
   type TeamsInvokeActivity,
   type TeamsMessageActivity,
 } from "#public/channels/teams/inbound.js";
@@ -573,21 +572,10 @@ async function dispatchMessage(input: {
 
   const fileParts = collectTeamsFileParts(input.activity.attachments, input.filesPolicy);
   const turnMessage = buildTeamsTurnMessage(input.activity.text, fileParts);
-  const inboundContext: TeamsInboundContext = {
-    activityId: input.activity.id,
-    channelId: input.activity.teamsChannelId,
-    conversationId: input.activity.conversation.id,
-    conversationType: input.activity.conversationType,
-    scope: input.activity.scope,
-    teamId: input.activity.teamId,
-    tenantId: input.activity.tenantId,
-    userId: input.activity.from.id,
-    userName: input.activity.from.name,
-  };
   try {
     await input.send(
       {
-        clientContext: [formatTeamsContextBlock(inboundContext)],
+        clientContext: [formatTeamsActivityContextBlock(input.activity)],
         context: [formatTeamsDeliveryContext(), ...(result.context ?? [])],
         message: turnMessage,
       },
@@ -649,7 +637,11 @@ async function dispatchInputResponses(input: {
   if (result === null) return;
   try {
     await input.send(
-      { inputResponses },
+      {
+        clientContext: [formatTeamsActivityContextBlock(input.activity)],
+        context: [formatTeamsDeliveryContext()],
+        inputResponses,
+      },
       {
         auth: result.auth,
         continuationToken: resolveInputContinuationToken(input.activity, state),

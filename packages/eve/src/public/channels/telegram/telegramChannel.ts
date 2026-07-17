@@ -37,6 +37,7 @@ import {
 } from "#public/channels/telegram/hitl.js";
 import {
   formatTelegramContextBlock,
+  formatTelegramCallbackContext,
   formatTelegramDeliveryContext,
   parseTelegramUpdate,
   type TelegramCallbackQuery,
@@ -536,7 +537,6 @@ async function dispatchMessage(input: {
     log.error("message delivery failed", { error });
   }
 }
-
 async function dispatchCallbackQuery(input: {
   readonly config: TelegramChannelConfig;
   readonly query: TelegramCallbackQuery;
@@ -546,7 +546,6 @@ async function dispatchCallbackQuery(input: {
   const telegram: TelegramContext = {
     telegram: buildTelegramHandle({ config: input.config, state }),
   };
-
   if (input.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true) {
     try {
       await telegram.telegram.answerCallbackQuery({
@@ -556,11 +555,12 @@ async function dispatchCallbackQuery(input: {
     } catch (error) {
       log.warn("Telegram callback-query acknowledgement failed", { error });
     }
-
     if (!input.query.message || !state.chatId) return;
     try {
       await input.send(
         {
+          clientContext: [formatTelegramCallbackContext(input.query, input.config.botUsername)],
+          context: [formatTelegramDeliveryContext()],
           inputResponses: [telegramCallbackInputResponse(input.query.data)],
         },
         {

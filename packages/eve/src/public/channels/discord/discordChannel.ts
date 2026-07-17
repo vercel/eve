@@ -32,8 +32,8 @@ import {
   commandInteractionMessage,
   DISCORD_INTERACTION_RESPONSE_TYPE,
   DISCORD_INTERACTION_TYPE,
-  formatDiscordContextBlock,
   formatDiscordDeliveryContext,
+  formatDiscordInteractionContextBlock,
   parseDiscordInteraction,
   type DiscordCommandInteraction,
   type DiscordComponentInteraction,
@@ -583,14 +583,7 @@ async function dispatchCommand(input: {
   readonly state: DiscordChannelState;
 }): Promise<void> {
   const turnMessage = commandInteractionMessage(input.interaction);
-  const contextBlock = formatDiscordContextBlock({
-    channelId: input.interaction.channelId,
-    commandName: input.interaction.commandName,
-    guildId: input.interaction.guildId,
-    interactionId: input.interaction.id,
-    userId: input.interaction.user.id,
-    username: input.interaction.user.username,
-  });
+  const contextBlock = formatDiscordInteractionContextBlock(input.interaction);
   try {
     await input.send(
       {
@@ -620,7 +613,11 @@ async function dispatchInputResponses(input: {
 }): Promise<void> {
   try {
     await input.send(
-      { inputResponses: input.inputResponses },
+      {
+        clientContext: [formatDiscordInteractionContextBlock(input.interaction)],
+        context: [formatDiscordDeliveryContext()],
+        inputResponses: input.inputResponses,
+      },
       {
         auth: null,
         continuationToken: discordContinuationToken(

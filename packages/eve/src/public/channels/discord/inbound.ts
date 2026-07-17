@@ -160,6 +160,21 @@ export function formatDiscordContextBlock(context: DiscordInboundContext): strin
   return lines.join("\n");
 }
 
+/** Renders provider metadata shared by command and interactive-resume turns. */
+export function formatDiscordInteractionContextBlock(interaction: DiscordInteraction): string {
+  return formatDiscordContextBlock({
+    channelId: interaction.channelId,
+    commandName:
+      interaction.type === DISCORD_INTERACTION_TYPE.APPLICATION_COMMAND
+        ? interaction.commandName
+        : undefined,
+    guildId: interaction.guildId,
+    interactionId: interaction.id,
+    userId: interaction.user.id,
+    username: interaction.user.username,
+  });
+}
+
 /** Renders trusted, channel-authored Discord delivery instructions. */
 export function formatDiscordDeliveryContext(): string {
   return [
