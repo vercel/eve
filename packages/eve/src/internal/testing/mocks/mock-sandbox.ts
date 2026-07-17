@@ -127,7 +127,8 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   }
 
   async function defaultRun(command: string): Promise<SandboxCommandResult> {
-    const findMatch = /^if \[ -d '([^']+)' \]; then find '\1' -type f -print0; fi$/u.exec(command);
+    const findMatch =
+      /^if \[ -d '([^']+)' \] && \[ ! -L '\1' \]; then find '\1' -mindepth 1 /u.exec(command);
     if (findMatch !== null) {
       const root = findMatch[1]!;
       const prefix = `${root}/`;
@@ -135,7 +136,8 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       return {
         exitCode: 0,
         stderr: "",
-        stdout: matches.length === 0 ? "" : `${matches.join("\0")}\0`,
+        stdout:
+          matches.flatMap((path) => ["f", path]).join("\0") + (matches.length > 0 ? "\0" : ""),
       };
     }
     return { exitCode: 0, stderr: "", stdout: "" };

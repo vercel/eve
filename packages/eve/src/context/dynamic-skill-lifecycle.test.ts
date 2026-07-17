@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
+import {
+  captureAuthoredSkillBaseline,
+  recoverCapturedAuthoredSkillBaseline,
+} from "#context/dynamic-skill-authored-baseline.js";
 import { DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE } from "#context/dynamic-skill-materialization-marker.js";
 import {
   PendingSkillAnnouncementKey,
@@ -654,6 +658,113 @@ describe("dispatchDynamicSkillEvent", () => {
       recreated.files.get("/home/agent/.agents/skills/talk-like-a-dog/references/authored.md"),
     ).toBe("Authored reference");
   });
+
+  it("reuses the captured authored baseline when sandbox replacement retries before serialization", async () => {
+    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+    sandbox.files.set(skillPath, "Authored body from sandbox A.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored body from sandbox A."));
+    let enabled = true;
+    const resolver = createResolver("custom", () =>
+      enabled ? { "talk-like-a-dog": makeSkill("Dynamic override", "Woof.") } : null,
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    const durableSandboxAManifest = structuredClone(ctx.get(DynamicSkillManifestKey)!);
+
+    const recreated = mockSandbox({
+      id: "sbx_recreated_retry",
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+      initialFiles: {
+        [skillPath]: "Authored body from sandbox B.",
+      },
+    });
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+    const failingSession = {
+      ...recreated.session,
+      async writeTextFile(options: Parameters<typeof recreated.session.writeTextFile>[0]) {
+        if (options.path === markerPath) throw new Error("injected post-overlay failure");
+        await recreated.session.writeTextFile(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return failingSession;
+      },
+    });
+
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow("injected post-overlay failure");
+    expect(recreated.files.get(skillPath)).toBe("Woof.");
+
+    // The workflow failed before serializing the sandbox-B manifest, so the
+    // retry reconstructs the durable context from sandbox A.
+    ctx.set(DynamicSkillManifestKey, durableSandboxAManifest);
+    ctx.set(SandboxKey, recreated.access);
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    enabled = false;
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(recreated.files.get(skillPath)).toBe("Authored body from sandbox B.");
+  });
+
+  it.each(["deleted", "tampered"] as const)(
+    "fails closed when the same-generation baseline receipt is %s",
+    async (state) => {
+      const { sandbox } = createCtx(["talk-like-a-dog"]);
+      const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+      const receiptPath =
+        "/home/agent/.agents/skills/.eve-dynamic-skill-authored-baselines/talk-like-a-dog.receipt.json";
+      sandbox.files.set(skillPath, "Authored body.");
+      sandbox.fileBytes.set(skillPath, Buffer.from("Authored body."));
+      await captureAuthoredSkillBaseline({ name: "talk-like-a-dog", sandbox: sandbox.session });
+      sandbox.files.set(skillPath, "Dynamic body.");
+      sandbox.fileBytes.set(skillPath, Buffer.from("Dynamic body."));
+
+      if (state === "deleted") {
+        sandbox.files.delete(receiptPath);
+        sandbox.fileBytes.delete(receiptPath);
+      } else {
+        sandbox.files.set(receiptPath, "not json");
+        sandbox.fileBytes.set(receiptPath, Buffer.from("not json"));
+      }
+
+      await expect(
+        recoverCapturedAuthoredSkillBaseline({
+          name: "talk-like-a-dog",
+          sandbox: sandbox.session,
+        }),
+      ).rejects.toThrow(`Authored skill baseline receipt for "talk-like-a-dog" is`);
+      expect(sandbox.files.get(skillPath)).toBe("Dynamic body.");
+    },
+  );
 
   it("collapses a directly-returned single defineSkill to the bare slug", async () => {
     const { ctx, sandbox } = createCtx();

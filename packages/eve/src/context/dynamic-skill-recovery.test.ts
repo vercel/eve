@@ -94,6 +94,44 @@ describe("dynamic skill materialization recovery", () => {
     },
   );
 
+  it("rejects a symlink sibling while validating a warm package", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("tenant", () => makeSkill("Tenant policy", "Trusted body."));
+    const packageRoot = "/home/agent/.agents/skills/tenant";
+    const skillPath = `${packageRoot}/SKILL.md`;
+    const symlinkPath = `${packageRoot}/references/injected-link`;
+
+    await dispatch({ ctx, resolvers: [resolver] });
+    const removalsBeforeValidation = sandbox.removedPaths.length;
+    const writesBeforeValidation = sandbox.writes.length;
+    const symlinkAwareSession = {
+      ...sandbox.session,
+      async run(options: Parameters<typeof sandbox.session.run>[0]) {
+        if (options.command.includes(`find '${packageRoot}' -mindepth 1`)) {
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout: `f\0${skillPath}\0l\0${symlinkPath}\0`,
+          };
+        }
+        return await sandbox.session.run(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return symlinkAwareSession;
+      },
+    });
+
+    await dispatch({ ctx, resolvers: [resolver] });
+
+    expect(sandbox.removedPaths.slice(removalsBeforeValidation)).toContain(packageRoot);
+    expect(sandbox.writes.length).toBeGreaterThan(writesBeforeValidation);
+  });
+
   it("preserves an existing legacy manifest until its resolver can migrate it", async () => {
     const { ctx, sandbox } = createCtx();
     const resolver = createResolver(

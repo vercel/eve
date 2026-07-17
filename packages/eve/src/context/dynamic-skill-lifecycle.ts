@@ -17,7 +17,10 @@ import {
   DynamicSkillManifestKey,
   SandboxKey,
 } from "#context/keys.js";
-import { captureAuthoredSkillBaseline } from "#context/dynamic-skill-authored-baseline.js";
+import {
+  captureAuthoredSkillBaseline,
+  recoverCapturedAuthoredSkillBaseline,
+} from "#context/dynamic-skill-authored-baseline.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import {
   type DynamicSkillMaterializationMarkerRead,
@@ -307,7 +310,9 @@ export async function dispatchDynamicSkillEvent(input: {
           sandbox !== undefined &&
           (authoredBaseline === undefined || authoredBaselineSandboxId !== sandbox.id)
         ) {
-          authoredBaseline = await captureAuthoredSkillBaseline({ name: skill.name, sandbox });
+          authoredBaseline =
+            (await recoverCapturedAuthoredSkillBaseline({ name: skill.name, sandbox })) ??
+            (await captureAuthoredSkillBaseline({ name: skill.name, sandbox }));
           authoredBaselineSandboxId = sandbox.id;
         }
         metadata.push({
