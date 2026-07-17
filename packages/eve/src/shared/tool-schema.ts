@@ -16,11 +16,15 @@ export type ToolSchema<Input = unknown, Output = Input> = StandardSchemaV1<Input
 
 /**
  * Any value accepted at a schema boundary: a live {@link ToolSchema}, a
- * JSON-Schema-capable Standard Schema, or plain JSON Schema data.
+ * JSON-Schema-capable Standard Schema, or plain JSON Schema data. Plain data
+ * is runtime-validated by {@link parseJsonObject} during conversion.
  */
-export type ToolSchemaSource = StandardJSONSchemaV1 | JsonObject;
+export type ToolSchemaSource = StandardJSONSchemaV1 | Record<string, unknown>;
 
 type SchemaDirection = "input" | "output";
+
+/** `null` and `undefined` pass through every conversion untouched. */
+type SchemaResult<TSource, TResult> = TSource extends null | undefined ? TSource : TResult;
 
 const JSON_SCHEMA_TARGET: StandardJSONSchemaV1.Target = "draft-07";
 
@@ -35,13 +39,10 @@ const rehydratedSchemas: Record<SchemaDirection, WeakMap<object, ToolSchema>> = 
  * through unchanged; serialized JSON Schemas are rehydrated into vendored Zod
  * validators. `null` and `undefined` pass through untouched.
  */
-export function toInputSchema(source: ToolSchemaSource): ToolSchema;
-export function toInputSchema(source: ToolSchemaSource | null): ToolSchema | null;
-export function toInputSchema(source: ToolSchemaSource | undefined): ToolSchema | undefined;
-export function toInputSchema(
-  source: ToolSchemaSource | null | undefined,
-): ToolSchema | null | undefined {
-  return toSchema(source, "input");
+export function toInputSchema<T extends ToolSchemaSource | null | undefined>(
+  source: T,
+): SchemaResult<T, ToolSchema> {
+  return toSchema(source, "input") as SchemaResult<T, ToolSchema>;
 }
 
 /**
@@ -49,13 +50,10 @@ export function toInputSchema(
  * through unchanged; serialized JSON Schemas are rehydrated into vendored Zod
  * validators. `null` and `undefined` pass through untouched.
  */
-export function toOutputSchema(source: ToolSchemaSource): ToolSchema;
-export function toOutputSchema(source: ToolSchemaSource | null): ToolSchema | null;
-export function toOutputSchema(source: ToolSchemaSource | undefined): ToolSchema | undefined;
-export function toOutputSchema(
-  source: ToolSchemaSource | null | undefined,
-): ToolSchema | null | undefined {
-  return toSchema(source, "output");
+export function toOutputSchema<T extends ToolSchemaSource | null | undefined>(
+  source: T,
+): SchemaResult<T, ToolSchema> {
+  return toSchema(source, "output") as SchemaResult<T, ToolSchema>;
 }
 
 /**
@@ -63,13 +61,10 @@ export function toOutputSchema(
  * `$schema` key) for compiled artifacts, durable state, and protocol
  * responses. `null` and `undefined` pass through untouched.
  */
-export function serializeInputSchema(source: ToolSchemaSource): JsonObject;
-export function serializeInputSchema(source: ToolSchemaSource | null): JsonObject | null;
-export function serializeInputSchema(source: ToolSchemaSource | undefined): JsonObject | undefined;
-export function serializeInputSchema(
-  source: ToolSchemaSource | null | undefined,
-): JsonObject | null | undefined {
-  return serializeSchema(source, "input");
+export function serializeInputSchema<T extends ToolSchemaSource | null | undefined>(
+  source: T,
+): SchemaResult<T, JsonObject> {
+  return serializeSchema(source, "input") as SchemaResult<T, JsonObject>;
 }
 
 /**
@@ -77,13 +72,10 @@ export function serializeInputSchema(
  * `$schema` key) for compiled artifacts, durable state, and protocol
  * responses. `null` and `undefined` pass through untouched.
  */
-export function serializeOutputSchema(source: ToolSchemaSource): JsonObject;
-export function serializeOutputSchema(source: ToolSchemaSource | null): JsonObject | null;
-export function serializeOutputSchema(source: ToolSchemaSource | undefined): JsonObject | undefined;
-export function serializeOutputSchema(
-  source: ToolSchemaSource | null | undefined,
-): JsonObject | null | undefined {
-  return serializeSchema(source, "output");
+export function serializeOutputSchema<T extends ToolSchemaSource | null | undefined>(
+  source: T,
+): SchemaResult<T, JsonObject> {
+  return serializeSchema(source, "output") as SchemaResult<T, JsonObject>;
 }
 
 /**
@@ -127,7 +119,11 @@ function toSchema(
   let resolved = cache.get(source);
   if (resolved === undefined) {
     const jsonSchema = toJsonObject(source, direction);
-    resolved = z.fromJSONSchema(jsonSchema as Parameters<typeof z.fromJSONSchema>[0]) as ToolSchema;
+    // The rehydration target must match JSON_SCHEMA_TARGET: serialized
+    // schemas strip `$schema`, so zod would otherwise assume draft-2020-12.
+    resolved = z.fromJSONSchema(jsonSchema as Parameters<typeof z.fromJSONSchema>[0], {
+      defaultTarget: "draft-7",
+    }) as ToolSchema;
     cache.set(source, resolved);
   }
   return resolved;

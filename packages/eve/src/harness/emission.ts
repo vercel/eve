@@ -41,7 +41,10 @@ import {
   createRuntimeActionRequestFromToolCall,
   resolveToolCallInputObject,
 } from "#harness/runtime-actions.js";
-import { createInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
+import {
+  createInvalidToolCallInputError,
+  isInvalidToolCall,
+} from "#harness/tool-call-input-errors.js";
 import type {
   RuntimeActionRequest,
   RuntimeToolResultActionResult,
@@ -479,7 +482,7 @@ async function consumeStreamContent(
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
-    if (toolCall.invalid === true) {
+    if (isInvalidToolCall(toolCall)) {
       invalidInputToolCallIds.add(toolCall.toolCallId);
       return;
     }

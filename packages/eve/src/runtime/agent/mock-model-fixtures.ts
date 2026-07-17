@@ -26,9 +26,7 @@ export function createMockAuthoredToolInput(
 
   if (
     inputPropertyNames.includes("topic") ||
-    (inputPropertyNames.length === 0 &&
-      !hasDeclaredInputProperties(tool.inputSchema) &&
-      /\btopic\b/u.test(normalizeText(message)))
+    (!hasDeclaredInputProperties(tool.inputSchema) && /\btopic\b/u.test(normalizeText(message)))
   ) {
     return { topic: resolveLookupTopic(message) };
   }

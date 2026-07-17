@@ -9,9 +9,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
  */
-interface LoadSkillInput {
-  readonly skill: string;
-}
+type LoadSkillInput = z.infer<typeof SKILL_INPUT_SCHEMA>;
 
 /**
  * Executes the `load_skill` tool.

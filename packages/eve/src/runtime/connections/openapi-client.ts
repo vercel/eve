@@ -27,7 +27,6 @@ import type {
 } from "#runtime/connections/types.js";
 import { isObject } from "#shared/guards.js";
 import { toInputSchema, type ToolSchema } from "#shared/tool-schema.js";
-import type { JsonObject } from "#shared/json.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 const log = createLogger("runtime.connections.openapi-client");
@@ -162,7 +161,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
     for (const operation of selected) {
       let inputSchema: ToolSchema;
       try {
-        inputSchema = toInputSchema(operation.inputSchema as JsonObject);
+        inputSchema = toInputSchema(operation.inputSchema);
       } catch (error) {
         log.warn("omitting OpenAPI operation with an invalid input schema", {
           connectionName: this.#connection.connectionName,

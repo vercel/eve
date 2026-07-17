@@ -1,4 +1,4 @@
-import { type ToolSet } from "ai";
+import type { ToolSet } from "ai";
 import { z } from "#compiled/zod/index.js";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";

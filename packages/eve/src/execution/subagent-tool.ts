@@ -8,8 +8,7 @@ import type {
   SessionCapabilities,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
-import { isObject } from "#shared/guards.js";
-import type { JsonObject } from "#shared/json.js";
+import { isJsonObjectValue } from "#shared/json.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
@@ -100,8 +99,8 @@ export function buildSubagentRunInput(input: {
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
   const outputSchema = action.input.outputSchema;
   const requestedOutputSchema =
-    isObject(outputSchema) && Object.keys(outputSchema).length > 0
-      ? (outputSchema as JsonObject)
+    isJsonObjectValue(outputSchema) && Object.keys(outputSchema).length > 0
+      ? outputSchema
       : undefined;
 
   const runInput: {

@@ -150,13 +150,11 @@ import {
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
-import { getInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
 import {
-  buildStepHooks,
-  emitStepActions,
-  type HarnessStepResult,
+  getInvalidToolCallInputError,
   isInvalidToolCall,
-} from "#harness/step-hooks.js";
+} from "#harness/tool-call-input-errors.js";
+import { buildStepHooks, emitStepActions, type HarnessStepResult } from "#harness/step-hooks.js";
 import {
   buildToolApproval,
   buildToolSetFromDefinitions,
@@ -1788,11 +1786,12 @@ async function handleStepResult(input: {
   const invalidInputToolErrors = getInvalidToolCallInputErrors({
     toolCalls: result.toolCalls as TypedToolCall<ToolSet>[],
   });
+  // Unions every invalid-input signal: SDK-marked invalid calls (which get
+  // SDK-synthesized tool errors), non-object inputs caught by
+  // getInvalidToolCallInputErrors, and ids the stream consumer observed.
   const invalidInputToolCallIds = new Set([
     ...(result.invalidInputToolCallIds ?? []),
-    ...result.toolCalls
-      .filter((toolCall) => toolCall.invalid === true)
-      .map((toolCall) => toolCall.toolCallId),
+    ...result.toolCalls.filter(isInvalidToolCall).map((toolCall) => toolCall.toolCallId),
     ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
   ]);
   const rawResponseMessages = emptyDelivery
@@ -1862,7 +1861,6 @@ async function handleStepResult(input: {
     tools: config.tools,
   });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
-    .filter((toolCall) => !isInvalidToolCall(toolCall))
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => config.tools.get(toolCall.toolName)?.runtimeAction !== undefined)
     .filter((toolCall) => {
@@ -2048,7 +2046,7 @@ const OUTPUT_SCHEMA_NOT_FULFILLED = {
  */
 function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
   return (result.toolCalls ?? []).find(
-    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && call.invalid !== true,
+    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && !isInvalidToolCall(call),
   )?.input as JsonValue | undefined;
 }
 

@@ -12,9 +12,9 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
  * with live callbacks reattached from the authored module.
  *
  * Schema-bearing module exports are retained when they implement the validated
- * runtime contract. Serialized schemas from the compiled manifest are
- * otherwise rehydrated into Zod. Optional hooks are reattached from the live
- * module export.
+ * runtime contract; serialized schemas from the compiled manifest are
+ * otherwise rehydrated into live validators. Optional hooks are reattached
+ * from the live module export.
  */
 export async function resolveToolDefinition(
   definition: CompiledToolDefinition,

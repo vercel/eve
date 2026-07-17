@@ -1,18 +1,4 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import type { HandleMessageStreamEvent, ResultCompletedStreamEvent } from "#protocol/message.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
-import type { JsonObject } from "#shared/json.js";
-
-/**
- * Normalizes a client-supplied output schema into the wire-safe JSON Schema
- * representation accepted by eve message routes.
- */
-export function normalizeOutputSchemaForRequest<TOutput>(
-  schema: StandardJSONSchemaV1<unknown, TOutput> | JsonObject | undefined,
-): JsonObject | undefined {
-  return serializeOutputSchema(schema);
-}
 
 /**
  * Extracts the most recent finalized structured result from a turn event list.

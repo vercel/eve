@@ -12,11 +12,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 /**
  * Single item in the todo list.
  */
-export interface TodoItem {
-  readonly content: string;
-  readonly priority: "high" | "medium" | "low";
-  readonly status: "pending" | "in_progress" | "completed" | "cancelled";
-}
+export type TodoItem = z.infer<typeof TODO_ITEM_SCHEMA>;
 
 /**
  * Durable state for the framework todo tool.
@@ -33,9 +29,7 @@ export const TodoStateKey = new ContextKey<TodoState>("eve.todo");
  * When `todos` is provided, the list is replaced (full replacement write).
  * When `todos` is omitted, the current list is returned without modification.
  */
-export interface TodoToolInput {
-  readonly todos?: readonly TodoItem[];
-}
+export type TodoToolInput = z.infer<typeof TODO_INPUT_SCHEMA>;
 
 function formatTodoSummary(state: TodoState): string | undefined {
   if (state.items.length === 0) return undefined;
