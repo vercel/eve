@@ -17,6 +17,7 @@ import {
   DynamicSkillManifestKey,
   SandboxKey,
 } from "#context/keys.js";
+import { captureAuthoredSkillBaseline } from "#context/dynamic-skill-authored-baseline.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import {
   type DynamicSkillMaterializationMarkerRead,
@@ -24,14 +25,18 @@ import {
 } from "#context/dynamic-skill-materialization-marker.js";
 import {
   type DynamicSkillMaterializationResult,
-  dynamicSkillManifestMatchesSandbox,
-  dynamicSkillMarkerFromManifest,
-  dynamicSkillMarkerMatchesManifest,
   materializeDynamicSkillUpdates,
 } from "#context/dynamic-skill-materialization.js";
+import {
+  dynamicSkillManifestsEqual,
+  isFullRematerialization,
+  retainCompiledResolverPackages,
+  trustDynamicSkillMarker,
+} from "#context/dynamic-skill-manifest.js";
 import { logDynamicSkillMaterializationTelemetry } from "#context/dynamic-skill-telemetry.js";
 import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("dynamic-skills");
 
@@ -115,6 +120,9 @@ export async function dispatchDynamicSkillEvent(input: {
   let trustedMarkerReadLoaded = false;
   let previousManifest = ctx.get(DynamicSkillManifestKey) ?? {};
   let activeManifest = previousManifest;
+  const authoredPackageNames = new Set(
+    (ctx.get(BundleKey)?.resolvedAgent.skills ?? []).map((skill) => skill.name),
+  );
 
   const loadMaterializationState = async (): Promise<void> => {
     if (sandbox !== undefined) return;
@@ -134,7 +142,11 @@ export async function dispatchDynamicSkillEvent(input: {
   > => {
     await loadMaterializationState();
     if (!trustedMarkerReadLoaded) {
-      trustedMarkerRead = await trustDynamicSkillMarker(rawMarkerRead, previousManifest, sandbox);
+      trustedMarkerRead = await trustDynamicSkillMarker({
+        manifest: previousManifest,
+        markerRead: rawMarkerRead,
+        sandbox,
+      });
       trustedMarkerReadLoaded = true;
     }
     return trustedMarkerRead;
@@ -183,7 +195,11 @@ export async function dispatchDynamicSkillEvent(input: {
     Object.keys(previousManifest).length > 0
   ) {
     const markerRead = await loadTrustedMarker();
-    if (sandbox !== null && isFullRematerialization(markerRead)) {
+    if (
+      sandbox !== null &&
+      isFullRematerialization(markerRead) &&
+      markerRead?.status !== "legacy"
+    ) {
       activeManifest = {};
       ctx.set(DynamicSkillManifestKey, activeManifest);
       ctx.setVirtualContext(PendingSkillAnnouncementKey, "");
@@ -271,16 +287,35 @@ export async function dispatchDynamicSkillEvent(input: {
   // the packages resolved now, then remove every previously announced package
   // before writing the current set.
   const newManifest = isFullRematerialization(markerRead) ? {} : { ...activeManifest };
+  const previousSkillsByName = new Map(
+    Object.values(previousManifest)
+      .flat()
+      .map((skill) => [skill.name, skill]),
+  );
   for (const { resolver, skills } of updates) {
     if (skills.length === 0) {
       delete newManifest[resolver.slug];
     } else {
-      newManifest[resolver.slug] = skills.map((skill) => ({
-        contentDigest: skill.contentDigest,
-        description: skill.description,
-        name: skill.name,
-        relativePaths: skill.files.map((file) => file.relativePath),
-      }));
+      const metadata: DurableDynamicSkillMetadata[] = [];
+      for (const skill of skills) {
+        let authoredBaseline = previousSkillsByName.get(skill.name)?.authoredBaseline;
+        if (
+          authoredBaseline === undefined &&
+          authoredPackageNames.has(skill.name) &&
+          sandbox !== null &&
+          sandbox !== undefined
+        ) {
+          authoredBaseline = await captureAuthoredSkillBaseline({ name: skill.name, sandbox });
+        }
+        metadata.push({
+          authoredBaseline,
+          contentDigest: skill.contentDigest,
+          description: skill.description,
+          name: skill.name,
+          relativePaths: skill.files.map((file) => file.relativePath),
+        });
+      }
+      newManifest[resolver.slug] = metadata;
     }
   }
 
@@ -340,54 +375,4 @@ export async function dispatchDynamicSkillEvent(input: {
     sandboxMs,
     totalMs: performance.now() - totalStartedAt,
   });
-}
-
-async function trustDynamicSkillMarker(
-  markerRead: DynamicSkillMaterializationMarkerRead | undefined,
-  manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
-  sandbox: SandboxSession | null | undefined,
-): Promise<DynamicSkillMaterializationMarkerRead | undefined> {
-  if (markerRead === undefined || sandbox === null || sandbox === undefined) {
-    return markerRead;
-  }
-
-  if (markerRead.marker === null) {
-    if (
-      markerRead.status === "missing" &&
-      Object.keys(manifest).length > 0 &&
-      (await dynamicSkillManifestMatchesSandbox({ manifest, sandbox }))
-    ) {
-      const marker = dynamicSkillMarkerFromManifest(manifest);
-      return marker === null ? markerRead : { ...markerRead, marker };
-    }
-    return markerRead;
-  }
-
-  return !dynamicSkillMarkerMatchesManifest(markerRead.marker, manifest) ||
-    !(await dynamicSkillManifestMatchesSandbox({ manifest, sandbox }))
-    ? { ...markerRead, status: "stale" }
-    : markerRead;
-}
-
-function isFullRematerialization(
-  markerRead: DynamicSkillMaterializationMarkerRead | undefined,
-): boolean {
-  return markerRead !== undefined && (markerRead.marker === null || markerRead.status === "stale");
-}
-
-function dynamicSkillManifestsEqual(
-  left: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
-  right: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
-): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function retainCompiledResolverPackages(
-  manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
-  resolvers: readonly ResolvedDynamicSkillResolver[],
-): Record<string, readonly DurableDynamicSkillMetadata[]> {
-  const compiledResolverSlugs = new Set(resolvers.map((resolver) => resolver.slug));
-  return Object.fromEntries(
-    Object.entries(manifest).filter(([resolverSlug]) => compiledResolverSlugs.has(resolverSlug)),
-  );
 }

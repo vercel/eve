@@ -1,6 +1,9 @@
-import { Buffer } from "node:buffer";
-
 import type { DurableDynamicSkillMetadata } from "#context/keys.js";
+import {
+  dynamicSkillPackageMatchesSandbox,
+  readVerifiedAuthoredSkillBaseline,
+  writeVisibleSkillPackage,
+} from "#context/dynamic-skill-authored-baseline.js";
 import {
   type DynamicSkillMaterializationMarker,
   type DynamicSkillMaterializationMarkerEntry,
@@ -10,7 +13,6 @@ import {
 } from "#context/dynamic-skill-materialization-marker.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import {
-  digestMaterializedSkillPackage,
   type MaterializableSkillPackage,
   removeSkillPackageFromSandbox,
   writeSkillPackageToSandbox,
@@ -91,30 +93,49 @@ export async function dynamicSkillManifestMatchesSandbox(input: {
   readonly sandbox: SandboxSession;
 }): Promise<boolean> {
   for (const [name, metadata] of indexManifest(input.manifest)) {
-    if (metadata.contentDigest === undefined || metadata.relativePaths === undefined) return false;
-
-    const files = [];
-    for (const relativePath of metadata.relativePaths) {
-      const content = await input.sandbox.readBinaryFile({
-        path: await resolveSandboxSkillWritePath({
-          name,
-          relativePath,
-          sandbox: input.sandbox,
-        }),
-      });
-      if (content === null) return false;
-      files.push({ content: Buffer.from(content), relativePath });
-    }
-
     if (
-      digestMaterializedSkillPackage({ description: metadata.description, files, name }) !==
-      metadata.contentDigest
-    ) {
+      !(await dynamicSkillPackageMatchesSandbox({
+        metadata: { ...metadata, name },
+        sandbox: input.sandbox,
+      }))
+    )
       return false;
-    }
   }
 
   return true;
+}
+
+/** Returns whether a legacy manifest still has every package entry in this sandbox. */
+export async function legacyDynamicSkillManifestExistsInSandbox(input: {
+  readonly manifest: DynamicSkillManifest;
+  readonly sandbox: SandboxSession;
+}): Promise<boolean> {
+  let hasLegacyMetadata = false;
+
+  for (const [name, metadata] of indexManifest(input.manifest)) {
+    if (metadata.contentDigest !== undefined && metadata.relativePaths !== undefined) {
+      if (
+        !(await dynamicSkillPackageMatchesSandbox({
+          metadata: { ...metadata, name },
+          sandbox: input.sandbox,
+        }))
+      )
+        return false;
+      continue;
+    }
+
+    hasLegacyMetadata = true;
+    const skillBody = await input.sandbox.readBinaryFile({
+      path: await resolveSandboxSkillWritePath({
+        name,
+        relativePath: "SKILL.md",
+        sandbox: input.sandbox,
+      }),
+    });
+    if (skillBody === null) return false;
+  }
+
+  return hasLegacyMetadata;
 }
 
 /** Applies one dynamic-skill delta and commits its sandbox marker last. */
@@ -165,7 +186,20 @@ export async function materializeDynamicSkillUpdates(input: {
     if (!updates.has(name)) delete nextPackages[name];
   }
 
-  const packageMutationNeeded = removePackages.size > 0 || writeSkills.length > 0;
+  const restorePackages = await Promise.all(
+    [...removePackages].flatMap((name) => {
+      const baseline = previous.get(name)?.authoredBaseline;
+      return baseline === undefined
+        ? []
+        : [
+            readVerifiedAuthoredSkillBaseline({ baseline, name, sandbox: input.sandbox }).then(
+              (files) => ({ files, name }),
+            ),
+          ];
+    }),
+  );
+  const packageMutationNeeded =
+    removePackages.size > 0 || restorePackages.length > 0 || writeSkills.length > 0;
   if (packageMutationNeeded) {
     await input.sandbox.removePath({ force: true, path: input.markerRead.path });
   }
@@ -177,6 +211,9 @@ export async function materializeDynamicSkillUpdates(input: {
   const removeMs = performance.now() - removeStartedAt;
 
   const writeStartedAt = performance.now();
+  for (const restored of restorePackages) {
+    await writeVisibleSkillPackage({ ...restored, sandbox: input.sandbox });
+  }
   for (const skill of writeSkills) {
     await writeSkillPackageToSandbox({ sandbox: input.sandbox, skill });
   }
@@ -210,14 +247,22 @@ export async function materializeDynamicSkillUpdates(input: {
     removeCallCount: removePackages.size,
     removeMs,
     removedPackageCount,
-    writeByteCount: writeSkills.reduce(
-      (total, skill) =>
-        total + skill.files.reduce((fileTotal, file) => fileTotal + file.content.byteLength, 0),
-      0,
-    ),
-    writeFileCount: writeSkills.reduce((total, skill) => total + skill.files.length, 0),
+    writeByteCount:
+      restorePackages.reduce(
+        (total, restored) =>
+          total + restored.files.reduce((sum, file) => sum + file.content.byteLength, 0),
+        0,
+      ) +
+      writeSkills.reduce(
+        (total, skill) =>
+          total + skill.files.reduce((sum, file) => sum + file.content.byteLength, 0),
+        0,
+      ),
+    writeFileCount:
+      restorePackages.reduce((total, restored) => total + restored.files.length, 0) +
+      writeSkills.reduce((total, skill) => total + skill.files.length, 0),
     writeMs,
-    writePackageCount: writeSkills.length,
+    writePackageCount: restorePackages.length + writeSkills.length,
   };
 }
 

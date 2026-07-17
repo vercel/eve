@@ -26,7 +26,11 @@ function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledB
     nodeId: undefined,
     resolvedAgent: {
       config: { name: "test-agent" },
-      skills: authoredSkillNames.map((name) => ({ name })),
+      skills: authoredSkillNames.map((name) => ({
+        description: `Authored ${name}`,
+        markdown: `Authored ${name} body.`,
+        name,
+      })),
     } as never,
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
@@ -458,12 +462,22 @@ describe("dispatchDynamicSkillEvent", () => {
 
   it("lets a dynamic skill override a same-named authored skill instead of throwing", async () => {
     const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    let enabled = true;
+    const authoredSkill = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
     const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
+    sandbox.files.set(authoredSkill, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(authoredSkill, Buffer.from("Authored talk-like-a-dog body."));
     sandbox.files.set(authoredReference, "Authored reference");
     sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
-    const resolver = createResolver("custom", () => ({
-      "talk-like-a-dog": makeSkill("Dynamic override", "Woof."),
-    }));
+    const resolver = createResolver(
+      "custom",
+      (): Record<string, SkillPackageDefinition> =>
+        enabled
+          ? {
+              "talk-like-a-dog": makeSkill("Dynamic override", "Woof."),
+            }
+          : {},
+    );
 
     await dispatchDynamicSkillEvent({
       ctx,
@@ -489,6 +503,108 @@ describe("dispatchDynamicSkillEvent", () => {
       ),
     ).toBe(true);
     expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
+
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+    sandbox.files.set(markerPath, "not json");
+    sandbox.fileBytes.set(markerPath, Buffer.from("not json"));
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
+
+    enabled = false;
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.get(authoredSkill)).toBe("Authored talk-like-a-dog body.");
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
+  });
+
+  it("restores the exact authored baseline when a dynamic override retires", async () => {
+    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+    const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
+    const dynamicReference = "/home/agent/.agents/skills/talk-like-a-dog/references/dynamic.md";
+    sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
+    sandbox.files.set(authoredReference, "Authored reference");
+    sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
+    let enabled = true;
+    const resolver = createResolver("custom", () =>
+      enabled
+        ? {
+            "talk-like-a-dog": makeSkill("Dynamic override", "Woof.", {
+              "references/dynamic.md": "Dynamic reference",
+            }),
+          }
+        : null,
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    enabled = false;
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.get(skillPath)).toBe("Authored talk-like-a-dog body.");
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
+    expect(sandbox.files.has(dynamicReference)).toBe(false);
+  });
+
+  it("rebuilds a changed dynamic override over the exact authored baseline", async () => {
+    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+    const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
+    const staleReference = "/home/agent/.agents/skills/talk-like-a-dog/references/stale.md";
+    sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
+    sandbox.files.set(authoredReference, "Authored reference");
+    sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
+    let changed = false;
+    const resolver = createResolver("custom", () =>
+      changed
+        ? { "talk-like-a-dog": makeSkill("Dynamic override", "New woof.") }
+        : {
+            "talk-like-a-dog": makeSkill("Dynamic override", "Old woof.", {
+              "references/stale.md": "Stale",
+            }),
+          },
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    expect(ctx.get(DynamicSkillManifestKey)?.custom?.[0]?.authoredBaseline).toHaveLength(2);
+    changed = true;
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.get(skillPath)).toBe("New woof.");
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
+    expect(sandbox.files.has(staleReference)).toBe(false);
   });
 
   it("collapses a directly-returned single defineSkill to the bare slug", async () => {

@@ -126,7 +126,18 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     fileBytes.set(resolved, Buffer.from(contents, "utf8"));
   }
 
-  async function defaultRun(): Promise<SandboxCommandResult> {
+  async function defaultRun(command: string): Promise<SandboxCommandResult> {
+    const findMatch = /^if \[ -d '([^']+)' \]; then find '\1' -type f -print0; fi$/u.exec(command);
+    if (findMatch !== null) {
+      const root = findMatch[1]!;
+      const prefix = `${root}/`;
+      const matches = [...files.keys()].filter((path) => path.startsWith(prefix)).sort();
+      return {
+        exitCode: 0,
+        stderr: "",
+        stdout: matches.length === 0 ? "" : `${matches.join("\0")}\0`,
+      };
+    }
     return { exitCode: 0, stderr: "", stdout: "" };
   }
 
@@ -144,7 +155,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       return await fallback(options);
     }
 
-    return await defaultRun();
+    return await defaultRun(options.command);
   }
 
   async function removePath(options: SandboxRemovePathOptions): Promise<void> {

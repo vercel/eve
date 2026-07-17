@@ -71,6 +71,51 @@ async function dispatch(input: {
 }
 
 describe("dynamic skill materialization recovery", () => {
+  it.each(["warm", "missing-marker"] as const)(
+    "removes an unlisted sibling during %s validation",
+    async (state) => {
+      const { ctx, sandbox } = createCtx();
+      const resolver = createResolver("tenant", () => makeSkill("Tenant policy", "Trusted body."));
+      const extraPath = "/home/agent/.agents/skills/tenant/references/injected.md";
+      const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+
+      await dispatch({ ctx, resolvers: [resolver] });
+      sandbox.files.set(extraPath, "Injected sibling.");
+      sandbox.fileBytes.set(extraPath, Buffer.from("Injected sibling."));
+      if (state === "missing-marker") {
+        sandbox.files.delete(markerPath);
+        sandbox.fileBytes.delete(markerPath);
+      }
+
+      await dispatch({ ctx, resolvers: [resolver] });
+
+      expect(sandbox.files.has(extraPath)).toBe(false);
+      expect(sandbox.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe("Trusted body.");
+    },
+  );
+
+  it("preserves an existing legacy manifest until its resolver can migrate it", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver(
+      "session-policy",
+      () => makeSkill("Session policy", "Follow session policy."),
+      ["session.started"],
+    );
+    const skillPath = "/home/agent/.agents/skills/session-policy/SKILL.md";
+    sandbox.files.set(skillPath, "Follow session policy.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Follow session policy."));
+    ctx.set(DynamicSkillManifestKey, {
+      "session-policy": [{ description: "Session policy", name: "session-policy" }],
+    });
+
+    await dispatch({ ctx, event: "turn.started", resolvers: [resolver] });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      "session-policy": [{ description: "Session policy", name: "session-policy" }],
+    });
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("session-policy: Session policy");
+  });
+
   it("migrates exact pre-marker packages instead of dropping them on an unmatched event", async () => {
     const { ctx, sandbox } = createCtx();
     const resolver = createResolver(
