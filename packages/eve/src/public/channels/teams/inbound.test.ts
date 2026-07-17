@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatTeamsContextBlock,
+  formatTeamsDeliveryContext,
   parseTeamsActivity,
   teamsThreadRootActivityId,
 } from "#public/channels/teams/inbound.js";
@@ -58,8 +59,9 @@ describe("Teams inbound parsing", () => {
       userName: "Ada",
     });
     expect(block).toContain("<teams_context>");
-    expect(block).toContain("response_medium: microsoft_teams");
+    expect(block).not.toContain("response_medium");
     expect(block).toContain("user_id: U1");
+    expect(formatTeamsDeliveryContext()).toContain("response_medium: microsoft_teams");
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatTelegramContextBlock,
+  formatTelegramDeliveryContext,
   parseTelegramUpdate,
 } from "#public/channels/telegram/inbound.js";
 
@@ -110,7 +111,8 @@ describe("Telegram context rendering", () => {
         userId: "42",
         username: "ada",
       }),
-    ).toContain("<telegram_context>\nresponse_medium: telegram");
+    ).toContain("<telegram_context>\nchat_id: -1001");
+    expect(formatTelegramDeliveryContext()).toContain("response_medium: telegram");
   });
 
   it("renders chat and actor identity into the block", () => {

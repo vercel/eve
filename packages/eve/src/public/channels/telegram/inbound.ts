@@ -118,15 +118,11 @@ export function parseTelegramUpdate(value: unknown): TelegramUpdate | null {
 }
 
 /**
- * Renders one {@link TelegramInboundContext} as a deterministic
- * `<telegram_context>` block with fixed response instructions and the chat and
- * user identity fields.
+ * Renders provider-authored Telegram chat and user metadata as user context.
  */
 export function formatTelegramContextBlock(context: TelegramInboundContext): string {
   const lines = [
     "<telegram_context>",
-    "response_medium: telegram",
-    `response_instructions: ${TELEGRAM_RESPONSE_INSTRUCTIONS}`,
     `chat_id: ${context.chatId}`,
     `chat_type: ${context.chatType}`,
     ...(context.chatTitle ? [`chat_title: ${context.chatTitle}`] : []),
@@ -140,6 +136,16 @@ export function formatTelegramContextBlock(context: TelegramInboundContext): str
     "</telegram_context>",
   ];
   return lines.join("\n");
+}
+
+/** Renders trusted, channel-authored Telegram delivery instructions. */
+export function formatTelegramDeliveryContext(): string {
+  return [
+    "<telegram_delivery>",
+    "response_medium: telegram",
+    `response_instructions: ${TELEGRAM_RESPONSE_INSTRUCTIONS}`,
+    "</telegram_delivery>",
+  ].join("\n");
 }
 
 function parseTelegramMessage(value: unknown): TelegramMessage | null {

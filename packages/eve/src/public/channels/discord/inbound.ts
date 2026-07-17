@@ -145,12 +145,10 @@ export function commandInteractionMessage(interaction: DiscordCommandInteraction
   return optionText ? `/${interaction.commandName} ${optionText}` : `/${interaction.commandName}`;
 }
 
-/** Renders one {@link DiscordInboundContext} as a deterministic context block. */
+/** Renders provider-authored Discord metadata as user context. */
 export function formatDiscordContextBlock(context: DiscordInboundContext): string {
   const lines = [
     "<discord_context>",
-    "response_medium: discord",
-    `response_instructions: ${DISCORD_RESPONSE_INSTRUCTIONS}`,
     `user_id: ${context.userId}`,
     ...(context.username ? [`username: ${context.username}`] : []),
     `channel_id: ${context.channelId}`,
@@ -160,6 +158,16 @@ export function formatDiscordContextBlock(context: DiscordInboundContext): strin
     "</discord_context>",
   ];
   return lines.join("\n");
+}
+
+/** Renders trusted, channel-authored Discord delivery instructions. */
+export function formatDiscordDeliveryContext(): string {
+  return [
+    "<discord_delivery>",
+    "response_medium: discord",
+    `response_instructions: ${DISCORD_RESPONSE_INSTRUCTIONS}`,
+    "</discord_delivery>",
+  ].join("\n");
 }
 
 function parseCommandInteraction(raw: Record<string, unknown>): DiscordCommandInteraction | null {

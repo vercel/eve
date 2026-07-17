@@ -165,10 +165,17 @@ describe("telegramChannel() inbound route", () => {
     const [payload, options] = send.mock.calls[0]!;
     expect(payload).toMatchObject({
       clientContext: [expect.stringContaining("<telegram_context>")],
-      context: ["trusted Telegram hook instruction"],
+      context: [
+        expect.stringContaining("<telegram_delivery>"),
+        "trusted Telegram hook instruction",
+      ],
       message: expect.stringContaining("hello"),
     });
-    expect((payload as { context: string[] }).context[0]).not.toContain("<telegram_context>");
+    expect((payload as { clientContext: string[] }).clientContext[0]).not.toContain(
+      "response_medium",
+    );
+    expect((payload as { context: string[] }).context[0]).toContain("response_medium: telegram");
+    expect((payload as { context: string[] }).context.join("\n")).not.toContain("chat_id: 42");
     expect(options).toMatchObject({
       auth: {
         authenticator: "telegram-webhook",
@@ -312,6 +319,7 @@ describe("telegramChannel() deliver hook", () => {
     expect(
       await adapter.deliver!(
         {
+          clientContext: ["telegram metadata"],
           inputResponses: [
             { optionId: "selected", requestId: "telegram_callback:eve:0" },
             { requestId: "telegram_reply:55", text: "because" },
@@ -324,6 +332,7 @@ describe("telegramChannel() deliver hook", () => {
         { optionId: "approve", requestId: "call_1" },
         { requestId: "call_2", text: "because" },
       ],
+      clientContext: ["telegram metadata"],
       context: undefined,
     });
   });
@@ -335,12 +344,13 @@ describe("telegramChannel() deliver hook", () => {
     expect(
       await adapter.deliver!(
         {
+          clientContext: ["telegram metadata"],
           inputResponses: [{ requestId: "telegram_reply:55", text: "hello" }],
           message: "hello",
         },
         ctx,
       ),
-    ).toEqual({ message: "hello", context: undefined });
+    ).toEqual({ clientContext: ["telegram metadata"], message: "hello", context: undefined });
   });
 });
 

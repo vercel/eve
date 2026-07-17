@@ -209,10 +209,14 @@ describe("discordChannel() inbound route", () => {
     const [payload, options] = send.mock.calls[0]!;
     expect(payload).toMatchObject({
       clientContext: [expect.stringContaining("<discord_context>")],
-      context: ["trusted Discord hook instruction"],
+      context: [expect.stringContaining("<discord_delivery>"), "trusted Discord hook instruction"],
       message: expect.stringContaining("hello discord"),
     });
-    expect((payload as { context: string[] }).context[0]).not.toContain("<discord_context>");
+    expect((payload as { clientContext: string[] }).clientContext[0]).not.toContain(
+      "response_medium",
+    );
+    expect((payload as { context: string[] }).context[0]).toContain("response_medium: discord");
+    expect((payload as { context: string[] }).context.join("\n")).not.toContain("user_id: U01");
     expect(options).toMatchObject({
       auth: {
         authenticator: "discord-interaction",

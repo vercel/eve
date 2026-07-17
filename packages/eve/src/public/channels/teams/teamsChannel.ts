@@ -46,6 +46,7 @@ import {
 } from "#public/channels/teams/hitl.js";
 import {
   formatTeamsContextBlock,
+  formatTeamsDeliveryContext,
   parseTeamsActivity,
   teamsThreadRootActivityId,
   type TeamsActivity,
@@ -587,7 +588,7 @@ async function dispatchMessage(input: {
     await input.send(
       {
         clientContext: [formatTeamsContextBlock(inboundContext)],
-        context: result.context,
+        context: [formatTeamsDeliveryContext(), ...(result.context ?? [])],
         message: turnMessage,
       },
       {

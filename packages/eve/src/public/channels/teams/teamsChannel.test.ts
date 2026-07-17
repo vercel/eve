@@ -101,9 +101,11 @@ describe("teamsChannel", () => {
     });
     expect(send.mock.calls[0]![0]).toMatchObject({
       clientContext: [expect.stringContaining("<teams_context>")],
-      context: ["trusted Teams hook instruction"],
+      context: [expect.stringContaining("<teams_delivery>"), "trusted Teams hook instruction"],
     });
-    expect(send.mock.calls[0]![0].context[0]).not.toContain("<teams_context>");
+    expect(send.mock.calls[0]![0].clientContext[0]).not.toContain("response_medium");
+    expect(send.mock.calls[0]![0].context[0]).toContain("response_medium: microsoft_teams");
+    expect(send.mock.calls[0]![0].context.join("\n")).not.toContain("user_id: USER");
   });
 
   it("default dispatch ignores unmentioned group messages", async () => {

@@ -3,8 +3,25 @@ import { describe, expect, it } from "vitest";
 import {
   commandInteractionMessage,
   formatDiscordContextBlock,
+  formatDiscordDeliveryContext,
   parseDiscordInteraction,
 } from "#public/channels/discord/inbound.js";
+
+describe("Discord context rendering", () => {
+  it("separates provider metadata from fixed delivery instructions", () => {
+    const context = formatDiscordContextBlock({
+      channelId: "C01",
+      interactionId: "I01",
+      userId: "U01",
+    });
+    const delivery = formatDiscordDeliveryContext();
+
+    expect(context).toContain("user_id: U01");
+    expect(context).not.toContain("response_medium");
+    expect(delivery).toContain("response_medium: discord");
+    expect(delivery).not.toContain("user_id: U01");
+  });
+});
 
 describe("parseDiscordInteraction", () => {
   it("parses an application command interaction", () => {

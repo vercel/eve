@@ -37,6 +37,7 @@ import {
 } from "#public/channels/telegram/hitl.js";
 import {
   formatTelegramContextBlock,
+  formatTelegramDeliveryContext,
   parseTelegramUpdate,
   type TelegramCallbackQuery,
   type TelegramChatType,
@@ -521,7 +522,7 @@ async function dispatchMessage(input: {
     await input.send(
       {
         clientContext: [contextBlock],
-        context: result.context,
+        context: [formatTelegramDeliveryContext(), ...(result.context ?? [])],
         inputResponses: replyInputResponses,
         message: turnMessage,
       },
@@ -601,17 +602,24 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
     if (responses.some(isTelegramSyntheticResponse)) {
       const resolved = resolveTelegramInputResponses(ctx.state, responses);
       if (resolved.length > 0) {
-        return { inputResponses: resolved, context: payload.context };
+        return {
+          clientContext: payload.clientContext,
+          context: payload.context,
+          inputResponses: resolved,
+        };
       }
       if (payload.message !== undefined) {
-        return { message: payload.message, context: payload.context };
+        return {
+          clientContext: payload.clientContext,
+          context: payload.context,
+          message: payload.message,
+        };
       }
       return undefined;
     }
     return defaultDeliverResult(payload);
   };
 }
-
 function stateFromMessage(
   message: TelegramMessage,
   config: TelegramChannelConfig,

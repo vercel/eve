@@ -33,6 +33,7 @@ import {
   DISCORD_INTERACTION_RESPONSE_TYPE,
   DISCORD_INTERACTION_TYPE,
   formatDiscordContextBlock,
+  formatDiscordDeliveryContext,
   parseDiscordInteraction,
   type DiscordCommandInteraction,
   type DiscordComponentInteraction,
@@ -594,7 +595,7 @@ async function dispatchCommand(input: {
     await input.send(
       {
         clientContext: [contextBlock],
-        context: input.result.context,
+        context: [formatDiscordDeliveryContext(), ...(input.result.context ?? [])],
         message: turnMessage,
       },
       {

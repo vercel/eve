@@ -130,15 +130,12 @@ export function teamsThreadRootActivityId(
 }
 
 /**
- * Renders one {@link TeamsInboundContext} as a `<teams_context>` block of
- * `key: value` lines for the model. Optional fields (user name, conversation
- * type, tenant, team, channel) are omitted when absent; field order is stable.
+ * Renders provider-authored Teams metadata as a `<teams_context>` user-context
+ * block. Optional fields are omitted when absent; field order is stable.
  */
 export function formatTeamsContextBlock(context: TeamsInboundContext): string {
   const lines = [
     "<teams_context>",
-    "response_medium: microsoft_teams",
-    `response_instructions: ${TEAMS_RESPONSE_INSTRUCTIONS}`,
     `user_id: ${context.userId}`,
     ...(context.userName ? [`user_name: ${context.userName}`] : []),
     `conversation_id: ${context.conversationId}`,
@@ -151,6 +148,16 @@ export function formatTeamsContextBlock(context: TeamsInboundContext): string {
     "</teams_context>",
   ];
   return lines.join("\n");
+}
+
+/** Renders trusted, channel-authored Teams delivery instructions. */
+export function formatTeamsDeliveryContext(): string {
+  return [
+    "<teams_delivery>",
+    "response_medium: microsoft_teams",
+    `response_instructions: ${TEAMS_RESPONSE_INSTRUCTIONS}`,
+    "</teams_delivery>",
+  ].join("\n");
 }
 
 function parseMessageActivity(raw: Record<string, unknown>): TeamsMessageActivity | null {
