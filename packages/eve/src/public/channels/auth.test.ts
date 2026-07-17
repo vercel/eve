@@ -17,6 +17,7 @@ import {
   none,
   placeholderAuth,
   routeAuth,
+  type UnauthorizedChallenge,
   UnauthenticatedError,
   vercelOidc,
   vercelSubject,
@@ -24,6 +25,7 @@ import {
   verifyJwtEcdsa,
   verifyJwtHmac,
   verifyVercelOidc,
+  withAuthChallenges,
 } from "#public/channels/auth.js";
 
 const TEST_ROUTE_URL = `https://example.com${EVE_CREATE_SESSION_ROUTE_PATH}`;
@@ -535,6 +537,145 @@ describe("routeAuth", () => {
     const result = await routeAuth(makeRequest(), [asyncAccept]);
 
     expect(result).toEqual(SAMPLE_CONTEXT);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Declared challenges (vercel/eve#909): the 401 `www-authenticate` header
+  // must reflect the auth strategies actually configured on the route,
+  // rather than always defaulting to `Bearer`.
+  // ---------------------------------------------------------------------------
+
+  it("advertises a Basic challenge when the route is protected only by httpBasic", async () => {
+    const request = makeRequest();
+    const result = await routeAuth(request, [
+      httpBasic({ password: "top-secret", username: "ops" }),
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.status).toBe(401);
+      expect(result.headers.get("www-authenticate")).toBe('Basic charset="UTF-8"');
+    }
+  });
+
+  it("renders the realm before charset in the Basic challenge", async () => {
+    const request = makeRequest();
+    const result = await routeAuth(request, [
+      httpBasic({ password: "top-secret", username: "ops" }, { realm: "agent" }),
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.headers.get("www-authenticate")).toBe('Basic realm="agent", charset="UTF-8"');
+    }
+  });
+
+  it("advertises Bearer for a lone jwtHmac strategy", async () => {
+    const request = makeRequest();
+    const result = await routeAuth(request, [
+      jwtHmac({
+        algorithm: "HS256",
+        audiences: ["weather-agent"],
+        issuer: "https://internal.example",
+        secret: "shared-secret",
+      }),
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.headers.get("www-authenticate")).toBe("Bearer");
+    }
+  });
+
+  it("advertises both Basic and Bearer for a mixed httpBasic + jwtHmac route", async () => {
+    const request = makeRequest();
+    const result = await routeAuth(request, [
+      httpBasic({ password: "top-secret", username: "ops" }),
+      jwtHmac({
+        algorithm: "HS256",
+        audiences: ["weather-agent"],
+        issuer: "https://internal.example",
+        secret: "shared-secret",
+      }),
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      const header = result.headers.get("www-authenticate");
+      expect(header).toContain('Basic charset="UTF-8"');
+      expect(header).toContain("Bearer");
+    }
+  });
+
+  it("dedupes repeated Bearer challenges from multiple bearer strategies", async () => {
+    const request = makeRequest();
+    const result = await routeAuth(request, [
+      vercelOidc(),
+      jwtHmac({
+        algorithm: "HS256",
+        audiences: ["weather-agent"],
+        issuer: "https://internal.example",
+        secret: "shared-secret",
+      }),
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.headers.get("www-authenticate")).toBe("Bearer");
+    }
+  });
+
+  it("does not emit www-authenticate on a successful authentication", async () => {
+    const result = await routeAuth(makeRequest(), [
+      httpBasic({ password: "top-secret", username: "ops" }),
+      none(),
+    ]);
+
+    expect(result).not.toBeInstanceOf(Response);
+    expect(result).toMatchObject({ principalType: "anonymous" });
+  });
+
+  it("gives precedence to a thrown UnauthenticatedError over collected challenges", async () => {
+    const request = makeRequest();
+    const result = await routeAuth(request, [
+      () => {
+        throw new UnauthenticatedError({ message: "custom rejection" });
+      },
+      httpBasic({ password: "top-secret", username: "ops" }),
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.status).toBe(401);
+      // The thrown error's own response wins outright: `UnauthenticatedError`
+      // declares no challenges of its own, so it carries no Basic challenge
+      // from the strategy that never ran (nor any www-authenticate header).
+      expect(result.headers.has("www-authenticate")).toBe(false);
+      await expect(result.json()).resolves.toMatchObject({ error: "custom rejection" });
+    }
+  });
+
+  it("falls back to Bearer when no configured strategy declares a challenge", async () => {
+    const result = await routeAuth(makeRequest(), [() => null, () => undefined]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.headers.get("www-authenticate")).toBe("Bearer");
+    }
+  });
+
+  it("advertises a challenge declared on a custom AuthFn via withAuthChallenges", async () => {
+    const challenges: readonly UnauthorizedChallenge[] = [
+      { scheme: "Basic", parameters: { realm: "x" } },
+    ];
+    const customAuthFn = withAuthChallenges<Request>(() => null, challenges);
+
+    const result = await routeAuth(makeRequest(), [customAuthFn]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.headers.get("www-authenticate")).toBe('Basic realm="x"');
+    }
   });
 });
 
