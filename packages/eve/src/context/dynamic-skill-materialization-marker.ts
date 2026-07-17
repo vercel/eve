@@ -26,6 +26,7 @@ export type DynamicSkillMaterializationMarkerStatus =
   | "corrupt"
   | "missing"
   | "old"
+  | "stale"
   | "unreadable";
 
 export interface DynamicSkillMaterializationMarkerRead {

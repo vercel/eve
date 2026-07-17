@@ -19,7 +19,10 @@ import {
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import { readDynamicSkillMaterializationMarker } from "#context/dynamic-skill-materialization-marker.js";
-import { materializeDynamicSkillUpdates } from "#context/dynamic-skill-materialization.js";
+import {
+  dynamicSkillMarkerMatchesManifest,
+  materializeDynamicSkillUpdates,
+} from "#context/dynamic-skill-materialization.js";
 import { logDynamicSkillMaterializationTelemetry } from "#context/dynamic-skill-telemetry.js";
 import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
 
@@ -169,9 +172,15 @@ export async function dispatchDynamicSkillEvent(input: {
   const sandbox = await ctx.require(SandboxKey).get();
   const sandboxMs = performance.now() - sandboxStartedAt;
   const markerStartedAt = performance.now();
-  const markerRead =
+  const rawMarkerRead =
     sandbox === null ? undefined : await readDynamicSkillMaterializationMarker({ sandbox });
   const markerMs = performance.now() - markerStartedAt;
+  const markerRead =
+    rawMarkerRead !== undefined &&
+    rawMarkerRead.marker !== null &&
+    !dynamicSkillMarkerMatchesManifest(rawMarkerRead.marker, manifest)
+      ? { ...rawMarkerRead, marker: null, status: "stale" as const }
+      : rawMarkerRead;
 
   // Without a trustworthy marker, package bodies from resolvers that did not
   // run for this event cannot be proven present. Fail closed by retaining only

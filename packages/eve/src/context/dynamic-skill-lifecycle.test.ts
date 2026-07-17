@@ -237,67 +237,85 @@ describe("dispatchDynamicSkillEvent", () => {
     ).toBe(true);
   });
 
-  it("invalidates unresolvable manifest packages after the sandbox is recreated", async () => {
-    const { ctx } = createCtx();
-    const sessionResolver = createResolver(
-      "session-policy",
-      () => makeSkill("Session policy", "Follow session policy."),
-      undefined,
-      ["session.started"],
-    );
-    const turnResolver = createResolver(
-      "turn-policy",
-      () => makeSkill("Turn policy", "Follow turn policy."),
-      undefined,
-      ["turn.started"],
-    );
+  it.each(["missing", "stale"] as const)(
+    "invalidates unresolvable manifest packages after a %s marker",
+    async (markerState) => {
+      const { ctx, sandbox } = createCtx();
+      const sessionResolver = createResolver(
+        "session-policy",
+        () => makeSkill("Session policy", "Follow session policy."),
+        undefined,
+        ["session.started"],
+      );
+      const turnResolver = createResolver(
+        "turn-policy",
+        () => makeSkill("Turn policy", "Follow turn policy."),
+        undefined,
+        ["turn.started"],
+      );
 
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: makeEvent("session.started"),
-      messages: [],
-      resolvers: [sessionResolver, turnResolver],
-    });
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: makeEvent("turn.started"),
-      messages: [],
-      resolvers: [sessionResolver, turnResolver],
-    });
-    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("session-policy: Session policy");
+      await dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent("session.started"),
+        messages: [],
+        resolvers: [sessionResolver, turnResolver],
+      });
+      await dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent("turn.started"),
+        messages: [],
+        resolvers: [sessionResolver, turnResolver],
+      });
+      expect(ctx.get(PendingSkillAnnouncementKey)).toContain("session-policy: Session policy");
 
-    const recreated = mockSandbox({
-      id: "sbx_recreated",
-      commands: {
-        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
-      },
-    });
-    ctx.set(SandboxKey, recreated.access);
+      let activeSandbox = sandbox;
+      if (markerState === "missing") {
+        activeSandbox = mockSandbox({
+          id: "sbx_recreated",
+          commands: {
+            [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+          },
+        });
+        ctx.set(SandboxKey, activeSandbox.access);
+      } else {
+        const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+        const marker = JSON.parse(sandbox.files.get(markerPath)!) as {
+          packages: Record<string, unknown>;
+          version: number;
+        };
+        delete marker.packages["session-policy"];
+        const staleMarker = JSON.stringify(marker);
+        sandbox.files.set(markerPath, staleMarker);
+        sandbox.fileBytes.set(markerPath, Buffer.from(staleMarker));
+      }
 
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: makeEvent("turn.started"),
-      messages: [],
-      resolvers: [sessionResolver, turnResolver],
-    });
+      await dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent("turn.started"),
+        messages: [],
+        resolvers: [sessionResolver, turnResolver],
+      });
 
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      "turn-policy": [
-        {
-          contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
-          description: "Turn policy",
-          name: "turn-policy",
-          relativePaths: ["SKILL.md"],
-        },
-      ],
-    });
-    expect(ctx.get(PendingSkillAnnouncementKey)).not.toContain("session-policy: Session policy");
-    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("turn-policy: Turn policy");
-    expect(recreated.files.has("/home/agent/.agents/skills/session-policy/SKILL.md")).toBe(false);
-    expect(recreated.files.get("/home/agent/.agents/skills/turn-policy/SKILL.md")).toBe(
-      "Follow turn policy.",
-    );
-  });
+      expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+        "turn-policy": [
+          {
+            contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            description: "Turn policy",
+            name: "turn-policy",
+            relativePaths: ["SKILL.md"],
+          },
+        ],
+      });
+      expect(ctx.get(PendingSkillAnnouncementKey)).not.toContain("session-policy: Session policy");
+      expect(ctx.get(PendingSkillAnnouncementKey)).toContain("turn-policy: Turn policy");
+      expect(activeSandbox.files.has("/home/agent/.agents/skills/session-policy/SKILL.md")).toBe(
+        false,
+      );
+      expect(activeSandbox.files.get("/home/agent/.agents/skills/turn-policy/SKILL.md")).toBe(
+        "Follow turn policy.",
+      );
+    },
+  );
 
   it.each([
     ["corrupt", "{"],

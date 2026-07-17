@@ -38,6 +38,28 @@ export interface DynamicSkillMaterializationResult {
   readonly writePackageCount: number;
 }
 
+/** Returns whether one marker exactly describes the durable package manifest. */
+export function dynamicSkillMarkerMatchesManifest(
+  marker: DynamicSkillMaterializationMarker,
+  manifest: DynamicSkillManifest,
+): boolean {
+  const indexedManifest = indexManifest(manifest);
+  const markedNames = Object.keys(marker.packages);
+  return (
+    markedNames.length === indexedManifest.size &&
+    [...indexedManifest].every(
+      ([name, metadata]) =>
+        metadata.contentDigest !== undefined &&
+        metadata.relativePaths !== undefined &&
+        markerEntryMatches(marker.packages[name], {
+          contentDigest: metadata.contentDigest,
+          relativePaths: metadata.relativePaths,
+          resolverSlug: metadata.resolverSlug,
+        }),
+    )
+  );
+}
+
 /** Applies one dynamic-skill delta and commits its sandbox marker last. */
 export async function materializeDynamicSkillUpdates(input: {
   readonly nextManifest: DynamicSkillManifest;
