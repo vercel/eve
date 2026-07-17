@@ -205,10 +205,7 @@ export function defaultDeliverResult(payload: DeliverPayload): StepInput | undef
     };
   }
 
-  if (
-    (payload.clientContext !== undefined && payload.clientContext.length > 0) ||
-    (payload.context !== undefined && payload.context.length > 0)
-  ) {
+  if (payload.context !== undefined && payload.context.length > 0) {
     return {
       clientContext: payload.clientContext,
       context: payload.context,

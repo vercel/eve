@@ -99,6 +99,10 @@ describe("ChannelAdapter helpers", () => {
     expect(defaultDeliverResult({ context })).toEqual({ context });
   });
 
+  it("defaultDeliverResult rejects clientContext-only payloads", () => {
+    expect(defaultDeliverResult({ clientContext: ["selected word: jazz"] })).toBeUndefined();
+  });
+
   it("defaultDeliverResult returns undefined when the payload is empty", () => {
     expect(defaultDeliverResult({})).toBeUndefined();
   });
