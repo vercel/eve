@@ -16,12 +16,14 @@ registry packages, reproducing the sibling-dependency layout without
 publishing anything. Both packages are built with `eve extension build` before
 evals run (the e2e workflows run the build and then refresh the install so the
 store copies pick up the dist), so the fixture consumes them in their
-published form: `exports` pointing at `dist/`, extension capabilities
-discovered from `extension/` source.
+published form: package entrypoints and an agent-shaped `dist/extension` tree,
+with no author TypeScript in the store copy. The consuming eve discovers,
+validates, and normalizes that dist tree.
 
 Together with the `extensions` fixture this covers the matrix: gizmo is
 consumed from the workspace there and store-installed here, toolkit stays
 workspace-only, and gadget is store-installed only.
 
 The fixture has no `typecheck` script: type resolution goes through the store
-copies' `dist/`, which does not exist in jobs that skip the extension build.
+copies' generated declarations, which do not exist in jobs that skip the
+extension build.

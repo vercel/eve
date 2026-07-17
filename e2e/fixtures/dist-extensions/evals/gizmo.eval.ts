@@ -2,7 +2,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "A built extension installed with a registry-style store layout loads and its tool runs.",
+    "A dist-only extension installed with a registry-style store layout loads and its tool runs.",
   async test(t) {
     await t.send("Call `gizmo__gizmo_search` with query 'eve'. Report the output.");
 

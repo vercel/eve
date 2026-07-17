@@ -2,7 +2,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "A source-backed extension with a registry-style store layout loads and its tool runs.",
+    "An agent-shaped dist extension with a registry-style store layout loads and its tool runs.",
   async test(t) {
     await t.send("Call `gadget__gadget_echo` with message 'eve'. Report the output.");
 

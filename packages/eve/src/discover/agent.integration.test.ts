@@ -425,6 +425,7 @@ describe("discoverAgent (memory)", () => {
   it("discovers module-only lib sources and reports unsupported lib entries", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
+        "lib/generated.d.ts": "export declare const generated: true;\n",
         "lib/notes.md": "unsupported",
         "lib/weather/client.ts": "export const client = {};\n",
         "instructions.md": "You are a precise assistant.",
