@@ -260,7 +260,10 @@ function markerPackagesEqual(
   const rightNames = Object.keys(right);
   return (
     leftNames.length === rightNames.length &&
-    leftNames.every((name) => markerEntryMatches(left[name], right[name]!))
+    leftNames.every((name) => {
+      const rightEntry = right[name];
+      return rightEntry !== undefined && markerEntryMatches(left[name], rightEntry);
+    })
   );
 }
 
