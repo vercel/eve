@@ -1,4 +1,4 @@
-import { clipVisible, stripAnsi, visibleLength } from "./terminal-text.js";
+import { clipVisible, stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
 import type { Theme } from "./theme.js";
 import type { LogDisplayMode } from "./log-display-mode.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";

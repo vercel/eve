@@ -98,7 +98,7 @@ import {
   visibleLine,
   type LineState,
 } from "./line-editor.js";
-import { LiveRegion } from "./live-region.js";
+import { LiveRegion } from "#cli/ui/live-region.js";
 import { buildStatusLine } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
@@ -108,7 +108,7 @@ import {
   renderInputWithBlockCursor,
   stripAnsi,
   stripTerminalControls,
-} from "./terminal-text.js";
+} from "#cli/ui/terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";

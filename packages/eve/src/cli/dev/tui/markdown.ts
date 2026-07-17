@@ -1,4 +1,4 @@
-import { visibleLength } from "./terminal-text.js";
+import { visibleLength } from "#cli/ui/terminal-text.js";
 
 type TableAlignment = "left" | "center" | "right";
 

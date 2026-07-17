@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildStatusLine } from "./status-line.js";
-import { stripAnsi, visibleLength } from "./terminal-text.js";
+import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 

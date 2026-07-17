@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
+import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
@@ -353,7 +354,11 @@ describe("eve dev boot progress", () => {
 
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
-    expect(writes.at(-1)).toBe("\r\u001B[K");
+    // Replaying every write through a terminal emulator: the boot progress row
+    // is erased, leaving a clean screen for the error to print onto.
+    const screen = new MockScreen({ columns: 80, rows: 10 });
+    screen.write(writes.join(""));
+    expect(screen.snapshot()).toBe("");
     expect(close).toHaveBeenCalledOnce();
   });
 });

@@ -38,7 +38,7 @@ import {
   renderInputWithBlockCursor,
   visibleLength,
   wrapVisibleLine,
-} from "./terminal-text.js";
+} from "#cli/ui/terminal-text.js";
 
 function clip(line: string, width: number): string {
   return clipVisible(line, width);

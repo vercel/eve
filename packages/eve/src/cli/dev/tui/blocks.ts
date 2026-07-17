@@ -14,7 +14,7 @@ import { renderMarkdown } from "./markdown.js";
 import type { Theme } from "./theme.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
 import { formatValuePretty, truncate } from "./tool-format.js";
-import { sliceVisible, visibleLength, wrapVisibleLine } from "./terminal-text.js";
+import { sliceVisible, visibleLength, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 
 export type ToolStatus = "running" | "done" | "error" | "denied" | "approval";
 

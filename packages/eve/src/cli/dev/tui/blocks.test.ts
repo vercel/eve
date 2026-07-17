@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { type Block, renderBlockLines } from "./blocks.js";
-import { stripAnsi, visibleLength } from "./terminal-text.js";
+import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const theme = createTheme({ color: false, unicode: true });
