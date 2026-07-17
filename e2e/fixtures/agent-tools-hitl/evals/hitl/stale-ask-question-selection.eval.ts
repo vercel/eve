@@ -64,7 +64,15 @@ export default defineEval({
       count: 1,
       data: { message: "Use STALE-CANDIDATE-7Q4M" },
     });
-    staleSelection.messageIncludes(/STALE-CANDIDATE-7Q4M/i);
+    // The stale selection reaches the model as context it may act on or
+    // disregard; judge that the reply engages with it instead of demanding
+    // a literal echo the model can rightly decline.
+    t.judge.autoevals
+      .closedQA(
+        "The reply acknowledges a late selection of the STALE-CANDIDATE-7Q4M option, either by applying it or by explaining that the question was already answered and the selection is no longer relevant.",
+        { on: staleSelection.message },
+      )
+      .atLeast(0.5);
 
     t.succeeded();
   },
