@@ -186,9 +186,23 @@ export async function materializeDynamicSkillUpdates(input: {
     if (!updates.has(name)) delete nextPackages[name];
   }
 
+  const freshAuthoredPackages = new Set(
+    [...removePackages].filter((name) => {
+      const previousMetadata = previous.get(name);
+      return (
+        desired.get(name)?.authoredBaseline === undefined &&
+        previousMetadata?.authoredBaseline !== undefined &&
+        previousMetadata.authoredBaselineSandboxId !== undefined &&
+        previousMetadata.authoredBaselineSandboxId !== input.sandbox.id
+      );
+    }),
+  );
+  const filesystemRemovePackages = new Set(
+    [...removePackages].filter((name) => !freshAuthoredPackages.has(name)),
+  );
   const restorePackages = await Promise.all(
-    [...removePackages].flatMap((name) => {
-      const baseline = previous.get(name)?.authoredBaseline;
+    [...filesystemRemovePackages].flatMap((name) => {
+      const baseline = desired.get(name)?.authoredBaseline ?? previous.get(name)?.authoredBaseline;
       return baseline === undefined
         ? []
         : [
@@ -199,13 +213,13 @@ export async function materializeDynamicSkillUpdates(input: {
     }),
   );
   const packageMutationNeeded =
-    removePackages.size > 0 || restorePackages.length > 0 || writeSkills.length > 0;
+    filesystemRemovePackages.size > 0 || restorePackages.length > 0 || writeSkills.length > 0;
   if (packageMutationNeeded) {
     await input.sandbox.removePath({ force: true, path: input.markerRead.path });
   }
 
   const removeStartedAt = performance.now();
-  for (const name of [...removePackages].sort()) {
+  for (const name of [...filesystemRemovePackages].sort()) {
     await removeSkillPackageFromSandbox({ name, sandbox: input.sandbox });
   }
   const removeMs = performance.now() - removeStartedAt;
@@ -244,7 +258,7 @@ export async function materializeDynamicSkillUpdates(input: {
     markerStatus: input.markerRead.status,
     markerWriteCount: markerWriteNeeded ? 1 : 0,
     markerWriteMs,
-    removeCallCount: removePackages.size,
+    removeCallCount: filesystemRemovePackages.size,
     removeMs,
     removedPackageCount,
     writeByteCount:

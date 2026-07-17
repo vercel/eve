@@ -607,6 +607,54 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(sandbox.files.has(staleReference)).toBe(false);
   });
 
+  it("recaptures the authored baseline after sandbox replacement", async () => {
+    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    sandbox.files.set(
+      "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md",
+      "Authored talk-like-a-dog body.",
+    );
+    sandbox.fileBytes.set(
+      "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md",
+      Buffer.from("Authored talk-like-a-dog body."),
+    );
+    const resolver = createResolver("custom", () => ({
+      "talk-like-a-dog": makeSkill("Dynamic override", "Woof."),
+    }));
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    const recreated = mockSandbox({
+      id: "sbx_recreated",
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+      initialFiles: {
+        "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md": "Authored talk-like-a-dog body.",
+        "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md": "Authored reference",
+      },
+    });
+    ctx.set(SandboxKey, recreated.access);
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(recreated.files.get("/home/agent/.agents/skills/talk-like-a-dog/SKILL.md")).toBe(
+      "Woof.",
+    );
+    expect(
+      recreated.files.get("/home/agent/.agents/skills/talk-like-a-dog/references/authored.md"),
+    ).toBe("Authored reference");
+  });
+
   it("collapses a directly-returned single defineSkill to the bare slug", async () => {
     const { ctx, sandbox } = createCtx();
     const resolver = createResolver("tenant", () => makeSkill("Tenant policy"));

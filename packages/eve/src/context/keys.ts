@@ -165,6 +165,8 @@ export const LiveStepToolsKey = new ContextKey<
 export interface DurableDynamicSkillMetadata {
   /** Exact authored package baseline preserved beneath a same-name dynamic overlay. */
   readonly authoredBaseline?: readonly DurableDynamicSkillBaselineFileMetadata[];
+  /** Sandbox generation that owns the hidden authored baseline bytes. */
+  readonly authoredBaselineSandboxId?: string;
   /** SHA-256 over the normalized name, description, ordered paths, and exact bytes. */
   readonly contentDigest?: string;
   readonly description: string;

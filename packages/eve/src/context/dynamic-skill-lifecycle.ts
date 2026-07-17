@@ -298,17 +298,21 @@ export async function dispatchDynamicSkillEvent(input: {
     } else {
       const metadata: DurableDynamicSkillMetadata[] = [];
       for (const skill of skills) {
-        let authoredBaseline = previousSkillsByName.get(skill.name)?.authoredBaseline;
+        const previousSkill = previousSkillsByName.get(skill.name);
+        let authoredBaseline = previousSkill?.authoredBaseline;
+        let authoredBaselineSandboxId = previousSkill?.authoredBaselineSandboxId;
         if (
-          authoredBaseline === undefined &&
           authoredPackageNames.has(skill.name) &&
           sandbox !== null &&
-          sandbox !== undefined
+          sandbox !== undefined &&
+          (authoredBaseline === undefined || authoredBaselineSandboxId !== sandbox.id)
         ) {
           authoredBaseline = await captureAuthoredSkillBaseline({ name: skill.name, sandbox });
+          authoredBaselineSandboxId = sandbox.id;
         }
         metadata.push({
           authoredBaseline,
+          authoredBaselineSandboxId,
           contentDigest: skill.contentDigest,
           description: skill.description,
           name: skill.name,
