@@ -1044,6 +1044,10 @@ export function httpBasic(
   options?: HttpBasicAuthOptions,
 ): AuthFn<Request> {
   const realm = options?.realm;
+  // `realm` renders before `charset` so browsers show the label first.
+  const parameters: Record<string, string> = {};
+  if (realm) parameters.realm = realm;
+  parameters.charset = "UTF-8";
   return withAuthChallenges(
     (request) => {
       const result = verifyHttpBasic(request.headers.get("authorization"), credentials);
@@ -1051,10 +1055,7 @@ export function httpBasic(
     },
     [
       {
-        parameters: {
-          ...(realm === undefined ? {} : { realm }),
-          charset: "UTF-8",
-        },
+        parameters,
         scheme: "Basic",
       },
     ],
