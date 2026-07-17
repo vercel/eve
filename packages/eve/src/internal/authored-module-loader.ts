@@ -15,6 +15,7 @@ import {
 import {
   CACHED_CHANNEL_PREFIX,
   RESOLVE_EXTENSIONS,
+  createDistributionPackageBoundaryPlugin,
   createGenerationPackageBoundaryPlugin,
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
@@ -23,7 +24,10 @@ import {
   type RolldownResolveContext,
 } from "#internal/authored-package-boundary.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
-import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import {
+  buildSingleRolldownChunk,
+  buildWithNitroRolldown,
+} from "#internal/bundler/nitro-rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
@@ -175,6 +179,72 @@ export async function bundleAuthoredModuleForGeneration(
   });
 
   return removeRolldownModuleRegionComments(code);
+}
+
+/** One path-preserving entry in an extension distribution graph. */
+export interface ExtensionDistributionGraphEntry {
+  /** Output path relative to `dist/`, without the `.mjs` extension. */
+  readonly name: string;
+  /** Absolute authored module path. */
+  readonly path: string;
+}
+
+/**
+ * Transforms an extension's authored modules as one code-split graph while
+ * preserving an entry for every agent-shaped source module. Package imports
+ * remain external for the consuming app and source maps are omitted.
+ */
+export async function bundleExtensionDistributionGraph(input: {
+  readonly entries: readonly ExtensionDistributionGraphEntry[];
+  readonly packageRoot: string;
+  readonly runtimeDependencies: readonly string[];
+}): Promise<ReadonlyMap<string, string>> {
+  const plugins = [
+    createAuthoredDirectiveGuardPlugin(),
+    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
+    createAuthoredAssetImportPlugin(),
+    createAuthoredPackageTsConfigPathsPlugin({
+      appPackageRoot: input.packageRoot,
+      extensions: RESOLVE_EXTENSIONS,
+    }),
+    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+    createDistributionPackageBoundaryPlugin({
+      packageRoot: input.packageRoot,
+      runtimeDependencies: input.runtimeDependencies,
+    }),
+  ];
+
+  try {
+    const result = await buildWithNitroRolldown({
+      cwd: input.packageRoot,
+      input: Object.fromEntries(input.entries.map((entry) => [entry.name, entry.path])),
+      platform: "node",
+      plugins,
+      resolve: {
+        extensions: [...RESOLVE_EXTENSIONS],
+      },
+      tsconfig: resolveAuthoredTsConfigPath(input.packageRoot),
+      write: false,
+      output: {
+        chunkFileNames: "_chunks/[name]-[hash].mjs",
+        codeSplitting: true,
+        comments: false,
+        entryFileNames: "[name].mjs",
+        format: "esm",
+        sourcemap: false,
+      },
+    });
+
+    const files = new Map<string, string>();
+    for (const item of result.output) {
+      if (item.type === "chunk") {
+        files.set(item.fileName, removeRolldownModuleRegionComments(item.code));
+      }
+    }
+    return files;
+  } catch (error) {
+    throw createAuthoredModuleBundleError(input.packageRoot, error);
+  }
 }
 
 /**

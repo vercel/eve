@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -30,7 +31,7 @@ const PACKAGE_NAME = "@acme/installed-crm";
 const EXT_TREE: Readonly<Record<string, string>> = {
   "extension/extension.ts": [
     'import { defineExtension } from "eve/extension";',
-    'const config = { "~standard": { version: 1, vendor: "scenario", validate: (value) => ({ value }) } };',
+    'const config = { "~standard": { version: 1, vendor: "scenario", validate: (value: unknown) => ({ value: value as { apiKey: string } }) } } as const;',
     "export default defineExtension({ config });",
     "",
   ].join("\n"),
@@ -41,7 +42,7 @@ const EXT_TREE: Readonly<Record<string, string>> = {
     '  description: "Echo the configured API key.",',
     '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
     "  async execute() {",
-    "    return { apiKey: extension.config.apiKey };",
+    "    return { apiKey: (extension.config as { apiKey: string }).apiKey };",
     "  },",
     "});",
     "",
@@ -49,21 +50,37 @@ const EXT_TREE: Readonly<Record<string, string>> = {
 };
 
 /**
- * Runs the extension package build over a `.ts`-authored extension and returns the built package
- * (compiled `dist/` + source `extension/`) as files to place under the consumer's real
+ * Runs the extension package build over a `.ts`-authored extension and returns the dist-only
+ * package as files to place under the consumer's real
  * `node_modules/`. Placing it there — rather than a workspace symlink — means the
  * mount's `.` entrypoint resolves under `node_modules` and is externalized, so
- * Node loads the emitted `dist/index.mjs` directly. The `.ts` source is
- * load-bearing: only TypeScript under `node_modules` triggers the type-stripping
- * refusal a `.mjs`-authored extension would never hit.
+ * Node loads the emitted `dist/index.mjs` directly. The consumer discovers and
+ * normalizes the emitted agent-shaped `dist/extension` tree.
  */
 async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
   const extRoot = await mkdtemp(join(tmpdir(), "eve-ext-src-"));
   tempRoots.push(extRoot);
   await writeFile(
     join(extRoot, "package.json"),
-    `${JSON.stringify({ name: PACKAGE_NAME, type: "module", eve: { extension: "./extension" } }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        name: PACKAGE_NAME,
+        type: "module",
+        eve: {
+          extension: { source: "./extension", dist: "./dist/extension" },
+        },
+        peerDependencies: { eve: "*" },
+      },
+      null,
+      2,
+    )}\n`,
     "utf8",
+  );
+  await mkdir(join(extRoot, "node_modules"), { recursive: true });
+  await symlink(
+    dirname(createRequire(import.meta.url).resolve("eve/package.json")),
+    join(extRoot, "node_modules", "eve"),
+    "dir",
   );
   await mkdir(join(extRoot, "extension", "tools"), { recursive: true });
   for (const [path, contents] of Object.entries(EXT_TREE)) {
@@ -73,15 +90,19 @@ async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
   const config = await tryReadExtensionBuildConfig(extRoot);
   await buildExtensionPackage(extRoot, config!);
 
-  // `eve build` writes dist/ (compiled entrypoints + declarations) and the
-  // exports map into package.json; ship those plus the extension/ source verbatim.
+  // `eve extension build` writes the complete runtime tree and declarations
+  // under dist/ and updates package exports; original TypeScript is omitted.
   const packaged = [
     "package.json",
     "dist/index.mjs",
     "dist/index.d.ts",
     "dist/tools/index.mjs",
     "dist/tools/index.d.ts",
-    ...Object.keys(EXT_TREE),
+    "dist/extension/_manifest.json",
+    "dist/extension/extension.mjs",
+    "dist/extension/extension.d.ts",
+    "dist/extension/tools/echo.mjs",
+    "dist/extension/tools/echo.d.ts",
   ];
   const files: Record<string, string> = {};
   for (const path of packaged) {

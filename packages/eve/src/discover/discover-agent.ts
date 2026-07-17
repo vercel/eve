@@ -51,7 +51,6 @@ import {
 import { discoverSandboxSource } from "#discover/sandbox.js";
 import { discoverScheduleSources } from "#discover/schedules.js";
 import { discoverSkills } from "#discover/skills.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { stripNpmPackageScope } from "#shared/package-name.js";
 
 /**
@@ -74,12 +73,6 @@ interface DiscoverAgentInput {
    * not resolve further extensions (transitive mounting is a non-goal).
    */
   role?: "agent" | "extension";
-  /**
-   * The app's eve version, checked against each mounted extension's
-   * `peerDependencies.eve`. Defaults to the running eve's version; injectable
-   * for tests.
-   */
-  eveVersion?: string;
 }
 
 /**
@@ -99,7 +92,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   const appRoot = resolve(input.appRoot);
   const agentRoot = resolve(input.agentRoot);
   const role = input.role ?? "agent";
-  const eveVersion = input.eveVersion ?? resolveInstalledPackageInfo().version;
   const diagnostics: DiscoverDiagnostic[] = [];
   const packageName = await tryReadPackageJsonName(source, appRoot);
   const rootEntries = await readSortedDirectoryEntries(source, agentRoot);
@@ -298,7 +290,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
         appRoot,
         mount: descriptor.mountRef,
         namespace: descriptor.namespace,
-        eveVersion,
       });
       diagnostics.push(...located.diagnostics);
       if (located.location === undefined) {

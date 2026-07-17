@@ -1,11 +1,16 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import semver from "#compiled/semver/index.js";
+import {
+  EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
+  findUnsupportedExtensionCapabilities,
+  parseExtensionCompatibilityManifest,
+} from "#compiler/extension-compatibility.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { ExtensionSourceRef } from "#discover/manifest.js";
 import type { ProjectSource } from "#discover/project-source.js";
+import { parseExtensionPackageRoots } from "#shared/extension-package-contract.js";
 
 /**
  * Emitted when a mount file cannot be resolved to an extension package.
@@ -47,11 +52,17 @@ export const DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT =
 export const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
 
 /**
- * Emitted when the app's eve version does not satisfy an extension's declared
- * `peerDependencies.eve` range — the tie between an extension and the eve it was
- * built for.
+ * Emitted when an extension distribution's compatibility manifest is missing
+ * or malformed.
  */
-export const DISCOVER_EXTENSION_EVE_INCOMPATIBLE = "discover/extension-eve-incompatible";
+export const DISCOVER_EXTENSION_COMPATIBILITY_INVALID = "discover/extension-compatibility-invalid";
+
+/**
+ * Emitted when this eve cannot consume one of the extension capabilities the
+ * distribution requires.
+ */
+export const DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE =
+  "discover/extension-capability-incompatible";
 
 /**
  * Emitted when an extension source tree declares agent-level config (`agent.ts`),
@@ -85,7 +96,7 @@ export interface ExtensionMountLocation {
   readonly packageName: string;
   /** Absolute path to the resolved package root. */
   readonly packageRoot: string;
-  /** Absolute path to the extension's agent-shaped source root. */
+  /** Absolute path to the extension's agent-shaped distribution root. */
   readonly sourceRoot: string;
 }
 
@@ -135,7 +146,7 @@ export function packageStateNamespace(packageName: string): string {
  * Resolves one extension mount to its package and agent-shaped source root
  * without importing the mount module. Reads the mount source text to extract
  * the package specifier, resolves the package, and reads
- * `package.json#eve.extension` for the source root.
+ * `package.json#eve.extension.dist` for the agent-shaped distribution root.
  */
 export async function locateExtensionMount(input: {
   readonly source: ProjectSource;
@@ -147,8 +158,6 @@ export async function locateExtensionMount(input: {
    * the file and directory mount forms name it at different path positions.
    */
   readonly namespace: string;
-  /** The app's eve version, checked against the extension's `peerDependencies.eve`. */
-  readonly eveVersion: string;
 }): Promise<{ location?: ExtensionMountLocation; diagnostics: DiscoverDiagnostic[] }> {
   const mountPath = join(input.agentRoot, input.mount.logicalPath);
   const { namespace } = input;
@@ -202,7 +211,7 @@ export async function locateExtensionMount(input: {
   }
 
   const manifestPath = join(packageRoot, "package.json");
-  let pkg: { name?: unknown; eve?: { extension?: unknown }; peerDependencies?: { eve?: unknown } };
+  let pkg: { name?: unknown; eve?: { extension?: unknown } };
   try {
     pkg = JSON.parse(await input.source.readTextFile(manifestPath)) as typeof pkg;
   } catch {
@@ -217,13 +226,13 @@ export async function locateExtensionMount(input: {
     };
   }
 
-  const extensionRoot = pkg.eve?.extension;
-  if (typeof extensionRoot !== "string" || extensionRoot.length === 0) {
+  const extension = parseExtensionPackageRoots(pkg.eve?.extension);
+  if (extension === null) {
     return {
       diagnostics: [
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_PACKAGE_INVALID,
-          message: `Package "${specifier}" is not an eve extension: its package.json is missing the \`eve.extension\` source-root field.`,
+          message: `Package "${specifier}" is not an eve extension: its package.json must declare \`eve.extension.source\` and \`eve.extension.dist\`.`,
           sourcePath: manifestPath,
         }),
       ],
@@ -231,23 +240,36 @@ export async function locateExtensionMount(input: {
   }
 
   const packageName = typeof pkg.name === "string" && pkg.name.length > 0 ? pkg.name : specifier;
-
-  // Tie the extension to the eve it was built for. Only a real semver range is
-  // enforced; workspace/link/file protocols are resolved by the package manager.
-  const peerRange = pkg.peerDependencies?.eve;
-  if (
-    typeof peerRange === "string" &&
-    semver.validRange(peerRange) !== null &&
-    !semver.intersects(input.eveVersion, peerRange)
-  ) {
+  const sourceRoot = resolve(packageRoot, extension.dist);
+  const compatibilityPath = join(sourceRoot, EXTENSION_COMPATIBILITY_MANIFEST_FILENAME);
+  let compatibility;
+  try {
+    compatibility = parseExtensionCompatibilityManifest(
+      await input.source.readTextFile(compatibilityPath),
+      compatibilityPath,
+    );
+  } catch (error) {
     return {
       diagnostics: [
         createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
-          message: `Extension "${packageName}" requires eve "${peerRange}", but this app uses eve ${input.eveVersion}. Upgrade the extension to a version that supports this eve, or align your eve version.`,
-          sourcePath: manifestPath,
+          code: DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
+          message: `Extension "${packageName}" has no valid compatibility manifest at "${compatibilityPath}". Rebuild or reinstall the extension. ${error instanceof Error ? error.message : String(error)}`,
+          sourcePath: compatibilityPath,
         }),
       ],
+    };
+  }
+
+  const unsupportedCapabilities = findUnsupportedExtensionCapabilities(compatibility);
+  if (unsupportedCapabilities.length > 0) {
+    return {
+      diagnostics: unsupportedCapabilities.map((unsupported) =>
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+          message: `Extension "${packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`,
+          sourcePath: compatibilityPath,
+        }),
+      ),
     };
   }
 
@@ -257,10 +279,16 @@ export async function locateExtensionMount(input: {
       specifier,
       packageName,
       packageRoot,
-      sourceRoot: resolve(packageRoot, extensionRoot),
+      sourceRoot,
     },
     diagnostics: [],
   };
+}
+
+function formatSupportedVersions(versions: readonly number[]): string {
+  return versions.length === 0
+    ? "versions: none"
+    : `versions: ${versions.map((v) => `v${v}`).join(", ")}`;
 }
 
 async function resolvePackageRoot(input: {

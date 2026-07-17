@@ -1115,9 +1115,6 @@ importers:
 
   e2e/fixtures/toolkit-extension:
     dependencies:
-      eve:
-        specifier: workspace:*
-        version: link:../../../packages/eve
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -1125,6 +1122,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.9.1
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

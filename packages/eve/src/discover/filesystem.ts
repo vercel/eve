@@ -348,6 +348,10 @@ export function normalizeLogicalPath(input: string): string {
  * extension.
  */
 export function getSupportedModuleBaseName(name: string): string | null {
+  if (/\.d\.(?:cts|mts|ts)$/.test(name)) {
+    return null;
+  }
+
   for (const extension of SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS) {
     if (name.endsWith(extension) && name.length > extension.length) {
       return name.slice(0, -extension.length);

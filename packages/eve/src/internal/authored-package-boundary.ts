@@ -1,5 +1,6 @@
-import { existsSync, realpathSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { isBuiltin } from "node:module";
+import { dirname, join, resolve, sep } from "node:path";
 
 export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
@@ -156,6 +157,82 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   };
 }
 
+/**
+ * Keeps package imports external in an extension distribution while enforcing
+ * that every runtime package is declared by the extension.
+ */
+export function createDistributionPackageBoundaryPlugin(input: {
+  readonly runtimeDependencies: readonly string[];
+  readonly packageRoot: string;
+}): Record<string, unknown> {
+  const declaredDependencies = new Set(input.runtimeDependencies);
+
+  return {
+    name: "eve-extension-distribution-package-boundary",
+    async resolveId(
+      this: RolldownResolveContext,
+      source: string,
+      importer: string | undefined,
+      options: { kind: string },
+    ) {
+      if (!isPackageImport(source)) {
+        return undefined;
+      }
+
+      if (source.startsWith("#")) {
+        const resolved = await this.resolve(source, importer, {
+          kind: options.kind,
+          skipSelf: true,
+        });
+        if (
+          resolved !== null &&
+          typeof resolved.id === "string" &&
+          !isPathInsideOrEqual(toCanonicalPath(resolved.id), toCanonicalPath(input.packageRoot))
+        ) {
+          const packageName = nearestPackageName(resolved.id);
+          if (packageName !== undefined && !declaredDependencies.has(packageName)) {
+            throw new Error(
+              `Package import "${source}" resolves to undeclared package "${packageName}". ` +
+                `Add "${packageName}" to dependencies, optionalDependencies, or peerDependencies.`,
+            );
+          }
+        }
+        return undefined;
+      }
+
+      if (isBuiltin(source)) {
+        return { external: true, id: source };
+      }
+
+      const packageName = packageImportName(source);
+      if (!declaredDependencies.has(packageName)) {
+        throw new Error(
+          `Package "${source}" is not declared by the extension. ` +
+            `Add "${packageName}" to dependencies, optionalDependencies, or peerDependencies.`,
+        );
+      }
+
+      let resolved = await this.resolve(source, importer, {
+        kind: options.kind,
+        skipSelf: true,
+      });
+      if (resolved === null) {
+        resolved = await this.resolve(source, join(input.packageRoot, "package.json"), {
+          kind: options.kind,
+          skipSelf: true,
+        });
+      }
+      if (resolved === null || typeof resolved.id !== "string") {
+        throw new Error(
+          `Cannot resolve declared package "${source}". Install the extension's dependencies before building.`,
+        );
+      }
+
+      return { external: true, id: source };
+    },
+  };
+}
+
 async function resolveConfiguredExternalModule(
   this: RolldownResolveContext,
   input: {
@@ -204,6 +281,32 @@ function resolveConfiguredExternalDependency(
   return externalDependencies.find(
     (dependencyName) => source === dependencyName || source.startsWith(`${dependencyName}/`),
   );
+}
+
+function packageImportName(source: string): string {
+  return source.startsWith("@") ? source.split("/", 2).join("/") : source.split("/", 1)[0]!;
+}
+
+function nearestPackageName(filePath: string): string | undefined {
+  let directory = dirname(toCanonicalPath(filePath));
+  while (true) {
+    const manifestPath = join(directory, "package.json");
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { name?: unknown };
+        return typeof manifest.name === "string" && manifest.name.length > 0
+          ? manifest.name
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    const parent = dirname(directory);
+    if (parent === directory) {
+      return undefined;
+    }
+    directory = parent;
+  }
 }
 
 function resolveExistingExternalFilePath(id: string): string | undefined {

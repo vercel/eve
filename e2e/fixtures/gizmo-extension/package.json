@@ -3,8 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "files": [
-    "dist",
-    "extension"
+    "dist"
   ],
   "type": "module",
   "exports": {
@@ -32,6 +31,9 @@
     "eve": "*"
   },
   "eve": {
-    "extension": "./extension"
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
   }
 }
