@@ -8,6 +8,12 @@ import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 
 const scenarioApp = useScenarioApp();
+const compatibilityManifest = JSON.stringify({
+  kind: "eve-extension",
+  formatVersion: 1,
+  builtWithEve: "0.0.0-test",
+  requires: { extension: 1, tool: 1 },
+});
 
 /**
  * A no-config extension (`defineExtension()`, no schema) mounted with a bare
@@ -26,9 +32,10 @@ describe("mounted extension without config", () => {
         "node_modules/@acme/widget/package.json": `${JSON.stringify({
           name: "@acme/widget",
           type: "module",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
+        "node_modules/@acme/widget/extension/_manifest.json": compatibilityManifest,
         "node_modules/@acme/widget/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "export default defineExtension();",

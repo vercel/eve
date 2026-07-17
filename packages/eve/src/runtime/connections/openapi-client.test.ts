@@ -667,6 +667,36 @@ describe("OpenApiConnectionClient", () => {
     expect(props.mix?.type).toEqual(["string", "null"]);
   });
 
+  it("omits only operations whose input schemas cannot be rehydrated", async () => {
+    const spec: Record<string, unknown> = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1" },
+      servers: [{ url: "https://api.example.com" }],
+      paths: {
+        "/valid": {
+          get: {
+            operationId: "getValid",
+            parameters: [{ name: "id", in: "query", schema: { type: "string" } }],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+        "/invalid": {
+          get: {
+            operationId: "getInvalid",
+            parameters: [{ name: "state", in: "query", schema: { enum: "not-an-array" } }],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const client = new OpenApiConnectionClient(makeConnection({ spec }));
+
+    await expect(client.getToolMetadata()).resolves.toMatchObject([{ name: "getValid" }]);
+    await expect(client.getTools()).resolves.toHaveProperty("getValid");
+    await expect(client.getTools()).resolves.not.toHaveProperty("getInvalid");
+    await expect(client.executeTool("getInvalid", {})).rejects.toThrow(/not found/);
+  });
+
   it("parses a YAML spec fetched from a URL", async () => {
     const yamlSpec = [
       "openapi: 3.0.3",

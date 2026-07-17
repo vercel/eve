@@ -234,6 +234,7 @@ describe("dispatchChannelRequest", () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
+      resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn(),
     };
@@ -280,6 +281,7 @@ describe("dispatchChannelRequest", () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
+      resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn(),
     };
@@ -319,8 +321,9 @@ describe("dispatchChannelRequest", () => {
 
   it("does not mutate route-owned run and deliver inputs", async () => {
     const runtimeForTest: Runtime = {
-      cancelTurn: vi.fn().mockResolvedValue({ status: "cancelling" }),
+      cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_deliver" }),
+      resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn().mockResolvedValue({
         continuationToken: "route-token",

@@ -3,10 +3,12 @@ import { existsSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, readlink, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 
-import type { CompiledAgentManifest, CompiledAgentNodeManifest } from "#compiler/manifest.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { COMPILED_AGENT_MANIFEST_KIND, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { collectModuleRefsForManifest } from "#compiler/module-map.js";
-import { bundleAuthoredModuleForGeneration } from "#internal/authored-module-loader.js";
+import {
+  bundleAuthoredModuleForGeneration,
+  bundleAuthoredModuleMapForGeneration,
+} from "#internal/authored-module-loader.js";
 import { serializeCompiledManifestForFingerprint } from "#internal/compiled-manifest-fingerprint.js";
 
 const MATERIALIZED_MODULES_DIRECTORY = "authored-modules";
@@ -16,8 +18,8 @@ const INSTRUMENTATION_EXTENSIONS = [".ts", ".mts", ".js", ".mjs"] as const;
 export interface MaterializedAuthoredModuleIndex {
   readonly fingerprint: string;
   readonly instrumentation?: string;
-  readonly nodes: Readonly<Record<string, { readonly modules: Readonly<Record<string, string>> }>>;
-  readonly version: 1;
+  readonly moduleMap: string;
+  readonly version: 2;
 }
 
 export async function materializeAuthoredModules(input: {
@@ -26,8 +28,6 @@ export async function materializeAuthoredModules(input: {
   const compileRoot = join(input.runtimeAppRoot, ".eve", "compile");
   const manifest = await readCompiledManifest(join(compileRoot, "compiled-agent-manifest.json"));
   const modulesRoot = join(compileRoot, MATERIALIZED_MODULES_DIRECTORY);
-  const scopeIndex = createExtensionScopeIndex(manifest);
-  const nodes: Record<string, { modules: Record<string, string> }> = {};
   const fingerprint = createHash("sha256");
 
   await mkdir(modulesRoot, { recursive: true });
@@ -40,32 +40,19 @@ export async function materializeAuthoredModules(input: {
       }),
     )
     .update("\0");
-  for (const node of collectNodeManifests(manifest)) {
-    const modules: Record<string, string> = {};
+  const moduleMapCode = await bundleAuthoredModuleMapForGeneration({
+    manifest,
+    moduleMapPath: join(compileRoot, "module-map.mjs"),
+  });
+  const moduleMapFileName = createMaterializedModuleFileName(
+    ROOT_COMPILED_AGENT_NODE_ID,
+    "module-map",
+    moduleMapCode,
+  );
+  const moduleMapPath = join(MATERIALIZED_MODULES_DIRECTORY, moduleMapFileName);
 
-    for (const ref of collectModuleRefsForManifest(node.manifest).sort((left, right) =>
-      left.sourceId.localeCompare(right.sourceId),
-    )) {
-      const code = await bundleAuthoredModuleForGeneration(join(node.agentRoot, ref.logicalPath), {
-        externalDependencies: node.manifest.config.build?.externalDependencies ?? [],
-        extensionScopeNamespace: extensionNamespaceForSourceId(ref.sourceId, scopeIndex),
-      });
-      const fileName = createMaterializedModuleFileName(node.nodeId, ref.sourceId, code);
-
-      await writeFile(join(modulesRoot, fileName), code);
-      fingerprint
-        .update("module\0")
-        .update(node.nodeId)
-        .update("\0")
-        .update(ref.sourceId)
-        .update("\0")
-        .update(code)
-        .update("\0");
-      modules[ref.sourceId] = join(MATERIALIZED_MODULES_DIRECTORY, fileName);
-    }
-
-    nodes[node.nodeId] = { modules };
-  }
+  await writeFile(join(modulesRoot, moduleMapFileName), moduleMapCode);
+  fingerprint.update("module-map\0").update(moduleMapCode).update("\0");
 
   const instrumentation = resolveInstrumentationModule(manifest.agentRoot);
   let instrumentationPath: string | undefined;
@@ -93,12 +80,12 @@ export async function materializeAuthoredModules(input: {
   const index: {
     fingerprint: string;
     instrumentation?: string;
-    nodes: MaterializedAuthoredModuleIndex["nodes"];
-    version: 1;
+    moduleMap: string;
+    version: 2;
   } = {
     fingerprint: fingerprint.digest("hex"),
-    nodes,
-    version: 1,
+    moduleMap: moduleMapPath,
+    version: 2,
   };
   if (instrumentationPath !== undefined) {
     index.instrumentation = instrumentationPath;
@@ -119,54 +106,17 @@ export async function readMaterializedAuthoredModuleIndex(
     await readFile(indexPath, "utf8"),
   ) as Partial<MaterializedAuthoredModuleIndex>;
   if (
-    parsed.version !== 1 ||
+    parsed.version !== 2 ||
     typeof parsed.fingerprint !== "string" ||
     parsed.fingerprint.length === 0 ||
-    typeof parsed.nodes !== "object" ||
-    parsed.nodes === null ||
+    typeof parsed.moduleMap !== "string" ||
+    parsed.moduleMap.length === 0 ||
     (parsed.instrumentation !== undefined && typeof parsed.instrumentation !== "string")
   ) {
     throw new Error(`Invalid materialized authored module index at "${indexPath}".`);
   }
 
   return parsed as MaterializedAuthoredModuleIndex;
-}
-
-interface ExtensionScopeIndex {
-  readonly byMountNamespace: ReadonlyMap<string, string>;
-}
-
-function collectNodeManifests(manifest: CompiledAgentManifest): Array<{
-  readonly agentRoot: string;
-  readonly manifest: CompiledAgentNodeManifest;
-  readonly nodeId: string;
-}> {
-  return [
-    { agentRoot: manifest.agentRoot, manifest, nodeId: ROOT_COMPILED_AGENT_NODE_ID },
-    ...[...manifest.subagents]
-      .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
-      .map((subagent) => ({
-        agentRoot: subagent.agent.agentRoot,
-        manifest: subagent.agent,
-        nodeId: subagent.nodeId,
-      })),
-  ];
-}
-
-function createExtensionScopeIndex(manifest: CompiledAgentManifest): ExtensionScopeIndex {
-  return {
-    byMountNamespace: new Map(
-      manifest.extensionMounts.map((mount) => [mount.namespace, mount.packageNamespace]),
-    ),
-  };
-}
-
-function extensionNamespaceForSourceId(
-  sourceId: string,
-  index: ExtensionScopeIndex,
-): string | undefined {
-  const match = sourceId.match(/^ext:([^:]+):/u);
-  return match === null ? undefined : index.byMountNamespace.get(match[1]!);
 }
 
 async function readCompiledManifest(path: string): Promise<CompiledAgentManifest> {

@@ -166,7 +166,8 @@ export function toDevelopmentSourceSnapshotPath(input: {
   return toSnapshotPath(input);
 }
 
-function resolveDevelopmentSourceRoot(appRoot: string): string {
+/** Resolves the repository/workspace boundary used for authored development sources. */
+export function resolveDevelopmentSourceRoot(appRoot: string): string {
   let currentDirectory = resolve(appRoot);
 
   while (true) {
@@ -597,7 +598,8 @@ function isPathInsideOrEqual(path: string, directory: string): boolean {
   );
 }
 
-function isAuthoredSourcePath(path: string, sourceRoot: string): boolean {
+/** Returns whether a path is authored workspace source rather than installed dependency data. */
+export function isAuthoredSourcePath(path: string, sourceRoot: string): boolean {
   if (!isPathInsideOrEqual(path, sourceRoot)) {
     return false;
   }

@@ -49,10 +49,10 @@ Cancel a session's in-flight turn with an empty body, or scope the cancel to the
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session/ses_01h.../cancel
-# {"ok":true,"sessionId":"ses_01h...","status":"cancelling"}
+# {"ok":true,"sessionId":"ses_01h...","status":"accepted"}
 ```
 
-Cancellation is asynchronous: `"cancelling"` means a cancellation hook accepted the request. Confirm the effective outcome on the stream as `turn.cancelled` followed by `session.waiting` — never as a failure. Content emitted before the cancel stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally. When there is no resumable cancellation target (including an unknown session, a settled turn, or a duplicate cancel), the route responds with `"no_active_turn"` — also a success, so a stop button can fire and forget. A `turnId` naming any other turn is accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
+Cancellation is asynchronous: `"accepted"` means a cancellation hook accepted the request. Confirm the effective outcome on the stream as `turn.cancelled` followed by `session.waiting` — never as a failure. Active local and remote subagents are cancelled recursively before the parent settles; their own streams carry their cancellation boundaries, and cancelled work does not emit `subagent.completed` on the parent. Content emitted before the cancel stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally. When there is no resumable cancellation target (including an unknown session, a settled turn, or a duplicate cancel), the route responds with `"no_active_turn"` — also a success, so a stop button can fire and forget. A `turnId` naming any other turn is accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
 
 See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the full request and stream flow, including the complete event set.
 

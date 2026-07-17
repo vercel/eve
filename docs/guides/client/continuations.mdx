@@ -23,6 +23,8 @@ await response.result();
 await saveSessionState(session.state);
 ```
 
+As soon as `send()` returns, `session.state.sessionId` identifies the accepted in-flight turn for cancellation or stream reconnection. Consume the response before saving a fully advanced cursor: the continuation token and `streamIndex` update as events reach the turn boundary.
+
 Store the full state object:
 
 ```ts

@@ -5,6 +5,20 @@ description: "Consume eve client stream events live, reconnect by event index, a
 
 Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.
 
+Once `send()` is accepted, the session exposes its assigned `sessionId` and can request cooperative cancellation with `session.cancel()`, even while the response stream is still running. The result status is `accepted` when the active turn accepted the signal or `no_active_turn` when it already settled:
+
+```ts
+const session = client.session();
+const response = await session.send("Run the long operation.");
+
+const cancellation = await session.cancel();
+console.log(cancellation.status);
+
+const result = await response.result();
+```
+
+Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally.
+
 ## Aggregate a turn
 
 Use `result()` when you only need the final turn summary:

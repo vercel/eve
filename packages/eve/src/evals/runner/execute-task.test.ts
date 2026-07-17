@@ -327,6 +327,130 @@ describe("executeTask", () => {
     expect(outcome.error).toContain("skip() must be called before");
   });
 
+  it("coordinates started and externally watched live turns through one stream owner", async () => {
+    const server = createScriptedServer(
+      [
+        {
+          sessionId: "parent-session",
+          events: [
+            turnStarted("parent-turn"),
+            subagentCalled("parent-turn", "child-session", "sleeper"),
+            turnCompleted("parent-turn"),
+            sessionWaiting("eve:parent-session"),
+          ],
+        },
+        {
+          sessionId: "child-session",
+          events: [
+            turnStarted("child-follow-up"),
+            messageCompleted("child continued", "child-follow-up"),
+            turnCompleted("child-follow-up"),
+            sessionWaiting("eve:child-session-next"),
+          ],
+        },
+      ],
+      {
+        cancelStatus: "accepted",
+        streams: [
+          {
+            sessionId: "child-session",
+            events: [
+              turnStarted("child-turn"),
+              actionsRequested("child-turn", "wait-for-cancellation"),
+              turnCompleted("child-turn"),
+              sessionWaiting("eve:child-session"),
+            ],
+          },
+        ],
+      },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const parent = await t.start("delegate");
+        expect(parent.sessionId).toBe("parent-session");
+
+        const called = await parent.waitForEvent("subagent.called", {
+          data: { name: "sleeper" },
+        });
+        expect(called.data.childSessionId).toBe("child-session");
+
+        const child = t.target.watchTurn(called.data.childSessionId);
+        const requested = await child.waitForEvent("actions.requested", {
+          data: {
+            actions: (actions) =>
+              actions.some(
+                (action) =>
+                  action.kind === "tool-call" && action.toolName === "wait-for-cancellation",
+              ),
+          },
+        });
+        expect(requested.data.actions).toHaveLength(1);
+        await expect(parent.cancel()).resolves.toEqual({
+          sessionId: "parent-session",
+          status: "accepted",
+        });
+
+        const [parentTurn, childTurn] = await Promise.all([parent.result(), child.result()]);
+        expect(await parent.result()).toBe(parentTurn);
+        parentTurn.event("subagent.called", { count: 1 });
+        childTurn.calledTool("wait-for-cancellation", { status: "pending", count: 1 });
+        await expect(parent.waitForEvent("subagent.completed")).rejects.toThrow(/session\.waiting/);
+
+        const childFollowUp = await child.session.send("continue child");
+        childFollowUp.messageIncludes("child continued");
+      }, "live-turns"),
+    });
+
+    expect(outcome.error).toBeUndefined();
+    expect(server.cancels).toEqual(["parent-session"]);
+    expect(server.posts[1]?.body).toEqual({
+      continuationToken: "eve:child-session",
+      message: "continue child",
+    });
+    expect(outcome.result.sessions?.map((session) => session.sessionId)).toEqual([
+      "parent-session",
+      "child-session",
+    ]);
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
+  it("fails unmatched live event waiters without rejecting the failed turn result", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "failed-session",
+        events: [
+          turnStarted("failed-turn"),
+          {
+            data: {
+              code: "MODEL_FAILED",
+              message: "model failed",
+              sessionId: "failed-session",
+            },
+            type: "session.failed",
+          },
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const live = await t.start("fail");
+        await expect(live.waitForEvent("actions.requested")).rejects.toThrow(/session\.failed/);
+        await expect(live.result()).resolves.toMatchObject({ status: "failed" });
+      }, "live-turn-failure"),
+    });
+
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.result.status).toBe("failed");
+  });
+
   it("attaches to a target-created session and captures its stream", async () => {
     const server = createScriptedServer([], {
       streams: [
@@ -474,6 +598,7 @@ describe("executeTask", () => {
 function createScriptedServer(
   turns: readonly { events: readonly HandleMessageStreamEvent[]; sessionId: string }[],
   options: {
+    readonly cancelStatus?: "accepted" | "no_active_turn";
     readonly streams?: readonly {
       readonly events: readonly HandleMessageStreamEvent[];
       readonly sessionId: string;
@@ -483,6 +608,7 @@ function createScriptedServer(
   const pendingTurns = [...turns];
   const streamQueues = new Map<string, HandleMessageStreamEvent[][]>();
   const posts: Array<{ body: unknown; method: string; url: string }> = [];
+  const cancels: string[] = [];
 
   for (const stream of options.streams ?? []) {
     const queue = streamQueues.get(stream.sessionId) ?? [];
@@ -491,11 +617,22 @@ function createScriptedServer(
   }
 
   return {
+    cancels,
     posts,
     async fetch(request: string | URL | Request, init?: RequestInit): Promise<Response> {
       const url =
         typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
       const method = init?.method ?? "GET";
+      const pathname = new URL(url).pathname;
+
+      if (method === "POST" && pathname.endsWith("/cancel")) {
+        const sessionId = decodeURIComponent(pathname.split("/").at(-2) ?? "");
+        cancels.push(sessionId);
+        return Response.json(
+          { ok: true, sessionId, status: options.cancelStatus ?? "no_active_turn" },
+          { status: 202 },
+        );
+      }
 
       if (method === "POST") {
         const next = pendingTurns.shift();
@@ -623,5 +760,25 @@ function actionsRequested(
       turnId,
     },
     type: "actions.requested",
+  };
+}
+
+function subagentCalled(
+  turnId: string,
+  childSessionId: string,
+  name: string,
+): HandleMessageStreamEvent {
+  return {
+    data: {
+      callId: "call_subagent",
+      childSessionId,
+      sessionId: "parent-session",
+      sequence: 1,
+      name,
+      toolName: name,
+      turnId,
+      workflowId: "workflow_child",
+    },
+    type: "subagent.called",
   };
 }

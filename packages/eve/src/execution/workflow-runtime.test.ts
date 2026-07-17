@@ -13,11 +13,13 @@ import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
+const getHookByTokenMock = vi.fn();
 const getRunMock = vi.fn();
 const resumeHookMock = vi.fn();
 const startMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
   getRun: (...args: unknown[]) => getRunMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
@@ -28,6 +30,7 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 }));
 
 afterEach(() => {
+  getHookByTokenMock.mockReset();
   getRunMock.mockReset();
   resumeHookMock.mockReset();
   startMock.mockReset();
@@ -141,7 +144,7 @@ describe("createWorkflowRuntime#cancelTurn", () => {
 
     await expect(
       buildRuntime().cancelTurn({ sessionId: "session-1", turnId: "turn-2" }),
-    ).resolves.toEqual({ status: "cancelling" });
+    ).resolves.toEqual({ status: "accepted" });
     expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", { turnId: "turn-2" });
   });
 
@@ -149,7 +152,7 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     resumeHookMock.mockResolvedValue({ runId: "turn-run" });
 
     await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).resolves.toEqual({
-      status: "cancelling",
+      status: "accepted",
     });
     expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {});
   });
@@ -177,6 +180,35 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     resumeHookMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).rejects.toBe(failure);
+  });
+});
+
+describe("createWorkflowRuntime#resolveSession", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("returns the owning session id from the hook lookup", async () => {
+    getHookByTokenMock.mockResolvedValue({ runId: "owner-session" });
+
+    await expect(buildRuntime().resolveSession("test:token")).resolves.toEqual({
+      sessionId: "owner-session",
+    });
+    expect(getHookByTokenMock).toHaveBeenCalledWith("test:token");
+  });
+
+  it("returns undefined for an unknown token", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError("test:token"));
+
+    await expect(buildRuntime().resolveSession("test:token")).resolves.toBeUndefined();
+  });
+
+  it("rethrows unexpected lookup failures", async () => {
+    const failure = new Error("transient backing-store outage");
+    getHookByTokenMock.mockRejectedValue(failure);
+
+    await expect(buildRuntime().resolveSession("test:token")).rejects.toBe(failure);
   });
 });
 

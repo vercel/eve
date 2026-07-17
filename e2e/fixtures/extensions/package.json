@@ -13,6 +13,7 @@
   "dependencies": {
     "eve": "workspace:*",
     "gizmo-extension": "workspace:*",
+    "js-only-extension": "workspace:*",
     "toolkit-extension": "workspace:*",
     "zod": "catalog:"
   },

@@ -249,6 +249,52 @@ describe("startAuthoredSourceWatcher", () => {
     }
   });
 
+  it("watches workspace extension build inputs and ignores its managed output", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-watch-extension-"));
+    const packageRoot = join(appRoot, "packages", "crm");
+    const sourceRoot = join(packageRoot, "extension");
+    const outDir = join(packageRoot, "artifacts");
+    const tsconfigPath = join(packageRoot, "tsconfig.json");
+    temporaryDirectories.push(appRoot);
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await mkdir(sourceRoot, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"name":"watch-agent","type":"module"}\n');
+    await writeFile(join(appRoot, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+    await writeFile(tsconfigPath, "{}\n");
+    const host: PreparedDevelopmentApplicationHost = {
+      ...createPreparedHost(appRoot),
+      workspaceExtensions: [
+        {
+          packageRoot,
+          buildConfigPaths: [join(packageRoot, "package.json"), tsconfigPath],
+          config: {
+            sourceRoot,
+            distRoot: join(outDir, "extension"),
+            outDir,
+            packageName: "@acme/crm",
+            runtimeDependencies: ["eve"],
+            shortName: "crm",
+          },
+        },
+      ],
+    };
+    const watcher = await startAuthoredSourceWatcher({
+      coordinator: createCoordinator(host),
+      preparedHost: host,
+    });
+
+    try {
+      const paths = getInitialWatchPaths();
+      expect(paths).toContain(sourceRoot);
+      expect(paths).toContain(tsconfigPath);
+      const ignored = getIgnoredPredicate();
+      expect(ignored(join(outDir, "extension", "tools", "search.mjs"))).toBe(true);
+      expect(ignored(join(sourceRoot, "tools", "search.ts"))).toBe(false);
+    } finally {
+      await watcher.close();
+    }
+  });
+
   it("does not watch ancestor lockfiles for an app without a workspace marker", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-dev-watch-standalone-"));
     const appRoot = join(tempRoot, "standalone-agent");
@@ -337,6 +383,7 @@ function createPreparedHost(
     scheduleRegistrations: [],
     schedules: [],
     workflowBuildDir: join(appRoot, ".eve", "dev-hosts", "test", "workflow"),
+    workspaceExtensions: [],
     workspace: {
       artifactsDir: join(appRoot, ".eve", "dev-hosts", "test", "artifacts"),
       compilerArtifactsDir: join(appRoot, ".eve", "dev-hosts", "test", "compiler"),

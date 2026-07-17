@@ -101,14 +101,21 @@ describe("runExtensionInitCommand", () => {
 
     const projectPath = join(parentDirectory, "my-crm");
     const packageJson = JSON.parse(await readFile(join(projectPath, "package.json"), "utf8")) as {
-      eve?: { extension?: string };
+      eve?: { extension?: { source?: string; dist?: string } };
+      files?: string[];
       peerDependencies?: { eve?: string };
+      peerDependenciesMeta?: Record<string, unknown>;
       devDependencies?: { eve?: string; typescript?: string };
       dependencies?: { zod?: string; ai?: string };
       scripts?: Record<string, string>;
     };
-    expect(packageJson.eve?.extension).toBe("./extension");
-    expect(packageJson.peerDependencies?.eve).toBe("^0.6.0");
+    expect(packageJson.eve?.extension).toEqual({
+      source: "./extension",
+      dist: "./dist/extension",
+    });
+    expect(packageJson.files).toEqual(["dist"]);
+    expect(packageJson.peerDependencies?.eve).toBe("*");
+    expect(packageJson.peerDependenciesMeta).toBeUndefined();
     expect(packageJson.devDependencies?.eve).toBe("^0.6.0");
     expect(packageJson.dependencies?.zod).toBe("4.0.0");
     expect(packageJson.dependencies?.ai).toBeUndefined();
@@ -188,7 +195,7 @@ describe("runExtensionInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("honors EVE_INIT_PACKAGE_SPEC for peer and dev eve deps", async () => {
+  it("honors EVE_INIT_PACKAGE_SPEC for the dev dependency while keeping a wildcard peer", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-extension-init-spec-"));
     const output = logger();
     const deps = dependencies();
@@ -202,7 +209,7 @@ describe("runExtensionInitCommand", () => {
       peerDependencies?: { eve?: string };
       devDependencies?: { eve?: string };
     };
-    expect(packageJson.peerDependencies?.eve).toBe("file:/tmp/eve-local.tgz");
+    expect(packageJson.peerDependencies?.eve).toBe("*");
     expect(packageJson.devDependencies?.eve).toBe("file:/tmp/eve-local.tgz");
   });
 });

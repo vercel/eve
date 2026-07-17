@@ -110,6 +110,26 @@ jobs:
         # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
         run: pnpm --filter eve run build
 
+      - name: Build extension fixtures
+        if: needs.changes.outputs.relevant == 'true'
+        # Extension fixtures ship no committed `dist/`; produce it here so
+        # consuming fixtures resolve the built artifacts. `--if-present` skips
+        # extension fixtures without a build script. The update re-packs the
+        # `file:`-protocol store copies so they pick up the fresh dist —
+        # a plain reinstall short-circuits and leaves them stale.
+        run: |
+          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
+          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+
+      - name: Stage workspace extension fixtures as dist-only
+        if: needs.changes.outputs.relevant == 'true'
+        # Removing author source proves the deployment consumes the same
+        # agent-shaped dist trees registry packages ship. Toolkit covers the
+        # rich TypeScript surface; js-only covers pure JavaScript authoring.
+        run: |
+          mv e2e/fixtures/toolkit-extension/extension "$RUNNER_TEMP/toolkit-extension-source"
+          mv e2e/fixtures/js-only-extension/extension "$RUNNER_TEMP/js-only-extension-source"
+
       - name: Deploy fixture and run evals
         if: needs.changes.outputs.relevant == 'true'
         env:

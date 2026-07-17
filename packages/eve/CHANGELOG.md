@@ -1,5 +1,51 @@
 # eve
 
+## 0.25.0
+
+### Minor Changes
+
+- b9bb8b2: Scaffold extensions with separate source and dist roots, a required wildcard eve peer, and dist-only publication. `eve extension build` now emits an agent-shaped JavaScript distribution with declarations, assets, and capability compatibility metadata instead of requiring author TypeScript in the published package.
+
+### Patch Changes
+
+- 29ecffc: Build mounted source-backed workspace extensions before `eve dev` compiles the agent, then rebuild only the affected extension when its source changes. Failed extension builds keep the previous dist and active development generation serving.
+- 46b78b8: Stop development microsandboxes on `eve dev` shutdown by discovering resources from their run labels and loading the application's installed microsandbox version during cleanup.
+- 6a5a36a: Deliver stale HITL responses — answers to a question or approval that is no longer pending — as a new user message, letting the model decide whether the old selection still matters. A stale approval never authorizes the earlier tool call.
+- f7c69b1: The Vercel Framework Preset is now reconciled with the host framework on disk when running `/deploy` via the TUI.
+- bbec675: Extensions installed with a registry-style store layout (e.g. from npm with pnpm) now work in `eve dev` and `eve eval`. Extension modules reached through a node_modules symlink resolve their dependencies from the package's real location — matching standard resolver semantics — instead of failing with `UNRESOLVED_IMPORT`/`ERR_MODULE_NOT_FOUND` or silently picking up another copy of the dependency from the consuming app.
+- 14501dc: Every eve-owned tool input is now validated against its schema before execution, so invalid calls are returned to the model for retry instead of failing the run. Subagent calls treat an empty `outputSchema` as absent, and OpenAPI operations with invalid schemas are omitted with a warning.
+
+## 0.24.6
+
+### Patch Changes
+
+- 3029647: Update the generated Web Chat template for Next.js 16.3 preview type declarations.
+- b97f1d1: Custom channel routes can now cancel a session's in-flight turn: route handlers receive a `cancel({ continuationToken, turnId? })` helper addressed by the channel-local continuation token, and `Session` handles returned by `send()` and `getSession()` expose `cancel({ turnId? })` for session-id-addressed cancellation. `ClientSession.cancel()` accepts the same optional `turnId` stale-request guard.
+
+## 0.24.5
+
+### Patch Changes
+
+- bfbbe92: Add `eve build --profile <path>` for a machine-readable build-timing and final-output-size report. Profile collection is best-effort, so reporting failures do not fail an otherwise successful build.
+- dab9889: Allow agents to remove the root-only built-in `agent` delegation tool with `disableTool()` from `agent/tools/agent.ts`.
+- e1cb505: Retry transient network failures while reopening client session streams so active turns remain attached.
+- 2568387: Cancel active local, nested, and remote subagent turns when their parent turn is cancelled. Client and eval sessions can now cancel active turns directly, and eval live-turn handles can wait for typed mid-turn events before cancellation or settlement.
+- 20cd9a1: Added `POST /eve/v1/session/:sessionId/cancel` to the eve HTTP channel for requesting cancellation of an in-flight turn. The optional `{ turnId }` body limits the request to the turn the caller observed; the response reports `"accepted"` when a cancellation hook accepts it or the benign `"no_active_turn"` when no resumable target exists.
+- 02698fd: Fix Vercel deploys for the Next.js web channel. `eve` no longer scaffolds a
+  `vercel.json` `experimentalServices` block, which the Vercel platform now
+  rejects (it requires the `services` key and a stricter schema). For Next.js the
+  block was also redundant — `withEve()` generates the eve service and
+  `/eve/v1/*` routes into the Build Output at build time — so the scaffold now
+  writes a minimal `vercel.json`.
+- e45a066: `eve link` now lets you create a Vercel project or link an existing one, matching the project setup available through `/model` usage.
+- 5f8818b: `eve channels add web` now updates the Vercel Framework Preset when adding a
+  Next.js web channel to an already-linked eve project to prevent deployment
+  failures.
+- 887908c: Bundle authored modules in each development generation as one shared graph, avoiding repeated parsing and emission of dependencies for every tool.
+- 376a82f: Report the root-only `agent` action alongside other framework tools in agent info, including whether it is active, disabled, or replaced.
+- 4f2863d: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- d9d3226: Fix `withEve` producing a broken Vercel build command in npm workspaces, where the `eve` module is located in the workspace root.
+
 ## 0.24.4
 
 ### Patch Changes

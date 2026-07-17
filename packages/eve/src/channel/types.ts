@@ -1,6 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -27,7 +28,7 @@ export interface CancelTurnInput {
 
 /** Result of requesting turn cancellation. Both statuses are successful. */
 export interface CancelTurnResult {
-  readonly status: "cancelling" | "no_active_turn";
+  readonly status: CancelTurnStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +387,13 @@ export interface Runtime {
    * Delivers a follow-up message to a parked session.
    */
   deliver(input: DeliverInput): Promise<{ sessionId: string }>;
+
+  /**
+   * Resolves the session that currently owns a continuation token without
+   * delivering input or starting a run. Returns `undefined` when no session
+   * owns the token.
+   */
+  resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined>;
 
   /**
    * Returns a readable stream of lifecycle events for an existing session.

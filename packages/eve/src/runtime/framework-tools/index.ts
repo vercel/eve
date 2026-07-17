@@ -1,4 +1,4 @@
-import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
+import { AGENT_TOOL_DEFINITION } from "#runtime/framework-tools/agent.js";
 import { ASK_QUESTION_TOOL_DEFINITION } from "#runtime/framework-tools/ask-question.js";
 import { BASH_TOOL_DEFINITION } from "#runtime/framework-tools/bash.js";
 import { GLOB_TOOL_DEFINITION } from "#runtime/framework-tools/glob.js";
@@ -18,7 +18,7 @@ export { TodoStateKey } from "#runtime/framework-tools/todo.js";
 
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
-const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
+const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ASK_QUESTION_TOOL_DEFINITION,
   BASH_TOOL_DEFINITION,
   GLOB_TOOL_DEFINITION,
@@ -31,16 +31,29 @@ const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   SKILL_TOOL_DEFINITION,
 ];
 
+const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
+  ...REGISTERED_FRAMEWORK_TOOLS,
+  AGENT_TOOL_DEFINITION,
+];
+
 /**
  * Returns framework-owned tool definitions registered in the tool registry
  * alongside authored tools during graph resolution.
  *
- * `connection_search` is no longer in this list — it is registered as a
- * framework dynamic tool resolver in the graph resolution path.
+ * `connection_search` is no longer in this list. The graph resolution path
+ * registers it as a framework dynamic tool resolver.
  */
 export function getFrameworkToolDefinitions(_config?: {
   readonly hasConnections?: boolean;
 }): readonly ResolvedToolDefinition[] {
+  return REGISTERED_FRAMEWORK_TOOLS;
+}
+
+/**
+ * Returns every static framework-owned tool definition, including tools such
+ * as `agent` that the runtime does not register in the tool registry.
+ */
+export function getAllFrameworkToolDefinitions(): readonly ResolvedToolDefinition[] {
   return ALL_FRAMEWORK_TOOLS;
 }
 
@@ -54,5 +67,5 @@ export function getFrameworkToolDefinitions(_config?: {
  * as an authoring error rather than silently dropping the request.
  */
 export function getAllFrameworkToolNames(): ReadonlySet<string> {
-  return new Set([...ALL_FRAMEWORK_TOOLS.map((def) => def.name), AGENT_TOOL_NAME]);
+  return new Set(ALL_FRAMEWORK_TOOLS.map((definition) => definition.name));
 }

@@ -20,7 +20,7 @@ import {
   expectString,
 } from "#internal/authored-module.js";
 import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
-import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
+import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -305,10 +305,7 @@ function normalizeRemoteAgentDefinition(
 
   return {
     description: expectString(record.description, message),
-    outputSchema:
-      record.outputSchema === undefined
-        ? undefined
-        : normalizeJsonSchemaDefinition(record.outputSchema, "output"),
+    outputSchema: serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined),
     path:
       record.path === undefined
         ? EVE_CREATE_SESSION_ROUTE_PATH

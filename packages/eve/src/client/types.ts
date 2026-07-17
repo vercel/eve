@@ -2,6 +2,7 @@ import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -184,6 +185,14 @@ export interface StreamOptions {
    * Abort signal for cancelling the stream.
    */
   readonly signal?: AbortSignal;
+}
+
+/** Result of requesting cancellation for a client session's active turn. */
+export interface CancelSessionResult {
+  /** Session whose active turn was targeted. */
+  readonly sessionId: string;
+  /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
+  readonly status: CancelTurnStatus;
 }
 
 /**

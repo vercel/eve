@@ -6,6 +6,7 @@ import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import { defineReadFileTool } from "../src/public/tools/define-read-file-tool.js";
+import { serializeInputSchema } from "../src/shared/tool-schema.js";
 import { ReadFileStateKey } from "../src/runtime/framework-tools/file-state.js";
 
 function createFakeAccess(files: Record<string, string>): SandboxAccess {
@@ -53,7 +54,7 @@ describe("defineReadFileTool", () => {
     expect(tool.description).toBe("Read a file from the workspace sandbox.");
     expect(typeof tool.execute).toBe("function");
 
-    const schema = tool.inputSchema as unknown as Record<string, unknown>;
+    const schema = serializeInputSchema(tool.inputSchema);
     expect(schema).toMatchObject({
       properties: { filePath: { type: "string" } },
       required: ["filePath"],

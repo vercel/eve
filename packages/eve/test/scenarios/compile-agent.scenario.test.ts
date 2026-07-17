@@ -548,9 +548,15 @@ describe("compileAgent", () => {
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
           name: "@acme/crm",
           type: "module",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/index.mjs" },
         })}\n`,
+        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 1,
+          builtWithEve: "0.0.0-test",
+          requires: { extension: 1, tool: 1, instructions: 1 },
+        }),
         "node_modules/@acme/crm/extension/index.mjs": "export default {};\n",
         "node_modules/@acme/crm/extension/instructions/policy.mjs":
           'export default { markdown: "Prefer the CRM over guessing." };\n',
@@ -682,7 +688,11 @@ describe("compileAgent", () => {
 
     // The disable sentinel reaches the compiled manifest as a name in the
     // dedicated array, not as a tool entry.
-    expect([...result.manifest.disabledFrameworkTools].sort()).toEqual(["web_fetch", "web_search"]);
+    expect([...result.manifest.disabledFrameworkTools].sort()).toEqual([
+      "agent",
+      "web_fetch",
+      "web_search",
+    ]);
 
     // Both the wrapped bash and the replacement todo land in `tools` as
     // ordinary CompiledToolDefinitions. The web_fetch override is intentionally

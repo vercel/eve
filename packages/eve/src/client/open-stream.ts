@@ -64,8 +64,9 @@ export async function* openStreamIterable(
 }
 
 /**
- * Opens one stream response body, retrying the short propagation window where
- * a just-acknowledged session may not yet be readable from the stream route.
+ * Opens one stream response body, retrying transient network errors and the
+ * short propagation window where a just-acknowledged session may not yet be
+ * readable from the stream route.
  */
 export async function openStreamBody(
   input: OpenStreamBodyInput,
@@ -82,11 +83,24 @@ export async function openStreamBody(
     );
 
     const headers = await input.resolveHeaders();
-    const response = await fetch(url, {
-      headers,
-      redirect: input.redirect,
-      signal: input.signal ?? null,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers,
+        redirect: input.redirect,
+        signal: input.signal ?? null,
+      });
+    } catch (error) {
+      if (
+        input.signal?.aborted ||
+        !isStreamDisconnectError(error) ||
+        attempt === STREAM_OPEN_RETRY_ATTEMPTS - 1
+      ) {
+        throw error;
+      }
+      await sleep(STREAM_OPEN_RETRY_DELAY_MS);
+      continue;
+    }
 
     if (response.ok) {
       if (!response.body) {

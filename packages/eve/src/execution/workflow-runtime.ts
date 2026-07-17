@@ -25,6 +25,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  getHookByToken,
   getRun,
   resumeHook,
   start,
@@ -170,17 +171,7 @@ export function createWorkflowRuntime(config: {
     },
 
     async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
-      const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
-
-      try {
-        await resumeHook(sessionCancelHookToken(input.sessionId), payload);
-        return { status: "cancelling" };
-      } catch (error) {
-        if (isInactiveCancelTarget(error)) {
-          return { status: "no_active_turn" };
-        }
-        throw error;
-      }
+      return await requestWorkflowTurnCancellation(input);
     },
 
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
@@ -214,7 +205,39 @@ export function createWorkflowRuntime(config: {
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
     },
+
+    async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
+      try {
+        const hook = await getHookByToken(continuationToken);
+        return { sessionId: hook.runId };
+      } catch (error) {
+        if (HookNotFoundError.is(error)) {
+          return undefined;
+        }
+        logError(log, "failed to resolve session by continuation token", error, {
+          continuationToken,
+        });
+        throw error;
+      }
+    },
   };
+}
+
+/** Requests cancellation through a session's stable workflow hook. */
+export async function requestWorkflowTurnCancellation(
+  input: CancelTurnInput,
+): Promise<CancelTurnResult> {
+  const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
+
+  try {
+    await resumeHook(sessionCancelHookToken(input.sessionId), payload);
+    return { status: "accepted" };
+  } catch (error) {
+    if (isInactiveCancelTarget(error)) {
+      return { status: "no_active_turn" };
+    }
+    throw error;
+  }
 }
 
 function isInactiveCancelTarget(error: unknown): boolean {

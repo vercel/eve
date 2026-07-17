@@ -71,15 +71,21 @@ Config is bound once when the consumer mounts the extension and stays constant f
 
 ## Publishing
 
-Point `eve.extension` at the source directory and run `eve extension build` (wired to `build`/`prepare`):
+Declare separate authoring and distribution roots and run `eve extension build` (wired to `build`/`prepare`):
 
 ```jsonc title="package.json"
 {
   "name": "@acme/crm",
   "type": "module",
-  "eve": { "extension": "./extension" },
-  "files": ["extension", "dist"],
-  "peerDependencies": { "eve": "^x" },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension",
+    },
+  },
+  "files": ["dist"],
+  "peerDependencies": { "eve": "*" },
+  "devDependencies": { "eve": "^x", "typescript": "^x" },
   "dependencies": { "zod": "^3" },
   "scripts": { "build": "eve extension build", "prepare": "eve extension build" },
 }
@@ -100,11 +106,21 @@ Author the source with `moduleResolution: "bundler"` — eve compiles it, so rel
 }
 ```
 
-`eve extension build` compiles the package's entry points to plain JavaScript with type declarations — the mount factory (`dist/index.mjs`) and the tool re-exports overrides use (`dist/tools`) — and fills the `exports` map so you never hand-list it. Compiling is what lets an installed extension load directly; local and workspace packages also work without publishing.
+`eve extension build` transforms every JavaScript or TypeScript module into an agent-shaped `dist/extension` tree, copies skill packages and their assets, emits type declarations, and writes `dist/extension/_manifest.json`. The generated package entrypoints (`dist/index.mjs` and `dist/tools/index.mjs`) re-export those same dist modules, and the build fills the `exports` map so you never hand-list it. The published package therefore needs `dist/`, not the author's original TypeScript. Consumers read only `eve.extension.dist`, so a published package may omit `eve.extension.source`; keep `source` declared wherever `eve extension build` runs.
+
+The build uses the package `tsconfig.json` when it emits declarations. Its `include` must cover every JavaScript or TypeScript module in the extension source (and JavaScript modules require `allowJs`); the build fails before publishing if any distributed module would be missing its declaration.
+
+The manifest contains only its format, the diagnostic eve build version, and the versions of extension capabilities this package actually uses. It does not contain compiled tools, schemas, names, or executable definitions; the consuming eve still discovers and normalizes the agent-shaped dist tree.
+
+### Workspace development
+
+During local development, `eve dev` automatically rebuilds mounted workspace extensions when their source changes.
 
 ### Dependencies
 
-`eve` is a **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. Declare the eve versions your extension supports as the peer range (`"eve": "^1"`) — eve enforces it when the extension is mounted, failing the build with a clear error if the app's eve is out of range, rather than surfacing a confusing compile break. Everything else the extension imports (SDKs, `zod`, …) goes in `dependencies`; each extension resolves its own versions. The consumer recompiles the extension's contributions from source, so `files` must ship both `extension/` (that source) and `dist/` (the compiled entry points).
+`eve` is a required wildcard **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. The extension's concrete eve version belongs in `devDependencies` for authoring types and build tooling. npm peer semver does not decide extension compatibility; eve validates the generated per-capability requirements. Do not mark the eve peer optional and do not add eve to regular `dependencies`.
+
+Everything else the extension imports at execution time (SDKs, `zod`, …) goes in `dependencies`; each extension resolves its own versions. Build-only and test-only packages go in `devDependencies`.
 
 Those deps resolve from `node_modules` under `eve dev`/`eve eval` and are bundled into the deployable by the consuming agent's `eve build`. A dependency that can't be bundled (a native addon) must be listed in the **consuming agent's** `build.externalDependencies` — an extension can't declare build config, so note it in your README.
 

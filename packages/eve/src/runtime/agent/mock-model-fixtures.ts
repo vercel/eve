@@ -1,5 +1,6 @@
 import type { BootstrapPrompt } from "#runtime/agent/bootstrap-model-utils.js";
 import { getPromptContentText } from "#runtime/agent/bootstrap-model-utils.js";
+import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 export interface AvailableBootstrapTool {
@@ -23,7 +24,10 @@ export function createMockAuthoredToolInput(
     return { command: resolveShellCommand(message) };
   }
 
-  if (inputPropertyNames.includes("topic") || /\btopic\b/u.test(normalizeText(message))) {
+  if (
+    inputPropertyNames.includes("topic") ||
+    (!hasDeclaredInputProperties(tool.inputSchema) && /\btopic\b/u.test(normalizeText(message)))
+  ) {
     return { topic: resolveLookupTopic(message) };
   }
 
@@ -36,7 +40,12 @@ export function createMockAuthoredToolInput(
     return { message };
   }
 
-  return { city };
+  if (inputPropertyNames.includes("city") || !hasDeclaredInputProperties(tool.inputSchema)) {
+    return { city };
+  }
+
+  const sample = createJsonSchemaSample(tool.inputSchema);
+  return isRecord(sample) ? sample : {};
 }
 
 /**
@@ -216,6 +225,10 @@ function getToolInputPropertyNames(schema: unknown): readonly string[] {
   }
 
   return Object.keys(schema.properties);
+}
+
+function hasDeclaredInputProperties(schema: unknown): boolean {
+  return isRecord(schema) && isRecord(schema.properties);
 }
 
 function hasProperties(actual: readonly string[], expected: readonly string[]): boolean {

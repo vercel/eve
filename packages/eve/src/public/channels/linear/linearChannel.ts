@@ -426,7 +426,8 @@ function stateFromAgentSession(
     issueIdentifier: session.issue?.identifier ?? null,
     issueTitle: session.issue?.title ?? null,
     issueUrl: session.issue?.url ?? null,
-    organizationId: session.organizationId ?? null,
+    // Only the webhook session ref carries an organization id.
+    organizationId: "organizationId" in session ? (session.organizationId ?? null) : null,
     pendingToolCallMessage: null,
     sourceCommentId: session.sourceCommentId ?? null,
   };

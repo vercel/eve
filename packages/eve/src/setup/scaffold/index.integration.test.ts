@@ -10,6 +10,7 @@ import {
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
+  resolveVercelHostFrameworkPreset,
   scaffoldBaseProject,
   scaffoldExtensionProject,
   type WebPackageVersions,
@@ -682,6 +683,42 @@ describe("hasVercelHostFramework", () => {
   });
 });
 
+describe("resolveVercelHostFrameworkPreset", () => {
+  test("reads as no host framework when package.json is missing", async () => {
+    const projectRoot = await createTempDir();
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
+  });
+
+  test.each([
+    ["Next.js", { next: "16.2.6" }, "nextjs"],
+    ["Nuxt", { nuxt: "4.3.3" }, "nuxtjs"],
+    ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
+    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
+    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
+  ])("maps %s to its Vercel Framework Preset slug", async (_label, dependencies, preset) => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", devDependencies: dependencies }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
+  });
+
+  test("returns undefined for a standalone eve project", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
+  });
+});
+
 describe("listAuthoredChannels", () => {
   test("recognizes flat channel modules and folder connection modules", async () => {
     const projectRoot = await createTempDir();
@@ -705,9 +742,10 @@ describe("scaffoldExtensionProject", () => {
 
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
       name: string;
-      eve?: { extension?: string };
+      eve?: { extension?: { source?: string; dist?: string } };
       files?: string[];
       peerDependencies?: { eve?: string };
+      peerDependenciesMeta?: Record<string, unknown>;
       devDependencies?: Record<string, string>;
       dependencies?: Record<string, string>;
       scripts?: Record<string, string>;
@@ -715,9 +753,9 @@ describe("scaffoldExtensionProject", () => {
     };
     expect(packageJson).toMatchObject({
       name: "demo-extension",
-      eve: { extension: "./extension" },
-      files: ["extension", "dist"],
-      peerDependencies: { eve: "^0.25.0" },
+      eve: { extension: { source: "./extension", dist: "./dist/extension" } },
+      files: ["dist"],
+      peerDependencies: { eve: "*" },
       dependencies: { zod: "4.4.3" },
       scripts: {
         build: "eve extension build",
@@ -727,6 +765,7 @@ describe("scaffoldExtensionProject", () => {
       engines: { node: "24.x" },
     });
     expect(packageJson.devDependencies?.eve).toBe("^0.25.0");
+    expect(packageJson.peerDependenciesMeta).toBeUndefined();
     expect(packageJson.devDependencies?.typescript).toBe("7.0.2");
     expect(packageJson.dependencies?.ai).toBeUndefined();
     expect(packageJson.scripts?.dev).toBeUndefined();

@@ -4,10 +4,11 @@ import {
   ASK_QUESTION_INPUT_SCHEMA,
   ASK_QUESTION_TOOL_DEFINITION,
 } from "#runtime/framework-tools/ask-question.js";
+import { serializeInputSchema } from "#shared/tool-schema.js";
 
 describe("ASK_QUESTION_INPUT_SCHEMA", () => {
   it("is derived from the input request schema", () => {
-    expect(ASK_QUESTION_INPUT_SCHEMA).toEqual({
+    expect(serializeInputSchema(ASK_QUESTION_INPUT_SCHEMA)).toEqual({
       additionalProperties: false,
       properties: {
         allowFreeform: {
