@@ -23,6 +23,7 @@ import {
   readDynamicSkillMaterializationMarker,
 } from "#context/dynamic-skill-materialization-marker.js";
 import {
+  type DynamicSkillMaterializationResult,
   dynamicSkillManifestMatchesSandbox,
   dynamicSkillMarkerFromManifest,
   dynamicSkillMarkerMatchesManifest,
@@ -300,20 +301,24 @@ export async function dispatchDynamicSkillEvent(input: {
     }
   }
 
-  const materialization =
-    sandbox === null || sandbox === undefined || markerRead === undefined
-      ? undefined
-      : await materializeDynamicSkillUpdates({
-          markerMs,
-          markerRead,
-          nextManifest: newManifest,
-          previousManifest,
-          sandbox,
-          updates: updates.map(({ resolver, skills }) => ({
-            resolverSlug: resolver.slug,
-            skills,
-          })),
-        });
+  let materialization: DynamicSkillMaterializationResult | undefined;
+  if (sandbox !== null && sandbox !== undefined && markerRead !== undefined) {
+    // Record trusted dynamic ownership before the first write. If a first
+    // materialization fails partway through, the next dispatch can clean only
+    // that owned package without treating authored packages as disposable.
+    ctx.set(DynamicSkillManifestKey, newManifest);
+    materialization = await materializeDynamicSkillUpdates({
+      markerMs,
+      markerRead,
+      nextManifest: newManifest,
+      previousManifest,
+      sandbox,
+      updates: updates.map(({ resolver, skills }) => ({
+        resolverSlug: resolver.slug,
+        skills,
+      })),
+    });
+  }
 
   ctx.set(DynamicSkillManifestKey, newManifest);
   if (!dynamicSkillManifestsEqual(activeManifest, newManifest)) {

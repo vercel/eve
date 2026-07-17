@@ -139,9 +139,6 @@ export async function materializeDynamicSkillUpdates(input: {
 
   if (fullRematerialization) {
     for (const name of previous.keys()) removePackages.add(name);
-    for (const name of updates.keys()) {
-      removePackages.add(name);
-    }
   } else {
     reconcileMarkedPackages({ currentMarker, desired, removePackages, updates });
   }

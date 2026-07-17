@@ -309,7 +309,7 @@ describe("dispatchDynamicSkillEvent", () => {
 
     const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
     expect(sandbox.files.has(markerPath)).toBe(false);
-    expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();
+    expect(ctx.get(DynamicSkillManifestKey)).toHaveProperty("tenant");
 
     ctx.set(SandboxKey, sandbox.access);
     await dispatchDynamicSkillEvent({
@@ -458,6 +458,9 @@ describe("dispatchDynamicSkillEvent", () => {
 
   it("lets a dynamic skill override a same-named authored skill instead of throwing", async () => {
     const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
+    sandbox.files.set(authoredReference, "Authored reference");
+    sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
     const resolver = createResolver("custom", () => ({
       "talk-like-a-dog": makeSkill("Dynamic override", "Woof."),
     }));
@@ -485,6 +488,7 @@ describe("dispatchDynamicSkillEvent", () => {
         w.path.includes("/home/agent/.agents/skills/talk-like-a-dog/SKILL.md"),
       ),
     ).toBe(true);
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
   });
 
   it("collapses a directly-returned single defineSkill to the bare slug", async () => {

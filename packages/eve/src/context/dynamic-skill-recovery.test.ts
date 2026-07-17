@@ -312,7 +312,7 @@ describe("dynamic skill materialization recovery", () => {
       "injected final write failure",
     );
     expect(sandbox.files.has("/home/agent/.agents/skills/tenant/references/stale.md")).toBe(true);
-    expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();
+    expect(ctx.get(DynamicSkillManifestKey)).toHaveProperty("tenant");
 
     files = {};
     ctx.set(SandboxKey, sandbox.access);
