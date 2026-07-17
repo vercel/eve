@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import type { DurableDynamicSkillMetadata } from "#context/keys.js";
 import {
   type DynamicSkillMaterializationMarker,
@@ -8,10 +10,12 @@ import {
 } from "#context/dynamic-skill-materialization-marker.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import {
+  digestMaterializedSkillPackage,
   type MaterializableSkillPackage,
   removeSkillPackageFromSandbox,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
+import { resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
 
 type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
 
@@ -60,6 +64,38 @@ export function dynamicSkillMarkerMatchesManifest(
   );
 }
 
+/** Returns whether durable metadata still describes the exact managed sandbox bytes. */
+export async function dynamicSkillManifestMatchesSandbox(input: {
+  readonly manifest: DynamicSkillManifest;
+  readonly sandbox: SandboxSession;
+}): Promise<boolean> {
+  for (const [name, metadata] of indexManifest(input.manifest)) {
+    if (metadata.contentDigest === undefined || metadata.relativePaths === undefined) return false;
+
+    const files = [];
+    for (const relativePath of metadata.relativePaths) {
+      const content = await input.sandbox.readBinaryFile({
+        path: await resolveSandboxSkillWritePath({
+          name,
+          relativePath,
+          sandbox: input.sandbox,
+        }),
+      });
+      if (content === null) return false;
+      files.push({ content: Buffer.from(content), relativePath });
+    }
+
+    if (
+      digestMaterializedSkillPackage({ description: metadata.description, files, name }) !==
+      metadata.contentDigest
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /** Applies one dynamic-skill delta and commits its sandbox marker last. */
 export async function materializeDynamicSkillUpdates(input: {
   readonly nextManifest: DynamicSkillManifest;
@@ -76,13 +112,12 @@ export async function materializeDynamicSkillUpdates(input: {
   const desired = indexManifest(input.nextManifest);
   const updates = indexUpdates(input.updates);
   const nextPackages: Record<string, DynamicSkillMaterializationMarkerEntry> =
-    currentMarker === null ? {} : { ...currentMarker.packages };
+    fullRematerialization || currentMarker === null ? {} : { ...currentMarker.packages };
   const removePackages = new Set<string>();
   const writeSkills: MaterializableSkillPackage[] = [];
 
   if (fullRematerialization) {
     for (const name of previous.keys()) removePackages.add(name);
-    for (const name of Object.keys(currentMarker?.packages ?? {})) removePackages.add(name);
     for (const name of updates.keys()) {
       removePackages.add(name);
     }
@@ -112,6 +147,11 @@ export async function materializeDynamicSkillUpdates(input: {
     if (!updates.has(name)) delete nextPackages[name];
   }
 
+  const packageMutationNeeded = removePackages.size > 0 || writeSkills.length > 0;
+  if (packageMutationNeeded) {
+    await input.sandbox.removePath({ force: true, path: input.markerRead.path });
+  }
+
   const removeStartedAt = performance.now();
   for (const name of [...removePackages].sort()) {
     await removeSkillPackageFromSandbox({ name, sandbox: input.sandbox });
@@ -128,7 +168,8 @@ export async function materializeDynamicSkillUpdates(input: {
   const markerChanged =
     currentMarker === null || !markerPackagesEqual(currentMarker.packages, nextMarker.packages);
   const markerWriteStartedAt = performance.now();
-  if (markerChanged) {
+  const markerWriteNeeded = markerChanged || packageMutationNeeded;
+  if (markerWriteNeeded) {
     await writeDynamicSkillMaterializationMarker({
       marker: nextMarker,
       path: input.markerRead.path,
@@ -145,7 +186,7 @@ export async function materializeDynamicSkillUpdates(input: {
     fullRematerialization,
     markerMs: input.markerMs,
     markerStatus: input.markerRead.status,
-    markerWriteCount: markerChanged ? 1 : 0,
+    markerWriteCount: markerWriteNeeded ? 1 : 0,
     markerWriteMs,
     removeCallCount: removePackages.size,
     removeMs,

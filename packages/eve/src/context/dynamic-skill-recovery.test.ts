@@ -71,6 +71,107 @@ async function dispatch(input: {
 }
 
 describe("dynamic skill materialization recovery", () => {
+  it("invalidates the old marker before a changed package can partially write", async () => {
+    const { ctx, sandbox } = createCtx();
+    let markdown = "Version one.";
+    let files: Readonly<Record<string, string>> = {};
+    const resolver = createResolver("tenant", () => makeSkill("Tenant policy", markdown, files));
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+
+    await dispatch({ ctx, resolvers: [resolver] });
+    expect(sandbox.files.has(markerPath)).toBe(true);
+
+    markdown = "Partial version two.";
+    files = { "references/fail.md": "fail" };
+    const failingSession = {
+      ...sandbox.session,
+      async writeBinaryFile(options: Parameters<typeof sandbox.session.writeBinaryFile>[0]) {
+        if (options.path.endsWith("/references/fail.md")) {
+          throw new Error("injected changed-package write failure");
+        }
+        await sandbox.session.writeBinaryFile(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return failingSession;
+      },
+    });
+
+    await expect(dispatch({ ctx, resolvers: [resolver] })).rejects.toThrow(
+      "injected changed-package write failure",
+    );
+    expect(sandbox.files.has(markerPath)).toBe(false);
+
+    markdown = "Version one.";
+    files = {};
+    ctx.set(SandboxKey, sandbox.access);
+    await dispatch({ ctx, resolvers: [resolver] });
+
+    expect(sandbox.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe("Version one.");
+  });
+
+  it("retires packages owned by resolvers removed from the compiled inventory", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("retired", () => makeSkill("Retired policy", "Retired body."));
+
+    await dispatch({ ctx, resolvers: [resolver] });
+    ctx.clearVirtualContext();
+    await dispatch({ ctx, resolvers: [] });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
+    expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
+    expect(sandbox.files.has("/home/agent/.agents/skills/retired/SKILL.md")).toBe(false);
+  });
+
+  it("never uses an injected marker package as recursive-delete authority", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("tenant", () => makeSkill("Tenant policy", "Tenant body."));
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+    const authoredPath = "/home/agent/.agents/skills/authored/SKILL.md";
+
+    await dispatch({ ctx, resolvers: [resolver] });
+    sandbox.files.set(authoredPath, "Authored body.");
+    sandbox.fileBytes.set(authoredPath, Buffer.from("Authored body."));
+    const marker = JSON.parse(sandbox.files.get(markerPath)!) as {
+      packages: Record<string, unknown>;
+      version: number;
+    };
+    marker.packages.authored = marker.packages.tenant;
+    const injected = `${JSON.stringify(marker)}\n`;
+    sandbox.files.set(markerPath, injected);
+    sandbox.fileBytes.set(markerPath, Buffer.from(injected));
+
+    await dispatch({ ctx, resolvers: [resolver] });
+
+    expect(sandbox.files.get(authoredPath)).toBe("Authored body.");
+  });
+
+  it.each(["modified", "missing"] as const)(
+    "repairs %s managed package bytes instead of trusting a warm marker",
+    async (state) => {
+      const { ctx, sandbox } = createCtx();
+      const resolver = createResolver("tenant", () => makeSkill("Tenant policy", "Trusted body."));
+      const skillPath = "/home/agent/.agents/skills/tenant/SKILL.md";
+
+      await dispatch({ ctx, resolvers: [resolver] });
+      if (state === "modified") {
+        sandbox.files.set(skillPath, "Injected body.");
+        sandbox.fileBytes.set(skillPath, Buffer.from("Injected body."));
+      } else {
+        sandbox.files.delete(skillPath);
+        sandbox.fileBytes.delete(skillPath);
+      }
+
+      await dispatch({ ctx, resolvers: [resolver] });
+
+      expect(sandbox.files.get(skillPath)).toBe("Trusted body.");
+    },
+  );
+
   it("does not re-announce session skills after sandbox replacement on an unmatched event", async () => {
     const { ctx } = createCtx();
     const resolver = createResolver(

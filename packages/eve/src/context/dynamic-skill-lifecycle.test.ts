@@ -164,6 +164,7 @@ describe("dispatchDynamicSkillEvent", () => {
 
     expect(sandbox.files.has("/home/agent/.agents/skills/tenant/references/policy.md")).toBe(false);
     expect(sandbox.removedPaths.slice(removalsBeforeChange)).toEqual([
+      "/home/agent/.agents/skills/.eve-dynamic-skill-materialization.json",
       "/home/agent/.agents/skills/tenant",
     ]);
   });
@@ -362,6 +363,7 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
     expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
     expect(sandbox.removedPaths.slice(removalsBeforeDisable)).toEqual([
+      "/home/agent/.agents/skills/.eve-dynamic-skill-materialization.json",
       "/home/agent/.agents/skills/tenant",
     ]);
   });

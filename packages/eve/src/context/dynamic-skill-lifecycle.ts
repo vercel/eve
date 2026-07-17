@@ -23,6 +23,7 @@ import {
   readDynamicSkillMaterializationMarker,
 } from "#context/dynamic-skill-materialization-marker.js";
 import {
+  dynamicSkillManifestMatchesSandbox,
   dynamicSkillMarkerMatchesManifest,
   materializeDynamicSkillUpdates,
 } from "#context/dynamic-skill-materialization.js";
@@ -108,7 +109,9 @@ export async function dispatchDynamicSkillEvent(input: {
   let sandboxMs = 0;
   let sandbox: SandboxSession | null | undefined;
   let rawMarkerRead: DynamicSkillMaterializationMarkerRead | undefined;
-  const previousManifest = ctx.get(DynamicSkillManifestKey) ?? {};
+  let trustedMarkerRead: DynamicSkillMaterializationMarkerRead | undefined;
+  let trustedMarkerReadLoaded = false;
+  let previousManifest = ctx.get(DynamicSkillManifestKey) ?? {};
   let activeManifest = previousManifest;
 
   const loadMaterializationState = async (): Promise<void> => {
@@ -124,6 +127,52 @@ export async function dispatchDynamicSkillEvent(input: {
     markerMs = performance.now() - markerStartedAt;
   };
 
+  const loadTrustedMarker = async (): Promise<
+    DynamicSkillMaterializationMarkerRead | undefined
+  > => {
+    await loadMaterializationState();
+    if (!trustedMarkerReadLoaded) {
+      trustedMarkerRead = await trustDynamicSkillMarker(rawMarkerRead, previousManifest, sandbox);
+      trustedMarkerReadLoaded = true;
+    }
+    return trustedMarkerRead;
+  };
+
+  // A resolver removed by a rebuild no longer has code that can emit an empty
+  // update. Retire its durable packages from the compiled resolver inventory
+  // before they can be announced or loaded again.
+  const reconciledManifest = retainCompiledResolverPackages(previousManifest, resolvers);
+  if (!dynamicSkillManifestsEqual(previousManifest, reconciledManifest)) {
+    const markerRead = await loadTrustedMarker();
+    const nextManifest = isFullRematerialization(markerRead) ? {} : reconciledManifest;
+
+    if (sandbox !== null && sandbox !== undefined && markerRead !== undefined) {
+      await materializeDynamicSkillUpdates({
+        markerMs,
+        markerRead,
+        nextManifest,
+        previousManifest,
+        sandbox,
+        updates: [],
+      });
+      const markerStartedAt = performance.now();
+      rawMarkerRead = await readDynamicSkillMaterializationMarker({ sandbox });
+      markerMs += performance.now() - markerStartedAt;
+    }
+
+    previousManifest = nextManifest;
+    activeManifest = nextManifest;
+    trustedMarkerRead = undefined;
+    trustedMarkerReadLoaded = false;
+    ctx.set(DynamicSkillManifestKey, nextManifest);
+    const announcementStartedAt = performance.now();
+    ctx.setVirtualContext(
+      PendingSkillAnnouncementKey,
+      await formatDynamicSkillAnnouncement({ ctx, manifest: nextManifest }),
+    );
+    announcementMs += performance.now() - announcementStartedAt;
+  }
+
   // Build phase: rebuild announcement from durable manifest when the
   // virtual key is empty (step boundary crossed). Re-announce only when the
   // sandbox marker still proves the durable packages are materialized.
@@ -131,8 +180,7 @@ export async function dispatchDynamicSkillEvent(input: {
     ctx.get(PendingSkillAnnouncementKey) === undefined &&
     Object.keys(previousManifest).length > 0
   ) {
-    await loadMaterializationState();
-    const markerRead = trustDynamicSkillMarker(rawMarkerRead, previousManifest);
+    const markerRead = await loadTrustedMarker();
     if (sandbox !== null && isFullRematerialization(markerRead)) {
       activeManifest = {};
       ctx.set(DynamicSkillManifestKey, activeManifest);
@@ -198,8 +246,7 @@ export async function dispatchDynamicSkillEvent(input: {
 
   if (updates.length === 0) return;
 
-  await loadMaterializationState();
-  const markerRead = trustDynamicSkillMarker(rawMarkerRead, previousManifest);
+  const markerRead = await loadTrustedMarker();
 
   // Without a trustworthy marker, package bodies from resolvers that did not
   // run for this event cannot be proven present. Fail closed by retaining only
@@ -273,13 +320,22 @@ export async function dispatchDynamicSkillEvent(input: {
   });
 }
 
-function trustDynamicSkillMarker(
+async function trustDynamicSkillMarker(
   markerRead: DynamicSkillMaterializationMarkerRead | undefined,
   manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
-): DynamicSkillMaterializationMarkerRead | undefined {
-  return markerRead !== undefined &&
-    markerRead.marker !== null &&
-    !dynamicSkillMarkerMatchesManifest(markerRead.marker, manifest)
+  sandbox: SandboxSession | null | undefined,
+): Promise<DynamicSkillMaterializationMarkerRead | undefined> {
+  if (
+    markerRead === undefined ||
+    markerRead.marker === null ||
+    sandbox === null ||
+    sandbox === undefined
+  ) {
+    return markerRead;
+  }
+
+  return !dynamicSkillMarkerMatchesManifest(markerRead.marker, manifest) ||
+    !(await dynamicSkillManifestMatchesSandbox({ manifest, sandbox }))
     ? { ...markerRead, status: "stale" }
     : markerRead;
 }
@@ -295,4 +351,14 @@ function dynamicSkillManifestsEqual(
   right: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function retainCompiledResolverPackages(
+  manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
+  resolvers: readonly ResolvedDynamicSkillResolver[],
+): Record<string, readonly DurableDynamicSkillMetadata[]> {
+  const compiledResolverSlugs = new Set(resolvers.map((resolver) => resolver.slug));
+  return Object.fromEntries(
+    Object.entries(manifest).filter(([resolverSlug]) => compiledResolverSlugs.has(resolverSlug)),
+  );
 }

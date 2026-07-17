@@ -47,7 +47,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
   files.sort((left, right) => comparePaths(left.relativePath, right.relativePath));
 
   return {
-    contentDigest: digestSkillPackage({
+    contentDigest: digestMaterializedSkillPackage({
       description: input.description,
       files,
       name: input.name,
@@ -61,7 +61,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
   };
 }
 
-function digestSkillPackage(input: {
+export function digestMaterializedSkillPackage(input: {
   readonly description: string;
   readonly files: readonly NormalizedSkillPackageFile[];
   readonly name: string;
