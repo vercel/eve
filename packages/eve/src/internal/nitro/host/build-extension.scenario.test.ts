@@ -132,6 +132,35 @@ describe("extension build output", () => {
     );
   });
 
+  it("emits portable declarations for default-exported hooks", async () => {
+    const root = await createExtensionPackage();
+    await mkdir(join(root, "extension", "hooks"), { recursive: true });
+    await writeFile(
+      join(root, "extension", "hooks", "audit.ts"),
+      [
+        'import { defineHook } from "eve/hooks";',
+        "",
+        "export default defineHook({",
+        "  events: {",
+        '    "action.result"(event) {',
+        "      console.info(event.data.result);",
+        "    },",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+
+    const declaration = await readFile(join(outDir, "extension", "hooks", "audit.d.ts"), "utf8");
+    expect(declaration).toMatch(
+      /import\(["']eve\/hooks["']\)\.HookDefinition<["']action\.result["']>/,
+    );
+    expect(declaration).not.toContain("protocol/message");
+  });
+
   it("copies data files and stamps only the extension capabilities in use", async () => {
     const root = await createExtensionPackage();
     await writeFile(
