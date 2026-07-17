@@ -121,12 +121,14 @@ jobs:
           pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
           pnpm --filter dist-extensions update gizmo-extension gadget-extension
 
-      - name: Stage workspace extension fixture as dist-only
+      - name: Stage workspace extension fixtures as dist-only
         if: needs.changes.outputs.relevant == 'true'
-        # The toolkit fixture exercises config, overrides, state, dynamic tools,
-        # and skills. Removing its author source proves the deployment consumes
-        # the same agent-shaped dist tree a registry package ships.
-        run: mv e2e/fixtures/toolkit-extension/extension "$RUNNER_TEMP/toolkit-extension-source"
+        # Removing author source proves the deployment consumes the same
+        # agent-shaped dist trees registry packages ship. Toolkit covers the
+        # rich TypeScript surface; js-only covers pure JavaScript authoring.
+        run: |
+          mv e2e/fixtures/toolkit-extension/extension "$RUNNER_TEMP/toolkit-extension-source"
+          mv e2e/fixtures/js-only-extension/extension "$RUNNER_TEMP/js-only-extension-source"
 
       - name: Deploy fixture and run evals
         if: needs.changes.outputs.relevant == 'true'
