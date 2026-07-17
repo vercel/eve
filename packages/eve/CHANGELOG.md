@@ -1,5 +1,11 @@
 # eve
 
+## 0.25.1
+
+### Patch Changes
+
+- b2bc6b6: Make default-exported hooks emit portable extension declarations while preserving typed event handlers and authored event keys.
+
 ## 0.25.0
 
 ### Minor Changes
