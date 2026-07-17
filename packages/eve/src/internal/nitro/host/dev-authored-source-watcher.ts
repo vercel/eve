@@ -5,6 +5,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
 import { resolveDevelopmentSourceSnapshotWatchPaths } from "#internal/nitro/dev-runtime-source-snapshot.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
+import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import { getDevelopmentEnvironmentFilePaths } from "#cli/dev/environment.js";
 import {
@@ -71,7 +72,7 @@ export async function startAuthoredSourceWatcher(input: {
     },
     followSymlinks: false,
     ignoreInitial: true,
-    ignored: shouldIgnoreWatcherPath,
+    ignored: (path) => shouldIgnoreWatcherPath(path, currentHost.workspaceExtensions),
   });
   const watcherReady = waitForWatcherReady(watcher);
 
@@ -201,6 +202,13 @@ async function resolveAuthoredWatchPaths(
   const tsconfigPaths = await resolveTsConfigWatchPaths(host.appRoot);
   const sourceSnapshotWatchPaths = await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot);
 
+  for (const extension of host.workspaceExtensions) {
+    watchPaths.add(extension.config.sourceRoot);
+    for (const path of extension.buildConfigPaths) {
+      watchPaths.add(path);
+    }
+  }
+
   for (const envFilePath of getDevelopmentEnvironmentFilePaths(host.appRoot)) {
     watchPaths.add(envFilePath);
   }
@@ -300,8 +308,22 @@ async function resolveTsConfigWatchPaths(appRoot: string): Promise<string[]> {
   return await resolveTsConfigDependencyPaths(appRoot);
 }
 
-function shouldIgnoreWatcherPath(path: string): boolean {
+function shouldIgnoreWatcherPath(
+  path: string,
+  workspaceExtensions: readonly DevelopmentWorkspaceExtension[],
+): boolean {
   const pathParts = normalize(path).split(sep).filter(Boolean);
 
-  return pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part));
+  return (
+    pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part)) ||
+    workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
+  );
+}
+
+function isPathInsideOrEqual(path: string, directory: string): boolean {
+  const resolvedPath = resolve(path);
+  const resolvedDirectory = resolve(directory);
+  return (
+    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
+  );
 }

@@ -101,6 +101,26 @@ export interface ExtensionMountLocation {
 }
 
 /**
+ * Package roots resolved from one extension mount before its distribution is
+ * inspected. Development uses this to build a mounted workspace extension
+ * before the consumer requires its dist tree to exist.
+ */
+export interface ExtensionMountPackageLocation {
+  /** Mount namespace derived from the mount filename. */
+  readonly namespace: string;
+  /** Package specifier read from the mount declaration. */
+  readonly specifier: string;
+  /** Package name from the resolved package manifest. */
+  readonly packageName: string;
+  /** Absolute path to the resolved package root. */
+  readonly packageRoot: string;
+  /** Absolute authoring root when the package publishes a source-backed contract. */
+  readonly authoredSourceRoot?: string;
+  /** Absolute path to the agent-shaped distribution root. */
+  readonly distRoot: string;
+}
+
+/**
  * Derives the mount namespace from an `extensions/<name>.<ext>` logical path.
  */
 export function mountNamespace(logicalPath: string): string {
@@ -159,6 +179,70 @@ export async function locateExtensionMount(input: {
    */
   readonly namespace: string;
 }): Promise<{ location?: ExtensionMountLocation; diagnostics: DiscoverDiagnostic[] }> {
+  const locatedPackage = await locateExtensionMountPackage(input);
+  if (locatedPackage.location === undefined) {
+    return { diagnostics: locatedPackage.diagnostics };
+  }
+
+  const { location } = locatedPackage;
+  const compatibilityPath = join(location.distRoot, EXTENSION_COMPATIBILITY_MANIFEST_FILENAME);
+  let compatibility;
+  try {
+    compatibility = parseExtensionCompatibilityManifest(
+      await input.source.readTextFile(compatibilityPath),
+      compatibilityPath,
+    );
+  } catch (error) {
+    return {
+      diagnostics: [
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
+          message: `Extension "${location.packageName}" has no valid compatibility manifest at "${compatibilityPath}". Rebuild or reinstall the extension. ${error instanceof Error ? error.message : String(error)}`,
+          sourcePath: compatibilityPath,
+        }),
+      ],
+    };
+  }
+
+  const unsupportedCapabilities = findUnsupportedExtensionCapabilities(compatibility);
+  if (unsupportedCapabilities.length > 0) {
+    return {
+      diagnostics: unsupportedCapabilities.map((unsupported) =>
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+          message: `Extension "${location.packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`,
+          sourcePath: compatibilityPath,
+        }),
+      ),
+    };
+  }
+
+  return {
+    location: {
+      namespace: location.namespace,
+      specifier: location.specifier,
+      packageName: location.packageName,
+      packageRoot: location.packageRoot,
+      sourceRoot: location.distRoot,
+    },
+    diagnostics: [],
+  };
+}
+
+/**
+ * Resolves one extension mount through its package manifest without requiring
+ * a built distribution or compatibility manifest.
+ */
+export async function locateExtensionMountPackage(input: {
+  readonly source: ProjectSource;
+  readonly agentRoot: string;
+  readonly appRoot: string;
+  readonly mount: ExtensionSourceRef;
+  readonly namespace: string;
+}): Promise<{
+  location?: ExtensionMountPackageLocation;
+  diagnostics: DiscoverDiagnostic[];
+}> {
   const mountPath = join(input.agentRoot, input.mount.logicalPath);
   const { namespace } = input;
 
@@ -240,38 +324,6 @@ export async function locateExtensionMount(input: {
   }
 
   const packageName = typeof pkg.name === "string" && pkg.name.length > 0 ? pkg.name : specifier;
-  const sourceRoot = resolve(packageRoot, extension.dist);
-  const compatibilityPath = join(sourceRoot, EXTENSION_COMPATIBILITY_MANIFEST_FILENAME);
-  let compatibility;
-  try {
-    compatibility = parseExtensionCompatibilityManifest(
-      await input.source.readTextFile(compatibilityPath),
-      compatibilityPath,
-    );
-  } catch (error) {
-    return {
-      diagnostics: [
-        createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
-          message: `Extension "${packageName}" has no valid compatibility manifest at "${compatibilityPath}". Rebuild or reinstall the extension. ${error instanceof Error ? error.message : String(error)}`,
-          sourcePath: compatibilityPath,
-        }),
-      ],
-    };
-  }
-
-  const unsupportedCapabilities = findUnsupportedExtensionCapabilities(compatibility);
-  if (unsupportedCapabilities.length > 0) {
-    return {
-      diagnostics: unsupportedCapabilities.map((unsupported) =>
-        createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-          message: `Extension "${packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`,
-          sourcePath: compatibilityPath,
-        }),
-      ),
-    };
-  }
 
   return {
     location: {
@@ -279,7 +331,10 @@ export async function locateExtensionMount(input: {
       specifier,
       packageName,
       packageRoot,
-      sourceRoot,
+      ...(extension.source === undefined
+        ? {}
+        : { authoredSourceRoot: resolve(packageRoot, extension.source) }),
+      distRoot: resolve(packageRoot, extension.dist),
     },
     diagnostics: [],
   };

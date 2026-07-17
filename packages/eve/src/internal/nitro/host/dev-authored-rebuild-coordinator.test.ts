@@ -91,6 +91,7 @@ function createHost(
     scheduleRegistrations: [],
     schedules: [],
     workflowBuildDir: `/tmp/eve-test/.eve/dev-hosts/${id}/workflow`,
+    workspaceExtensions: [],
     workspace: {
       artifactsDir: `/tmp/eve-test/.eve/dev-hosts/${id}/artifacts`,
       compilerArtifactsDir: `/tmp/eve-test/.eve/dev-hosts/${id}/compiler`,
@@ -144,6 +145,36 @@ beforeEach(() => {
 });
 
 describe("transactional authored rebuild coordinator", () => {
+  it("passes changed paths into extension preparation and retains its committed watch plan", async () => {
+    const { coordinator, devServer } = await createCoordinatorWithServer();
+    const candidate = createHost("candidate", "run-1");
+    const extension = {
+      packageRoot: "/tmp/eve-test/packages/crm",
+      buildConfigPaths: ["/tmp/eve-test/packages/crm/tsconfig.json"],
+      config: {
+        sourceRoot: "/tmp/eve-test/packages/crm/extension",
+        distRoot: "/tmp/eve-test/packages/crm/dist/extension",
+        outDir: "/tmp/eve-test/packages/crm/dist",
+        packageName: "@acme/crm",
+        runtimeDependencies: ["eve"],
+        shortName: "crm",
+      },
+    } as const;
+    candidate.workspaceExtensions = [extension];
+    mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(candidate);
+    const changedPaths = ["/tmp/eve-test/packages/crm/extension/tools/search.ts"];
+
+    const result = await coordinator.rebuild({ changedPaths });
+
+    expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test", {
+      changedPaths,
+      previousExtensions: [],
+    });
+    expect(result.kind).toBe("unchanged");
+    expect(result.host.workspaceExtensions).toEqual([extension]);
+    await devServer.close();
+  });
+
   it("keeps the live worker when activation fails after the swap and retries on the next rebuild", async () => {
     const { coordinator, devServer } = await createCoordinatorWithServer();
     const structuralHost = createHost("structural", "run-2");

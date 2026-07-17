@@ -112,6 +112,14 @@ The build uses the package `tsconfig.json` when it emits declarations. Its `incl
 
 The manifest contains only its format, the diagnostic eve build version, and the versions of extension capabilities this package actually uses. It does not contain compiled tools, schemas, names, or executable definitions; the consuming eve still discovers and normalizes the agent-shaped dist tree.
 
+### Workspace development
+
+`eve dev` builds mounted source-backed workspace extensions before it compiles the consuming agent. It continues to discover and execute the generated dist tree, so local development exercises the same package shape that gets published.
+
+When a file under an extension's declared `source` root changes, eve rebuilds only that extension and activates the result through the normal transactional development reload. A failed extension build leaves the previous dist and active agent generation in place. Generated output is ignored by the watcher, so publishing the new dist does not trigger a rebuild loop.
+
+Workspace detection follows the resolved package's real filesystem path rather than requiring a `workspace:` dependency. Linked and `file:` packages inside the application's repository/workspace boundary therefore behave the same way. Dist-only packages and installed packages under `node_modules` remain immutable consumer inputs and are not rebuilt.
+
 ### Dependencies
 
 `eve` is a required wildcard **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. The extension's concrete eve version belongs in `devDependencies` for authoring types and build tooling. npm peer semver does not decide extension compatibility; eve validates the generated per-capability requirements. Do not mark the eve peer optional and do not add eve to regular `dependencies`.
