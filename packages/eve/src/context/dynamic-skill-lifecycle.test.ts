@@ -88,6 +88,24 @@ function createCtxWithAuthoredDogReference() {
   });
 }
 
+function setBaselineLessDynamicDogManifest(ctx: ContextContainer): void {
+  const dynamic = normalizeSkillPackage({
+    description: "Dynamic override",
+    markdown: "Woof.",
+    name: "talk-like-a-dog",
+  });
+  ctx.set(DynamicSkillManifestKey, {
+    custom: [
+      {
+        contentDigest: dynamic.contentDigest,
+        description: dynamic.description,
+        name: dynamic.name,
+        relativePaths: dynamic.files.map((file) => file.relativePath),
+      },
+    ],
+  });
+}
+
 function createResolver(
   slug: string,
   handler: () =>
@@ -602,6 +620,119 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(sandbox.files.get(skillPath)).toBe("Authored talk-like-a-dog body.");
     expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
     expect(sandbox.files.has(dynamicReference)).toBe(false);
+  });
+
+  it("retains authored baseline metadata when dynamic override retirement fails", async () => {
+    const { ctx, sandbox } = createCtxWithAuthoredDogReference();
+    const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+    const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
+    const dynamicReference = "/home/agent/.agents/skills/talk-like-a-dog/references/dynamic.md";
+    sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
+    sandbox.files.set(authoredReference, "Authored reference");
+    sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
+    let enabled = true;
+    const resolver = createResolver("custom", () =>
+      enabled
+        ? {
+            "talk-like-a-dog": makeSkill("Dynamic override", "Woof.", {
+              "references/dynamic.md": "Dynamic reference",
+            }),
+          }
+        : null,
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    enabled = false;
+    const failingSession = {
+      ...sandbox.session,
+      async writeBinaryFile(options: Parameters<typeof sandbox.session.writeBinaryFile>[0]) {
+        if (options.path === authoredReference)
+          throw new Error("injected baseline restore failure");
+        await sandbox.session.writeBinaryFile(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return failingSession;
+      },
+    });
+
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow("injected baseline restore failure");
+    expect(ctx.get(DynamicSkillManifestKey)?.custom?.[0]?.authoredBaseline).toHaveLength(2);
+
+    ctx.set(SandboxKey, sandbox.access);
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.get(skillPath)).toBe("Authored talk-like-a-dog body.");
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
+    expect(sandbox.files.has(dynamicReference)).toBe(false);
+  });
+
+  it("preserves a newly authored package when stale dynamic ownership retires on an unmatched event", async () => {
+    const { ctx, sandbox } = createCtxWithAuthoredDogReference();
+    const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+    const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
+    sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
+    sandbox.files.set(authoredReference, "Authored reference");
+    sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
+    setBaselineLessDynamicDogManifest(ctx);
+    const resolver = createResolver("custom", () => null, undefined, ["session.started"]);
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent("turn.started"),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
+    expect(sandbox.files.get(skillPath)).toBe("Authored talk-like-a-dog body.");
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
+  });
+
+  it("preserves a newly authored package when its stale dynamic resolver is removed", async () => {
+    const { ctx, sandbox } = createCtxWithAuthoredDogReference();
+    const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+    const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
+    sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
+    sandbox.files.set(authoredReference, "Authored reference");
+    sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
+    setBaselineLessDynamicDogManifest(ctx);
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
+    expect(sandbox.files.get(skillPath)).toBe("Authored talk-like-a-dog body.");
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
   });
 
   it("rebuilds a changed dynamic override over the exact authored baseline", async () => {

@@ -1,5 +1,7 @@
 import type { DurableDynamicSkillMetadata } from "#context/keys.js";
 import {
+  type AuthoredSkillPackageIdentity,
+  authoredSkillPackageMatchesSandbox,
   dynamicSkillPackageMatchesSandbox,
   readVerifiedAuthoredSkillBaseline,
   writeVisibleSkillPackage,
@@ -106,6 +108,7 @@ export async function dynamicSkillManifestMatchesSandbox(input: {
 
 /** Applies one dynamic-skill delta and commits its sandbox marker last. */
 export async function materializeDynamicSkillUpdates(input: {
+  readonly authoredPackageIdentities: ReadonlyMap<string, AuthoredSkillPackageIdentity>;
   readonly nextManifest: DynamicSkillManifest;
   readonly markerMs: number;
   readonly markerRead: DynamicSkillMaterializationMarkerRead;
@@ -152,17 +155,27 @@ export async function materializeDynamicSkillUpdates(input: {
     if (!updates.has(name)) delete nextPackages[name];
   }
 
-  const freshAuthoredPackages = new Set(
-    [...removePackages].filter((name) => {
-      const previousMetadata = previous.get(name);
-      return (
-        desired.get(name)?.authoredBaseline === undefined &&
-        previousMetadata?.authoredBaseline !== undefined &&
-        previousMetadata.authoredBaselineSandboxId !== undefined &&
-        previousMetadata.authoredBaselineSandboxId !== input.sandbox.id
+  const freshAuthoredPackages = new Set<string>();
+  for (const name of removePackages) {
+    if (updates.has(name)) continue;
+    const identity = input.authoredPackageIdentities.get(name);
+    if (identity === undefined) continue;
+    if (await authoredSkillPackageMatchesSandbox({ identity, sandbox: input.sandbox })) {
+      freshAuthoredPackages.add(name);
+      continue;
+    }
+
+    const desiredMetadata = desired.get(name);
+    const previousMetadata = previous.get(name);
+    const baseline = desiredMetadata?.authoredBaseline ?? previousMetadata?.authoredBaseline;
+    const baselineSandboxId =
+      desiredMetadata?.authoredBaselineSandboxId ?? previousMetadata?.authoredBaselineSandboxId;
+    if (baseline === undefined || baselineSandboxId !== input.sandbox.id) {
+      throw new Error(
+        `Cannot retire dynamic skill "${name}" over a compiled authored package without verified current-generation authored bytes.`,
       );
-    }),
-  );
+    }
+  }
   const filesystemRemovePackages = new Set(
     [...removePackages].filter((name) => !freshAuthoredPackages.has(name)),
   );

@@ -81,6 +81,28 @@ interface DynamicSkillResolution {
   readonly named: readonly { name: string; entry: SkillPackageDefinition }[];
 }
 
+type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
+
+function mergeDynamicSkillRecoveryManifest(
+  previous: DynamicSkillManifest,
+  next: DynamicSkillManifest,
+): Record<string, readonly DurableDynamicSkillMetadata[]> {
+  const nextNames = new Set(
+    Object.values(next)
+      .flat()
+      .map((skill) => skill.name),
+  );
+  const recovery: Record<string, readonly DurableDynamicSkillMetadata[]> = {};
+  for (const [resolverSlug, skills] of Object.entries(previous)) {
+    const retired = skills.filter((skill) => !nextNames.has(skill.name));
+    if (retired.length > 0) recovery[resolverSlug] = retired;
+  }
+  for (const [resolverSlug, skills] of Object.entries(next)) {
+    recovery[resolverSlug] = [...(recovery[resolverSlug] ?? []), ...skills];
+  }
+  return recovery;
+}
+
 async function formatDynamicSkillAnnouncement(input: {
   readonly ctx: ContextContainer;
   readonly manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
@@ -124,17 +146,21 @@ export async function dispatchDynamicSkillEvent(input: {
   let previousManifest = ctx.get(DynamicSkillManifestKey) ?? {};
   let activeManifest = previousManifest;
   const authoredPackageIdentities = new Map(
-    (ctx.get(BundleKey)?.resolvedAgent.skills ?? []).map((skill) => [
-      skill.name,
+    (ctx.get(BundleKey)?.resolvedAgent.skills ?? []).flatMap((skill) =>
       skill.contentDigest === undefined || skill.relativePaths === undefined
-        ? undefined
-        : {
-            contentDigest: skill.contentDigest,
-            description: skill.description,
-            name: skill.name,
-            relativePaths: skill.relativePaths,
-          },
-    ]),
+        ? []
+        : [
+            [
+              skill.name,
+              {
+                contentDigest: skill.contentDigest,
+                description: skill.description,
+                name: skill.name,
+                relativePaths: skill.relativePaths,
+              },
+            ] as const,
+          ],
+    ),
   );
 
   const loadMaterializationState = async (): Promise<void> => {
@@ -175,6 +201,7 @@ export async function dispatchDynamicSkillEvent(input: {
 
     if (sandbox !== null && sandbox !== undefined && markerRead !== undefined) {
       await materializeDynamicSkillUpdates({
+        authoredPackageIdentities,
         markerMs,
         markerRead,
         nextManifest,
@@ -211,6 +238,7 @@ export async function dispatchDynamicSkillEvent(input: {
     if (sandbox !== null && isFullRematerialization(markerRead)) {
       if (sandbox !== undefined && markerRead !== undefined) {
         await materializeDynamicSkillUpdates({
+          authoredPackageIdentities,
           markerMs,
           markerRead,
           nextManifest: {},
@@ -231,6 +259,7 @@ export async function dispatchDynamicSkillEvent(input: {
         markerRead.status === "missing"
       ) {
         await materializeDynamicSkillUpdates({
+          authoredPackageIdentities,
           markerMs,
           markerRead,
           nextManifest: previousManifest,
@@ -372,8 +401,12 @@ export async function dispatchDynamicSkillEvent(input: {
     // Record trusted dynamic ownership before the first write. If a first
     // materialization fails partway through, the next dispatch can clean only
     // that owned package without treating authored packages as disposable.
-    ctx.set(DynamicSkillManifestKey, newManifest);
+    ctx.set(
+      DynamicSkillManifestKey,
+      mergeDynamicSkillRecoveryManifest(previousManifest, newManifest),
+    );
     materialization = await materializeDynamicSkillUpdates({
+      authoredPackageIdentities,
       markerMs,
       markerRead,
       nextManifest: newManifest,

@@ -124,6 +124,24 @@ function assertMatchesAuthoredSkillPackageIdentity(input: {
   }
 }
 
+export async function authoredSkillPackageMatchesSandbox(input: {
+  readonly identity: AuthoredSkillPackageIdentity;
+  readonly sandbox: SandboxSession;
+}): Promise<boolean> {
+  const skillRoot = await resolveSandboxSkillRoot({ sandbox: input.sandbox });
+  let files: readonly NormalizedSkillPackageFile[];
+  try {
+    files = await readFiles({
+      root: `${skillRoot}/${input.identity.name}`,
+      sandbox: input.sandbox,
+    });
+    assertMatchesAuthoredSkillPackageIdentity({ files, identity: input.identity });
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 export async function readVerifiedAuthoredSkillBaseline(input: {
   readonly baseline: readonly DurableDynamicSkillBaselineFileMetadata[];
   readonly name: string;
