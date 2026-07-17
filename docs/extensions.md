@@ -114,9 +114,7 @@ The manifest contains only its format, the diagnostic eve build version, and the
 
 ### Workspace development
 
-`eve dev` builds mounted source-backed workspace extensions before it compiles the consuming agent. It continues to discover and execute the generated dist tree, so local development exercises the same package shape that gets published.
-
-When a file under an extension's declared `source` root changes, eve rebuilds only that extension and activates the result through the normal transactional development reload. A failed extension build leaves the previous dist and active agent generation in place. Generated output is ignored by the watcher, so publishing the new dist does not trigger a rebuild loop.
+During local development, `eve dev` automatically rebuilds mounted workspace extensions when their source changes.
 
 ### Dependencies
 
