@@ -2,7 +2,7 @@ import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
-import { isEveSchema, toEveSchema } from "#shared/eve-schema.js";
+import { isToolSchema, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
@@ -48,16 +48,12 @@ export async function resolveToolDefinition(
       resolvedRecord.execute,
       describe(definition, "to provide an execute function"),
     ) as ResolvedToolDefinition["execute"];
-    const inputSchema = isEveSchema(resolvedRecord.inputSchema)
+    const inputSchema = isToolSchema(resolvedRecord.inputSchema)
       ? resolvedRecord.inputSchema
-      : definition.inputSchema === null
-        ? null
-        : toEveSchema(definition.inputSchema);
-    const outputSchema = isEveSchema(resolvedRecord.outputSchema)
+      : toInputSchema(definition.inputSchema);
+    const outputSchema = isToolSchema(resolvedRecord.outputSchema)
       ? resolvedRecord.outputSchema
-      : definition.outputSchema === undefined
-        ? undefined
-        : toEveSchema(definition.outputSchema, "output");
+      : toOutputSchema(definition.outputSchema);
 
     return {
       description: definition.description,

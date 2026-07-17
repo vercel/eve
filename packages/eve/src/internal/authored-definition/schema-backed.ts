@@ -10,7 +10,11 @@ import {
   expectString,
 } from "#internal/authored-module.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
-import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
+import {
+  serializeInputSchema,
+  serializeOutputSchema,
+  type ToolSchemaSource,
+} from "#shared/tool-schema.js";
 import {
   isDynamicSentinel,
   rejectDynamicSentinelFallback,
@@ -81,11 +85,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     message,
   );
   const inputSchema =
-    record.inputSchema === undefined ? null : normalizeJsonSchemaDefinition(record.inputSchema);
-  const outputSchema =
-    record.outputSchema === undefined
-      ? undefined
-      : normalizeJsonSchemaDefinition(record.outputSchema, "output");
+    record.inputSchema === undefined
+      ? null
+      : serializeInputSchema(record.inputSchema as ToolSchemaSource);
+  const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
     execute: expectFunction(record.execute, message),

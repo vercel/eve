@@ -1,7 +1,7 @@
 import { RuntimeRegistry } from "#internal/runtime-registry.js";
 import type { PreparedRuntimeAuthoredTool } from "#runtime/sessions/turn.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { serializeEveSchema } from "#shared/eve-schema.js";
+import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
 
 /**
  * One executable authored tool tracked by the runtime-owned registry.
@@ -75,15 +75,11 @@ async function createPreparedRuntimeTool(
 ): Promise<PreparedRuntimeAuthoredTool> {
   return {
     description: definition.description,
-    inputSchema:
-      definition.inputSchema === null ? null : serializeEveSchema(definition.inputSchema),
+    inputSchema: serializeInputSchema(definition.inputSchema),
     kind: "authored-tool",
     logicalPath: definition.logicalPath,
     name: definition.name,
-    outputSchema:
-      definition.outputSchema === undefined
-        ? undefined
-        : serializeEveSchema(definition.outputSchema, "output"),
+    outputSchema: serializeOutputSchema(definition.outputSchema),
     sourceId: definition.sourceId,
   };
 }

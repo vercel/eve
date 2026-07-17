@@ -26,7 +26,7 @@ import type {
   ConnectionToolMetadata,
 } from "#runtime/connections/types.js";
 import { isObject } from "#shared/guards.js";
-import { toEveSchema } from "#shared/eve-schema.js";
+import { toInputSchema, type ToolSchema } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
@@ -160,9 +160,9 @@ export class OpenApiConnectionClient implements ConnectionClient {
     const tools: ToolSet = {};
 
     for (const operation of selected) {
-      let inputSchema: ReturnType<typeof toEveSchema>;
+      let inputSchema: ToolSchema;
       try {
-        inputSchema = toEveSchema(operation.inputSchema as JsonObject);
+        inputSchema = toInputSchema(operation.inputSchema as JsonObject);
       } catch (error) {
         log.warn("omitting OpenAPI operation with an invalid input schema", {
           connectionName: this.#connection.connectionName,

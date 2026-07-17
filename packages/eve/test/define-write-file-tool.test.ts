@@ -6,7 +6,7 @@ import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import { defineWriteFileTool } from "../src/public/tools/define-write-file-tool.js";
-import { normalizeJsonSchemaDefinition } from "../src/shared/json-schema.js";
+import { serializeInputSchema } from "../src/shared/tool-schema.js";
 import {
   createReadFileStamp,
   ReadFileStateKey,
@@ -59,7 +59,7 @@ describe("defineWriteFileTool", () => {
     expect(tool.description).toBe("Write a file to the workspace sandbox.");
     expect(typeof tool.execute).toBe("function");
 
-    const schema = normalizeJsonSchemaDefinition(tool.inputSchema);
+    const schema = serializeInputSchema(tool.inputSchema);
     expect(schema).toMatchObject({
       properties: {
         content: { type: "string" },

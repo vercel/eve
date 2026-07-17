@@ -7,7 +7,7 @@ import {
 } from "ai";
 import { Factuality } from "autoevals";
 
-import { toEveSchema } from "#shared/eve-schema.js";
+import { toInputSchema } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -132,7 +132,7 @@ function convertTools(tools: readonly ChatTool[] | undefined): ToolSet {
     if (item.type !== "function" || item.function?.name === undefined) continue;
     result[item.function.name] = {
       description: item.function.description,
-      inputSchema: toEveSchema((item.function.parameters ?? {}) as JsonObject),
+      inputSchema: toInputSchema((item.function.parameters ?? {}) as JsonObject),
     };
   }
   return result;

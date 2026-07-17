@@ -5,7 +5,7 @@ import {
   getAllFrameworkToolNames,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
-import { isEveSchema } from "#shared/eve-schema.js";
+import { isToolSchema } from "#shared/tool-schema.js";
 
 describe("framework-tools/index", () => {
   it("returns every known framework tool name regardless of config", () => {
@@ -42,7 +42,7 @@ describe("framework-tools/index", () => {
   it("uses one validated runtime schema for every framework-defined input", () => {
     for (const tool of getAllFrameworkToolDefinitions()) {
       if (tool.inputSchema !== null) {
-        expect(isEveSchema(tool.inputSchema), `${tool.name} has a validated input schema`).toBe(
+        expect(isToolSchema(tool.inputSchema), `${tool.name} has a validated input schema`).toBe(
           true,
         );
       }

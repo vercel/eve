@@ -6,7 +6,7 @@ import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import { defineBashTool } from "../src/public/tools/define-bash-tool.js";
-import { normalizeJsonSchemaDefinition } from "../src/shared/json-schema.js";
+import { serializeInputSchema } from "../src/shared/tool-schema.js";
 
 describe("defineBashTool", () => {
   it("produces a schema that never exposes a sandbox property to the model", () => {
@@ -16,7 +16,7 @@ describe("defineBashTool", () => {
     expect(tool.description).toBe("Execute a shell command in the workspace sandbox.");
     expect(typeof tool.execute).toBe("function");
 
-    const schema = normalizeJsonSchemaDefinition(tool.inputSchema);
+    const schema = serializeInputSchema(tool.inputSchema);
     expect(schema).toMatchObject({
       properties: { command: { type: "string" } },
       required: ["command"],

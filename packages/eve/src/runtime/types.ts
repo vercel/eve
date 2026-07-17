@@ -35,7 +35,7 @@ import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
-import type { EveSchema } from "#shared/eve-schema.js";
+import type { ToolSchema } from "#shared/tool-schema.js";
 
 /**
  * Runtime-owned source ref describing one additive config module import.
@@ -160,11 +160,11 @@ export type ResolvedToolDefinition = Readonly<
      * Validated runtime input schema. Compiled and durable JSON Schemas are
      * rehydrated before entering this runtime-owned definition.
      */
-    readonly inputSchema: EveSchema | null;
+    readonly inputSchema: ToolSchema | null;
     /**
      * Optional validated runtime output schema.
      */
-    readonly outputSchema?: EveSchema;
+    readonly outputSchema?: ToolSchema;
     /**
      * Optional per-tool approval gate. When set, determines whether user
      * approval is required before executing this tool. See

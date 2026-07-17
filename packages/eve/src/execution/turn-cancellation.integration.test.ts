@@ -24,7 +24,7 @@ import type { Agent } from "#public/definitions/channel.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
-import { toEveSchema } from "#shared/eve-schema.js";
+import { toInputSchema } from "#shared/tool-schema.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -74,7 +74,7 @@ function buildWaitForCancelTool(onStart: () => void, onAbort: () => void): Resol
         ctx.abortSignal.addEventListener("abort", abort, { once: true });
       });
     },
-    inputSchema: toEveSchema({ additionalProperties: false, properties: {}, type: "object" }),
+    inputSchema: toInputSchema({ additionalProperties: false, properties: {}, type: "object" }),
     logicalPath: `tools/${WAIT_TOOL_NAME}.ts`,
     name: WAIT_TOOL_NAME,
     sourceId: `tools/${WAIT_TOOL_NAME}.ts`,

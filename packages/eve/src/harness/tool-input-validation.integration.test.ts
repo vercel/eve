@@ -9,7 +9,7 @@ import {
   ASK_QUESTION_INPUT_SCHEMA,
   ASK_QUESTION_TOOL_DEFINITION,
 } from "#runtime/framework-tools/ask-question.js";
-import { serializeEveSchema } from "#shared/eve-schema.js";
+import { serializeInputSchema } from "#shared/tool-schema.js";
 
 const usage = {
   inputTokens: {
@@ -109,7 +109,7 @@ describe("framework tool input validation (real AI SDK)", () => {
         tools: [
           {
             description: ASK_QUESTION_TOOL_DEFINITION.description,
-            inputSchema: serializeEveSchema(ASK_QUESTION_INPUT_SCHEMA),
+            inputSchema: serializeInputSchema(ASK_QUESTION_INPUT_SCHEMA),
             name: "ask_question",
           },
         ],

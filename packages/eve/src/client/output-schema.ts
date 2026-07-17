@@ -1,7 +1,7 @@
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { HandleMessageStreamEvent, ResultCompletedStreamEvent } from "#protocol/message.js";
-import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
+import { serializeOutputSchema } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -11,7 +11,7 @@ import type { JsonObject } from "#shared/json.js";
 export function normalizeOutputSchemaForRequest<TOutput>(
   schema: StandardJSONSchemaV1<unknown, TOutput> | JsonObject | undefined,
 ): JsonObject | undefined {
-  return schema === undefined ? undefined : normalizeJsonSchemaDefinition(schema, "output");
+  return serializeOutputSchema(schema);
 }
 
 /**

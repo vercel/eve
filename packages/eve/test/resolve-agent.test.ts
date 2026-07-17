@@ -9,7 +9,7 @@ import {
 import type { CompiledModuleMap } from "../src/compiler/module-map.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
 import { ResolveAgentError, resolveAgent } from "../src/runtime/resolve-agent.js";
-import { serializeEveSchema } from "../src/shared/eve-schema.js";
+import { serializeInputSchema } from "../src/shared/tool-schema.js";
 
 describe("resolveAgent", () => {
   it("hydrates compiled authored metadata and attaches tool execute functions", async () => {
@@ -261,7 +261,7 @@ describe("resolveAgent", () => {
       sourceId: "tools/get-weather.mjs",
       sourceKind: "module",
     });
-    expect(serializeEveSchema(resolved.tools[0]!.inputSchema!)).toMatchObject({
+    expect(serializeInputSchema(resolved.tools[0]!.inputSchema!)).toMatchObject({
       properties: {
         city: {
           type: "string",

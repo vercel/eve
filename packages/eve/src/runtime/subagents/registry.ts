@@ -3,7 +3,7 @@ import { z } from "#compiled/zod/index.js";
 import { RuntimeRegistry, RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { ResolvedRuntimeDelegationNode } from "#runtime/types.js";
-import { serializeEveSchema } from "#shared/eve-schema.js";
+import { serializeInputSchema } from "#shared/tool-schema.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -23,7 +23,7 @@ export interface RuntimeSubagentRegistry {
 }
 
 /**
- * Stable JSON Schema lowered onto every subagent tool. Subagents always
+ * Stable input schema lowered onto every subagent tool. Subagents always
  * accept one free-form `message` string from the parent agent.
  */
 export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
@@ -39,6 +39,8 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
     )
     .optional(),
 });
+
+const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(SUBAGENT_TOOL_INPUT_SCHEMA);
 
 /**
  * Builds the runtime-owned registry for the resolved subagents visible from one
@@ -97,7 +99,7 @@ function createPreparedRuntimeSubagentTool(
 ): PreparedRuntimeDelegationTool {
   return {
     description: definition.description,
-    inputSchema: serializeEveSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
+    inputSchema: SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
     kind: definition.kind,
     logicalPath: definition.logicalPath,
     name: definition.name,
