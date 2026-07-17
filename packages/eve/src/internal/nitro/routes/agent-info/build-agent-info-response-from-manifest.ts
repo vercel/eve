@@ -1,27 +1,24 @@
-import {
-  getAllFrameworkToolNames,
-  getFrameworkToolDefinitions,
-} from "#runtime/framework-tools/index.js";
+import { getAllFrameworkToolNames } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
 } from "#runtime/framework-channels/index.js";
 import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
 import type { AgentInfoManifestData } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
-import type { ResolvedChannelDefinition, ResolvedToolDefinition } from "#runtime/types.js";
+import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type {
   AgentInfoFrameworkChannelEntry,
-  AgentInfoFrameworkToolEntry,
   AgentInfoResponse,
 } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import {
+  buildFrameworkToolInfo,
+  getRootDelegationToolNames,
   renderChannel,
   renderDynamicResolver,
   renderSchedule,
   renderSubagent,
-  renderTool,
   toSource,
 } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import {
@@ -45,13 +42,7 @@ export function buildAgentInfoResponseFromManifest(
   const disabledFrameworkTools = new Set(manifest.disabledFrameworkTools);
   const allFrameworkToolNames = getAllFrameworkToolNames();
   const allFrameworkChannelNames = getAllFrameworkChannelNames();
-  const frameworkToolDefinitions = getFrameworkToolDefinitions({
-    hasConnections: manifest.connections.length > 0,
-  });
   const frameworkChannelDefinitions = getFrameworkChannelDefinitions();
-  const activeFrameworkTools = frameworkToolDefinitions.filter(
-    (tool) => !authoredToolNames.has(tool.name) && !disabledFrameworkTools.has(tool.name),
-  );
   const authoredTools = manifest.tools.map((tool) => ({
     ...toSource(tool),
     description: tool.description,
@@ -73,6 +64,11 @@ export function buildAgentInfoResponseFromManifest(
     (channel) =>
       !authoredChannelNames.has(channel.name) && !disabledFrameworkChannelNames.has(channel.name),
   );
+  const frameworkToolInfo = buildFrameworkToolInfo({
+    authoredToolNames,
+    delegationToolNames: getRootDelegationToolNames(manifest),
+    disabledFrameworkToolNames: disabledFrameworkTools,
+  });
   const renderedAuthoredChannels = authoredChannels.map((channel) => ({
     ...toSource(channel),
     adapterKind: channel.adapterKind,
@@ -201,15 +197,7 @@ export function buildAgentInfoResponseFromManifest(
       total: manifest.subagents.length,
     },
     tools: {
-      available: [
-        ...activeFrameworkTools.map((tool) =>
-          renderTool(tool as ResolvedToolDefinition, {
-            origin: "framework",
-            replacesFrameworkTool: false,
-          }),
-        ),
-        ...authoredTools,
-      ],
+      available: [...frameworkToolInfo.available, ...authoredTools],
       authored: authoredTools,
       disabledFramework: [...manifest.disabledFrameworkTools],
       dynamic: [
@@ -220,25 +208,7 @@ export function buildAgentInfoResponseFromManifest(
           renderDynamicResolver(resolver, { origin: "authored" }),
         ),
       ],
-      framework: frameworkToolDefinitions.map((tool) => {
-        const replacedByAuthoredTool = authoredToolNames.has(tool.name);
-        const disabledByAuthor = disabledFrameworkTools.has(tool.name);
-        const status: AgentInfoFrameworkToolEntry["status"] = disabledByAuthor
-          ? "disabled"
-          : replacedByAuthoredTool
-            ? "replaced"
-            : "active";
-
-        return {
-          ...renderTool(tool as ResolvedToolDefinition, {
-            origin: "framework",
-            replacesFrameworkTool: false,
-          }),
-          disabledByAuthor,
-          replacedByAuthoredTool,
-          status,
-        };
-      }),
+      framework: frameworkToolInfo.framework,
       reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
     },
     version: 1,

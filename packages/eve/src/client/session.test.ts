@@ -12,15 +12,16 @@ function createSession(
   options: {
     readonly maxReconnectAttempts?: number;
     readonly preserveCompletedSessions?: boolean;
+    readonly redirect?: "error" | "follow" | "manual";
+    readonly resolveHeaders?: () => Promise<Headers>;
   } = {},
 ) {
   const context: ConstructorParameters<typeof ClientSession>[0] = {
     host: "https://eve.test",
     maxReconnectAttempts: options.maxReconnectAttempts ?? 0,
     preserveCompletedSessions: options.preserveCompletedSessions ?? false,
-    async resolveHeaders() {
-      return new Headers();
-    },
+    redirect: options.redirect,
+    resolveHeaders: options.resolveHeaders ?? (async () => new Headers()),
   };
 
   return new ClientSession(context, state);
@@ -52,6 +53,64 @@ function createStreamResponse(events: readonly unknown[]) {
 }
 
 describe("ClientSession", () => {
+  it("cancels an accepted turn before its stream settles with freshly resolved auth", async () => {
+    let headerResolution = 0;
+    const requests: Array<{ headers: Headers; method: string; url: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push({
+        headers: new Headers(init?.headers),
+        method: init?.method ?? "GET",
+        url,
+      });
+      if (new URL(url).pathname.endsWith("/cancel")) {
+        return Response.json(
+          { ok: true, sessionId: "session_1", status: "accepted" },
+          { status: 202 },
+        );
+      }
+      return createAcceptedResponse();
+    });
+    const session = createSession(
+      { streamIndex: 0 },
+      {
+        redirect: "error",
+        resolveHeaders: async () => {
+          headerResolution += 1;
+          return new Headers({ authorization: `Bearer token-${headerResolution}` });
+        },
+      },
+    );
+
+    const turn = await session.send("wait");
+    const cancelled = await session.cancel();
+
+    expect(turn.sessionId).toBe("session_1");
+    expect(session.state.sessionId).toBe("session_1");
+    expect(cancelled).toEqual({ sessionId: "session_1", status: "accepted" });
+    expect(requests).toHaveLength(2);
+    expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/session/session_1/cancel");
+    expect(requests[1]!.method).toBe("POST");
+    expect(requests[1]!.headers.get("authorization")).toBe("Bearer token-2");
+  });
+
+  it("rejects cancellation before a session has started", async () => {
+    await expect(createSession().cancel()).rejects.toThrow("Session has no session ID");
+  });
+
+  it("rejects a cancel response for a different session", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { ok: true, sessionId: "another-session", status: "accepted" },
+        { status: 202 },
+      ),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
+  });
+
   it("serializes clientContext when sending a create-session message", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession();
@@ -340,5 +399,64 @@ describe("ClientSession", () => {
     }
 
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("retries a transient fetch failure while reopening an active turn stream", async () => {
+    const encoder = new TextEncoder();
+    const streamUrls: string[] = [];
+    let streamRequest = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      streamUrls.push(
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url,
+      );
+      streamRequest += 1;
+
+      if (streamRequest === 1) {
+        let emitted = false;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (!emitted) {
+                emitted = true;
+                controller.enqueue(
+                  encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+                );
+                return;
+              }
+              controller.error(new Error("socket disconnected"));
+            },
+          }),
+        );
+      }
+
+      if (streamRequest === 2) {
+        throw new TypeError("fetch failed");
+      }
+
+      return createStreamResponse([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:test", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession(undefined, { maxReconnectAttempts: 2 });
+
+    const eventTypes: string[] = [];
+    for await (const event of await session.send("first")) {
+      eventTypes.push(event.type);
+    }
+
+    expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(streamUrls.map((url) => new URL(url).searchParams.get("startIndex"))).toEqual([
+      null,
+      "1",
+      "1",
+    ]);
   });
 });

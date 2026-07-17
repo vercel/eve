@@ -42,6 +42,7 @@ export type {
   AgentInfoSubagentEntry,
   AgentInfoToolEntry,
   AgentInfoTools,
+  CancelSessionResult,
   ClientAuth,
   ClientOptions,
   ClientRedirectPolicy,

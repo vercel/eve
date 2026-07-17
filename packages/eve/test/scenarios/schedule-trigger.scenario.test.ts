@@ -57,6 +57,12 @@ interface CapturedRun {
 
 function createCapturingRuntime(captured: CapturedRun[]): Runtime {
   return {
+    async cancelTurn() {
+      throw new Error("cancelTurn should not be called in this scenario");
+    },
+    async resolveSession() {
+      throw new Error("resolveSession should not be called in this scenario");
+    },
     async run(input) {
       captured.push({
         adapter: input.adapter,

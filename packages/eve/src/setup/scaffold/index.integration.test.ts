@@ -10,6 +10,7 @@ import {
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
+  resolveVercelHostFrameworkPreset,
   scaffoldBaseProject,
   scaffoldExtensionProject,
   type WebPackageVersions,
@@ -210,23 +211,13 @@ describe("ensureChannel", () => {
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
+    // withEve() generates the eve service + /eve/v1/* routes into
+    // .vercel/output/config.json at build time, so the scaffold only writes a
+    // minimal vercel.json rather than a services block the platform rejects.
     await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toBe(
       `${JSON.stringify(
         {
           $schema: "https://openapi.vercel.sh/vercel.json",
-          experimentalServices: {
-            web: {
-              entrypoint: ".",
-              framework: "nextjs",
-              routePrefix: "/",
-            },
-            eve: {
-              buildCommand: "eve build",
-              entrypoint: ".",
-              framework: "eve",
-              routePrefix: "/_eve_internal/eve",
-            },
-          },
         },
         null,
         2,
@@ -345,18 +336,15 @@ describe("ensureChannel", () => {
     );
   });
 
-  test("preserves existing Vercel configuration when adding Web Chat services", async () => {
+  test("preserves existing Vercel configuration when adding Web Chat", async () => {
     const projectRoot = await createTempDir();
     await writeFile(
       join(projectRoot, "package.json"),
       `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
       "utf8",
     );
-    await writeFile(
-      join(projectRoot, "vercel.json"),
-      `${JSON.stringify({ regions: ["iad1"], experimentalServices: { worker: { entrypoint: "worker.ts" } } }, null, 2)}\n`,
-      "utf8",
-    );
+    const existingVercelJson = `${JSON.stringify({ regions: ["iad1"], rewrites: [] }, null, 2)}\n`;
+    await writeFile(join(projectRoot, "vercel.json"), existingVercelJson, "utf8");
 
     await ensureChannel({
       projectRoot,
@@ -364,16 +352,12 @@ describe("ensureChannel", () => {
       webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
     });
 
-    await expect(
-      readFile(join(projectRoot, "vercel.json"), "utf8").then((value) => JSON.parse(value)),
-    ).resolves.toMatchObject({
-      regions: ["iad1"],
-      experimentalServices: {
-        worker: { entrypoint: "worker.ts" },
-        web: { framework: "nextjs" },
-        eve: { framework: "eve" },
-      },
-    });
+    // withEve() owns eve service generation, so the scaffold leaves an existing
+    // vercel.json completely untouched — no injected services block, no $schema
+    // rewrite, no reformatting of a file the user manages.
+    await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toBe(
+      existingVercelJson,
+    );
   });
 
   test("scaffolds Web Chat without Vercel Services for preview-only targets", async () => {
@@ -696,6 +680,42 @@ describe("hasVercelHostFramework", () => {
     );
 
     await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+});
+
+describe("resolveVercelHostFrameworkPreset", () => {
+  test("reads as no host framework when package.json is missing", async () => {
+    const projectRoot = await createTempDir();
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
+  });
+
+  test.each([
+    ["Next.js", { next: "16.2.6" }, "nextjs"],
+    ["Nuxt", { nuxt: "4.3.3" }, "nuxtjs"],
+    ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
+    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
+    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
+  ])("maps %s to its Vercel Framework Preset slug", async (_label, dependencies, preset) => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", devDependencies: dependencies }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
+  });
+
+  test("returns undefined for a standalone eve project", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
   });
 });
 

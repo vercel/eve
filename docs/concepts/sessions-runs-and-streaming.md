@@ -89,6 +89,19 @@ If the session is waiting on a human-in-the-loop approval, a matching text reply
 
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
+## Cancel the in-flight turn
+
+POST to the session's cancel endpoint to stop the turn that is currently running. The body is optional; pass `turnId` (stamped on every turn-scoped stream event) to scope the cancel to the turn you observed:
+
+```bash
+curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel
+# {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
+```
+
+`"accepted"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+
+Custom channel routes request the same cancellation without knowing the session id: the `cancel` route helper is addressed by the channel-local continuation token, and `Session.cancel()` by session id. See [custom channels](../channels/custom#cancel-a-turn).
+
 ## Reconnect and rewind
 
 The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.

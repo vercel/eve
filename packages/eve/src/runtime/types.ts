@@ -146,7 +146,8 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
 };
 
 /**
- * Runtime-owned authored tool definition resolved from a compiled module map.
+ * Runtime-owned tool definition resolved from a compiled module map or
+ * declared by the framework catalog.
  * A tool without `execute` is surfaced to the client and never executed by eve.
  */
 export type ResolvedToolDefinition = Readonly<

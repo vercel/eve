@@ -1,6 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -17,6 +18,18 @@ export type RunSessionLimits = Pick<
   AgentLimitsDefinition,
   "maxInputTokensPerSession" | "maxOutputTokensPerSession"
 >;
+
+/** Identifies the session turn to cancel. */
+export interface CancelTurnInput {
+  readonly sessionId: string;
+  /** Limits the request to the turn the caller observed. */
+  readonly turnId?: string;
+}
+
+/** Result of requesting turn cancellation. Both statuses are successful. */
+export interface CancelTurnResult {
+  readonly status: CancelTurnStatus;
+}
 
 // ---------------------------------------------------------------------------
 // Lineage
@@ -367,10 +380,20 @@ export interface Runtime {
    */
   run(input: RunInput): Promise<RunHandle>;
 
+  /** Requests cancellation of a session's in-flight turn. */
+  cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+
   /**
    * Delivers a follow-up message to a parked session.
    */
   deliver(input: DeliverInput): Promise<{ sessionId: string }>;
+
+  /**
+   * Resolves the session that currently owns a continuation token without
+   * delivering input or starting a run. Returns `undefined` when no session
+   * owns the token.
+   */
+  resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined>;
 
   /**
    * Returns a readable stream of lifecycle events for an existing session.

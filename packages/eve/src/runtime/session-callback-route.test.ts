@@ -177,6 +177,9 @@ describe("session callback route", () => {
 function createRouteContext(params: Record<string, string>): RouteContext {
   return {
     agent: {
+      async cancelTurn() {
+        throw new Error("unexpected cancelTurn");
+      },
       async deliver() {
         throw new Error("unexpected deliver");
       },

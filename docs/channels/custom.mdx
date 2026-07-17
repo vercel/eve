@@ -47,13 +47,43 @@ export default defineChannel({
 Declare routes with the `POST()` and `GET()` helpers. Each route handler receives the raw `Request` and a helpers object:
 
 - `send(message, { auth, continuationToken, state?, title? })` starts or resumes a session. `title` overrides the new workflow session's display title without changing the model message. Returns a `Session`.
-- `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming.
+- `cancel({ continuationToken, turnId? })` requests cancellation of the active turn on the session that owns the token. See [Cancel a turn](#cancel-a-turn).
+- `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming and `cancel({ turnId? })` for session-id-addressed cancellation.
 - `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
 - `params` holds route parameters extracted from the path pattern.
 - `waitUntil(promise)` extends the request lifetime for background work.
 - `requestIp` is the client IP, or `null` when the host cannot provide it.
 
 Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
+
+## Cancel a turn
+
+A stop route cancels a session's in-flight turn with the `cancel` helper, addressed by the same channel-local continuation token used with `send()`:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/threads/:threadId/stop", async (_req, { cancel, params }) => {
+      const result = await cancel({ continuationToken: params.threadId });
+      return Response.json(result);
+    }),
+  ],
+});
+```
+
+Both result statuses are successful. `"accepted"` means the cancellation request was consumed, not that the observed turn will cancel; confirmation is `turn.cancelled` followed by `session.waiting` on the event stream. `"no_active_turn"` covers an unknown token and a session with nothing to cancel — idle, parked, or already completed.
+
+Semantics:
+
+- `cancel` never starts a session, sends input, or clears history. The session parks and accepts the next message normally.
+- Pass `turnId` (stamped on every turn-scoped stream event) to guard against stale stop requests. A mismatched guard is consumed as a benign no-op and cannot cancel a newer turn.
+- The helper addresses only this channel's sessions; it cannot cancel a session owned by another channel.
+- Cancellation stops work without replacement input. Partial streamed output and completed side effects remain observable, and active local or remote subagents receive cancellation recursively.
+- The route owns authentication of the inbound stop request, exactly as for `send()`.
+
+When you already hold a `Session` — returned by `send()` or `getSession(sessionId)` — call `session.cancel({ turnId? })` to request the same cancellation addressed by session id.
 
 ## CORS
 
@@ -95,7 +125,7 @@ export default defineChannel({
 });
 ```
 
-`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
+`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `cancel`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
 
 ### Node upgrade server escape hatch
 

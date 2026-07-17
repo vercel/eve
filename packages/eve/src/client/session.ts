@@ -1,7 +1,9 @@
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
+import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
+  createEveCancelTurnRoutePath,
   createEveContinueSessionRoutePath,
 } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
@@ -12,6 +14,7 @@ import { normalizeOutputSchemaForRequest } from "#client/output-schema.js";
 import { advanceSession } from "#client/session-utils.js";
 import { createClientUrl } from "#client/url.js";
 import type {
+  CancelSessionResult,
   ClientRedirectPolicy,
   SendTurnInput,
   SendTurnPayload,
@@ -52,8 +55,9 @@ export class ClientSession {
   }
 
   /**
-   * Current session cursor. Always reflects the latest state after each
-   * completed turn. Serialize this to persist and resume later.
+   * Current session cursor. The assigned session ID appears as soon as a send
+   * is accepted; the continuation token and stream index advance as its event
+   * stream is consumed. Serialize this to persist and resume later.
    */
   get state(): SessionState {
     return this.#state;
@@ -72,11 +76,71 @@ export class ClientSession {
     const postResult = await this.#postTurn(payload, state);
     const { continuationToken, sessionId } = postResult;
 
+    // Cancellation and observation can begin as soon as the POST is accepted,
+    // before the response stream reaches a turn boundary.
+    if (this.#state === state) {
+      this.#state = { ...state, sessionId };
+    }
+
     return new MessageResponse<TOutput>({
       continuationToken,
       createStream: () => this.#createEventStream(sessionId, continuationToken, state, payload),
       sessionId,
     });
+  }
+
+  /**
+   * Requests cooperative cancellation of this session's active turn.
+   *
+   * Both `accepted` and `no_active_turn` are successful outcomes. The latter
+   * means the active turn settled before the request arrived or the session is
+   * already parked. `turnId` limits the request to the turn the caller
+   * observed; a stale guard is consumed as a benign no-op. Credentials are
+   * resolved immediately before the request.
+   *
+   * @throws {Error} If this handle has not started or attached to a session.
+   * @throws {ClientError} If the cancel route returns a non-successful status.
+   */
+  async cancel(options?: { turnId?: string }): Promise<CancelSessionResult> {
+    const sessionId = this.#state.sessionId;
+    if (!sessionId) {
+      throw new Error("Session has no session ID. Send a message first.");
+    }
+
+    const url = createClientUrl(this.#context.host, createEveCancelTurnRoutePath(sessionId));
+    const headers = await this.#context.resolveHeaders();
+    headers.set("content-type", "application/json");
+
+    const response = await fetch(
+      url,
+      withRedirectPolicy(
+        {
+          headers,
+          method: "POST",
+          body: options ? JSON.stringify(options) : undefined,
+        },
+        this.#context.redirect,
+      ),
+    );
+    const body = await response.text();
+
+    if (!response.ok) {
+      throw new ClientError(response.status, body, response.headers);
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      throw new Error(`Cancel route returned invalid JSON (${response.status}).`);
+    }
+
+    const result = CancelTurnResponseSchema.safeParse(payload);
+    if (!result.success || result.data.sessionId !== sessionId) {
+      throw new Error(`Cancel route returned an invalid response (${response.status}).`);
+    }
+
+    return { sessionId: result.data.sessionId, status: result.data.status };
   }
 
   /**
@@ -373,4 +437,8 @@ function createHandleMessageBody(input: {
   }
 
   return body;
+}
+
+function withRedirectPolicy(init: RequestInit, redirect?: ClientRedirectPolicy): RequestInit {
+  return redirect === undefined ? init : { ...init, redirect };
 }

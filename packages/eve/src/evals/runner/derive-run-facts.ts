@@ -13,6 +13,8 @@ interface MutableToolCall {
 }
 
 interface MutableSubagentCall {
+  callId: string;
+  childSessionId?: string;
   name: string;
   remoteUrl?: string;
   output?: JsonValue;
@@ -85,6 +87,7 @@ export function deriveRunFacts(
     if (existing !== undefined) return existing;
 
     const call: MutableSubagentCall = {
+      callId,
       name,
       status: "pending",
       turnIndex: Math.max(turnIndex, 0),
@@ -126,6 +129,7 @@ export function deriveRunFacts(
 
       case "subagent.called": {
         const call = ensureSubagentCall(event.data.callId, event.data.name);
+        call.childSessionId = event.data.childSessionId;
         if (event.data.remote !== undefined) {
           call.remoteUrl = event.data.remote.url;
         }

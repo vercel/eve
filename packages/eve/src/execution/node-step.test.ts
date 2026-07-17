@@ -191,8 +191,13 @@ function createTestNode(
   turnAgent?: RuntimeTurnAgent,
   overrides: Partial<ResolvedRuntimeAgentNode> = {},
 ): ResolvedRuntimeAgentNode {
+  const agent = {} as ResolvedRuntimeAgentNode["agent"];
+
   return {
-    agent: {} as ResolvedRuntimeAgentNode["agent"],
+    agent: {
+      ...agent,
+      disabledFrameworkTools: [],
+    },
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
@@ -210,7 +215,9 @@ function createTestNode(
 
 function createNoopRuntime(): Runtime {
   return {
+    cancelTurn: vi.fn(),
     deliver: vi.fn(),
+    resolveSession: vi.fn(),
     run: vi.fn().mockRejectedValue(new Error("runtime.run should not be called in this test")),
     getEventStream: vi
       .fn()
@@ -219,7 +226,7 @@ function createNoopRuntime(): Runtime {
 }
 
 describe("createNodeHarnessTools", () => {
-  it("guides the model to split large tasks across parallel recursive agent calls", () => {
+  it("guides the model to split large tasks across parallel agent calls", () => {
     const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
@@ -228,12 +235,31 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.description).toContain("include essential context");
     expect(agentTool?.description).toContain("non-overlapping scopes");
     expect(agentTool?.description).not.toContain("eve");
-    expect(agentTool?.runtimeAction?.recursive).toBe(true);
+    expect(agentTool?.runtimeAction).toEqual({
+      kind: "subagent-call",
+      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      subagentName: "agent",
+    });
   });
 
-  it("does not give declared subagent nodes the recursive agent tool", () => {
+  it("does not give declared subagent nodes the built-in agent tool", () => {
     const tools = createNodeHarnessTools({
       node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+    });
+
+    expect(tools.has("agent")).toBe(false);
+  });
+
+  it("does not give the root node the built-in agent tool when it is disabled", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          disabledFrameworkTools: ["agent"],
+        },
+      },
     });
 
     expect(tools.has("agent")).toBe(false);
