@@ -113,11 +113,17 @@ describe("development generation artifacts", () => {
           "",
         ].join("\n"),
         "packages/shared-graph-extension/package.json": `${JSON.stringify({
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
           exports: "./extension/extension.mjs",
           name: packageName,
           type: "module",
         })}\n`,
+        "packages/shared-graph-extension/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 1,
+          builtWithEve: "0.0.0-test",
+          requires: { extension: 1, tool: 1, config: 1 },
+        }),
         "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
       },
       name: "shared-generation-extension-scope",

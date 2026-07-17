@@ -34,6 +34,7 @@ function createDeps() {
       async () => true,
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => DEPLOYED),
+    syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
   };
 }
 
@@ -168,6 +169,50 @@ describe("deployProject box", () => {
     expect(deps.runVercel.mock.calls[1]?.[0]).toEqual(["deploy", "--prod", "--yes"]);
     expect(linkOrder).toBeLessThan(installOrder);
     expect(installOrder).toBeLessThan(deployOrder);
+  });
+
+  it("reconciles the host framework preset for the linked project before deploying", async () => {
+    const deps = createDeps();
+    const box = headlessBox({ deps });
+
+    await runHeadless([box], pendingState(), silentSink);
+
+    expect(deps.syncHostFrameworkPreset).toHaveBeenCalledWith(
+      expect.anything(),
+      "/tmp/project",
+      expect.anything(),
+      expect.anything(),
+    );
+    // The preset must be aligned before the deploy subprocess so Vercel builds
+    // the right framework, and only after the project is linked.
+    const reconcileOrder = deps.syncHostFrameworkPreset.mock.invocationCallOrder[0]!;
+    const deployOrder = deps.runVercel.mock.invocationCallOrder[0]!;
+    expect(reconcileOrder).toBeLessThan(deployOrder);
+  });
+
+  it("reconciles the preset only after linking a previously unlinked directory", async () => {
+    const deps = createDeps();
+    const box = deployProject({ prompter: createPrompter(), deps });
+    const state = pendingState();
+    state.project = { kind: "unresolved" };
+
+    await runInteractive([box], state, silentSink);
+
+    // A stale preset can only be read once the directory is linked, so the
+    // reconcile must follow the interactive `vercel link`.
+    const linkOrder = deps.runVercel.mock.invocationCallOrder[0]!;
+    const reconcileOrder = deps.syncHostFrameworkPreset.mock.invocationCallOrder[0]!;
+    expect(deps.runVercel.mock.calls[0]?.[0]).toEqual(["link"]);
+    expect(linkOrder).toBeLessThan(reconcileOrder);
+  });
+
+  it("does not reconcile the preset when the deploy is skipped", async () => {
+    const deps = createDeps();
+    const box = headlessBox({ deps, skip: true });
+
+    await runHeadless([box], pendingState(), silentSink);
+
+    expect(deps.syncHostFrameworkPreset).not.toHaveBeenCalled();
   });
 
   it("throws the vercel-link human action headlessly when no project resolution exists", async () => {

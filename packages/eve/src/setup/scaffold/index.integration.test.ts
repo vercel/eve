@@ -742,9 +742,10 @@ describe("scaffoldExtensionProject", () => {
 
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
       name: string;
-      eve?: { extension?: string };
+      eve?: { extension?: { source?: string; dist?: string } };
       files?: string[];
       peerDependencies?: { eve?: string };
+      peerDependenciesMeta?: Record<string, unknown>;
       devDependencies?: Record<string, string>;
       dependencies?: Record<string, string>;
       scripts?: Record<string, string>;
@@ -752,9 +753,9 @@ describe("scaffoldExtensionProject", () => {
     };
     expect(packageJson).toMatchObject({
       name: "demo-extension",
-      eve: { extension: "./extension" },
-      files: ["extension", "dist"],
-      peerDependencies: { eve: "^0.25.0" },
+      eve: { extension: { source: "./extension", dist: "./dist/extension" } },
+      files: ["dist"],
+      peerDependencies: { eve: "*" },
       dependencies: { zod: "4.4.3" },
       scripts: {
         build: "eve extension build",
@@ -764,6 +765,7 @@ describe("scaffoldExtensionProject", () => {
       engines: { node: "24.x" },
     });
     expect(packageJson.devDependencies?.eve).toBe("^0.25.0");
+    expect(packageJson.peerDependenciesMeta).toBeUndefined();
     expect(packageJson.devDependencies?.typescript).toBe("7.0.2");
     expect(packageJson.dependencies?.ai).toBeUndefined();
     expect(packageJson.scripts?.dev).toBeUndefined();

@@ -21,6 +21,7 @@ import type {
   ResolvedChannelDefinition,
   ResolvedToolDefinition,
 } from "#runtime/types.js";
+import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
@@ -458,17 +459,20 @@ export function renderTool(
     readonly replacesFrameworkTool: boolean;
   },
 ): AgentInfoToolEntry {
+  const inputSchema = serializeInputSchema(tool.inputSchema);
+  const outputSchema = serializeOutputSchema(tool.outputSchema);
+
   return {
     ...toSource(tool),
     description: tool.description,
     hasAuth: false,
     hasExecute: tool.execute !== undefined,
     hasModelOutputProjection: tool.toModelOutput !== undefined,
-    hasOutputSchema: tool.outputSchema !== undefined && tool.outputSchema !== null,
-    inputSchema: tool.inputSchema,
+    hasOutputSchema: outputSchema !== undefined,
+    inputSchema,
     name: tool.name,
     origin: input.origin,
-    outputSchema: tool.outputSchema,
+    outputSchema,
     replacesFrameworkTool: input.replacesFrameworkTool,
     requiresApproval: tool.approval !== undefined,
   };

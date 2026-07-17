@@ -1,5 +1,3 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import { executeGrepOnSandbox, type GrepInput } from "#execution/sandbox/grep-tool.js";
 import { GREP_INPUT_SCHEMA, GREP_OUTPUT_SCHEMA } from "#runtime/framework-tools/grep.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
@@ -31,7 +29,7 @@ export function defineGrepTool(input: DefineGrepToolInput = {}): ToolDefinition 
     async execute(args, ctx) {
       return executeGrepOnSandbox(await ctx.getSandbox(), args as GrepInput);
     },
-    inputSchema: GREP_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
+    inputSchema: GREP_INPUT_SCHEMA,
     outputSchema: GREP_OUTPUT_SCHEMA,
   };
 }

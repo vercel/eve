@@ -6,6 +6,7 @@ import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import { defineGrepTool } from "../src/public/tools/define-grep-tool.js";
+import { serializeInputSchema } from "../src/shared/tool-schema.js";
 
 function createFakeAccess(
   handler: (command: string) => { exitCode: number; stderr: string; stdout: string } | null,
@@ -60,7 +61,7 @@ describe("defineGrepTool", () => {
     expect(tool.description).toBe("Search file contents by pattern in the workspace sandbox.");
     expect(typeof tool.execute).toBe("function");
 
-    const schema = tool.inputSchema as unknown as Record<string, unknown>;
+    const schema = serializeInputSchema(tool.inputSchema);
     expect(schema).toMatchObject({
       properties: { pattern: { type: "string" } },
       required: ["pattern"],

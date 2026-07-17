@@ -10,8 +10,8 @@ import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { openStreamBody, openStreamIterable } from "#client/open-stream.js";
-import { normalizeOutputSchemaForRequest } from "#client/output-schema.js";
 import { advanceSession } from "#client/session-utils.js";
+import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
 import type {
   CancelSessionResult,
@@ -182,7 +182,7 @@ export class ClientSession {
 
     const body = createHandleMessageBody({
       input,
-      outputSchema: normalizeOutputSchemaForRequest(input.outputSchema),
+      outputSchema: serializeOutputSchema(input.outputSchema),
       session,
     });
 

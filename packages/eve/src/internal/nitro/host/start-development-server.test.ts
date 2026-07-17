@@ -89,6 +89,7 @@ const mocks = vi.hoisted(() => {
         snapshotSourceRoot: "/tmp/eve-test/.eve/dev-runtime/snapshots/test/source",
         sourceRoot: "/tmp/eve-test",
       },
+      workspaceExtensions: [],
       workspace: {
         artifactsDir: "/tmp/eve-test/.eve/dev-hosts/test/artifacts",
         compilerArtifactsDir: "/tmp/eve-test/.eve/dev-hosts/test/compiler",

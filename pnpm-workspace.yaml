@@ -30,7 +30,7 @@ catalog:
   "@types/node": "25.9.1"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
-  "@vercel/connect": "0.2.2"
+  "@vercel/connect": "0.4.0"
   "@vercel/sandbox": "2.3.0"
   ai: "^7.0.26"
   next: "16.3.0-preview.6"

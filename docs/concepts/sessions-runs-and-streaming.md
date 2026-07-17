@@ -87,6 +87,12 @@ The follow-up reuses the same durable session: same history, same state.
 
 If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `deny` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
 
+If the session is waiting on `ask_question`, a follow-up message clears that pending request before the model continues. An exact option match or permitted freeform response answers the question; any other message marks the question unanswered and starts the follow-up turn.
+
+A response is stale when its request is no longer pending: the question or approval was already answered, cleared by a follow-up message, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
+
+Responses match pending requests by request ID, so a response to an older request stays a plain user message even while a different question or approval is pending. Like any follow-up message, a stale response clears a pending question and is held while an approval is pending.
+
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
 ## Cancel the in-flight turn

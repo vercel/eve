@@ -175,6 +175,13 @@ async function discoverOneSkill(input: {
         logicalSkillsPath: input.skillsLogicalPath,
         skillFileName: input.entryName,
       });
+    case "ignored-declaration":
+      return {
+        diagnostics: [],
+        logicalPath: normalizeLogicalPath(join(input.skillsLogicalPath, input.entryName)),
+        skill: null,
+        skillId: null,
+      };
     default:
       return {
         diagnostics: [

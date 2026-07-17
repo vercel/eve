@@ -276,6 +276,22 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.input.outputSchema).toBeUndefined();
   });
 
+  it("treats an empty outputSchema as absent", () => {
+    const action: RuntimeSubagentCallActionRequest = {
+      ...makeAction(),
+      input: { message: "do something", outputSchema: {} },
+    };
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action,
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+    });
+
+    expect(runInput.input.outputSchema).toBeUndefined();
+  });
+
   it("includes parentSandboxState and sandboxSessionId for self-delegation", () => {
     const sandboxState = { initialized: true, session: null };
     const session = { ...makeSession(), sandboxState };

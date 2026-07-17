@@ -1,6 +1,7 @@
+import { z } from "#compiled/zod/index.js";
+
 import { executeReadFileOnSandbox, type ReadFileInput } from "#execution/sandbox/read-file-tool.js";
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
@@ -12,44 +13,33 @@ import type { ToolExecuteOptions } from "#shared/tool-definition.js";
  * `READ_FILE_TOOL_DEFINITION` use the exact same schema object — keeping
  * model input contracts in sync without duplication.
  */
-export const READ_FILE_INPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    filePath: {
-      description: "The absolute path to the file to read.",
-      type: "string",
-    },
-    limit: {
-      description: "Maximum number of lines to return. Defaults to 2000.",
-      minimum: 1,
-      type: "integer",
-    },
-    offset: {
-      description: "1-based line number to start from. Defaults to 1.",
-      minimum: 1,
-      type: "integer",
-    },
-  },
-  required: ["filePath"],
-  type: "object",
-};
+export const READ_FILE_INPUT_SCHEMA = z.strictObject({
+  filePath: z.string().describe("The absolute path to the file to read."),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .describe("Maximum number of lines to return. Defaults to 2000.")
+    .optional(),
+  offset: z
+    .number()
+    .int()
+    .min(1)
+    .describe("1-based line number to start from. Defaults to 1.")
+    .optional(),
+});
 
 /**
  * Shared output schema used by the framework `read_file` tool and any author
  * tool constructed via {@link defineReadFileTool}.
  */
-export const READ_FILE_OUTPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    content: { type: "string" },
-    nextOffset: { minimum: 1, type: "integer" },
-    path: { type: "string" },
-    totalLines: { minimum: 0, type: "integer" },
-    truncated: { type: "boolean" },
-  },
-  required: ["content", "path", "totalLines", "truncated"],
-  type: "object",
-};
+export const READ_FILE_OUTPUT_SCHEMA = z.strictObject({
+  content: z.string(),
+  nextOffset: z.number().int().min(1).optional(),
+  path: z.string(),
+  totalLines: z.number().int().min(0),
+  truncated: z.boolean(),
+});
 
 /**
  * Framework-owned executor that delegates to the default sandbox.

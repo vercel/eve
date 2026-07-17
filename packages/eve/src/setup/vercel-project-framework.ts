@@ -1,4 +1,4 @@
-import { createPromptCommandOutput } from "#setup/cli/index.js";
+import { type ChannelSetupLog, createPromptCommandOutput } from "#setup/cli/index.js";
 import { captureVercel } from "#setup/primitives/index.js";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
@@ -243,7 +243,7 @@ function describeError(error: unknown): string {
  * is a no-op; a Vercel API failure warns rather than aborting the deploy.
  */
 export async function syncHostFrameworkPreset(
-  prompter: Prompter,
+  prompter: { log: Pick<ChannelSetupLog, "info" | "warning"> },
   projectRoot: string,
   onOutput: ReturnType<typeof createPromptCommandOutput>,
   options: VercelProjectOperationOptions,
