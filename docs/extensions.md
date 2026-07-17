@@ -118,8 +118,6 @@ The manifest contains only its format, the diagnostic eve build version, and the
 
 When a file under an extension's declared `source` root changes, eve rebuilds only that extension and activates the result through the normal transactional development reload. A failed extension build leaves the previous dist and active agent generation in place. Generated output is ignored by the watcher, so publishing the new dist does not trigger a rebuild loop.
 
-Workspace detection follows the resolved package's real filesystem path rather than requiring a `workspace:` dependency. Linked and `file:` packages inside the application's repository/workspace boundary therefore behave the same way. Dist-only packages and installed packages under `node_modules` remain immutable consumer inputs and are not rebuilt.
-
 ### Dependencies
 
 `eve` is a required wildcard **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. The extension's concrete eve version belongs in `devDependencies` for authoring types and build tooling. npm peer semver does not decide extension compatibility; eve validates the generated per-capability requirements. Do not mark the eve peer optional and do not add eve to regular `dependencies`.
