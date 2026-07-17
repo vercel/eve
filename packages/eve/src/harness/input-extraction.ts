@@ -1,18 +1,35 @@
 import type { ContentPart, ModelMessage, ToolSet, TypedToolCall } from "ai";
+import { z } from "zod";
 
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/input-requests.js";
 
-interface ToolCallDescriptor {
-  readonly input: unknown;
-  readonly toolCallId: string;
-  readonly toolName: string;
-}
+// Persisted history parts lose AI SDK typing on the storage round trip. The
+// schemas are the single source for the runtime narrowing and the static
+// types, so the checks and the annotations cannot drift apart.
+const ToolCallDescriptorSchema = z.object({
+  input: z.unknown(),
+  toolCallId: z.string(),
+  toolName: z.string(),
+});
 
-interface PersistedToolCall extends ToolCallDescriptor {
-  readonly type: "tool-call";
-}
+type ToolCallDescriptor = z.infer<typeof ToolCallDescriptorSchema>;
+
+const PersistedToolCallSchema = ToolCallDescriptorSchema.extend({
+  type: z.literal("tool-call"),
+});
+
+// Malformed optional metadata degrades to `undefined` instead of dropping the
+// whole approval request: a broken `toolCall` falls back to the sibling
+// tool-call lookup and a broken `isAutomatic` counts as not automatic.
+const ToolApprovalRequestSchema = z.object({
+  approvalId: z.string(),
+  isAutomatic: z.boolean().optional().catch(undefined),
+  toolCall: ToolCallDescriptorSchema.optional().catch(undefined),
+  toolCallId: z.string().optional().catch(undefined),
+  type: z.literal("tool-approval-request"),
+});
 
 /**
  * Extracts question input requests from tool calls that target the
@@ -98,28 +115,35 @@ function extractApprovalRequests(input: {
   const toolCallsById = new Map<string, ToolCallDescriptor>();
 
   for (const part of input.content) {
-    if (isPersistedToolCall(part)) {
-      toolCallsById.set(part.toolCallId, part);
+    const toolCall = PersistedToolCallSchema.safeParse(part);
+    if (toolCall.success) {
+      toolCallsById.set(toolCall.data.toolCallId, toolCall.data);
     }
   }
 
   for (const part of input.content) {
-    if (!isToolApprovalRequest(part)) {
+    const parsed = ToolApprovalRequestSchema.safeParse(part);
+    if (!parsed.success) {
       continue;
     }
+    const approval = parsed.data;
 
-    if (input.includedRequestIds !== undefined && !input.includedRequestIds.has(part.approvalId)) {
+    if (
+      input.includedRequestIds !== undefined &&
+      !input.includedRequestIds.has(approval.approvalId)
+    ) {
       continue;
     }
 
     // AI SDK records automatic decisions as request/response pairs for history;
     // only unresolved requests should become eve input.
-    if (part.isAutomatic === true) {
+    if (approval.isAutomatic === true) {
       continue;
     }
+
     const toolCall =
-      (isToolCallDescriptor(part.toolCall) ? part.toolCall : undefined) ??
-      (typeof part.toolCallId !== "string" ? undefined : toolCallsById.get(part.toolCallId));
+      approval.toolCall ??
+      (approval.toolCallId === undefined ? undefined : toolCallsById.get(approval.toolCallId));
     if (toolCall === undefined) {
       continue;
     }
@@ -128,12 +152,8 @@ function extractApprovalRequests(input: {
       continue;
     }
 
-    const action = createRuntimeToolCallActionFromToolCall({
-      toolCall,
-    });
-
     requests.push({
-      action,
+      action: createRuntimeToolCallActionFromToolCall({ toolCall }),
       allowFreeform: false,
       display: "confirmation",
       options: [
@@ -141,42 +161,11 @@ function extractApprovalRequests(input: {
         { id: "deny", label: "No" },
       ],
       prompt: `Approve tool call: ${toolCall.toolName}`,
-      requestId: part.approvalId,
+      requestId: approval.approvalId,
     });
   }
 
   return requests;
-}
-
-function isToolCallDescriptor(value: unknown): value is ToolCallDescriptor {
-  return (
-    isRecord(value) &&
-    typeof value.toolCallId === "string" &&
-    typeof value.toolName === "string" &&
-    "input" in value
-  );
-}
-
-function isPersistedToolCall(value: unknown): value is PersistedToolCall {
-  return isRecord(value) && value.type === "tool-call" && isToolCallDescriptor(value);
-}
-
-function isToolApprovalRequest(value: unknown): value is {
-  readonly approvalId: string;
-  readonly isAutomatic?: unknown;
-  readonly toolCall?: unknown;
-  readonly toolCallId?: unknown;
-  readonly type: "tool-approval-request";
-} {
-  return (
-    isRecord(value) &&
-    value.type === "tool-approval-request" &&
-    typeof value.approvalId === "string"
-  );
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null;
 }
 
 /**
@@ -196,9 +185,12 @@ export function extractHistoricalInputRequests(input: {
       continue;
     }
 
-    const toolCalls = message.content
-      .filter(isPersistedToolCall)
-      .filter((toolCall) => input.requestIds.has(toolCall.toolCallId));
+    const toolCalls = message.content.flatMap((part: unknown) => {
+      const toolCall = PersistedToolCallSchema.safeParse(part);
+      return toolCall.success && input.requestIds.has(toolCall.data.toolCallId)
+        ? [toolCall.data]
+        : [];
+    });
     const candidates = [
       ...extractQuestionRequests({ excludedCallIds: new Set(), toolCalls }),
       ...extractApprovalRequests({
