@@ -24,6 +24,7 @@ import {
 } from "#context/dynamic-skill-materialization-marker.js";
 import {
   dynamicSkillManifestMatchesSandbox,
+  dynamicSkillMarkerFromManifest,
   dynamicSkillMarkerMatchesManifest,
   materializeDynamicSkillUpdates,
 } from "#context/dynamic-skill-materialization.js";
@@ -186,6 +187,22 @@ export async function dispatchDynamicSkillEvent(input: {
       ctx.set(DynamicSkillManifestKey, activeManifest);
       ctx.setVirtualContext(PendingSkillAnnouncementKey, "");
     } else {
+      if (
+        sandbox !== null &&
+        sandbox !== undefined &&
+        markerRead !== undefined &&
+        markerRead.marker !== null &&
+        markerRead.status === "missing"
+      ) {
+        await materializeDynamicSkillUpdates({
+          markerMs,
+          markerRead,
+          nextManifest: previousManifest,
+          previousManifest,
+          sandbox,
+          updates: [],
+        });
+      }
       const announcementStartedAt = performance.now();
       ctx.setVirtualContext(
         PendingSkillAnnouncementKey,
@@ -325,12 +342,19 @@ async function trustDynamicSkillMarker(
   manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
   sandbox: SandboxSession | null | undefined,
 ): Promise<DynamicSkillMaterializationMarkerRead | undefined> {
-  if (
-    markerRead === undefined ||
-    markerRead.marker === null ||
-    sandbox === null ||
-    sandbox === undefined
-  ) {
+  if (markerRead === undefined || sandbox === null || sandbox === undefined) {
+    return markerRead;
+  }
+
+  if (markerRead.marker === null) {
+    if (
+      markerRead.status === "missing" &&
+      Object.keys(manifest).length > 0 &&
+      (await dynamicSkillManifestMatchesSandbox({ manifest, sandbox }))
+    ) {
+      const marker = dynamicSkillMarkerFromManifest(manifest);
+      return marker === null ? markerRead : { ...markerRead, marker };
+    }
     return markerRead;
   }
 

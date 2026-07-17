@@ -71,6 +71,27 @@ async function dispatch(input: {
 }
 
 describe("dynamic skill materialization recovery", () => {
+  it("migrates exact pre-marker packages instead of dropping them on an unmatched event", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver(
+      "session-policy",
+      () => makeSkill("Session policy", "Follow session policy."),
+      ["session.started"],
+    );
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+
+    await dispatch({ ctx, event: "session.started", resolvers: [resolver] });
+    sandbox.files.delete(markerPath);
+    sandbox.fileBytes.delete(markerPath);
+    ctx.clearVirtualContext();
+
+    await dispatch({ ctx, event: "turn.started", resolvers: [resolver] });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toHaveProperty("session-policy");
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("session-policy: Session policy");
+    expect(sandbox.files.has(markerPath)).toBe(true);
+  });
+
   it("invalidates the old marker before a changed package can partially write", async () => {
     const { ctx, sandbox } = createCtx();
     let markdown = "Version one.";

@@ -64,6 +64,27 @@ export function dynamicSkillMarkerMatchesManifest(
   );
 }
 
+/** Builds migration proof for exact pre-marker packages. */
+export function dynamicSkillMarkerFromManifest(
+  manifest: DynamicSkillManifest,
+): DynamicSkillMaterializationMarker | null {
+  const indexedManifest = indexManifest(manifest);
+  const packageCount = Object.values(manifest).reduce((total, skills) => total + skills.length, 0);
+  if (indexedManifest.size !== packageCount) return null;
+
+  const packages: Record<string, DynamicSkillMaterializationMarkerEntry> = {};
+  for (const [name, metadata] of indexedManifest) {
+    if (metadata.contentDigest === undefined || metadata.relativePaths === undefined) return null;
+    packages[name] = {
+      contentDigest: metadata.contentDigest,
+      relativePaths: metadata.relativePaths,
+      resolverSlug: metadata.resolverSlug,
+    };
+  }
+
+  return { packages, version: 1 };
+}
+
 /** Returns whether durable metadata still describes the exact managed sandbox bytes. */
 export async function dynamicSkillManifestMatchesSandbox(input: {
   readonly manifest: DynamicSkillManifest;
@@ -168,7 +189,8 @@ export async function materializeDynamicSkillUpdates(input: {
   const markerChanged =
     currentMarker === null || !markerPackagesEqual(currentMarker.packages, nextMarker.packages);
   const markerWriteStartedAt = performance.now();
-  const markerWriteNeeded = markerChanged || packageMutationNeeded;
+  const markerWriteNeeded =
+    markerChanged || packageMutationNeeded || input.markerRead.status !== "current";
   if (markerWriteNeeded) {
     await writeDynamicSkillMaterializationMarker({
       marker: nextMarker,
