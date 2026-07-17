@@ -28,6 +28,40 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
+## Persisting turns
+
+The audit example above logs on `message.completed`, and that is the right event for observing individual text blocks. Persisting conversation turns needs two extra considerations.
+
+`message.completed` can fire more than once per turn — the agent often emits interim text before a tool call (see [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming)). A hook that persists the reply on every `message.completed` also stores that narration. To record one entry per turn, accumulate the cumulative `messageSoFar` from `message.appended` and flush once on `turn.completed`:
+
+```ts title="agent/hooks/persist-turns.ts"
+import { defineHook } from "eve/hooks";
+import { saveTurn } from "../lib/turn-store";
+
+const replies = new Map<string, string>();
+
+export default defineHook({
+  events: {
+    "message.appended"(event, ctx) {
+      replies.set(ctx.session.id, event.data.messageSoFar);
+    },
+    async "turn.completed"(_event, ctx) {
+      const reply = replies.get(ctx.session.id);
+      replies.delete(ctx.session.id);
+      if (!reply) return;
+      try {
+        await saveTurn(ctx.session.id, reply);
+      } catch {
+        // A thrown hook fails the turn (see below) — persistence problems
+        // should not take the conversation down with them.
+      }
+    },
+  },
+});
+```
+
+Swallow your own errors. A thrown hook surfaces as `turn.failed` (see [What happens when a hook throws](#what-happens-when-a-hook-throws)), which is right for invariants but wrong for best-effort side effects — without the `try`/`catch` above, a database outage would fail every turn of every conversation.
+
 ## Hook structure and context
 
 Every handler receives the same `HookContext`:
