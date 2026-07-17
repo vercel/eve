@@ -735,6 +735,55 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
   });
 
+  it("replaces a non-file marker while preserving a newly authored package", async () => {
+    const { ctx, sandbox } = createCtxWithAuthoredDogReference();
+    const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";
+    const authoredReference = "/home/agent/.agents/skills/talk-like-a-dog/references/authored.md";
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+    const markerChild = `${markerPath}/injected`;
+    sandbox.files.set(skillPath, "Authored talk-like-a-dog body.");
+    sandbox.fileBytes.set(skillPath, Buffer.from("Authored talk-like-a-dog body."));
+    sandbox.files.set(authoredReference, "Authored reference");
+    sandbox.fileBytes.set(authoredReference, Buffer.from("Authored reference"));
+    sandbox.files.set(markerChild, "Injected node.");
+    sandbox.fileBytes.set(markerChild, Buffer.from("Injected node."));
+    setBaselineLessDynamicDogManifest(ctx);
+    const directoryMarkerSession = {
+      ...sandbox.session,
+      async readTextFile(options: Parameters<typeof sandbox.session.readTextFile>[0]) {
+        if (options.path === markerPath) throw new Error("EISDIR: marker is a directory");
+        return await sandbox.session.readTextFile(options);
+      },
+      async writeTextFile(options: Parameters<typeof sandbox.session.writeTextFile>[0]) {
+        if (options.path === markerPath && sandbox.files.has(markerChild)) {
+          throw new Error("EISDIR: marker is still a directory");
+        }
+        await sandbox.session.writeTextFile(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return directoryMarkerSession;
+      },
+    });
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
+    expect(sandbox.files.has(markerChild)).toBe(false);
+    expect(sandbox.files.get(markerPath)).toContain('"packages":{}');
+    expect(sandbox.files.get(skillPath)).toBe("Authored talk-like-a-dog body.");
+    expect(sandbox.files.get(authoredReference)).toBe("Authored reference");
+  });
+
   it("rebuilds a changed dynamic override over the exact authored baseline", async () => {
     const { ctx, sandbox } = createCtxWithAuthoredDogReference();
     const skillPath = "/home/agent/.agents/skills/talk-like-a-dog/SKILL.md";

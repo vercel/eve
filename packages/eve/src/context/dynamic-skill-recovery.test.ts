@@ -303,6 +303,12 @@ describe("dynamic skill materialization recovery", () => {
         }
         await sandbox.session.removePath(options);
       },
+      async writeTextFile(options: Parameters<typeof sandbox.session.writeTextFile>[0]) {
+        if (options.path === markerPath && sandbox.files.has(markerChild)) {
+          throw new Error("EISDIR: marker is still a directory");
+        }
+        await sandbox.session.writeTextFile(options);
+      },
     };
     ctx.set(SandboxKey, {
       async captureState() {
@@ -318,6 +324,44 @@ describe("dynamic skill materialization recovery", () => {
     expect(sandbox.files.has(markerChild)).toBe(false);
     expect(sandbox.files.get(markerPath)).toContain('"version":1');
     expect(sandbox.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe("Tenant body.");
+  });
+
+  it("replaces a non-file marker node when a resolver returns no packages", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("tenant", () => null);
+    const markerPath = `/home/agent/.agents/skills/${DYNAMIC_SKILL_MATERIALIZATION_MARKER_FILE}`;
+    const markerChild = `${markerPath}/injected`;
+    sandbox.files.set(markerChild, "Injected node.");
+    sandbox.fileBytes.set(markerChild, Buffer.from("Injected node."));
+    const directoryMarkerSession = {
+      ...sandbox.session,
+      async readTextFile(options: Parameters<typeof sandbox.session.readTextFile>[0]) {
+        if (options.path === markerPath) throw new Error("EISDIR: marker is a directory");
+        return await sandbox.session.readTextFile(options);
+      },
+      async removePath(options: Parameters<typeof sandbox.session.removePath>[0]) {
+        await sandbox.session.removePath(options);
+      },
+      async writeTextFile(options: Parameters<typeof sandbox.session.writeTextFile>[0]) {
+        if (options.path === markerPath && sandbox.files.has(markerChild)) {
+          throw new Error("EISDIR: marker is still a directory");
+        }
+        await sandbox.session.writeTextFile(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return directoryMarkerSession;
+      },
+    });
+
+    await dispatch({ ctx, resolvers: [resolver] });
+
+    expect(sandbox.files.has(markerChild)).toBe(false);
+    expect(sandbox.files.get(markerPath)).toContain('"packages":{}');
   });
 
   it.each(["modified", "missing"] as const)(

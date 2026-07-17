@@ -193,8 +193,10 @@ export async function materializeDynamicSkillUpdates(input: {
   );
   const packageMutationNeeded =
     filesystemRemovePackages.size > 0 || restorePackages.length > 0 || writeSkills.length > 0;
+  let markerInvalidated = false;
   if (packageMutationNeeded) {
     await input.sandbox.removePath({ force: true, path: input.markerRead.path, recursive: true });
+    markerInvalidated = true;
   }
 
   const removeStartedAt = performance.now();
@@ -219,6 +221,9 @@ export async function materializeDynamicSkillUpdates(input: {
   const markerWriteNeeded =
     markerChanged || packageMutationNeeded || input.markerRead.status !== "current";
   if (markerWriteNeeded) {
+    if (!markerInvalidated) {
+      await input.sandbox.removePath({ force: true, path: input.markerRead.path, recursive: true });
+    }
     await writeDynamicSkillMaterializationMarker({
       marker: nextMarker,
       path: input.markerRead.path,
