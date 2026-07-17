@@ -319,6 +319,73 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("preserves the original turn error when parent notify fails in the catch path", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnControls: [
+        {
+          error: { message: "persistent recoverable failure", name: "Error" },
+          kind: "turn-error",
+        },
+      ],
+    });
+    vi.mocked(notifyDelegatedParentStep).mockRejectedValueOnce(new Error("parent inbox gone"));
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext({
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-1",
+              parentContinuationToken: "parent-token",
+              subagentName: "researcher",
+            },
+          },
+        }),
+      }),
+    ).rejects.toThrow("persistent recoverable failure");
+  });
+
+  it("notifies the parent before marking a successful child session completed", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnControls: [turnResult({ action: "done", output: "child done", sessionState })],
+    });
+    const order: string[] = [];
+    vi.mocked(notifyDelegatedParentStep).mockImplementation(async () => {
+      order.push("notify");
+    });
+    vi.mocked(fireSessionCallbackStep).mockImplementation(async () => {
+      order.push("callback");
+    });
+
+    try {
+      await workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext({
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-1",
+              parentContinuationToken: "parent-token",
+              parentSessionId: "parent-session",
+              subagentName: "researcher",
+            },
+          },
+        }),
+      });
+
+      expect(order).toEqual(["notify", "callback"]);
+    } finally {
+      vi.mocked(notifyDelegatedParentStep).mockResolvedValue(undefined);
+      vi.mocked(fireSessionCallbackStep).mockResolvedValue(undefined);
+    }
+  });
+
   it("passes the resumed channel request id to the next turn", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));

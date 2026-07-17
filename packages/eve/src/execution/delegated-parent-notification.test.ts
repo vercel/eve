@@ -30,7 +30,7 @@ function createSuccessResult(): RuntimeSubagentResultActionResult {
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(state?: Record<string, unknown>): Record<string, unknown> {
   const bundle = {
     adapterRegistry: {
       adaptersByKind: new Map([[SUBAGENT_ADAPTER_KIND, SUBAGENT_ADAPTER]]),
@@ -44,7 +44,7 @@ function createSerializedContext(): Record<string, unknown> {
   ctx.set(BundleKey, bundle);
   ctx.set(ChannelKey, {
     ...SUBAGENT_ADAPTER,
-    state: {
+    state: state ?? {
       callId: "call-1",
       parentContinuationToken: "parent-tok",
       parentSessionId: "parent-session",
@@ -112,5 +112,35 @@ describe("notifyDelegatedParentStep", () => {
       kind: "runtime-action-result",
       results: [errorResult],
     });
+  });
+
+  it("throws when subagent adapter state is missing parentContinuationToken", async () => {
+    await expect(
+      notifyDelegatedParentStep({
+        result: createSuccessResult(),
+        serializedContext: createSerializedContext({
+          callId: "call-1",
+          parentContinuationToken: "",
+          parentSessionId: "parent-session",
+          subagentName: "research",
+        }),
+      }),
+    ).rejects.toThrow(/adapter state is invalid/);
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("rethrows resumeHook failures so the child run fails visibly", async () => {
+    const hookError = Object.assign(new Error("Hook not found"), {
+      name: "HookNotFoundError",
+    });
+    resumeHookMock.mockRejectedValue(hookError);
+
+    await expect(
+      notifyDelegatedParentStep({
+        result: createSuccessResult(),
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toBe(hookError);
   });
 });

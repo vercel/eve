@@ -135,10 +135,17 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       serializedContext: input.serializedContext,
       status: "failed",
     });
-    await notifyDelegatedParentStep({
-      result: createDelegatedSubagentErrorResult(input.serializedContext, error),
-      serializedContext: input.serializedContext,
-    });
+    // Isolate parent-notify failures so a HookNotFound / resume error
+    // cannot replace the original exception (or skip rethrowing it).
+    // `notifyDelegatedParentStep` logs its own failures.
+    try {
+      await notifyDelegatedParentStep({
+        result: createDelegatedSubagentErrorResult(input.serializedContext, error),
+        serializedContext: input.serializedContext,
+      });
+    } catch {
+      // Parent may remain parked; the child already emitted session.failed.
+    }
     throw error;
   }
 }
@@ -315,18 +322,21 @@ async function finalizeDone(input: {
   const { output, serializedContext } = input.action;
   const failed = input.action.isError === true;
 
-  await fireSessionCallbackStep({
-    error: failed ? output : undefined,
-    output: failed ? undefined : output,
-    serializedContext,
-    status: failed ? "failed" : "completed",
-    usage: failed ? undefined : input.action.usage,
-  });
+  // Notify the parent *before* marking the child session completed so a
+  // failed `resumeHook` cannot leave clients observing a finished child
+  // while the parent stays parked on its turn inbox forever.
   await notifyDelegatedParentStep({
     result: failed
       ? createDelegatedSubagentErrorResult(serializedContext, output)
       : createDelegatedSubagentSuccessResult(serializedContext, output),
     serializedContext,
+    usage: failed ? undefined : input.action.usage,
+  });
+  await fireSessionCallbackStep({
+    error: failed ? output : undefined,
+    output: failed ? undefined : output,
+    serializedContext,
+    status: failed ? "failed" : "completed",
     usage: failed ? undefined : input.action.usage,
   });
   return { output };
