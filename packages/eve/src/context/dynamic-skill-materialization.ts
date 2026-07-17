@@ -66,7 +66,7 @@ export async function materializeDynamicSkillUpdates(input: {
       if (updatedResolvers.has(metadata.resolverSlug)) removePackages.add(name);
     }
     for (const name of updates.keys()) {
-      if (previous.has(name)) removePackages.add(name);
+      removePackages.add(name);
     }
   } else {
     reconcileMarkedPackages({ currentMarker, desired, removePackages, updates });

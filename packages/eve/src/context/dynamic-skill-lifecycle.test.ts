@@ -324,6 +324,59 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(sandbox.files.has(markerPath)).toBe(true);
   });
 
+  it("clears stale siblings when retrying a partial first materialization", async () => {
+    const { ctx, sandbox } = createCtx();
+    let files: Readonly<Record<string, string>> = {
+      "references/stale.md": "Stale body",
+      "scripts/fail.sh": "exit 1",
+    };
+    const resolver = createResolver("tenant", () =>
+      makeSkill("Tenant policy", "Follow tenant policy.", files),
+    );
+    const failingSession = {
+      ...sandbox.session,
+      async writeBinaryFile(options: Parameters<typeof sandbox.session.writeBinaryFile>[0]) {
+        if (options.path.endsWith("/scripts/fail.sh")) {
+          throw new Error("injected final write failure");
+        }
+        await sandbox.session.writeBinaryFile(options);
+      },
+    };
+    ctx.set(SandboxKey, {
+      async captureState() {
+        return { initialized: false, session: null };
+      },
+      async get() {
+        return failingSession;
+      },
+    });
+
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow("injected final write failure");
+    expect(sandbox.files.has("/home/agent/.agents/skills/tenant/references/stale.md")).toBe(true);
+    expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();
+
+    files = {};
+    ctx.set(SandboxKey, sandbox.access);
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(sandbox.files.has("/home/agent/.agents/skills/tenant/references/stale.md")).toBe(false);
+    expect(sandbox.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe(
+      "Follow tenant policy.",
+    );
+  });
+
   it("clears removed dynamic skills from the durable announcement", async () => {
     const { ctx, sandbox } = createCtx();
     let enabled = true;
