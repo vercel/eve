@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
@@ -427,9 +427,26 @@ function createAuthoredRelativeExtensionResolverPlugin(input: {
         return undefined;
       }
 
-      return { id: resolvedPath };
+      // Standard resolvers realpath resolved modules, so a module reached
+      // through a node_modules symlink resolves its own dependencies from its
+      // real location — with pnpm's store layout they are store siblings that
+      // only exist there. Path imports probed here (the compiled module map
+      // reaches store-installed extension source through the consumer's
+      // node_modules symlink) must get the same treatment, and it keeps one
+      // canonical module identity per real file.
+      return {
+        id: isNodeModulesPath(resolvedPath) ? toRealModulePath(resolvedPath) : resolvedPath,
+      };
     },
   };
+}
+
+function toRealModulePath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 function createInFlightModuleLoadKey(

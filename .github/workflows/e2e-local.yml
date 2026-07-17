@@ -107,6 +107,17 @@ jobs:
         # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
         run: pnpm --filter eve run build
 
+      - name: Build extension fixtures
+        if: needs.changes.outputs.relevant == 'true'
+        # Extension fixtures ship no committed `dist/`; produce it here so
+        # consuming fixtures resolve the built artifacts. `--if-present` skips
+        # extension fixtures without a build script. The update re-packs the
+        # `file:`-protocol store copies so they pick up the fresh dist —
+        # a plain reinstall short-circuits and leaves them stale.
+        run: |
+          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
+          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+
       - name: Run fixture evals
         if: needs.changes.outputs.relevant == 'true'
         run: |
