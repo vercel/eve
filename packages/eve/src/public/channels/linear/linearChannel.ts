@@ -157,7 +157,7 @@ export interface LinearChannelEvents {
 /**
  * Result of an inbound Linear hook. Return `null` to acknowledge without
  * dispatching; return `{ auth }` to dispatch. Optional `context` strings are
- * added as `role: "user"` messages before the dispatched turn.
+ * applied as instructions for the dispatched turn.
  */
 export type LinearInboundResult = {
   readonly auth: SessionAuthContext | null;

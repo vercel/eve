@@ -75,8 +75,8 @@ export interface GitHubPullRequestContextInput {
  * Builds bounded, one-shot pull-request background for a GitHub turn: PR
  * metadata plus the changed-file diff (noisy files excluded from the patch).
  *
- * The returned strings are intended for `SendPayload.context`; each is appended
- * as a `role: "user"` message to session history before the delivery message.
+ * The returned strings are intended for `SendPayload.context`; each applies as
+ * instructions for the dispatched turn without entering conversation history.
  */
 export async function buildGitHubPullRequestContext(
   input: GitHubPullRequestContextInput,

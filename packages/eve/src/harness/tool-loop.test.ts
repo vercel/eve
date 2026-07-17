@@ -6730,7 +6730,7 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("keeps channel context after the approval-response model call", async () => {
+  it("applies channel context after the approval-response model call", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Approved.", role: "assistant" }] },
@@ -6791,8 +6791,10 @@ describe("createToolLoopHarness", () => {
     });
     const harness = createToolLoopHarness(config);
     const context = "<linear_context>issue metadata</linear_context>";
+    const clientContext = "Client context:\napproval modal open";
 
     const firstResult = await harness(createPendingBashApprovalSession(), {
+      clientContext: [clientContext],
       context: [context],
       inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
     });
@@ -6800,6 +6802,7 @@ describe("createToolLoopHarness", () => {
     const firstMessages = readGenerateMessages(0);
     expect(typeof firstResult.next).toBe("function");
     expect(firstMessages.at(-1)?.role).toBe("tool");
+    expect(firstMessages).not.toContainEqual({ content: clientContext, role: "user" });
     expect(firstMessages).not.toContainEqual({ content: context, role: "user" });
     expect((await readPreparedMessages(0)).at(-1)).toMatchObject({
       providerOptions: {
@@ -6813,14 +6816,27 @@ describe("createToolLoopHarness", () => {
     const secondMessages = readGenerateMessages(1);
     expect(secondResult.next).toBeNull();
     expect(secondMessages.slice(0, firstMessages.length)).toEqual(firstMessages);
-    expect(secondMessages.at(-1)).toEqual({ content: context, role: "user" });
+    expect(secondMessages.at(-2)).toEqual({ content: "Approved.", role: "assistant" });
+    expect(secondMessages.at(-1)).toEqual({ content: clientContext, role: "user" });
+    expect(vi.mocked(ToolLoopAgent).mock.calls[1]?.[0].instructions).toEqual({
+      content: `You are a test assistant.\n\n${context}`,
+      providerOptions: {
+        anthropic: { cacheControl: { type: "ephemeral" } },
+      },
+      role: "system",
+    });
     expect((await readPreparedMessages(1)).at(-1)).toMatchObject({
-      content: context,
+      content: clientContext,
       providerOptions: {
         anthropic: { cacheControl: { type: "ephemeral" } },
       },
       role: "user",
     });
+    expect(secondResult.session.history).not.toContainEqual({
+      content: clientContext,
+      role: "user",
+    });
+    expect(secondResult.session.history).not.toContainEqual({ content: context, role: "user" });
   });
 
   it("deferred message lands as last non-system message after explicit approval denial", async () => {
@@ -9037,8 +9053,9 @@ describe("createToolLoopHarness", () => {
       };
       const instance = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value as {
         generate: ReturnType<typeof vi.fn>;
+        stream: ReturnType<typeof vi.fn>;
       };
-      const call = instance.generate.mock.calls[0]?.[0] as {
+      const call = (instance.generate.mock.calls[0]?.[0] ?? instance.stream.mock.calls[0]?.[0]) as {
         messages: Array<{ role: string; content: unknown }>;
       };
       return { instructions: settings.instructions, messages: call.messages };
@@ -9054,20 +9071,123 @@ describe("createToolLoopHarness", () => {
       };
     }
 
-    it("appends context strings as user messages", async () => {
+    it("applies delivery context as turn-scoped instructions", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       const session = createTestSession();
 
-      await runStep(session, {
+      const result = await runStep(session, {
         message: "Hi",
         context: ["ephemeral-context"],
       });
 
-      const { messages } = getLastAgentSettings();
-      const contextMessage = messages.find((m) => m.content === "ephemeral-context");
-      expect(contextMessage).toBeDefined();
-      expect(contextMessage!.role).toBe("user");
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: "You are a test assistant.\n\nephemeral-context",
+      });
+      expect(messages).not.toContainEqual({ role: "user", content: "ephemeral-context" });
+      expect(result.session.history).toEqual([
+        { role: "user", content: "Hi" },
+        { role: "assistant", content: "ok" },
+      ]);
+    });
+
+    it("keeps public client context as a turn-scoped user overlay", async () => {
+      const dynamicModelMessages: ModelMessage[][] = [];
+      const dynamicToolMessages: ModelMessage[][] = [];
+      const emit: HarnessEmitFn = async (event, messages) => {
+        if (event.type === "step.started" && messages !== undefined) {
+          dynamicToolMessages.push([...messages]);
+        }
+      };
+      const dispatchDynamicModelEvent: NonNullable<
+        ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
+      > = vi.fn(async ({ ctx, fallback, messages }) => {
+        dynamicModelMessages.push([...messages]);
+        ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
+          model: {} as LanguageModel,
+          reference: fallback,
+        });
+      });
+      setupMockAgent({
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            {
+              content: [
+                { input: { a: 1, b: 2 }, toolCallId: "call-1", toolName: "add", type: "tool-call" },
+              ],
+              role: "assistant",
+            },
+            {
+              content: [
+                { output: "42", toolCallId: "call-1", toolName: "add", type: "tool-result" },
+              ],
+              role: "tool",
+            },
+          ],
+        },
+        text: "",
+        toolCalls: [
+          { input: { a: 1, b: 2 }, toolCallId: "call-1", toolName: "add", type: "tool-call" },
+        ],
+        toolResults: [
+          {
+            input: { a: 1, b: 2 },
+            output: "42",
+            toolCallId: "call-1",
+            toolName: "add",
+            type: "tool-result",
+          },
+        ],
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", emit, { dispatchDynamicModelEvent }),
+      );
+      const ctx = new ContextContainer();
+      const session = createTestSession();
+      const clientContext = "Client context:\nselection: jazz";
+
+      const first = await contextStorage.run(ctx, () =>
+        runStep(session, {
+          clientContext: [clientContext],
+          message: "Use the selected word",
+        }),
+      );
+      expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
+      expect(getLastAgentSettings().messages).toContainEqual({
+        role: "user",
+        content: clientContext,
+      });
+      expect(dynamicModelMessages[0]).toContainEqual({ role: "user", content: clientContext });
+      expect(dynamicToolMessages[0]).toContainEqual({ role: "user", content: clientContext });
+      expect(first.session.history).not.toContainEqual({ role: "user", content: clientContext });
+
+      setupMockAgent(defaultModelResult());
+      expect(typeof first.next).toBe("function");
+      const second = await contextStorage.run(ctx, () =>
+        (first.next as typeof runStep)(first.session),
+      );
+      expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
+      expect(getLastAgentSettings().messages).toContainEqual({
+        role: "user",
+        content: clientContext,
+      });
+      expect(dynamicModelMessages[1]).toContainEqual({ role: "user", content: clientContext });
+      expect(dynamicToolMessages[1]).toContainEqual({ role: "user", content: clientContext });
+      expect(second.session.history).not.toContainEqual({ role: "user", content: clientContext });
+
+      setupMockAgent(defaultModelResult());
+      await contextStorage.run(ctx, () =>
+        runStep(second.session, { message: "Start the next turn" }),
+      );
+      expect(getLastAgentSettings().messages).not.toContainEqual({
+        role: "user",
+        content: clientContext,
+      });
+      expect(dynamicModelMessages[2]).not.toContainEqual({ role: "user", content: clientContext });
+      expect(dynamicToolMessages[2]).not.toContainEqual({ role: "user", content: clientContext });
     });
 
     it("routes role:system durable history into instructions, not messages", async () => {
@@ -9088,21 +9208,70 @@ describe("createToolLoopHarness", () => {
       expect(messages.at(-1)).toEqual({ role: "user", content: "Hi" });
     });
 
-    it("persists context strings in session history as user messages", async () => {
-      setupMockAgent(defaultModelResult());
+    it("keeps delivery context through internal steps without leaking it into the next turn", async () => {
+      setupMockAgent({
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            {
+              content: [
+                { input: { a: 1, b: 2 }, toolCallId: "call-1", toolName: "add", type: "tool-call" },
+              ],
+              role: "assistant",
+            },
+            {
+              content: [
+                { output: "42", toolCallId: "call-1", toolName: "add", type: "tool-result" },
+              ],
+              role: "tool",
+            },
+          ],
+        },
+        text: "",
+        toolCalls: [
+          { input: { a: 1, b: 2 }, toolCallId: "call-1", toolName: "add", type: "tool-call" },
+        ],
+        toolResults: [
+          {
+            input: { a: 1, b: 2 },
+            output: "42",
+            toolCallId: "call-1",
+            toolName: "add",
+            type: "tool-result",
+          },
+        ],
+      });
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       const session = createTestSession();
 
-      const result = await runStep(session, {
-        message: "Hi",
-        context: ["background-context"],
+      const first = await runStep(session, {
+        message: "Add 1 and 2",
+        context: ["current-turn-only"],
+      });
+      expect(getLastAgentSettings().instructions).toEqual({
+        role: "system",
+        content: "You are a test assistant.\n\ncurrent-turn-only",
       });
 
-      expect(result.session.history).toEqual([
-        { role: "user", content: "background-context" },
-        { role: "user", content: "Hi" },
-        { role: "assistant", content: "ok" },
-      ]);
+      setupMockAgent(defaultModelResult());
+      expect(typeof first.next).toBe("function");
+      const second = await (first.next as typeof runStep)(first.session);
+      expect(getLastAgentSettings().instructions).toEqual({
+        role: "system",
+        content: "You are a test assistant.\n\ncurrent-turn-only",
+      });
+      expect(second.session.history).not.toContainEqual({
+        role: "user",
+        content: "current-turn-only",
+      });
+
+      setupMockAgent(defaultModelResult());
+      await runStep(second.session, { message: "Start the next turn" });
+      expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
+      expect(getLastAgentSettings().messages).not.toContainEqual({
+        role: "user",
+        content: "current-turn-only",
+      });
     });
 
     it("leaves instructions unchanged when no context is provided", async () => {

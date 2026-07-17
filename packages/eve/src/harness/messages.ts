@@ -20,6 +20,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     a: a.message,
     b: b.message,
   });
+  const clientContext = coalesceContext({
+    a: a.clientContext,
+    b: b.clientContext,
+  });
   const context = coalesceContext({
     a: a.context,
     b: b.context,
@@ -29,6 +33,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   const result: {
     inputResponses?: readonly InputResponse[];
     message?: string | UserContent;
+    clientContext?: readonly string[];
     context?: readonly string[];
     outputSchema?: StepInput["outputSchema"];
   } = {};
@@ -39,6 +44,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   if (message !== undefined) {
     result.message = message;
+  }
+
+  if (clientContext !== undefined) {
+    result.clientContext = clientContext;
   }
 
   if (context !== undefined) {

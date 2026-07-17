@@ -129,7 +129,7 @@ describe("workflowEntry", () => {
     });
 
     const result = await workflowEntry({
-      input: { message: "hello there" },
+      input: { clientContext: ["selected word: jazz"], message: "hello there" },
       serializedContext: createSerializedContext(),
     });
 
@@ -145,7 +145,13 @@ describe("workflowEntry", () => {
         completionToken: expect.any(String),
         delivery: {
           kind: "deliver",
-          payloads: [{ message: "hello there", context: undefined }],
+          payloads: [
+            {
+              clientContext: ["selected word: jazz"],
+              message: "hello there",
+              context: undefined,
+            },
+          ],
         },
         serializedContext: expect.objectContaining({
           "eve.continuationToken": "http:test",

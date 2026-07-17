@@ -31,6 +31,7 @@ export function createSendFn<TState = undefined>(
     const {
       message: rawMessage,
       inputResponses,
+      clientContext,
       context,
       outputSchema,
     } = normalizeSendInput(input);
@@ -41,7 +42,7 @@ export function createSendFn<TState = undefined>(
         auth,
         continuationToken,
         requestId: metadata.requestId,
-        payload: { inputResponses, message, context, outputSchema },
+        payload: { inputResponses, message, clientContext, context, outputSchema },
       };
       const { sessionId } = await runtime.deliver(deliverInput);
 
@@ -73,7 +74,7 @@ export function createSendFn<TState = undefined>(
       channelName,
       callback,
       continuationToken,
-      input: { message: message ?? "", context, outputSchema },
+      input: { message: message ?? "", clientContext, context, outputSchema },
       mode,
       requestId: metadata.requestId,
       title,

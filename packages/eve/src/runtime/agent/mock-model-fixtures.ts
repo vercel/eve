@@ -77,11 +77,11 @@ export function resolveMockFixtureToken(prompt: BootstrapPrompt): string | null 
     .map((message) => getPromptContentText(message.content))
     .join("\n");
   // The current turn's user batch participates last so instruction- and
-  // skill-delivered fixture directives always win. Scanning user text makes
-  // per-turn context (clientContext entries, channel context strings) and
-  // exact-reply prompts deterministically provable in smoke evals. Only the
-  // trailing user messages count: directives from earlier turns must not
-  // leak into later replies.
+  // skill-delivered fixture directives always win. Scanning system and user
+  // text makes channel instructions, clientContext entries, and exact-reply
+  // prompts deterministically provable in smoke evals. Only trailing user
+  // messages count: directives from earlier turns must not leak into later
+  // replies.
   const searchableTexts = [
     ...getLoadedSkillResultTexts(prompt),
     systemText,

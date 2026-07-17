@@ -217,9 +217,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (!messageResult.dispatch) return droppedMessageResponse();
 
         const token = `eve:${crypto.randomUUID()}`;
-        const context = mergeContext(body.context, messageResult.context);
-
-        const session = await send(createSendPayload(body, context), {
+        const session = await send(createSendPayload(body, messageResult.context), {
           auth: messageResult.auth,
           callback: body.callback,
           continuationToken: token,
@@ -275,7 +273,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
-        let context = body.context;
+        let context: readonly string[] | undefined;
         let dispatchAuth: SessionAuthContext | null = sessionAuth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
@@ -287,7 +285,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           });
           if (messageResult instanceof Response) return messageResult;
           if (!messageResult.dispatch) return droppedMessageResponse();
-          context = mergeContext(body.context, messageResult.context);
+          context = messageResult.context;
           dispatchAuth = messageResult.auth;
         }
 
@@ -295,6 +293,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           {
             inputResponses: body.inputResponses,
             message: body.message,
+            clientContext: body.clientContext,
             context,
             outputSchema: body.outputSchema,
           },
@@ -515,7 +514,7 @@ interface ParsedCreateBody {
   callback?: SessionCallback;
   message: string | UserContent;
   mode?: RunMode;
-  context?: readonly string[];
+  clientContext?: readonly string[];
   outputSchema?: JsonObject;
 }
 
@@ -523,8 +522,8 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
 
-  const context = parseClientContextField(payload.clientContext);
-  if (context instanceof Response) return context;
+  const clientContext = parseClientContextField(payload.clientContext);
+  if (clientContext instanceof Response) return clientContext;
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
@@ -542,14 +541,14 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     );
   }
 
-  return { callback, message, mode, context, outputSchema };
+  return { callback, clientContext, message, mode, outputSchema };
 }
 
 interface ParsedContinueBody {
   message?: string | UserContent;
   continuationToken: string;
   inputResponses?: readonly InputResponse[];
-  context?: readonly string[];
+  clientContext?: readonly string[];
   outputSchema?: JsonObject;
 }
 
@@ -572,8 +571,8 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
 
-  const context = parseClientContextField(payload.clientContext);
-  if (context instanceof Response) return context;
+  const clientContext = parseClientContextField(payload.clientContext);
+  if (clientContext instanceof Response) return clientContext;
 
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
@@ -588,7 +587,7 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
     );
   }
 
-  return { message, continuationToken, inputResponses, context, outputSchema };
+  return { clientContext, message, continuationToken, inputResponses, outputSchema };
 }
 
 interface ParsedCancelTurnBody {
@@ -631,23 +630,32 @@ async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody |
 
 function createSendPayload(
   body: ParsedCreateBody,
-  context = body.context,
+  context?: readonly string[],
 ):
   | string
   | UserContent
   | {
       readonly message: string | UserContent;
+      readonly clientContext?: readonly string[];
       readonly context?: readonly string[];
       readonly outputSchema?: JsonObject;
     } {
-  if (context === undefined && body.outputSchema === undefined) {
+  if (
+    body.clientContext === undefined &&
+    context === undefined &&
+    body.outputSchema === undefined
+  ) {
     return body.message;
   }
   const payload: {
     message: string | UserContent;
+    clientContext?: readonly string[];
     context?: readonly string[];
     outputSchema?: JsonObject;
   } = { message: body.message };
+  if (body.clientContext !== undefined) {
+    payload.clientContext = body.clientContext;
+  }
   if (context !== undefined) {
     payload.context = context;
   }
@@ -822,15 +830,6 @@ function parseInputResponses(value: unknown): readonly InputResponse[] | Respons
     );
   }
   return inputResponses;
-}
-
-function mergeContext(
-  existing: readonly string[] | undefined,
-  added: readonly string[] | undefined,
-): readonly string[] | undefined {
-  if (existing === undefined) return added;
-  if (added === undefined) return existing;
-  return [...existing, ...added];
 }
 
 const CLIENT_CONTEXT_PREFIX = "Client context:\n";

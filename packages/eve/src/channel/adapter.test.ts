@@ -71,12 +71,14 @@ describe("ChannelAdapter helpers", () => {
     });
   });
 
-  it("defaultDeliverResult forwards context with message payloads", () => {
+  it("defaultDeliverResult keeps client and channel context separate", () => {
+    const clientContext = ["selected word: jazz"];
     const context = ["thread background"];
 
-    expect(defaultDeliverResult({ message: "hi", context })).toEqual({
+    expect(defaultDeliverResult({ clientContext, message: "hi", context })).toEqual({
       inputResponses: undefined,
       message: "hi",
+      clientContext,
       context,
     });
   });

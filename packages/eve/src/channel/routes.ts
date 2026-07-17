@@ -38,9 +38,15 @@ export interface SendPayload {
   readonly message?: string | UserContent;
   readonly inputResponses?: readonly InputResponse[];
   /**
-   * Context strings contributed by the channel. eve appends each entry
-   * as a `role: "user"` message to `session.history` before the delivery
-   * message and persists it across the session.
+   * Caller-authored client or page context. eve presents each entry as a
+   * transient user-role message for this turn and never persists it to
+   * durable conversation history.
+   */
+  readonly clientContext?: readonly string[];
+  /**
+   * Context strings contributed by the channel. eve applies each entry as
+   * instructions for this turn without adding it to durable conversation
+   * history.
    */
   readonly context?: readonly string[];
   /**

@@ -110,6 +110,12 @@ import {
 import { convertStaleResponsesToUserMessage } from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
+import {
+  buildTurnClientContextView,
+  getTurnDeliveryContext,
+  setTurnClientContext,
+  setTurnDeliveryContext,
+} from "#harness/turn-delivery-context.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
@@ -619,6 +625,21 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = pending.session;
     let messages: ModelMessage[] = pending.messages;
 
+    if (
+      hasStepInput(effectiveStepInput) ||
+      effectiveStepInput?.clientContext !== undefined ||
+      effectiveStepInput?.context !== undefined
+    ) {
+      session = setTurnClientContext(
+        session,
+        pending.deferredClientContext === true ? undefined : effectiveStepInput?.clientContext,
+      );
+      session = setTurnDeliveryContext(
+        session,
+        pending.deferredContext === true ? undefined : effectiveStepInput?.context,
+      );
+    }
+
     // A resolved session-limit continuation prompt grants a fresh token
     // budget or ends the session; see session-limit-enforcement.
     const continuation = await applySessionLimitContinuation({
@@ -632,12 +653,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return continuation.result;
     }
     session = continuation.session;
-
-    if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
-      for (const entry of effectiveStepInput.context) {
-        messages.push({ content: entry, role: "user" });
-      }
-    }
 
     if (
       effectiveStepInput?.message !== undefined &&
@@ -666,7 +681,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           turnId: emissionState.turnId,
         }),
         fallback: session.agent.dynamicModelDefaultReference ?? session.agent.modelReference,
-        messages,
+        messages: buildTurnClientContextView(session, messages),
       });
     }
     const resolvedModel = await resolveActiveRuntimeModel({
@@ -730,6 +745,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         nonSystemMessages.push(entry);
       }
     }
+    for (const entry of getTurnDeliveryContext(session)) {
+      systemMessages.push({ role: "system", content: entry });
+    }
     if (ctx !== undefined) {
       systemMessages.push(...buildDynamicInstructionMessages(ctx));
       const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
@@ -741,7 +759,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       systemMessages.push({ role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION });
     }
 
-    const modelMessages = nonSystemMessages;
+    const modelMessages = buildTurnClientContextView(session, nonSystemMessages);
 
     const prepareModelCallInput = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote
@@ -1015,7 +1033,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Emit step.started before building the toolset so dynamic tool
     // resolvers subscribed to step.started write to LiveStepToolsKey.
     if (emit) {
-      await emitStepStarted(emit, emissionState, messages);
+      await emitStepStarted(emit, emissionState, buildTurnClientContextView(session, messages));
     }
 
     // Workflow continuations replay the sandbox after step.started so nested

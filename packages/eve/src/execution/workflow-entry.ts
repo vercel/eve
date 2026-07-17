@@ -110,6 +110,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         payloads: [
           {
             message: input.input.message,
+            clientContext: input.input.clientContext,
             context: input.input.context,
             outputSchema: input.input.outputSchema,
           },

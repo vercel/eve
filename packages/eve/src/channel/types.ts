@@ -113,6 +113,7 @@ export type EventEmitFn = (event: HandleMessageStreamEvent) => Promise<void>;
 export interface DeliverPayload {
   readonly inputResponses?: readonly InputResponse[];
   readonly message?: string | UserContent;
+  readonly clientContext?: readonly string[];
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
   readonly [key: string]: unknown;
@@ -307,6 +308,7 @@ export interface RunInput {
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly input: {
     readonly message: string | UserContent;
+    readonly clientContext?: readonly string[];
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;
   };

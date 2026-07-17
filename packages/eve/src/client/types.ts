@@ -130,10 +130,11 @@ export type SendTurnInput<TOutput = unknown> = string | SendTurnPayload<TOutput>
  */
 export interface SendTurnPayload<TOutput = unknown> {
   /**
-   * Ephemeral client/page context for the next model call only.
+   * Ephemeral client/page context for the active turn only.
    *
    * Strings are rendered as user-role model context messages. Objects are
-   * JSON-serialized into one user-role model context message. Client context
+   * JSON-serialized into one user-role model context message. It remains
+   * available across internal model continuations for that turn. Client context
    * rides along with a message or HITL response; it does not dispatch a turn by
    * itself and is never persisted to durable session history.
    */

@@ -83,7 +83,8 @@ describe("createSendFn", () => {
     expect(runtime.run).not.toHaveBeenCalled();
   });
 
-  it("forwards context through deliver and run payloads", async () => {
+  it("keeps client and channel context separate through deliver and run payloads", async () => {
+    const clientContext = ["selected word: jazz"];
     const context = ["thread background"];
     const deliverRuntime: Runtime = {
       cancelTurn: vi.fn(),
@@ -94,7 +95,10 @@ describe("createSendFn", () => {
     };
 
     const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test");
-    await deliverSend({ message: "hello", context }, { auth: null, continuationToken: "token" });
+    await deliverSend(
+      { clientContext, message: "hello", context },
+      { auth: null, continuationToken: "token" },
+    );
 
     expect(deliverRuntime.deliver).toHaveBeenCalledWith({
       auth: null,
@@ -102,6 +106,7 @@ describe("createSendFn", () => {
       payload: {
         inputResponses: undefined,
         message: "hello",
+        clientContext,
         context,
       },
     });
@@ -109,10 +114,14 @@ describe("createSendFn", () => {
 
     const runRuntime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
     const runSend = createSendFn(runRuntime, ADAPTER, "test");
-    await runSend({ message: "hello", context }, { auth: null, continuationToken: "token" });
+    await runSend(
+      { clientContext, message: "hello", context },
+      { auth: null, continuationToken: "token" },
+    );
 
     expect(vi.mocked(runRuntime.run).mock.calls[0]![0].input).toEqual({
       message: "hello",
+      clientContext,
       context,
     });
   });

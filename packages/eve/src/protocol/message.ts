@@ -112,7 +112,8 @@ export interface RuntimeIdentity {
  * array (mixing `text`, `image`, and `file` parts). Clients pass
  * multimodal attachments with the same shape AI SDK's `useChat`
  * `sendMessage({ files })` produces. `clientContext` is one-turn
- * client/page context; the channel converts it into internal model context.
+ * client/page context; the channel converts it into transient user-role model
+ * context that is never persisted to durable session history.
  */
 export type HandleMessageRequestBody =
   | {

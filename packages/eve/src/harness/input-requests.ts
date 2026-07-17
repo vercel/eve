@@ -8,6 +8,7 @@ import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
+import { compactStepInput } from "#harness/compact-step-input.js";
 import {
   isSessionLimitContinuationRequest,
   resolveSessionLimitContinuation,
@@ -211,9 +212,13 @@ export function resolvePendingInput(input: {
   // in isolation; `consumeDeferredStepInput` replays them on the next step.
   if (resolvesApprovalBatch) {
     const deferredInput: {
+      clientContext?: StepInput["clientContext"];
       context?: StepInput["context"];
       message?: StepInput["message"];
     } = {};
+    if ((resolvedStepInput?.clientContext?.length ?? 0) > 0) {
+      deferredInput.clientContext = resolvedStepInput?.clientContext;
+    }
     if ((resolvedStepInput?.context?.length ?? 0) > 0) {
       deferredInput.context = resolvedStepInput?.context;
     }
@@ -221,11 +226,16 @@ export function resolvePendingInput(input: {
       deferredInput.message = resolvedStepInput.message;
     }
 
-    if (deferredInput.context !== undefined || deferredInput.message !== undefined) {
+    if (
+      deferredInput.clientContext !== undefined ||
+      deferredInput.context !== undefined ||
+      deferredInput.message !== undefined
+    ) {
       session = queueDeferredStepInput(session, deferredInput);
 
       return {
         consumedMessage: resolvedStepInput?.messageConsumed,
+        deferredClientContext: deferredInput.clientContext === undefined ? undefined : true,
         deferredContext: deferredInput.context === undefined ? undefined : true,
         deferredMessage: deferredInput.message === undefined ? undefined : true,
         limitContinuation,
@@ -268,40 +278,6 @@ function resolveTextMessageInput(
   });
 }
 
-function compactStepInput(
-  input: (StepInput & { readonly messageConsumed?: boolean }) | undefined,
-): StepInput & { readonly messageConsumed?: boolean } {
-  if (input === undefined) {
-    return {};
-  }
-
-  const result: {
-    context?: StepInput["context"];
-    inputResponses?: StepInput["inputResponses"];
-    message?: StepInput["message"];
-    messageConsumed?: boolean;
-    outputSchema?: StepInput["outputSchema"];
-  } = {};
-
-  if ((input.context?.length ?? 0) > 0) {
-    result.context = input.context;
-  }
-  if ((input.inputResponses?.length ?? 0) > 0) {
-    result.inputResponses = input.inputResponses;
-  }
-  if (input.message !== undefined) {
-    result.message = input.message;
-  }
-  if (input.messageConsumed === true) {
-    result.messageConsumed = true;
-  }
-  if (input.outputSchema !== undefined) {
-    result.outputSchema = input.outputSchema;
-  }
-
-  return result;
-}
-
 function hasUnansweredApproval(input: {
   readonly pendingBatch: PendingInputBatch;
   readonly responses: readonly InputResponse[];
@@ -314,6 +290,7 @@ function hasUnansweredApproval(input: {
 
 type ResolvePendingInputResult = {
   readonly consumedMessage?: boolean;
+  readonly deferredClientContext?: boolean;
   readonly deferredContext?: boolean;
   readonly deferredMessage?: boolean;
   /**

@@ -295,8 +295,8 @@ export interface SlackInteractionUser {
 /**
  * Result of an `onAppMention` or `onDirectMessage` callback. Return an
  * object (auth may be `null`) to dispatch a turn, or `null` to drop the
- * inbound message. `context` strings are appended as user messages to
- * session history before the delivery message.
+ * inbound message. `context` strings apply as turn instructions without
+ * entering conversation history.
  */
 export type SlackMentionResult = {
   readonly auth: SessionAuthContext | null;

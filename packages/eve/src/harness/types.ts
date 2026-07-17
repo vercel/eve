@@ -123,9 +123,14 @@ export interface StepInput {
   readonly inputResponses?: readonly InputResponse[];
   readonly message?: string | UserContent;
   /**
-   * Context strings from the channel delivery. Each entry is appended
-   * as a `role: "user"` message to `session.history` before the
-   * delivery message. Populated by channels via `SendPayload.context`.
+   * Caller-authored client or page context. Each entry applies as a transient
+   * user-role model message for this turn without entering durable history.
+   */
+  readonly clientContext?: readonly string[];
+  /**
+   * Context strings from the channel delivery. Each entry applies as
+   * instructions for this turn without entering durable conversation
+   * history. Populated by channels via `SendPayload.context`.
    */
   readonly context?: readonly string[];
   /**

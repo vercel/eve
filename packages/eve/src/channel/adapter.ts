@@ -190,6 +190,7 @@ export function defaultDeliverResult(payload: DeliverPayload): StepInput | undef
     return {
       inputResponses: payload.inputResponses,
       message: payload.message,
+      clientContext: payload.clientContext,
       context: payload.context,
       outputSchema: payload.outputSchema,
     };
@@ -198,13 +199,21 @@ export function defaultDeliverResult(payload: DeliverPayload): StepInput | undef
   if (payload.inputResponses !== undefined && payload.inputResponses.length > 0) {
     return {
       inputResponses: payload.inputResponses,
+      clientContext: payload.clientContext,
       context: payload.context,
       outputSchema: payload.outputSchema,
     };
   }
 
-  if (payload.context !== undefined && payload.context.length > 0) {
-    return { context: payload.context, outputSchema: payload.outputSchema };
+  if (
+    (payload.clientContext !== undefined && payload.clientContext.length > 0) ||
+    (payload.context !== undefined && payload.context.length > 0)
+  ) {
+    return {
+      clientContext: payload.clientContext,
+      context: payload.context,
+      outputSchema: payload.outputSchema,
+    };
   }
 
   if (payload.outputSchema !== undefined) {

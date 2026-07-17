@@ -422,7 +422,8 @@ describe("eveChannel — onMessage", () => {
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload).toEqual({
       message: "What word is selected?",
-      context: ["Client context:\nselection: jazz", "Authenticated caller profile: enterprise"],
+      clientContext: ["Client context:\nselection: jazz"],
+      context: ["Authenticated caller profile: enterprise"],
     });
     const options = handler.send.mock.calls[0]?.[1] as SendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
@@ -528,10 +529,8 @@ describe("eveChannel — onMessage", () => {
     expect(response.status).toBe(200);
     expect(onMessage).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload.context).toEqual([
-      "Client context:\napproval modal open",
-      "Authenticated continuation context",
-    ]);
+    expect(payload.clientContext).toEqual(["Client context:\napproval modal open"]);
+    expect(payload.context).toEqual(["Authenticated continuation context"]);
     expect(payload.inputResponses).toEqual([{ requestId: "req-1", optionId: "approve" }]);
     const options = handler.send.mock.calls[0]?.[1] as SendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
@@ -709,7 +708,7 @@ describe("eveChannel — create session (text)", () => {
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload).toEqual({
       message: "What word is selected?",
-      context: ['Client context:\n{"selectedWord":"jazz"}'],
+      clientContext: ['Client context:\n{"selectedWord":"jazz"}'],
     });
   });
 
@@ -764,7 +763,7 @@ describe("eveChannel — create session (text)", () => {
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload.context).toEqual([
+    expect(payload.clientContext).toEqual([
       "Client context:\nroute: /editor",
       "Client context:\nselection: jazz",
     ]);
@@ -1120,7 +1119,7 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload.message).toBe("yes please");
-    expect(payload.context).toEqual(["Client context:\napproval modal open"]);
+    expect(payload.clientContext).toEqual(["Client context:\napproval modal open"]);
   });
 
   it("forwards outputSchema with a continue-session message", async () => {

@@ -99,7 +99,7 @@ export interface GitHubEventContext extends GitHubChannelContext, ChannelSession
 /**
  * Result of a GitHub inbound hook. Return `null` to acknowledge without
  * dispatching; return `{ auth }` to dispatch. Optional `context` strings are
- * added as `role: "user"` messages before the dispatched turn.
+ * applied as instructions for the dispatched turn.
  */
 export type GitHubInboundResult = {
   readonly auth: SessionAuthContext | null;

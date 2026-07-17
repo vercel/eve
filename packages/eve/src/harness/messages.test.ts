@@ -55,13 +55,15 @@ describe("coalesceTurnInputs", () => {
     });
   });
 
-  it("preserves context from both payloads in order", () => {
+  it("preserves client and channel context independently in order", () => {
     const result = coalesceTurnInputs(
       {
+        clientContext: ["client-a"],
         message: "hello",
         context: ["from-channel"],
       },
       {
+        clientContext: ["client-b"],
         inputResponses: [{ requestId: "r1", text: "yes" }],
         context: ["from-hook"],
       },
@@ -70,6 +72,7 @@ describe("coalesceTurnInputs", () => {
     expect(result).toEqual({
       inputResponses: [{ requestId: "r1", text: "yes" }],
       message: "hello",
+      clientContext: ["client-a", "client-b"],
       context: ["from-channel", "from-hook"],
     });
   });
