@@ -166,6 +166,8 @@ describe("linearChannel inbound Agent Session events", () => {
     expect(payload.message).toBe("Please handle this issue.");
     expect(payload.clientContext[0]).toContain("<linear_context>");
     expect(payload.clientContext[0]).toContain("issue_identifier: EVE-123");
+    expect(payload.clientContext[0]).not.toContain("response_medium");
+    expect(payload.context[0]).toContain("response_medium: linear_agent_activity");
     expect(options).toMatchObject({
       auth: {
         authenticator: "linear-agent-webhook",

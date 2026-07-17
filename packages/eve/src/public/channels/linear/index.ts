@@ -31,6 +31,7 @@ export {
 } from "#public/channels/linear/hitl.js";
 export {
   formatLinearContextBlock,
+  formatLinearDeliveryContext,
   linearContinuationToken,
   messageFromLinearAgentSessionEvent,
   parseLinearWebhookEvent,

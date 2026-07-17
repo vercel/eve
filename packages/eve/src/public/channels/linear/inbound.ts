@@ -157,7 +157,7 @@ export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEven
   return "Linear agent session started.";
 }
 
-/** Formats Linear issue/session context as an eve context block. */
+/** Formats caller-provided Linear issue/session metadata as an eve context block. */
 export function formatLinearContextBlock(event: LinearAgentSessionEvent): string {
   const session = event.agentSession;
   const issue = session.issue;
@@ -173,10 +173,16 @@ export function formatLinearContextBlock(event: LinearAgentSessionEvent): string
     `issue_url: ${issue?.url ?? ""}`,
     `comment_id: ${session.commentId ?? ""}`,
     `source_comment_id: ${session.sourceCommentId ?? ""}`,
-    "response_medium: linear_agent_activity",
     "</linear_context>",
   ];
   return lines.join("\n");
+}
+
+/** Renders trusted, channel-authored Linear delivery instructions. */
+export function formatLinearDeliveryContext(): string {
+  return ["<linear_delivery>", "response_medium: linear_agent_activity", "</linear_delivery>"].join(
+    "\n",
+  );
 }
 
 function readAgentSession(value: unknown): LinearAgentSessionRef | null {

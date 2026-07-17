@@ -17,6 +17,7 @@ import { createDefaultEvents, defaultOnAgentSession } from "#public/channels/lin
 import { resolveLinearPromptInputResponses } from "#public/channels/linear/hitl.js";
 import {
   formatLinearContextBlock,
+  formatLinearDeliveryContext,
   linearContinuationToken,
   messageFromLinearAgentSessionEvent,
   parseLinearWebhookEvent,
@@ -353,7 +354,7 @@ async function dispatchAgentSession(input: {
   await input.send(
     {
       clientContext: [formatLinearContextBlock(event), ...event.previousComments],
-      context: result.context,
+      context: [formatLinearDeliveryContext(), ...(result.context ?? [])],
       inputResponses,
       message: messageFromLinearAgentSessionEvent(event),
     },
