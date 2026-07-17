@@ -1,5 +1,20 @@
 # eve
 
+## 0.25.0
+
+### Minor Changes
+
+- b9bb8b2: Scaffold extensions with separate source and dist roots, a required wildcard eve peer, and dist-only publication. `eve extension build` now emits an agent-shaped JavaScript distribution with declarations, assets, and capability compatibility metadata instead of requiring author TypeScript in the published package.
+
+### Patch Changes
+
+- 29ecffc: Build mounted source-backed workspace extensions before `eve dev` compiles the agent, then rebuild only the affected extension when its source changes. Failed extension builds keep the previous dist and active development generation serving.
+- 46b78b8: Stop development microsandboxes on `eve dev` shutdown by discovering resources from their run labels and loading the application's installed microsandbox version during cleanup.
+- 6a5a36a: Deliver stale HITL responses — answers to a question or approval that is no longer pending — as a new user message, letting the model decide whether the old selection still matters. A stale approval never authorizes the earlier tool call.
+- f7c69b1: The Vercel Framework Preset is now reconciled with the host framework on disk when running `/deploy` via the TUI.
+- bbec675: Extensions installed with a registry-style store layout (e.g. from npm with pnpm) now work in `eve dev` and `eve eval`. Extension modules reached through a node_modules symlink resolve their dependencies from the package's real location — matching standard resolver semantics — instead of failing with `UNRESOLVED_IMPORT`/`ERR_MODULE_NOT_FOUND` or silently picking up another copy of the dependency from the consuming app.
+- 14501dc: Every eve-owned tool input is now validated against its schema before execution, so invalid calls are returned to the model for retry instead of failing the run. Subagent calls treat an empty `outputSchema` as absent, and OpenAPI operations with invalid schemas are omitted with a warning.
+
 ## 0.24.6
 
 ### Patch Changes
