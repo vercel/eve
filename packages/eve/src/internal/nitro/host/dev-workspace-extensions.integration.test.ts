@@ -129,6 +129,21 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
     expect(mocks.buildExtensionPackage).not.toHaveBeenCalled();
   });
 
+  it("does not rebuild a workspace package distributed without its authored source", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    const packageRoot = join(appRoot, "packages", "alpha");
+    await writeText(
+      join(packageRoot, "dist", "extension", "extension.mjs"),
+      "export default {};\n",
+    );
+    await rm(join(packageRoot, "extension"), { recursive: true });
+
+    const extensions = await prepareDevelopmentWorkspaceExtensions({ appRoot });
+
+    expect(extensions).toEqual([]);
+    expect(mocks.buildExtensionPackage).not.toHaveBeenCalled();
+  });
+
   it("rebuilds every mounted workspace extension for a forced reload", async () => {
     const appRoot = await createWorkspaceAgent(["alpha", "beta"]);
     const initial = await prepareDevelopmentWorkspaceExtensions({ appRoot });

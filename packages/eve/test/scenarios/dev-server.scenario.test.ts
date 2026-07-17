@@ -1,6 +1,7 @@
 import { Agent } from "node:http";
 import { existsSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -36,6 +37,8 @@ import {
 process.env.EVE_TUI_UNICODE = "1";
 
 const scenarioApp = useScenarioApp();
+const require = createRequire(import.meta.url);
+const TYPESCRIPT_VERSION = (require("typescript/package.json") as { version: string }).version;
 const DEV_SERVER_SCENARIO_TIMEOUT_MS = 360_000;
 const DEV_SERVER_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   ...WEATHER_AGENT_DESCRIPTOR,
@@ -179,6 +182,7 @@ const WORKSPACE_EXTENSION_HMR_DESCRIPTOR: ScenarioAppDescriptor = {
         version: "0.0.0",
         type: "module",
         eve: { extension: { source: "extension", dist: "dist/extension" } },
+        devDependencies: { typescript: TYPESCRIPT_VERSION },
         peerDependencies: { eve: "*" },
       },
       null,

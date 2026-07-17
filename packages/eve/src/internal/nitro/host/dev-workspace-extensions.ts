@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 import {
@@ -114,6 +114,10 @@ async function resolveWorkspaceExtension(input: {
 
   const config = await tryReadExtensionBuildConfig(packageRoot);
   if (config === null) {
+    return undefined;
+  }
+  const sourceStat = await stat(config.sourceRoot).catch(() => undefined);
+  if (sourceStat?.isDirectory() !== true) {
     return undefined;
   }
   const buildConfigPaths = [
