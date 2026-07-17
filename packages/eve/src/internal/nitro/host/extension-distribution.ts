@@ -1,6 +1,7 @@
 import { cp, mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
+import { EXTENSION_COMPATIBILITY_MANIFEST_FILENAME } from "#compiler/extension-compatibility.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
@@ -24,8 +25,19 @@ export async function emitExtensionDistribution(input: {
   readonly transactionRoot: string;
 }): Promise<void> {
   const sourceFiles = await collectExtensionSourceFiles(input.sourceRoot);
-  const moduleFiles = sourceFiles.filter((file) => isAuthoredModule(file.logicalPath));
-  await copyDistributionDataFiles({ files: sourceFiles, stagedDistRoot: input.stagedDistRoot });
+  const skillPackageRoots = input.manifest.skills
+    .filter((skill) => skill.sourceKind === "skill-package")
+    .map((skill) => relative(input.sourceRoot, skill.rootPath).replaceAll("\\", "/"));
+  const moduleFiles = sourceFiles.filter(
+    (file) =>
+      isAuthoredModule(file.logicalPath) &&
+      !skillPackageRoots.some((root) => file.logicalPath.startsWith(`${root}/`)),
+  );
+  await copyDistributionDataFiles({
+    files: sourceFiles,
+    moduleLogicalPaths: new Set(moduleFiles.map((file) => file.logicalPath)),
+    stagedDistRoot: input.stagedDistRoot,
+  });
   const entries = await createDistributionEntries({ ...input, moduleFiles });
   const emitted = await bundleExtensionDistributionGraph({
     entries,
@@ -40,15 +52,41 @@ export async function emitExtensionDistribution(input: {
 
   await emitExtensionDeclarations({
     appRoot: input.appRoot,
-    sourceRoot: input.sourceRoot,
     declarationsRoot: input.declarationsRoot,
+    moduleLogicalPaths: moduleFiles.map((file) => file.logicalPath),
+    sourceRoot: input.sourceRoot,
   });
-  await cp(
-    join(input.declarationsRoot, relative(input.appRoot, input.sourceRoot)),
-    input.stagedDistRoot,
-    { recursive: true },
-  );
+  const sourceRelativePath = relative(input.appRoot, input.sourceRoot);
+  try {
+    await cp(join(input.declarationsRoot, sourceRelativePath), input.stagedDistRoot, {
+      recursive: true,
+    });
+  } catch (error) {
+    if (!isFileSystemError(error, "ENOENT")) throw error;
+    throw new Error(
+      `TypeScript emitted no declarations for "${sourceRelativePath}". Ensure the package tsconfig.json \`include\` covers every module under \`eve.extension.source\`.`,
+      { cause: error },
+    );
+  }
   await emitDeclarationBarrels(input);
+}
+
+/**
+ * Thrown when publishing failed and the prior output could not be moved back.
+ * The prior output survives at {@link preservedOutputPath}; callers must not
+ * delete the transaction directory that contains it.
+ */
+export class ExtensionOutputRestoreError extends Error {
+  readonly preservedOutputPath: string;
+
+  constructor(preservedOutputPath: string, options: { cause: unknown }) {
+    super(
+      `Publishing the extension build output failed, and the previous output could not be restored. It is preserved at "${preservedOutputPath}".`,
+      options,
+    );
+    this.name = "ExtensionOutputRestoreError";
+    this.preservedOutputPath = preservedOutputPath;
+  }
 }
 
 /** Atomically publishes a staged extension output, restoring the prior tree on failure. */
@@ -57,6 +95,7 @@ export async function replaceExtensionBuildOutput(input: {
   readonly stagedOutDir: string;
   readonly transactionRoot: string;
 }): Promise<void> {
+  await mkdir(dirname(input.outDir), { recursive: true });
   const previousOutDir = join(input.transactionRoot, "previous-output");
   let hadPreviousOutput = false;
   try {
@@ -68,7 +107,13 @@ export async function replaceExtensionBuildOutput(input: {
   try {
     await rename(input.stagedOutDir, input.outDir);
   } catch (error) {
-    if (hadPreviousOutput) await rename(previousOutDir, input.outDir);
+    if (hadPreviousOutput) {
+      try {
+        await rename(previousOutDir, input.outDir);
+      } catch {
+        throw new ExtensionOutputRestoreError(previousOutDir, { cause: error });
+      }
+    }
     throw error;
   }
 }
@@ -89,9 +134,9 @@ async function collectExtensionSourceFiles(
       files.push(...(await collectExtensionSourceFiles(sourceRoot, absolutePath)));
     } else if (entry.isFile()) {
       const logicalPath = relative(sourceRoot, absolutePath).replaceAll("\\", "/");
-      if (logicalPath === "_manifest.json") {
+      if (logicalPath === EXTENSION_COMPATIBILITY_MANIFEST_FILENAME) {
         throw new Error(
-          'The extension source cannot contain "_manifest.json"; eve reserves it for generated compatibility metadata.',
+          `The extension source cannot contain "${EXTENSION_COMPATIBILITY_MANIFEST_FILENAME}"; eve reserves it for generated compatibility metadata.`,
         );
       }
       files.push({ absolutePath, logicalPath });
@@ -113,11 +158,12 @@ function isAuthoredModule(logicalPath: string): boolean {
 
 async function copyDistributionDataFiles(input: {
   readonly files: readonly ExtensionSourceFile[];
+  readonly moduleLogicalPaths: ReadonlySet<string>;
   readonly stagedDistRoot: string;
 }): Promise<void> {
   await Promise.all(
     input.files
-      .filter((file) => !isAuthoredModule(file.logicalPath))
+      .filter((file) => !input.moduleLogicalPaths.has(file.logicalPath))
       .map(async (file) => {
         const outputPath = join(input.stagedDistRoot, file.logicalPath);
         await mkdir(dirname(outputPath), { recursive: true });

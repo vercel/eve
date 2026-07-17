@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EXTENSION_CAPABILITY_SUPPORT,
+  EXTENSION_CAPABILITY_VERSIONS,
   EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
   EXTENSION_COMPATIBILITY_MANIFEST_KIND,
   findUnsupportedExtensionCapabilities,
   parseExtensionCompatibilityManifest,
   serializeExtensionCompatibilityManifest,
+  type ExtensionCapability,
 } from "#compiler/extension-compatibility.js";
 
 describe("extension compatibility manifest", () => {
@@ -64,5 +67,26 @@ describe("extension compatibility manifest", () => {
       { capability: "futureCapability", requiredVersion: 1, supportedVersions: [] },
       { capability: "tool", requiredVersion: 2, supportedVersions: [1] },
     ]);
+  });
+
+  it("fails closed for capability names that collide with Object.prototype members", () => {
+    const manifest = {
+      kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+      builtWithEve: "0.24.6",
+      requires: { toString: 1, constructor: 1, hasOwnProperty: 2 },
+    } as const;
+
+    expect(findUnsupportedExtensionCapabilities(manifest)).toEqual([
+      { capability: "constructor", requiredVersion: 1, supportedVersions: [] },
+      { capability: "hasOwnProperty", requiredVersion: 2, supportedVersions: [] },
+      { capability: "toString", requiredVersion: 1, supportedVersions: [] },
+    ]);
+  });
+
+  it("supports every capability version it stamps", () => {
+    for (const [capability, version] of Object.entries(EXTENSION_CAPABILITY_VERSIONS)) {
+      expect(EXTENSION_CAPABILITY_SUPPORT[capability as ExtensionCapability]).toContain(version);
+    }
   });
 });

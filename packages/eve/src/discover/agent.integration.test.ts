@@ -733,6 +733,34 @@ describe("discoverAgent (memory)", () => {
     expect(mount.manifest.resolvedExtensions).toEqual([]);
   });
 
+  it("resolves a published dist-only extension package that omits eve.extension.source", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
+        "node_modules/@acme/crm/extension/tools/search.ts":
+          'throw new Error("extension modules should not execute during discovery");\n',
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.resolvedExtensions).toHaveLength(1);
+    expect(result.manifest.resolvedExtensions[0]!.packageName).toBe("@acme/crm");
+  });
+
   it("rejects an extension package that declares agent config", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {

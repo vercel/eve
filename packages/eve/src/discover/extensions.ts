@@ -232,7 +232,7 @@ export async function locateExtensionMount(input: {
       diagnostics: [
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_PACKAGE_INVALID,
-          message: `Package "${specifier}" is not an eve extension: its package.json must declare \`eve.extension.source\` and \`eve.extension.dist\`.`,
+          message: `Package "${specifier}" is not an eve extension: its package.json must declare \`eve.extension.dist\`.`,
           sourcePath: manifestPath,
         }),
       ],

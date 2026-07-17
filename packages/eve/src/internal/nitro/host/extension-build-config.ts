@@ -40,6 +40,11 @@ export async function tryReadExtensionBuildConfig(
   if (extension === null) {
     return null;
   }
+  if (extension.source === undefined) {
+    throw new Error(
+      "`eve.extension.dist` is declared without `eve.extension.source`. Building an extension requires the authoring root; add `eve.extension.source` to package.json.",
+    );
+  }
 
   const sourceRoot = resolve(appRoot, extension.source);
   const distRoot = resolve(appRoot, extension.dist);

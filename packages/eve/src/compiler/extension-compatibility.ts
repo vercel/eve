@@ -34,20 +34,33 @@ export type ExtensionCapability = keyof typeof EXTENSION_CAPABILITY_VERSIONS;
 /** Capability requirements stamped by one extension build. */
 export type ExtensionCapabilityRequirements = Partial<Record<ExtensionCapability, number>>;
 
-/** Capability contract versions this eve release can consume. */
-export const EXTENSION_CAPABILITY_SUPPORT = {
-  extension: [1],
-  tool: [1],
-  dynamicTool: [1],
-  connection: [1],
-  hook: [1],
-  skill: [1],
-  dynamicSkill: [1],
-  instructions: [1],
-  dynamicInstructions: [1],
-  config: [1],
-  state: [1],
-} as const satisfies Record<ExtensionCapability, readonly number[]>;
+/**
+ * Older contract versions this eve release still consumes. List a version here
+ * only when a capability bump keeps the previous format readable.
+ */
+const ADDITIONAL_SUPPORTED_CAPABILITY_VERSIONS: Partial<
+  Record<ExtensionCapability, readonly number[]>
+> = {};
+
+function deriveCapabilitySupport(): Readonly<Record<ExtensionCapability, readonly number[]>> {
+  const support = {} as Record<ExtensionCapability, readonly number[]>;
+  for (const capability of Object.keys(EXTENSION_CAPABILITY_VERSIONS) as ExtensionCapability[]) {
+    support[capability] = [
+      ...(ADDITIONAL_SUPPORTED_CAPABILITY_VERSIONS[capability] ?? []),
+      EXTENSION_CAPABILITY_VERSIONS[capability],
+    ];
+  }
+  return support;
+}
+
+/**
+ * Capability contract versions this eve release can consume. Derived from
+ * {@link EXTENSION_CAPABILITY_VERSIONS} so the version this release stamps is
+ * always one it accepts.
+ */
+export const EXTENSION_CAPABILITY_SUPPORT: Readonly<
+  Record<ExtensionCapability, readonly number[]>
+> = deriveCapabilitySupport();
 
 /** Consumer support table used to validate one extension distribution. */
 export type ExtensionCapabilitySupport = Readonly<Record<string, readonly number[]>>;
@@ -133,7 +146,11 @@ export function findUnsupportedExtensionCapabilities(
 ): UnsupportedExtensionCapability[] {
   return Object.entries(manifest.requires)
     .flatMap(([capability, requiredVersion]) => {
-      const supportedVersions = support[capability] ?? [];
+      // Manifest keys are untrusted; "toString" must fail closed, not resolve
+      // through the prototype chain.
+      const supportedVersions = Object.hasOwn(support, capability)
+        ? (support[capability] ?? [])
+        : [];
       return supportedVersions.includes(requiredVersion)
         ? []
         : [{ capability, requiredVersion, supportedVersions }];

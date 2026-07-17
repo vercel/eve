@@ -67,6 +67,10 @@ describe("extension build output", () => {
     const index = await readFile(join(outDir, "index.mjs"), "utf8");
     expect(index).toMatch(/from\s+["']\.\/extension\/extension\.mjs["']/);
 
+    // `eve/*` stays external so the mount resolves to the consumer's eve.
+    const extensionModule = await readFile(join(outDir, "extension", "extension.mjs"), "utf8");
+    expect(extensionModule).toMatch(/from\s+["']eve\/extension["']/);
+
     const toolsIndex = await readFile(join(outDir, "tools", "index.mjs"), "utf8");
     expect(toolsIndex).toMatch(/from\s+["']\.\.\/extension\/tools\/crm_search\.mjs["']/);
     expect(await readFile(join(outDir, "extension", "tools", "crm_search.mjs"), "utf8")).toContain(
@@ -212,6 +216,33 @@ describe("extension build output", () => {
     ).toBe("runtime data\n");
   });
 
+  it("preserves JavaScript files inside packaged skill resource trees", async () => {
+    const root = await createExtensionPackage();
+    await mkdir(join(root, "extension", "skills", "triage", "scripts"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(root, "extension", "skills", "triage", "SKILL.md"),
+      "---\ndescription: Triage a request.\n---\n\nRun scripts/check.js.\n",
+      "utf8",
+    );
+    const script = 'export const token = "skill-script-resource";\n';
+    await writeFile(
+      join(root, "extension", "skills", "triage", "scripts", "check.js"),
+      script,
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+
+    await expect(
+      readFile(join(outDir, "extension", "skills", "triage", "scripts", "check.js"), "utf8"),
+    ).resolves.toBe(script);
+    await expect(
+      readFile(join(outDir, "extension", "skills", "triage", "scripts", "check.mjs"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("sanitizes kebab-case tool names into valid export bindings", async () => {
     const root = await createExtensionPackage();
     await writeFile(
@@ -254,6 +285,44 @@ describe("extension build output", () => {
 
     await expect(buildExtensionPackage(root, config!)).rejects.toThrow(/TS2322/);
     await expect(readFile(join(outDir, "last-success.txt"), "utf8")).resolves.toBe("keep\n");
+  });
+
+  it("explains a tsconfig whose include misses the extension source", async () => {
+    const root = await createExtensionPackage();
+    await mkdir(join(root, "scripts"), { recursive: true });
+    await writeFile(join(root, "scripts", "release.ts"), "export const release = true;\n", "utf8");
+    await writeFile(
+      join(root, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          module: "esnext",
+          moduleResolution: "bundler",
+          skipLibCheck: true,
+          types: [],
+        },
+        include: ["scripts/**/*.ts"],
+      }),
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+
+    await expect(buildExtensionPackage(root, config!)).rejects.toThrow(
+      /TypeScript emitted no declarations for "extension"/,
+    );
+  });
+
+  it("rejects a published module excluded by the package tsconfig", async () => {
+    const root = await createExtensionPackage();
+    await writeFile(
+      join(root, "extension", "tools", "excluded.mts"),
+      'export default { description: "Excluded declaration.", async execute() { return {}; } };\n',
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+
+    await expect(buildExtensionPackage(root, config!)).rejects.toThrow(
+      'TypeScript emitted no declaration for extension module "tools/excluded.mts"',
+    );
   });
 
   it("upgrades a stale bare-string export entry to the runnable + types shape", async () => {

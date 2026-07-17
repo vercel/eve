@@ -106,7 +106,9 @@ Author the source with `moduleResolution: "bundler"` — eve compiles it, so rel
 }
 ```
 
-`eve extension build` transforms every JavaScript or TypeScript module into an agent-shaped `dist/extension` tree, copies skill packages and their assets, emits type declarations, and writes `dist/extension/_manifest.json`. The generated package entrypoints (`dist/index.mjs` and `dist/tools/index.mjs`) re-export those same dist modules, and the build fills the `exports` map so you never hand-list it. The published package therefore needs `dist/`, not the author's original TypeScript.
+`eve extension build` transforms every JavaScript or TypeScript module into an agent-shaped `dist/extension` tree, copies skill packages and their assets, emits type declarations, and writes `dist/extension/_manifest.json`. The generated package entrypoints (`dist/index.mjs` and `dist/tools/index.mjs`) re-export those same dist modules, and the build fills the `exports` map so you never hand-list it. The published package therefore needs `dist/`, not the author's original TypeScript. Consumers read only `eve.extension.dist`, so a published package may omit `eve.extension.source`; keep `source` declared wherever `eve extension build` runs.
+
+The build uses the package `tsconfig.json` when it emits declarations. Its `include` must cover every JavaScript or TypeScript module in the extension source (and JavaScript modules require `allowJs`); the build fails before publishing if any distributed module would be missing its declaration.
 
 The manifest contains only its format, the diagnostic eve build version, and the versions of extension capabilities this package actually uses. It does not contain compiled tools, schemas, names, or executable definitions; the consuming eve still discovers and normalizes the agent-shaped dist tree.
 
