@@ -164,8 +164,8 @@ describe("linearChannel inbound Agent Session events", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [payload, options] = send.mock.calls[0]!;
     expect(payload.message).toBe("Please handle this issue.");
-    expect(payload.context[0]).toContain("<linear_context>");
-    expect(payload.context[0]).toContain("issue_identifier: EVE-123");
+    expect(payload.clientContext[0]).toContain("<linear_context>");
+    expect(payload.clientContext[0]).toContain("issue_identifier: EVE-123");
     expect(options).toMatchObject({
       auth: {
         authenticator: "linear-agent-webhook",

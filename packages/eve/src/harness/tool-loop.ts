@@ -112,6 +112,7 @@ import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import {
   buildTurnClientContextView,
+  clearTurnContext,
   getTurnDeliveryContext,
   setTurnClientContext,
   setTurnDeliveryContext,
@@ -508,10 +509,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const executeStep = () => executeStepBody(initialSession, input, turnSpan);
 
     try {
-      if (parentContext) {
-        return await otelContext.with(parentContext, executeStep);
-      }
-      return await executeStep();
+      const result = parentContext
+        ? await otelContext.with(parentContext, executeStep)
+        : await executeStep();
+      return typeof result.next === "function"
+        ? result
+        : { ...result, session: clearTurnContext(result.session) };
     } finally {
       turnSpan?.end();
     }

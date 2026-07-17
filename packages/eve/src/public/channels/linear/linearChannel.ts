@@ -352,11 +352,8 @@ async function dispatchAgentSession(input: {
 
   await input.send(
     {
-      context: [
-        formatLinearContextBlock(event),
-        ...event.previousComments,
-        ...(result.context ?? []),
-      ],
+      clientContext: [formatLinearContextBlock(event), ...event.previousComments],
+      context: result.context,
       inputResponses,
       message: messageFromLinearAgentSessionEvent(event),
     },

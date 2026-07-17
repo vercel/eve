@@ -42,6 +42,11 @@ export function setTurnDeliveryContext(
   return setStoredContext(session, TURN_DELIVERY_CONTEXT_KEY, context);
 }
 
+/** Clears context that must not survive the active turn. */
+export function clearTurnContext(session: HarnessSession): HarnessSession {
+  return setTurnDeliveryContext(setTurnClientContext(session, undefined), undefined);
+}
+
 function setStoredContext(
   session: HarnessSession,
   key: string,

@@ -42,6 +42,7 @@ import {
   setPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { getTurnClientContext, getTurnDeliveryContext } from "#harness/turn-delivery-context.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -6837,6 +6838,8 @@ describe("createToolLoopHarness", () => {
       role: "user",
     });
     expect(secondResult.session.history).not.toContainEqual({ content: context, role: "user" });
+    expect(getTurnClientContext(secondResult.session)).toEqual([]);
+    expect(getTurnDeliveryContext(secondResult.session)).toEqual([]);
   });
 
   it("deferred message lands as last non-system message after explicit approval denial", async () => {
@@ -7041,9 +7044,15 @@ describe("createToolLoopHarness", () => {
       },
     });
 
-    const result = await runStep(session, { message: "Choose for me." });
+    const result = await runStep(session, {
+      clientContext: ["selected issue text"],
+      context: ["channel instruction"],
+      message: "Choose for me.",
+    });
 
     expect(result.next).toBeNull();
+    expect(getTurnClientContext(result.session)).toEqual([]);
+    expect(getTurnDeliveryContext(result.session)).toEqual([]);
     expect(events.some((event) => event.type === "actions.requested")).toBe(false);
     expect(events.find((event) => event.type === "input.requested")).toEqual({
       data: {
@@ -9091,6 +9100,7 @@ describe("createToolLoopHarness", () => {
         { role: "user", content: "Hi" },
         { role: "assistant", content: "ok" },
       ]);
+      expect(getTurnDeliveryContext(result.session)).toEqual([]);
     });
 
     it("keeps public client context as a turn-scoped user overlay", async () => {
@@ -9163,6 +9173,7 @@ describe("createToolLoopHarness", () => {
       expect(dynamicModelMessages[0]).toContainEqual({ role: "user", content: clientContext });
       expect(dynamicToolMessages[0]).toContainEqual({ role: "user", content: clientContext });
       expect(first.session.history).not.toContainEqual({ role: "user", content: clientContext });
+      expect(getTurnClientContext(first.session)).toEqual([clientContext]);
 
       setupMockAgent(defaultModelResult());
       expect(typeof first.next).toBe("function");
@@ -9177,6 +9188,7 @@ describe("createToolLoopHarness", () => {
       expect(dynamicModelMessages[1]).toContainEqual({ role: "user", content: clientContext });
       expect(dynamicToolMessages[1]).toContainEqual({ role: "user", content: clientContext });
       expect(second.session.history).not.toContainEqual({ role: "user", content: clientContext });
+      expect(getTurnClientContext(second.session)).toEqual([]);
 
       setupMockAgent(defaultModelResult());
       await contextStorage.run(ctx, () =>

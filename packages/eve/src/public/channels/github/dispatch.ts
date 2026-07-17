@@ -20,10 +20,7 @@ import {
   type GitHubUser,
   type GitHubWorkflowRunWebhookEvent,
 } from "#public/channels/github/inbound.js";
-import {
-  buildGitHubPullRequestContext,
-  mergeGitHubContext,
-} from "#public/channels/github/pr-context.js";
+import { buildGitHubPullRequestContext } from "#public/channels/github/pr-context.js";
 import {
   continuationTokenFromState,
   stateFromCiEvent,
@@ -233,12 +230,14 @@ async function dispatchWebhookEventTurn(input: {
 
   await sendGitHubTurn({
     auth: result.auth,
+    clientContext: await buildPullRequestContext(
+      input.config,
+      input.state,
+      input.event.delivery.id,
+    ),
+    context: result.context,
     event: input.event,
     message: input.message,
-    context: mergeGitHubContext({
-      github: await buildPullRequestContext(input.config, input.state, input.event.delivery.id),
-      hook: result.context,
-    }),
     send: input.send,
     state: input.state,
   });
@@ -268,13 +267,15 @@ async function dispatchCommentTurn(input: {
 
   await sendGitHubTurn({
     auth: result.auth,
+    clientContext: await buildPullRequestContext(
+      input.config,
+      input.state,
+      input.event.delivery.id,
+    ),
     commentUrl: input.commentUrl,
+    context: result.context,
     event: input.event,
     message,
-    context: mergeGitHubContext({
-      github: await buildPullRequestContext(input.config, input.state, input.event.delivery.id),
-      hook: result.context,
-    }),
     send: input.send,
     state: input.state,
   });
@@ -296,11 +297,12 @@ async function runInboundHandler(input: {
 
 async function sendGitHubTurn(input: {
   readonly auth: SessionAuthContext | null;
+  readonly clientContext?: readonly string[];
   readonly commentUrl?: string;
+  readonly context?: readonly string[];
   readonly event: GitHubTurnEvent;
   readonly logMessage?: string;
   readonly message: string;
-  readonly context: readonly string[] | undefined;
   readonly send: SendFn<GitHubChannelState>;
   readonly state: GitHubChannelState;
 }): Promise<void> {
@@ -318,8 +320,9 @@ async function sendGitHubTurn(input: {
   try {
     await input.send(
       {
-        message: turnMessage,
+        clientContext: input.clientContext,
         context: input.context,
+        message: turnMessage,
       },
       {
         auth: input.auth,

@@ -404,8 +404,8 @@ describe("githubChannel", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://github.test/repos/vercel/eve/pulls/7");
     const [payload] = send.mock.calls[0]!;
-    expect(payload.context?.[0]).toContain("title: Add GitHub context");
-    expect(payload.context?.[0]).toContain("head_sha: head-sha");
+    expect(payload.clientContext?.[0]).toContain("title: Add GitHub context");
+    expect(payload.clientContext?.[0]).toContain("head_sha: head-sha");
   });
 
   it("dispatches inline review comments to the review-thread token", async () => {
@@ -514,7 +514,7 @@ describe("githubChannel", () => {
       credentials: { appId: "test-app", webhookSecret: SECRET },
       onPullRequest(ctx, pullRequest) {
         hook(ctx.conversation, pullRequest);
-        return { auth: defaultGitHubAuth(ctx) };
+        return { auth: defaultGitHubAuth(ctx), context: ["trusted hook instruction"] };
       },
     });
 
@@ -547,6 +547,8 @@ describe("githubChannel", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [payload, options] = send.mock.calls[0]!;
     expect(payload.message).toContain("Pull request opened: #7 Add webhook PR handling");
+    expect(payload.clientContext?.[0]).toContain("title: Add GitHub context");
+    expect(payload.context).toEqual(["trusted hook instruction"]);
     expect(options).toMatchObject({
       continuationToken: "repo:123:pull:7",
       state: {

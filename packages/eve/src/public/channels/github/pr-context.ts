@@ -75,8 +75,9 @@ export interface GitHubPullRequestContextInput {
  * Builds bounded, one-shot pull-request background for a GitHub turn: PR
  * metadata plus the changed-file diff (noisy files excluded from the patch).
  *
- * The returned strings are intended for `SendPayload.context`; each applies as
- * instructions for the dispatched turn without entering conversation history.
+ * The returned strings are intended for `SendPayload.clientContext`; each
+ * applies as user-role context for the dispatched turn without entering
+ * conversation history.
  */
 export async function buildGitHubPullRequestContext(
   input: GitHubPullRequestContextInput,
@@ -133,17 +134,6 @@ export async function buildGitHubPullRequestContext(
       lines.join("\n"),
     ].join("\n"),
   ];
-}
-
-/** Merges channel-generated PR context before hook-provided context. */
-export function mergeGitHubContext(input: {
-  readonly github?: readonly string[];
-  readonly hook?: readonly string[];
-}): readonly string[] | undefined {
-  const github = input.github ?? [];
-  const hook = input.hook ?? [];
-  if (github.length === 0 && hook.length === 0) return undefined;
-  return [...github, ...hook];
 }
 
 function withPinnedPullRequestShas(
