@@ -71,6 +71,30 @@ async function dispatch(input: {
 }
 
 describe("dynamic skill materialization recovery", () => {
+  it("does not re-announce session skills after sandbox replacement on an unmatched event", async () => {
+    const { ctx } = createCtx();
+    const resolver = createResolver(
+      "session-policy",
+      () => makeSkill("Session policy", "Follow session policy."),
+      ["session.started"],
+    );
+    await dispatch({ ctx, event: "session.started", resolvers: [resolver] });
+    ctx.clearVirtualContext();
+
+    const recreated = mockSandbox({
+      id: "sbx_recreated",
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+    ctx.set(SandboxKey, recreated.access);
+    await dispatch({ ctx, event: "turn.started", resolvers: [resolver] });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
+    expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
+    expect(recreated.files.has("/home/agent/.agents/skills/session-policy/SKILL.md")).toBe(false);
+  });
+
   it.each(["missing", "stale"] as const)(
     "invalidates unresolvable manifest packages after a %s marker",
     async (markerState) => {

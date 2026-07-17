@@ -70,7 +70,7 @@ export async function materializeDynamicSkillUpdates(input: {
   readonly updates: readonly DynamicSkillMaterializationUpdate[];
 }): Promise<DynamicSkillMaterializationResult> {
   const currentMarker = input.markerRead.marker;
-  const fullRematerialization = currentMarker === null;
+  const fullRematerialization = currentMarker === null || input.markerRead.status === "stale";
 
   const previous = indexManifest(input.previousManifest);
   const desired = indexManifest(input.nextManifest);
@@ -82,6 +82,7 @@ export async function materializeDynamicSkillUpdates(input: {
 
   if (fullRematerialization) {
     for (const name of previous.keys()) removePackages.add(name);
+    for (const name of Object.keys(currentMarker?.packages ?? {})) removePackages.add(name);
     for (const name of updates.keys()) {
       removePackages.add(name);
     }
