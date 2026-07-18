@@ -52,7 +52,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     throw error;
   });
 
-  await screen.waitForText("❯", 5_000);
+  await screen.waitForText("›", 5_000);
 
   input.type(
     "Use the echo marker subagent to process the input 'ping'. Once it returns, reply with the subagent's exact output included verbatim in your message.",
@@ -96,7 +96,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   // The turn is complete; wait until the runner is back at the prompt so
   // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
   // turn and returns to the prompt (Claude Code's two-step exit).
-  await screen.waitForText("❯", 30_000);
+  await screen.waitForText("›", 30_000);
   input.ctrlC();
   await runPromise;
 });

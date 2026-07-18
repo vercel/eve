@@ -62,7 +62,7 @@ async function runPendingDeployCycle(): Promise<void> {
   const runPromise = runner.run();
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForText("›", 5_000);
     await screen.waitForText(` :${new URL(UNREACHABLE_HOST).port} `, 5_000);
     console.log(theme.muted("[tui-status-line] local loopback badge rendered"));
 
@@ -74,7 +74,7 @@ async function runPendingDeployCycle(): Promise<void> {
 
     input.type("/new");
     input.enter();
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForText("›", 5_000);
     if (!screen.snapshot().includes("deploy pending")) {
       throw new Error(`/new dropped the pending-deploy flag:\n${screen.snapshot()}`);
     }
@@ -120,12 +120,12 @@ async function runUnlinkedShowsNoVercelSegment(): Promise<void> {
   const runPromise = runner.run();
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForText("›", 5_000);
     // Allow the unlinked probe to land and repaint before judging the footer.
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     const lines = screen.snapshot().split("\n");
-    const promptRow = lines.findLastIndex((line) => line.includes("❯"));
+    const promptRow = lines.findLastIndex((line) => line.includes("›"));
     const footer = lines.slice(promptRow + 1).join("\n");
     if (footer.includes("▲")) {
       throw new Error(`unlinked footer rendered a Vercel segment:\n${screen.snapshot()}`);

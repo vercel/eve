@@ -12,6 +12,7 @@ import {
 
 import type { AgentTUIStreamEvent, AgentTUIStreamResult } from "./runner.js";
 import { promptCommandsFor } from "./prompt-commands.js";
+import { PROMPT_PLACEHOLDER_MESSAGES } from "./prompt-placeholder.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
@@ -239,9 +240,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("bash");
+    expect(snapshot).toContain("Run rm something");
     expect(snapshot).toContain("denied");
-    expect(snapshot).not.toContain("✓ bash");
+    expect(snapshot).not.toContain("✓ Run");
     renderer.shutdown();
   });
 
@@ -269,7 +270,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Fetch https://github.com/vercel/eve/issues/648");
+    expect(snapshot).toContain("Fetched https://github.com/vercel/eve/issues/648");
     expect(snapshot).not.toContain("format=markdown");
     expect(snapshot).not.toContain("large fetched page");
     renderer.shutdown();
@@ -299,11 +300,99 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("▌ call fetch twice in parallel\n\n✓ Fetch 2 URLs");
-    expect(snapshot).toContain("✓ Fetch 2 URLs");
-    expect(snapshot).toContain("https://one.example");
-    expect(snapshot).toContain("https://two.example");
+    // A fully settled batch collapses to one past-tense line; the item rail
+    // is gone from the transcript.
+    expect(snapshot).toContain("▌ call fetch twice in parallel\n\n ▪ Fetched 2 URLs");
+    expect(snapshot).not.toContain("https://one.example");
+    expect(snapshot).not.toContain("https://two.example");
     renderer.shutdown();
+  });
+
+  it("partitions a fetch cohort with interleaved failures into per-outcome groups", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "fetch-1",
+          toolName: "web_fetch",
+          input: { url: "https://one.example" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "fetch-2",
+          toolName: "web_fetch",
+          input: { url: "https://two.example" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "fetch-3",
+          toolName: "web_fetch",
+          input: { url: "https://three.example" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "fetch-4",
+          toolName: "web_fetch",
+          input: { url: "https://four.example" },
+        },
+        { type: "tool-result", toolCallId: "fetch-1", output: { content: "one" } },
+        { type: "tool-error", toolCallId: "fetch-2", errorText: "status 403" },
+        { type: "tool-result", toolCallId: "fetch-3", output: { content: "three" } },
+        { type: "tool-error", toolCallId: "fetch-4", errorText: "status 429" },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "fetch four urls", continueSession: false },
+    );
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    // Successes collapse to a counted past-tense line; failures keep their
+    // itemized rail, newest call first, closed by the corner.
+    expect(snapshot).toContain("▪ Fetched 2 URLs");
+    expect(snapshot).not.toContain("https://one.example");
+    expect(snapshot).toContain(
+      " ⨯ Fetch 2 URLs\n │ https://four.example status 429\n │ https://two.example  status 403\n └",
+    );
+  });
+
+  it("renders a write as an all-added diff for a new file and a real diff after a read", async () => {
+    const { screen, renderer } = makeRenderer(120, 60);
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "write-1",
+          toolName: "write_file",
+          input: { filePath: "/workspace/knicks.txt", content: "knicks\n" },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "write-1",
+          output: { existed: false, path: "/workspace/knicks.txt" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "write-2",
+          toolName: "write_file",
+          input: { filePath: "/workspace/knicks.txt", content: "knicks\nnets\n" },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "write-2",
+          output: { existed: true, path: "/workspace/knicks.txt" },
+        },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "write the teams", continueSession: false },
+    );
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    // First write: the file did not exist, so its content is all additions.
+    expect(snapshot).toContain(" ▪ Wrote /workspace/knicks.txt\n │+ knicks\n └");
+    // Second write diffs against the first write's cached content.
+    expect(snapshot).toContain(" │  knicks\n │+ nets\n └");
   });
 
   it("renders interleaved tool lifecycles in arrival order", async () => {
@@ -330,9 +419,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("✓ first_search");
+    expect(snapshot).toContain("▪ first_search");
     expect(snapshot).toContain("first result");
-    expect(snapshot).toContain("✓ second_search");
+    expect(snapshot).toContain("▪ second_search");
     expect(snapshot).toContain("second result");
     expect(snapshot.indexOf("first_search")).toBeLessThan(snapshot.indexOf("second_search"));
     renderer.shutdown();
@@ -364,11 +453,17 @@ describe("TerminalRenderer (inline scrollback)", () => {
       });
     }
 
-    await screen.waitForText("tri-state-100");
+    await screen.waitForText("Search 100 queries");
 
     const snapshot = screen.snapshot();
-    expect(snapshot.match(/web_search/g)).toHaveLength(100);
-    expect(snapshot).not.toContain("✓ web_search");
+    // Semantic copy coalesces the running batch into one counted row that
+    // lists the newest calls first and elides the rest; nothing may render
+    // as completed yet.
+    expect(snapshot.match(/tri-state-\d+/g)).toHaveLength(5);
+    expect(snapshot).toContain("tri-state-100");
+    expect(snapshot).toContain("(95 more)");
+    expect(snapshot).not.toContain("Searched");
+    expect(snapshot).not.toContain("web_search");
 
     controller?.close();
     await rendering;
@@ -716,8 +811,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
       ]),
       { submittedPrompt: "list files", continueSession: true },
     );
-    expect(screen.snapshot()).toContain("bash");
-    expect(screen.snapshot()).not.toContain("✓ bash");
+    expect(screen.snapshot()).toContain("Run ls");
+    expect(screen.snapshot()).not.toContain("Ran ls");
 
     await renderer.renderStream(
       streamOf([
@@ -733,7 +828,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("✓ bash");
+    expect(snapshot).toContain("▪ Ran ls");
   });
 
   it("settles an authorization block when its callback arrives in a later stream pass", async () => {
@@ -902,6 +997,94 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("coalesces parallel calls to the same subagent under one counted header", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    const calls = [
+      ["s1", "echo-marker-1"],
+      ["s2", "echo-marker-2"],
+      ["s3", "echo-marker-3"],
+    ] as const;
+    // Parallel sections stream before any of them finalizes, like the runner
+    // delivers them; the shared header must wait for the whole batch.
+    for (const finalized of [false, true]) {
+      for (const [callId, token] of calls) {
+        renderer.upsertSubagentStep({
+          callId,
+          subagentName: "echo-marker",
+          sectionKey: 0,
+          reasoning: "",
+          message: `SUBAGENT_TOKEN=${token}`,
+          finalized,
+        });
+      }
+    }
+    // The run commits at the turn boundary, not when the batch settles.
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "echo-marker subagent")).toBe(1);
+    expect(snapshot).toContain("echo-marker subagent · 3 calls");
+    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-1");
+    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-2");
+    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-3");
+  });
+
+  it("accumulates sequential batches to the same subagent into one counted header", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    // Two batches settle at different times within one turn. Before the run
+    // was pinned to the turn boundary, the first batch committed to
+    // scrollback on its own and the second fragmented into a new header.
+    for (const batch of [
+      ["s1", "s2"],
+      ["s3", "s4"],
+    ]) {
+      for (const callId of batch) {
+        renderer.upsertSubagentStep({
+          callId,
+          subagentName: "echo-marker",
+          sectionKey: 0,
+          reasoning: "",
+          message: `SUBAGENT_TOKEN=${callId}`,
+          finalized: true,
+        });
+      }
+    }
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "echo-marker subagent")).toBe(1);
+    expect(snapshot).toContain("echo-marker subagent · 4 calls");
+  });
+
+  it("elides all but the newest step rows of a long subagent run", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    for (let call = 1; call <= 16; call += 1) {
+      renderer.upsertSubagentStep({
+        callId: `s${call}`,
+        subagentName: "echo-marker",
+        sectionKey: 0,
+        reasoning: "",
+        message: `SUBAGENT_TOKEN=token-${call}`,
+        finalized: true,
+      });
+    }
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "echo-marker subagent")).toBe(1);
+    expect(snapshot).toContain("echo-marker subagent · 16 calls");
+    expect(snapshot).toContain("+6 more");
+    expect(snapshot).not.toContain("SUBAGENT_TOKEN=token-6");
+    expect(snapshot).toContain("SUBAGENT_TOKEN=token-7");
+    expect(snapshot).toContain("SUBAGENT_TOKEN=token-16");
+  });
+
   it("recalls a previous prompt with the up arrow", async () => {
     const { input, renderer } = makeRenderer();
 
@@ -966,17 +1149,21 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("· Authentication was refreshed");
   });
 
-  it("shows a bare prompt with no placeholder and accepts typing", async () => {
+  it("invites with a quiet placeholder until typing starts", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     // A bare prompt before any info/turn has no status row (no ↑ 0 ↓ 0 counter).
     expect(screen.snapshot()).not.toContain("↑ 0");
-    expect(screen.snapshot()).toContain("❯");
-    expect(screen.snapshot()).not.toContain("Type to chat");
+    // Empty buffer: the quiet `›` gutter with the rotation's first message.
+    expect(screen.snapshot()).toContain(`› ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
+    expect(screen.snapshot()).not.toContain("❯");
     expect(screen.rawOutput()).not.toContain("\x1b[48;5;");
 
     input.type("hello");
+    // Typing swaps in the active prompt mark and clears the invitation.
+    expect(screen.snapshot()).toContain("❯ hello");
+    expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
     input.enter();
     expect(screen.snapshot()).toContain("Working…");
     expect(await prompt).toBe("hello");
@@ -1013,6 +1200,78 @@ describe("TerminalRenderer (inline scrollback)", () => {
       await Promise.resolve();
       expect(screen.snapshot()).not.toContain("⊙ Working…");
       expect(screen.snapshot()).toContain("    Working…");
+
+      streamController?.close();
+      await rendering;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retires the placeholder after the first user message", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const first = renderer.readPrompt();
+    expect(screen.snapshot()).toContain(`› ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
+    input.type("hello");
+    input.enter();
+    expect(await first).toBe("hello");
+
+    // Once the user has spoken, the empty prompt keeps the quiet `›` but
+    // drops the invitation text; typing still swaps in the active `❯`.
+    const second = renderer.readPrompt();
+    expect(screen.snapshot()).toContain("›");
+    expect(screen.snapshot()).not.toContain("❯");
+    expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
+    input.type("again");
+    expect(screen.snapshot()).toContain("❯ again");
+    input.ctrlC();
+    expect(screen.snapshot()).not.toContain("❯");
+    input.ctrlC();
+    await expect(second).rejects.toThrow();
+    renderer.shutdown();
+  });
+
+  it("restores the working pulse when the stream stalls mid-answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+      const rendering = renderer.renderStream(
+        {
+          events: new ReadableStream<AgentTUIStreamEvent>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        },
+        { submittedPrompt: "ask me something", continueSession: true },
+      );
+
+      streamController?.enqueue({
+        type: "assistant-delta",
+        id: "m1",
+        delta: "Here are some ideas:",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.snapshot()).toContain("Here are some ideas:");
+
+      // While the answer streams, the footer stays quiet — the moving text
+      // is the indicator.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(screen.snapshot()).not.toContain("⊙");
+
+      // The model goes silent generating a large tool call (an ask_question
+      // payload, a big write): past the stall threshold the ticker repaint
+      // restores the pulse so the screen never reads as frozen.
+      await vi.advanceTimersByTimeAsync(1_500);
+      let pulseSeen = screen.snapshot().includes("⊙");
+      for (let tick = 0; tick < 12 && !pulseSeen; tick += 1) {
+        await vi.advanceTimersByTimeAsync(90);
+        pulseSeen = screen.snapshot().includes("⊙");
+      }
+      expect(pulseSeen).toBe(true);
 
       streamController?.close();
       await rendering;
@@ -1124,7 +1383,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("renders the selected question option as a padded inverse-blue label", async () => {
+  it("renders the question overlay with numbered rows and an inverse-blue cursor", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const answer = renderer.readInputQuestion({
@@ -1137,26 +1396,182 @@ describe("TerminalRenderer (inline scrollback)", () => {
       ],
     });
 
-    const selected = screen
-      .snapshot()
-      .split("\n")
-      .find((line) => line.includes("AI Gateway"));
-    expect(selected).toContain(" ▶ AI Gateway ");
+    const snapshot = screen.snapshot();
+    const lines = snapshot.split("\n");
+    const selected = lines.find((line) => line.includes("AI Gateway"));
+    expect(selected).toContain(" ▶ 1. AI Gateway ");
+    expect(selected).toContain("↵");
     expect(screen.rawOutput()).toContain("\x1b[7m");
     expect(screen.rawOutput()).toContain("\x1b[34m");
+    // Every option's description rides its own row, cursor or not.
+    expect(lines).toContain("        Managed access");
+    expect(lines).toContain("        Direct access");
+    // One hint surface: the status line, not a duplicated panel footer.
+    expect(snapshot).toContain("Enter to select · ↑/↓ to navigate · Esc to dismiss");
+    expect(countOccurrences(snapshot, "Esc to")).toBe(1);
 
-    const selectedDescriptionColumn = selected?.indexOf("— Managed access");
-    expect(selectedDescriptionColumn).toBeGreaterThanOrEqual(0);
     input.down();
     const unselected = screen
       .snapshot()
       .split("\n")
       .find((line) => line.includes("AI Gateway"));
-    expect(unselected?.indexOf("— Managed access")).toBe(selectedDescriptionColumn);
+    expect(unselected).toContain("1. AI Gateway");
+    expect(unselected).not.toContain("▶");
     input.up();
 
     input.enter();
     await expect(answer).resolves.toEqual({ optionId: "gateway" });
+    // The committed transcript hangs the answer under the question's elbow.
+    expect(screen.snapshot()).toContain("? Choose access");
+    expect(screen.snapshot()).toContain("⎿  AI Gateway");
+    renderer.shutdown();
+  });
+
+  it("dismisses the question with Esc, recording it compactly", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    // A lone ESC is held briefly in case it starts an arrow sequence.
+    const escape = async () => {
+      input.send("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    };
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "Choose access",
+      display: "select",
+      options: [
+        { id: "gateway", label: "AI Gateway", description: "Managed access" },
+        { id: "external", label: "Other providers", description: "Direct access" },
+      ],
+    });
+    expect(screen.snapshot()).toContain("Esc to dismiss");
+
+    await escape();
+    // No answer travels; the runner returns to the prompt and the server
+    // records the parked request as ignored on the next message.
+    await expect(answer).resolves.toBeUndefined();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain(" ? Choose access");
+    expect(snapshot).toContain("⎿  Dismissed.");
+    // The option list does not survive the dismissal.
+    expect(snapshot).not.toContain("Managed access");
+    expect(snapshot).not.toContain("Enter to select");
+    renderer.shutdown();
+  });
+
+  it("clears a freeform draft on the first Esc and dismisses on the second", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const escape = async () => {
+      input.send("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    };
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "Choose access",
+      display: "select",
+      options: [{ id: "gateway", label: "AI Gateway" }],
+      allowFreeform: true,
+    });
+    input.type("2");
+    input.type("draft answer");
+    expect(screen.snapshot()).toContain("⎿ draft answer");
+
+    await escape();
+    expect(screen.snapshot()).not.toContain("draft answer");
+    expect(screen.snapshot()).toContain("Esc to dismiss");
+
+    await escape();
+    await expect(answer).resolves.toBeUndefined();
+    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    renderer.shutdown();
+  });
+
+  it("suppresses the tool block for ask_question calls", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "ask-1",
+          toolName: "ask_question",
+          input: { prompt: "Pick a color." },
+        },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "ask me", continueSession: false },
+    );
+    renderer.shutdown();
+
+    // The question surface is the call's representation; no `Ask …` block.
+    expect(screen.snapshot()).not.toContain("Ask Pick a color.");
+  });
+
+  it("selects a question option directly by its number key", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "Choose access",
+      display: "select",
+      options: [
+        { id: "gateway", label: "AI Gateway" },
+        { id: "external", label: "Other providers" },
+      ],
+    });
+    input.type("2");
+
+    await expect(answer).resolves.toEqual({ optionId: "external" });
+    renderer.shutdown();
+  });
+
+  it("focuses the freeform editor when the cursor reaches its row", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "Choose access",
+      display: "select",
+      options: [
+        { id: "gateway", label: "AI Gateway" },
+        { id: "external", label: "Other providers" },
+      ],
+      allowFreeform: true,
+    });
+
+    expect(screen.snapshot()).toContain("3. Type your own answer");
+    // The freeform row's number moves focus into its inline editor; typing
+    // lands there without a separate enter.
+    input.type("3");
+    input.type("neither");
+    expect(screen.snapshot()).toContain("⎿ neither");
+    input.enter();
+
+    await expect(answer).resolves.toEqual({ text: "neither" });
+    renderer.shutdown();
+  });
+
+  it("dismisses a text question with Esc once its draft is cleared", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const escape = async () => {
+      input.send("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    };
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "What city are you in?",
+      display: "text",
+    });
+    input.type("New York");
+    await escape();
+    // First Esc only clears the draft; the question is still answerable.
+    expect(screen.snapshot()).toContain("? What city are you in?");
+
+    await escape();
+    await expect(answer).resolves.toBeUndefined();
+    expect(screen.snapshot()).toContain("⎿  Dismissed.");
     renderer.shutdown();
   });
 
@@ -3254,7 +3669,7 @@ describe("TerminalRenderer status line", () => {
     });
 
     const lines = screen.snapshot().split("\n");
-    const promptRow = lines.findIndex((line) => line.includes("❯"));
+    const promptRow = lines.findIndex((line) => line.includes("›"));
     expect(promptRow).toBeGreaterThan(-1);
     const statusRow = lines.slice(promptRow + 1).join("\n");
     expect(statusRow).toContain(":3000");

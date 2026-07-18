@@ -42,7 +42,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForText("›", 5_000);
 
     // Submit a prompt, then emit a foreign stderr write before the turn
     // renders, the order the in-process server produces it in.
@@ -70,7 +70,7 @@ void (async () => {
       );
     }
 
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForText("›", 5_000);
     input.type("/exit");
     input.enter();
     await runPromise;

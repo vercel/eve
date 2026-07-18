@@ -61,7 +61,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
     throw error;
   });
 
-  await screen.waitForText("❯", 5_000);
+  await screen.waitForText("›", 5_000);
 
   // Delegate explicitly. An implicit prompt ("what is the value of GOOG?")
   // leaves the choice to the model, which may answer directly instead of
@@ -140,11 +140,11 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   const finalSnapshot = screen.snapshot();
 
   // No parent-level tool row for the child's call should remain: a tool
-  // row at the parent level starts with a status glyph at column 0
-  // (e.g. `✓ get_stock_price`), while the legitimate one is prefixed by
-  // the subagent's `│` rule. Assistant prose lines start with `▲ ` or
-  // indentation, so they cannot false-positive here.
-  const parentToolRowRegex = /^[^\s│▲▌] get_stock_price/mu;
+  // row at the parent level is a status glyph in the indented header cell
+  // (e.g. ` ▪ get_stock_price`), while the legitimate one is prefixed by
+  // the subagent's `│` rule. Assistant prose lines start with `▲ `, so
+  // they cannot false-positive here.
+  const parentToolRowRegex = /^ ?[^\s│▲▌] get_stock_price/mu;
   if (parentToolRowRegex.test(finalSnapshot)) {
     throw new Error(
       `Final screen still contains a parent-level tool row for the child's get_stock_price call. The nested subagent region should be the only place it appears.\n\n${finalSnapshot}`,
@@ -159,7 +159,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   // The turn is complete; wait until the runner is back at the prompt so
   // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
   // turn and returns to the prompt (Claude Code's two-step exit).
-  await screen.waitForText("❯", 30_000);
+  await screen.waitForText("›", 30_000);
   input.ctrlC();
   await runPromise;
 });
