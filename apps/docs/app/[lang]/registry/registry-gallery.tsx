@@ -1,31 +1,26 @@
 "use client";
 
-import { ArrowUpRightIcon, CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
+import { Button } from "@vercel/geistdocs/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@vercel/geistdocs/components/dropdown-menu";
+import { Input } from "@vercel/geistdocs/components/input";
+import { ChevronDownIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
-import { Select } from "radix-ui";
 import { useMemo, useState } from "react";
-import type {
-  RegistryCategory,
-  RegistryEntry,
-  RegistryIntegration,
-  RegistrySource,
-} from "@/lib/registry/data";
+import type { RegistryCategory, RegistryEntry, RegistryIntegration } from "@/lib/registry/data";
 import { integrationIcons } from "./integration-icons";
 
 const ALL = "all" as const;
 
 type FilterValue<T extends string> = typeof ALL | T;
 
-const categories: RegistryCategory[] = ["Chat", "Collaboration", "Example"];
-const integrations: RegistryIntegration[] = [
-  "HTTP API",
-  "Linear",
-  "Notion",
-  "Sentry",
-  "Slack",
-  "Web chat",
-];
-const sources: RegistrySource[] = ["GitHub", "Vercel Templates"];
+const categories: RegistryCategory[] = ["Chat"];
+const integrations: RegistryIntegration[] = ["Linear", "Notion", "Sentry", "Slack", "Web chat"];
 
 interface RegistryGalleryProps {
   entries: RegistryEntry[];
@@ -46,90 +41,70 @@ const FilterSelect = <T extends string>({
   options,
   value,
 }: FilterSelectProps<T>) => (
-  <Select.Root onValueChange={(nextValue) => onChange(nextValue as FilterValue<T>)} value={value}>
-    <Select.Trigger
-      aria-label={label}
-      className="flex h-10 w-full min-w-0 items-center justify-between gap-3 rounded-md border border-gray-alpha-400 bg-background-100 px-3 text-gray-1000 text-sm outline-none transition-colors hover:border-gray-alpha-500 focus:border-gray-700 data-[state=open]:border-gray-700"
-    >
-      <Select.Value />
-      <Select.Icon asChild>
-        <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-gray-700" />
-      </Select.Icon>
-    </Select.Trigger>
-    <Select.Portal>
-      <Select.Content
-        align="start"
-        className="z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border border-gray-alpha-400 bg-background-100 p-1 shadow-lg shadow-black/20"
-        position="popper"
-        sideOffset={6}
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button
+        aria-label={label}
+        className="h-11 w-full justify-between px-3 md:h-9 md:w-44"
+        variant="outline"
       >
-        <Select.Viewport>
-          <FilterOption label={allLabel} value={ALL} />
-          {options.map((option) => (
-            <FilterOption key={option} label={option} value={option} />
-          ))}
-        </Select.Viewport>
-      </Select.Content>
-    </Select.Portal>
-  </Select.Root>
+        <span className="truncate">{value === ALL ? allLabel : value}</span>
+        <ChevronDownIcon aria-hidden="true" className="size-3.5 text-gray-800" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
+      <DropdownMenuRadioGroup
+        onValueChange={(nextValue) => onChange(nextValue as FilterValue<T>)}
+        value={value}
+      >
+        <FilterOption label={allLabel} value={ALL} />
+        {options.map((option) => (
+          <FilterOption key={option} label={option} value={option} />
+        ))}
+      </DropdownMenuRadioGroup>
+    </DropdownMenuContent>
+  </DropdownMenu>
 );
 
 const FilterOption = ({ label, value }: { label: string; value: string }) => (
-  <Select.Item
-    className="relative flex h-8 cursor-default select-none items-center rounded px-2 pr-8 text-gray-900 text-sm outline-none data-[highlighted]:bg-gray-100 data-[highlighted]:text-gray-1000"
-    value={value}
-  >
-    <Select.ItemText>{label}</Select.ItemText>
-    <Select.ItemIndicator className="absolute right-2 inline-flex items-center">
-      <CheckIcon aria-hidden="true" className="size-3.5 text-gray-1000" />
-    </Select.ItemIndicator>
-  </Select.Item>
+  <DropdownMenuRadioItem className="min-h-11 md:min-h-8" value={value}>
+    {label}
+  </DropdownMenuRadioItem>
 );
 
 const RegistryCard = ({ entry }: { entry: RegistryEntry }) => (
-  <article className="group relative flex min-h-40 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 transition-colors hover:border-gray-alpha-500 hover:bg-gray-100/40">
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <h2 className="font-medium text-base text-gray-1000 leading-snug">
-          <Link
-            className="after:absolute after:inset-0 no-underline"
-            href={`/registry/${entry.slug}`}
-          >
-            {entry.title}
-          </Link>
-        </h2>
-      </div>
-      <ArrowUpRightIcon
-        aria-hidden="true"
-        className="size-4 shrink-0 text-gray-700 transition-colors group-hover:text-gray-1000"
-      />
-    </div>
-    <p className="mt-2 line-clamp-3 text-gray-900 text-sm leading-relaxed">{entry.description}</p>
-    <div className="relative mt-auto flex flex-wrap items-center gap-2 pt-4">
-      <ul className="flex items-center gap-2">
+  <li>
+    <Link
+      className="flex min-h-36 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
+      href={`/registry/${entry.slug}`}
+    >
+      <h2 className="text-[16px] leading-none font-medium text-gray-1000">{entry.title}</h2>
+      <p className="mt-2 line-clamp-2 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
+        {entry.description}
+      </p>
+      <ul aria-label="Integrations" className="mt-auto flex items-center gap-2 pt-4">
         {entry.integrations.map((integration) => {
           const Icon = integrationIcons[integration];
           return (
             <li
-              className="text-gray-700 transition-colors group-hover:text-gray-1000"
+              className="flex size-4 items-center justify-center text-gray-700 grayscale"
               key={integration}
               title={integration}
             >
-              <Icon aria-hidden="true" className="size-4" />
+              <Icon aria-hidden="true" className="size-3.5" />
               <span className="sr-only">{integration}</span>
             </li>
           );
         })}
       </ul>
-    </div>
-  </article>
+    </Link>
+  </li>
 );
 
 export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<FilterValue<RegistryCategory>>(ALL);
   const [integration, setIntegration] = useState<FilterValue<RegistryIntegration>>(ALL);
-  const [source, setSource] = useState<FilterValue<RegistrySource>>(ALL);
 
   const results = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -141,47 +116,35 @@ export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
       if (integration !== ALL && !entry.integrations.includes(integration)) {
         return false;
       }
-      if (source !== ALL && entry.source !== source) {
-        return false;
-      }
       if (!normalizedQuery) {
         return true;
       }
 
-      return [entry.title, entry.description, entry.category, entry.source, ...entry.integrations]
+      return [entry.title, entry.description, entry.category, ...entry.integrations]
         .join(" ")
         .toLowerCase()
         .includes(normalizedQuery);
     });
-  }, [category, entries, integration, query, source]);
-
-  const hasFilters = query !== "" || category !== ALL || integration !== ALL || source !== ALL;
-
-  const clearFilters = () => {
-    setQuery("");
-    setCategory(ALL);
-    setIntegration(ALL);
-    setSource(ALL);
-  };
+  }, [category, entries, integration, query]);
 
   return (
-    <section aria-label="Registry entries" className="flex flex-col gap-5">
-      <div className="flex flex-col gap-3">
-        <label className="relative">
-          <span className="sr-only">Search registry</span>
+    <section aria-label="Registry entries" className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2 md:flex-row">
+        <div className="relative min-w-0 flex-1">
           <SearchIcon
             aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-gray-700"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-gray-800"
           />
-          <input
-            className="h-12 w-full rounded-md border border-gray-alpha-400 bg-background-100 pr-4 pl-10 text-gray-1000 text-sm outline-none transition-colors placeholder:text-gray-700 hover:border-gray-alpha-500 focus:border-gray-700"
+          <Input
+            aria-label="Search registry"
+            className="h-11 pr-4 pl-9 text-copy-14 md:h-9"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search templates and examples"
+            placeholder="Search templates and examples…"
             type="search"
             value={query}
           />
-        </label>
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
+        </div>
+        <div className="grid grid-cols-2 gap-2 md:flex md:shrink-0">
           <FilterSelect
             allLabel="All categories"
             label="Filter by category"
@@ -196,47 +159,23 @@ export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
             options={integrations}
             value={integration}
           />
-          <FilterSelect
-            allLabel="All sources"
-            label="Filter by source"
-            onChange={setSource}
-            options={sources}
-            value={source}
-          />
         </div>
       </div>
 
-      {hasFilters ? (
-        <div className="flex justify-end">
-          <button
-            className="text-gray-900 text-sm underline decoration-gray-alpha-500 underline-offset-4 hover:text-gray-1000"
-            onClick={clearFilters}
-            type="button"
-          >
-            Clear filters
-          </button>
-        </div>
-      ) : null}
-
-      {results.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {results.map((entry) => (
-            <RegistryCard entry={entry} key={entry.title} />
-          ))}
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-gray-alpha-400 py-16 text-center">
-          <p className="font-medium text-gray-1000">No registry entries found</p>
-          <p className="text-gray-800 text-sm">Try a different search or filter.</p>
-          <button
-            className="mt-3 font-medium text-gray-1000 text-sm underline underline-offset-4"
-            onClick={clearFilters}
-            type="button"
-          >
-            Clear filters
-          </button>
-        </div>
-      )}
+      <div aria-live="polite">
+        {results.length > 0 ? (
+          <ul className="grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3">
+            {results.map((entry) => (
+              <RegistryCard entry={entry} key={entry.title} />
+            ))}
+          </ul>
+        ) : (
+          <div className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-alpha-400 px-6 text-center">
+            <p className="text-heading-16 text-gray-1000">No matching entries</p>
+            <p className="text-copy-14 text-gray-900">Try a different search or filter.</p>
+          </div>
+        )}
+      </div>
     </section>
   );
 };

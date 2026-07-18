@@ -1,11 +1,22 @@
-import { ArrowLeftIcon, ArrowUpRightIcon, GitBranchIcon } from "lucide-react";
+import { CodeBlock } from "@vercel/geistdocs/components/code-block";
+import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
+import { highlight } from "fumadocs-core/highlight";
+import { ArrowLeftIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ComponentProps } from "react";
 import { translations } from "@/geistdocs";
-import { getRegistryEntry, registryEntries, type RegistryEntry } from "@/lib/registry/data";
+import {
+  getRegistryEntry,
+  registryEntries,
+  type RegistryEntry,
+  type RegistryFile,
+} from "@/lib/registry/data";
+import { cn } from "@/lib/utils";
 import { integrationIcons } from "../integration-icons";
-import { FileViewer } from "./file-viewer";
+import { FileViewer, type HighlightedRegistryFile } from "./file-viewer";
+import { TemplateActions } from "./template-actions";
 
 interface PageParams {
   lang: string;
@@ -37,81 +48,85 @@ const RegistryDetailPage = async ({ params }: { params: Promise<PageParams> }) =
   if (!entry) {
     notFound();
   }
+  const highlightedFiles = await Promise.all(entry.files.map(highlightFile));
 
   return (
-    <main className="mx-auto w-full max-w-[1080px] px-4 pt-12 pb-32 sm:px-6">
+    <main className="mx-auto max-w-[1080px] px-4 pt-10 pb-32 sm:px-6 sm:pt-12">
       <Link
-        className="inline-flex items-center gap-1.5 text-gray-800 text-sm no-underline transition-colors hover:text-gray-1000"
+        className="inline-flex min-h-8 items-center gap-1.5 rounded-sm text-gray-900 text-label-14 no-underline outline-none transition-colors hover:text-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
         href="/registry"
       >
         <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
         Registry
       </Link>
 
-      <header className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+      <header className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div className="min-w-0">
-          <p className="text-gray-700 text-xs uppercase tracking-wide">{entry.category}</p>
-          <h1 className="mt-2 font-semibold text-[40px] text-gray-1000 tracking-tighter sm:text-5xl">
+          <h1 className="font-medium! text-heading-40 text-gray-1000 tracking-tighter sm:text-heading-48">
             {entry.title}
           </h1>
-          <p className="mt-4 max-w-2xl text-gray-900 text-lg leading-relaxed">
-            {entry.description}
-          </p>
+          <p className="mt-4 max-w-[600px] text-copy-16 text-gray-900">{entry.description}</p>
           <IntegrationList entry={entry} />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <a
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-gray-alpha-400 px-4 font-medium text-gray-1000 text-sm no-underline transition-colors hover:bg-gray-100"
-            href={entry.sourceHref}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            <GitBranchIcon aria-hidden="true" className="size-4" />
-            Source
-          </a>
-          <a
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-gray-1000 px-4 font-medium text-background-100 text-sm no-underline transition-opacity hover:opacity-80"
-            href={entry.href}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            Open template
-            <ArrowUpRightIcon aria-hidden="true" className="size-4" />
-          </a>
-        </div>
-      </header>
-
-      <section className="mt-12">
-        <h2 className="font-semibold text-gray-1000 text-xl tracking-tight">Overview</h2>
-        <dl className="mt-4 grid overflow-hidden rounded-lg border border-gray-alpha-400 sm:grid-cols-3 sm:divide-x sm:divide-gray-alpha-400">
+        <TemplateActions
+          bootstrapCommand={entry.bootstrapCommand}
+          deployHref={entry.deployHref}
+          sourceHref={entry.sourceHref}
+        />
+        <dl className="flex flex-wrap gap-x-10 gap-y-4 border-gray-alpha-400 border-t pt-6 lg:col-span-2">
           <OverviewItem label="Model" value={entry.model} />
           <OverviewItem label="Authored files" value={String(entry.files.length)} />
-          <OverviewItem label="Source" value={entry.source} />
         </dl>
-      </section>
+      </header>
 
-      <section className="mt-12">
+      <section className="mt-14">
         <div>
-          <h2 className="font-semibold text-gray-1000 text-xl tracking-tight">Filesystem</h2>
-          <p className="mt-1 text-gray-800 text-sm">
-            Browse the authored agent at source revision {entry.sourceRevision.slice(0, 7)}.
+          <h2 className="text-heading-24 text-gray-1000">Filesystem</h2>
+          <p className="mt-2 text-copy-14 text-gray-900">
+            Browse the authored files at revision{" "}
+            <code className="text-copy-13-mono">{entry.sourceRevision.slice(0, 7)}</code>.
           </p>
         </div>
         <div className="mt-4">
-          <FileViewer files={entry.files} />
+          <FileViewer files={highlightedFiles} />
         </div>
       </section>
     </main>
   );
 };
 
+const highlightFile = async (file: RegistryFile): Promise<HighlightedRegistryFile> => ({
+  code: await highlight(file.contents, {
+    lang: file.language,
+    theme: geistShikiTheme,
+    components: {
+      pre: ({ children, ...props }: ComponentProps<"pre">) => (
+        <CodeBlock
+          {...props}
+          className={cn(
+            props.className,
+            "overflow-x-hidden! whitespace-pre-wrap break-words rounded-none border-0 bg-transparent p-4 text-copy-13-mono [&>code]:min-w-0! [&>code]:w-full!",
+          )}
+        >
+          {children}
+        </CodeBlock>
+      ),
+    },
+  }),
+  language: file.language,
+  relativePath: file.relativePath,
+});
+
 const IntegrationList = ({ entry }: { entry: RegistryEntry }) => (
-  <ul className="mt-5 flex flex-wrap items-center gap-3">
+  <ul aria-label="Integrations" className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
     {entry.integrations.map((integration) => {
       const Icon = integrationIcons[integration];
       return (
-        <li className="inline-flex items-center gap-1.5 text-gray-800 text-sm" key={integration}>
-          <Icon aria-hidden="true" className="size-4" />
+        <li
+          className="inline-flex items-center gap-1.5 text-gray-900 text-label-13"
+          key={integration}
+        >
+          <Icon aria-hidden="true" className="size-4 grayscale" />
           {integration}
         </li>
       );
@@ -120,9 +135,9 @@ const IntegrationList = ({ entry }: { entry: RegistryEntry }) => (
 );
 
 const OverviewItem = ({ label, value }: { label: string; value: string }) => (
-  <div className="border-gray-alpha-400 border-b p-4 last:border-b-0 sm:border-b-0">
-    <dt className="text-gray-700 text-xs uppercase tracking-wide">{label}</dt>
-    <dd className="mt-1 truncate font-mono text-gray-1000 text-sm">{value}</dd>
+  <div className="min-w-0">
+    <dt className="text-gray-800 text-label-12">{label}</dt>
+    <dd className="mt-1 break-all text-copy-13-mono text-gray-1000">{value}</dd>
   </div>
 );
 

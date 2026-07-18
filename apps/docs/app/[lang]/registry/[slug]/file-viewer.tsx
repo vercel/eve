@@ -11,31 +11,36 @@ import {
   SettingsIcon,
   WrenchIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import type { RegistryFile } from "@/lib/registry/data";
 import { cn } from "@/lib/utils";
 
+export interface HighlightedRegistryFile {
+  code: ReactNode;
+  language: RegistryFile["language"];
+  relativePath: string;
+}
+
 interface FileViewerProps {
-  files: RegistryFile[];
+  files: HighlightedRegistryFile[];
 }
 
 interface CategoryStyle {
-  color: string;
   icon: LucideIcon;
 }
 
 const categoryStyles: Record<string, CategoryStyle> = {
-  "agent.ts": { icon: SettingsIcon, color: "text-pink-600" },
-  "instructions.md": { icon: FileTextIcon, color: "text-green-600" },
-  channels: { icon: MessageSquareIcon, color: "text-blue-600" },
-  connections: { icon: PlugIcon, color: "text-rose-500" },
-  skills: { icon: FileTextIcon, color: "text-amber-500" },
-  tools: { icon: WrenchIcon, color: "text-orange-600" },
-  subagents: { icon: BotIcon, color: "text-violet-600" },
-  lib: { icon: BracesIcon, color: "text-cyan-600" },
+  "agent.ts": { icon: SettingsIcon },
+  "instructions.md": { icon: FileTextIcon },
+  channels: { icon: MessageSquareIcon },
+  connections: { icon: PlugIcon },
+  skills: { icon: FileTextIcon },
+  tools: { icon: WrenchIcon },
+  subagents: { icon: BotIcon },
+  lib: { icon: BracesIcon },
 };
 
-const defaultStyle: CategoryStyle = { icon: FileTextIcon, color: "text-gray-700" };
+const defaultStyle: CategoryStyle = { icon: FileTextIcon };
 const categoryOrder = [
   "agent.ts",
   "instructions.md",
@@ -48,7 +53,7 @@ const categoryOrder = [
 ];
 
 interface FileEntry {
-  file: RegistryFile;
+  file: HighlightedRegistryFile;
   label: string;
 }
 
@@ -60,7 +65,7 @@ interface FolderNode {
 }
 
 interface LeafNode {
-  file: RegistryFile;
+  file: HighlightedRegistryFile;
   key: string;
   kind: "leaf";
   style: CategoryStyle;
@@ -68,9 +73,9 @@ interface LeafNode {
 
 type TreeNode = FolderNode | LeafNode;
 
-const buildTree = (files: RegistryFile[]): TreeNode[] => {
+const buildTree = (files: HighlightedRegistryFile[]): TreeNode[] => {
   const folders = new Map<string, FileEntry[]>();
-  const leaves = new Map<string, RegistryFile>();
+  const leaves = new Map<string, HighlightedRegistryFile>();
 
   for (const sourceFile of files) {
     const parts = sourceFile.relativePath.split("/");
@@ -141,9 +146,12 @@ export const FileViewer = ({ files }: FileViewerProps) => {
   };
 
   return (
-    <div className="grid overflow-hidden rounded-lg border border-gray-alpha-400 md:grid-cols-[240px_minmax(0,1fr)]">
-      <nav aria-label="Template files" className="border-b p-3 md:border-r md:border-b-0">
-        <p className="px-2 pb-2 font-mono text-gray-700 text-xs">agent/</p>
+    <div className="grid overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-100 md:grid-cols-[200px_minmax(0,1fr)]">
+      <nav
+        aria-label="Template files"
+        className="border-gray-alpha-400 border-b p-3 md:border-r md:border-b-0"
+      >
+        <p className="px-2 pb-2 text-gray-800 text-label-13-mono">agent/</p>
         <ul className="space-y-0.5">
           {tree.map((node) => {
             const Icon = node.style.icon;
@@ -152,16 +160,17 @@ export const FileViewer = ({ files }: FileViewerProps) => {
               return (
                 <li key={node.key}>
                   <button
+                    aria-pressed={isSelected}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-[13px] transition-colors",
+                      "flex min-h-11 w-full touch-manipulation items-center gap-2 rounded-sm px-2 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none md:min-h-7",
                       isSelected
-                        ? "bg-gray-100 text-gray-1000"
-                        : "text-gray-800 hover:bg-gray-100/60 hover:text-gray-1000",
+                        ? "font-medium text-gray-1000"
+                        : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
                     )}
                     onClick={() => setSelectedPath(node.file.relativePath)}
                     type="button"
                   >
-                    <Icon aria-hidden="true" className={cn("size-4 shrink-0", node.style.color)} />
+                    <Icon aria-hidden="true" className="size-3.5 shrink-0 text-gray-900" />
                     <span className="truncate">{node.key}</span>
                   </button>
                 </li>
@@ -177,10 +186,10 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                 <button
                   aria-expanded={isOpen}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-[13px] transition-colors",
+                    "flex min-h-11 w-full touch-manipulation items-center gap-2 rounded-sm px-2 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none md:min-h-7",
                     containsSelected
                       ? "text-gray-1000"
-                      : "text-gray-800 hover:bg-gray-100/60 hover:text-gray-1000",
+                      : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
                   )}
                   onClick={() => (isOpen ? toggleFolder(node.key) : selectFolder(node))}
                   type="button"
@@ -192,7 +201,7 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                       isOpen ? "rotate-90" : null,
                     )}
                   />
-                  <Icon aria-hidden="true" className={cn("size-4 shrink-0", node.style.color)} />
+                  <Icon aria-hidden="true" className="size-3.5 shrink-0 text-gray-900" />
                   <span className="truncate">{node.key}/</span>
                 </button>
                 {isOpen ? (
@@ -202,11 +211,12 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                       return (
                         <li key={entry.file.relativePath}>
                           <button
+                            aria-pressed={isSelected}
                             className={cn(
-                              "w-full truncate rounded px-2 py-1 text-left font-mono text-xs transition-colors",
+                              "min-h-11 w-full touch-manipulation truncate rounded-sm px-2 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none md:min-h-7",
                               isSelected
-                                ? "bg-gray-100 text-gray-1000"
-                                : "text-gray-700 hover:bg-gray-100/60 hover:text-gray-1000",
+                                ? "font-medium text-gray-1000"
+                                : "text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000",
                             )}
                             onClick={() => setSelectedPath(entry.file.relativePath)}
                             type="button"
@@ -225,17 +235,17 @@ export const FileViewer = ({ files }: FileViewerProps) => {
       </nav>
 
       <div className="flex min-w-0 flex-col">
-        <div className="flex items-center justify-between gap-4 border-b border-gray-alpha-400 px-4 py-2">
-          <code className="truncate font-mono text-gray-1000 text-sm">
+        <div className="flex min-h-11 items-center justify-between gap-4 border-gray-alpha-400 border-b px-4">
+          <code className="truncate text-copy-13-mono text-gray-1000">
             {selected?.relativePath ?? ""}
           </code>
-          <span className="shrink-0 text-[11px] text-gray-700 uppercase tracking-wider">
+          <span className="shrink-0 rounded-sm bg-gray-alpha-200 px-2 py-1 text-gray-900 text-label-12-mono">
             {selected?.language ?? ""}
           </span>
         </div>
-        <pre className="max-h-[520px] min-h-80 overflow-auto p-4 font-mono text-[13px] text-gray-1000 leading-relaxed">
-          {selected?.contents ?? ""}
-        </pre>
+        <div className="max-h-[560px] min-h-80 overflow-auto md:min-h-[420px] [&>div]:mb-0">
+          {selected?.code ?? null}
+        </div>
       </div>
     </div>
   );
