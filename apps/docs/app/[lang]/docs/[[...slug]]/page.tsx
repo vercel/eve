@@ -5,38 +5,9 @@ import { EditOnGithubAction } from "@/components/geistdocs/edit-on-github";
 import { getMDXComponents } from "@/components/geistdocs/mdx-components";
 import { config } from "@/lib/geistdocs/config";
 import { staticOgImage } from "@/lib/geistdocs/og";
+import { resolveDocsPageTitle } from "@/lib/geistdocs/page-title";
 import { geistdocsSource } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
-
-// Geistdocs owns the page-tree version, which can differ from the docs app's Fumadocs version.
-interface SidebarNode {
-  children?: SidebarNode[];
-  fallback?: SidebarNode;
-  index?: SidebarNode;
-  name?: unknown;
-  type?: string;
-  url?: string;
-}
-
-const findSidebarParentTitle = (node: SidebarNode, url: string): string | undefined => {
-  if (node.index?.type === "page" && node.index.url === url) {
-    return typeof node.name === "string" ? node.name : undefined;
-  }
-
-  if (node.fallback) {
-    const title = findSidebarParentTitle(node.fallback, url);
-    if (title !== undefined) return title;
-  }
-
-  for (const child of node.children ?? []) {
-    if (child.type === "page" && child.url === url) {
-      return typeof node.name === "string" ? node.name : undefined;
-    }
-
-    const title = findSidebarParentTitle(child, url);
-    if (title !== undefined) return title;
-  }
-};
 
 const docsPage = createDocsPage({
   config,
@@ -50,14 +21,13 @@ const docsPage = createDocsPage({
     return getMDXComponents(components);
   },
   metadata: ({ metadata, page, params }) => {
-    const parentTitle =
-      page.data.title === "Overview"
-        ? findSidebarParentTitle(geistdocsSource.source.getPageTree(params.lang), page.url)
-        : undefined;
-
     return {
       ...metadata,
-      title: parentTitle ?? metadata.title,
+      title: resolveDocsPageTitle({
+        pageTitle: page.data.title,
+        pageUrl: page.url,
+        tree: geistdocsSource.source.getPageTree(params.lang),
+      }),
       metadataBase: new URL(getSiteOrigin()),
       openGraph: {
         ...metadata.openGraph,
