@@ -19,9 +19,6 @@ const ALL = "all" as const;
 
 type FilterValue<T extends string> = typeof ALL | T;
 
-const categories: RegistryCategory[] = ["Chat"];
-const integrations: RegistryIntegration[] = ["Linear", "Notion", "Sentry", "Slack", "Web chat"];
-
 interface RegistryGalleryProps {
   entries: RegistryEntry[];
 }
@@ -106,6 +103,23 @@ export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
   const [category, setCategory] = useState<FilterValue<RegistryCategory>>(ALL);
   const [integration, setIntegration] = useState<FilterValue<RegistryIntegration>>(ALL);
 
+  const filterOptions = useMemo(() => {
+    const categories = new Set<RegistryCategory>();
+    const integrations = new Set<RegistryIntegration>();
+
+    for (const entry of entries) {
+      categories.add(entry.category);
+      for (const entryIntegration of entry.integrations) {
+        integrations.add(entryIntegration);
+      }
+    }
+
+    return {
+      categories: Array.from(categories).sort(),
+      integrations: Array.from(integrations).sort(),
+    };
+  }, [entries]);
+
   const results = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
@@ -149,14 +163,14 @@ export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
             allLabel="All categories"
             label="Filter by category"
             onChange={setCategory}
-            options={categories}
+            options={filterOptions.categories}
             value={category}
           />
           <FilterSelect
             allLabel="All integrations"
             label="Filter by integration"
             onChange={setIntegration}
-            options={integrations}
+            options={filterOptions.integrations}
             value={integration}
           />
         </div>
