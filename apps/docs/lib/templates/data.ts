@@ -38,11 +38,10 @@ export const templateEntries: TemplateEntry[] = [
       "Set up the eve chat template in my current workspace using https://github.com/vercel-labs/eve-chat-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A persisted Next.js chat template for eve, built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.",
-    sourceHref:
-      "https://github.com/vercel-labs/eve-chat-template/tree/80625bd00858cfd21abc3249ee9e446a1629afe3",
-    sourceRevision: "80625bd00858cfd21abc3249ee9e446a1629afe3",
+    sourceHref: "https://github.com/vercel-labs/eve-chat-template/tree/main",
+    sourceRevision: "f7c164ac8901e5400f6e4ef00eead67ee71cd5d4",
     category: "Chat",
-    model: "anthropic/claude-haiku-4.5",
+    model: "anthropic/claude-sonnet-5",
     integrations: ["Web chat", "Slack", "Linear", "Notion", "Sentry"],
     source: "Vercel Templates",
     files: templateSourceFiles["eve-chat-template"],
@@ -54,11 +53,10 @@ export const templateEntries: TemplateEntry[] = [
       "Set up the eve Slack agent template in my current workspace using https://github.com/vercel-labs/eve-slack-agent-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A Slack agent template with webhook handling, Vercel Connect, a starter agent, and an example tool ready to deploy on Vercel.",
-    sourceHref:
-      "https://github.com/vercel-labs/eve-slack-agent-template/tree/f7286e71edc2e230cb98519e6d9fd1a23d6cd8e8",
-    sourceRevision: "f7286e71edc2e230cb98519e6d9fd1a23d6cd8e8",
+    sourceHref: "https://github.com/vercel-labs/eve-slack-agent-template/tree/main",
+    sourceRevision: "bb35e1fb0159926c625d356d0b43ad618e11b44c",
     category: "Collaboration",
-    model: "anthropic/claude-haiku-4.5",
+    model: "anthropic/claude-sonnet-5",
     integrations: ["Slack"],
     source: "Vercel Templates",
     files: templateSourceFiles["eve-slack-agent"],
@@ -70,9 +68,8 @@ export const templateEntries: TemplateEntry[] = [
       "Set up the eve weather agent in my current workspace using https://github.com/vercel/eve/tree/main/apps/fixtures/weather-agent as the source. Copy that fixture into a standalone project, install its dependencies, and make any minimal changes needed to run it outside the eve monorepo. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A small representative eve app with agent config, instructions, a typed weather tool, and a markdown skill.",
-    sourceHref:
-      "https://github.com/vercel/eve/tree/c1b6ad3e485f2d15a25bdb5636209aa1367a3124/apps/fixtures/weather-agent",
-    sourceRevision: "c1b6ad3e485f2d15a25bdb5636209aa1367a3124",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/fixtures/weather-agent",
+    sourceRevision: "71d57185233d2bd9ff31fe0cd21915df7afa6e2e",
     category: "Example",
     model: "anthropic/claude-sonnet-5",
     integrations: ["HTTP API"],

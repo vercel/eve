@@ -14,7 +14,7 @@ export const templateSourceFiles: Record<string, TemplateFile[]> = {
       `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-haiku-4.5",
+  model: "anthropic/claude-sonnet-5",
 });
 `,
     ),
@@ -164,7 +164,7 @@ export default defineTool({
       `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-haiku-4.5",
+  model: "anthropic/claude-sonnet-5",
 });
 `,
     ),
