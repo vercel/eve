@@ -49,7 +49,7 @@ export default defineEval({
     // a literal echo the model can rightly decline.
     t.judge.autoevals
       .closedQA(
-        "The reply acknowledges a late selection of the STALE-CANDIDATE-7Q4M option, either by applying it or by explaining that the question was already answered and the selection is no longer relevant.",
+        "The reply treats the message as a late response to an EARLIER question — either applying that earlier selection, or explaining that the earlier question was already answered or is no longer relevant (stale). Answer yes unless the reply ignores the message entirely or is unrelated to it.",
         { on: staleSelection.message },
       )
       .atLeast(0.5);

@@ -4,6 +4,7 @@ import type {
 } from "#compiled/@standard-schema/spec/index.js";
 import { z } from "#compiled/zod/index.js";
 
+import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 /**
@@ -37,7 +38,9 @@ const rehydratedSchemas: Record<SchemaDirection, WeakMap<object, ToolSchema>> = 
 /**
  * Resolves a source into a live input {@link ToolSchema}. Live schemas pass
  * through unchanged; serialized JSON Schemas are rehydrated into vendored Zod
- * validators. `null` and `undefined` pass through untouched.
+ * validators. Serialized schemas outside Zod's conversion subset degrade to a
+ * validation-free schema that still advertises the source JSON Schema. `null`
+ * and `undefined` pass through untouched.
  */
 export function toInputSchema<T extends ToolSchemaSource | null | undefined>(
   source: T,
@@ -48,7 +51,9 @@ export function toInputSchema<T extends ToolSchemaSource | null | undefined>(
 /**
  * Resolves a source into a live output {@link ToolSchema}. Live schemas pass
  * through unchanged; serialized JSON Schemas are rehydrated into vendored Zod
- * validators. `null` and `undefined` pass through untouched.
+ * validators. Serialized schemas outside Zod's conversion subset degrade to a
+ * validation-free schema that still advertises the source JSON Schema. `null`
+ * and `undefined` pass through untouched.
  */
 export function toOutputSchema<T extends ToolSchemaSource | null | undefined>(
   source: T,
@@ -118,15 +123,61 @@ function toSchema(
   const cache = rehydratedSchemas[direction];
   let resolved = cache.get(source);
   if (resolved === undefined) {
-    const jsonSchema = toJsonObject(source, direction);
-    // The rehydration target must match JSON_SCHEMA_TARGET: serialized
-    // schemas strip `$schema`, so zod would otherwise assume draft-2020-12.
-    resolved = z.fromJSONSchema(jsonSchema as Parameters<typeof z.fromJSONSchema>[0], {
-      defaultTarget: "draft-7",
-    }) as ToolSchema;
+    resolved = rehydrateJsonSchema(toJsonObject(source, direction));
     cache.set(source, resolved);
   }
   return resolved;
+}
+
+type FromJsonSchemaSource = Parameters<typeof z.fromJSONSchema>[0];
+
+function rehydrateJsonSchema(jsonSchema: JsonObject): ToolSchema {
+  // The first rehydration target must match JSON_SCHEMA_TARGET: serialized
+  // schemas strip `$schema`, so zod would otherwise assume draft-2020-12.
+  try {
+    return z.fromJSONSchema(jsonSchema as FromJsonSchemaSource, {
+      defaultTarget: "draft-7",
+    }) as ToolSchema;
+  } catch {
+    // Retry below with the dialect raw remote schemas actually use.
+  }
+
+  // MCP declares tool schemas as JSON Schema 2020-12, where `$defs` replaces
+  // draft-07 `definitions`, so raw remote schemas get a second pass here.
+  try {
+    return z.fromJSONSchema(jsonSchema as FromJsonSchemaSource, {
+      defaultTarget: "draft-2020-12",
+    }) as ToolSchema;
+  } catch (error) {
+    // Valid JSON Schema can exceed zod's conversion subset (inline JSON
+    // Pointer $refs, conditionals, unevaluated* keywords). Advertise the
+    // schema unchanged without local validation — the tool's executor (e.g.
+    // the remote MCP server) still validates input — rather than letting one
+    // incompatible tool schema fail the whole turn.
+    console.warn(
+      "[eve] Tool schema uses JSON Schema features outside local validation support; " +
+        `passing input through unvalidated: ${toErrorMessage(error)}`,
+    );
+    return toPassthroughSchema(jsonSchema);
+  }
+}
+
+/**
+ * Validation-free {@link ToolSchema} that advertises the source JSON Schema
+ * verbatim and accepts any input. Emission returns a fresh copy per call so
+ * consumers that mutate emitted schemas cannot corrupt durable sources.
+ */
+function toPassthroughSchema(jsonSchema: JsonObject): ToolSchema {
+  const emit = (): Record<string, unknown> =>
+    structuredClone(jsonSchema) as Record<string, unknown>;
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "eve",
+      validate: (value: unknown) => ({ value }),
+      jsonSchema: { input: emit, output: emit },
+    },
+  };
 }
 
 function serializeSchema(
