@@ -1,4 +1,5 @@
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -64,7 +65,7 @@ interface CliRuntimeDependencies {
     readonly appRoot: string;
     readonly serverUrl: string;
   }): Promise<boolean>;
-  buildHost(appRoot: string): Promise<string>;
+  buildHost: BuildHost;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
@@ -124,10 +125,6 @@ interface EvalCliOptions {
   timeout?: string;
   url?: string;
   verbose?: boolean;
-}
-
-async function loadBuildHost(): Promise<CliRuntimeDependencies["buildHost"]> {
-  return (await import("#internal/nitro/host.js")).buildApplication;
 }
 
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
@@ -360,24 +357,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
   registerProjectCommands({ program, logger, appRoot });
 
-  program
-    .command("build")
-    .description("Build the current eve application.")
-    .action(async () => {
-      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-
-      loadDevelopmentEnvironmentFiles(appRoot);
-
-      const buildHost = runtime.buildHost ?? (await loadBuildHost());
-      const outputDir = await buildHost(appRoot);
-      logger.log(
-        renderCliTaggedLine(theme, {
-          message: `built output at ${outputDir}`,
-          tag: "build",
-          tone: "success",
-        }),
-      );
-    });
+  registerBuildCommand({
+    appRoot,
+    buildHost: runtime.buildHost,
+    logger,
+    program,
+  });
 
   program
     .command("start")

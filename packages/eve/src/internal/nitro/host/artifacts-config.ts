@@ -1,34 +1,41 @@
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { resolveDevelopmentRuntimeArtifactsPointerPath } from "#internal/nitro/dev-runtime-artifacts.js";
-import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
+import type {
+  DevelopmentNitroArtifactsConfig,
+  ProductionNitroArtifactsConfig,
+} from "#internal/nitro/routes/runtime-artifacts.js";
+import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
+import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 
 /**
- * Artifacts config serialized into virtual Nitro handlers so route handlers
- * can resolve compiled artifacts without a global runtime configuration store.
+ * Runtime-artifacts wiring for the dev server: routes read compiled
+ * artifacts from the authored app root via the snapshot pointer so hot
+ * reload can swap them.
  */
-export interface NitroArtifactsConfigInput extends NitroArtifactsConfig {
+export function createDevelopmentNitroArtifactsConfig(input: {
   readonly appRoot: string;
-  readonly dev: boolean;
-}
-
-/**
- * Creates the artifacts config baked into Nitro virtual handlers.
- */
-export function createNitroArtifactsConfig(input: {
-  readonly appRoot: string;
-  readonly dev: boolean;
-}): NitroArtifactsConfigInput {
-  if (!input.dev) {
-    return {
-      appRoot: input.appRoot,
-      dev: input.dev,
-    };
-  }
-
+  readonly configuredWorld?: AgentWorkflowWorldDefinition;
+}): DevelopmentNitroArtifactsConfig {
   return {
     appRoot: input.appRoot,
     devRuntimeArtifactsPointerPath: resolveDevelopmentRuntimeArtifactsPointerPath(input.appRoot),
-    dev: input.dev,
+    // Only parent-World deliveries install the generation context that a
+    // logical durable selector needs; a custom World's payloads must pin
+    // their exact snapshot instead.
+    durableArtifactsReference: usesParentDevelopmentWorkflowWorld(input.configuredWorld)
+      ? "development-generation"
+      : undefined,
+    kind: "development",
     moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
+  };
+}
+
+/**
+ * Runtime-artifacts wiring for built output: routes require the artifacts
+ * bundled into the server at build time and never touch the filesystem.
+ */
+export function createProductionNitroArtifactsConfig(): ProductionNitroArtifactsConfig {
+  return {
+    kind: "production",
   };
 }

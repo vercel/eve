@@ -32,7 +32,9 @@ export async function* openStreamIterable(
   input: OpenStreamInput,
 ): AsyncGenerator<HandleMessageStreamEvent> {
   let startIndex = input.startIndex;
-  let remainingReconnectAttempts = input.maxReconnectAttempts;
+  // A relative tail cursor cannot be advanced safely after a disconnect
+  // without first resolving it to an absolute stream index.
+  let remainingReconnectAttempts = input.startIndex < 0 ? 0 : input.maxReconnectAttempts;
 
   while (true) {
     const body = await openStreamBody({ ...input, startIndex });
@@ -62,8 +64,9 @@ export async function* openStreamIterable(
 }
 
 /**
- * Opens one stream response body, retrying the short propagation window where
- * a just-acknowledged session may not yet be readable from the stream route.
+ * Opens one stream response body, retrying transient network errors and the
+ * short propagation window where a just-acknowledged session may not yet be
+ * readable from the stream route.
  */
 export async function openStreamBody(
   input: OpenStreamBodyInput,
@@ -76,15 +79,28 @@ export async function openStreamBody(
     const url = createClientUrl(
       input.host,
       createEveMessageStreamRoutePath(input.sessionId),
-      input.startIndex > 0 ? { startIndex: String(input.startIndex) } : undefined,
+      input.startIndex !== 0 ? { startIndex: String(input.startIndex) } : undefined,
     );
 
     const headers = await input.resolveHeaders();
-    const response = await fetch(url, {
-      headers,
-      redirect: input.redirect,
-      signal: input.signal ?? null,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers,
+        redirect: input.redirect,
+        signal: input.signal ?? null,
+      });
+    } catch (error) {
+      if (
+        input.signal?.aborted ||
+        !isStreamDisconnectError(error) ||
+        attempt === STREAM_OPEN_RETRY_ATTEMPTS - 1
+      ) {
+        throw error;
+      }
+      await sleep(STREAM_OPEN_RETRY_DELAY_MS);
+      continue;
+    }
 
     if (response.ok) {
       if (!response.body) {

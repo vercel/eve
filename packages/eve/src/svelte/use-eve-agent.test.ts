@@ -86,7 +86,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.stubGlobal("window", {});
     const events = [
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_1"),
     ];
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))

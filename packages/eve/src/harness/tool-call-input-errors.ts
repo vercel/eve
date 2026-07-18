@@ -2,6 +2,20 @@ import type { ToolSet, TypedToolCall, TypedToolError } from "ai";
 
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 
+/**
+ * Returns true when the AI SDK marked the tool call `invalid` (typically
+ * because the model emitted unparsable JSON or targeted an unknown tool).
+ *
+ * Invalid calls have a raw-string or partial `input` payload that cannot
+ * satisfy the runtime-action contract. The AI SDK synthesizes a tool-error
+ * result for the next model step automatically; callers must skip invalid
+ * calls when projecting to `RuntimeActionRequest` values or the harness
+ * will throw on the JSON-object invariant.
+ */
+export function isInvalidToolCall(toolCall: TypedToolCall<ToolSet>): boolean {
+  return toolCall.invalid === true;
+}
+
 export function createInvalidToolCallInputError(input: {
   readonly error: unknown;
   readonly toolCall: TypedToolCall<ToolSet>;
@@ -47,7 +61,7 @@ export function getInvalidToolCallInputError(input: {
 }): TypedToolError<ToolSet> | undefined {
   const { toolCall } = input;
 
-  if (toolCall.invalid === true) {
+  if (isInvalidToolCall(toolCall)) {
     return undefined;
   }
 

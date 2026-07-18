@@ -308,12 +308,11 @@ describe("createSession", () => {
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
   });
 
-  it("persists subagent depth limits through durable session projection and hydration", () => {
+  it("persists subagent depth through durable session projection and hydration", () => {
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
       subagentDepth: 2,
-      subagentMaxDepth: 4,
       turnAgent: createTestTurnAgent(),
     });
 
@@ -324,9 +323,7 @@ describe("createSession", () => {
     });
 
     expect(durable.subagentDepth).toBe(2);
-    expect(durable.subagentMaxDepth).toBe(4);
     expect(hydrated.subagentDepth).toBe(2);
-    expect(hydrated.subagentMaxDepth).toBe(4);
   });
 
   it("persists session token limits through durable session projection and hydration", () => {

@@ -47,7 +47,7 @@ After scaffolding, a human terminal usually continues into `eve dev` (or a codin
 
 ## `eve extension`
 
-Commands for reusable [extension](/docs/extensions) packages. An extension is identified by `package.json#eve.extension` (for example `"eve": { "extension": "./extension" }`).
+Commands for reusable [extension](/docs/extensions) packages. An extension declares distinct authoring and distribution roots in `package.json#eve.extension` (for example `"eve": { "extension": { "source": "./extension", "dist": "./dist/extension" } }`).
 
 ### `eve extension init`
 
@@ -73,7 +73,7 @@ See [Extensions](/docs/extensions) for authoring and mount details.
 eve extension build
 ```
 
-Builds the current package as an extension: compiles the mount factory and tool re-exports into `dist/`, and fills the package `exports` map. Requires `package.json#eve.extension`.
+Builds the complete agent-shaped extension tree into its configured dist root, emits declarations and compatibility metadata, and fills the package `exports` map. The original TypeScript source is not required in the published package.
 
 ## `eve info`
 
@@ -90,12 +90,27 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 ## `eve build`
 
 ```bash
-eve build
+eve build [--profile <path>] [--skip-sandbox-prewarm]
 ```
 
-No flags. Compiles to `.eve/` and builds the host output, then prints the built output path.
+Compiles and bundles in an invocation-owned directory under `.eve/builds/`, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure.
 
-Useful artifacts written under `.eve/` (preserved even on partial failure):
+| Flag                     | Type   | Default | Description                                                                                   |
+| ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
+| `--profile <path>`       | string | off     | Best-effort versioned JSON report with build-phase timings and final output-size measurements |
+| `--skip-sandbox-prewarm` | flag   | off     | Skip sandbox template prewarm for a Vercel build; the output might not be deployable          |
+
+Use a profile file to establish a repeatable baseline before changing the build pipeline:
+
+```bash
+eve build --profile .eve/build-profiles/baseline.json
+```
+
+The report is attempted only after a successful build. It records total elapsed time, completed phase timings, and final regular-file totals for file count, raw bytes, and the sum of each file compressed with gzip. For Vercel output it also includes a subtotal for every real `.func` directory, so app and flow bundles can be compared separately. The profile path resolves from the app root and should be outside the published output directory; profile collection does not add a file to the deployment. If collection or writing fails, eve emits a warning but keeps the completed build successful.
+
+Production builds do not write through the stable compiler, host, Nitro, or Workflow files owned by `eve dev`, so builds can run while a local dev server is active. A failed build leaves the last successful `.output/` and agent summary untouched. Concurrent completed builds serialize only the final publication window.
+
+Useful stable artifacts written by inspection and development flows under `.eve/` include:
 
 | Artifact                                       | Description                                          |
 | ---------------------------------------------- | ---------------------------------------------------- |
@@ -156,7 +171,7 @@ For bearer tokens or custom schemes, pass explicit headers with `-H`.
 
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 
-Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight sessions hold a consistent code revision while new prompts pick up rebuilds. On startup, `eve dev` prunes stale runtime snapshots and old local sandbox templates in the background. For manual cleanup, stop `eve dev` and delete `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`.
+Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; use `/new` to start a fresh session. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
 
 ## `eve link`
 
@@ -164,7 +179,7 @@ Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snaps
 eve link
 ```
 
-Links the current directory to an existing Vercel project. You select a team and then one of its recent projects; type a project name and choose **Search for '<name>'** to search the rest of that team's projects. Vercel links the selected project, eve verifies its project ID, and then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes --non-interactive` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
+Links the current directory to a Vercel project. After selecting a team, you can create a project named for the agent or link an existing project. The existing-project picker shows recent projects; type a project name and choose **Search for '<name>'** to search the rest of that team's projects. Vercel links the resolved project, eve verifies its project ID, and then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes --non-interactive` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
 
 ## `eve deploy`
 

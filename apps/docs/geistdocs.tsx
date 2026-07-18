@@ -18,7 +18,7 @@ export const nav = [
     href: "/integrations",
   },
   {
-    label: "Resources",
+    label: "Templates",
     href: "/resources",
   },
   {

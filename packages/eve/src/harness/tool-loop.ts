@@ -101,11 +101,13 @@ import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-c
 import {
   consumeDeferredStepInput,
   getApprovedTools,
+  getPendingInputRequestIds,
   hasDeferredStepInput,
   hasStepInput,
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
+import { convertStaleResponsesToUserMessage } from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
@@ -148,13 +150,11 @@ import {
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
-import { getInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
 import {
-  buildStepHooks,
-  emitStepActions,
-  type HarnessStepResult,
+  getInvalidToolCallInputError,
   isInvalidToolCall,
-} from "#harness/step-hooks.js";
+} from "#harness/tool-call-input-errors.js";
+import { buildStepHooks, emitStepActions, type HarnessStepResult } from "#harness/step-hooks.js";
 import {
   buildToolApproval,
   buildToolSetFromDefinitions,
@@ -257,6 +257,37 @@ function enrichTelemetry(
     recordInputs: authored.recordInputs ?? true,
     recordOutputs: authored.recordOutputs ?? true,
   };
+}
+
+function mergeSystemInstructions(
+  instructions: readonly SystemModelMessage[],
+): SystemModelMessage | undefined {
+  if (instructions.length === 0) {
+    return undefined;
+  }
+
+  if (instructions.length === 1) {
+    return { ...instructions[0]! };
+  }
+
+  let providerOptions: SystemModelMessage["providerOptions"] | undefined;
+  for (const instruction of instructions) {
+    if (instruction.providerOptions !== undefined) {
+      providerOptions = {
+        ...providerOptions,
+        ...instruction.providerOptions,
+      };
+    }
+  }
+
+  const merged: SystemModelMessage = {
+    role: "system",
+    content: instructions.map((instruction) => instruction.content).join("\n\n"),
+  };
+  if (providerOptions !== undefined) {
+    merged.providerOptions = providerOptions;
+  }
+  return merged;
 }
 
 /**
@@ -509,21 +540,37 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = resolvedRuntimeActions.session;
 
+    const staleConversion = convertStaleResponsesToUserMessage({
+      history: resolvedRuntimeActions.messages,
+      pendingRequestIds: getPendingInputRequestIds(session.state),
+      stepInput: stepInput.input,
+    });
+    const effectiveStepInput = staleConversion.stepInput;
+    const preambleStepInput =
+      staleConversion.kind === "converted"
+        ? { ...effectiveStepInput, message: staleConversion.displayMessage }
+        : effectiveStepInput;
+
     const pending = resolvePendingInput({
       history: resolvedRuntimeActions.messages,
       resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
       session,
-      stepInput: stepInput.input,
+      stepInput: effectiveStepInput,
     });
     if (pending.outcome === "unresolved") {
       if (emit && pending.deferredMessage === true && hasStepInput(input)) {
         emissionState = await emitTurnPreamble(
           emit,
-          input ?? {},
+          preambleStepInput ?? {},
           emissionState,
           config.runtimeIdentity,
         );
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        emissionState = await emitTurnEpilogue(
+          emit,
+          emissionState,
+          config.mode,
+          pending.session.continuationToken,
+        );
         return {
           next: null,
           session: setHarnessEmissionState(pending.session, emissionState),
@@ -556,7 +603,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (emit && hasStepInput(input)) {
       emissionState = await emitTurnPreamble(
         emit,
-        input ?? {},
+        preambleStepInput ?? {},
         emissionState,
         config.runtimeIdentity,
       );
@@ -584,14 +631,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    if (stepInput.input?.context !== undefined) {
-      for (const entry of stepInput.input.context) {
+    if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
+      for (const entry of effectiveStepInput.context) {
         messages.push({ content: entry, role: "user" });
       }
     }
 
     if (
-      stepInput.input?.message !== undefined &&
+      effectiveStepInput?.message !== undefined &&
       !pending.deferredMessage &&
       !pending.consumedMessage
     ) {
@@ -600,7 +647,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // `messages` array — and everything that flows into
       // `session.history` from it — therefore never carries raw
       // attachment bytes across step boundaries.
-      const content = await stageAttachmentsToSandbox(stepInput.input.message);
+      const content = await stageAttachmentsToSandbox(effectiveStepInput.message);
       messages.push({ content, role: "user" });
     }
 
@@ -705,10 +752,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         systemMessages.length > 0 || extraSystemEntry.length > 0
           ? [...extraSystemEntry, ...baseSystemEntry, ...systemMessages]
           : undefined;
-      const instructions =
+      const markedInstructions =
         rawInstructions !== undefined && marker
           ? applySystemCacheBreakpoint(rawInstructions, marker)
-          : (rawInstructions ?? session.agent.system ?? undefined);
+          : rawInstructions;
+      const instructions =
+        markedInstructions !== undefined
+          ? mergeSystemInstructions(markedInstructions)
+          : (session.agent.system ?? undefined);
 
       return {
         instructions,
@@ -968,7 +1019,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Workflow continuations replay the sandbox after step.started so nested
     // action lifecycle events keep the active turn's emission coordinates.
     const pendingWorkflowInterrupt = await continuePendingWorkflowInterrupt({
-      childResults: stepInput.input?.runtimeActionResults,
+      childResults: effectiveStepInput?.runtimeActionResults,
       config,
       emit,
       emissionState,
@@ -1064,6 +1115,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           });
           emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
             code: "WORKFLOW_STREAM_WRITE_FAILED",
+            continuationToken: session.continuationToken,
             details: { ...streamWriteDetails, errorId },
             message: toErrorMessage(finalError),
           });
@@ -1174,6 +1226,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         );
         emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
           code: "MODEL_CALL_FAILED",
+          continuationToken: session.continuationToken,
           details,
           message: errorMessage,
         });
@@ -1733,8 +1786,12 @@ async function handleStepResult(input: {
   const invalidInputToolErrors = getInvalidToolCallInputErrors({
     toolCalls: result.toolCalls as TypedToolCall<ToolSet>[],
   });
+  // Unions every invalid-input signal: SDK-marked invalid calls (which get
+  // SDK-synthesized tool errors), non-object inputs caught by
+  // getInvalidToolCallInputErrors, and ids the stream consumer observed.
   const invalidInputToolCallIds = new Set([
     ...(result.invalidInputToolCallIds ?? []),
+    ...result.toolCalls.filter(isInvalidToolCall).map((toolCall) => toolCall.toolCallId),
     ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
   ]);
   const rawResponseMessages = emptyDelivery
@@ -1804,7 +1861,6 @@ async function handleStepResult(input: {
     tools: config.tools,
   });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
-    .filter((toolCall) => !isInvalidToolCall(toolCall))
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => config.tools.get(toolCall.toolName)?.runtimeAction !== undefined)
     .filter((toolCall) => {
@@ -1875,7 +1931,12 @@ async function handleStepResult(input: {
       );
 
       if (config.mode === "conversation") {
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        emissionState = await emitTurnEpilogue(
+          emit,
+          emissionState,
+          config.mode,
+          parkedSession.continuationToken,
+        );
         parkedSession = setHarnessEmissionState(parkedSession, emissionState);
       }
     }
@@ -1984,8 +2045,9 @@ const OUTPUT_SCHEMA_NOT_FULFILLED = {
  * `final_output` tool, or `undefined` when the terminal turn ended in prose.
  */
 function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
-  return (result.toolCalls ?? []).find((call) => call.toolName === FINAL_OUTPUT_TOOL_NAME)
-    ?.input as JsonValue | undefined;
+  return (result.toolCalls ?? []).find(
+    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && !isInvalidToolCall(call),
+  )?.input as JsonValue | undefined;
 }
 
 /**
@@ -2011,6 +2073,7 @@ async function emitStructuredResult(
   emissionState: ReturnType<typeof getHarnessEmissionState>,
   structured: JsonValue,
   mode: RunMode,
+  continuationToken: string,
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   await emit(
     createResultCompletedEvent({
@@ -2020,7 +2083,7 @@ async function emitStructuredResult(
       turnId: emissionState.turnId,
     }),
   );
-  return emitTurnEpilogue(emit, emissionState, mode);
+  return emitTurnEpilogue(emit, emissionState, mode, continuationToken);
 }
 
 /**
@@ -2042,7 +2105,12 @@ async function finishTaskTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "task");
+      emissionState = await emitTurnEpilogue(
+        emit,
+        emissionState,
+        "task",
+        session.continuationToken,
+      );
       session = setHarnessEmissionState(session, emissionState);
     }
     return { next: { done: true, output: stepOutput ?? "" }, session };
@@ -2064,7 +2132,13 @@ async function finishTaskTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "task");
+    emissionState = await emitStructuredResult(
+      emit,
+      emissionState,
+      structured,
+      "task",
+      session.continuationToken,
+    );
     session = setHarnessEmissionState(session, emissionState);
   }
   return { next: { done: true, output: structured }, session };
@@ -2088,7 +2162,12 @@ async function finishConversationTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
+      emissionState = await emitTurnEpilogue(
+        emit,
+        emissionState,
+        "conversation",
+        session.continuationToken,
+      );
       session = setHarnessEmissionState(session, emissionState);
     }
     return { next: null, session };
@@ -2097,11 +2176,10 @@ async function finishConversationTurn(input: {
   const structured = extractFinalOutput(result);
   if (structured === undefined) {
     if (emit) {
-      emissionState = await emitRecoverableFailedTurn(
-        emit,
-        emissionState,
-        OUTPUT_SCHEMA_NOT_FULFILLED,
-      );
+      emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
+        ...OUTPUT_SCHEMA_NOT_FULFILLED,
+        continuationToken: session.continuationToken,
+      });
       session = setHarnessEmissionState(session, emissionState);
     }
     return { next: null, session };
@@ -2109,7 +2187,13 @@ async function finishConversationTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
+    emissionState = await emitStructuredResult(
+      emit,
+      emissionState,
+      structured,
+      "conversation",
+      session.continuationToken,
+    );
     session = setHarnessEmissionState(session, emissionState);
   }
   return { next: null, session };

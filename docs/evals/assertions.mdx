@@ -22,7 +22,7 @@ Scoped assertions take no explicit value and gate by default. Assertions on `t` 
 | `t.usedNoTools()`                                     | No tool calls at all                                                          |
 | `t.maxToolCalls(n)`                                   | At most `n` tool calls                                                        |
 | `t.noFailedActions()`                                 | No tool, subagent, or skill action reported a failure                         |
-| `t.calledSubagent(name, opts?)`                       | A subagent delegation happened (`remoteUrl`, `output` constraints)            |
+| `t.calledSubagent(name, opts?)`                       | A subagent delegation happened (identity, remote, output, status, count)      |
 | `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                |
 | `t.eventOrder([...matchers])`                         | Matching event groups occur in order                                          |
 | `t.eventsSatisfy(label, predicate)`                   | Escape hatch: any predicate over the typed event stream                       |
@@ -77,7 +77,7 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 

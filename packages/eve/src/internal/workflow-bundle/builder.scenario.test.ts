@@ -117,13 +117,7 @@ describe("WorkflowBundleBuilder", () => {
       await Promise.all([
         writeFile(
           compiledArtifactsBootstrapPath,
-          [
-            "export async function __eveInstallCompiledArtifactsStep() {",
-            '  "use step";',
-            "  return null;",
-            "}",
-            "",
-          ].join("\n"),
+          "globalThis.__eveCompiledArtifactsInstalled = true;\n",
         ),
         writeFile(
           stepFilePath,
@@ -160,6 +154,9 @@ describe("WorkflowBundleBuilder", () => {
       expect(builder.workflowBundleCalls).toBe(1);
       expect(JSON.stringify(builder.capturedManifest)).toContain("ping");
       expect(JSON.stringify(builder.capturedManifest)).toContain("step//");
+      expect(JSON.stringify(builder.capturedManifest)).not.toContain(
+        "__eveInstallCompiledArtifactsStep",
+      );
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }

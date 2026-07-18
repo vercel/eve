@@ -5,7 +5,7 @@ import type { H3Event } from "nitro";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { createNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
+import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
 import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
 import { EVE_CREATE_SESSION_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "../../src/protocol/routes.js";
@@ -15,6 +15,7 @@ const createAppRoot = useTemporaryAppRoots();
 
 const APP_ROOT_OPTIONS = { packageName: "agent-info-route-test-agent" } as const;
 const EVE_CHANNEL_IMPORT_URL = new URL("../../dist/src/public/channels/eve.js", import.meta.url);
+const EVE_TOOLS_IMPORT_URL = new URL("../../dist/src/public/tools/index.js", import.meta.url);
 const INFO_ROUTE_KEY = `GET ${EVE_INFO_ROUTE_PATH}`;
 
 // Loopback request — `localDev()` authenticates this one. Models a
@@ -59,6 +60,19 @@ async function installEveChannelShim(appRoot: string): Promise<void> {
   );
 }
 
+async function installEveToolsShim(appRoot: string): Promise<void> {
+  const packageRoot = join(appRoot, "node_modules", "eve");
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(
+    join(packageRoot, "package.json"),
+    `${JSON.stringify({ name: "eve", type: "module", exports: { "./tools": "./tools.js" } })}\n`,
+  );
+  await writeFile(
+    join(packageRoot, "tools.js"),
+    `export { disableTool } from ${JSON.stringify(EVE_TOOLS_IMPORT_URL.href)};\n`,
+  );
+}
+
 function createInfoEvent(request: Request): H3Event {
   Object.assign(request, { ip: "127.0.0.1" });
   const event: MinimalAgentInfoH3Event = {
@@ -73,7 +87,7 @@ async function requestAgentInfo(appRoot: string, request: Request): Promise<Resp
   return await dispatchChannelRequest(
     createInfoEvent(request),
     INFO_ROUTE_KEY,
-    createNitroArtifactsConfig({ appRoot, dev: true }),
+    createDevelopmentNitroArtifactsConfig({ configuredWorld: undefined, appRoot }),
   );
 }
 
@@ -84,6 +98,7 @@ describe("eve agent info route", () => {
     await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "tools"), { recursive: true });
+    await installEveToolsShim(appRoot);
     await writeFile(
       join(agentRoot, "tools", "get_weather.mjs"),
       'export default { description: "Get the weather.", async execute() { return { temperature: 72 }; } };\n',
@@ -109,8 +124,13 @@ describe("eve agent info route", () => {
     expect(payload.instructions.dynamic).toEqual([]);
     expect(payload.tools.authored.map((tool) => tool.name)).toEqual(["get_weather"]);
     expect(payload.tools.available.map((tool) => tool.name)).toContain("bash");
+    expect(payload.tools.available.map((tool) => tool.name)).toContain("agent");
     expect(payload.tools.available.map((tool) => tool.name)).toContain("get_weather");
     expect(payload.tools.framework.find((tool) => tool.name === "bash")).toMatchObject({
+      origin: "framework",
+      status: "active",
+    });
+    expect(payload.tools.framework.find((tool) => tool.name === "agent")).toMatchObject({
       origin: "framework",
       status: "active",
     });
@@ -121,6 +141,22 @@ describe("eve agent info route", () => {
     expect(payload.diagnostics).toEqual({
       discoveryErrors: 0,
       discoveryWarnings: 0,
+    });
+
+    await writeFile(
+      join(agentRoot, "tools", "agent.mjs"),
+      'import { disableTool } from "eve/tools";\nexport default disableTool();\n',
+    );
+    await compileAgent({ startPath: appRoot });
+
+    const disabledPayload = (await (
+      await requestAgentInfo(appRoot, LOOPBACK_REQUEST)
+    ).json()) as AgentInfoResponse;
+
+    expect(disabledPayload.tools.available.map((tool) => tool.name)).not.toContain("agent");
+    expect(disabledPayload.tools.framework.find((tool) => tool.name === "agent")).toMatchObject({
+      disabledByAuthor: true,
+      status: "disabled",
     });
   });
 

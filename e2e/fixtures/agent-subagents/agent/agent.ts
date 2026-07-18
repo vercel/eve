@@ -1,10 +1,6 @@
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  limits: {
-    maxSubagentDepth: 4,
-    maxSubagents: 2,
-  },
-  model: "anthropic/claude-sonnet-5",
+  model: process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol",
   reasoning: "high",
 });

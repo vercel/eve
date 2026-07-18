@@ -1,7 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
 import { inputRequestSchema } from "#runtime/input/types.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
@@ -9,34 +8,18 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
  */
 export const ASK_QUESTION_TOOL_NAME = "ask_question";
 
-const askQuestionToolInputSchema = inputRequestSchema.omit({
+export const ASK_QUESTION_INPUT_SCHEMA = inputRequestSchema.omit({
   action: true,
   display: true,
   requestId: true,
 });
-const { $schema: _jsonSchemaVersion, ...askQuestionInputSchema } = z.toJSONSchema(
-  askQuestionToolInputSchema,
-);
-const askQuestionToolOutputSchema = z
+export const ASK_QUESTION_OUTPUT_SCHEMA = z
   .object({
     optionId: z.string().optional(),
     status: z.enum(["answered", "ignored"]),
     text: z.string().optional(),
   })
   .strict();
-const { $schema: _outputJsonSchemaVersion, ...askQuestionOutputSchema } = z.toJSONSchema(
-  askQuestionToolOutputSchema,
-);
-
-/**
- * Shared input schema used by the framework `ask_question` tool.
- */
-export const ASK_QUESTION_INPUT_SCHEMA = askQuestionInputSchema as JsonObject;
-
-/**
- * Shared output schema used by the framework `ask_question` tool.
- */
-export const ASK_QUESTION_OUTPUT_SCHEMA = askQuestionOutputSchema as JsonObject;
 
 /**
  * Root-only framework tool that lets the agent request structured user input.

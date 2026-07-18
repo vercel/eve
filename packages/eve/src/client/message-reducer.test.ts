@@ -9,9 +9,11 @@ import {
   createInputRequestedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
+  createReasoningAppendedEvent,
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
+  createTurnCancelledEvent,
 } from "#protocol/message.js";
 
 describe("defaultMessageReducer", () => {
@@ -641,6 +643,57 @@ describe("defaultMessageReducer", () => {
             state: "done",
             stepIndex: 1,
             text: "Second step.",
+            type: "text",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("finalizes partial streamed message and reasoning when the turn is cancelled", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.reduce(
+      reducer.initial(),
+      createReasoningAppendedEvent({
+        reasoningDelta: "Thinking",
+        reasoningSoFar: "Thinking",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageAppendedEvent({
+        messageDelta: "Partial",
+        messageSoFar: "Partial",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(data, createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }));
+
+    expect(data.messages).toEqual([
+      {
+        id: "turn_1:assistant",
+        metadata: {
+          status: "complete",
+          turnId: "turn_1",
+        },
+        parts: [
+          { type: "step-start" },
+          {
+            state: "done",
+            stepIndex: 0,
+            text: "Thinking",
+            type: "reasoning",
+          },
+          {
+            state: "done",
+            stepIndex: 0,
+            text: "Partial",
             type: "text",
           },
         ],

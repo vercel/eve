@@ -8,13 +8,14 @@ import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
+import { toInputSchema } from "#shared/tool-schema.js";
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
@@ -191,11 +192,16 @@ function createTestNode(
   turnAgent?: RuntimeTurnAgent,
   overrides: Partial<ResolvedRuntimeAgentNode> = {},
 ): ResolvedRuntimeAgentNode {
+  const agent = {} as ResolvedRuntimeAgentNode["agent"];
+
   return {
-    agent: {} as ResolvedRuntimeAgentNode["agent"],
+    agent: {
+      ...agent,
+      disabledFrameworkTools: [],
+    },
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
-    nodeId: "root",
+    nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: createStubSandboxRegistry(),
     subagentRegistry: {
       preparedTools: [],
@@ -210,7 +216,9 @@ function createTestNode(
 
 function createNoopRuntime(): Runtime {
   return {
+    cancelTurn: vi.fn(),
     deliver: vi.fn(),
+    resolveSession: vi.fn(),
     run: vi.fn().mockRejectedValue(new Error("runtime.run should not be called in this test")),
     getEventStream: vi
       .fn()
@@ -219,7 +227,7 @@ function createNoopRuntime(): Runtime {
 }
 
 describe("createNodeHarnessTools", () => {
-  it("guides the model to split large tasks across parallel recursive agent calls", () => {
+  it("guides the model to split large tasks across parallel agent calls", () => {
     const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
@@ -228,6 +236,34 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.description).toContain("include essential context");
     expect(agentTool?.description).toContain("non-overlapping scopes");
     expect(agentTool?.description).not.toContain("eve");
+    expect(agentTool?.runtimeAction).toEqual({
+      kind: "subagent-call",
+      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      subagentName: "agent",
+    });
+  });
+
+  it("does not give declared subagent nodes the built-in agent tool", () => {
+    const tools = createNodeHarnessTools({
+      node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+    });
+
+    expect(tools.has("agent")).toBe(false);
+  });
+
+  it("does not give the root node the built-in agent tool when it is disabled", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          disabledFrameworkTools: ["agent"],
+        },
+      },
+    });
+
+    expect(tools.has("agent")).toBe(false);
   });
 });
 
@@ -240,7 +276,7 @@ describe("createExecutionNodeStep", () => {
         {
           description: "A regular tool.",
           execute: async () => "tool-output",
-          inputSchema: { type: "object" },
+          inputSchema: toInputSchema({ type: "object" }),
           logicalPath: "tools/regular-tool.ts",
           name: "regular-tool",
           sourceId: "tools/regular-tool.ts",

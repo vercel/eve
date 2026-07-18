@@ -1,25 +1,13 @@
 import { existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, normalize, resolve, sep } from "node:path";
 import { watch } from "#compiled/chokidar/index.js";
-import type { Nitro } from "nitro/types";
-import { clearCompiledRuntimeAgentBundleCache } from "#runtime/sessions/compiled-agent-cache.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { resolveDevelopmentSourceSnapshotWatchPaths } from "#internal/nitro/dev-runtime-source-snapshot.js";
-import { pruneDevelopmentRuntimeArtifactsSnapshotsInBackground } from "#internal/nitro/dev-runtime-artifacts.js";
-import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
-import {
-  computeChannelRouteRegistrations,
-  syncChannelVirtualHandlers,
-} from "#internal/nitro/host/channel-routes.js";
-import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
-import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
-import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
-import {
-  getDevelopmentEnvironmentFilePaths,
-  loadDevelopmentEnvironmentFiles,
-} from "#cli/dev/environment.js";
+import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
+import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
+import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
+import { getDevelopmentEnvironmentFilePaths } from "#cli/dev/environment.js";
 import {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
   STRUCTURAL_RELOAD_LOG_LINE,
@@ -45,27 +33,10 @@ const WATCHER_IGNORED_DIRECTORY_NAMES = new Set([
   ".output",
   ".turbo",
   ".vercel",
-  ".workflow-data",
   "build",
   "dist",
   "node_modules",
 ]);
-type DevelopmentWatcherNitroOptions = Pick<
-  Nitro["options"],
-  "experimental" | "handlers" | "scheduledTasks" | "tasks" | "virtual"
-> &
-  Partial<Pick<Nitro["options"], "dev" | "preset">>;
-
-interface DevelopmentWatcherNitro {
-  hooks: {
-    callHook: Nitro["hooks"]["callHook"];
-  };
-  options: DevelopmentWatcherNitroOptions;
-  routing: {
-    sync(): void;
-  };
-}
-
 /**
  * Handle for the authored-source development watcher.
  */
@@ -82,8 +53,8 @@ export interface AuthoredSourceWatcherHandle {
  * triggers Nitro rebuild reloads only when structural runtime wiring changes.
  */
 export async function startAuthoredSourceWatcher(input: {
-  nitro: DevelopmentWatcherNitro;
-  preparedHost: PreparedApplicationHost;
+  coordinator: DevelopmentAuthoredRebuildCoordinator;
+  preparedHost: PreparedDevelopmentApplicationHost;
 }): Promise<AuthoredSourceWatcherHandle> {
   let currentHost = input.preparedHost;
   let closed = false;
@@ -101,7 +72,7 @@ export async function startAuthoredSourceWatcher(input: {
     },
     followSymlinks: false,
     ignoreInitial: true,
-    ignored: shouldIgnoreWatcherPath,
+    ignored: (path) => shouldIgnoreWatcherPath(path, currentHost.workspaceExtensions),
   });
   const watcherReady = waitForWatcherReady(watcher);
 
@@ -125,64 +96,21 @@ export async function startAuthoredSourceWatcher(input: {
         pendingEvents.clear();
         pendingChangedPaths.clear();
         const previousHost = currentHost;
-        const hasSandboxPrewarmChange = hasSandboxRelatedChange(
-          previousHost.compileResult.project.agentRoot,
-          changedPaths,
-        );
-        const hasEnvironmentChange = hasDevelopmentEnvironmentFileChange(
-          previousHost.appRoot,
-          changedPaths,
-        );
         if (changeEvents.length > 0) {
           console.log(formatChangeDetectedLogLine(previousHost.appRoot, changeEvents));
         }
 
         try {
-          if (hasEnvironmentChange) {
-            loadDevelopmentEnvironmentFiles(previousHost.appRoot);
-          }
+          const result = await input.coordinator.rebuild({ changedPaths });
+          currentHost = result.host;
 
-          const nextHost = await prepareApplicationHost(previousHost.appRoot, {
-            dev: input.nitro.options.dev === true,
-          });
-          if (input.nitro.options.dev === true) {
-            pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(nextHost.appRoot);
-          }
-          const artifactsConfig = createNitroArtifactsConfig({
-            appRoot: nextHost.appRoot,
-            dev: input.nitro.options.dev === true,
-          });
-          if (hasSandboxPrewarmChange) {
-            startDevelopmentSandboxPrewarmInBackground({
-              appRoot: nextHost.appRoot,
-              compiledArtifactsSource: resolveNitroCompiledArtifactsSource(artifactsConfig),
-              log: (message) => console.log(message),
-            });
-          }
-          const hasChannelRouteChanged = syncChannelVirtualHandlers(input.nitro, {
-            artifactsConfig,
-            next: computeChannelRouteRegistrations(nextHost),
-            previous: computeChannelRouteRegistrations(previousHost),
-          });
-          clearCompiledRuntimeAgentBundleCache();
-          currentHost = nextHost;
-
-          // Schedule registrations are intentionally not reconciled here:
-          // `eve dev` never registers Nitro scheduled tasks for authored
-          // schedules. The only dev-time entry point is the dev-only
-          // `POST /eve/v1/dev/schedules/:scheduleId` route, which reads
-          // compiled registrations from disk on every request without
-          // needing Nitro wiring.
-          const hasStructuralChange = hasChannelRouteChanged || hasEnvironmentChange;
-
-          if (hasStructuralChange) {
+          if (result.kind === "structural") {
             console.log(STRUCTURAL_RELOAD_LOG_LINE);
-            await input.nitro.hooks.callHook("rollup:reload");
           } else {
             console.log(AUTHORED_ARTIFACTS_UPDATED_LOG_LINE);
           }
 
-          const nextWatchPaths = await resolveAuthoredWatchPaths(nextHost);
+          const nextWatchPaths = await resolveAuthoredWatchPaths(currentHost);
           currentWatchPathsByKey = syncWatcherPaths({
             nextWatchPaths,
             previousWatchPathsByKey: currentWatchPathsByKey,
@@ -212,7 +140,7 @@ export async function startAuthoredSourceWatcher(input: {
     await rebuild(true);
   };
   watcher.on("all", (event, changedPath) => {
-    if (closed || !isWatcherReady) {
+    if (closed || !isWatcherReady || event === "addDir" || event === "unlinkDir") {
       return;
     }
 
@@ -261,7 +189,9 @@ async function waitForWatcherReady(input: {
   });
 }
 
-async function resolveAuthoredWatchPaths(host: PreparedApplicationHost): Promise<string[]> {
+async function resolveAuthoredWatchPaths(
+  host: PreparedDevelopmentApplicationHost,
+): Promise<string[]> {
   const watchPaths = new Set<string>([
     host.compileResult.project.agentRoot,
     join(host.appRoot, "package.json"),
@@ -271,6 +201,13 @@ async function resolveAuthoredWatchPaths(host: PreparedApplicationHost): Promise
   ]);
   const tsconfigPaths = await resolveTsConfigWatchPaths(host.appRoot);
   const sourceSnapshotWatchPaths = await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot);
+
+  for (const extension of host.workspaceExtensions) {
+    watchPaths.add(extension.config.sourceRoot);
+    for (const path of extension.buildConfigPaths) {
+      watchPaths.add(path);
+    }
+  }
 
   for (const envFilePath of getDevelopmentEnvironmentFilePaths(host.appRoot)) {
     watchPaths.add(envFilePath);
@@ -339,41 +276,7 @@ function syncWatcherPaths(input: {
 }
 
 function toWatchPathKey(path: string): string {
-  return path.replaceAll("\\", "/");
-}
-
-function hasDevelopmentEnvironmentFileChange(
-  appRoot: string,
-  changedPaths: readonly string[],
-): boolean {
-  const environmentFilePathKeys = new Set(
-    getDevelopmentEnvironmentFilePaths(appRoot).map((path) => toWatchPathKey(resolve(path))),
-  );
-
-  return changedPaths.some((path) => environmentFilePathKeys.has(toWatchPathKey(resolve(path))));
-}
-
-function hasSandboxRelatedChange(agentRoot: string, changedPaths: readonly string[]): boolean {
-  return changedPaths.some((path) => {
-    const agentRelativePath = toAgentRelativePath(agentRoot, path);
-    return (
-      agentRelativePath === "sandbox.ts" ||
-      agentRelativePath.startsWith("sandbox/") ||
-      agentRelativePath === "workspace" ||
-      agentRelativePath.startsWith("workspace/") ||
-      agentRelativePath === "skills" ||
-      agentRelativePath.startsWith("skills/")
-    );
-  });
-}
-
-function toAgentRelativePath(agentRoot: string, path: string): string {
-  const relativePath = relative(resolve(agentRoot), resolve(path));
-  const pathKey = toWatchPathKey(relativePath);
-  if (pathKey === ".." || pathKey.startsWith("../") || pathKey === "") {
-    return "";
-  }
-  return pathKey;
+  return normalize(resolve(path));
 }
 
 function resolveLockfileSearchDirectories(appRoot: string): string[] {
@@ -405,8 +308,22 @@ async function resolveTsConfigWatchPaths(appRoot: string): Promise<string[]> {
   return await resolveTsConfigDependencyPaths(appRoot);
 }
 
-function shouldIgnoreWatcherPath(path: string): boolean {
-  const pathParts = path.replaceAll("\\", "/").split("/").filter(Boolean);
+function shouldIgnoreWatcherPath(
+  path: string,
+  workspaceExtensions: readonly DevelopmentWorkspaceExtension[],
+): boolean {
+  const pathParts = normalize(path).split(sep).filter(Boolean);
 
-  return pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part));
+  return (
+    pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part)) ||
+    workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
+  );
+}
+
+function isPathInsideOrEqual(path: string, directory: string): boolean {
+  const resolvedPath = resolve(path);
+  const resolvedDirectory = resolve(directory);
+  return (
+    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
+  );
 }

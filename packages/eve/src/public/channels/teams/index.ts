@@ -24,6 +24,7 @@ export {
   type TeamsHandle,
   type TeamsInboundResult,
   type TeamsInboundResultOrPromise,
+  type TeamsInputResponseResult,
   type TeamsInvokeResult,
   type TeamsInvokeResultOrPromise,
   type TeamsReceiveTarget,

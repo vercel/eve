@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { access, mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +9,7 @@ import { runCli } from "../../src/cli/run.js";
 import { resolveInstalledPackageInfo } from "../../src/internal/application/package.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
+import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workflow/local-world-data-directory.js";
 import {
   EVE_CONTINUE_SESSION_ROUTE_PATTERN,
   EVE_CREATE_SESSION_ROUTE_PATH,
@@ -396,11 +397,13 @@ describe("runCli", () => {
     }
   });
 
-  it("starts an existing built app and serves the health route", async () => {
+  it("starts an existing built app with local Workflow data under .eve", async () => {
     const { buildApplication } = await import("../../src/internal/nitro/host.js");
     const appRoot = await createMinimalAppRoot("eve-cli-start-health-");
 
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, {
+      skipVercelSandboxPrewarm: false,
+    });
 
     const server = await startPackagedEveStart(appRoot);
 
@@ -411,6 +414,12 @@ describe("runCli", () => {
       expect(response.status).toBe(200);
       expect(responseJson).toMatchObject({ ok: true, status: "ready" });
       expect(server.stdout()).toContain("[START] server listening at");
+      await expect(
+        access(join(resolveLocalWorkflowWorldDataDirectory(appRoot), "version.txt")),
+      ).resolves.toBeUndefined();
+      await expect(access(join(appRoot, ".workflow-data"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     } finally {
       await server.stop();
     }
@@ -458,9 +467,8 @@ describe("runCli", () => {
     }
 
     expect(thrownError.message).toContain("Discovery failed with 1 error(s) and 0 warning(s).");
-    expect(thrownError.message).toContain(
-      `Diagnostics artifact: ${join(resolvedWorkspaceRoot, ".eve", "discovery", "diagnostics.json")}`,
-    );
+    expect(thrownError.message).not.toContain("Diagnostics artifact:");
+    expect(thrownError.message).not.toContain(`${join(resolvedWorkspaceRoot, ".eve", "builds")}/`);
     expect(thrownError.message).toContain("Discovery diagnostics:");
     expect(thrownError.message).toContain(
       'Expected authored instructions at "instructions.md", "instructions.ts", "instructions.cts", "instructions.mts", "instructions.js", "instructions.cjs", "instructions.mjs", or "instructions/" directory.',
@@ -517,7 +525,9 @@ describe("runCli", () => {
       process.chdir(previousCwd);
     }
 
-    expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot);
+    expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
+      skipVercelSandboxPrewarm: false,
+    });
     expect(observedEnvironment).toEqual({
       EVE_BUILD_DEFAULT_ONLY: "from-env",
       EVE_BUILD_DEVELOPMENT_LOCAL_ONLY: "from-development-local",
@@ -525,6 +535,31 @@ describe("runCli", () => {
       EVE_BUILD_LOCAL_ONLY: "from-local",
       EVE_BUILD_SHARED: "from-local",
       EVE_BUILD_SHELL_ONLY: "from-shell",
+    });
+  });
+
+  it("forwards the sandbox prewarm opt-out to the build host", async () => {
+    const workspaceRoot = await createScratchDirectory("eve-cli-build-skip-prewarm-");
+    const resolvedWorkspaceRoot = await realpath(workspaceRoot);
+    const previousCwd = process.cwd();
+    const logger = {
+      error: vi.fn(),
+      log: vi.fn(),
+    };
+    const buildHost = vi.fn(async () => join(workspaceRoot, ".vercel", "output"));
+
+    process.chdir(workspaceRoot);
+
+    try {
+      await runCli(["build", "--skip-sandbox-prewarm"], logger, {
+        buildHost,
+      });
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
+      skipVercelSandboxPrewarm: true,
     });
   });
 });

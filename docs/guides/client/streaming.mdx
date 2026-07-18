@@ -5,6 +5,20 @@ description: "Consume eve client stream events live, reconnect by event index, a
 
 Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.
 
+Once `send()` is accepted, the session exposes its assigned `sessionId` and can request cooperative cancellation with `session.cancel()`, even while the response stream is still running. The result status is `accepted` when the active turn accepted the signal or `no_active_turn` when it already settled:
+
+```ts
+const session = client.session();
+const response = await session.send("Run the long operation.");
+
+const cancellation = await session.cancel();
+console.log(cancellation.status);
+
+const result = await response.result();
+```
+
+Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally.
+
 ## Aggregate a turn
 
 Use `result()` when you only need the final turn summary:
@@ -70,7 +84,7 @@ The most common UI events are:
 | `action.result`      | Show tool call results.                                                        |
 | `input.requested`    | Pause the UI for approval or a question answer.                                |
 | `result.completed`   | Read structured output from an [output schema](./output-schema).               |
-| `session.waiting`    | Enable the composer for the next turn.                                         |
+| `session.waiting`    | Enable the composer and read the current `data.continuationToken`.             |
 | `session.completed`  | Mark the conversation terminal.                                                |
 | `session.failed`     | Mark the conversation failed.                                                  |
 
@@ -124,11 +138,26 @@ for await (const event of session.stream({ startIndex: 0 })) {
 }
 ```
 
+Nonnegative values are absolute event indexes. Negative values read relative to the stream's current tail, so `-1` reads the latest event:
+
+```ts
+for await (const event of session.stream({ startIndex: -1 })) {
+  if (event.type === "session.waiting") {
+    console.log(event.data.continuationToken);
+  }
+  break;
+}
+```
+
+Tail-relative attachments do not automatically reconnect or advance the session's stored absolute `streamIndex`. Break after the event you need when using one as a tail lookup.
+
 `stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
 
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream. Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
+Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops the server-side turn — it keeps running and remains attachable by index. To stop the turn itself, POST the session's [cancel route](../../channels/eve#routes) and watch the stream settle with `turn.cancelled` followed by `session.waiting`.
+
+Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 
 ```ts
 const controller = new AbortController();

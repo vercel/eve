@@ -15,25 +15,26 @@ import {
   prepareEveVersionedCacheDirectory,
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
-import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
-import {
-  createNitroArtifactsConfig,
-  type NitroArtifactsConfigInput,
-} from "#internal/nitro/host/artifacts-config.js";
+import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
-import { configureNitroRoutes } from "#internal/nitro/host/configure-nitro-routes.js";
+import {
+  configureDevelopmentNitroRoutes,
+  configureProductionNitroRoutes,
+} from "#internal/nitro/host/configure-nitro-routes.js";
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
-import { captureDevLiveVirtualModules } from "#internal/nitro/host/dev-live-virtual-modules.js";
 import {
   createOptionalEngineDependencyPlugin,
   OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
 } from "#internal/nitro/host/optional-engine-dependency-plugin.js";
 import { addNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
 import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
-import { SERVER_EXTERNAL_PACKAGES } from "#internal/nitro/host/server-external-packages.js";
-import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type {
+  NitroBuildSurface,
+  PreparedApplicationHost,
+  PreparedDevelopmentApplicationHost,
+} from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
@@ -80,12 +81,8 @@ function resolveWorkflowAliases(): Record<string, string> {
   return aliases;
 }
 
-function resolveNitroPreset(dev: boolean): "vercel" | undefined {
-  if (!dev && process.env.VERCEL) {
-    return "vercel";
-  }
-
-  return undefined;
+function resolveProductionNitroPreset(): "vercel" | undefined {
+  return process.env.VERCEL ? "vercel" : undefined;
 }
 
 function includesApplicationSurface(surface: NitroBuildSurface): boolean {
@@ -103,22 +100,13 @@ function includesWorkflowStepRegistrations(surface: NitroBuildSurface): boolean 
 /** Whether any agent needs the dynamic Workflow sandbox runtime. */
 function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  return nodes.some((node) => node.workflowEnabled === true);
+  return nodes.some((node) => node.workflowTool !== undefined);
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
   return manifest.channels.some(
     (entry) => entry.kind === "channel" && entry.method === "WEBSOCKET",
   );
-}
-
-function resolveWorkflowStepEntrypointPath(
-  nitro: Nitro,
-  preparedHost: PreparedApplicationHost,
-): string {
-  return nitro.options.dev
-    ? join(nitro.options.buildDir, "workflow", "steps.mjs")
-    : join(preparedHost.workflowBuildDir, "steps.mjs");
 }
 
 function collectHostedTraceDependencies(
@@ -132,6 +120,9 @@ function collectHostedTraceDependencies(
   const configuredExternalDependencies = agentNodes.flatMap(
     (node) => node.config.build?.externalDependencies ?? [],
   );
+  // Nitro already classifies known native and non-bundleable packages through
+  // its nf3 database. traceDeps is only for eve-owned or author-configured
+  // additions to that upstream policy.
   const merged = new Set<string>([
     ...FRAMEWORK_HOSTED_EXTERNAL_PACKAGES,
     // Optional engine packages (just-bash, microsandbox) join the
@@ -141,7 +132,6 @@ function collectHostedTraceDependencies(
     // so a resolvable-but-unrequested install adds nothing to hosted
     // output.
     ...configuredOptionalEnginePackages,
-    ...SERVER_EXTERNAL_PACKAGES,
     ...configuredExternalDependencies,
   ]);
   return [...merged].filter((dependencyName) => dependencyName !== EVE_PACKAGE_NAME);
@@ -179,11 +169,7 @@ export function shouldPruneLocalSandboxBackends(input: {
   );
 }
 
-function createDevelopmentWatchOptions(appRoot: string): { ignored: string[] } | undefined {
-  if (appRoot.length === 0) {
-    return undefined;
-  }
-
+function createDevelopmentWatchOptions(appRoot: string): { ignored: string[] } {
   return {
     // eve's authored-source watcher owns app code rebuilds. If Nitro/Rollup
     // also watches those files it can reload the worker while a workflow
@@ -415,7 +401,7 @@ function addNitroStepModuleSideEffectsPlugin(
   input: {
     stepEntrypointPath: string;
   },
-): void {
+): () => void {
   let cachedStepTransformTargets: Set<string> | null = null;
 
   const getStepTransformTargets = async (): Promise<Set<string>> => {
@@ -430,15 +416,10 @@ function addNitroStepModuleSideEffectsPlugin(
     return cachedStepTransformTargets;
   };
 
-  nitro.hooks.hook("build:before", () => {
+  const clearCachedStepTransformTargets = () => {
     cachedStepTransformTargets = null;
-  });
-
-  if (nitro.options.dev) {
-    nitro.hooks.hook("dev:reload", () => {
-      cachedStepTransformTargets = null;
-    });
-  }
+  };
+  nitro.hooks.hook("build:before", clearCachedStepTransformTargets);
 
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
@@ -466,6 +447,8 @@ function addNitroStepModuleSideEffectsPlugin(
       },
     });
   });
+
+  return clearCachedStepTransformTargets;
 }
 
 /**
@@ -478,7 +461,7 @@ function addNitroStepTransformPlugin(
   input: {
     stepEntrypointPath: string;
   },
-): void {
+): () => void {
   let cachedStepTransformTargets: Set<string> | null = null;
 
   const getStepTransformTargets = async (): Promise<Set<string>> => {
@@ -493,15 +476,10 @@ function addNitroStepTransformPlugin(
     return cachedStepTransformTargets;
   };
 
-  nitro.hooks.hook("build:before", () => {
+  const clearCachedStepTransformTargets = () => {
     cachedStepTransformTargets = null;
-  });
-
-  if (nitro.options.dev) {
-    nitro.hooks.hook("dev:reload", () => {
-      cachedStepTransformTargets = null;
-    });
-  }
+  };
+  nitro.hooks.hook("build:before", clearCachedStepTransformTargets);
 
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
@@ -534,6 +512,8 @@ function addNitroStepTransformPlugin(
       name: "eve:workflow-step-transform",
     });
   });
+
+  return clearCachedStepTransformTargets;
 }
 
 /**
@@ -644,31 +624,10 @@ function patchWorkflowTransformExcludePath(nitro: Nitro, workflowBuildDir: strin
   });
 }
 
-/**
- * Creates one configured Nitro instance for either production build or dev
- * hosting of an eve application.
- *
- * `surface` narrows the mounted routes for isolated production builds.
- * `outputDir` lets callers stage those isolated builds into separate Nitro
- * output roots before assembling the final hosted deployment.
- */
-export async function createApplicationNitro(
+function createApplicationNitroBundlerConfiguration(
   preparedHost: PreparedApplicationHost,
-  dev: boolean,
-  options: {
-    outputDir?: string;
-    surface?: NitroBuildSurface;
-  } = {},
-): Promise<Nitro> {
-  const surface = options.surface ?? "all";
-  // Dev mode never registers Nitro scheduled tasks. We do not want Nitro to
-  // watch authored schedules and fire them on their cron expressions during
-  // `eve dev`; the dev-only `POST /eve/v1/dev/schedules/:scheduleId` route
-  // is the only dev-time entry point. Production builds always register
-  // schedules.
-  const shouldRegisterScheduleTasks =
-    !dev && includesApplicationSurface(surface) && preparedHost.scheduleRegistrations.length > 0;
-  const preset = resolveNitroPreset(dev);
+  preset: "vercel" | undefined,
+) {
   const configuredBackendNames = collectConfiguredSandboxBackendNames(
     preparedHost.compileResult.manifest,
   );
@@ -705,21 +664,19 @@ export async function createApplicationNitro(
     preparedHost,
     configuredOptionalEnginePackages,
   );
-  const nitroBuildDir = resolveNitroBuildDirectory(preparedHost.appRoot, surface);
-  const websocketEnabled =
-    includesApplicationSurface(surface) &&
-    (dev || manifestHasWebSocketChannel(preparedHost.compileResult.manifest));
-  const nitroPlugins: string[] = [];
-  nitroPlugins.push(preparedHost.compiledArtifacts.bootstrapPath);
-  nitroPlugins.push(preparedHost.compiledArtifacts.workflowWorldPluginPath);
-  if (!dev) {
-    // Stops all tracked sandboxes when the production server shuts
-    // down. Dev servers are excluded: the dev CLI parent already stops
-    // dev-tagged sandboxes when the dev server closes.
-    nitroPlugins.push(
-      resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
-    );
-  }
+
+  return {
+    nitroRolldownConfig,
+    nitroRollupConfig,
+    tracedAppDependencies,
+  };
+}
+
+function createApplicationNitroPlugins(preparedHost: PreparedApplicationHost): string[] {
+  const nitroPlugins = [
+    preparedHost.compiledArtifacts.bootstrapPath,
+    preparedHost.compiledArtifacts.workflowWorldPluginPath,
+  ];
   if (manifestEnablesWorkflow(preparedHost.compileResult.manifest)) {
     nitroPlugins.push(
       resolvePackageSourceFilePath("src/internal/nitro/host/workflow-sandbox-runtime-plugin.ts"),
@@ -728,55 +685,16 @@ export async function createApplicationNitro(
   if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {
     nitroPlugins.push(preparedHost.compiledArtifacts.instrumentationPluginPath);
   }
-  await prepareEveVersionedCacheDirectory(nitroBuildDir);
-  const nitro = await createNitro(
-    {
-      _cli: {
-        command: dev ? "dev" : "build",
-      },
-      buildDir: nitroBuildDir,
-      dev,
-      features: {
-        websocket: websocketEnabled,
-      },
-      logLevel: dev ? 1 : undefined,
-      output:
-        options.outputDir === undefined
-          ? undefined
-          : {
-              dir: options.outputDir,
-            },
-      preset,
-      plugins: nitroPlugins,
-      publicAssets: [],
-      scanDirs: includesWorkflowStepRegistrations(surface)
-        ? [resolvePackageSourceDirectoryPath("src/execution")]
-        : undefined,
-      rolldownConfig: nitroRolldownConfig,
-      rollupConfig: nitroRollupConfig,
-      rootDir: preparedHost.appRoot,
-      serverDir: false,
-      traceDeps: tracedAppDependencies,
-      vercel: createEveVercelOptions(preset === "vercel" && includesApplicationSurface(surface)),
-      watchOptions: dev ? createDevelopmentWatchOptions(preparedHost.appRoot) : undefined,
-    },
-    dev
-      ? {
-          watch: true,
-        }
-      : undefined,
-  );
-  await writeEveVersionedCacheMetadata(nitroBuildDir);
 
+  return nitroPlugins;
+}
+
+function configureSharedApplicationNitro(
+  nitro: Nitro,
+  preparedHost: PreparedApplicationHost,
+  surface: NitroBuildSurface,
+): void {
   addNitroRoutingImportSpecifierPlugin(nitro);
-  if (dev) {
-    captureDevLiveVirtualModules(nitro);
-  }
-
-  // Resolve bare `workflow/*` specifiers during Nitro's Rollup bundling so
-  // pre-built workflow modules (whose imports target eve's installed copies)
-  // resolve correctly in production builds where Node resolution from the
-  // workflow cache directory is not available.
   if (includesWorkflowSurface(surface)) {
     const workflowAliases = resolveWorkflowAliases();
     for (const [specifier, resolvedPath] of Object.entries(workflowAliases)) {
@@ -785,17 +703,7 @@ export async function createApplicationNitro(
     addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
     patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
   }
-  if (includesWorkflowStepRegistrations(surface)) {
-    const stepEntrypointPath = resolveWorkflowStepEntrypointPath(nitro, preparedHost);
-    addNitroStepModuleSideEffectsPlugin(nitro, {
-      stepEntrypointPath,
-    });
-    addNitroStepTransformPlugin(nitro, {
-      stepEntrypointPath,
-    });
-  }
-  // Dynamic tool transform runs unconditionally — it needs to hoist
-  // execute functions for all tool files, not just workflow step targets.
+
   addDynamicToolTransformPlugin(nitro);
 
   if (preparedHost.compiledArtifacts.instrumentationSourcePath !== undefined) {
@@ -804,43 +712,152 @@ export async function createApplicationNitro(
       preparedHost.compiledArtifacts.instrumentationSourcePath,
     );
   }
+}
 
-  // Prevent Nitro from re-bundling the pre-built workflow bundle in dev
-  // mode. `steps.mjs` is now a source entry that Nitro must still bundle
-  // so its imported TypeScript step files are transformed.
-  if (dev && includesWorkflowSurface(surface)) {
-    const workflowBuildDir = preparedHost.workflowBuildDir;
-    const externalWorkflowModules = new Set([
-      normalizePath(join(workflowBuildDir, "workflows.mjs")),
-    ]);
+function configureNitroStepPlugins(nitro: Nitro, stepEntrypointPath: string): Array<() => void> {
+  return [
+    addNitroStepModuleSideEffectsPlugin(nitro, { stepEntrypointPath }),
+    addNitroStepTransformPlugin(nitro, { stepEntrypointPath }),
+  ];
+}
 
-    nitro.hooks.hook("rollup:before", (_nitro, config) => {
-      const existingExternal = config.external;
-      config.external = (id: string, ...rest: unknown[]) => {
-        if (externalWorkflowModules.has(normalizePath(id))) {
-          return true;
-        }
-        if (typeof existingExternal === "function") {
-          return (
-            existingExternal as (id: string, ...rest: unknown[]) => boolean | null | undefined
-          )(id, ...rest);
-        }
-        return undefined;
-      };
-    });
+function externalizeDevelopmentWorkflowBundle(
+  nitro: Nitro,
+  preparedHost: PreparedApplicationHost,
+): void {
+  const externalWorkflowModules = new Set([
+    normalizePath(join(preparedHost.workflowBuildDir, "workflows.mjs")),
+  ]);
+
+  nitro.hooks.hook("rollup:before", (_nitro, config) => {
+    const existingExternal = config.external;
+    config.external = (id: string, ...rest: unknown[]) => {
+      if (externalWorkflowModules.has(normalizePath(id))) {
+        return true;
+      }
+      if (typeof existingExternal === "function") {
+        return (existingExternal as (id: string, ...rest: unknown[]) => boolean | null | undefined)(
+          id,
+          ...rest,
+        );
+      }
+      return undefined;
+    };
+  });
+}
+
+/**
+ * Creates one isolated Nitro host candidate for `eve dev`.
+ */
+export async function createDevelopmentApplicationNitro(
+  preparedHost: PreparedDevelopmentApplicationHost,
+): Promise<Nitro> {
+  const nitroBuildDir = preparedHost.workspace.nitroBuildDir;
+  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, undefined);
+  const plugins = createApplicationNitroPlugins(preparedHost);
+
+  await prepareEveVersionedCacheDirectory(nitroBuildDir);
+  const nitro = await createNitro(
+    {
+      _cli: { command: "dev" },
+      buildDir: nitroBuildDir,
+      dev: true,
+      features: { websocket: true },
+      logLevel: 1,
+      output: { dir: preparedHost.workspace.nitroOutputDir },
+      plugins,
+      publicAssets: [],
+      scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
+      rolldownConfig: bundler.nitroRolldownConfig,
+      rollupConfig: bundler.nitroRollupConfig,
+      rootDir: preparedHost.appRoot,
+      serverDir: false,
+      traceDeps: bundler.tracedAppDependencies,
+      vercel: createEveVercelOptions(false),
+      watchOptions: createDevelopmentWatchOptions(preparedHost.appRoot),
+    },
+    { watch: true },
+  );
+  await writeEveVersionedCacheMetadata(nitroBuildDir);
+
+  const stepEntrypointPath = join(nitro.options.buildDir, "workflow", "steps.mjs");
+  configureSharedApplicationNitro(nitro, preparedHost, "all");
+  const clearStepTransformCaches = configureNitroStepPlugins(nitro, stepEntrypointPath);
+  nitro.hooks.hook("dev:reload", () => {
+    for (const clearCache of clearStepTransformCaches) {
+      clearCache();
+    }
+  });
+  externalizeDevelopmentWorkflowBundle(nitro, preparedHost);
+  await configureDevelopmentNitroRoutes(nitro, preparedHost);
+  await addNitroStepNoExternals(nitro, stepEntrypointPath);
+
+  return nitro;
+}
+
+interface ProductionApplicationNitroOptions {
+  readonly buildDir: string;
+  readonly outputDir: string;
+  readonly surface: NitroBuildSurface;
+}
+
+/**
+ * Creates a build-mode Nitro host for one production surface. `surface`
+ * narrows which route groups are registered ("all" for self-hosted output;
+ * "app"/"flow" for the separately bundled Vercel functions), and `buildDir`/
+ * `outputDir` place all bundler state inside the invocation-owned build
+ * workspace.
+ */
+export async function createProductionApplicationNitro(
+  preparedHost: PreparedApplicationHost,
+  options: ProductionApplicationNitroOptions,
+): Promise<Nitro> {
+  const preset = resolveProductionNitroPreset();
+  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, preset);
+  const nitroPlugins = createApplicationNitroPlugins(preparedHost);
+  nitroPlugins.push(
+    resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
+  );
+
+  await prepareEveVersionedCacheDirectory(options.buildDir);
+  const nitro = await createNitro({
+    _cli: { command: "build" },
+    buildDir: options.buildDir,
+    dev: false,
+    features: {
+      websocket:
+        includesApplicationSurface(options.surface) &&
+        manifestHasWebSocketChannel(preparedHost.compileResult.manifest),
+    },
+    output: { dir: options.outputDir },
+    preset,
+    plugins: nitroPlugins,
+    publicAssets: [],
+    scanDirs: includesWorkflowStepRegistrations(options.surface)
+      ? [resolvePackageSourceDirectoryPath("src/execution")]
+      : undefined,
+    rolldownConfig: bundler.nitroRolldownConfig,
+    rollupConfig: bundler.nitroRollupConfig,
+    rootDir: preparedHost.appRoot,
+    serverDir: false,
+    traceDeps: bundler.tracedAppDependencies,
+    vercel: createEveVercelOptions(
+      preset === "vercel" && includesApplicationSurface(options.surface),
+    ),
+  });
+  await writeEveVersionedCacheMetadata(options.buildDir);
+
+  configureSharedApplicationNitro(nitro, preparedHost, options.surface);
+  if (includesWorkflowStepRegistrations(options.surface)) {
+    configureNitroStepPlugins(nitro, join(preparedHost.workflowBuildDir, "steps.mjs"));
   }
 
-  if (shouldRegisterScheduleTasks) {
-    // Replace Vercel's default `/_vercel/cron` path with an unguessable
-    // per-build route so users do not need to configure `CRON_SECRET` to
-    // protect the cron endpoint. No-op when the Vercel preset is not in
-    // use (e.g. dev mode), where the cron route is never registered.
+  if (
+    includesApplicationSurface(options.surface) &&
+    preparedHost.scheduleRegistrations.length > 0
+  ) {
     applyEveCronHandlerRoute(nitro);
-
-    const artifactsConfig: NitroArtifactsConfigInput = createNitroArtifactsConfig({
-      appRoot: preparedHost.appRoot,
-      dev: nitro.options.dev,
-    });
+    const artifactsConfig = createProductionNitroArtifactsConfig();
     registerScheduleTaskHandlers(nitro, {
       artifactsConfig,
       dispatchModulePath: resolvePackageSourceFilePath(
@@ -849,12 +866,10 @@ export async function createApplicationNitro(
       registrations: preparedHost.scheduleRegistrations,
     });
   }
-  await configureNitroRoutes(nitro, preparedHost, {
-    surface,
-  });
-  if (includesWorkflowStepRegistrations(surface)) {
-    await addNitroStepNoExternals(nitro, resolveWorkflowStepEntrypointPath(nitro, preparedHost));
-  }
 
+  await configureProductionNitroRoutes(nitro, preparedHost, options.surface);
+  if (includesWorkflowStepRegistrations(options.surface)) {
+    await addNitroStepNoExternals(nitro, join(preparedHost.workflowBuildDir, "steps.mjs"));
+  }
   return nitro;
 }

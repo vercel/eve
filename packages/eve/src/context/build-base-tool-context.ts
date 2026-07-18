@@ -7,19 +7,22 @@ import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 export type BaseToolContext = SessionContext & {
   readonly abortSignal: AbortSignal;
   readonly callId: string;
+  readonly toolName: string;
 };
 
 /** Builds the base context for one tool execution. */
-export function buildBaseToolContext(
-  options: Pick<ToolExecuteOptions, "abortSignal" | "toolCallId">,
-): BaseToolContext {
+export function buildBaseToolContext(input: {
+  readonly options: Pick<ToolExecuteOptions, "abortSignal" | "toolCallId">;
+  readonly toolName: string;
+}): BaseToolContext {
   const callbackContext = buildCallbackContext();
-  const signal = options.abortSignal ?? new AbortController().signal;
+  const signal = input.options.abortSignal ?? new AbortController().signal;
 
   return {
     ...callbackContext,
     abortSignal: signal,
-    callId: options.toolCallId,
+    callId: input.options.toolCallId,
     getSandbox: async () => bindSandboxAbortSignal(await callbackContext.getSandbox(), signal),
+    toolName: input.toolName,
   };
 }

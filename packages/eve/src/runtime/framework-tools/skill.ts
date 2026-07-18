@@ -1,16 +1,15 @@
+import { z } from "#compiled/zod/index.js";
+
 import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import type { JsonObject } from "#shared/json.js";
 
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
  */
-interface LoadSkillInput {
-  readonly skill: string;
-}
+type LoadSkillInput = z.infer<typeof SKILL_INPUT_SCHEMA>;
 
 /**
  * Executes the `load_skill` tool.
@@ -63,7 +62,10 @@ function availableSkillNames(ctx: ReturnType<typeof loadContext>): string[] {
 // Tool definition
 // ---------------------------------------------------------------------------
 
-export const SKILL_OUTPUT_SCHEMA: JsonObject = { type: "string" };
+export const SKILL_INPUT_SCHEMA = z.strictObject({
+  skill: z.string().describe("Available skill name or id."),
+});
+export const SKILL_OUTPUT_SCHEMA = z.string();
 
 export const SKILL_TOOL_DEFINITION: ResolvedToolDefinition = {
   description: [
@@ -74,17 +76,7 @@ export const SKILL_TOOL_DEFINITION: ResolvedToolDefinition = {
     'Choose the "skill" value from the Available skills block.',
   ].join(" "),
   execute: (input) => executeLoadSkillTool(input as LoadSkillInput),
-  inputSchema: {
-    additionalProperties: false,
-    properties: {
-      skill: {
-        description: "Available skill name or id.",
-        type: "string",
-      },
-    },
-    required: ["skill"],
-    type: "object",
-  },
+  inputSchema: SKILL_INPUT_SCHEMA,
   logicalPath: "eve:framework/load-skill",
   name: "load_skill",
   outputSchema: SKILL_OUTPUT_SCHEMA,

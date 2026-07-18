@@ -31,7 +31,7 @@ Import from `eve/svelte` and read the reactive getters directly. No `$` prefix:
 | `events`  | `readonly HandleMessageStreamEvent[]`       | Raw server events for this session.                                       |
 | `session` | `SessionState`                              | Snapshot of session state.                                                |
 | `send`    | `(input: SendTurnPayload) => Promise<void>` | Send text or a full turn (multi-part, attachments, HITL responses).       |
-| `stop`    | `() => void`                                | Abort the in-flight request.                                              |
+| `stop`    | `() => void`                                | Abort the client's in-flight stream.                                      |
 | `reset`   | `() => void`                                | Clear state and start a new session.                                      |
 
 These state fields are reactive getters, so read them straight from templates, `$derived`, or `$effect`. They are not stores, so don't prefix them with `$`.
@@ -103,7 +103,7 @@ The find-and-answer flow is identical across frameworks. The [React hook referen
 
 ## Stop, reset, and resume
 
-`stop()` aborts the in-flight stream. `reset()` wipes state and starts a fresh session. To resume across reloads, hand `initialSession` the state you saved earlier and use `onSessionChange` to persist the cursor as it advances:
+`stop()` aborts the in-flight stream; the server-side turn keeps running and remains attachable — to stop the turn itself, POST the session's [cancel route](../../channels/eve#routes). `reset()` wipes state and starts a fresh session. To resume across reloads, hand `initialSession` the state you saved earlier and use `onSessionChange` to persist the cursor as it advances:
 
 ```ts
 const agent = useEveAgent({

@@ -16,13 +16,18 @@ describe("extension build config", () => {
     const root = await mkdtemp(join(tmpdir(), "eve-ext-build-"));
     await writeFile(
       join(root, "package.json"),
-      JSON.stringify({ name: "@acme/crm", type: "module", eve: { extension: "extension" } }),
+      JSON.stringify({
+        name: "@acme/crm",
+        type: "module",
+        eve: { extension: { source: "extension", dist: "dist/extension" } },
+      }),
       "utf8",
     );
     const config = await tryReadExtensionBuildConfig(root);
     expect(config).not.toBeNull();
     expect(config?.packageName).toBe("@acme/crm");
     expect(config?.shortName).toBe("crm");
+    expect(config?.distRoot).toBe(join(root, "dist", "extension"));
   });
 
   it("returns null for a regular agent app without eve.extension", async () => {
@@ -31,11 +36,53 @@ describe("extension build config", () => {
     expect(await tryReadExtensionBuildConfig(root)).toBeNull();
   });
 
+  it("requires the authoring root to build a dist-only contract", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-ext-distonly-"));
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({
+        name: "@acme/dist-only",
+        eve: { extension: { dist: "dist/extension" } },
+      }),
+      "utf8",
+    );
+    await expect(tryReadExtensionBuildConfig(root)).rejects.toThrow(/eve\.extension\.source/);
+  });
+
+  it("does not accept the legacy string extension root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-ext-legacy-"));
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ name: "@acme/legacy", eve: { extension: "extension" } }),
+      "utf8",
+    );
+    expect(await tryReadExtensionBuildConfig(root)).toBeNull();
+  });
+
+  it("rejects overlapping source and managed output roots", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-ext-overlap-"));
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({
+        name: "@acme/overlap",
+        eve: {
+          extension: { source: "extension", dist: "extension/dist/runtime" },
+        },
+      }),
+      "utf8",
+    );
+    await expect(tryReadExtensionBuildConfig(root)).rejects.toThrow(/cannot overlap/);
+  });
+
   it("throws when the extension has no declaration module", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-ext-nodecl-"));
     await writeFile(
       join(root, "package.json"),
-      JSON.stringify({ name: "@acme/nodecl", type: "module", eve: { extension: "extension" } }),
+      JSON.stringify({
+        name: "@acme/nodecl",
+        type: "module",
+        eve: { extension: { source: "extension", dist: "dist/extension" } },
+      }),
       "utf8",
     );
     await mkdir(join(root, "extension", "tools"), { recursive: true });

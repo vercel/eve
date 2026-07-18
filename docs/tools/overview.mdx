@@ -38,6 +38,7 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 
 - `ctx.session`: session metadata, turn, auth, parent lineage.
 - `ctx.callId`: the id of the current tool call, carried by the call's [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
+- `ctx.toolName`: the final runtime name the model called, including any namespace qualification.
 - `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 - `ctx.getSkill(id)`: read a packaged [skill](/docs/skills)'s metadata and files.

@@ -4,10 +4,7 @@ import { join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import {
   createExtensionScopePlugin,
   createFixedNamespaceScopePlugin,
@@ -35,15 +32,14 @@ function scratchModule(source: string): { modulePath: string; sourceRoot: string
 }
 
 async function bundle(input: string, plugins: unknown[]): Promise<string> {
-  const result = await buildWithNitroRolldown({
+  const chunk = await buildSingleRolldownChunk("test module", {
     input,
     platform: "node",
     plugins,
     resolve: { extensions: [".ts", ".js", ".mjs"] },
-    write: false,
     output: { comments: false, format: "esm" },
   });
-  return getSingleRolldownChunk(result, "test module").code;
+  return chunk.code;
 }
 
 const STATE_MODULE = [
