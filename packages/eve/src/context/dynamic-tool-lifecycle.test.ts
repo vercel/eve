@@ -1,3 +1,4 @@
+import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
@@ -498,6 +499,54 @@ function createReplayableTool(
 }
 
 describe("dispatchDynamicToolEvent", () => {
+  it("leaves unsupported connection input schemas for the MCP server to validate", async () => {
+    const ctx = createCtx();
+    const inputSchema = {
+      properties: {
+        filters: {
+          anyOf: [
+            { properties: { source: { type: "string" } }, type: "object" },
+            {
+              properties: {
+                source: { $ref: "#/properties/filters/anyOf/0/properties/source" },
+              },
+              type: "object",
+            },
+          ],
+        },
+      },
+      type: "object",
+    };
+    const resolver = createResolver("connection", ["step.started"], () => ({
+      remote: {
+        description: "remote tool",
+        inputSchema,
+        execute: async (): Promise<unknown> => ({ ok: true }),
+      },
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    const tools = buildDynamicTools(ctx);
+    expect(tools).toHaveLength(1);
+
+    // The advertised schema preserves the source verbatim, including the
+    // inline JSON Pointer $ref that zod cannot rehydrate.
+    const schema = asSchema(tools[0]!.inputSchema);
+    expect(schema.jsonSchema).toMatchObject(inputSchema);
+
+    // Local validation is a passthrough — the MCP server stays responsible.
+    await expect(schema.validate?.({ filters: { source: "octolens" } })).resolves.toEqual({
+      success: true,
+      value: { filters: { source: "octolens" } },
+    });
+  });
+
   it("resolves tools for matching event and stores on scoped durable key", async () => {
     const ctx = createCtx();
     const resolver = createResolver("weather", ["session.started"], () => ({
