@@ -82,7 +82,7 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
  *
  * `surfaces.scaffoldable` reflects what the CLI can scaffold today: Slack and
- * eve Web Chat for channels, and every curated connection. The remaining
+ * Web Chat for channels, and every curated connection. The remaining
  * channels are runtime modules that are still configured by hand, so they
  * appear in the gallery but not the CLI picker.
  */
@@ -119,7 +119,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "twilio",
     name: "Twilio",
     kind: "channel",
-    tagline: "Reach users over SMS and WhatsApp through Twilio.",
+    tagline: "Put your agent on a phone number: SMS and speech-transcribed calls.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -138,10 +138,38 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   },
   {
     slug: "eve",
-    name: "eve Web Chat",
+    name: "Web Chat",
     kind: "channel",
     tagline: "Embed a first-party web chat UI backed by your agent.",
     surfaces: { scaffoldable: true, gallery: true },
+  },
+  {
+    slug: "chat-sdk-gchat",
+    name: "Google Chat",
+    kind: "channel",
+    tagline: "Google Chat spaces and DMs via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-whatsapp",
+    name: "WhatsApp",
+    kind: "channel",
+    tagline: "Customer messaging through WhatsApp Business Cloud via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-x",
+    name: "X",
+    kind: "channel",
+    tagline: "Public mentions and DMs on X via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-messenger",
+    name: "Messenger",
+    kind: "channel",
+    tagline: "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
   },
   {
     slug: "linear",
