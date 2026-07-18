@@ -60,19 +60,27 @@ const RegistryDetailPage = async ({ params }: { params: Promise<PageParams> }) =
         Registry
       </Link>
 
-      <header className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+      <header className="mt-8 grid gap-4 lg:grid-cols-2 lg:items-start lg:gap-8">
         <div className="min-w-0">
-          <h1 className="font-medium! text-heading-40 text-gray-1000 tracking-tighter sm:text-heading-48">
+          <h1 className="m-0 font-medium! text-heading-40 text-gray-1000 tracking-tighter sm:text-heading-48">
             {entry.title}
           </h1>
-          <p className="mt-4 max-w-[600px] text-copy-16 text-gray-900">{entry.description}</p>
-          <IntegrationList entry={entry} />
+          <div className="hidden lg:block">
+            <IntegrationList entry={entry} />
+          </div>
         </div>
-        <TemplateActions
-          bootstrapCommand={entry.bootstrapCommand}
-          deployHref={entry.deployHref}
-          sourceHref={entry.sourceHref}
-        />
+        <div className="min-w-0">
+          <p className="max-w-[520px] text-copy-16 text-gray-900">{entry.description}</p>
+          <div className="mt-6">
+            <TemplateActions
+              bootstrapCommand={entry.bootstrapCommand}
+              sourceHref={entry.sourceHref}
+            />
+          </div>
+          <div className="pt-3 lg:hidden">
+            <IntegrationList entry={entry} />
+          </div>
+        </div>
         <dl className="flex flex-wrap gap-x-10 gap-y-4 border-gray-alpha-400 border-t pt-6 lg:col-span-2">
           <OverviewItem label="Model" value={entry.model} />
           <OverviewItem label="Authored files" value={String(entry.files.length)} />
@@ -118,12 +126,15 @@ const highlightFile = async (file: RegistryFile): Promise<HighlightedRegistryFil
 });
 
 const IntegrationList = ({ entry }: { entry: RegistryEntry }) => (
-  <ul aria-label="Integrations" className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
+  <ul
+    aria-label="Integrations"
+    className="mt-5 grid w-full grid-cols-2 gap-x-4 gap-y-3 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2"
+  >
     {entry.integrations.map((integration) => {
       const Icon = integrationIcons[integration];
       return (
         <li
-          className="inline-flex items-center gap-1.5 text-gray-900 text-label-13"
+          className="inline-flex items-center justify-self-center gap-1.5 text-gray-900 text-label-13 sm:justify-self-auto"
           key={integration}
         >
           <Icon aria-hidden="true" className="size-4 grayscale" />

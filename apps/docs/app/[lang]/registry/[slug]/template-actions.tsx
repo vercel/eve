@@ -1,21 +1,16 @@
 "use client";
 
-import { SiGithub, SiVercel } from "@icons-pack/react-simple-icons";
+import { SiGithub } from "@icons-pack/react-simple-icons";
 import { Button } from "@vercel/geistdocs/components/button";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 interface TemplateActionsProps {
   bootstrapCommand: string;
-  deployHref: string;
   sourceHref: string;
 }
 
-export const TemplateActions = ({
-  bootstrapCommand,
-  deployHref,
-  sourceHref,
-}: TemplateActionsProps) => {
+export const TemplateActions = ({ bootstrapCommand, sourceHref }: TemplateActionsProps) => {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -38,7 +33,7 @@ export const TemplateActions = ({
   };
 
   return (
-    <div className="grid gap-2 sm:flex sm:flex-wrap lg:justify-end">
+    <div className="grid gap-2 sm:flex sm:flex-wrap">
       <Button
         className="font-medium text-background-100! text-label-14"
         onClick={copyCommand}
@@ -71,12 +66,6 @@ export const TemplateActions = ({
         <a href={sourceHref} rel="noopener noreferrer" target="_blank">
           <SiGithub aria-hidden="true" className="size-4" />
           View GitHub
-        </a>
-      </Button>
-      <Button asChild className="font-medium text-label-14" variant="outline">
-        <a href={deployHref} rel="noopener noreferrer" target="_blank">
-          <SiVercel aria-hidden="true" className="size-4" />
-          Deploy
         </a>
       </Button>
       <span aria-live="polite" className="sr-only">
