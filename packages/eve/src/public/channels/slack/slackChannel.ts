@@ -21,11 +21,18 @@ import {
   createSlackFetchFile,
 } from "#public/channels/slack/attachments.js";
 import {
+  createDefaultInboundHandler,
+  createDefaultTurnStarted,
   defaultEvents,
   defaultInputRequestedHandler,
   defaultOnAppMention,
   defaultOnDirectMessage,
 } from "#public/channels/slack/defaults.js";
+import {
+  applySuggestedPrompts,
+  isSuggestedPromptsTrigger,
+  type SlackSuggestedPrompts,
+} from "#public/channels/slack/suggested-prompts.js";
 import {
   type SlackEvent,
   type SlackInboundContext,
@@ -463,6 +470,33 @@ export interface SlackChannelConfig {
    */
   onEvent?(ctx: SlackContext, event: SlackEvent): void | Promise<void>;
 
+  /**
+   * Rotating typing-indicator messages shown while the agent works,
+   * replacing the default `"Thinking..."` / `"Working..."` statuses.
+   * Slack cycles through the entries via `assistant.threads.setStatus`
+   * `loading_messages`. Applies only to the default inbound and
+   * `turn.started` handlers — supplying your own `onAppMention`,
+   * `onDirectMessage`, or `events["turn.started"]` replaces the typing
+   * behavior along with the handler. Progress statuses (reasoning
+   * snippets, action labels) still take over as the turn advances.
+   */
+  readonly loadingMessages?: readonly string[];
+
+  /**
+   * Suggested prompts applied via
+   * `assistant.threads.setSuggestedPrompts` when a user opens the
+   * conversation with the bot. Under the current Agent messaging
+   * experience (`agent_view` manifest mode) the trigger is
+   * `app_home_opened` with `tab: "messages"` and the prompts render at
+   * the top of the Messages tab; under the legacy assistant experience
+   * the trigger is `assistant_thread_started` and the prompts render
+   * in the opened thread. Pass a static payload (max four prompts), or
+   * a resolver invoked per open (return `null` to skip). Requires the
+   * `assistant:write` scope and a subscription to the relevant event.
+   * Failures are logged and swallowed.
+   */
+  readonly suggestedPrompts?: SlackSuggestedPrompts;
+
   readonly events?: SlackChannelEvents;
 }
 
@@ -508,10 +542,26 @@ export interface SlackChannel extends Channel<
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
-  const onAppMention = config.onAppMention ?? defaultOnAppMention;
-  const onDirectMessage = config.onDirectMessage ?? defaultOnDirectMessage;
+  const loadingMessages =
+    config.loadingMessages !== undefined && config.loadingMessages.length > 0
+      ? config.loadingMessages
+      : undefined;
+  const onAppMention =
+    config.onAppMention ??
+    (loadingMessages === undefined
+      ? defaultOnAppMention
+      : createDefaultInboundHandler(loadingMessages));
+  const onDirectMessage =
+    config.onDirectMessage ??
+    (loadingMessages === undefined
+      ? defaultOnDirectMessage
+      : createDefaultInboundHandler(loadingMessages));
   const authorizationRequiredOverride = config.events?.["authorization.required"];
-  const turnStartedHandler = config.events?.["turn.started"] ?? defaultEvents["turn.started"]!;
+  const turnStartedHandler =
+    config.events?.["turn.started"] ??
+    (loadingMessages === undefined
+      ? defaultEvents["turn.started"]!
+      : createDefaultTurnStarted(loadingMessages));
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
@@ -586,6 +636,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
             onAppMention,
             onDirectMessage,
             onEvent: config.onEvent,
+            suggestedPrompts: config.suggestedPrompts,
             uploadPolicy,
             threadContext: config.threadContext,
             handledEvents,
@@ -694,6 +745,7 @@ async function handleEventPost(input: {
   readonly onAppMention: NonNullable<SlackChannelConfig["onAppMention"]>;
   readonly onDirectMessage: NonNullable<SlackChannelConfig["onDirectMessage"]>;
   readonly onEvent: SlackChannelConfig["onEvent"];
+  readonly suggestedPrompts: SlackSuggestedPrompts | undefined;
   readonly uploadPolicy: UploadPolicy;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly credentials: SlackChannelCredentials | undefined;
@@ -716,7 +768,10 @@ async function handleEventPost(input: {
 
   const inboundPayload =
     payload.kind === "app_mention" || payload.kind === "direct_message" ? payload : null;
-  const slackEvent = input.onEvent === undefined ? null : slackEventFromWebhookPayload(payload);
+  const slackEvent =
+    input.onEvent === undefined && input.suggestedPrompts === undefined
+      ? null
+      : slackEventFromWebhookPayload(payload);
   if (inboundPayload === null && slackEvent === null) return new Response("ok");
 
   const eventId = inboundPayload === null ? slackEvent?.eventId : inboundPayload.eventId;
@@ -735,6 +790,26 @@ async function handleEventPost(input: {
 
   if (slackEvent !== null && input.onEvent !== undefined) {
     input.waitUntil(invokeOnEvent(input.onEvent, slackEvent, input.credentials));
+  }
+
+  if (
+    slackEvent !== null &&
+    input.suggestedPrompts !== undefined &&
+    isSuggestedPromptsTrigger(slackEvent)
+  ) {
+    const { slack } = buildSlackBinding({
+      botToken: input.credentials?.botToken,
+      channelId: slackEvent.channelId ?? "",
+      threadTs: slackEvent.threadTs ?? "",
+      teamId: slackEvent.teamId,
+    });
+    input.waitUntil(
+      applySuggestedPrompts({
+        suggestedPrompts: input.suggestedPrompts,
+        event: slackEvent,
+        request: (operation, body) => slack.request(operation, body),
+      }),
+    );
   }
 
   if (inboundPayload === null) return new Response("ok");

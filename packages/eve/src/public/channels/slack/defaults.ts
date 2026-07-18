@@ -58,16 +58,26 @@ export function defaultSlackAuth(
 }
 
 /**
+ * Builds the default inbound handler (shared by `onAppMention` and
+ * `onDirectMessage`): derives auth from the Slack actor and posts a
+ * typing indicator before the workflow runtime starts. `typingStatus`
+ * is the status to show — a string, or an array Slack rotates through
+ * (`slackChannel({ loadingMessages })`).
+ */
+export function createDefaultInboundHandler(
+  typingStatus: string | readonly string[],
+): (ctx: SlackContext, message: SlackMessage) => Promise<SlackMentionResult> {
+  return async (ctx, message) => {
+    await ctx.thread.startTyping(typingStatus);
+    return { auth: defaultSlackAuth(message, ctx) };
+  };
+}
+
+/**
  * Default `onAppMention` — derives auth from the Slack actor and posts
  * a `"Thinking…"` typing indicator before the workflow runtime starts.
  */
-export async function defaultOnAppMention(
-  ctx: SlackContext,
-  message: SlackMessage,
-): Promise<SlackMentionResult> {
-  await ctx.thread.startTyping("Thinking...");
-  return { auth: defaultSlackAuth(message, ctx) };
-}
+export const defaultOnAppMention = createDefaultInboundHandler("Thinking...");
 
 /**
  * Default `onDirectMessage` — derives auth from the Slack actor and
@@ -75,13 +85,7 @@ export async function defaultOnAppMention(
  * starts. Matches the default mention behavior; replace the option to
  * customize gating, auth derivation, or pre-dispatch side effects.
  */
-export async function defaultOnDirectMessage(
-  ctx: SlackContext,
-  message: SlackMessage,
-): Promise<SlackMentionResult> {
-  await ctx.thread.startTyping("Thinking...");
-  return { auth: defaultSlackAuth(message, ctx) };
-}
+export const defaultOnDirectMessage = createDefaultInboundHandler("Thinking...");
 
 /**
  * Reads the first non-empty line of a model-emitted message. The
@@ -145,13 +149,25 @@ function buildInputRequestPosts(
  * `authorization.required` handler owns the public link-free status,
  * which user overrides cannot express.
  */
-export const defaultEvents: SlackChannelInternalEvents = {
-  async "turn.started"(_event, channel, _ctx) {
+/**
+ * Builds the default `turn.started` handler: resets typing-related
+ * state and posts a typing indicator. `typingStatus` is the status to
+ * show — a string, or an array Slack rotates through
+ * (`slackChannel({ loadingMessages })`).
+ */
+export function createDefaultTurnStarted(
+  typingStatus: string | readonly string[],
+): NonNullable<SlackChannelInternalEvents["turn.started"]> {
+  return async (_event, channel, _ctx) => {
     channel.state.pendingToolCallMessage = null;
     channel.state.lastReasoningTypingAtMs = null;
     channel.state.lastReasoningTypingStatus = null;
-    await channel.thread.startTyping("Working...");
-  },
+    await channel.thread.startTyping(typingStatus);
+  };
+}
+
+export const defaultEvents: SlackChannelInternalEvents = {
+  "turn.started": createDefaultTurnStarted("Working..."),
 
   async "reasoning.appended"(event, channel, _ctx) {
     const line = firstNonEmptyLine(event.reasoningSoFar);

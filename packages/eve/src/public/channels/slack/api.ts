@@ -249,11 +249,13 @@ export interface SlackThread {
 
   /**
    * Show a typing/status indicator in this thread via Slack's
-   * `assistant.threads.setStatus`. Called with no argument, clears the
-   * indicator (empty status). Failures are logged and swallowed: the
+   * `assistant.threads.setStatus`. Pass an array to have Slack rotate
+   * through the entries (`loading_messages`); the first entry doubles as
+   * the immediate status. Called with no argument (or an empty array),
+   * clears the indicator. Failures are logged and swallowed: the
    * indicator is a UX nicety, never a reason to fail a turn.
    */
-  startTyping(status?: string): Promise<void>;
+  startTyping(status?: string | readonly string[]): Promise<void>;
 
   /**
    * Fetch the latest replies in this thread into {@link recentMessages}
@@ -418,14 +420,16 @@ export function buildSlackBinding(input: {
     async startTyping(status) {
       if (!input.channelId || !currentThreadTs) return;
       try {
-        const normalizedStatus = status === undefined ? "" : truncateTypingStatus(status);
+        const statuses = (typeof status === "string" ? [status] : (status ?? []))
+          .map(truncateTypingStatus)
+          .filter((entry) => entry.length > 0);
         const body: Record<string, unknown> = {
           channel_id: input.channelId,
           thread_ts: currentThreadTs,
-          status: normalizedStatus,
+          status: statuses[0] ?? "",
         };
-        if (normalizedStatus.length > 0) {
-          body.loading_messages = [normalizedStatus];
+        if (statuses.length > 0) {
+          body.loading_messages = statuses;
         }
         const response = await request("assistant.threads.setStatus", body);
         if (response.ok !== true) {

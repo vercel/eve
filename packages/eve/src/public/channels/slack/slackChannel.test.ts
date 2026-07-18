@@ -1619,6 +1619,202 @@ describe("slackChannel() onEvent pipeline", () => {
   });
 });
 
+describe("slackChannel() assistant config (loadingMessages / suggestedPrompts)", () => {
+  const ORIGINAL_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    process.env.SLACK_SIGNING_SECRET = SIGNING_SECRET;
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_SIGNING_SECRET === undefined) {
+      delete process.env.SLACK_SIGNING_SECRET;
+    } else {
+      process.env.SLACK_SIGNING_SECRET = ORIGINAL_SIGNING_SECRET;
+    }
+  });
+
+  const LOADING_MESSAGES = ["Thinking...", "Digging through the archives..."];
+
+  function buildAssistantThreadStartedBody(): string {
+    mentionCounter += 1;
+    return JSON.stringify({
+      type: "event_callback",
+      team_id: "T01",
+      event_id: `Ev${mentionCounter}`,
+      event_time: 1700000000,
+      event: {
+        type: "assistant_thread_started",
+        assistant_thread: {
+          user_id: "U01",
+          channel_id: "D01",
+          thread_ts: "1700000000.000001",
+          context: { channel_id: null, team_id: "T01", enterprise_id: null },
+        },
+        event_ts: "1700000000.000001",
+      },
+    });
+  }
+
+  it("default onAppMention rotates loadingMessages in the typing indicator", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      loadingMessages: LOADING_MESSAGES,
+    });
+
+    const { body } = buildMentionBody();
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    const typingCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("assistant.threads.setStatus"),
+    );
+    expect(typingCall).toBeDefined();
+    const sent = parseSlackRequestBody(typingCall![1] as RequestInit);
+    expect(sent.status).toBe("Thinking...");
+    expect(sent.loading_messages).toEqual(LOADING_MESSAGES);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("default turn.started rotates loadingMessages instead of 'Working...'", async () => {
+    const adapter = withState(
+      getAdapter(
+        slackChannel({
+          credentials: { botToken: "xoxb-test" },
+          loadingMessages: LOADING_MESSAGES,
+        }),
+      ),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", { sequence: 0, stepIndex: 0, turnId: "t1" }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("https://slack.com/api/assistant.threads.setStatus");
+    const body = parseSlackRequestBody(init as RequestInit);
+    expect(body).toMatchObject({
+      status: "Thinking...",
+      loading_messages: LOADING_MESSAGES,
+    });
+  });
+
+  it("an empty loadingMessages array keeps the built-in defaults", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      loadingMessages: [],
+    });
+
+    const { body } = buildMentionBody();
+    await firePost(channel, buildSignedRequest({ body }));
+
+    const typingCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("assistant.threads.setStatus"),
+    );
+    const sent = parseSlackRequestBody(typingCall![1] as RequestInit);
+    expect(sent.status).toBe("Thinking...");
+    expect(sent.loading_messages).toEqual(["Thinking..."]);
+  });
+
+  it("applies suggestedPrompts when an assistant thread starts", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      suggestedPrompts: {
+        title: "Welcome!",
+        prompts: [{ title: "Catch me up", message: "What did I miss today?" }],
+      },
+    });
+
+    const { response, send } = await firePost(
+      channel,
+      buildSignedRequest({ body: buildAssistantThreadStartedBody() }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(send).not.toHaveBeenCalled();
+    const promptsCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("assistant.threads.setSuggestedPrompts"),
+    );
+    expect(promptsCall).toBeDefined();
+    const sent = parseSlackRequestBody(promptsCall![1] as RequestInit);
+    expect(sent).toMatchObject({
+      channel_id: "D01",
+      thread_ts: "1700000000.000001",
+      title: "Welcome!",
+      prompts: [{ title: "Catch me up", message: "What did I miss today?" }],
+    });
+  });
+
+  it("applies suggestedPrompts on app_home_opened for the Messages tab (agent_view)", async () => {
+    mentionCounter += 1;
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T01",
+      event_id: `Ev${mentionCounter}`,
+      event: { type: "app_home_opened", user: "U01", channel: "D01", tab: "messages" },
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      suggestedPrompts: { prompts: [{ title: "Catch me up", message: "What did I miss today?" }] },
+    });
+
+    const { response, send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(response.status).toBe(200);
+    expect(send).not.toHaveBeenCalled();
+    const promptsCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("assistant.threads.setSuggestedPrompts"),
+    );
+    expect(promptsCall).toBeDefined();
+    const sent = parseSlackRequestBody(promptsCall![1] as RequestInit);
+    expect(sent.channel_id).toBe("D01");
+    expect(sent).not.toHaveProperty("thread_ts");
+  });
+
+  it("assistant_thread_started also reaches onEvent when both are configured", async () => {
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      suggestedPrompts: { prompts: [{ title: "Hi", message: "hello" }] },
+      onEvent,
+    });
+
+    await firePost(channel, buildSignedRequest({ body: buildAssistantThreadStartedBody() }));
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent.mock.calls[0]![1]).toMatchObject({ type: "assistant_thread_started" });
+    const promptsCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("assistant.threads.setSuggestedPrompts"),
+    );
+    expect(promptsCall).toBeDefined();
+  });
+
+  it("drops assistant_thread_started without dispatching when suggestedPrompts is unset", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    const { response, send, waitUntil } = await firePost(
+      channel,
+      buildSignedRequest({ body: buildAssistantThreadStartedBody() }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(send).not.toHaveBeenCalled();
+    expect(waitUntil).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("slackChannel() HITL interaction pipeline", () => {
   const ORIGINAL_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
   const ORIGINAL_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;

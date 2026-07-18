@@ -53,6 +53,13 @@ export {
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
+export type {
+  SlackSuggestedPrompt,
+  SlackSuggestedPrompts,
+  SlackSuggestedPromptsContext,
+  SlackSuggestedPromptsInput,
+} from "#public/channels/slack/suggested-prompts.js";
+
 export {
   describeActionRequest,
   describeActionRequests,

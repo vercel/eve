@@ -154,6 +154,27 @@ export default slackChannel({
 });
 ```
 
+### Assistant threads
+
+Two options tune the assistant/agent-thread experience:
+
+- `loadingMessages` replaces the default `Thinking…` / `Working…` typing statuses with a set Slack rotates through while the agent works. Progress statuses (reasoning snippets, action labels) still take over as the turn advances. Supplying your own `onAppMention`, `onDirectMessage`, or `events["turn.started"]` replaces the typing behavior along with the handler.
+- `suggestedPrompts` sets up to four suggested prompts when a user opens the conversation with the bot. Under Slack's current Agent messaging experience (`agent_view` manifest mode) they render at the top of the Messages tab, triggered by `app_home_opened`; under the legacy assistant experience they render inside the opened thread, triggered by `assistant_thread_started`. Both triggers are handled — subscribe the app to whichever event matches its manifest mode. Pass a static payload, or a resolver invoked per open (return `null` to skip). Requires the `assistant:write` scope.
+
+```ts
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  loadingMessages: ["Thinking...", "Digging through the archives..."],
+  suggestedPrompts: {
+    title: "Welcome! What can I do for you?",
+    prompts: [
+      { title: "Catch me up", message: "What did I miss today?" },
+      { title: "Draft a message", message: "Help me draft a message" },
+    ],
+  },
+});
+```
+
 ### Human-in-the-loop (HITL)
 
 HITL renders as Slack buttons and selects. When the user responds, the parked session (paused awaiting input) resumes.
