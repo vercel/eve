@@ -8,14 +8,14 @@ import { notFound } from "next/navigation";
 import type { ComponentProps } from "react";
 import { translations } from "@/geistdocs";
 import {
-  getRegistryEntry,
-  registryEntries,
-  type RegistryEntry,
-  type RegistryFile,
-} from "@/lib/registry/data";
+  getTemplateEntry,
+  templateEntries,
+  type TemplateEntry,
+  type TemplateFile,
+} from "@/lib/templates/data";
 import { cn } from "@/lib/utils";
 import { integrationIcons } from "../integration-icons";
-import { FileViewer, type HighlightedRegistryFile } from "./file-viewer";
+import { FileViewer, type HighlightedTemplateFile } from "./file-viewer";
 import { TemplateActions } from "./template-actions";
 
 interface PageParams {
@@ -25,7 +25,7 @@ interface PageParams {
 
 export const generateStaticParams = (): PageParams[] =>
   Object.keys(translations).flatMap((lang) =>
-    registryEntries.map((entry) => ({ lang, slug: entry.slug })),
+    templateEntries.map((entry) => ({ lang, slug: entry.slug })),
   );
 
 export const dynamicParams = false;
@@ -36,15 +36,15 @@ export const generateMetadata = async ({
   params: Promise<PageParams>;
 }): Promise<Metadata> => {
   const { slug } = await params;
-  const entry = getRegistryEntry(slug);
+  const entry = getTemplateEntry(slug);
   return entry
     ? { title: entry.title, description: entry.description }
-    : { title: "Registry entry not found" };
+    : { title: "Template not found" };
 };
 
-const RegistryDetailPage = async ({ params }: { params: Promise<PageParams> }) => {
+const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) => {
   const { slug } = await params;
-  const entry = getRegistryEntry(slug);
+  const entry = getTemplateEntry(slug);
   if (!entry) {
     notFound();
   }
@@ -54,10 +54,10 @@ const RegistryDetailPage = async ({ params }: { params: Promise<PageParams> }) =
     <main className="mx-auto max-w-[1080px] px-4 pt-10 pb-32 sm:px-6 sm:pt-12">
       <Link
         className="inline-flex min-h-8 items-center gap-1.5 rounded-sm text-gray-900 text-label-14 no-underline outline-none transition-colors hover:text-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
-        href="/registry"
+        href="/templates"
       >
         <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
-        Registry
+        Templates
       </Link>
 
       <header className="mt-8 grid gap-4 lg:grid-cols-2 lg:items-start lg:gap-8">
@@ -100,7 +100,7 @@ const RegistryDetailPage = async ({ params }: { params: Promise<PageParams> }) =
   );
 };
 
-const highlightFile = async (file: RegistryFile): Promise<HighlightedRegistryFile> => ({
+const highlightFile = async (file: TemplateFile): Promise<HighlightedTemplateFile> => ({
   code: await highlight(file.contents, {
     lang: file.language,
     theme: geistShikiTheme,
@@ -122,7 +122,7 @@ const highlightFile = async (file: RegistryFile): Promise<HighlightedRegistryFil
   relativePath: file.relativePath,
 });
 
-const IntegrationList = ({ entry }: { entry: RegistryEntry }) => (
+const IntegrationList = ({ entry }: { entry: TemplateEntry }) => (
   <ul
     aria-label="Integrations"
     className="mt-5 grid w-full grid-cols-2 gap-x-4 gap-y-3 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2"
@@ -149,4 +149,4 @@ const OverviewItem = ({ label, value }: { label: string; value: string }) => (
   </div>
 );
 
-export default RegistryDetailPage;
+export default TemplateDetailPage;

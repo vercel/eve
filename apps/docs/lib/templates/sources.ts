@@ -1,12 +1,12 @@
-import type { RegistryFile } from "./data";
+import type { TemplateFile } from "./data";
 
 const file = (
   relativePath: string,
-  language: RegistryFile["language"],
+  language: TemplateFile["language"],
   contents: string,
-): RegistryFile => ({ contents, language, relativePath });
+): TemplateFile => ({ contents, language, relativePath });
 
-export const registrySourceFiles: Record<string, RegistryFile[]> = {
+export const templateSourceFiles: Record<string, TemplateFile[]> = {
   "eve-chat-template": [
     file(
       "agent/agent.ts",

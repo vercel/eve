@@ -12,17 +12,17 @@ import {
   WrenchIcon,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
-import type { RegistryFile } from "@/lib/registry/data";
+import type { TemplateFile } from "@/lib/templates/data";
 import { cn } from "@/lib/utils";
 
-export interface HighlightedRegistryFile {
+export interface HighlightedTemplateFile {
   code: ReactNode;
-  language: RegistryFile["language"];
+  language: TemplateFile["language"];
   relativePath: string;
 }
 
 interface FileViewerProps {
-  files: HighlightedRegistryFile[];
+  files: HighlightedTemplateFile[];
 }
 
 interface CategoryStyle {
@@ -53,7 +53,7 @@ const categoryOrder = [
 ];
 
 interface FileEntry {
-  file: HighlightedRegistryFile;
+  file: HighlightedTemplateFile;
   label: string;
 }
 
@@ -65,7 +65,7 @@ interface FolderNode {
 }
 
 interface LeafNode {
-  file: HighlightedRegistryFile;
+  file: HighlightedTemplateFile;
   key: string;
   kind: "leaf";
   style: CategoryStyle;
@@ -73,9 +73,9 @@ interface LeafNode {
 
 type TreeNode = FolderNode | LeafNode;
 
-const buildTree = (files: HighlightedRegistryFile[]): TreeNode[] => {
+const buildTree = (files: HighlightedTemplateFile[]): TreeNode[] => {
   const folders = new Map<string, FileEntry[]>();
-  const leaves = new Map<string, HighlightedRegistryFile>();
+  const leaves = new Map<string, HighlightedTemplateFile>();
 
   for (const sourceFile of files) {
     const parts = sourceFile.relativePath.split("/");

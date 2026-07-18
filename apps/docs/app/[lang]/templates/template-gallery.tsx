@@ -12,15 +12,15 @@ import { Input } from "@vercel/geistdocs/components/input";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import type { RegistryCategory, RegistryEntry, RegistryIntegration } from "@/lib/registry/data";
+import type { TemplateCategory, TemplateEntry, TemplateIntegration } from "@/lib/templates/data";
 import { integrationIcons } from "./integration-icons";
 
 const ALL = "all" as const;
 
 type FilterValue<T extends string> = typeof ALL | T;
 
-interface RegistryGalleryProps {
-  entries: RegistryEntry[];
+interface TemplateGalleryProps {
+  entries: TemplateEntry[];
 }
 
 interface FilterSelectProps<T extends string> {
@@ -69,11 +69,11 @@ const FilterOption = ({ label, value }: { label: string; value: string }) => (
   </DropdownMenuRadioItem>
 );
 
-const RegistryCard = ({ entry }: { entry: RegistryEntry }) => (
+const TemplateCard = ({ entry }: { entry: TemplateEntry }) => (
   <li>
     <Link
       className="flex min-h-36 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
-      href={`/registry/${entry.slug}`}
+      href={`/templates/${entry.slug}`}
     >
       <h2 className="text-[16px] leading-none font-medium text-gray-1000">{entry.title}</h2>
       <p className="mt-2 line-clamp-2 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
@@ -98,14 +98,14 @@ const RegistryCard = ({ entry }: { entry: RegistryEntry }) => (
   </li>
 );
 
-export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
+export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<FilterValue<RegistryCategory>>(ALL);
-  const [integration, setIntegration] = useState<FilterValue<RegistryIntegration>>(ALL);
+  const [category, setCategory] = useState<FilterValue<TemplateCategory>>(ALL);
+  const [integration, setIntegration] = useState<FilterValue<TemplateIntegration>>(ALL);
 
   const filterOptions = useMemo(() => {
-    const categories = new Set<RegistryCategory>();
-    const integrations = new Set<RegistryIntegration>();
+    const categories = new Set<TemplateCategory>();
+    const integrations = new Set<TemplateIntegration>();
 
     for (const entry of entries) {
       categories.add(entry.category);
@@ -142,7 +142,7 @@ export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
   }, [category, entries, integration, query]);
 
   return (
-    <section aria-label="Registry entries" className="flex flex-col gap-6">
+    <section aria-label="Templates" className="flex flex-col gap-6">
       <div className="flex flex-col gap-2 md:flex-row">
         <div className="relative min-w-0 flex-1">
           <SearchIcon
@@ -150,7 +150,7 @@ export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
             className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-gray-800"
           />
           <Input
-            aria-label="Search registry"
+            aria-label="Search templates"
             className="h-11 pr-4 pl-9 text-copy-14 md:h-9"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search templates and examples…"
@@ -180,7 +180,7 @@ export const RegistryGallery = ({ entries }: RegistryGalleryProps) => {
         {results.length > 0 ? (
           <ul className="grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3">
             {results.map((entry) => (
-              <RegistryCard entry={entry} key={entry.title} />
+              <TemplateCard entry={entry} key={entry.title} />
             ))}
           </ul>
         ) : (

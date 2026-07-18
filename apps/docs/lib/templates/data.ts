@@ -1,36 +1,36 @@
-export type RegistryCategory = "Chat" | "Collaboration" | "Example";
-import { registrySourceFiles } from "./sources";
+export type TemplateCategory = "Chat" | "Collaboration" | "Example";
+import { templateSourceFiles } from "./sources";
 
-export type RegistryIntegration =
+export type TemplateIntegration =
   | "HTTP API"
   | "Linear"
   | "Notion"
   | "Sentry"
   | "Slack"
   | "Web chat";
-export type RegistrySource = "GitHub" | "Vercel Templates";
+export type TemplateSource = "GitHub" | "Vercel Templates";
 
-export interface RegistryFile {
+export interface TemplateFile {
   contents: string;
   language: "markdown" | "typescript";
   relativePath: string;
 }
 
-export interface RegistryEntry {
-  category: RegistryCategory;
+export interface TemplateEntry {
+  category: TemplateCategory;
   description: string;
-  files: RegistryFile[];
-  integrations: RegistryIntegration[];
+  files: TemplateFile[];
+  integrations: TemplateIntegration[];
   model: string;
   slug: string;
-  source: RegistrySource;
+  source: TemplateSource;
   sourceHref: string;
   sourceRevision: string;
   setupPrompt: string;
   title: string;
 }
 
-export const registryEntries: RegistryEntry[] = [
+export const templateEntries: TemplateEntry[] = [
   {
     slug: "eve-chat-template",
     title: "Chat",
@@ -45,7 +45,7 @@ export const registryEntries: RegistryEntry[] = [
     model: "anthropic/claude-haiku-4.5",
     integrations: ["Web chat", "Slack", "Linear", "Notion", "Sentry"],
     source: "Vercel Templates",
-    files: registrySourceFiles["eve-chat-template"],
+    files: templateSourceFiles["eve-chat-template"],
   },
   {
     slug: "eve-slack-agent",
@@ -61,7 +61,7 @@ export const registryEntries: RegistryEntry[] = [
     model: "anthropic/claude-haiku-4.5",
     integrations: ["Slack"],
     source: "Vercel Templates",
-    files: registrySourceFiles["eve-slack-agent"],
+    files: templateSourceFiles["eve-slack-agent"],
   },
   {
     slug: "weather-agent-fixture",
@@ -77,9 +77,9 @@ export const registryEntries: RegistryEntry[] = [
     model: "anthropic/claude-sonnet-5",
     integrations: ["HTTP API"],
     source: "GitHub",
-    files: registrySourceFiles["weather-agent-fixture"],
+    files: templateSourceFiles["weather-agent-fixture"],
   },
 ];
 
-export const getRegistryEntry = (slug: string): RegistryEntry | undefined =>
-  registryEntries.find((entry) => entry.slug === slug);
+export const getTemplateEntry = (slug: string): TemplateEntry | undefined =>
+  templateEntries.find((entry) => entry.slug === slug);
