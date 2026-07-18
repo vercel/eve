@@ -11,6 +11,7 @@
  */
 
 import { renderMarkdown } from "./markdown.js";
+import type { ToolDetailLine } from "./line-diff.js";
 import type { Theme } from "./theme.js";
 import type { ToolGroupPresentation } from "./tool-presentation.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
@@ -54,6 +55,8 @@ export interface Block {
 
   /** Primary label — tool name, subagent name, log source, error title. */
   title?: string;
+  /** Past-tense tool label swapped in once the call settles successfully. */
+  doneTitle?: string;
   /** Compact secondary text — summarized tool args. */
   subtitle?: string;
   /** Main multi-line content (markdown for prose, plain for logs). */
@@ -88,7 +91,25 @@ export interface Block {
   /** Optional aggregation metadata; execution state remains on this call's block. */
   toolGroup?: ToolGroupPresentation;
   /** Display-only items populated when equivalent tool blocks are coalesced. */
-  toolGroupItems?: readonly string[];
+  toolGroupItems?: readonly ToolGroupItem[];
+  /** Salient body lines rendered behind the `│` rail under the tool header. */
+  detailLines?: readonly ToolDetailLine[];
+  /** When true, `detailLines` stay visible after the call settles (writes). */
+  keepDetailWhenDone?: boolean;
+  /** Links a subagent section's header and children so calls can coalesce. */
+  subagentCallId?: string;
+  /**
+   * Display-only stand-in for this many earlier sibling rows elided from a
+   * capped subagent run; renders as a single dim `… +N more` line.
+   */
+  elided?: number;
+}
+
+/** One coalesced call's row beneath an aggregated tool header. */
+export interface ToolGroupItem {
+  readonly text: string;
+  /** Per-call failure summary, present when a failed batch is aggregated. */
+  readonly result?: string;
 }
 
 export interface RenderBlockContext {
@@ -136,6 +157,9 @@ function renderBody(
   theme: Theme,
   context: RenderBlockContext,
 ): string[] {
+  if (block.elided !== undefined) {
+    return [theme.colors.dim(`${theme.glyph.ellipsis} +${block.elided} more`)];
+  }
   switch (block.kind) {
     case "user":
       return renderUser(block, width, theme);
@@ -235,10 +259,15 @@ function renderTool(
   context: RenderBlockContext,
 ): string[] {
   const { icon, accent } = toolGlyph(block.status ?? "running", theme, context);
-  const name = block.title ?? "tool";
-  const headerWidth = width - 2;
+  const name =
+    block.status === "done" && block.doneTitle !== undefined
+      ? block.doneTitle
+      : (block.title ?? "tool");
+  // The header is indented one cell so its glyph shares a column with the
+  // `│`/`└` rail beneath it.
+  const headerWidth = width - 3;
   const namePlain = truncatePlain(name, headerWidth);
-  let header = `${icon} ${theme.colors.bold(namePlain)}`;
+  let header = ` ${icon} ${boldLeadingWord(namePlain, theme)}`;
   const argsBudget = headerWidth - namePlain.length - 2;
   const args = block.subtitle ?? "";
   if (args.length > 0 && argsBudget >= 6) {
@@ -247,10 +276,16 @@ function renderTool(
 
   const rows = [header];
 
+  // Detail region: `│`-railed rows closed by a `└` corner. Group items and
+  // write bodies share the rail so every accumulating tool reads the same.
+  const railRows: string[] = [];
   if (block.toolGroupItems !== undefined) {
-    for (const item of block.toolGroupItems) {
-      rows.push(`  ${theme.colors.gray(truncate(item, Math.max(1, width - 2)))}`);
-    }
+    railRows.push(...toolGroupItemRows(block.toolGroupItems, width, theme));
+  } else if (!block.expanded && showToolDetail(block)) {
+    railRows.push(...detailLineRows(block.detailLines ?? [], width, theme));
+  }
+  if (railRows.length > 0) {
+    rows.push(...railRows, ` ${theme.colors.dim(theme.glyph.corner)}`);
   }
 
   if (block.expanded) {
@@ -264,6 +299,109 @@ function renderTool(
   }
 
   return rows;
+}
+
+/**
+ * Only the verb carries the header's weight: `Ran find /workspace …` reads
+ * as an action with its argument, not one long bold banner.
+ */
+function boldLeadingWord(text: string, theme: Theme): string {
+  const split = text.indexOf(" ");
+  if (split === -1) return theme.colors.bold(text);
+  return `${theme.colors.bold(text.slice(0, split))}${text.slice(split)}`;
+}
+
+/** Detail stays up while the call runs; after settling only writes keep it. */
+function showToolDetail(block: Block): boolean {
+  if (block.detailLines === undefined || block.detailLines.length === 0) return false;
+  const status = block.status ?? "running";
+  if (status === "running" || status === "approval") return true;
+  return block.keepDetailWhenDone === true;
+}
+
+/**
+ * An aggregated tool row lists at most this many member items; the rest
+ * collapse into a single `… (N more)` line above the closing corner.
+ */
+export const maxVisibleToolGroupItems = 5;
+
+/** A write's visible content is windowed to this many rail rows. */
+export const maxVisibleToolDetailLines = 10;
+
+function railRow(body: string, theme: Theme): string {
+  return ` ${theme.colors.dim(theme.glyph.rule)} ${body}`;
+}
+
+function elisionRow(hidden: number, theme: Theme): string {
+  return railRow(theme.colors.dim(`${theme.glyph.ellipsis} (${hidden} more)`), theme);
+}
+
+function toolGroupItemRows(items: readonly ToolGroupItem[], width: number, theme: Theme): string[] {
+  const visible = items.slice(0, maxVisibleToolGroupItems);
+  const hidden = items.length - visible.length;
+  const rows = itemRows(visible, width, theme);
+  if (hidden > 0) {
+    rows.push(elisionRow(hidden, theme));
+  }
+  return rows;
+}
+
+function detailLineRows(lines: readonly ToolDetailLine[], width: number, theme: Theme): string[] {
+  const c = theme.colors;
+  const visible = lines.slice(0, maxVisibleToolDetailLines);
+  const hidden = lines.length - visible.length;
+  // A region with changes gets a marker column so `+`/`-` rows and their
+  // context stay aligned; plain content keeps the tighter rail.
+  const hasDiff = visible.some((line) => line.kind === "added" || line.kind === "removed");
+  const budget = Math.max(1, width - (hasDiff ? 5 : 4));
+
+  // Content lines clip rather than wrap: file bodies read best one row per
+  // logical line, and the window cap already bounds the region's height.
+  const rows = visible.map((line) => {
+    if (line.kind === "gap") {
+      return railRow(c.dim(theme.glyph.ellipsis), theme);
+    }
+    const text = truncatePlain(line.text, budget);
+    switch (line.kind) {
+      case "added":
+        return ` ${c.dim(theme.glyph.rule)}${c.green("+")} ${c.green(text)}`;
+      case "removed":
+        return ` ${c.dim(theme.glyph.rule)}${c.red("-")} ${c.red(text)}`;
+      default:
+        return hasDiff
+          ? ` ${c.dim(theme.glyph.rule)}  ${c.gray(text)}`
+          : railRow(c.gray(text), theme);
+    }
+  });
+  if (hidden > 0) rows.push(elisionRow(hidden, theme));
+  return rows;
+}
+
+function itemRows(items: readonly ToolGroupItem[], width: number, theme: Theme): string[] {
+  const budget = Math.max(1, width - 4);
+  const hasResults = items.some((item) => item.result !== undefined && item.result.length > 0);
+  if (!hasResults) {
+    return items.map((item) => railRow(theme.colors.gray(truncate(item.text, budget)), theme));
+  }
+
+  // Failure summaries align into one column so a mixed batch scans like a
+  // table; long items yield to keep at least a short summary visible.
+  const textColumn = Math.min(
+    Math.max(...items.map((item) => visibleLength(item.text))),
+    Math.max(8, budget - 9),
+  );
+  const resultBudget = Math.max(8, budget - textColumn - 1);
+  return items.map((item) => {
+    const text = truncate(item.text, textColumn);
+    if (item.result === undefined || item.result.length === 0) {
+      return railRow(theme.colors.gray(text), theme);
+    }
+    const padded = text + " ".repeat(Math.max(0, textColumn - visibleLength(text)));
+    return railRow(
+      `${theme.colors.gray(padded)} ${theme.colors.red(truncate(item.result, resultBudget))}`,
+      theme,
+    );
+  });
 }
 
 function renderToolExpanded(block: Block, width: number, theme: Theme): string[] {
@@ -302,7 +440,9 @@ function toolGlyph(
 ): { icon: string; accent: (text: string) => string } {
   switch (status) {
     case "done":
-      return { icon: theme.colors.green(theme.glyph.success), accent: theme.colors.gray };
+      // The settled form of the running pulse (`▪` held steady), not a green
+      // check: completed activity reads as a quiet one-line summary.
+      return { icon: theme.colors.gray(theme.glyph.square), accent: theme.colors.gray };
     case "error":
       return { icon: theme.colors.red(theme.glyph.error), accent: theme.colors.red };
     case "denied":
@@ -408,8 +548,9 @@ function paintCommands(line: string, theme: Theme): string {
 
 /**
  * A slash command invocation under the user gutter. Automatic commands use
- * the same row so their result can follow it. The `❯` glyph remains exclusive
- * to live input because the TUI tests use it to detect a ready prompt.
+ * the same row so their result can follow it. The `❯`/`›` glyphs remain
+ * exclusive to live input because the TUI tests use `›` (the empty prompt's
+ * quiet mark) to detect a ready prompt.
  */
 function renderCommand(block: Block, theme: Theme): string[] {
   const c = theme.colors;
@@ -462,20 +603,25 @@ function renderPreformatted(block: Block, width: number, theme: Theme): string[]
     block.kind === "connection-auth"
       ? theme.colors.yellow(theme.glyph.connection)
       : theme.colors.yellow(theme.colors.bold(theme.glyph.question));
+  // Questions share the tool grammar's one-cell indent so `?` sits in the
+  // same column as `▪`.
+  const lead = block.kind === "question" ? " " : "";
   // The title is agent-authored prose (a question prompt, a connection name)
   // and can exceed the width; an overflowing row soft-wraps in the terminal
   // and breaks the live region's one-row-one-line accounting, leaking a
   // duplicate of the row into scrollback on every repaint.
-  const title = wrap(block.title ?? "", width - 2);
+  const title = wrap(block.title ?? "", width - 2 - lead.length);
   const rows =
     title.length === 0
-      ? [`${glyph} `]
+      ? [`${lead}${glyph} `]
       : title.map((line, index) =>
-          index === 0 ? `${glyph} ${theme.colors.bold(line)}` : `  ${theme.colors.bold(line)}`,
+          index === 0
+            ? `${lead}${glyph} ${theme.colors.bold(line)}`
+            : `${lead}  ${theme.colors.bold(line)}`,
         );
   for (const raw of (block.body ?? "").split("\n")) {
-    for (const line of wrapVisibleLine(raw, width - 2)) {
-      rows.push(`  ${line}`);
+    for (const line of wrapVisibleLine(raw, width - 2 - lead.length)) {
+      rows.push(`${lead}  ${line}`);
     }
   }
   return rows;
@@ -546,9 +692,11 @@ function renderLog(
 
 function renderSubagentHeader(block: Block, width: number, theme: Theme): string[] {
   const name = truncatePlain(block.title ?? "subagent", Math.max(8, width - 14));
-  return [
-    `${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(name)} ${theme.colors.dim("subagent")}`,
-  ];
+  let header = `${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(name)} ${theme.colors.dim("subagent")}`;
+  if (block.subtitle !== undefined && block.subtitle.length > 0) {
+    header += ` ${theme.colors.dim(`${theme.glyph.dot} ${block.subtitle}`)}`;
+  }
+  return [header];
 }
 
 function wrap(text: string, width: number): string[] {

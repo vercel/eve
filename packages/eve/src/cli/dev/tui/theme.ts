@@ -65,6 +65,14 @@ export interface ThemeGlyphs {
   user: string;
   /** `○` — reasoning / "thinking" marker (Next.js "wait" glyph). */
   reasoning: string;
+  /** `▪` — static tool-activity mark (the settled form of the activity pulse). */
+  square: string;
+  /** `└` — closes a `│`-railed detail region under a tool header. */
+  corner: string;
+  /** `●` — a completed todo item. */
+  dotFilled: string;
+  /** `⏺` — the in-progress todo item (pulses while the turn runs). */
+  dotActive: string;
   /** `✓` — a completed tool or success state. */
   success: string;
   /** `⨯` — an error or failed tool. */
@@ -89,6 +97,8 @@ export interface ThemeGlyphs {
   option: string;
   /** `❯` — the input prompt mark. */
   prompt: string;
+  /** `›` — the prompt mark's quiet form while the buffer is empty. */
+  promptIdle: string;
   /** `⎿` — hangs a command's result under its invocation. */
   elbow: string;
   /** `▔` — strong full-width rule opening the bottom question panel. */
@@ -123,6 +133,10 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   brand: "▲",
   user: "▌",
   reasoning: "○",
+  square: "▪",
+  corner: "└",
+  dotFilled: "●",
+  dotActive: "⏺",
   success: "✓",
   error: "⨯",
   warning: "⚠",
@@ -135,6 +149,7 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   selectedPointer: "▶",
   option: "◦",
   prompt: "❯",
+  promptIdle: "›",
   elbow: "⎿",
   hrule: "▔",
   caret: "▏",
@@ -155,6 +170,10 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   brand: ">",
   user: "|",
   reasoning: "o",
+  square: "*",
+  corner: "`",
+  dotFilled: "*",
+  dotActive: "*",
   success: "+",
   error: "x",
   warning: "!",
@@ -167,6 +186,7 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   selectedPointer: ">",
   option: ".",
   prompt: ">",
+  promptIdle: ">",
   elbow: "`-",
   hrule: "=",
   caret: "_",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type Block, renderBlockLines } from "./blocks.js";
+import { type Block, maxVisibleToolGroupItems, renderBlockLines } from "./blocks.js";
 import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -29,23 +29,169 @@ describe("renderBlockLines", () => {
       status: "done",
       result: "73°F",
     });
-    expect(lines[0]).toBe('✓ get_weather  city="SF"');
+    expect(lines[0]).toBe(' ▪ get_weather  city="SF"');
     expect(lines[1]).toBe("  → 73°F");
+  });
+
+  it("swaps in the past-tense title once the call settles", () => {
+    const running = render({
+      kind: "tool",
+      title: "Fetch https://one.example",
+      doneTitle: "Fetched https://one.example",
+      status: "running",
+    });
+    expect(running[0]).toBe(" ▪ Fetch https://one.example");
+
+    const done = render({
+      kind: "tool",
+      title: "Fetch https://one.example",
+      doneTitle: "Fetched https://one.example",
+      status: "done",
+    });
+    expect(done).toEqual([" ▪ Fetched https://one.example"]);
+  });
+
+  it("bolds only the leading verb of a tool header", () => {
+    const colored = createTheme({ color: true, unicode: true });
+    const [header] = renderBlockLines(
+      { kind: "tool", title: "Ran find /workspace -maxdepth 3", status: "done" },
+      80,
+      colored,
+      ctx,
+    );
+    // The verb closes bold before its argument begins.
+    expect(header).toContain("\x1b[1mRan\x1b[22m find /workspace -maxdepth 3");
   });
 
   it("shows the shared square pulse while a tool runs", () => {
     const lines = render({ kind: "tool", title: "search", status: "running", live: true });
-    expect(lines[0]).toBe("▪ search");
+    expect(lines[0]).toBe(" ▪ search");
   });
 
-  it("renders a coalesced tool presentation as one header with independent items", () => {
+  it("renders a coalesced tool presentation as a railed item region", () => {
     const lines = render({
       kind: "tool",
       title: "Fetch 2 URLs",
-      status: "done",
-      toolGroupItems: ["https://one.example", "https://two.example"],
+      status: "running",
+      toolGroupItems: [{ text: "https://two.example" }, { text: "https://one.example" }],
     });
-    expect(lines).toEqual(["✓ Fetch 2 URLs", "  https://one.example", "  https://two.example"]);
+    expect(lines).toEqual([
+      " ▪ Fetch 2 URLs",
+      " │ https://two.example",
+      " │ https://one.example",
+      " └",
+    ]);
+  });
+
+  it("caps a coalesced batch's item list behind an elision line", () => {
+    const lines = render({
+      kind: "tool",
+      title: "Fetch 30 URLs",
+      status: "running",
+      toolGroupItems: Array.from({ length: 30 }, (_, index) => ({
+        text: `https://example.com/${index + 1}`,
+      })),
+    });
+    expect(lines).toHaveLength(1 + maxVisibleToolGroupItems + 2);
+    expect(lines[1]).toBe(" │ https://example.com/1");
+    expect(lines[maxVisibleToolGroupItems]).toBe(
+      ` │ https://example.com/${maxVisibleToolGroupItems}`,
+    );
+    expect(lines.at(-2)).toBe(" │ … (25 more)");
+    expect(lines.at(-1)).toBe(" └");
+  });
+
+  it("renders a coalesced failed batch as an aligned per-item summary table", () => {
+    const lines = render({
+      kind: "tool",
+      title: "Fetch 2 URLs",
+      status: "error",
+      toolGroupItems: [
+        { text: "https://one.example", result: "status 403" },
+        { text: "https://two.example/nested", result: "status 429" },
+      ],
+    });
+    expect(lines).toEqual([
+      " ⨯ Fetch 2 URLs",
+      " │ https://one.example        status 403",
+      " │ https://two.example/nested status 429",
+      " └",
+    ]);
+  });
+
+  it("keeps a write's railed content visible after the call settles", () => {
+    const lines = render({
+      kind: "tool",
+      title: "Write ~/app/package.json",
+      doneTitle: "Wrote ~/app/package.json",
+      status: "done",
+      detailLines: [{ text: "{" }, { text: '  "name": "app"' }, { text: "}" }],
+      keepDetailWhenDone: true,
+    });
+    expect(lines).toEqual([
+      " ▪ Wrote ~/app/package.json",
+      " │ {",
+      ' │   "name": "app"',
+      " │ }",
+      " └",
+    ]);
+  });
+
+  it("renders a write diff with marker-aligned added and removed rows", () => {
+    const lines = render({
+      kind: "tool",
+      title: "Write ~/app/package.json",
+      doneTitle: "Wrote ~/app/package.json",
+      status: "done",
+      detailLines: [
+        { text: '  "dev": "eve dev",' },
+        { text: '  "typecheck": "eve build && tsc"', kind: "added" },
+        { text: '  "zod": "^5.6.0"', kind: "removed" },
+        { text: "", kind: "gap" },
+        { text: "  }" },
+      ],
+      keepDetailWhenDone: true,
+    });
+    expect(lines).toEqual([
+      " ▪ Wrote ~/app/package.json",
+      ' │    "dev": "eve dev",',
+      ' │+   "typecheck": "eve build && tsc"',
+      ' │-   "zod": "^5.6.0"',
+      " │ …",
+      " │    }",
+      " └",
+    ]);
+  });
+
+  it("drops non-write detail once the call settles", () => {
+    const lines = render({
+      kind: "tool",
+      title: "Run pnpm test",
+      doneTitle: "Ran pnpm test",
+      status: "done",
+      detailLines: [{ text: "line one" }, { text: "line two" }],
+    });
+    expect(lines).toEqual([" ▪ Ran pnpm test"]);
+  });
+
+  it("renders a counted subagent header for coalesced parallel calls", () => {
+    const lines = render({
+      kind: "subagent",
+      title: "echo-marker",
+      subtitle: "3 calls",
+      live: false,
+    });
+    expect(lines).toEqual(["◆ echo-marker subagent · 3 calls"]);
+  });
+
+  it("renders an elided stand-in row inside the subagent gutter", () => {
+    const lines = render({
+      kind: "subagent-step",
+      depth: 1,
+      live: false,
+      elided: 6,
+    });
+    expect(lines).toEqual(["│ … +6 more"]);
   });
 
   it("nests subagent tools under the orange rule", () => {
@@ -56,7 +202,7 @@ describe("renderBlockLines", () => {
       status: "done",
       result: "ok",
     });
-    expect(lines[0]?.startsWith("│ ✓ fetch")).toBe(true);
+    expect(lines[0]?.startsWith("│  ▪ fetch")).toBe(true);
   });
 
   it("collapses reasoning to a single line when requested", () => {
@@ -78,11 +224,20 @@ describe("renderBlockLines", () => {
       "Please provide them in the format owner/repo.";
     const lines = render({ kind: "question", title: prompt, body: "  (type your answer)" }, 40);
     expect(lines.length).toBeGreaterThan(2);
-    expect(lines[0]).toBe("? Which repository or repositories");
-    expect(lines[1]).toBe("  should the tool check? Please provide");
+    expect(lines[0]).toBe(" ? Which repository or repositories");
+    expect(lines[1]).toBe("   should the tool check? Please provide");
     for (const line of lines) {
       expect(visibleLength(line)).toBeLessThanOrEqual(40);
     }
+  });
+
+  it("hangs a question's answer under the elbow with the shared indent", () => {
+    const lines = render({
+      kind: "question",
+      title: "Choose access",
+      body: "⎿  AI Gateway",
+    });
+    expect(lines).toEqual([" ? Choose access", "   ⎿  AI Gateway"]);
   });
 
   it("renders a dim notice line", () => {
