@@ -72,10 +72,7 @@ const RegistryDetailPage = async ({ params }: { params: Promise<PageParams> }) =
         <div className="min-w-0">
           <p className="max-w-[520px] text-copy-16 text-gray-900">{entry.description}</p>
           <div className="mt-6">
-            <TemplateActions
-              bootstrapCommand={entry.bootstrapCommand}
-              sourceHref={entry.sourceHref}
-            />
+            <TemplateActions setupPrompt={entry.setupPrompt} sourceHref={entry.sourceHref} />
           </div>
           <div className="pt-3 lg:hidden">
             <IntegrationList entry={entry} />

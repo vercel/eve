@@ -17,7 +17,6 @@ export interface RegistryFile {
 }
 
 export interface RegistryEntry {
-  bootstrapCommand: string;
   category: RegistryCategory;
   description: string;
   files: RegistryFile[];
@@ -27,6 +26,7 @@ export interface RegistryEntry {
   source: RegistrySource;
   sourceHref: string;
   sourceRevision: string;
+  setupPrompt: string;
   title: string;
 }
 
@@ -34,7 +34,8 @@ export const registryEntries: RegistryEntry[] = [
   {
     slug: "eve-chat-template",
     title: "Chat",
-    bootstrapCommand: "npx eve@latest init my-agent --template eve-chat-template",
+    setupPrompt:
+      "Set up the eve Chat template in my current workspace using https://github.com/vercel-labs/eve-chat-template/tree/80625bd00858cfd21abc3249ee9e446a1629afe3 as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A persisted Next.js chat template for eve, built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.",
     sourceHref:
@@ -49,7 +50,8 @@ export const registryEntries: RegistryEntry[] = [
   {
     slug: "eve-slack-agent",
     title: "Slack",
-    bootstrapCommand: "npx eve@latest init my-agent --template eve-slack-agent",
+    setupPrompt:
+      "Set up the eve Slack agent template in my current workspace using https://github.com/vercel-labs/eve-slack-agent-template/tree/f7286e71edc2e230cb98519e6d9fd1a23d6cd8e8 as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A Slack agent template with webhook handling, Vercel Connect, a starter agent, and an example tool ready to deploy on Vercel.",
     sourceHref:
@@ -64,7 +66,8 @@ export const registryEntries: RegistryEntry[] = [
   {
     slug: "weather-agent-fixture",
     title: "Weather",
-    bootstrapCommand: "npx eve@latest init weather-agent --template weather-agent",
+    setupPrompt:
+      "Set up the eve Weather agent in my current workspace using https://github.com/vercel/eve/tree/c1b6ad3e485f2d15a25bdb5636209aa1367a3124/apps/fixtures/weather-agent as the source. Copy that fixture into a standalone project, install its dependencies, and make any minimal changes needed to run it outside the eve monorepo. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A small representative eve app with agent config, instructions, a typed weather tool, and a markdown skill.",
     sourceHref:

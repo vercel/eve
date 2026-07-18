@@ -6,11 +6,11 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 interface TemplateActionsProps {
-  bootstrapCommand: string;
+  setupPrompt: string;
   sourceHref: string;
 }
 
-export const TemplateActions = ({ bootstrapCommand, sourceHref }: TemplateActionsProps) => {
+export const TemplateActions = ({ setupPrompt, sourceHref }: TemplateActionsProps) => {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -23,8 +23,8 @@ export const TemplateActions = ({ bootstrapCommand, sourceHref }: TemplateAction
     [],
   );
 
-  const copyCommand = async () => {
-    await navigator.clipboard.writeText(bootstrapCommand);
+  const copyPrompt = async () => {
+    await navigator.clipboard.writeText(setupPrompt);
     setCopied(true);
     if (resetTimer.current) {
       clearTimeout(resetTimer.current);
@@ -36,7 +36,7 @@ export const TemplateActions = ({ bootstrapCommand, sourceHref }: TemplateAction
     <div className="grid gap-2 sm:flex sm:flex-wrap">
       <Button
         className="font-medium text-background-100! text-label-14"
-        onClick={copyCommand}
+        onClick={copyPrompt}
         type="button"
       >
         <span className="grid">
@@ -69,7 +69,7 @@ export const TemplateActions = ({ bootstrapCommand, sourceHref }: TemplateAction
         </a>
       </Button>
       <span aria-live="polite" className="sr-only">
-        {copied ? "CLI command copied to clipboard." : ""}
+        {copied ? "Setup prompt copied to clipboard." : ""}
       </span>
     </div>
   );
