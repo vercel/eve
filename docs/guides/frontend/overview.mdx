@@ -100,6 +100,8 @@ Assistant text, reasoning, tool calls, and tool results stream into `data` as th
 
 `stop()` is local: turns are resumable across disconnects, so detaching the stream never cancels the work — the turn keeps running and billing on the server. To stop the turn itself, POST the session's [cancel route](../../channels/eve#routes); the turn then settles on the stream as `turn.cancelled` followed by `session.waiting`.
 
+A chat UI with a Stop button should own the `ClientSession` passed to `useEveAgent`, create it with `preserveCompletedSessions: true`, and call `session.cancel({ turnId })` after observing that turn's `turn.started` event. The `turnId` guard makes a late click a harmless no-op instead of cancelling a newer turn. Keep the stream open until the cancellation boundary arrives; do not use `stop()` for this interaction.
+
 After eve confirms an attachment turn with `message.received`, the default reducer projects each
 received attachment as a `file` part on the user message. The part includes `mediaType`, optional
 `filename` and `size`, and a `url` only when the original attachment was browser-resolvable.
