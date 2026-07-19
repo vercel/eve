@@ -1386,6 +1386,56 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("accumulates session stats past display guards and reports them to the dump", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const updateSessionStats = vi.fn();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      tools: "hidden",
+      subagents: "hidden",
+      unicode: true,
+      diagnosticsDump: {
+        path: "/app/.eve/logs/dev.dump",
+        displayPath: ".eve/logs/dev.dump",
+        updateSessionStats,
+        close: async () => {},
+      },
+    });
+
+    renderer.upsertSubagentTool({
+      callId: "sub-1",
+      subagentName: "echo-marker",
+      childCallId: "child-1",
+      toolName: "echo",
+      input: {},
+      status: "executing",
+    });
+    await renderer.renderStream(
+      streamOf([
+        { type: "tool-call", toolCallId: "c1", toolName: "bash", input: {} },
+        { type: "tool-call", toolCallId: "c2", toolName: "bash", input: {} },
+        { type: "tool-call", toolCallId: "c3", toolName: "weather", input: {} },
+        { type: "step-finish", usage: { inputTokens: 100, outputTokens: 20 } },
+        { type: "step-finish", usage: { inputTokens: 40, outputTokens: 5 } },
+        // `finish` replays the last step's usage; it must not double-count.
+        { type: "finish", usage: { inputTokens: 40, outputTokens: 5 } },
+      ]),
+      { submittedPrompt: "run it", continueSession: false },
+    );
+
+    expect(updateSessionStats).toHaveBeenLastCalledWith({
+      prompts: 1,
+      inputTokens: 140,
+      outputTokens: 25,
+      toolCalls: { bash: 2, weather: 1 },
+      subagents: 1,
+    });
+    renderer.shutdown();
+  });
+
   it("records sandbox log lines in the diagnostic log", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();

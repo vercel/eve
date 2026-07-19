@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+import type { DevDiagnosticDump, DevSessionStats } from "../diagnostic-dump.js";
 import type { DevDiagnosticSink } from "../diagnostic-sink.js";
 
 import type {
@@ -233,6 +234,8 @@ export type TerminalRendererOptions = {
   color?: boolean;
   unicode?: boolean;
   diagnostics?: DevDiagnosticSink;
+  /** Companion environment dump updated with session stats at turn boundaries. */
+  diagnosticsDump?: DevDiagnosticDump;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
 };
@@ -303,6 +306,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #defaultContextSize?: number;
   readonly #captureForeignOutput: boolean;
   readonly #diagnostics?: DevDiagnosticSink;
+  readonly #diagnosticsDump?: DevDiagnosticDump;
+  // Session-wide activity counters reported into the diagnostics dump at
+  // turn boundaries. Accumulated ahead of every display guard so hidden
+  // tools and collapsed subagents still count.
+  #statsPrompts = 0;
+  #statsInputTokens = 0;
+  #statsOutputTokens = 0;
+  readonly #statsToolCalls = new Map<string, number>();
+  readonly #statsSubagentCallIds = new Set<string>();
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   /** Which captured log sources render. Mutable via {@link setLogDisplayMode}. */
   #logs: LogDisplayMode;
@@ -449,6 +461,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#diagnostics = options?.diagnostics;
+    this.#diagnosticsDump = options?.diagnosticsDump;
     this.#logs = options?.logs ?? "none";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
@@ -658,6 +671,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     this.#status = this.#connectionAuthPendingCount > 0 ? STATUS.connectionAuth : STATUS.processing;
     this.#addSubmittedPrompt(options?.submittedPrompt);
+    if (options?.submittedPrompt !== undefined) this.#statsPrompts += 1;
     this.#interrupted = false;
     this.#totalTokens = undefined;
     this.#promptTokens = undefined;
@@ -709,6 +723,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       this.#status = completedTurnStatus(this.#interrupted, options?.continueSession === true);
       this.#finalizeAllBlocks();
+      this.#reportSessionStats();
       this.#paint();
 
       if (!options?.continueSession) {
@@ -957,6 +972,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   upsertSubagentStep(update: SubagentStepUpdate): void {
+    this.#statsSubagentCallIds.add(update.callId);
     if (this.#subagents === "hidden") return;
     const reasoningText = stripTerminalControls(update.reasoning ?? "").trim();
     const messageText = stripTerminalControls(update.message ?? "").trim();
@@ -980,6 +996,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   upsertSubagentTool(update: SubagentToolUpdate): void {
+    this.#statsSubagentCallIds.add(update.callId);
     if (update.status === "failed" && update.errorText !== undefined) {
       // Captured before the display guards: hidden or collapsed subagent
       // views must not keep tool failures out of the diagnostic log.
@@ -2260,6 +2277,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#pushBlock({ kind: "user", body: stripTerminalControls(prompt), live: false });
   }
 
+  #reportSessionStats(): void {
+    if (this.#diagnosticsDump === undefined) return;
+    const stats: DevSessionStats = {
+      prompts: this.#statsPrompts,
+      inputTokens: this.#statsInputTokens,
+      outputTokens: this.#statsOutputTokens,
+      toolCalls: Object.fromEntries(this.#statsToolCalls),
+      subagents: this.#statsSubagentCallIds.size,
+    };
+    this.#diagnosticsDump.updateSessionStats(stats);
+  }
+
   #addErrorBlock(title: string, content: string, detail?: string) {
     const cleanTitle = stripTerminalControls(title);
     const cleanBody = stripTerminalControls(content);
@@ -2343,6 +2372,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
 
       case "step-finish":
+        // Step usage reports are per-step deltas (extractStepUsage in the
+        // harness), so summing them yields true session totals. The
+        // `finish` event replays the last step's usage — don't sum there.
+        this.#statsInputTokens += event.usage?.inputTokens ?? 0;
+        this.#statsOutputTokens += event.usage?.outputTokens ?? 0;
         this.#applyUsage(event.usage);
         this.#paint();
         break;
@@ -2387,6 +2421,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
 
       case "tool-call":
+        this.#statsToolCalls.set(
+          event.toolName,
+          (this.#statsToolCalls.get(event.toolName) ?? 0) + 1,
+        );
         if (displayModes.tools === "hidden") break;
         this.#setStreamStatus(STATUS.executingTools);
         this.#upsertNativeTool(

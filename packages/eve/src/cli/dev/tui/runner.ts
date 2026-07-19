@@ -92,6 +92,7 @@ import {
 } from "./mcp-connection-status.js";
 import type { detectProjectIdentity } from "#setup/project-resolution.js";
 import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
+import type { DevDiagnosticDump } from "../diagnostic-dump.js";
 import type { DevDiagnosticSink } from "../diagnostic-sink.js";
 
 export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
@@ -385,6 +386,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   onBootProgress?: DevBootProgressReporter;
   /** Parent-owned local diagnostic sink; omitted for remote and test renderers. */
   diagnostics?: DevDiagnosticSink;
+  /** Parent-owned environment dump paired with the diagnostic sink. */
+  diagnosticsDump?: DevDiagnosticDump;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -1703,6 +1706,7 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     input: options.userInput,
     output: options.screen,
     diagnostics: options.diagnostics,
+    diagnosticsDump: options.diagnosticsDump,
   });
 }
 
