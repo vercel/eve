@@ -100,6 +100,8 @@ By default, `eve dev` shows `stderr` and keeps stdout and sandbox lines buffered
 - `--logs <all|stderr|sandbox|none>` sets the starting mode at launch (default `stderr`).
 - `Ctrl+L` at the idle prompt cycles `none → all → stderr → sandbox → none`.
 
+Every captured line, tool failure, workflow error, and eve framework log record also lands in a private per-process diagnostic log under `.eve/logs/`, regardless of the display mode. The file is JSON Lines: each line is one JSON record with `at` and `source` fields (framework log records add `level`, `namespace`, `message`, and `fields`), so it parses with any JSONL tool — `jq -c 'select(.source=="tool")'` — even when a payload spans many stack-trace lines. Long stderr output collapses in the transcript to a one-line summary pointing at the file (the raw text stays available in the `all` mode).
+
 ## Display flags
 
 Density flags control how much of each section renders. They accept `full`, `collapsed`, `auto-collapsed`, or `hidden`.

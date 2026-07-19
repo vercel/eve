@@ -70,7 +70,7 @@ import type {
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
 import { summarizeKnownError } from "#harness/semantic-errors.js";
-import { inspectError } from "#internal/logging.js";
+import { inspectError, setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 import {
   parseDevRebuildLogLine,
   type DevRebuildLogUpdate,
@@ -2981,7 +2981,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const restoreStdout = capture(process.stdout, "stdout");
     const restoreStderr = capture(process.stderr, "stderr");
+    // Take ownership of eve's own structured log records for the same
+    // window the stream capture is installed. Records arrive here directly
+    // — never rendered to the console — so the stderr scrape below only
+    // carries genuinely foreign output and each record lands in the
+    // diagnostic log exactly once, with its structure intact.
+    setLogRecordSubscriber((record) => this.#handleLogRecord(record));
     this.#restoreLogCapture = () => {
+      setLogRecordSubscriber(undefined);
       restoreStdout();
       restoreStderr();
     };
@@ -3003,6 +3010,34 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#shouldRenderLog("stderr")) process.stderr.write(`${this.#stderrLogBuffer}\n`);
       this.#stderrLogBuffer = "";
     }
+  }
+
+  /**
+   * One structured record from eve's own logger. Persisted with its level,
+   * namespace, and JSON fields, then displayed through the stderr path so
+   * `/loglevel` semantics and long-output collapsing match what the same
+   * record looked like when it arrived as scraped console output.
+   */
+  #handleLogRecord(record: LogRecord): void {
+    if (this.#diagnostics !== undefined) {
+      const entry: {
+        source: "log";
+        level: LogRecord["level"];
+        namespace: string;
+        message: string;
+        fields?: LogRecord["fields"];
+      } = {
+        source: "log",
+        level: record.level,
+        namespace: record.namespace,
+        message: record.message,
+      };
+      if (record.fields !== undefined) entry.fields = record.fields;
+      this.#diagnostics.append(entry);
+    }
+    const fieldsText = record.fields === undefined ? "" : ` ${JSON.stringify(record.fields)}`;
+    this.#handleCapturedStderr(`[eve:${record.namespace}] ${record.message}${fieldsText}`);
+    this.#paint();
   }
 
   #handleForeignOutput(source: "stdout" | "stderr", text: string): void {

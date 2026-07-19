@@ -1,13 +1,28 @@
 import { chmod, mkdir, open, type FileHandle } from "node:fs/promises";
 import { join, relative } from "node:path";
 
-export type DevDiagnosticSource = "stderr" | "stdout" | "sandbox" | "workflow" | "tool";
+import type { LogLevel } from "#internal/logging.js";
+import type { JsonObject } from "#shared/json.js";
 
-export interface DevDiagnosticEntry {
-  readonly source: DevDiagnosticSource;
+export type DevDiagnosticSource = "stderr" | "stdout" | "sandbox" | "workflow" | "tool" | "log";
+
+/** Captured output or a failure summary attributed to one capture point. */
+export interface DevDiagnosticOutputEntry {
+  readonly source: Exclude<DevDiagnosticSource, "log">;
   readonly summary?: string;
   readonly detail: string;
 }
+
+/** One structured record from eve's own logger. */
+export interface DevDiagnosticLogRecordEntry {
+  readonly source: "log";
+  readonly level: LogLevel;
+  readonly namespace: string;
+  readonly message: string;
+  readonly fields?: JsonObject;
+}
+
+export type DevDiagnosticEntry = DevDiagnosticOutputEntry | DevDiagnosticLogRecordEntry;
 
 export interface DevDiagnosticSink {
   readonly path: string;
@@ -70,7 +85,12 @@ function createOpenSink(
   };
 }
 
+/**
+ * JSON Lines: each record is one JSON object per line, `at` and `source`
+ * first. Multi-line details (stack traces, inspector dumps) are escaped by
+ * the JSON encoding, so the line-per-record invariant holds and the whole
+ * file parses with any JSONL reader (`jq -c 'select(.source=="tool")'`).
+ */
 function formatDiagnosticEntry(entry: DevDiagnosticEntry, at: Date): string {
-  const summary = entry.summary === undefined ? "" : `${entry.summary.trim()}\n`;
-  return `[${at.toISOString()}] ${entry.source}\n${summary}${entry.detail.trimEnd()}\n\n`;
+  return `${JSON.stringify({ at: at.toISOString(), ...entry })}\n`;
 }

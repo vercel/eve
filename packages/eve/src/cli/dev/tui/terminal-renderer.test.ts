@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
+import { createLogger } from "#internal/logging.js";
 import { searchActionValue } from "#setup/cli/select-state.js";
 import {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
@@ -1249,6 +1250,48 @@ describe("TerminalRenderer (inline scrollback)", () => {
     process.stdout.write("server listening on 3000\n");
     expect(append).toHaveBeenCalledWith({ source: "stdout", detail: "server listening on 3000" });
     renderer.shutdown();
+  });
+
+  it("captures eve log records structured, once, and releases the console on shutdown", () => {
+    const screen = new MockScreen({ columns: 120, rows: 30 });
+    const input = new MockUserInput();
+    const append = vi.fn();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      logs: "stderr",
+      unicode: true,
+      diagnostics: {
+        path: "/app/.eve/logs/dev.log",
+        displayPath: ".eve/logs/dev.log",
+        append,
+        close: async () => {},
+      },
+    });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+    createLogger("harness.tool-loop").error("tool execution failed", { toolName: "always_fail" });
+
+    // Structured, exactly once: never rendered to the console, so the
+    // stderr scrape cannot log the same record a second time.
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(append).toHaveBeenCalledWith({
+      source: "log",
+      level: "error",
+      namespace: "harness.tool-loop",
+      message: "tool execution failed",
+      fields: { toolName: "always_fail" },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(screen.snapshot()).toContain("[eve:harness.tool-loop] tool execution failed");
+
+    renderer.shutdown();
+    createLogger("harness.tool-loop").error("after shutdown");
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("[eve:harness.tool-loop] after shutdown");
+    errorSpy.mockRestore();
   });
 
   it("records tool failures in the diagnostic log even when tools are hidden", async () => {

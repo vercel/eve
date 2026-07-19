@@ -22,7 +22,7 @@ describe("createDevDiagnosticSink", () => {
       pid: 123,
     });
 
-    sink.append({ source: "stderr", detail: "first" });
+    sink.append({ source: "stderr", detail: "first\nwith a stack line" });
     sink.append({ source: "workflow", summary: "failed", detail: "second" });
     await sink.close();
 
@@ -31,6 +31,23 @@ describe("createDevDiagnosticSink", () => {
     expect((await stat(sink.path)).mode & 0o777).toBe(0o600);
     const content = await readFile(sink.path, "utf8");
     expect(content.indexOf("first")).toBeLessThan(content.indexOf("second"));
+
+    // JSON Lines: one JSON object per line, `at` and `source` first.
+    const lines = content.trimEnd().split("\n");
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      {
+        at: "2026-07-15T12:00:00.000Z",
+        source: "stderr",
+        detail: "first\nwith a stack line",
+      },
+      {
+        at: "2026-07-15T12:00:00.000Z",
+        source: "workflow",
+        summary: "failed",
+        detail: "second",
+      },
+    ]);
+    expect(lines[0]!.startsWith('{"at":"2026-07-15T12:00:00.000Z","source":"stderr"')).toBe(true);
   });
 
   it("uses exclusive creation for deterministic name collisions", async () => {
