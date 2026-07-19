@@ -265,6 +265,7 @@ describe("summarizeKnownModelCallConfigError", () => {
         "AI Gateway authentication failed: Invalid API key.\n\nCreate a new API key…",
       ),
     );
+    expect(summary?.id).toBe("gateway-auth-invalid-api-key");
     expect(summary?.name).toBe("AI Gateway authentication failed");
     expect(summary?.message).toMatch(/AI_GATEWAY_API_KEY/);
     expect(summary?.message).toMatch(/unset/i);
@@ -276,6 +277,7 @@ describe("summarizeKnownModelCallConfigError", () => {
         "AI Gateway authentication failed: Invalid OIDC token.\n\nRun 'npx vercel link'…",
       ),
     );
+    expect(summary?.id).toBe("gateway-auth-invalid-oidc-token");
     expect(summary?.name).toBe("AI Gateway authentication failed");
     expect(summary?.message).toMatch(/eve link/);
     expect(summary?.message).toMatch(/VERCEL_OIDC_TOKEN/);
@@ -287,6 +289,7 @@ describe("summarizeKnownModelCallConfigError", () => {
         "AI Gateway authentication failed: No authentication provided.\n\nOption 1…",
       ),
     );
+    expect(summary?.id).toBe("gateway-auth-missing-credentials");
     expect(summary?.name).toBe("AI Gateway authentication failed");
     expect(summary?.message).toMatch(/eve link/);
     expect(summary?.message).toMatch(/AI_GATEWAY_API_KEY/);
@@ -311,6 +314,7 @@ describe("summarizeKnownModelCallRequestError", () => {
     );
 
     expect(summary).toEqual({
+      id: "gateway-model-request-rejected",
       name: "AI Gateway model request rejected",
       message: "AI Gateway rejected the model request before the agent produced a response.",
     });
@@ -333,6 +337,7 @@ describe("summarizeKnownModelCallRequestError", () => {
     );
 
     expect(summary).toEqual({
+      id: "model-provider-api-error",
       name: "Model provider API error",
       message: "The requested model does not support this tool.",
     });
@@ -347,6 +352,7 @@ describe("summarizeKnownModelCallRequestError", () => {
     );
 
     expect(summary).toEqual({
+      id: "model-provider-api-error",
       name: "Model provider API error",
       message: "No endpoints found for anthropic/claude-3.5-haiku",
     });
@@ -367,6 +373,7 @@ describe("summarizeKnownModelCallRequestError", () => {
     );
 
     expect(summary).toEqual({
+      id: "model-provider-api-error",
       name: "Model provider API error",
       message: `Model provider API request failed (HTTP 400, invalid_request_error): ${responseBody}`,
     });

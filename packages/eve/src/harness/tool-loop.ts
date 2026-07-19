@@ -1353,6 +1353,7 @@ function buildModelCallFailureDetails(input: {
       errorId,
       message: configSummary.message,
       name: configSummary.name,
+      semanticErrorId: configSummary.id,
       ...modelCallDetails,
     };
   }
@@ -1362,6 +1363,7 @@ function buildModelCallFailureDetails(input: {
       errorId,
       message: toErrorMessage(error),
       name: requestSummary.name,
+      semanticErrorId: requestSummary.id,
       ...modelCallDetails,
     };
   }

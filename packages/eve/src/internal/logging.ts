@@ -337,7 +337,13 @@ function isFormattedError(
   return isObject(value) && typeof value.errorId === "string" && typeof value.message === "string";
 }
 
-function inspectError(error: unknown): string {
+/**
+ * Renders a throwable's full cause chain via `util.inspect`, bounded to
+ * the logger's inline-detail budget. Exported for callers that route a
+ * raw error into a diagnostic sink outside a log record (the dev TUI's
+ * client-side stream-error capture).
+ */
+export function inspectError(error: unknown): string {
   return truncate(
     inspect(error, {
       breakLength: Number.POSITIVE_INFINITY,

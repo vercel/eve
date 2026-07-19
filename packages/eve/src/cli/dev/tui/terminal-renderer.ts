@@ -69,6 +69,8 @@ import type {
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
+import { summarizeKnownError } from "#harness/semantic-errors.js";
+import { inspectError } from "#internal/logging.js";
 import {
   parseDevRebuildLogLine,
   type DevRebuildLogUpdate,
@@ -688,7 +690,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#applyStreamEvent(event, displayModes, turnState);
       }
     } catch (error) {
-      this.#addErrorBlock("Error", toErrorMessage(error));
+      // Cataloged failures render their curated headline; either way the
+      // raw inspection travels as detail so the diagnostic log keeps the
+      // evidence and the transcript shows only the pointer.
+      const summary = summarizeKnownError(error);
+      if (summary === null) {
+        this.#addErrorBlock("Error", toErrorMessage(error), inspectError(error));
+      } else {
+        this.#addErrorBlock(summary.name, summary.message, inspectError(error));
+      }
     } finally {
       this.#resolveStreamInterrupt = undefined;
       if (this.#interrupted) result.abort?.();

@@ -1,6 +1,6 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { toError } from "#shared/errors.js";
+import { toError, walkCauseChain } from "#shared/errors.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
@@ -42,8 +42,15 @@ const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supporte
  * gateway auth failure). Surfaces actionable text in REPL output and in
  * structured `step.failed` events without dumping the full SDK error
  * inspection into user-facing logs.
+ *
+ * `id` is the stable semantic-error catalog identifier (see
+ * `#harness/semantic-errors.js`): one kebab-case slug per recognized
+ * failure shape, carried into `step.failed` details as
+ * `semanticErrorId` so logs and transcripts can be correlated with the
+ * catalog entry that matched.
  */
 export interface ModelCallConfigErrorSummary {
+  readonly id: string;
   readonly name: string;
   readonly message: string;
 }
@@ -84,6 +91,7 @@ export function summarizeKnownModelCallConfigError(
     // exports a stale `AI_GATEWAY_API_KEY` that shadows the OIDC fallback.
     if (/Invalid API key/i.test(rawMessage)) {
       return {
+        id: "gateway-auth-invalid-api-key",
         name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
         message:
           "AI Gateway rejected the provided API key. Update or unset `AI_GATEWAY_API_KEY` (check your shell profile if you did not set it for this project) — manage keys at https://vercel.com/dashboard/ai/api-keys. Unsetting it falls back to OIDC via `eve link`.",
@@ -91,12 +99,14 @@ export function summarizeKnownModelCallConfigError(
     }
     if (/Invalid OIDC token/i.test(rawMessage)) {
       return {
+        id: "gateway-auth-invalid-oidc-token",
         name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
         message:
           "AI Gateway rejected the OIDC token. Run `eve link` to refresh `VERCEL_OIDC_TOKEN` in `.env.local`, or set `AI_GATEWAY_API_KEY` — create a key at https://vercel.com/dashboard/ai/api-keys.",
       };
     }
     return {
+      id: "gateway-auth-missing-credentials",
       name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
       message:
         "AI Gateway received no credentials. Run `eve link` to populate `VERCEL_OIDC_TOKEN`, or set `AI_GATEWAY_API_KEY` — create a key at https://vercel.com/dashboard/ai/api-keys.",
@@ -105,6 +115,7 @@ export function summarizeKnownModelCallConfigError(
 
   if (rawName === "LoadAPIKeyError" || /API key is missing/i.test(rawMessage)) {
     return {
+      id: "model-provider-api-key-missing",
       name: "Model provider API key missing",
       message:
         "The model provider could not load an API key. Export the provider's API key environment variable (for example `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and try again.",
@@ -126,6 +137,7 @@ export function summarizeKnownModelCallRequestError(
   // point at the harness's own throw site, not upstream evidence).
   if (error instanceof EmptyModelResponseError) {
     return {
+      id: "empty-model-response",
       name: "Empty model response",
       message: error.message,
     };
@@ -143,15 +155,14 @@ export function summarizeKnownModelCallRequestError(
   const apiSummary = signals.apiErrorMessage;
   if (apiSummary !== undefined) {
     return {
-      name: isGatewayErrorSignal(signals)
-        ? "AI Gateway model request rejected"
-        : "Model provider API error",
+      ...modelRequestErrorIdentity(signals),
       message: apiSummary,
     };
   }
 
   if (signals.statusCode === 400 && isGatewayErrorSignal(signals)) {
     return {
+      id: "gateway-model-request-rejected",
       name: "AI Gateway model request rejected",
       message: GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE,
     };
@@ -160,14 +171,20 @@ export function summarizeKnownModelCallRequestError(
   const apiCallSummary = formatApiCallErrorFallback(signals);
   if (apiCallSummary !== undefined) {
     return {
-      name: isGatewayErrorSignal(signals)
-        ? "AI Gateway model request rejected"
-        : "Model provider API error",
+      ...modelRequestErrorIdentity(signals),
       message: apiCallSummary,
     };
   }
 
   return null;
+}
+
+function modelRequestErrorIdentity(
+  signals: ModelCallErrorSignals,
+): Pick<ModelCallConfigErrorSummary, "id" | "name"> {
+  return isGatewayErrorSignal(signals)
+    ? { id: "gateway-model-request-rejected", name: "AI Gateway model request rejected" }
+    : { id: "model-provider-api-error", name: "Model provider API error" };
 }
 
 function isTransientHttpStatus(status: number | undefined): boolean {
@@ -648,16 +665,6 @@ function isAmbiguousGatewayInternalBadRequest(signals: ModelCallErrorSignals): b
       signals.gatewayType === "internal_server_error") &&
     (signals.upstreamType === undefined || signals.upstreamType === "internal_server_error")
   );
-}
-
-function* walkCauseChain(error: unknown): Generator<unknown> {
-  const seen = new Set<unknown>();
-  let current = error;
-  while (isObject(current) && !seen.has(current)) {
-    seen.add(current);
-    yield current;
-    current = current.cause;
-  }
 }
 
 function appendJsonField(target: Record<string, JsonValue>, key: string, value: unknown): void {

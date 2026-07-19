@@ -1297,6 +1297,52 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("renders a cataloged summary for a recognized stream error and logs the raw dump", async () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const append = vi.fn();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      diagnostics: {
+        path: "/app/.eve/logs/dev.log",
+        displayPath: ".eve/logs/dev.log",
+        append,
+        close: async () => {},
+      },
+    });
+
+    const failure = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3000"), {
+        code: "ECONNREFUSED",
+      }),
+    });
+    await renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            controller.error(failure);
+          },
+        }),
+      },
+      { submittedPrompt: "hello", continueSession: false },
+    );
+
+    // Transcript: curated headline plus the log pointer, no stack dump.
+    expect(screen.snapshot()).toContain("Network request failed");
+    expect(screen.snapshot()).toContain("details: .eve/logs/dev.log");
+    expect(screen.snapshot()).not.toContain("    at ");
+    // Log: the raw inspection, cause chain included.
+    expect(append).toHaveBeenCalledWith({
+      source: "workflow",
+      summary: expect.stringContaining("Network request failed"),
+      detail: expect.stringContaining("ECONNREFUSED"),
+    });
+    renderer.shutdown();
+  });
+
   it("records sandbox log lines in the diagnostic log", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
