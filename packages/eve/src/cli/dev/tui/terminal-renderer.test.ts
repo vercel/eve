@@ -3475,7 +3475,7 @@ describe("TerminalRenderer command typeahead", () => {
     expect(snapshot).toContain("Show available commands");
     expect(snapshot).toContain("Configure the agent's model and provider");
     const promptLine = snapshot.split("\n").find((line) => line.includes("❯ /"));
-    expect(promptLine?.startsWith(" ❯ /")).toBe(true);
+    expect(promptLine?.startsWith("❯ /")).toBe(true);
 
     input.enter();
     // The highlighted default — /help leads the registry — is what a bare

@@ -3744,14 +3744,14 @@ function promptInputRows({
     const body = renderInputWithBlockCursor({
       ...visibleLine(
         { text: placeholder, cursor: 0 },
-        Math.max(1, width - 4),
+        Math.max(1, width - 3),
         theme.glyph.ellipsis,
       ),
       visible: caretVisible,
       inverse: c.inverse,
       render: (segment) => c.dim(renderInputText(segment)),
     });
-    return [clip(` ${c.dim(theme.glyph.promptIdle)} ${body}`, width), ""];
+    return [clip(`${c.dim(theme.glyph.promptIdle)} ${body}`, width), ""];
   }
 
   const style = (segment: string): string => {
@@ -3767,8 +3767,10 @@ function promptInputRows({
   );
   const promptGlyph = c.cyan(theme.glyph.prompt);
   const ellipsis = c.dim(theme.glyph.ellipsis);
-  // Reserve the leading pad, gutter, and block cursor's trailing cell at end-of-line.
-  const budget = Math.max(1, width - 4);
+  // Reserve the gutter and the block cursor's trailing cell at end-of-line.
+  // The gutter sits at column 0, sharing a column with the conversation
+  // markers (`▌`, `▲`).
+  const budget = Math.max(1, width - 3);
   const out: string[] = [];
   for (let r = top; r < top + visibleCount; r += 1) {
     const row = layout.rows[r]!;
@@ -3799,7 +3801,7 @@ function promptInputRows({
     } else {
       body = style(row.text);
     }
-    out.push(clip(` ${gutter} ${body}`, width));
+    out.push(clip(`${gutter} ${body}`, width));
   }
   out.push("");
   return out;
