@@ -329,8 +329,7 @@ export function normalizeAssistantStepFinishReason(
 /**
  * Result of consuming one step's `fullStream`.
  *
- * Inline results avoid duplicate post-step events. Approval-resume
- * authorization results also route back to the park detector.
+ * Inline results avoid duplicate post-step events; authorization results route back to parking.
  */
 interface EmittedStreamContent {
   readonly emittedActionCallIds: ReadonlySet<string>;
@@ -346,8 +345,7 @@ interface StreamActionEmissionOptions {
 }
 
 /**
- * Consumes the AI SDK `fullStream` and emits real-time text and reasoning
- * events.
+ * Consumes the AI SDK `fullStream` and emits real-time text and reasoning events.
  *
  * Emits local tool events in source order. Provider calls that arrive in one
  * stream batch into one request event before their first result. A result
@@ -619,10 +617,12 @@ async function consumeStreamContent(
           await collectProviderToolCall(toolError);
           await providerActionBatch.flush();
           await emitActionResult(createRuntimeToolResultFromToolError(toolError));
-        } else if (emittedActionCallIds.has(toolError.toolCallId)) {
+        } else if (!handledInlineToolResultCallIds.has(toolError.toolCallId)) {
           await emitActionResult(createRuntimeToolResultFromToolError(toolError));
           handledInlineToolResultCallIds.add(toolError.toolCallId);
-          trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
+          if (emittedActionCallIds.has(toolError.toolCallId)) {
+            trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
+          }
         }
         break;
       }

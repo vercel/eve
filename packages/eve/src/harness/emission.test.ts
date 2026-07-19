@@ -536,6 +536,44 @@ describe("emitStreamContent action requests", () => {
     expect(providerResult.trailingInlineToolResultParts).toEqual([]);
   });
 
+  it("emits a failed action result when an approved tool throws on resume", async () => {
+    const emit = createEmitStub();
+
+    const result = await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          error: new Error("Approved execution failed"),
+          input: { query: "eve" },
+          toolCallId: "approved-call-1",
+          toolName: "web_search",
+          type: "tool-error",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          result: {
+            callId: "approved-call-1",
+            isError: true,
+            kind: "tool-result",
+            output: "Approved execution failed",
+            toolName: "web_search",
+          },
+          status: "failed",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    expect([...result.handledInlineToolResultCallIds]).toEqual(["approved-call-1"]);
+    expect(result.trailingInlineToolResultParts).toEqual([]);
+  });
+
   it("turns non-object tool call input into a failed tool result for the model", async () => {
     const tools = new Map<string, HarnessToolDefinition>([
       [
