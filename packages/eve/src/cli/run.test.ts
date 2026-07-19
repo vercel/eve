@@ -53,6 +53,20 @@ describe("CLI command registration", () => {
     expect(help).toContain("deploy");
     expect(help).not.toContain("setup");
   });
+
+  it("registers the diagnostic logs commands", async () => {
+    const output: string[] = [];
+    const logger = {
+      error: (message: string) => output.push(message),
+      log: (message: string) => output.push(message),
+    };
+
+    await runCli(["logs", "--help"], logger).catch(() => {});
+
+    const help = output.join("\n");
+    expect(help).toContain("show [options] [logid]");
+    expect(help).toContain("ls");
+  });
 });
 
 describe("eve init compatibility flags", () => {
