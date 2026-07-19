@@ -286,6 +286,22 @@ export function formatCompactTokenCount(count: number): string {
  * tokens up, output tokens down, both from the latest usage report. A known
  * `--context-size` appends the context-fill percentage of the input side.
  */
+/**
+ * Formats a turn's wall-clock duration for the end-of-turn stats line:
+ * `42s`, `3min 24s`, `1h 12min`. Sub-second turns round up to `1s` — a
+ * `0s` coda would read as a measurement error.
+ */
+export function formatTurnDuration(elapsedMs: number): string {
+  const totalSeconds = Math.max(1, Math.round(elapsedMs / 1000));
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes === 0) return `${seconds}s`;
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  if (hours === 0) return seconds === 0 ? `${minutes}min` : `${minutes}min ${seconds}s`;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}min`;
+}
+
 export function formatTokenFlow(
   flow: { inputTokens: number; outputTokens: number; contextSize?: number },
   glyph: { arrowUp: string; arrowDown: string },

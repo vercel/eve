@@ -103,6 +103,8 @@ export interface ThemeGlyphs {
   elbow: string;
   /** `▔` — strong full-width rule opening the bottom question panel. */
   hrule: string;
+  /** `─` — light rule segment framing the end-of-turn stats line. */
+  dash: string;
   /** `▏` — the synthetic input caret. */
   caret: string;
   /** `·` — inline separator for header / status segments. */
@@ -152,6 +154,7 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   promptIdle: "›",
   elbow: "⎿",
   hrule: "▔",
+  dash: "─",
   caret: "▏",
   dot: "·",
   ellipsis: "…",
@@ -189,6 +192,7 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   promptIdle: ">",
   elbow: "`-",
   hrule: "=",
+  dash: "-",
   caret: "_",
   dot: "-",
   ellipsis: "...",

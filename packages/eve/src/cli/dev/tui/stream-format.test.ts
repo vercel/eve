@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatCompactTokenCount,
   formatTokenFlow,
+  formatTurnDuration,
   isIncompletePaste,
   nextKey,
   parseKey,
@@ -70,6 +71,17 @@ describe("formatTokenFlow", () => {
       ),
     ).toBe("↑ 24K ↓ 300 12%");
     expect(formatTokenFlow({ inputTokens: 0, outputTokens: 0 }, FLOW_GLYPHS)).toBe("↑ 0 ↓ 0");
+  });
+});
+
+describe("formatTurnDuration", () => {
+  it("scales through seconds, minutes, and hours", () => {
+    expect(formatTurnDuration(400)).toBe("1s");
+    expect(formatTurnDuration(42_000)).toBe("42s");
+    expect(formatTurnDuration(204_000)).toBe("3min 24s");
+    expect(formatTurnDuration(300_000)).toBe("5min");
+    expect(formatTurnDuration(4_320_000)).toBe("1h 12min");
+    expect(formatTurnDuration(3_600_000)).toBe("1h");
   });
 });
 

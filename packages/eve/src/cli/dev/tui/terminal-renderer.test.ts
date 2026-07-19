@@ -1209,6 +1209,33 @@ describe("TerminalRenderer (inline scrollback)", () => {
     }
   });
 
+  it("commits an end-of-turn stats coda when control returns to the prompt", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("hey agent");
+    input.enter();
+    expect(await prompt).toBe("hey agent");
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "m1", delta: "Hello!" },
+        { type: "assistant-complete", id: "m1" },
+        { type: "finish", usage: { inputTokens: 4_500, outputTokens: 43 } },
+      ]),
+      { continueSession: true },
+    );
+    // Mid-turn (before control returns to the prompt) there is no coda —
+    // multi-pass turns must end with exactly one.
+    expect(screen.snapshot()).not.toContain("───");
+
+    const second = renderer.readPrompt();
+    expect(screen.snapshot()).toContain("─── 1s ↑ 4.5K ↓ 43 ───");
+    input.ctrlC();
+    await expect(second).rejects.toThrow();
+    renderer.shutdown();
+  });
+
   it("retires the placeholder after the first user message", async () => {
     const { screen, input, renderer } = makeRenderer();
 

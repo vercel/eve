@@ -148,6 +148,8 @@ import {
 import { readGatewayServiceTier } from "#shared/gateway-service-tier.js";
 import {
   formatAssistantResponseStats,
+  formatTokenFlow,
+  formatTurnDuration,
   isIncompletePaste,
   nextKey,
   sanitizePastedText,
@@ -401,6 +403,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #promptPlaceholderStartedAtMs = Date.now();
   /** Placeholder retires for good once the user has sent a first message. */
   #hasUserMessage = false;
+  /** Armed by a chat submit; the end-of-turn stats line consumes it. */
+  #turnStartedAtMs?: number;
   /** Wall clock of the latest stream event, for the mid-answer stall pulse. */
   #lastStreamEventAtMs = Date.now();
   #turnIndicator: TurnIndicatorState = { kind: "idle" };
@@ -542,6 +546,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
     this.#start(options);
     this.#stopTicker();
+    this.#commitTurnStats();
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
     this.#turnIndicator = { kind: "idle" };
@@ -656,6 +661,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             } else {
               this.#addUserBlock(prompt);
               this.#pendingEchoedPrompt = prompt;
+              this.#turnStartedAtMs = Date.now();
             }
             this.#syncInput(EMPTY_LINE);
             this.#paint();
@@ -2518,6 +2524,27 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  /**
+   * Commits the end-of-turn coda — wall-clock duration plus token flow —
+   * when control returns to the prompt after a chat turn. Consuming the
+   * armed timestamp here (not at stream end) spans multi-pass turns:
+   * question answers and connection authorizations re-stream without
+   * re-arming, so one turn gets one line.
+   */
+  #commitTurnStats(): void {
+    const startedAtMs = this.#turnStartedAtMs;
+    if (startedAtMs === undefined) return;
+    this.#turnStartedAtMs = undefined;
+
+    const parts = [formatTurnDuration(Date.now() - startedAtMs)];
+    const inputTokens = this.#promptTokens ?? 0;
+    const outputTokens = this.#assistantOutputTokens ?? 0;
+    if (inputTokens > 0 || outputTokens > 0) {
+      parts.push(formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph));
+    }
+    this.#pushBlock({ kind: "turn-stats", body: parts.join(" "), live: false });
+  }
+
   #addSubmittedPrompt(prompt: string | undefined) {
     if (prompt == null) return;
     if (this.#pendingEchoedPrompt === prompt) {
@@ -3858,6 +3885,7 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
     case "command":
     case "warning":
     case "flow":
+    case "turn-stats":
     case "agent-header":
       return true;
     // The elbow result hangs tight under its invocation — never a gap.

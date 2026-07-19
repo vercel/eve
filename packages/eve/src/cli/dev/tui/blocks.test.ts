@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { type Block, maxVisibleToolGroupItems, renderBlockLines } from "./blocks.js";
+import { type Block, renderBlockLines } from "./blocks.js";
+import { maxVisibleToolGroupItems } from "./tool-rows.js";
 import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -172,6 +173,12 @@ describe("renderBlockLines", () => {
       detailLines: [{ text: "line one" }, { text: "line two" }],
     });
     expect(lines).toEqual([" ▪ Ran pnpm test"]);
+  });
+
+  it("renders the end-of-turn stats as a dim framed coda", () => {
+    expect(render({ kind: "turn-stats", body: "3min 24s ↑ 32.4K ↓ 682" })).toEqual([
+      "  ─── 3min 24s ↑ 32.4K ↓ 682 ───",
+    ]);
   });
 
   it("renders a counted subagent header for coalesced parallel calls", () => {
