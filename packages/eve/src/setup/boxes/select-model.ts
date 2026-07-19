@@ -1,10 +1,11 @@
+import { addGatewayUA, buildGatewayURL } from "#internal/gateway.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 import { select, type Asker, type SelectOption } from "../ask.js";
 import type { SetupState } from "../state.js";
 import type { SetupBox } from "../step.js";
 
-const AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/models";
+const AI_GATEWAY_URL = buildGatewayURL("/v1/models");
 const FETCH_TIMEOUT_MS = 5000;
 const POPULAR_PROVIDERS: readonly string[] = ["anthropic", "openai", "google"];
 const WEB_SEARCH_TAG = "web-search";
@@ -64,7 +65,10 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
   try {
     const requestSignal =
       signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
-    const res = await fetch(AI_GATEWAY_URL, { signal: requestSignal });
+    const res = await fetch(AI_GATEWAY_URL, {
+      headers: addGatewayUA(new Headers()),
+      signal: requestSignal,
+    });
     const json = (await res.json()) as { data: GatewayCatalogModel[] };
     return json.data;
   } finally {

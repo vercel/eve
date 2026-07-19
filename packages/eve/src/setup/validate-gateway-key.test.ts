@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getCredits: vi.fn() }));
+const mocks = vi.hoisted(() => ({ createGateway: vi.fn(), getCredits: vi.fn() }));
 
 vi.mock("ai", () => ({
-  createGateway: () => ({ getCredits: mocks.getCredits }),
+  createGateway: mocks.createGateway.mockReturnValue({ getCredits: mocks.getCredits }),
 }));
 
 import { validateGatewayApiKey } from "./validate-gateway-key.js";
@@ -12,6 +12,11 @@ describe("validateGatewayApiKey", () => {
   it("is valid when the gateway accepts the key", async () => {
     mocks.getCredits.mockResolvedValueOnce({ models: [] });
     await expect(validateGatewayApiKey("sk-good")).resolves.toEqual({ kind: "valid" });
+    expect(mocks.createGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: { "user-agent": expect.stringMatching(/^eve\/.+/) },
+      }),
+    );
   });
 
   it("is invalid on an authentication rejection (401 / authentication_error)", async () => {

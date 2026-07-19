@@ -41,13 +41,14 @@ describe("createWorkflowWorldPluginSource", () => {
   });
 
   it("selects the vendored Vercel World with Workflow's selector", () => {
-    expect(
-      createWorkflowWorldPluginSource({
-        compiledArtifactsBootstrapPath: "/app/.eve/compile/bootstrap.mjs",
-        configuredWorld: undefined,
-        defaultWorld: "vercel",
-      }),
-    ).toContain("/compiled/@workflow/world-vercel/index.js");
+    const source = createWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/compile/bootstrap.mjs",
+      configuredWorld: undefined,
+      defaultWorld: "vercel",
+    });
+
+    expect(source).toContain("/compiled/@workflow/world-vercel/index.js");
+    expect(source).toMatch(/headers: \{ "User-Agent": "eve\/.+" \}/);
   });
 });
 

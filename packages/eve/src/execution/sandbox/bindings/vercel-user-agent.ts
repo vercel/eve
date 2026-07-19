@@ -1,19 +1,12 @@
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-
-export function eveSandboxUserAgentToken(): string {
-  const { name, version } = resolveInstalledPackageInfo();
-  return `${name}/${version}`;
-}
+import { appendPackageUserAgent } from "#internal/user-agent.js";
 
 /**
  * Wraps a `fetch` implementation so every request's `user-agent` ends with the
- * {@link eveSandboxUserAgentToken} (e.g.: eve/0.18.1).
+ * installed package product token.
  */
-export function withEveSandboxUserAgent(
+export function withSandboxUserAgent(
   inner: typeof globalThis.fetch = globalThis.fetch,
 ): typeof globalThis.fetch {
-  const token = eveSandboxUserAgentToken();
-
   return (input, init) => {
     const headers = new Headers(
       init?.headers ??
@@ -21,8 +14,7 @@ export function withEveSandboxUserAgent(
           ? (input as Request).headers
           : undefined),
     );
-    const existing = headers.get("user-agent");
-    headers.set("user-agent", existing ? `${existing} ${token}` : token);
+    appendPackageUserAgent(headers);
     return inner(input, { ...init, headers });
   };
 }

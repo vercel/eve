@@ -1,5 +1,6 @@
 import { createGateway } from "ai";
 
+import { addGatewayUA } from "#internal/gateway.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 /**
@@ -56,6 +57,7 @@ export async function validateGatewayApiKey(
       apiKey,
       fetch: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
         globalThis.fetch(url, { ...init, signal: effectiveSignal }),
+      headers: Object.fromEntries(addGatewayUA(new Headers())),
     });
     await provider.getCredits();
     return { kind: "valid" };
