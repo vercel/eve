@@ -39,31 +39,31 @@ export interface DevelopmentSourceSnapshotPlan {
   readonly appRoot: string;
   readonly copyFiles: readonly string[];
   readonly copyRoots: readonly string[];
+  readonly dependencyMounts: readonly DevelopmentSourceSnapshotDependencyMount[];
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
   readonly sourceRoot: string;
-  readonly symlinks: readonly DevelopmentSourceSnapshotSymlink[];
   readonly tsconfigPaths: readonly string[];
   readonly watchPaths: readonly string[];
 }
 
-export interface DevelopmentSourceSnapshotSymlink {
-  readonly linkPath: string;
-  readonly targetKind: "external" | "local";
-  readonly targetPath: string;
+export interface DevelopmentSourceSnapshotDependencyMount {
+  readonly mountPath: string;
+  readonly sourceKind: "installed" | "workspace";
+  readonly sourcePath: string;
 }
 
 interface SnapshotPlanState {
   readonly appRoot: string;
   readonly copyFiles: Set<string>;
   readonly copyRoots: Set<string>;
+  readonly dependencyMountsByPath: Map<string, DevelopmentSourceSnapshotDependencyMount>;
   readonly localRootsToProcess: string[];
   readonly processedLocalRoots: Set<string>;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
   readonly sourceRoot: string;
-  readonly symlinksByLinkPath: Map<string, DevelopmentSourceSnapshotSymlink>;
   readonly tsconfigPaths: Set<string>;
 }
 
@@ -79,12 +79,12 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
     appRoot,
     copyFiles: new Set(),
     copyRoots: new Set(),
+    dependencyMountsByPath: new Map(),
     localRootsToProcess: [appRoot],
     processedLocalRoots: new Set(),
     snapshotRoot,
     snapshotSourceRoot,
     sourceRoot,
-    symlinksByLinkPath: new Map(),
     tsconfigPaths: new Set(),
   };
 
@@ -110,7 +110,7 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
     state.copyRoots.add(resolvedLocalRoot);
 
     await addTsConfigDependenciesForRoot(state, resolvedLocalRoot);
-    await addDependencySymlinksForRoot(state, resolvedLocalRoot);
+    await addDependencyMountsForRoot(state, resolvedLocalRoot);
   }
 
   const copyRoots = normalizeCopyRoots([...state.copyRoots]);
@@ -120,15 +120,15 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
   const tsconfigPaths = [...state.tsconfigPaths]
     .filter((path) => isPathInsideOrEqual(path, sourceRoot))
     .sort((left, right) => left.localeCompare(right));
-  const symlinks = [...state.symlinksByLinkPath.values()].sort((left, right) =>
-    left.linkPath.localeCompare(right.linkPath),
+  const dependencyMounts = [...state.dependencyMountsByPath.values()].sort((left, right) =>
+    left.mountPath.localeCompare(right.mountPath),
   );
   const watchPaths = createWatchPaths({
     appRoot,
     copyFiles,
     copyRoots,
+    dependencyMounts,
     sourceRoot,
-    symlinks,
     tsconfigPaths,
   });
 
@@ -136,11 +136,11 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
     appRoot,
     copyFiles,
     copyRoots,
+    dependencyMounts,
     runtimeAppRoot: toSnapshotPath({ sourcePath: appRoot, sourceRoot, snapshotSourceRoot }),
     snapshotRoot,
     snapshotSourceRoot,
     sourceRoot,
-    symlinks,
     tsconfigPaths,
     watchPaths,
   };
@@ -220,7 +220,7 @@ async function addTsConfigDependenciesForRoot(
   }
 }
 
-async function addDependencySymlinksForRoot(
+async function addDependencyMountsForRoot(
   state: SnapshotPlanState,
   packageRoot: string,
 ): Promise<void> {
@@ -228,58 +228,60 @@ async function addDependencySymlinksForRoot(
 
   for (const dependencyName of dependencyNames) {
     for (const nodeModulesRoot of [packageRoot, state.sourceRoot]) {
-      const linkPath = joinNodeModulesPackagePath(nodeModulesRoot, dependencyName);
-      await addDependencySymlink(state, linkPath);
+      const mountPath = joinNodeModulesPackagePath(nodeModulesRoot, dependencyName);
+      await addDependencyMount(state, mountPath);
     }
   }
 }
 
-async function addDependencySymlink(state: SnapshotPlanState, linkPath: string): Promise<void> {
-  let linkStats: Awaited<ReturnType<typeof lstat>>;
+async function addDependencyMount(state: SnapshotPlanState, mountPath: string): Promise<void> {
+  let mountStats: Awaited<ReturnType<typeof lstat>>;
 
   try {
-    linkStats = await lstat(linkPath);
+    mountStats = await lstat(mountPath);
   } catch {
     return;
   }
 
-  if (!linkStats.isSymbolicLink()) {
+  if (!mountStats.isDirectory() && !mountStats.isSymbolicLink()) {
     return;
   }
 
-  const targetPathCandidates = await resolveSymlinkTargetPathCandidates(linkPath);
-  const localTargetPath = targetPathCandidates.find((candidate) =>
+  // Installation topology does not express ownership: npm and hoisted Yarn
+  // use directories where pnpm uses links for the same installed package.
+  const sourcePathCandidates = await resolveDependencySourcePathCandidates(mountPath);
+  const workspaceSourcePath = sourcePathCandidates.find((candidate) =>
     isAuthoredSourcePath(candidate, state.sourceRoot),
   );
 
-  if (localTargetPath !== undefined) {
-    await addLocalDependencySymlink({
-      linkPath,
+  if (workspaceSourcePath !== undefined) {
+    await addWorkspaceDependencyMount({
+      mountPath,
       state,
-      targetPath: localTargetPath,
+      sourcePath: workspaceSourcePath,
     });
     return;
   }
 
-  const externalTargetPath = targetPathCandidates.find((candidate) => existsSync(candidate));
+  const installedSourcePath = sourcePathCandidates.find((candidate) => existsSync(candidate));
 
-  if (externalTargetPath === undefined) {
+  if (installedSourcePath === undefined) {
     return;
   }
 
-  state.symlinksByLinkPath.set(resolve(linkPath), {
-    linkPath: resolve(linkPath),
-    targetKind: "external",
-    targetPath: externalTargetPath,
+  state.dependencyMountsByPath.set(resolve(mountPath), {
+    mountPath: resolve(mountPath),
+    sourceKind: "installed",
+    sourcePath: installedSourcePath,
   });
 }
 
-async function addLocalDependencySymlink(input: {
-  readonly linkPath: string;
+async function addWorkspaceDependencyMount(input: {
+  readonly mountPath: string;
   readonly state: SnapshotPlanState;
-  readonly targetPath: string;
+  readonly sourcePath: string;
 }): Promise<void> {
-  const packageRoot = await resolveNearestPackageRoot(input.targetPath, input.state.sourceRoot);
+  const packageRoot = await resolveNearestPackageRoot(input.sourcePath, input.state.sourceRoot);
 
   if (packageRoot === undefined || !isAuthoredSourcePath(packageRoot, input.state.sourceRoot)) {
     return;
@@ -288,27 +290,27 @@ async function addLocalDependencySymlink(input: {
   const { state } = input;
 
   enqueueLocalRoot(state, packageRoot);
-  state.symlinksByLinkPath.set(resolve(input.linkPath), {
-    linkPath: resolve(input.linkPath),
-    targetKind: "local",
-    targetPath: packageRoot,
+  state.dependencyMountsByPath.set(resolve(input.mountPath), {
+    mountPath: resolve(input.mountPath),
+    sourceKind: "workspace",
+    sourcePath: packageRoot,
   });
 }
 
-async function resolveSymlinkTargetPathCandidates(linkPath: string): Promise<string[]> {
+async function resolveDependencySourcePathCandidates(mountPath: string): Promise<string[]> {
   const candidates = new Set<string>();
 
   try {
-    const declaredTarget = await readlink(linkPath);
-    candidates.add(resolve(dirname(linkPath), declaredTarget));
+    const declaredTarget = await readlink(mountPath);
+    candidates.add(resolve(dirname(mountPath), declaredTarget));
   } catch {
     // Continue to canonical target fallback below.
   }
 
   try {
-    candidates.add(await realpath(linkPath));
+    candidates.add(await realpath(mountPath));
   } catch {
-    // Broken symlinks are ignored by the caller.
+    // Broken dependency entries are ignored by the caller.
   }
 
   return [...candidates];
@@ -536,8 +538,8 @@ function createWatchPaths(input: {
   readonly appRoot: string;
   readonly copyFiles: readonly string[];
   readonly copyRoots: readonly string[];
+  readonly dependencyMounts: readonly DevelopmentSourceSnapshotDependencyMount[];
   readonly sourceRoot: string;
-  readonly symlinks: readonly DevelopmentSourceSnapshotSymlink[];
   readonly tsconfigPaths: readonly string[];
 }): string[] {
   const watchPaths = new Set<string>([
@@ -552,9 +554,9 @@ function createWatchPaths(input: {
     }
   }
 
-  for (const symlink of input.symlinks) {
-    if (symlink.targetKind === "local" && symlink.targetPath !== input.appRoot) {
-      watchPaths.add(symlink.targetPath);
+  for (const mount of input.dependencyMounts) {
+    if (mount.sourceKind === "workspace" && mount.sourcePath !== input.appRoot) {
+      watchPaths.add(mount.sourcePath);
     }
   }
 
