@@ -82,14 +82,15 @@ function renderEndpoint(
 
   const c = input.theme.colors;
   const g = input.theme.glyph;
-  // The endpoint name is the clause's one bright token; `via` and the
-  // credential scope stay dim around it.
+  // Only the gateway earns the clause's one bright token — `via` and the
+  // credential scope stay dim around it; external providers render fully
+  // quiet.
   const clause = (name: string, suffix: string) =>
     `${c.dim("via ")}${c.white(name)}${c.dim(suffix)}`;
   if (input.endpoint.kind === "external") {
     const provider =
       EXTERNAL_PROVIDER_DISPLAY_NAMES[input.endpoint.provider] ?? input.endpoint.provider;
-    return { text: clause(provider, g.external), standalone: false };
+    return { text: c.dim(`via ${provider}${g.external}`), standalone: false };
   }
   if (!input.endpoint.connected) {
     return { text: c.yellow(`${g.warning} ai-gateway`), standalone: true };

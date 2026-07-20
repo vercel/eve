@@ -259,10 +259,19 @@ describe("buildStatusLine", () => {
       theme,
       width: 120,
     });
-    // The endpoint name is the one bright token; via/scope stay dim.
+    // Only the gateway is the bright token; via/scope stay dim.
     expect(linked).toContain("\x1b[97mai-gateway\x1b[39m");
     expect(linked).toContain("\x1b[2mvia \x1b[22m");
     expect(linked).toContain("\x1b[2m(oidc)\x1b[22m");
+
+    // External providers render fully quiet — no bright token.
+    const external = buildStatusLine({
+      endpoint: { kind: "external", provider: "codex" },
+      theme,
+      width: 120,
+    });
+    expect(external).toContain("\x1b[2mvia chatgpt-sub⌝\x1b[22m");
+    expect(external).not.toContain("\x1b[97m");
   });
 
   it("renders ASCII glyphs when unicode is unavailable", () => {
