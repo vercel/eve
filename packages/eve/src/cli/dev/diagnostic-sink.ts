@@ -11,6 +11,8 @@ export interface DevDiagnosticOutputEntry {
   readonly source: Exclude<DevDiagnosticSource, "log">;
   readonly summary?: string;
   readonly detail: string;
+  /** Structured remediation carried by cataloged failures. */
+  readonly hint?: string;
 }
 
 /** One structured record from eve's own logger. */

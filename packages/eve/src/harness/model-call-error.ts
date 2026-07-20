@@ -9,11 +9,6 @@ const API_ERROR_SUMMARY_LIMIT = 800;
 const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
   "AI Gateway rejected the model request before the agent produced a response.";
 
-export {
-  GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
-  GATEWAY_AUTHENTICATION_ERROR_NAME,
-} from "#harness/semantic-errors/rules/gateway.js";
-
 /**
  * Anchored regex for the upstream "unsupported tool" rejection message
  * that AI Gateway returns when a fallback provider cannot serve a

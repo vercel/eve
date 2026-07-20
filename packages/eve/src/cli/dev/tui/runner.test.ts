@@ -2005,15 +2005,18 @@ describe("EveTUIRunner Vercel status line", () => {
 describe("EveTUIRunner gateway-auth failure rendering", () => {
   const gatewayFailure = {
     code: "MODEL_CALL_FAILED",
-    message: "AI Gateway received no credentials. Run `eve link` to populate…",
+    message: "AI Gateway received no credentials.",
     details: {
       errorId: "err-1",
       name: "AI Gateway authentication failed",
-      gatewayName: "GatewayAuthenticationError",
+      semanticErrorId: "gateway-auth-missing-credentials",
+      hint: "Run `eve link` to populate `VERCEL_OIDC_TOKEN`, or set `AI_GATEWAY_API_KEY`…",
     },
   };
 
-  async function errorTextsFor(appRoot?: string): Promise<string[]> {
+  async function errorEventsFor(
+    appRoot?: string,
+  ): Promise<Array<{ errorText: string; hint?: string }>> {
     const prompts: Array<string | undefined> = ["hello", undefined];
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
@@ -2042,22 +2045,24 @@ describe("EveTUIRunner gateway-auth failure rendering", () => {
 
     return emitted
       .filter((event) => event.type === "error")
-      .map((event) => (event as { errorText: string }).errorText);
+      .map((event) => event as { errorText: string; hint?: string });
   }
 
-  it("collapses the failure to the minimal /model line when setup commands are available", async () => {
-    const errors = await errorTextsFor("/tmp/weather-agent");
+  it("swaps the hint for the local /model fix when setup commands are available", async () => {
+    const errors = await errorEventsFor("/tmp/weather-agent");
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toBe(
-      "There is no AI_GATEWAY_API_KEY set. Run /model to connect this to a project and refresh AI Gateway credentials, or set it manually in .env.local.",
+    expect(errors[0]!.errorText).toContain("MODEL_CALL_FAILED");
+    expect(errors[0]!.hint).toBe(
+      "Run /model to connect this to a project and refresh AI Gateway credentials, or set AI_GATEWAY_API_KEY manually in .env.local.",
     );
   });
 
-  it("keeps the full failure message when the TUI has no local project to link", async () => {
-    const errors = await errorTextsFor(undefined);
+  it("keeps the harness hint when the TUI has no local project to link", async () => {
+    const errors = await errorEventsFor(undefined);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("MODEL_CALL_FAILED");
-    expect(errors[0]).not.toContain("/model");
+    expect(errors[0]!.errorText).toContain("MODEL_CALL_FAILED");
+    expect(errors[0]!.hint).toContain("eve link");
+    expect(errors[0]!.hint).not.toContain("/model");
   });
 });
 

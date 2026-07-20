@@ -1,10 +1,7 @@
 import { allOf, anyOf, messageMatches, nameIs, typeIs, type SemanticErrorRule } from "../rule.js";
 
-/** The upstream error name the AI Gateway uses for authentication failures. */
-export const GATEWAY_AUTHENTICATION_ERROR_NAME = "GatewayAuthenticationError";
-
 /** The summary `name` shared by the gateway-auth rule variants. */
-export const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
+const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
 
 /**
  * The upstream `GatewayAuthenticationError` builds one of exactly three
@@ -18,7 +15,7 @@ export const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication fail
  * fallback.
  */
 const gatewayAuthenticationFailure = anyOf(
-  nameIs(GATEWAY_AUTHENTICATION_ERROR_NAME),
+  nameIs("GatewayAuthenticationError"),
   messageMatches(/AI Gateway authentication/i),
 );
 
