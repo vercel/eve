@@ -2,6 +2,7 @@ import { setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 
 import {
   createDevDiagnosticDump,
+  type CreateDevDiagnosticDumpOptions,
   type DevDiagnosticDump,
   type DevSessionStats,
 } from "./diagnostic-dump.js";
@@ -47,9 +48,12 @@ export interface DevDiagnostics {
  * Rejects when the log cannot be created (callers run without
  * diagnostics rather than crash the TUI).
  */
-export async function createDevDiagnostics(appRoot: string): Promise<DevDiagnostics> {
+export async function createDevDiagnostics(
+  appRoot: string,
+  options: CreateDevDiagnosticDumpOptions = {},
+): Promise<DevDiagnostics> {
   const sink = await createDevDiagnosticSink(appRoot);
-  const dump = createDevDiagnosticDump(appRoot, sink.path);
+  const dump = createDevDiagnosticDump(appRoot, sink.path, options);
   return new DevDiagnosticsRecorder(sink, dump);
 }
 

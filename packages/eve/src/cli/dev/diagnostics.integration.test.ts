@@ -8,18 +8,32 @@ import { createLogger } from "#internal/logging.js";
 
 import { createDevDiagnostics } from "./diagnostics.js";
 
+const STUB_ENVIRONMENT = {
+  eveVersion: "0.0.0-test",
+  nodeVersion: process.version,
+  platform: "test",
+};
+
 describe("createDevDiagnostics", () => {
   const roots: string[] = [];
 
   afterEach(async () => {
-    await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
+    await Promise.all(
+      roots.map((root) =>
+        rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
+      ),
+    );
     roots.length = 0;
   });
 
   async function makeRecorder() {
     const root = await mkdtemp(join(tmpdir(), "eve-diagnostics-recorder-"));
     roots.push(root);
-    const diagnostics = await createDevDiagnostics(root);
+    // Injected environment: the real collector spawns a `vercel --version`
+    // child whose lingering handle makes Windows tmp-dir cleanup flaky.
+    const diagnostics = await createDevDiagnostics(root, {
+      environment: () => Promise.resolve(STUB_ENVIRONMENT),
+    });
     return { root, diagnostics };
   }
 

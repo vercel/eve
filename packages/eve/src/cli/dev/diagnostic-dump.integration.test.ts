@@ -23,7 +23,11 @@ describe("createDevDiagnosticDump", () => {
   const roots: string[] = [];
 
   afterEach(async () => {
-    await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
+    await Promise.all(
+      roots.map((root) =>
+        rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
+      ),
+    );
     roots.length = 0;
   });
 
@@ -58,7 +62,10 @@ describe("createDevDiagnosticDump", () => {
 
     expect(dump.path).toBe(join(root, ".eve", "logs", "dev-2026-07-17T12-00-00.000Z-123.dump"));
     expect(dump.displayPath).toBe(".eve/logs/dev-2026-07-17T12-00-00.000Z-123.dump");
-    expect((await stat(dump.path)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      // POSIX permission bits only: Windows reports 0o666 and uses ACLs.
+      expect((await stat(dump.path)).mode & 0o777).toBe(0o600);
+    }
 
     const content = await readFile(dump.path, "utf8");
     expect(JSON.parse(content)).toEqual({

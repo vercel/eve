@@ -10,7 +10,11 @@ describe("createDevDiagnosticSink", () => {
   const roots: string[] = [];
 
   afterEach(async () => {
-    await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
+    await Promise.all(
+      roots.map((root) =>
+        rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
+      ),
+    );
     roots.length = 0;
   });
 
@@ -27,8 +31,6 @@ describe("createDevDiagnosticSink", () => {
     await sink.close();
 
     expect(sink.displayPath).toBe(".eve/logs/dev-2026-07-15T12-00-00.000Z-123.log");
-    expect((await stat(join(root, ".eve", "logs"))).mode & 0o777).toBe(0o700);
-    expect((await stat(sink.path)).mode & 0o777).toBe(0o600);
     const content = await readFile(sink.path, "utf8");
     expect(content.indexOf("first")).toBeLessThan(content.indexOf("second"));
 
@@ -49,6 +51,24 @@ describe("createDevDiagnosticSink", () => {
     ]);
     expect(lines[0]!.startsWith('{"at":"2026-07-15T12:00:00.000Z","source":"stderr"')).toBe(true);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "restricts the log directory and file to the owner",
+    async () => {
+      // POSIX permission bits only: Windows reports 0o666 regardless of the
+      // modes passed to mkdir/open, and relies on ACLs instead.
+      const root = await mkdtemp(join(tmpdir(), "eve-diagnostics-"));
+      roots.push(root);
+      const sink = await createDevDiagnosticSink(root, {
+        now: () => new Date("2026-07-15T12:00:00.000Z"),
+        pid: 123,
+      });
+      await sink.close();
+
+      expect((await stat(join(root, ".eve", "logs"))).mode & 0o777).toBe(0o700);
+      expect((await stat(sink.path)).mode & 0o777).toBe(0o600);
+    },
+  );
 
   it("uses exclusive creation for deterministic name collisions", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-diagnostics-"));
