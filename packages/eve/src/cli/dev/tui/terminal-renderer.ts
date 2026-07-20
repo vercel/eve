@@ -3681,10 +3681,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       ghost: "",
       maxRows: 4,
     };
-    // The pending prompt wears the same quiet `›` as the idle one. Readiness
-    // is therefore NOT detectable from the glyph — MockScreen's
+    // An empty pending prompt wears the same quiet `›` as the idle one; a
+    // typed draft flips to a DIM `❯` (inert — Enter does nothing yet).
+    // Readiness is therefore NOT detectable from the glyph — MockScreen's
     // `waitForIdlePrompt` discriminates by the live turn bar's absence.
     if (this.#streamDraft.text.length === 0) prompt.placeholder = "";
+    prompt.inert = true;
     rows.push(...promptInputRows(prompt));
   }
 
@@ -4091,6 +4093,8 @@ interface PromptInputRowsInput {
    * quiet mark with a bare caret (the post-first-message state).
    */
   placeholder?: string;
+  /** Anchored-but-inert prompt (streaming turn): typed drafts show a dim `❯`. */
+  inert?: boolean;
 }
 
 /**
@@ -4109,6 +4113,7 @@ function promptInputRows({
   ghost,
   maxRows,
   placeholder,
+  inert,
 }: PromptInputRowsInput): string[] {
   const c = theme.colors;
 
@@ -4140,7 +4145,9 @@ function promptInputRows({
     0,
     Math.min(layout.caretRow - visibleCount + 1, layout.rows.length - visibleCount),
   );
-  const promptGlyph = c.cyan(theme.glyph.prompt);
+  // An inert prompt's typed draft flips the mark like the active prompt,
+  // but keeps it dim: the state is legible without claiming readiness.
+  const promptGlyph = inert === true ? c.dim(theme.glyph.prompt) : c.cyan(theme.glyph.prompt);
   const ellipsis = c.dim(theme.glyph.ellipsis);
   // Reserve the gutter and the block cursor's trailing cell at end-of-line.
   // The gutter sits at column 0, sharing a column with the conversation

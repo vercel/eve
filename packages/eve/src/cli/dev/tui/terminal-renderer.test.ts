@@ -1291,6 +1291,36 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("shows a typed mid-stream draft behind a dim inert prompt mark", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "hello", continueSession: true },
+    );
+    await Promise.resolve();
+
+    // Empty: the quiet idle mark.
+    expect(screen.snapshot()).toContain("›");
+
+    // A typed draft flips to the active mark, but dim — Enter is inert, so
+    // the cyan ready state would overclaim.
+    input.type("next question");
+    await screen.waitForText("❯ next question");
+    expect(screen.rawOutput()).toContain("\x1b[2m❯\x1b[22m");
+    expect(screen.rawOutput()).not.toContain("\x1b[36m❯");
+
+    streamController?.close();
+    await rendering;
+    renderer.shutdown();
+  });
+
   it("never submits an empty or whitespace-only prompt", async () => {
     const { input, renderer } = makeRenderer();
 
