@@ -3604,6 +3604,28 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return rows;
     }
 
+    // A draft carried out of a finished turn renders ACTIVE immediately —
+    // the dim inert mark must not linger once the agent has returned. Keys
+    // pressed in this gap buffer and replay into the next prompt, so the
+    // cyan mark is honest.
+    if (this.#streamDraft.text.length > 0) {
+      rows.push("");
+      rows.push(
+        ...promptInputRows({
+          text: this.#streamDraft.text,
+          cursor: this.#streamDraft.cursor,
+          width,
+          theme: this.#theme,
+          caretVisible: true,
+          isCommand: false,
+          ghost: "",
+          maxRows: 4,
+        }),
+      );
+      this.#pushStatusLine(rows, width);
+      return rows;
+    }
+
     // Interactive prompts (approvals, connection auth), the flowless setup
     // spinner, and transitional states render as a quiet dot-led status row.
     const statusText = this.#flowlessStatus ?? (this.#status.length > 0 ? this.#status : "Ready");

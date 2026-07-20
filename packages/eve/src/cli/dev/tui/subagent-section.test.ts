@@ -71,11 +71,12 @@ describe("subagent section rendering", () => {
       renderBlockLines(group.display, 78, theme, { activityPulse: "▪" }).map(stripAnsi),
     );
 
+    // A live section shows only its most recently active row; everything
+    // earlier waits behind the elision (the completed footnote carries the
+    // full counted story).
     expect(rows).toEqual([
       "  ※ subagent(self:3)",
-      "  │  ⨯ Fetch url99",
-      "  │    └ Response too large (exceeds 5 MB limit).",
-      "  │  ▪ Searched 10 queries, Fetched 3 URLs, Made 1 tool call",
+      "  │  … (15 more)",
       "  └ # Vercel eve competitive capability comparison",
     ]);
   });

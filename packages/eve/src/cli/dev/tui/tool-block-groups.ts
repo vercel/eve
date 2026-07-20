@@ -201,11 +201,11 @@ function partitionRunByStatus(run: readonly Block[]): ToolBlockDisplayGroup[] {
 }
 
 /**
- * One subagent section renders at most this many of its most recently
- * active child rows; earlier ones collapse into a single `… (N more)` line
- * under the header.
+ * A live subagent section shows only its most recently active child row;
+ * everything earlier collapses into a single `… (N more)` line under the
+ * header. The completed section's counted footnote carries the full story.
  */
-export const maxVisibleSubagentRunChildren = 3;
+export const maxVisibleSubagentRunChildren = 1;
 
 /**
  * An ordinary captured write. In-place log status blocks (the dev rebuild

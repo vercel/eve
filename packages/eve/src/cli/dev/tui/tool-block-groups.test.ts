@@ -207,15 +207,11 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([subagentHeader("c1", "researcher"), ...run, step]);
 
-    // header, condensed row, then the message closing the rail.
+    // header, the condensed run elided behind the stand-in, then the
+    // message (the newest row) closing the rail.
     expect(groups).toHaveLength(3);
     expect(groups[1]?.members).toEqual(run);
-    expect(groups[1]?.display).toMatchObject({
-      kind: "subagent-tool",
-      status: "done",
-      // Top three kinds by count, then "and more" for the rest.
-      title: "Ran 1 command, Read 1 file, Wrote 1 file, and more",
-    });
+    expect(groups[1]?.display).toMatchObject({ kind: "subagent-step", elided: 4 });
     expect(groups[2]?.members).toEqual([step]);
     expect(groups[2]?.display).toEqual({ ...step, closesRail: true });
   });
@@ -262,7 +258,7 @@ describe("groupToolBlocksForDisplay", () => {
 
     expect(groups.map((group) => group.display)).toEqual([
       ha,
-      a1,
+      { kind: "subagent-step", depth: 1, live: false, elided: 1 },
       { ...a2, closesRail: true },
       hb,
       { ...b1, closesRail: true },

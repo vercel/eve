@@ -1133,9 +1133,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     upsert(2, "done");
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Searched q1");
+    // The window is the single most recently active call — c2 settled last.
     expect(snapshot).toContain("Ran cmd2");
-    expect(snapshot).toContain("(5 more)");
+    expect(snapshot).toContain("(7 more)");
     expect(snapshot).not.toContain("cmd6");
     renderer.shutdown();
   });
@@ -1161,8 +1161,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
       output: { ok: true },
     });
 
-    // Mid-flight the section shows its children and closes on a bare corner.
-    expect(screen.snapshot()).toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
+    // Mid-flight the section shows its newest child and closes on a bare
+    // corner (the tool arrived after the message, so it holds the window).
+    expect(screen.snapshot()).toContain("Fetched https://one.example");
     expect(screen.snapshot()).not.toContain("Done");
 
     renderer.completeSubagent({ callId: "s1" });
@@ -1209,7 +1210,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-3");
   });
 
-  it("windows one subagent's children to the newest five rows", async () => {
+  it("windows one subagent's children to the most recent row", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     for (let step = 1; step <= 8; step += 1) {
@@ -1227,11 +1228,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     expect(countOccurrences(snapshot, "※ subagent(echo-marker)")).toBe(1);
-    // A lone call carries no ordinal.
+    // A lone call carries no ordinal; only the newest child row shows.
     expect(snapshot).not.toContain("#1");
-    expect(snapshot).toContain("(5 more)");
-    expect(snapshot).not.toContain("SUBAGENT_TOKEN=token-5");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=token-6");
+    expect(snapshot).toContain("(7 more)");
+    expect(snapshot).not.toContain("SUBAGENT_TOKEN=token-7");
     expect(snapshot).toContain("SUBAGENT_TOKEN=token-8");
   });
 
