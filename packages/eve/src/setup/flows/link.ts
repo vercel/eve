@@ -1,6 +1,7 @@
 import { interactiveAsker, withAnswers } from "../ask.js";
 import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import {
+  hasEnvValue,
   resolveGatewayCredential,
   type GatewayCredentialResolution,
 } from "#internal/resolve-model-endpoint-status.js";
@@ -186,12 +187,11 @@ export async function runLinkFlow(input: {
   // The link provisioned OIDC, but reporting it while a key shadows it
   // would claim a credential that never authenticates a call — the one
   // precedence authority decides what actually won.
-  const shellKey = deps.env[AI_GATEWAY_API_KEY_ENV_VAR];
   const evidence: {
     apiKeyInEnv: boolean;
     apiKeyFile?: string;
     oidcFile?: string;
-  } = { apiKeyInEnv: shellKey !== undefined && shellKey.trim().length > 0 };
+  } = { apiKeyInEnv: hasEnvValue(deps.env[AI_GATEWAY_API_KEY_ENV_VAR]) };
   if (gatewayKeyFile !== undefined) evidence.apiKeyFile = gatewayKeyFile;
   if (oidcFile !== undefined) evidence.oidcFile = oidcFile;
   const resolution = resolveGatewayCredential(evidence);

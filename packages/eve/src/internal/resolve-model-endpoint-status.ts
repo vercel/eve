@@ -13,6 +13,11 @@ export interface GatewayCredentialPresence {
   readonly oidc: boolean;
 }
 
+/** True when an environment value is present and non-blank. */
+export function hasEnvValue(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0;
+}
+
 /** Where a winning gateway API key was observed. */
 export type GatewayCredentialSource = { kind: "env-file"; path: string } | { kind: "shell" };
 

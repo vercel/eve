@@ -3609,19 +3609,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // pressed in this gap buffer and replay into the next prompt, so the
     // cyan mark is honest.
     if (this.#streamDraft.text.length > 0) {
-      rows.push("");
-      rows.push(
-        ...promptInputRows({
-          text: this.#streamDraft.text,
-          cursor: this.#streamDraft.cursor,
-          width,
-          theme: this.#theme,
-          caretVisible: true,
-          isCommand: false,
-          ghost: "",
-          maxRows: 4,
-        }),
-      );
+      this.#pushDraftPrompt(rows, width, { inert: false });
       this.#pushStatusLine(rows, width);
       return rows;
     }
@@ -3692,6 +3680,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #pushStreamingPrompt(rows: string[], width: number): void {
     if (!this.#streamDraftActive) return;
+    // An empty pending prompt wears the same quiet `›` as the idle one; a
+    // typed draft flips to a DIM `❯` (inert — Enter does nothing yet).
+    // Readiness is therefore NOT detectable from the glyph — MockScreen's
+    // `waitForIdlePrompt` discriminates by the live turn bar's absence.
+    this.#pushDraftPrompt(rows, width, { inert: true });
+  }
+
+  /** The `#streamDraft` rendered as a prompt row — inert mid-turn, active in
+   * the gap between the turn ending and the next prompt arming. */
+  #pushDraftPrompt(rows: string[], width: number, options: { inert: boolean }): void {
     rows.push("");
     const prompt: Parameters<typeof promptInputRows>[0] = {
       text: this.#streamDraft.text,
@@ -3702,13 +3700,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       isCommand: false,
       ghost: "",
       maxRows: 4,
+      inert: options.inert,
     };
-    // An empty pending prompt wears the same quiet `›` as the idle one; a
-    // typed draft flips to a DIM `❯` (inert — Enter does nothing yet).
-    // Readiness is therefore NOT detectable from the glyph — MockScreen's
-    // `waitForIdlePrompt` discriminates by the live turn bar's absence.
-    if (this.#streamDraft.text.length === 0) prompt.placeholder = "";
-    prompt.inert = true;
+    if (options.inert && this.#streamDraft.text.length === 0) prompt.placeholder = "";
     rows.push(...promptInputRows(prompt));
   }
 

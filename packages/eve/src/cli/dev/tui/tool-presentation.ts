@@ -56,6 +56,11 @@ interface BuiltinToolCopy {
   readonly pluralNoun: string;
 }
 
+/** Copy shared by the full presenters and their preparing placeholders. */
+const WRITE_FILE_VERB = "Write";
+const DELEGATE_VERB = "Delegate";
+const FINAL_OUTPUT_TITLE = "Return final output";
+
 /**
  * Builtin tools whose calls read as one verb plus one argument. Runs group
  * by tool name; equal copy across two tools only merges their entries in a
@@ -169,7 +174,7 @@ function presentWriteFileTool(
   );
 
   return {
-    title: `Write ${salientLine(write.path) ?? write.path}`,
+    title: `${WRITE_FILE_VERB} ${salientLine(write.path) ?? write.path}`,
     doneTitle: `Wrote ${salientLine(write.path) ?? write.path}`,
     subtitle: "",
     summarizeResult: () => undefined,
@@ -214,7 +219,7 @@ export function presentTool(
     // message rides as the quiet subtitle. The block is transient — the
     // nested subagent section replaces it once the child registers.
     return {
-      title: `Delegate ${baseName}`,
+      title: `${DELEGATE_VERB} ${baseName}`,
       doneTitle: `Delegated ${baseName}`,
       subtitle: salientArg(input, "message") ?? "",
       summarizeResult: () => undefined,
@@ -223,7 +228,7 @@ export function presentTool(
   if (baseName === "final_output") {
     // Task-mode terminal signal (subagent streams): its input is the
     // structured result itself, kept behind the expanded `--tools full` view.
-    return { title: "Return final output", subtitle: "", summarizeResult: () => undefined };
+    return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
 
   const copy = BUILTIN_TOOL_COPY[baseName];
@@ -267,14 +272,18 @@ export function presentPreparingTool(
 ): ToolPresentation {
   const baseName = toolBaseName(toolName);
   if (baseName === "final_output") {
-    return { title: "Return final output", subtitle: "", summarizeResult: () => undefined };
+    return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
   if (context?.isSubagent === true) {
     // A named subagent's tool carries the delegation target in its name —
     // showable before the message finishes streaming.
-    return { title: `Delegate ${baseName} …`, subtitle: "", summarizeResult: () => undefined };
+    return {
+      title: `${DELEGATE_VERB} ${baseName} …`,
+      subtitle: "",
+      summarizeResult: () => undefined,
+    };
   }
-  const verb = baseName === "write_file" ? "Write" : BUILTIN_TOOL_COPY[baseName]?.verb;
+  const verb = baseName === "write_file" ? WRITE_FILE_VERB : BUILTIN_TOOL_COPY[baseName]?.verb;
   return {
     title: verb === undefined ? toolName : `${verb} …`,
     subtitle: verb === undefined ? "preparing…" : "",

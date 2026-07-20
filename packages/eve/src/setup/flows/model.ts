@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import {
+  hasEnvValue,
   resolveGatewayCredential,
   type GatewayCredentialResolution,
 } from "#internal/resolve-model-endpoint-status.js";
@@ -309,9 +310,8 @@ export async function detectModelProviderStatus(
     if (identity.teamName !== undefined) status.teamName = identity.teamName;
     return status;
   }
-  const shellKey = env[AI_GATEWAY_API_KEY_ENV_VAR];
   const evidence: { apiKeyInEnv: boolean; apiKeyFile?: string; oidcFile?: string } = {
-    apiKeyInEnv: shellKey !== undefined && shellKey.trim().length > 0,
+    apiKeyInEnv: hasEnvValue(env[AI_GATEWAY_API_KEY_ENV_VAR]),
   };
   if (gatewayKeyFile !== undefined) evidence.apiKeyFile = gatewayKeyFile;
   if (oidcFile !== undefined) evidence.oidcFile = oidcFile;
