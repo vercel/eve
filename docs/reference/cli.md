@@ -251,4 +251,4 @@ Related: [Project layout](./project-layout) · [instrumentation.ts](../guides/in
 
 - [Project layout](./project-layout): what `eve info` discovers
 - [instrumentation.ts](../guides/instrumentation): tracing and the error catalog
-- [Deployment](../guides/deployment): `eve build` and `eve start` in production
+- [Deployment](../guides/deployment/overview): `eve build` and `eve start` in production
