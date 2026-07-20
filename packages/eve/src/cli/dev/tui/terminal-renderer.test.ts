@@ -1085,6 +1085,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("SUBAGENT_TOKEN=token-16");
   });
 
+  it("never submits an empty or whitespace-only prompt", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.enter();
+    input.type("   ");
+    input.enter();
+    // The reader is still armed: only real content resolves it.
+    input.type("hello");
+    input.enter();
+    expect(await prompt).toBe("   hello");
+    renderer.shutdown();
+  });
+
   it("recalls a previous prompt with the up arrow", async () => {
     const { input, renderer } = makeRenderer();
 
@@ -3709,6 +3723,8 @@ describe("TerminalRenderer status line", () => {
     expect(statusRow).not.toContain("↑ 0");
     expect(statusRow).not.toContain("/deploy pending");
 
+    // An empty Enter is inert; the reader needs content to settle.
+    input.type("done");
     input.enter();
     await prompt;
     renderer.shutdown();

@@ -643,6 +643,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
               selected !== undefined && parsePromptCommand(editor.text) === null
                 ? typeaheadCompletion(selected).trimEnd()
                 : editor.text;
+            // An empty (or whitespace-only) buffer never submits.
+            if (prompt.trim().length === 0) break;
             this.#typeahead = undefined;
             this.#promptHistory.add(prompt);
             this.#inputActive = false;
