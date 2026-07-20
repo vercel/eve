@@ -24,7 +24,7 @@ import type {
 import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 export interface AgentInfoSource {
@@ -172,6 +172,8 @@ export interface AgentInfoResponse {
       readonly contextWindowTokens?: number;
       readonly id: string;
       readonly providerOptions?: unknown;
+      /** The agent's authored reasoning effort, forwarded to the model call. */
+      readonly reasoning?: AgentReasoningDefinition;
       readonly source?: AgentInfoSource;
       readonly routing?: ModelRouting;
       readonly endpoint?: ModelEndpointStatus;
@@ -230,6 +232,7 @@ export function buildAgentInfoResponse(
         contextWindowTokens: agent.config.model.contextWindowTokens,
         id: agent.config.model.id,
         providerOptions: agent.config.model.providerOptions,
+        reasoning: agent.config.reasoning,
         source: agent.config.model.source ? toSource(agent.config.model.source) : undefined,
       },
       name: agent.config.name,

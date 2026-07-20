@@ -10,7 +10,6 @@ afterEach(() => {
 function createSession(
   state: SessionState = { streamIndex: 0 },
   options: {
-    readonly maxReconnectAttempts?: number;
     readonly preserveCompletedSessions?: boolean;
     readonly redirect?: "error" | "follow" | "manual";
     readonly resolveHeaders?: () => Promise<Headers>;
@@ -18,13 +17,34 @@ function createSession(
 ) {
   const context: ConstructorParameters<typeof ClientSession>[0] = {
     host: "https://eve.test",
-    maxReconnectAttempts: options.maxReconnectAttempts ?? 0,
     preserveCompletedSessions: options.preserveCompletedSessions ?? false,
     redirect: options.redirect,
     resolveHeaders: options.resolveHeaders ?? (async () => new Headers()),
   };
 
   return new ClientSession(context, state);
+}
+
+/**
+ * Consumes an event stream under fake timers, flushing reconnect backoff
+ * sleeps so tests exercising many disconnects stay fast.
+ */
+async function collectEventTypes(events: AsyncIterable<{ type: string }>): Promise<string[]> {
+  const eventTypes: string[] = [];
+  let settled = false;
+  const consumed = (async () => {
+    for await (const event of events) {
+      eventTypes.push(event.type);
+    }
+  })().finally(() => {
+    settled = true;
+  });
+
+  while (!settled) {
+    await vi.advanceTimersByTimeAsync(1_000);
+  }
+  await consumed;
+  return eventTypes;
 }
 
 function createAcceptedResponse() {
@@ -389,10 +409,7 @@ describe("ClientSession", () => {
         }),
       );
     });
-    const session = createSession(
-      { sessionId: "session_1", streamIndex: 0 },
-      { maxReconnectAttempts: 3 },
-    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
 
     for await (const _event of session.stream({ startIndex: -1 })) {
       // Drain until the simulated disconnect.
@@ -444,19 +461,112 @@ describe("ClientSession", () => {
         },
       ]);
     });
-    const session = createSession(undefined, { maxReconnectAttempts: 2 });
+    const session = createSession();
 
-    const eventTypes: string[] = [];
-    for await (const event of await session.send("first")) {
-      eventTypes.push(event.type);
+    vi.useFakeTimers();
+    try {
+      const eventTypes = await collectEventTypes(await session.send("first"));
+      expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+    } finally {
+      vi.useRealTimers();
     }
 
-    expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(streamUrls.map((url) => new URL(url).searchParams.get("startIndex"))).toEqual([
       null,
       "1",
       "1",
     ]);
+  });
+
+  it("preserves the session cursor when a turn stream is aborted mid-flight", async () => {
+    const encoder = new TextEncoder();
+    const abortController = new AbortController();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      const signal = init?.signal;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+            );
+            signal?.addEventListener("abort", () => {
+              controller.error(new DOMException("The operation was aborted.", "AbortError"));
+            });
+          },
+        }),
+      );
+    });
+    const session = createSession();
+
+    const eventTypes: string[] = [];
+    for await (const event of await session.send({
+      message: "first",
+      signal: abortController.signal,
+    })) {
+      eventTypes.push(event.type);
+      abortController.abort();
+    }
+
+    expect(eventTypes).toEqual(["turn.started"]);
+    expect(session.state).toEqual({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 1,
+    });
+  });
+
+  it("keeps session.stream() boundary-blind across subsequent turns", async () => {
+    const streamStartIndices: Array<string | null> = [];
+    let streamRequest = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      streamStartIndices.push(new URL(url).searchParams.get("startIndex"));
+      streamRequest += 1;
+
+      if (streamRequest === 1) {
+        return createStreamResponse([
+          {
+            type: "session.waiting",
+            data: { continuationToken: "eve:first", wait: "next-user-message" },
+          },
+        ]);
+      }
+
+      return createStreamResponse([{ type: "turn.started", data: {} }]);
+    });
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+    const abortController = new AbortController();
+
+    vi.useFakeTimers();
+    try {
+      const eventTypes: string[] = [];
+      let settled = false;
+      const consumed = (async () => {
+        for await (const event of session.stream({ signal: abortController.signal })) {
+          eventTypes.push(event.type);
+          if (event.type === "turn.started") abortController.abort();
+        }
+      })().finally(() => {
+        settled = true;
+      });
+      while (!settled) await vi.advanceTimersByTimeAsync(1_000);
+      await consumed;
+      expect(eventTypes).toEqual(["session.waiting", "turn.started"]);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(streamStartIndices).toEqual([null, "1"]);
+    expect(session.state).toEqual({
+      continuationToken: "eve:first",
+      sessionId: "session_1",
+      streamIndex: 2,
+    });
   });
 });

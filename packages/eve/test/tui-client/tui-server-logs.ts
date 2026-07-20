@@ -42,7 +42,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
 
     // Submit a prompt, then emit a foreign stderr write before the turn
     // renders, the order the in-process server produces it in.
@@ -50,12 +50,16 @@ void (async () => {
     input.enter();
     console.warn(WARNING);
 
-    await screen.waitForText("stderr ·", 5_000);
+    await screen.waitForText("○ stderr", 5_000);
     await screen.waitForText(WARNING, 5_000);
 
-    // The warning must live inside the server-log lane, not shred the prompt.
+    // The warning must ride the section's rail, not shred the prompt.
     const snapshot = screen.snapshot();
-    if (!snapshot.split("\n").some((line) => line.includes(WARNING) && line.includes("stderr ·"))) {
+    if (
+      !snapshot
+        .split("\n")
+        .some((line) => line.includes(WARNING) && line.trimStart().startsWith("│"))
+    ) {
       throw new Error(`warning was not rendered in the server-log lane:\n${snapshot}`);
     }
 
@@ -70,7 +74,7 @@ void (async () => {
       );
     }
 
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     input.type("/exit");
     input.enter();
     await runPromise;

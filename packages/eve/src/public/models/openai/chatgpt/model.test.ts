@@ -88,6 +88,55 @@ describe("Codex model", () => {
       "msg_070f78d118bbc2a4016a4565689d4c8190b455e3c0b74eaf90",
     );
   });
+
+  it("shapes the request the way the Codex backend accepts", async () => {
+    const requests: RecordedRequest[] = [];
+    const model = createCodexSubscriptionModel(
+      { model: "gpt-5.2-codex" },
+      {
+        codexApiEndpoint: CODEX_ENDPOINT,
+        fetch: createRecordingFetch(requests),
+        readCredentials: async () => ({
+          kind: "chatgpt",
+          accessToken: createUnsignedJwt({ exp: 2_000_000_000 }),
+          authPath: "/home/user/.codex/auth.json",
+          codexHome: "/home/user/.codex",
+        }),
+      },
+    );
+
+    await model.doGenerate({
+      prompt: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: [{ type: "text", text: "hello" }] },
+      ],
+      maxOutputTokens: 1024,
+      temperature: 0.7,
+      topP: 0.9,
+      providerOptions: { openai: { reasoningEffort: "medium", reasoningSummary: "auto" } },
+    });
+
+    expect(requests).toHaveLength(1);
+    const body = JSON.parse(requests[0]?.body ?? "{}");
+    // The Codex backend requires instructions at the top level and rejects a
+    // `developer`/`system` role in the input array.
+    expect(body.instructions).toBe("You are a helpful assistant.");
+    expect(body.input).toEqual([
+      { role: "user", content: [{ type: "input_text", text: "hello" }] },
+    ]);
+    // The system prompt is hoisted, not duplicated into the input array.
+    expect(body.input).not.toContainEqual(expect.objectContaining({ role: "system" }));
+    expect(body.input).not.toContainEqual(expect.objectContaining({ role: "developer" }));
+    // The Codex backend rejects response storage and `max_output_tokens`, and
+    // never accepts sampling parameters for reasoning models.
+    expect(body.store).toBe(false);
+    expect(body.max_output_tokens).toBeUndefined();
+    expect(body.temperature).toBeUndefined();
+    expect(body.top_p).toBeUndefined();
+    // Stateless reasoning requires the encrypted reasoning payload to be
+    // echoed back, so `include` must carry it whenever reasoning is set.
+    expect(body.include).toContain("reasoning.encrypted_content");
+  });
 });
 
 interface RecordedRequest {

@@ -85,7 +85,7 @@ Declare separate authoring and distribution roots and run `eve extension build` 
   },
   "files": ["dist"],
   "peerDependencies": { "eve": "*" },
-  "devDependencies": { "eve": "^x", "typescript": "^x" },
+  "devDependencies": { "eve": "x.y.z", "typescript": "^x" },
   "dependencies": { "zod": "^3" },
   "scripts": { "build": "eve extension build", "prepare": "eve extension build" },
 }
@@ -119,6 +119,19 @@ During local development, `eve dev` automatically rebuilds mounted workspace ext
 ### Dependencies
 
 `eve` is a required wildcard **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. The extension's concrete eve version belongs in `devDependencies` for authoring types and build tooling. npm peer semver does not decide extension compatibility; eve validates the generated per-capability requirements. Do not mark the eve peer optional and do not add eve to regular `dependencies`.
+
+`eve extension init` pins `devDependencies.eve` to the exact eve release that created the scaffold:
+
+```jsonc title="package.json"
+{
+  "peerDependencies": { "eve": "*" },
+  "devDependencies": { "eve": "0.25.0" },
+}
+```
+
+The exact pin makes builds reproducible. Keep it until the extension intentionally upgrades its eve authoring API. `eve extension build` records the capability contracts required by the build, and each consuming eve validates those requirements before it runs the extension.
+
+If the extension must support an older eve release, replace the development pin with that exact version, then typecheck and build with it. Test the same dist against both the oldest and latest supported consumers; rebuilding with each consumer would produce and test different artifacts.
 
 Everything else the extension imports at execution time (SDKs, `zod`, …) goes in `dependencies`; each extension resolves its own versions. Build-only and test-only packages go in `devDependencies`.
 

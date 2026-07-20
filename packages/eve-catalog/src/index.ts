@@ -1,7 +1,7 @@
 /**
  * Shared identity for eve integrations. This package is the single source of
- * truth for *which* integrations exist (channels and connections) and how a
- * connection is wired (transport + model-facing description).
+ * truth for *which* integrations exist (channels, connections, and extensions)
+ * and how a connection is wired (transport + model-facing description).
  *
  * Surface-specific concerns live with their consumer, keyed by {@link
  * IntegrationEntry.slug}: the scaffolder (eve) overlays the
@@ -18,7 +18,7 @@
  */
 
 /** Surface an integration targets. Extend as new kinds are catalogued. */
-export type IntegrationKind = "channel" | "connection";
+export type IntegrationKind = "channel" | "connection" | "extension";
 
 /** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
@@ -170,6 +170,37 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     kind: "channel",
     tagline: "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
     surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "agent-browser",
+    name: "agent-browser",
+    kind: "extension",
+    tagline: "Add browser automation tools backed by agent-browser to an eve agent.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "kernel",
+    name: "Kernel",
+    kind: "connection",
+    tagline: "Launch cloud browsers and automate web interactions through Kernel's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Kernel: launch and automate cloud browsers, run Playwright, and inspect replays.",
+      mcp: { url: "https://mcp.onkernel.com/mcp" },
+    },
+  },
+  {
+    slug: "browser-use",
+    name: "Browser Use",
+    kind: "connection",
+    tagline: "Run managed browser automation tasks through Browser Use's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.",
+      mcp: { url: "https://api.browser-use.com/v3/mcp" },
+    },
   },
   {
     slug: "linear",
@@ -605,4 +636,9 @@ export function connectionEntries(): IntegrationEntry[] {
 /** All channel entries, in catalog order. */
 export function channelEntries(): IntegrationEntry[] {
   return integrationsByKind("channel");
+}
+
+/** All extension entries, in catalog order. */
+export function extensionEntries(): IntegrationEntry[] {
+  return integrationsByKind("extension");
 }

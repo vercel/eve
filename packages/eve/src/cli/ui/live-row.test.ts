@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { stripAnsi, visibleLength } from "#cli/dev/tui/terminal-text.js";
+import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
+import { visibleLength } from "#cli/ui/terminal-text.js";
 
 import { startCliLiveRow } from "./live-row.js";
 
@@ -8,40 +9,42 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function makeScreen(columns = 80) {
+  return new MockScreen({ columns, rows: 10 });
+}
+
+/** The glyph column carries a lit marker on visible pulse steps, a space otherwise. */
+function lit(screen: MockScreen): boolean {
+  return screen.snapshot().trimStart().startsWith("▪");
+}
+
 describe("startCliLiveRow", () => {
   it("starts each indicator at the first sequence step", () => {
     vi.useFakeTimers();
     const sequence = "10100000";
     const makeIndicator = () => {
-      const writes: string[] = [];
+      const screen = makeScreen();
       const progress = startCliLiveRow(
         { log: vi.fn() },
-        {
-          output: { columns: 80, isTTY: true, write: (chunk) => writes.push(chunk) },
-          pulseSequence: sequence,
-        },
+        { output: screen, pulseSequence: sequence },
       );
-      return { progress, writes };
+      return { progress, screen };
     };
-    const lit = (writes: string[]): boolean =>
-      stripAnsi(writes.at(-1) ?? "")
-        .trimStart()
-        .startsWith("▪");
 
     const first = makeIndicator();
     first.progress.update("First");
-    expect(lit(first.writes)).toBe(true);
+    expect(lit(first.screen)).toBe(true);
 
     vi.advanceTimersByTime(125);
-    expect(lit(first.writes)).toBe(false);
+    expect(lit(first.screen)).toBe(false);
 
     const second = makeIndicator();
     second.progress.update("Second");
-    expect(lit(second.writes)).toBe(true);
+    expect(lit(second.screen)).toBe(true);
 
     vi.advanceTimersByTime(125);
-    expect(lit(first.writes)).toBe(true);
-    expect(lit(second.writes)).toBe(false);
+    expect(lit(first.screen)).toBe(true);
+    expect(lit(second.screen)).toBe(false);
 
     first.progress.stop();
     second.progress.stop();
@@ -50,53 +53,39 @@ describe("startCliLiveRow", () => {
 
   it("renders installer detail inline without a second animation", () => {
     vi.useFakeTimers();
-    const writes: string[] = [];
+    const screen = makeScreen();
     const progress = startCliLiveRow(
       { log: vi.fn() },
-      {
-        output: {
-          columns: 80,
-          isTTY: true,
-          write: (chunk) => writes.push(chunk),
-        },
-        pulseSequence: "00000000",
-      },
+      { output: screen, pulseSequence: "00000000" },
     );
-    const rendered = (): string => stripAnsi(writes.at(-1) ?? "");
 
     progress.update("Preparing project");
-    expect(rendered()).toContain("Preparing project...");
+    expect(screen.snapshot()).toBe("  Preparing project...");
 
     progress.update("Installing dependencies", "npm install");
-    expect(rendered()).toContain("Installing dependencies npm install");
-    expect(rendered()).not.toContain(" · ");
-    expect(rendered()).not.toContain("dependencies...");
-    const writesAfterUpdate = writes.length;
+    // The detail replaces the row in place — one screen line, no stranded row.
+    expect(screen.snapshot()).toBe("  Installing dependencies npm install");
 
+    const rawAfterUpdate = screen.rawOutput();
     vi.advanceTimersByTime(600);
-    expect(writes).toHaveLength(writesAfterUpdate);
+    // A silent pulse sequence never repaints, so nothing more is written.
+    expect(screen.rawOutput()).toBe(rawAfterUpdate);
 
     progress.stop();
+    expect(screen.snapshot()).toBe("");
     expect(vi.getTimerCount()).toBe(0);
   });
 
   it("collapses whitespace before fitting a progress row", () => {
     vi.useFakeTimers();
-    const writes: string[] = [];
+    const screen = makeScreen(20);
     const progress = startCliLiveRow(
       { log: vi.fn() },
-      {
-        output: {
-          columns: 20,
-          isTTY: true,
-          write: (chunk) => writes.push(chunk),
-        },
-        pulseSequence: "00000000",
-      },
+      { output: screen, pulseSequence: "00000000" },
     );
 
     progress.update("X\nY", "\u001B]0;title\u0007aa\t\u001B[31mbbbbbbb\u001B[0m");
-    const row = stripAnsi(writes.at(-1) ?? "");
+    const row = screen.snapshot();
     expect(row).toContain("X Y aa bbbbbbb");
     expect(row).not.toContain("title");
     expect(row).not.toContain("\n");
@@ -109,28 +98,20 @@ describe("startCliLiveRow", () => {
 
   it("plays a 16-step sequence over the same one-second loop", () => {
     vi.useFakeTimers();
-    const writes: string[] = [];
+    const screen = makeScreen();
     const progress = startCliLiveRow(
       { log: vi.fn() },
-      {
-        output: {
-          columns: 80,
-          isTTY: true,
-          write: (chunk) => writes.push(chunk),
-        },
-        pulseSequence: "1000000010000000",
-      },
+      { output: screen, pulseSequence: "1000000010000000" },
     );
-    const rendered = (): string => stripAnsi(writes.at(-1) ?? "");
 
     progress.update("Preparing project");
-    expect(rendered()).toContain("▪ Preparing project...");
+    expect(screen.snapshot()).toBe("▪ Preparing project...");
 
     vi.advanceTimersByTime(63);
-    expect(rendered()).toContain("  Preparing project...");
+    expect(screen.snapshot()).toBe("  Preparing project...");
 
     vi.advanceTimersByTime(437);
-    expect(rendered()).toContain("▪ Preparing project...");
+    expect(screen.snapshot()).toBe("▪ Preparing project...");
 
     progress.stop();
     expect(vi.getTimerCount()).toBe(0);
@@ -145,24 +126,18 @@ describe("startCliLiveRow", () => {
 
   it("keeps the 00000000 sequence silent", () => {
     vi.useFakeTimers();
-    const writes: string[] = [];
+    const screen = makeScreen();
     const progress = startCliLiveRow(
       { log: vi.fn() },
-      {
-        output: {
-          columns: 80,
-          isTTY: true,
-          write: (chunk) => writes.push(chunk),
-        },
-        pulseSequence: "00000000",
-      },
+      { output: screen, pulseSequence: "00000000" },
     );
 
     progress.update("Preparing project");
-    expect(stripAnsi(writes.at(-1) ?? "")).toContain("  Preparing project...");
+    expect(screen.snapshot()).toBe("  Preparing project...");
 
+    const rawAfterUpdate = screen.rawOutput();
     vi.advanceTimersByTime(1000);
-    expect(writes).toHaveLength(1);
+    expect(screen.rawOutput()).toBe(rawAfterUpdate);
 
     progress.stop();
     expect(vi.getTimerCount()).toBe(0);
@@ -170,40 +145,32 @@ describe("startCliLiveRow", () => {
 
   it("follows an eight-step pulse sequence", () => {
     vi.useFakeTimers();
-    const writes: string[] = [];
+    const screen = makeScreen();
     const progress = startCliLiveRow(
       { log: vi.fn() },
-      {
-        output: {
-          columns: 80,
-          isTTY: true,
-          write: (chunk) => writes.push(chunk),
-        },
-        pulseSequence: "10100100",
-      },
+      { output: screen, pulseSequence: "10100100" },
     );
-    const rendered = (): string => stripAnsi(writes.at(-1) ?? "");
 
     progress.update("Preparing project");
-    expect(rendered()).toContain("▪ Preparing project...");
+    expect(screen.snapshot()).toBe("▪ Preparing project...");
 
     vi.advanceTimersByTime(125);
-    expect(rendered()).toContain("  Preparing project...");
+    expect(screen.snapshot()).toBe("  Preparing project...");
 
     vi.advanceTimersByTime(125);
-    expect(rendered()).toContain("▪ Preparing project...");
+    expect(screen.snapshot()).toBe("▪ Preparing project...");
 
     vi.advanceTimersByTime(125);
-    expect(rendered()).toContain("  Preparing project...");
+    expect(screen.snapshot()).toBe("  Preparing project...");
 
     vi.advanceTimersByTime(250);
-    expect(rendered()).toContain("▪ Preparing project...");
+    expect(screen.snapshot()).toBe("▪ Preparing project...");
 
     vi.advanceTimersByTime(125);
-    expect(rendered()).toContain("  Preparing project...");
+    expect(screen.snapshot()).toBe("  Preparing project...");
 
     vi.advanceTimersByTime(250);
-    expect(rendered()).toContain("▪ Preparing project...");
+    expect(screen.snapshot()).toBe("▪ Preparing project...");
 
     progress.stop();
     expect(vi.getTimerCount()).toBe(0);
@@ -214,21 +181,18 @@ describe("startCliLiveRow", () => {
     const previous = process.env.EVE_LOG_LEVEL;
     process.env.EVE_LOG_LEVEL = "debug";
     try {
-      const writes: string[] = [];
+      const screen = makeScreen();
       const logs: string[] = [];
       const progress = startCliLiveRow(
         { log: (message) => logs.push(message) },
-        {
-          output: { columns: 80, isTTY: true, write: (chunk) => writes.push(chunk) },
-          pulseSequence: "10101010",
-        },
+        { output: screen, pulseSequence: "10101010" },
       );
 
       progress.update("Preparing project");
       progress.update("Creating agent");
       vi.advanceTimersByTime(1000);
 
-      expect(writes).toEqual([]);
+      expect(screen.rawOutput()).toBe("");
       expect(logs).toEqual(["Preparing project..."]);
       expect(vi.getTimerCount()).toBe(0);
 

@@ -103,16 +103,7 @@ If you support refresh while an authorization prompt is pending, keep the sessio
 
 ## Reconnection
 
-The client reconnects after transient stream disconnects. It resumes from the number of events already consumed in the current session:
-
-```ts
-const client = new Client({
-  host: "https://agent.example.com",
-  maxReconnectAttempts: 5,
-});
-```
-
-`maxReconnectAttempts` is per turn. The default is `3`.
+HTTP connections can end before a run does. The client reconnects from the number of events already consumed, so long turns continue without replaying events. It stops at a turn boundary, when aborted, or when the stream can no longer make progress.
 
 ## Open a stream manually
 

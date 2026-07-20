@@ -1,3 +1,4 @@
+import { z } from "#compiled/zod/index.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 import { select, type Asker, type SelectOption } from "../ask.js";
@@ -6,18 +7,33 @@ import type { SetupBox } from "../step.js";
 
 const AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/models";
 const FETCH_TIMEOUT_MS = 5000;
-const POPULAR_PROVIDERS: readonly string[] = ["anthropic", "openai", "google"];
 const WEB_SEARCH_TAG = "web-search";
 const MODEL_PROMPT_MESSAGE = "Which model should your agent use?";
 
+const gatewayCatalogModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.string(),
+  owned_by: z.string(),
+  /** Public release timestamp in Unix seconds. Missing values sort last. */
+  released: z.number().finite().optional().catch(undefined),
+  tags: z.array(z.string()).optional().catch(undefined),
+  /** Per-tier pricing; the `service_tiers` keys reveal Fast mode (priority) support. */
+  pricing: z
+    .object({ service_tiers: z.record(z.string(), z.unknown()).optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+});
+
+const gatewayCatalogSchema = z.object({ data: z.array(z.unknown()) }).transform(({ data }) =>
+  data.flatMap((entry) => {
+    const result = gatewayCatalogModelSchema.safeParse(entry);
+    return result.success ? [result.data] : [];
+  }),
+);
+
 /** One model entry from the AI Gateway catalog response. */
-export interface GatewayCatalogModel {
-  id: string;
-  name: string;
-  type: string;
-  owned_by: string;
-  tags?: readonly string[];
-}
+export type GatewayCatalogModel = z.infer<typeof gatewayCatalogModelSchema>;
 
 function modelOption(
   value: string,
@@ -46,14 +62,17 @@ const FALLBACK_MODELS: SelectOption<string>[] = [
   modelOption("google/gemini-3.5", "Gemini 3.5", "Google", false),
 ];
 
+// Brand capitalizations first-letter uppercasing cannot produce.
+const PROVIDER_BRANDS: Record<string, string> = {
+  openai: "OpenAI",
+  xai: "xAI",
+  deepseek: "DeepSeek",
+  moonshotai: "Moonshot AI",
+};
+
 function providerLabel(provider: string): string {
   if (provider.length === 0) return "";
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
-}
-
-function providerPriority(provider: string): number {
-  const index = POPULAR_PROVIDERS.indexOf(provider);
-  return index === -1 ? POPULAR_PROVIDERS.length : index;
+  return PROVIDER_BRANDS[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
 /** Fetches the raw AI Gateway catalog. The default for {@link SelectModelDeps}. */
@@ -65,11 +84,24 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
     const requestSignal =
       signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
     const res = await fetch(AI_GATEWAY_URL, { signal: requestSignal });
-    const json = (await res.json()) as { data: GatewayCatalogModel[] };
-    return json.data;
+    if (!res.ok) throw new Error(`AI Gateway model catalog request failed (${res.status}).`);
+    return parseGatewayCatalog(await res.json());
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Validates a Gateway catalog response. A malformed payload throws (the
+ * picker then falls back to the static shortlist), but a malformed entry is
+ * skipped: one experimental entry shape must not take down the whole catalog.
+ */
+export function parseGatewayCatalog(input: unknown): GatewayCatalogModel[] {
+  const result = gatewayCatalogSchema.safeParse(input);
+  if (!result.success) {
+    throw new Error("AI Gateway returned an invalid model catalog.");
+  }
+  return result.data;
 }
 
 /** Position in the curated shortlist, or its length for everything else. */
@@ -79,49 +111,57 @@ function featuredPriority(id: string): number {
 }
 
 /**
- * Builds the picker options from the catalog (filtered to language models with
- * the `web-search` tag), with the curated shortlist first in its own order and
- * the rest sorted popular providers first. Catalog entries on the shortlist
- * are marked `featured`, so the picker opens on just them and scrolling or
- * filtering reaches the rest. Falls back to a static shortlist when the fetch
- * fails or yields nothing.
+ * Builds picker options from a fetched catalog (filtered to language models
+ * with the `web-search` tag), with the curated shortlist first in its own
+ * order and the rest sorted newest release first. Catalog entries on the
+ * shortlist are marked `featured`, so a searchable picker opens on just them
+ * and scrolling or filtering reaches the rest. Falls back to a static
+ * shortlist when the catalog is missing or yields nothing.
  */
+export function modelOptionsFromCatalog(
+  catalog: readonly GatewayCatalogModel[] | undefined,
+): SelectOption<string>[] {
+  if (catalog === undefined) return FALLBACK_MODELS;
+
+  const models = catalog
+    .filter((m) => m.type === "language" && (m.tags ?? []).includes(WEB_SEARCH_TAG))
+    .map((m) => {
+      const provider = m.id.split("/")[0] ?? "";
+      return {
+        value: m.id,
+        label: m.name,
+        hint: providerLabel(provider),
+        provider,
+        released: m.released,
+      };
+    })
+    .sort((a, b) => {
+      const featuredDiff = featuredPriority(a.value) - featuredPriority(b.value);
+      if (featuredDiff !== 0) return featuredDiff;
+      const releasedDiff =
+        (b.released ?? Number.NEGATIVE_INFINITY) - (a.released ?? Number.NEGATIVE_INFINITY);
+      if (releasedDiff !== 0) return releasedDiff;
+      const labelDiff = a.label.localeCompare(b.label);
+      if (labelDiff !== 0) return labelDiff;
+      return a.value.localeCompare(b.value);
+    });
+
+  if (models.length === 0) return FALLBACK_MODELS;
+  return models.map(({ value, label, hint }) => ({
+    id: value,
+    label,
+    value,
+    hint,
+    featured: FEATURED_MODEL_IDS.includes(value) || undefined,
+  }));
+}
+
 async function buildModelOptions(
   fetchModels: (signal?: AbortSignal) => Promise<GatewayCatalogModel[]>,
   signal?: AbortSignal,
 ): Promise<SelectOption<string>[]> {
   try {
-    const data = await fetchModels(signal);
-
-    const models = data
-      .filter((m) => m.type === "language" && (m.tags ?? []).includes(WEB_SEARCH_TAG))
-      .map((m) => {
-        const provider = m.id.split("/")[0] ?? "";
-        return {
-          value: m.id,
-          label: m.name,
-          hint: providerLabel(provider),
-          provider,
-        };
-      })
-      .sort((a, b) => {
-        const featuredDiff = featuredPriority(a.value) - featuredPriority(b.value);
-        if (featuredDiff !== 0) return featuredDiff;
-        const priorityDiff = providerPriority(a.provider) - providerPriority(b.provider);
-        if (priorityDiff !== 0) return priorityDiff;
-        const providerDiff = a.provider.localeCompare(b.provider);
-        if (providerDiff !== 0) return providerDiff;
-        return a.label.localeCompare(b.label);
-      });
-
-    if (models.length === 0) return FALLBACK_MODELS;
-    return models.map(({ value, label, hint }) => ({
-      id: value,
-      label,
-      value,
-      hint,
-      featured: FEATURED_MODEL_IDS.includes(value) || undefined,
-    }));
+    return modelOptionsFromCatalog(await fetchModels(signal));
   } catch {
     signal?.throwIfAborted();
     return FALLBACK_MODELS;

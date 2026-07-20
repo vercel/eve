@@ -17,7 +17,6 @@ import {
   toOutputSchema,
 } from "#shared/tool-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
@@ -27,6 +26,7 @@ import {
 } from "#context/keys.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -37,11 +37,11 @@ const log = createLogger("dynamic-tools");
 function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): HarnessToolDefinition {
   return {
     description: entry.description,
-    execute: (input: unknown, options) =>
-      entry.execute(
-        input as Record<string, unknown>,
-        buildBaseToolContext({ options, toolName: name }),
-      ),
+    execute: createToolExecuteWithAuth({
+      scope: name,
+      execute: (input, ctx) =>
+        entry.execute(input as Record<string, unknown>, ctx as Parameters<typeof entry.execute>[1]),
+    }),
     inputSchema: toInputSchema(entry.inputSchema),
     name,
     approval: entry.approval,
@@ -116,8 +116,10 @@ export function replayDynamicSessionTools(
 
     tools.push({
       description: m.description,
-      execute: (input: unknown, options) =>
-        stepFn(m.closureVars, input, buildBaseToolContext({ options, toolName: m.name })),
+      execute: createToolExecuteWithAuth({
+        scope: m.name,
+        execute: (input, ctx) => stepFn(m.closureVars, input, ctx),
+      }),
       inputSchema: toInputSchema(m.inputSchema),
       name: m.name,
       outputSchema: toOutputSchema(m.outputSchema),

@@ -19,7 +19,7 @@ export const nav = [
   },
   {
     label: "Templates",
-    href: "/resources",
+    href: "/templates",
   },
   {
     label: "GitHub",

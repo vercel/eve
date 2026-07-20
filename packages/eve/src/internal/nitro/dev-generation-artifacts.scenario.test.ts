@@ -155,6 +155,85 @@ describe("development generation artifacts", () => {
     expect(tool.default.execute()).toBe("configured");
   });
 
+  it("materializes a mounted extension from a physical installed directory", async () => {
+    const packageName = "@acme/physical-extension";
+    const app = await scenarioApp({
+      dependencies: {
+        [packageName]: "1.0.0",
+      },
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/extensions/physical.mjs": `export { default } from ${JSON.stringify(packageName)};\n`,
+        "agent/instructions.md": "Use the available tools.",
+      },
+      name: "physical-extension-generation",
+    });
+    const packageRoot = join(app.appRoot, "node_modules", "@acme", "physical-extension");
+    await mkdir(join(packageRoot, "extension", "tools"), { recursive: true });
+    await writeFile(
+      join(packageRoot, "package.json"),
+      `${JSON.stringify({
+        eve: { extension: { dist: "extension" } },
+        exports: "./extension/extension.mjs",
+        name: packageName,
+        type: "module",
+        version: "1.0.0",
+      })}\n`,
+    );
+    await writeFile(
+      join(packageRoot, "extension", "_manifest.json"),
+      `${JSON.stringify({
+        kind: "eve-extension",
+        formatVersion: 1,
+        builtWithEve: "0.0.0-test",
+        requires: { extension: 1, tool: 1 },
+      })}\n`,
+    );
+    await writeFile(
+      join(packageRoot, "extension", "extension.mjs"),
+      'import { defineExtension } from "eve/extension";\nexport default defineExtension();\n',
+    );
+    await writeFile(
+      join(packageRoot, "extension", "tools", "read_marker.mjs"),
+      [
+        "export default {",
+        '  description: "Read the extension marker.",',
+        '  execute: () => "physical-extension-original",',
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await mkdir(join(app.appRoot, "node_modules"), { recursive: true });
+    await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+    const snapshotPackageRoot = join(
+      snapshot.runtimeAppRoot,
+      "node_modules",
+      "@acme",
+      "physical-extension",
+    );
+
+    await expect(realpath(snapshotPackageRoot)).resolves.toBe(await realpath(packageRoot));
+    await rm(packageRoot, { force: true, recursive: true });
+
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        snapshot.runtimeAppRoot,
+      ),
+    });
+    const toolSourceId = compileResult.manifest.tools.find((tool) =>
+      tool.sourceId.startsWith("ext:physical:"),
+    )?.sourceId;
+    expect(toolSourceId).toBeDefined();
+    const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
+      default: { execute(): string };
+    };
+
+    expect(tool.default.execute()).toBe("physical-extension-original");
+  });
+
   it("executes dynamic imports after the original bundled dependency is removed", async () => {
     const evaluationMarker = "__eveGenerationDynamicImportEvaluated__";
     const globals = globalThis as Record<string, unknown>;

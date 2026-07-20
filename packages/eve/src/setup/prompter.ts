@@ -75,6 +75,8 @@ export interface SelectOption<T extends PrompterValue> {
    * to the front. Meaningless without `search`.
    */
   featured?: boolean;
+  /** Marks the currently-active value: renders a green check beside the row. */
+  checked?: boolean;
 }
 
 /**

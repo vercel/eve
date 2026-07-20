@@ -52,16 +52,43 @@ function normalizeCodexCallOptions(
   const providerOptions = options.providerOptions;
   const openaiOptions = providerOptions?.openai ?? {};
 
+  // The Codex backend requires system instructions in the top-level
+  // `instructions` field and rejects a `developer`/`system` role inside the
+  // `input` array (the shape the AI SDK produces by default). Hoist the system
+  // messages out of the prompt and into `instructions` before delegation.
+  const { instructions, prompt } = hoistSystemInstructions(options.prompt);
+
+  // The Codex backend rejects `max_output_tokens` with
+  // `400 Unsupported parameter`, so drop it before delegation.
+  const { maxOutputTokens: _maxOutputTokens, ...rest } = options;
+
   return {
-    ...options,
-    prompt: stripOpenAIItemIdsFromPrompt(options.prompt),
+    ...rest,
+    prompt: stripOpenAIItemIdsFromPrompt(prompt),
     providerOptions: {
       ...providerOptions,
       openai: {
         ...openaiOptions,
+        ...(instructions !== undefined && { instructions }),
         store: false,
       },
     },
+  };
+}
+
+function hoistSystemInstructions(prompt: LanguageModelV4CallOptions["prompt"]): {
+  readonly instructions: string | undefined;
+  readonly prompt: LanguageModelV4CallOptions["prompt"];
+} {
+  const systemContent = prompt
+    .filter((message) => message.role === "system")
+    .map((message) => message.content);
+  if (systemContent.length === 0) {
+    return { instructions: undefined, prompt };
+  }
+  return {
+    instructions: systemContent.join("\n\n"),
+    prompt: prompt.filter((message) => message.role !== "system"),
   };
 }
 

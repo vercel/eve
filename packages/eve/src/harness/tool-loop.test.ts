@@ -590,6 +590,36 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("omits user messages with no model-visible content", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
+    const blankMessages: Array<string | UserContent> = [
+      "",
+      " \n\t",
+      [{ text: "", type: "text" }],
+      [{ text: " \n\t", type: "text" }],
+    ];
+
+    for (const message of blankMessages) {
+      const result = await runStep(createTestSession(), {
+        context: ["channel context"],
+        message,
+      });
+
+      expect(result.session.history).toEqual([
+        { content: "channel context", role: "user" },
+        { content: "Hello!", role: "assistant" },
+      ]);
+    }
+  });
+
   it("parks without delivery when a terminal response contains the empty-delivery sentinel", async () => {
     setupMockAgent({
       finishReason: "stop",

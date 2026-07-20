@@ -651,6 +651,78 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("keeps multiple text runs within a single step as separate parts", () => {
+    // Regression test for https://github.com/vercel/eve/issues/436: a step can
+    // legitimately produce text, call tools, then produce more text. Keying
+    // text parts by stepIndex alone drops the first run and reorders the second
+    // ahead of the tool call.
+    const reducer = defaultMessageReducer();
+    let data = reducer.initial();
+
+    data = reducer.reduce(
+      data,
+      createMessageAppendedEvent({
+        messageDelta: "Checking Vienna",
+        messageSoFar: "Checking Vienna",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageCompletedEvent({
+        finishReason: "tool-calls",
+        message: "Checking Vienna first.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_1",
+            input: { city: "Vienna" },
+            kind: "tool-call",
+            toolName: "get_weather",
+          },
+        ],
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageAppendedEvent({
+        messageDelta: "Now Berlin",
+        messageSoFar: "Now Berlin",
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageCompletedEvent({
+        message: "Now checking Berlin.",
+        sequence: 4,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+
+    const assistant = data.messages.find((message) => message.id === "turn_0:assistant");
+    expect(
+      assistant?.parts
+        .filter((part) => part.type === "text" || part.type === "dynamic-tool")
+        .map((part) => (part.type === "text" ? part.text : `tool:${part.toolCallId}`)),
+    ).toEqual(["Checking Vienna first.", "tool:call_1", "Now checking Berlin."]);
+  });
+
   it("finalizes partial streamed message and reasoning when the turn is cancelled", () => {
     const reducer = defaultMessageReducer();
     let data = reducer.reduce(
