@@ -23,12 +23,17 @@ export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@vercel
 import type { ConnectionProtocol } from "@vercel/eve-catalog";
 
 /**
- * Which Vercel Connect token subject a connection authenticates as. Every mode
- * is Connect-managed: `user` (per-user OAuth, the default), `app` (one shared
- * app installation), and `jwtBearer` (a JWT bearer assertion whose subject maps
- * to a principal your IdP recognizes).
+ * How a connection authenticates. A mode uses either Vercel Connect (`user`,
+ * `app`, or `jwtBearer`) or a server-side API key.
  */
-export type AuthMode = "user" | "app" | "jwtBearer";
+export type AuthMode = "user" | "app" | "jwtBearer" | "apiKey";
+
+export interface ApiKeySpec {
+  /** Server-side environment variable containing the API key. */
+  env: string;
+  /** Header used to send the API key. */
+  header: string;
+}
 
 /**
  * Structured description of a connection consumed by the detail page to
@@ -41,6 +46,8 @@ export interface ConnectionSpec {
   connector?: string;
   /** Supported auth modes in display order; the first is the default. */
   authModes: AuthMode[];
+  /** API-key wiring when `authModes` includes `apiKey`. */
+  apiKey?: ApiKeySpec;
   /** Model-facing description; defaults to the integration tagline. */
   description?: string;
   mcp?: ConnectionIdentity["mcp"];
@@ -96,6 +103,7 @@ interface ChannelPresentation extends Presentation {
 /** Connection overlay: presentation plus Connect auth/config details. */
 interface ConnectionPresentation extends Presentation {
   authModes: AuthMode[];
+  apiKey?: ApiKeySpec;
   connector?: string;
   configureNote?: string;
 }
@@ -481,6 +489,18 @@ Credentials come from the \`createMessengerAdapter\` config or the adapter's env
  * note.
  */
 const connectionPresentations: Record<string, ConnectionPresentation> = {
+  "browser-use": {
+    logo: "browser-use",
+    docsHref: "https://docs.browser-use.com/cloud/guides/mcp-server",
+    keywords: ["mcp", "browser", "browser automation", "cloud browser", "web automation"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "BROWSER_USE_API_KEY",
+      header: "x-browser-use-api-key",
+    },
+    configureNote:
+      "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
+  },
   linear: {
     logo: "linear",
     docsHref: "/docs/connections/mcp",
@@ -746,6 +766,7 @@ function buildConnection(entry: IntegrationEntry): Integration {
     authModes: presentation.authModes,
     description: identity.description,
   };
+  if (presentation.apiKey !== undefined) spec.apiKey = presentation.apiKey;
   if (presentation.connector !== undefined) spec.connector = presentation.connector;
   if (identity.mcp !== undefined) spec.mcp = identity.mcp;
   if (identity.openapi !== undefined) spec.openapi = identity.openapi;
@@ -788,6 +809,7 @@ export const authModeLabel: Record<AuthMode, string> = {
   user: "User",
   app: "App",
   jwtBearer: "JWT bearer",
+  apiKey: "API key",
 };
 
 export const integrations: Integration[] = [...channels, ...connections];

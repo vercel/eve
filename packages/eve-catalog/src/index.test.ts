@@ -48,4 +48,10 @@ describe("integration catalog", () => {
   it("uses Linear's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
+
+  it("uses Browser Use's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
+      "https://api.browser-use.com/v3/mcp",
+    );
+  });
 });
