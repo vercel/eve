@@ -35,8 +35,10 @@ import {
   type PromptCommandSpec,
 } from "./prompt-commands.js";
 import {
+  enterBadge,
   renderFlowPanel,
   renderAcknowledgeQuestion,
+  renderModelEditorQuestion,
   renderSelectQuestion,
   renderTextQuestion,
   type FlowPanelContent,
@@ -46,6 +48,11 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
+import {
+  initialModelEditorState,
+  transitionModelEditor,
+  type ModelEditorEvent,
+} from "./model-editor.js";
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
@@ -54,6 +61,7 @@ import type {
   SetupSelectRequest,
 } from "./setup-flow.js";
 import type { SelectNotice } from "#setup/prompter.js";
+import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
@@ -122,9 +130,9 @@ import {
   PROGRESS_PULSE_ASCII_GLYPH,
   PROGRESS_PULSE_GLYPH,
 } from "#cli/ui/progress-pulse.js";
+import { readGatewayServiceTier } from "#shared/gateway-service-tier.js";
 import {
   formatAssistantResponseStats,
-  formatTokenFlow,
   isIncompletePaste,
   nextKey,
   sanitizePastedText,
@@ -301,7 +309,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #subagents: TerminalPartDisplayMode;
   readonly #connectionAuth: TerminalPartDisplayMode;
   readonly #assistantResponseStats: AssistantResponseStatsMode;
-  readonly #defaultContextSize?: number;
   readonly #captureForeignOutput: boolean;
   readonly #diagnostics?: DevDiagnostics;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
@@ -383,9 +390,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #paintAgain = false;
 
   #totalTokens?: number;
-  /** Input (prompt) tokens from the latest usage report — the ↑ side. */
-  #promptTokens?: number;
-  #contextSize?: number;
   #assistantOutputTokens?: number;
   #assistantTokensPerSecond?: number;
   /** Wall-clock start of the current stream, for the tok/s status stat. */
@@ -420,6 +424,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
     readProviderPicker: (options) => this.#readProviderPicker(options),
+    readModelEditor: (options) => this.#readModelEditor(options),
     readText: (options) => this.#readSetupText(options),
     readAcknowledge: (options) => this.#readSetupAcknowledge(options),
     readChoice: (options) => this.#readSetupChoice(options),
@@ -446,8 +451,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#subagents = options?.subagents ?? "auto-collapsed";
     this.#connectionAuth = options?.connectionAuth ?? "full";
     this.#assistantResponseStats = options?.assistantResponseStats ?? defaultAssistantResponseStats;
-    this.#defaultContextSize = options?.contextSize;
-    this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#diagnostics = options?.diagnostics;
     this.#logs = options?.logs ?? "none";
@@ -662,7 +665,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (options?.submittedPrompt !== undefined) this.#diagnostics?.recordPrompt();
     this.#interrupted = false;
     this.#totalTokens = undefined;
-    this.#promptTokens = undefined;
     this.#assistantOutputTokens = undefined;
     this.#assistantTokensPerSecond = undefined;
     this.#streamStartedAt = Date.now();
@@ -1108,7 +1110,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#devRebuild = undefined;
     this.#connectionAuthPendingCount = 0;
     this.#totalTokens = undefined;
-    this.#promptTokens = undefined;
     this.#assistantOutputTokens = undefined;
     this.#assistantTokensPerSecond = undefined;
     this.#streamStartedAt = undefined;
@@ -1591,23 +1592,34 @@ export class TerminalRenderer implements AgentTUIRenderer {
     let interaction = initialProviderPickerState(opts.options, opts.initialValue);
     let validation: AbortController | undefined;
 
-    flow.question = (width) =>
-      renderSelectQuestion(
-        {
-          kind: "inline-edit",
-          layout: "stacked",
-          message: opts.message,
-          options: opts.options,
-          select: interaction.select,
-          edit: {
-            optionValue: "own-key",
-            caretVisible: this.#caretVisible,
-            editor: { kind: "key", phase: interaction.phase },
-          },
+    // The cursor row's Enter affordance: `↵ change` on the currently-active
+    // provider, a bare `↵` elsewhere. The key row's own phases (editing,
+    // validating, invalid) carry their badge on the input line instead.
+    const cursorBadge = (): string | undefined => {
+      if (interaction.phase.kind !== "inactive") return undefined;
+      const value = selectValueAtCursor([...opts.options], interaction.select.cursor);
+      const row = opts.options.find((option) => option.value === value);
+      if (row === undefined) return undefined;
+      return enterBadge(this.#theme, row.checked === true ? "change" : undefined);
+    };
+
+    flow.question = (width) => {
+      const badge = cursorBadge();
+      const panel: SetupSelectPanelState = {
+        kind: "inline-edit",
+        layout: "stacked",
+        message: opts.message,
+        options: opts.options,
+        select: interaction.select,
+        edit: {
+          optionValue: "own-key",
+          caretVisible: this.#caretVisible,
+          editor: { kind: "key", phase: interaction.phase },
         },
-        this.#theme,
-        width,
-      );
+      };
+      if (badge !== undefined) panel.cursorBadge = badge;
+      return renderSelectQuestion(panel, this.#theme, width);
+    };
 
     const syncCaret = () => {
       if (interaction.phase.kind === "editing" || interaction.phase.kind === "invalid") {
@@ -1705,6 +1717,82 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#stopCaretBlink();
       },
     );
+    return await question.promise;
+  }
+
+  /**
+   * The composite Change-model screen: the searchable catalog, the reasoning
+   * slider, and the service-tier toggle on one panel, driven by the pure
+   * model-editor reducer. Resolves the drafted changes on Done, or `undefined`
+   * on Esc/Ctrl-C.
+   */
+  async #readModelEditor(opts: ModelSettingsRequest): Promise<ModelSettingsResult | undefined> {
+    const flow = this.#beginSetupQuestion();
+    let interaction = initialModelEditorState(opts);
+
+    flow.question = (width) =>
+      renderModelEditorQuestion({ request: opts, state: interaction }, this.#theme, width);
+    this.#paint();
+
+    const question = this.#captureSetupQuestion<ModelSettingsResult | undefined>((key, settle) => {
+      const dispatch = (event: ModelEditorEvent): void => {
+        const transition = transitionModelEditor(interaction, event, opts);
+        switch (transition.kind) {
+          case "ignore":
+            return;
+          case "render":
+            interaction = transition.state;
+            this.#paint();
+            return;
+          case "cancel":
+            settle(undefined);
+            return;
+          case "settle":
+            settle(transition.result);
+            return;
+        }
+      };
+
+      const intent = setupSelectionIntent(key);
+      switch (intent?.kind) {
+        case "cancel":
+          dispatch({ type: "cancel" });
+          return;
+        case "move":
+          dispatch({ type: "move", direction: intent.direction });
+          return;
+        case "submit":
+          dispatch({ type: "submit" });
+          return;
+        case "repaint":
+          this.#paint();
+          return;
+        case undefined:
+          break;
+      }
+
+      // Left/right adjust the inline value under the menu cursor, and Tab
+      // mimics right. The shared intent grammar deliberately drops the
+      // horizontal arrows (line editors own them elsewhere), so this surface
+      // consumes them locally.
+      if (key.type === "left" || key.type === "right") {
+        dispatch({ type: "adjust", direction: key.type });
+        return;
+      }
+      if (key.type === "tab") {
+        dispatch({ type: "adjust", direction: "right" });
+        return;
+      }
+      if (key.type === "backspace") {
+        dispatch({ type: "backspace" });
+        return;
+      }
+      if (key.type === "text") {
+        for (const char of key.value.replaceAll("\n", " ")) {
+          if (char >= " " && char !== "\u007f") dispatch({ type: "char", char });
+        }
+      }
+    });
     return await question.promise;
   }
 
@@ -2028,7 +2116,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #start(options?: AgentTUISessionOptions) {
     this.#title = options?.title ?? this.#title;
-    this.#contextSize = options?.contextSize ?? this.#defaultContextSize;
 
     if (this.#isInteractive) return;
 
@@ -2553,7 +2640,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (inputTokens != null || outputTokens != null) {
       this.#totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0);
     }
-    this.#promptTokens = inputTokens ?? this.#promptTokens;
     this.#assistantOutputTokens = outputTokens ?? this.#assistantOutputTokens;
 
     if (this.#assistantOutputTokens != null && this.#streamStartedAt !== undefined) {
@@ -2912,21 +2998,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const serverPort = new URL(serverUrl).port;
       if (serverPort.length > 0) input.serverPort = serverPort;
     }
-    const model = this.#agentHeader?.info?.agent.model.id;
-    if (model !== undefined) input.model = model;
+    const agentModel = this.#agentHeader?.info?.agent.model;
+    if (agentModel?.id !== undefined) input.model = agentModel.id;
+    // "provider-default" is the absent-setting sentinel, not a level worth showing.
+    if (agentModel?.reasoning !== undefined && agentModel.reasoning !== "provider-default") {
+      input.reasoning = agentModel.reasoning;
+    }
+    if (readGatewayServiceTier(agentModel?.providerOptions).kind === "priority") {
+      input.fastMode = true;
+    }
     // The runner resolves model-provider state with `/info` before caching this
     // header, so the status bar consumes that shared snapshot.
-    const endpoint = this.#agentHeader?.info?.agent.model.endpoint;
+    const endpoint = agentModel?.endpoint;
     if (endpoint !== undefined) input.endpoint = endpoint;
-    // Skip the token segment entirely until a turn moves a token — a `↑ 0 ↓ 0`
-    // row is noise before the first prompt.
-    const inputTokens = this.#promptTokens ?? 0;
-    const outputTokens = this.#assistantOutputTokens ?? 0;
-    if (inputTokens > 0 || outputTokens > 0) {
-      const flow: Parameters<typeof formatTokenFlow>[0] = { inputTokens, outputTokens };
-      if (this.#contextSize !== undefined) flow.contextSize = this.#contextSize;
-      input.tokens = formatTokenFlow(flow, this.#theme.glyph);
-    }
     if (this.#vercelStatus !== undefined) input.vercel = this.#vercelStatus;
     if (this.#remoteConnection !== undefined) input.remote = this.#remoteConnection;
     const line = buildStatusLine(input);

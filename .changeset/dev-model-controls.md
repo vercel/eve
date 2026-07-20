@@ -1,0 +1,5 @@
+---
+"eve": patch
+---
+
+The dev TUI's `/model` "Change model" row now opens a value menu — Model, Reasoning effort, Service tier, Done. Reasoning and tier adjust inline with `←`/`→` (Tab acts as `→`, both wrap as a ring): a `●─◉─○` track slides over the model's supported effort levels — snapping to the closest supported level when a pick changes what the model serves — and the tier flips between `fast ↯` and `normal`; the tier row disappears when the catalog prices no priority tier for the model. Enter on Model opens the searchable catalog as model ids on a `▏` rail — the same railed list component the team and project pickers now render with. All drafted changes commit through one atomic `agent.ts` edit. The provider picker marks and describes the currently-active provider and reports an accepted key as `AI_GATEWAY_API_KEY set.`. Linking an existing project now suggests the team project named after the agent, searching for it when it is not among the recents. Command cancellations now read "dismissed". The status line drops its `·` separators and shows the model as `slug@level ↯`.

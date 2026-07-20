@@ -5,14 +5,17 @@ import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { remoteHost } from "./target.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+import { formatModelSummary } from "#shared/model-summary.js";
 
 export interface StatusLineInput {
   /** Port of the connected local development server; omitted for remote sessions. */
   serverPort?: string;
   /** Resolved model slug, e.g. "anthropic/claude-sonnet-5"; absent when `/eve/v1/info` failed. */
   model?: string;
-  /** Preformatted token-flow segment (formatTokenFlow output), e.g. `↑ 394.4K ↓ 4.3K`. */
-  tokens?: string;
+  /** Authored reasoning effort, rendered bold after the model id, e.g. `(xhigh)`. */
+  reasoning?: string;
+  /** True when the Gateway priority tier is on; renders a `»fast` marker. */
+  fastMode?: boolean;
   /**
    * Transient dev-TUI log-display mode shown after a Ctrl+L cycle, e.g.
    * `sandbox`. Rendered as a prominent leading `logs: <mode>` segment that
@@ -31,12 +34,22 @@ export interface StatusLineInput {
 }
 
 function renderModel(
-  input: Pick<StatusLineInput, "model" | "remote" | "theme">,
+  input: Pick<StatusLineInput, "model" | "reasoning" | "fastMode" | "remote" | "theme">,
 ): string | undefined {
   if (input.model === undefined) return undefined;
-  const model =
-    input.remote === undefined ? input.model : stripAnsi(input.model).replace(/\s+/gu, " ").trim();
-  return input.theme.colors.dim(model);
+  const c = input.theme.colors;
+  const summary: Parameters<typeof formatModelSummary>[0] = { model: input.model };
+  if (input.reasoning !== undefined) summary.reasoning = input.reasoning;
+  if (input.fastMode === true) summary.fastGlyph = input.theme.glyph.fast;
+  if (input.remote !== undefined) {
+    // Sanitize the untrusted remote id before appending suffixes, so its
+    // trailing whitespace is trimmed instead of collapsing into an interior
+    // space ahead of the reasoning level.
+    summary.model = stripAnsi(input.model).replace(/\s+/gu, " ").trim();
+    const plain = stripAnsi(formatModelSummary(summary)).replace(/\s+/gu, " ").trim();
+    return c.dim(plain);
+  }
+  return c.dim(formatModelSummary(summary));
 }
 
 function renderServerPort(
@@ -61,10 +74,10 @@ function renderEndpoint(
 }
 
 /**
- * Builds a leading local `:port` or remote badge followed by model, token, and
- * deploy status segments. Both badges are the final narrow-width fallback.
- * Remote sessions omit endpoint state. Returns undefined when every segment is
- * empty.
+ * Builds a leading local `:port` or remote badge followed by the model (with
+ * its reasoning level and Fast mode marker), endpoint, and deploy status
+ * segments. Both badges are the final narrow-width fallback. Remote sessions
+ * omit endpoint state. Returns undefined when every segment is empty.
  */
 export function buildStatusLine(input: StatusLineInput): string | undefined {
   const { theme, width } = input;
@@ -73,14 +86,14 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   const logLevel = input.logLevel === undefined ? undefined : c.cyan(`logs: ${input.logLevel}`);
   const serverPort = renderServerPort(input);
   const model = renderModel(input);
-  const tokens = input.tokens === undefined ? undefined : c.dim(input.tokens);
   const pending = input.vercel?.pendingDeploy ? c.yellow("/deploy pending") : undefined;
   const remote = input.remote === undefined ? undefined : formatRemoteStatus(input.remote, theme);
   const endpoint = renderEndpoint(input);
   const leading = remote?.full ?? serverPort;
   const badge = remote?.badge ?? serverPort;
 
-  const separator = ` ${c.dim(theme.glyph.dot)} `;
+  // Whitespace separators: the dim segments read as columns without bullets.
+  const separator = "  ";
   const compose = (
     target: string | undefined,
     segments: ReadonlyArray<string | undefined>,
@@ -94,9 +107,9 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   // leads every variant and gets the final stand-alone fallback. Without one,
   // the logs hint retains its previous priority.
   const variants = [
-    compose(leading, [logLevel, model, tokens, endpoint, pending]),
-    compose(leading, [logLevel, model, tokens, pending]),
-    compose(leading, [logLevel, tokens, pending]),
+    compose(leading, [logLevel, model, endpoint, pending]),
+    compose(leading, [logLevel, model, pending]),
+    compose(leading, [logLevel, pending]),
     compose(leading, [logLevel]),
     compose(badge, [logLevel]),
     compose(badge, []),
@@ -122,7 +135,8 @@ function formatRemoteStatus(
       : `${snapshot.deployment.projectName} (${snapshot.deployment.environment})`;
   const arrow = theme.unicode ? "↗" : "->";
   const badge = formatRemoteBadge(` ${arrow} ${label} `, snapshot.connection.state, theme);
-  const separator = `${c.dim(theme.glyph.dot)} `;
+  // The badge carries its own trailing pad, so one space reads as a column gap.
+  const separator = " ";
   let suffix: string | undefined;
 
   switch (snapshot.connection.state) {

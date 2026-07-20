@@ -80,6 +80,7 @@ function stubDiagnostics() {
 function agentInfoWithModel(
   modelId: string,
   endpoint?: AgentInfoResult["agent"]["model"]["endpoint"],
+  extras?: Partial<AgentInfoResult["agent"]["model"]>,
 ): AgentInfoResult {
   return {
     agent: {
@@ -88,6 +89,7 @@ function agentInfoWithModel(
       model: {
         id: modelId,
         endpoint,
+        ...extras,
       },
       name: "Weather Agent",
     },
@@ -858,10 +860,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("hangs a command outcome under its invocation with the elbow connector", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("/model cancelled.");
+    renderer.renderCommandResult("/model dismissed.");
     renderer.shutdown();
 
-    expect(screen.snapshot()).toContain("\u23bf  /model cancelled.");
+    expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
   });
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
@@ -2216,14 +2218,14 @@ describe("TerminalRenderer setup panel", () => {
     expect(screen.snapshot()).toContain("Provider");
     expect(screen.snapshot()).toContain("•••••••");
     expect(screen.snapshot()).not.toContain("bad-key");
-    expect(screen.snapshot()).toContain("Validating…");
+    expect(screen.snapshot()).toContain("▪ validating");
 
     resolveValidation?.({ kind: "invalid", message: "Rejected." });
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Invalid key");
+      expect(screen.snapshot()).toContain("API key is not valid");
     });
     input.type("x");
-    expect(screen.snapshot()).not.toContain("Invalid key");
+    expect(screen.snapshot()).not.toContain("API key is not valid");
 
     input.enter();
     resolveValidation?.({ kind: "valid" });
@@ -2303,6 +2305,110 @@ describe("TerminalRenderer setup panel", () => {
       key: "sk-second",
       validation: { kind: "valid" },
     });
+    renderer.shutdown();
+  });
+
+  it("walks the model editor from pick to slider to toggle to Done", async () => {
+    const { screen, input, renderer } = makeRenderer(100, 40);
+    renderer.setupFlow.begin("Configure the agent model");
+    const answer = renderer.setupFlow.readModelEditor({
+      model: {
+        kind: "pick",
+        options: [
+          {
+            value: "anthropic/claude-sonnet-5",
+            label: "anthropic/claude-sonnet-5",
+            featured: true,
+          },
+          { value: "xai/grok-4.5", label: "xai/grok-4.5" },
+        ],
+        current: "anthropic/claude-sonnet-5",
+      },
+      reasoning: null,
+      serviceTier: { kind: "standard" },
+      settingsEditable: true,
+      externalRouting: false,
+      capabilitiesFor: () => ({
+        reasoning: true,
+        reasoningLevels: ["low", "high"],
+        fastMode: true,
+      }),
+    });
+
+    // The value menu opens on the Model row.
+    expect(screen.snapshot()).toContain("▶ Model");
+    input.enter();
+    expect(screen.snapshot()).toContain("Select the model");
+    input.type("grok");
+    expect(screen.snapshot()).toContain("xai/grok-4.5");
+    input.enter();
+    // Back on the menu, the model hint carries the pick.
+    expect(screen.snapshot()).toContain("xai/grok-4.5");
+
+    // Reasoning adjusts inline on its row: right enters the scale at the
+    // lowest level, another right (via Tab, which mimics it) walks up.
+    input.down();
+    expect(screen.snapshot()).toContain("▶ Reasoning effort");
+    input.right();
+    expect(screen.snapshot()).toContain("◉─○ low");
+    input.send("\t");
+    expect(screen.snapshot()).toContain("●─◉ high");
+
+    input.down();
+    expect(screen.snapshot()).toContain("▶ Service tier");
+    expect(screen.snapshot()).toContain("normal");
+    input.right();
+    expect(screen.snapshot()).toContain("fast ↯");
+
+    input.down();
+    input.enter();
+
+    await expect(answer).resolves.toEqual({
+      model: "xai/grok-4.5",
+      reasoning: "high",
+      serviceTier: "priority",
+    });
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
+  it("unwinds Esc through filter, sub-screen, and menu before cancelling", async () => {
+    const { screen, input, renderer } = makeRenderer(100, 40);
+    renderer.setupFlow.begin("Configure the agent model");
+    const answer = renderer.setupFlow.readModelEditor({
+      model: {
+        kind: "pick",
+        options: [{ value: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5" }],
+        current: "anthropic/claude-sonnet-5",
+      },
+      reasoning: null,
+      serviceTier: { kind: "standard" },
+      settingsEditable: true,
+      externalRouting: false,
+      capabilitiesFor: () => undefined,
+    });
+    let settled = false;
+    void answer.finally(() => {
+      settled = true;
+    });
+
+    input.enter();
+    input.type("sonnet");
+    input.send("\x1b");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    // The first Esc only cleared the filter; the list is still open.
+    expect(screen.snapshot()).toContain("▏ type to search");
+
+    input.send("\x1b");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    // Back on the menu.
+    expect(screen.snapshot()).toContain("▶ Model");
+
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });
 
@@ -3148,7 +3254,7 @@ describe("TerminalRenderer status line", () => {
       "",
       "   Select your team",
     ]);
-    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools · Authenticating via OIDC…");
+    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools  Authenticating via OIDC…");
     expect(status).toBeGreaterThan(title);
     expect(lines[status - 1]).toBe("");
 
@@ -3158,7 +3264,7 @@ describe("TerminalRenderer status line", () => {
     renderer.shutdown();
   });
 
-  it("keeps the running token total after the turn indicator disappears", async () => {
+  it("keeps the token flow off the status line after a turn reports usage", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
       streamOf([
@@ -3170,15 +3276,61 @@ describe("TerminalRenderer status line", () => {
       { submittedPrompt: "hello", continueSession: true },
     );
 
-    const lines = screen.snapshot().split("\n");
-    const readyRow = lines.find((line) => line.includes("Ready"));
-    const statusRow = lines.find((line) => line.includes("↑ 500 ↓ 300"));
-    expect(readyRow).toBeUndefined();
-    expect(statusRow).toBeDefined();
+    const snapshot = screen.snapshot();
+    expect(snapshot).not.toContain("Ready");
+    expect(snapshot).not.toContain("↑ 500");
+    expect(snapshot).not.toContain("↓ 300");
     renderer.shutdown();
   });
 
-  it("keeps the model and Vercel segments across reset while tokens clear", async () => {
+  it("renders the reasoning level and fast marker on the model segment", () => {
+    const { screen, renderer } = makeRenderer(100);
+    renderer.renderNotice("anchor");
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel(
+        "xai/grok-4.5",
+        { kind: "gateway", connected: true, credential: "oidc" },
+        {
+          reasoning: "xhigh",
+          providerOptions: { gateway: { serviceTier: "priority" } },
+        },
+      ),
+    });
+    // The first header commits with no footer; a Vercel status probe is the
+    // paint that reveals the persistent status line beneath it.
+    renderer.setVercelStatus(vercelStatus);
+
+    expect(screen.snapshot()).toContain("xai/grok-4.5@xhigh ↯");
+    renderer.shutdown();
+  });
+
+  it("hides the provider-default reasoning sentinel and non-priority tiers", () => {
+    const { screen, renderer } = makeRenderer(100);
+    renderer.renderNotice("anchor");
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel(
+        "xai/grok-4.5",
+        { kind: "gateway", connected: true, credential: "oidc" },
+        {
+          reasoning: "provider-default",
+          providerOptions: { gateway: { serviceTier: "flex" } },
+        },
+      ),
+    });
+    renderer.setVercelStatus(vercelStatus);
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("xai/grok-4.5");
+    expect(snapshot).not.toContain("@provider-default");
+    expect(snapshot).not.toContain("↯");
+    renderer.shutdown();
+  });
+
+  it("keeps the model and Vercel segments across reset while tokens stay clear", async () => {
     // 100 columns: all four segments fit at full fidelity, no drop order.
     const { screen, renderer } = makeRenderer(100);
     renderer.renderAgentHeader({
@@ -3200,7 +3352,7 @@ describe("TerminalRenderer status line", () => {
       ]),
       { submittedPrompt: "hello", continueSession: true },
     );
-    expect(screen.snapshot()).toContain("↑ 500 ↓ 300");
+    expect(screen.snapshot()).not.toContain("↑ 500 ↓ 300");
 
     renderer.reset();
 

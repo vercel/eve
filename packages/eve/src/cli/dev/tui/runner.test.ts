@@ -204,6 +204,7 @@ function idleSetupFlow(): SetupFlowRenderer {
     readSelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
+    readModelEditor: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -2163,7 +2164,7 @@ describe("EveTUIRunner boot setup detection", () => {
     ];
     const handle = vi.fn(async (command: { name: string }) => {
       order.push(command.name);
-      return { message: "/model cancelled." };
+      return { message: "/model dismissed." };
     });
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
@@ -2241,7 +2242,7 @@ describe("EveTUIRunner boot setup detection", () => {
       promptCommandHandler: {
         handle: async (command) => {
           order.push(command.name);
-          return { message: "/vc:install cancelled." };
+          return { message: "/vc:install dismissed." };
         },
       },
     });
@@ -2253,7 +2254,7 @@ describe("EveTUIRunner boot setup detection", () => {
   });
 
   it("does not auto-open /model outside the prefilled onboarding launch", async () => {
-    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const handle = vi.fn(async () => ({ message: "/model dismissed." }));
     const runner = new EveTUIRunner({
       session: sessionYielding([]),
       renderer: fakeRenderer({ setupFlow: createFakeSetupFlowRenderer() }),
@@ -2280,7 +2281,7 @@ describe("EveTUIRunner boot setup detection", () => {
   });
 
   it("keeps a prefilled /model editable without a local app root", async () => {
-    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const handle = vi.fn(async () => ({ message: "/model dismissed." }));
     const readPrompt = vi.fn(async (options?: AgentTUISessionOptions) => {
       expect(options?.initialDraft).toBe("/model");
       return undefined;

@@ -1,5 +1,7 @@
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.6",
+  model: "openai/gpt-5.6-luna",
+  reasoning: "medium",
+  modelOptions: { providerOptions: { gateway: { serviceTier: "priority" } } },
 });
