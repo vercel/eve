@@ -20,7 +20,7 @@ function createDeps() {
     getVercelAuthStatus: vi.fn(async (): Promise<VercelAuthStatus> => "authenticated"),
     runLinkFlow: vi.fn<ProviderFlowDeps["runLinkFlow"]>(async () => ({
       kind: "done",
-      credential: "VERCEL_OIDC_TOKEN",
+      resolution: { credential: "oidc", file: ".env.local" },
     })),
     appendEnv: vi.fn<ProviderFlowDeps["appendEnv"]>(async () => ({
       written: ["AI_GATEWAY_API_KEY"],
@@ -54,7 +54,10 @@ describe("runProviderFlow", () => {
       deps,
     });
 
-    expect(result).toEqual({ kind: "done", credential: "VERCEL_OIDC_TOKEN" });
+    expect(result).toEqual({
+      kind: "done",
+      resolution: { credential: "oidc", file: ".env.local" },
+    });
     expect(deps.runLinkFlow).toHaveBeenCalledExactlyOnceWith({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
@@ -140,7 +143,10 @@ describe("runProviderFlow", () => {
       deps,
     });
 
-    expect(result).toEqual({ kind: "done", credential: "AI_GATEWAY_API_KEY" });
+    expect(result).toEqual({
+      kind: "done",
+      resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
+    });
     expect(deps.validateGatewayApiKey).toHaveBeenCalledExactlyOnceWith(
       "sk-inline",
       expect.any(AbortSignal),
@@ -182,7 +188,7 @@ describe("runProviderFlow", () => {
 
     await expect(execution).resolves.toEqual({
       kind: "done",
-      credential: "AI_GATEWAY_API_KEY",
+      resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
     });
   });
 

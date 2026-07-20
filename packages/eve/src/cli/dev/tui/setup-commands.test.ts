@@ -141,7 +141,10 @@ describe("runTuiSetupCommand", () => {
         kind: "done",
         modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
         providerOutcome: {
-          credential: "AI_GATEWAY_API_KEY",
+          resolution: {
+            credential: "api-key",
+            source: { kind: "env-file", path: ".env.local" },
+          },
           status: { kind: "gateway-project", projectName: "my-agent" },
         },
       })),
@@ -160,7 +163,7 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         providerOutcome: {
-          credential: "VERCEL_OIDC_TOKEN",
+          resolution: { credential: "oidc", file: ".env.local" },
           status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
         },
       })),
@@ -177,8 +180,11 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         providerOutcome: {
-          credential: "AI_GATEWAY_API_KEY",
-          shadowedOidc: { keySource: "shell" },
+          resolution: {
+            credential: "api-key",
+            source: { kind: "shell" },
+            shadowedOidc: {},
+          },
           status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
         },
       })),
@@ -198,8 +204,15 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         providerOutcome: {
-          credential: "AI_GATEWAY_API_KEY",
-          status: { kind: "gateway-key", envKey: "AI_GATEWAY_API_KEY", envFile: ".env.local" },
+          resolution: {
+            credential: "api-key",
+            source: { kind: "env-file", path: ".env.local" },
+          },
+          status: {
+            kind: "gateway-key",
+            envKey: "AI_GATEWAY_API_KEY",
+            source: { kind: "env-file", path: ".env.local" },
+          },
         },
       })),
     });
@@ -523,11 +536,14 @@ describe("runTuiSetupCommand", () => {
                 resolve({
                   kind: "done",
                   providerOutcome: {
-                    credential: "AI_GATEWAY_API_KEY",
+                    resolution: {
+                      credential: "api-key",
+                      source: { kind: "env-file", path: ".env.local" },
+                    },
                     status: {
                       kind: "gateway-key",
                       envKey: "AI_GATEWAY_API_KEY",
-                      envFile: ".env.local",
+                      source: { kind: "env-file", path: ".env.local" },
                     },
                   },
                 }),

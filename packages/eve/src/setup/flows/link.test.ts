@@ -117,8 +117,11 @@ describe("runLinkFlow", () => {
     // claim a credential that never authenticates a call.
     expect(result).toEqual({
       kind: "done",
-      credential: "AI_GATEWAY_API_KEY",
-      shadowedOidc: { keySource: ".env.local" },
+      resolution: {
+        credential: "api-key",
+        source: { kind: "env-file", path: ".env.local" },
+        shadowedOidc: { file: ".env.local" },
+      },
     });
   });
 
@@ -141,8 +144,11 @@ describe("runLinkFlow", () => {
 
     expect(result).toEqual({
       kind: "done",
-      credential: "AI_GATEWAY_API_KEY",
-      shadowedOidc: { keySource: "shell" },
+      resolution: {
+        credential: "api-key",
+        source: { kind: "shell" },
+        shadowedOidc: { file: ".env.local" },
+      },
     });
   });
 
@@ -165,7 +171,10 @@ describe("runLinkFlow", () => {
 
     const result = await runLinkFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(result).toEqual({ kind: "done", credential: "VERCEL_OIDC_TOKEN" });
+    expect(result).toEqual({
+      kind: "done",
+      resolution: { credential: "oidc", file: ".env.local" },
+    });
     expect(selectMessages).toHaveLength(1);
     expect(stripVTControlCharacters(selectMessages[0] ?? "")).toBe(
       "This directory is already linked to\nweather-app in Acme",
@@ -209,7 +218,10 @@ describe("runLinkFlow", () => {
       teamSelectMessage,
     });
 
-    expect(result).toEqual({ kind: "done", credential: "VERCEL_OIDC_TOKEN" });
+    expect(result).toEqual({
+      kind: "done",
+      resolution: { credential: "oidc", file: ".env.local" },
+    });
     // The create path runs the new-project namer and never reaches the
     // existing-project picker — the opposite of the existing-only default.
     expect(deps.resolveProvisioning?.pickNewProjectName).toHaveBeenCalled();

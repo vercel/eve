@@ -484,29 +484,33 @@ function pendingChannelsResult(message: string): TuiSetupCommandResult {
  * without linking anything.
  */
 function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
-  const { credential, shadowedOidc, status } = outcome;
+  const { resolution, status } = outcome;
   if (status.kind === "gateway-project") {
-    if (credential === undefined) {
+    if (resolution === undefined) {
       return "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local.";
+    }
+    if (resolution.credential === "oidc") {
+      return "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.";
     }
     // A gateway key outranks the project's OIDC token at runtime — claiming
     // the OIDC connection while the key authenticates every call would split
     // this message from the status bar and the actual resolution.
-    if (shadowedOidc !== undefined) {
+    if (resolution.shadowedOidc !== undefined) {
+      const from = resolution.source.kind === "shell" ? "shell" : resolution.source.path;
       const remove =
-        shadowedOidc.keySource === "shell"
+        resolution.source.kind === "shell"
           ? "unset it in your shell"
-          : `remove it from ${shadowedOidc.keySource}`;
+          : `remove it from ${resolution.source.path}`;
       return (
-        `Project linked. AI_GATEWAY_API_KEY (${shadowedOidc.keySource}) outranks the ` +
-        `project's VERCEL_OIDC_TOKEN and stays the active credential — ${remove} to run ` +
-        "on the project."
+        `Project linked. AI_GATEWAY_API_KEY (${from}) outranks the project's ` +
+        `VERCEL_OIDC_TOKEN and stays the active credential — ${remove} to run on the project.`
       );
     }
-    return `Project linked. Connected to AI Gateway via ${credential}.`;
+    return "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.";
   }
   if (status.kind === "gateway-key") {
-    return `Connected to AI Gateway via ${status.envKey} in ${status.envFile}.`;
+    const where = status.source.kind === "shell" ? "your shell" : status.source.path;
+    return `Connected to AI Gateway via ${status.envKey} in ${where}.`;
   }
   return "Provider updated — no gateway credential detected; set AI_GATEWAY_API_KEY in .env.local.";
 }

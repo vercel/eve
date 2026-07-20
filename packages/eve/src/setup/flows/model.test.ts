@@ -287,7 +287,11 @@ describe("runModelFlow", () => {
       }),
       detectProviderStatus: vi.fn(
         async () =>
-          ({ kind: "gateway-key", envKey: "AI_GATEWAY_API_KEY", envFile: ".env.local" }) as const,
+          ({
+            kind: "gateway-key",
+            envKey: "AI_GATEWAY_API_KEY",
+            source: { kind: "env-file", path: ".env.local" },
+          }) as const,
       ),
     });
 
@@ -338,7 +342,7 @@ describe("runModelFlow", () => {
           ({
             kind: "gateway-key",
             envKey: "AI_GATEWAY_API_KEY",
-            envFile: ".env.local",
+            source: { kind: "env-file", path: ".env.local" },
           }) as const,
       ),
     });
@@ -517,14 +521,24 @@ describe("runModelFlow", () => {
       .mockResolvedValueOnce({ kind: "unset" })
       .mockResolvedValueOnce({ kind: "gateway-project", projectName: "my-agent" });
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
-      async () => ({ kind: "done", credential: "AI_GATEWAY_API_KEY" }) as const,
+      async () =>
+        ({
+          kind: "done",
+          resolution: {
+            credential: "api-key",
+            source: { kind: "env-file", path: ".env.local" },
+          },
+        }) as const,
     );
     const deps = flowDeps({ detectProviderStatus, runProviderFlow });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
       providerOutcome: {
-        credential: "AI_GATEWAY_API_KEY",
+        resolution: {
+          credential: "api-key",
+          source: { kind: "env-file", path: ".env.local" },
+        },
         status: { kind: "gateway-project", projectName: "my-agent" },
       },
     });
@@ -540,7 +554,8 @@ describe("runModelFlow", () => {
   it("honors confirmed provider entry when link metadata looks configured", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
-      async () => ({ kind: "done", credential: "VERCEL_OIDC_TOKEN" }) as const,
+      async () =>
+        ({ kind: "done", resolution: { credential: "oidc", file: ".env.local" } }) as const,
     );
     const deps = flowDeps({ runProviderFlow });
 
@@ -554,7 +569,7 @@ describe("runModelFlow", () => {
     ).resolves.toEqual({
       kind: "done",
       providerOutcome: {
-        credential: "VERCEL_OIDC_TOKEN",
+        resolution: { credential: "oidc", file: ".env.local" },
         status: { kind: "gateway-project", projectName: "my-agent" },
       },
     });
@@ -572,11 +587,14 @@ describe("runModelFlow", () => {
       .mockResolvedValueOnce({
         kind: "gateway-key",
         envKey: "AI_GATEWAY_API_KEY",
-        envFile: ".env.local",
+        source: { kind: "env-file", path: ".env.local" },
       });
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(async () => {
       controller.abort();
-      return { kind: "done", credential: "AI_GATEWAY_API_KEY" };
+      return {
+        kind: "done",
+        resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
+      };
     });
     const deps = flowDeps({ detectProviderStatus, runProviderFlow });
 
@@ -591,11 +609,11 @@ describe("runModelFlow", () => {
     ).resolves.toEqual({
       kind: "done",
       providerOutcome: {
-        credential: "AI_GATEWAY_API_KEY",
+        resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
         status: {
           kind: "gateway-key",
           envKey: "AI_GATEWAY_API_KEY",
-          envFile: ".env.local",
+          source: { kind: "env-file", path: ".env.local" },
         },
       },
     });

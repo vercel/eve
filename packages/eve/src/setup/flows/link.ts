@@ -1,6 +1,11 @@
 import { interactiveAsker, withAnswers } from "../ask.js";
 import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import {
+  resolveGatewayCredential,
+  type GatewayCredentialEvidence,
+  type GatewayCredentialResolution,
+} from "#internal/resolve-model-endpoint-status.js";
+import {
   applyAiGatewayCredential,
   type ApplyAiGatewayCredentialDeps,
 } from "../boxes/apply-ai-gateway-credential.js";
@@ -24,6 +29,8 @@ import { inProjectSetupState, prompterSink } from "./in-project.js";
 export interface LinkFlowDeps {
   detectProjectIdentity: typeof detectProjectIdentity;
   findEnvFileWithKey: typeof findEnvFileWithKey;
+  /** Shell environment probed for a gateway key that would shadow OIDC. */
+  env: Record<string, string | undefined>;
   resolveProvisioning?: ResolveProvisioningDeps;
   linkProject?: LinkProjectDeps;
   applyAiGatewayCredential?: ApplyAiGatewayCredentialDeps;
@@ -33,17 +40,11 @@ export type LinkFlowResult =
   | {
       kind: "done";
       /**
-       * The credential the runtime will actually resolve, ranked exactly as
-       * the AI SDK gateway provider ranks them: a gateway API key (env file
-       * or shell) outranks the pulled OIDC token.
+       * The credential the runtime will actually resolve, from the one
+       * precedence authority ({@link resolveGatewayCredential}): a gateway
+       * API key — env file or shell — outranks the pulled OIDC token.
        */
-      credential?: "VERCEL_OIDC_TOKEN" | typeof AI_GATEWAY_API_KEY_ENV_VAR;
-      /**
-       * Present when the link landed an OIDC token that a gateway API key
-       * shadows; `keySource` names where the winning key lives (an env file
-       * path, or `"shell"` for an exported variable eve cannot remove).
-       */
-      shadowedOidc?: { keySource: string };
+      resolution?: GatewayCredentialResolution;
     }
   | { kind: "cancelled" };
 
@@ -85,6 +86,7 @@ export async function runLinkFlow(input: {
   const deps: LinkFlowDeps = {
     detectProjectIdentity,
     findEnvFileWithKey,
+    env: process.env,
     ...input.deps,
   };
 
@@ -182,24 +184,16 @@ export async function runLinkFlow(input: {
     );
   }
   const done: LinkFlowResult = { kind: "done" };
-  // Ranked as the runtime resolves credentials: a gateway API key — from an
-  // env file or exported in the shell — outranks the pulled OIDC token. The
-  // link provisioned OIDC, but reporting it while a key shadows it would
-  // claim a credential that never authenticates a call.
-  if (gatewayKeyFile !== undefined) {
-    done.credential = AI_GATEWAY_API_KEY_ENV_VAR;
-    if (oidcFile !== undefined) done.shadowedOidc = { keySource: gatewayKeyFile };
-  } else if (hasShellGatewayKey()) {
-    done.credential = AI_GATEWAY_API_KEY_ENV_VAR;
-    if (oidcFile !== undefined) done.shadowedOidc = { keySource: "shell" };
-  } else if (oidcFile !== undefined) {
-    done.credential = "VERCEL_OIDC_TOKEN";
-  }
+  // The link provisioned OIDC, but reporting it while a key shadows it
+  // would claim a credential that never authenticates a call — the one
+  // precedence authority decides what actually won.
+  const shellKey = deps.env[AI_GATEWAY_API_KEY_ENV_VAR];
+  const evidence: GatewayCredentialEvidence = {
+    apiKeyInEnv: shellKey !== undefined && shellKey.trim().length > 0,
+    ...(gatewayKeyFile !== undefined ? { apiKeyFile: gatewayKeyFile } : {}),
+    ...(oidcFile !== undefined ? { oidcFile } : {}),
+  };
+  const resolution = resolveGatewayCredential(evidence);
+  if (resolution !== undefined) done.resolution = resolution;
   return done;
-}
-
-/** A gateway key exported in the shell shadows OIDC exactly like a file one. */
-function hasShellGatewayKey(): boolean {
-  const value = process.env[AI_GATEWAY_API_KEY_ENV_VAR];
-  return value !== undefined && value.trim().length > 0;
 }
