@@ -349,6 +349,32 @@ describe("inline tier adjust", () => {
     expect(state.draft.tier).toBe("priority");
   });
 
+  it("drops a drafted priority tier when the picked model prices no fast mode", () => {
+    // Drafted (not authored) priority: the pick must reset it, or the hidden
+    // row leaves it stuck and it leaks into the settle result.
+    const req = request();
+    let state = drive(req, initialModelEditorState(req), [
+      { type: "move", direction: "down" },
+      { type: "move", direction: "down" },
+      { type: "adjust", direction: "right" }, // tier → priority
+      { type: "move", direction: "up" },
+      { type: "move", direction: "up" },
+      { type: "submit" },
+      { type: "char", char: "frills" },
+      { type: "submit" }, // model → test/no-frills, fastMode: false
+    ]);
+    expect(state.draft.tier).toBe("standard");
+
+    // Priority survives a pick between two fast-mode models.
+    const priority = request({ serviceTier: { kind: "priority" } });
+    state = drive(priority, initialModelEditorState(priority), [
+      { type: "submit" },
+      { type: "char", char: "grok" },
+      { type: "submit" },
+    ]);
+    expect(state.draft.tier).toBe("priority");
+  });
+
   it("hides the tier row after a pick of a model without the tier", () => {
     const req = request();
     let state = drive(req, initialModelEditorState(req), [
@@ -417,6 +443,21 @@ describe("settling", () => {
     expect(transitionModelEditor(state, { type: "submit" }, req)).toEqual({
       kind: "settle",
       result: { serviceTier: "standard" },
+    });
+  });
+
+  it("settles an authored priority tier down to standard when the pick loses fast mode", () => {
+    const req = request({ serviceTier: { kind: "priority" } });
+    let state = drive(req, initialModelEditorState(req), [
+      { type: "submit" },
+      { type: "char", char: "frills" },
+      { type: "submit" },
+    ]);
+    state = toDone(req, state);
+
+    expect(transitionModelEditor(state, { type: "submit" }, req)).toEqual({
+      kind: "settle",
+      result: { model: "test/no-frills", serviceTier: "standard" },
     });
   });
 

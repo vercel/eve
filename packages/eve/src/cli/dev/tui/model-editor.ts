@@ -372,6 +372,11 @@ function transitionModelScreen(
             modelId: value,
             // A level the new model cannot serve must not survive the pick.
             reasoning: snapReasoningToCapabilities(state.draft.reasoning, capabilities),
+            // Nor a priority tier the new model prices no fast mode for — the
+            // hidden tier row would leave it drafted with no way to toggle it
+            // back, and it would leak into the settle result.
+            tier:
+              capabilities !== undefined && !capabilities.fastMode ? "standard" : state.draft.tier,
           },
           capabilities,
         },
