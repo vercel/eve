@@ -1,4 +1,4 @@
-import { codeIs, messageIs, type SemanticErrorRule } from "../rule.js";
+import { anyOf, codeIs, messageIs, type LinkPredicate, type SemanticErrorRule } from "../rule.js";
 
 /**
  * Node/undici error codes that identify a failed network dial or a
@@ -16,6 +16,19 @@ const NETWORK_ERROR_CODES = [
   "UND_ERR_SOCKET",
 ] as const;
 
+/**
+ * The one definition of "this link is a network failure", shared by the
+ * catalog rules below and the model-call retry classifier so
+ * presentation and recovery policy cannot drift apart.
+ */
+export const isNetworkFailureLink: LinkPredicate = anyOf(
+  codeIs(...NETWORK_ERROR_CODES),
+  messageIs("fetch failed", "socket hang up"),
+);
+
+const NETWORK_FAILURE_HINT =
+  "Check your internet connection and that the target service is reachable, then try again.";
+
 export const SYSTEM_RULES: readonly SemanticErrorRule[] = [
   {
     id: "port-already-in-use",
@@ -23,14 +36,16 @@ export const SYSTEM_RULES: readonly SemanticErrorRule[] = [
     tags: ["system", "config"],
     when: codeIs("EADDRINUSE"),
     message:
-      "The port is already in use — another process (perhaps another `eve dev`) is listening on it. Stop that process or pass a different `--port`.",
+      "The port is already in use — another process (perhaps another `eve dev`) is listening on it.",
+    hint: "Stop that process or pass a different `--port`.",
   },
   {
     id: "disk-full",
     name: "Disk full",
     tags: ["system"],
     when: codeIs("ENOSPC"),
-    message: "The disk is full, so writes are failing. Free up space and retry.",
+    message: "The disk is full, so writes are failing.",
+    hint: "Free up space and retry.",
   },
   // One failure shape, two detection signals in priority order: a
   // structured code anywhere on the chain beats a message match, because
@@ -42,6 +57,7 @@ export const SYSTEM_RULES: readonly SemanticErrorRule[] = [
     tags: ["system", "transient"],
     when: codeIs(...NETWORK_ERROR_CODES),
     message: (link) => networkFailureMessage(link.code ?? "network error"),
+    hint: NETWORK_FAILURE_HINT,
   },
   {
     // Exact-equality message fallback, verified empirically on Node 26:
@@ -56,9 +72,10 @@ export const SYSTEM_RULES: readonly SemanticErrorRule[] = [
     tags: ["system", "transient"],
     when: messageIs("fetch failed", "socket hang up"),
     message: (link) => networkFailureMessage(link.message.trim()),
+    hint: NETWORK_FAILURE_HINT,
   },
 ];
 
 function networkFailureMessage(evidence: string): string {
-  return `A network request failed before completing (${evidence}). Check your internet connection and that the target service is reachable, then try again.`;
+  return `A network request failed before completing (${evidence}).`;
 }

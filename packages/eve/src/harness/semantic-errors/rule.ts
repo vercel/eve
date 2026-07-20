@@ -36,18 +36,27 @@ export interface SemanticErrorRule {
   /** Matches when ANY link on the cause chain satisfies the predicate. */
   readonly when: LinkPredicate;
   /**
-   * Remediation text written for end users, or a projection of the
-   * matched link (e.g. pass-through for eve-authored error messages
-   * that are already actionable).
+   * What happened — one factual sentence, or a projection of the matched
+   * link (e.g. pass-through for eve-authored error messages).
    */
   readonly message: string | ((link: ErrorLink) => string);
+  /**
+   * What to do about it. Structured separately from `message` so render
+   * surfaces can style, replace, or suppress the remediation
+   * independently of the description (the dev TUI swaps in local
+   * `/model` hints; a channel adapter may drop CLI advice entirely).
+   */
+  readonly hint?: string | ((link: ErrorLink) => string | undefined);
 }
 
 /** A matched rule projected into a displayable summary. */
 export interface SemanticErrorSummary {
   readonly id: string;
   readonly name: string;
+  /** What happened. */
   readonly message: string;
+  /** What to do about it, when the rule carries remediation. */
+  readonly hint?: string;
 }
 
 /** Evaluates an ordered rule list against extracted signals; first match wins. */
@@ -58,11 +67,16 @@ export function evaluateSemanticErrorRules(
   for (const rule of rules) {
     const link = signals.chain.find((candidate) => rule.when(candidate));
     if (link === undefined) continue;
-    return {
+    const summary: {
+      -readonly [Key in keyof SemanticErrorSummary]: SemanticErrorSummary[Key];
+    } = {
       id: rule.id,
       name: rule.name,
       message: typeof rule.message === "string" ? rule.message : rule.message(link),
     };
+    const hint = typeof rule.hint === "function" ? rule.hint(link) : rule.hint;
+    if (hint !== undefined && hint.length > 0) summary.hint = hint;
+    return summary;
   }
   return null;
 }

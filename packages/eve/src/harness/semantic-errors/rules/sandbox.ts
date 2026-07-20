@@ -1,6 +1,7 @@
 import { nameIs, type SemanticErrorRule } from "../rule.js";
 
 const passThroughMessage = (link: { readonly message: string }) => link.message;
+const passThroughHint = (link: { readonly hint?: string }) => link.hint;
 
 /**
  * Error class names come from eve's own sandbox backends —
@@ -23,6 +24,7 @@ export const SANDBOX_RULES: readonly SemanticErrorRule[] = [
     tags: ["sandbox", "config"],
     when: nameIs("DockerUnavailableError"),
     message: passThroughMessage,
+    hint: passThroughHint,
   },
   {
     id: "sandbox-docker-daemon-unreachable",
@@ -30,6 +32,7 @@ export const SANDBOX_RULES: readonly SemanticErrorRule[] = [
     tags: ["sandbox", "config"],
     when: nameIs("DockerDaemonUnavailableError"),
     message: passThroughMessage,
+    hint: passThroughHint,
   },
   {
     id: "sandbox-provisioning-failed",
@@ -37,5 +40,6 @@ export const SANDBOX_RULES: readonly SemanticErrorRule[] = [
     tags: ["sandbox"],
     when: nameIs("MicrosandboxDiagnosticError"),
     message: passThroughMessage,
+    hint: passThroughHint,
   },
 ];

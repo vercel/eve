@@ -51,20 +51,22 @@ export function enrichMicrosandboxError(input: {
   const codeLabel = code === undefined ? "" : ` [${code}]`;
   const detail = toErrorMessage(input.error);
   const detailSentence = /[.!?]$/u.test(detail) ? detail : `${detail}.`;
-  const hint = microsandboxErrorHint(code);
-  const hintSuffix = hint === undefined ? "" : ` ${hint}`;
-  return new MicrosandboxDiagnosticError(
-    `${input.context}${codeLabel}: ${detailSentence}${hintSuffix}`,
-    { cause: input.error },
-  );
+  return new MicrosandboxDiagnosticError(`${input.context}${codeLabel}: ${detailSentence}`, {
+    cause: input.error,
+    hint: microsandboxErrorHint(code),
+  });
 }
 
 class MicrosandboxDiagnosticError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  /** Structured per-error-code remediation, surfaced by the semantic-error catalog. */
+  readonly hint?: string;
+
+  constructor(message: string, options?: ErrorOptions & { hint?: string }) {
     super(message, options);
     // Stable discriminator for the semantic-error catalog's sandbox rules;
     // subclassing alone leaves `name` as "Error".
     this.name = "MicrosandboxDiagnosticError";
+    if (options?.hint !== undefined) this.hint = options.hint;
   }
 }
 

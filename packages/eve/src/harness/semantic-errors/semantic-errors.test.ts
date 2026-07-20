@@ -161,6 +161,25 @@ describe("summarizeKnownError (catalog table)", () => {
     expect(summarizeKnownError(error)?.message).toContain("ECONNREFUSED");
   });
 
+  it("splits what happened (message) from what to do (hint)", () => {
+    const summary = summarizeKnownError(
+      named("GatewayAuthenticationError", "AI Gateway authentication failed: Invalid API key."),
+    );
+    expect(summary?.message).toBe("AI Gateway rejected the provided API key.");
+    expect(summary?.hint).toContain("AI_GATEWAY_API_KEY");
+    expect(summary?.message).not.toContain("AI_GATEWAY_API_KEY");
+  });
+
+  it("passes structured hints authored at the throw site through", () => {
+    const summary = summarizeKnownError(
+      named("DockerUnavailableError", "the `docker` CLI was not found.", {
+        hint: "Install and start Docker Desktop.",
+      }),
+    );
+    expect(summary?.message).toBe("the `docker` CLI was not found.");
+    expect(summary?.hint).toBe("Install and start Docker Desktop.");
+  });
+
   it("passes eve-authored sandbox messages through unchanged", () => {
     const summary = summarizeKnownError(
       named("MicrosandboxDiagnosticError", "pulling template [T001]: registry unreachable."),

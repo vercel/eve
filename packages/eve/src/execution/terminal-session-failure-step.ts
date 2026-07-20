@@ -25,15 +25,16 @@ export async function emitTerminalSessionFailureStep(input: {
   // raw evidence while the transcript shows the actionable summary.
   const formatted = formatError(input.error);
   const summary = summarizeKnownError(input.error);
-  const details =
-    summary === null
-      ? formatted
-      : {
-          ...formatted,
-          message: summary.message,
-          name: summary.name,
-          semanticErrorId: summary.id,
-        };
+  let details = formatted;
+  if (summary !== null) {
+    const curated = {
+      ...formatted,
+      message: summary.message,
+      name: summary.name,
+      semanticErrorId: summary.id,
+    };
+    details = summary.hint === undefined ? curated : { ...curated, hint: summary.hint };
+  }
   const code = typeof details.name === "string" ? details.name : "WORKFLOW_EXECUTION_FAILED";
   const message = typeof details.message === "string" ? details.message : String(input.error);
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";

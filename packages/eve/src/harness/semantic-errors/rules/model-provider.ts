@@ -18,8 +18,8 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
       nameIs("LoadAPIKeyError", "AI_LoadAPIKeyError"),
       messageMatches(/API key is missing/i),
     ),
-    message:
-      "The model provider could not load an API key. Export the provider's API key environment variable (for example `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and try again.",
+    message: "The model provider could not load an API key.",
+    hint: "Export the provider's API key environment variable (for example `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and try again.",
   },
   {
     id: "model-capability-unsupported",
@@ -27,6 +27,7 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     tags: ["model-provider"],
     when: nameIs("AI_UnsupportedFunctionalityError"),
     message:
-      "The selected model does not support a capability this agent uses (a tool type, modality, or feature). Remove the unsupported tool or switch to a model that supports it.",
+      "The selected model does not support a capability this agent uses (a tool type, modality, or feature).",
+    hint: "Remove the unsupported tool or switch to a model that supports it.",
   },
 ];

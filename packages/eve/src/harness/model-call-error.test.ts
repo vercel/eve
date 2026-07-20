@@ -239,14 +239,18 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(outer)).toBe("retry");
   });
 
-  it("treats common network error messages as retry-worthy", () => {
+  it("treats known network failures as retry-worthy, by structural signals only", () => {
     const econnreset = Object.assign(new Error("socket error"), {
-      cause: new Error("ECONNRESET fired"),
+      cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
     });
     expect(classifyModelCallError(econnreset)).toBe("retry");
 
     const fetchFailed = new Error("fetch failed");
     expect(classifyModelCallError(fetchFailed)).toBe("retry");
+
+    // The old substring policy is gone: prose that merely mentions a
+    // network token no longer forces a retry loop.
+    expect(classifyModelCallError(new Error("network configuration invalid"))).toBe("recoverable");
   });
 
   it("falls back to recoverable for unknown errors so the session parks instead of dying", () => {
@@ -267,8 +271,8 @@ describe("summarizeKnownModelCallConfigError", () => {
     );
     expect(summary?.id).toBe("gateway-auth-invalid-api-key");
     expect(summary?.name).toBe("AI Gateway authentication failed");
-    expect(summary?.message).toMatch(/AI_GATEWAY_API_KEY/);
-    expect(summary?.message).toMatch(/unset/i);
+    expect(summary?.hint).toMatch(/AI_GATEWAY_API_KEY/);
+    expect(summary?.hint).toMatch(/unset/i);
   });
 
   it("tells the user to refresh the OIDC token when the gateway rejects it", () => {
@@ -279,8 +283,8 @@ describe("summarizeKnownModelCallConfigError", () => {
     );
     expect(summary?.id).toBe("gateway-auth-invalid-oidc-token");
     expect(summary?.name).toBe("AI Gateway authentication failed");
-    expect(summary?.message).toMatch(/eve link/);
-    expect(summary?.message).toMatch(/VERCEL_OIDC_TOKEN/);
+    expect(summary?.hint).toMatch(/eve link/);
+    expect(summary?.hint).toMatch(/VERCEL_OIDC_TOKEN/);
   });
 
   it("tells the user to provide credentials when neither was offered", () => {
@@ -291,8 +295,8 @@ describe("summarizeKnownModelCallConfigError", () => {
     );
     expect(summary?.id).toBe("gateway-auth-missing-credentials");
     expect(summary?.name).toBe("AI Gateway authentication failed");
-    expect(summary?.message).toMatch(/eve link/);
-    expect(summary?.message).toMatch(/AI_GATEWAY_API_KEY/);
+    expect(summary?.hint).toMatch(/eve link/);
+    expect(summary?.hint).toMatch(/AI_GATEWAY_API_KEY/);
   });
 
   it("returns null for unrelated errors so the harness uses the raw SDK message", () => {

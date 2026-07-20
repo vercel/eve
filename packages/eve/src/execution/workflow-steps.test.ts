@@ -1247,12 +1247,13 @@ describe("emitTerminalSessionFailureStep", () => {
       data: {
         code: string;
         message: string;
-        details?: { detail?: string; semanticErrorId?: string };
+        details?: { detail?: string; hint?: string; semanticErrorId?: string };
       };
     };
     expect(data.code).toBe("Network request failed");
     expect(data.message).toContain("ECONNREFUSED");
     expect(data.details?.semanticErrorId).toBe("network-request-failed");
+    expect(data.details?.hint).toContain("Check your internet connection");
     // The raw inspection stays attached so the diagnostic log keeps the
     // evidence the curated message summarizes away.
     expect(data.details?.detail).toContain("fetch failed");

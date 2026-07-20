@@ -1,7 +1,7 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toError, walkCauseChain } from "#shared/errors.js";
-import { summarizeKnownConfigError } from "#harness/semantic-errors/index.js";
+import { isKnownNetworkError, summarizeKnownConfigError } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
@@ -12,7 +12,7 @@ const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
 export {
   GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
   GATEWAY_AUTHENTICATION_ERROR_NAME,
-} from "#harness/semantic-errors/index.js";
+} from "#harness/semantic-errors/rules/gateway.js";
 
 /**
  * Anchored regex for the upstream "unsupported tool" rejection message
@@ -44,7 +44,10 @@ const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supporte
 export interface ModelCallConfigErrorSummary {
   readonly id: string;
   readonly name: string;
+  /** What happened. */
   readonly message: string;
+  /** What to do about it, when the matched catalog rule carries remediation. */
+  readonly hint?: string;
 }
 
 interface ModelCallErrorSignals {
@@ -356,7 +359,7 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     if (status >= 400 && status < 500) return "terminal";
   }
 
-  if (isLikelyNetworkError(error)) {
+  if (isKnownNetworkError(error)) {
     return "retry";
   }
 
@@ -368,25 +371,6 @@ function hasRetryableFlag(error: unknown): boolean {
     if (isObject(candidate) && candidate.isRetryable === true) {
       return true;
     }
-  }
-  return false;
-}
-
-function isLikelyNetworkError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  if (
-    message.includes("econnreset") ||
-    message.includes("etimedout") ||
-    message.includes("eai_again") ||
-    message.includes("socket hang up") ||
-    message.includes("network") ||
-    message.includes("fetch failed")
-  ) {
-    return true;
-  }
-  if (error.cause !== undefined && error.cause !== error) {
-    return isLikelyNetworkError(error.cause);
   }
   return false;
 }

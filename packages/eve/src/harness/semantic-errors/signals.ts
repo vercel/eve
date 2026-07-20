@@ -16,6 +16,12 @@ export interface ErrorLink {
   readonly statusCode?: number;
   /** Gateway error body discriminator (`rate_limit_exceeded`, …). */
   readonly type?: string;
+  /**
+   * Structured remediation authored at the throw site (eve's own error
+   * classes carry it as an own property, so it survives structured
+   * clone). Pass-through rules surface it as the summary hint.
+   */
+  readonly hint?: string;
 }
 
 /** The full cause chain of a throwable, outermost first. */
@@ -42,6 +48,9 @@ export function extractErrorSignals(error: unknown): ErrorSignals {
     }
     if (typeof candidate.type === "string" && candidate.type.length > 0) {
       link.type = candidate.type;
+    }
+    if (typeof candidate.hint === "string" && candidate.hint.length > 0) {
+      link.hint = candidate.hint;
     }
     chain.push(link);
   }
