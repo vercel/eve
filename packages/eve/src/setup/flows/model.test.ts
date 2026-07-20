@@ -11,7 +11,12 @@ import type {
 } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { MODEL_MENU_MESSAGE, runModelFlow, type ModelFlowDeps } from "./model.js";
+import {
+  MODEL_MENU_MESSAGE,
+  runModelFlow,
+  type ModelFlowDeps,
+  type ModelSettingsRequest,
+} from "./model.js";
 
 const APP_ROOT = "/app/my-agent";
 
@@ -21,13 +26,24 @@ const CATALOG: GatewayCatalogModel[] = [
     name: "Claude Sonnet 5",
     type: "language",
     owned_by: "anthropic",
-    tags: ["web-search"],
+    tags: ["reasoning", "web-search"],
+    pricing: { service_tiers: { priority: {} } },
   },
   {
     id: "openai/gpt-5.5",
     name: "GPT-5.5",
     type: "language",
     owned_by: "openai",
+    tags: ["reasoning", "web-search"],
+    pricing: { service_tiers: { priority: {} } },
+  },
+  // Advertises neither the reasoning tag nor a priority tier, so capability
+  // lookups have a catalog-listed model with no adjustable controls.
+  {
+    id: "test/no-frills",
+    name: "No Frills",
+    type: "language",
+    owned_by: "test",
     tags: ["web-search"],
   },
 ];
@@ -51,6 +67,7 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
         }) as const,
     ),
     selectModel: { fetchModels: async () => CATALOG },
+    pickModelSettings: vi.fn(async () => undefined),
     detectProviderStatus: vi.fn(
       async () => ({ kind: "gateway-project", projectName: "my-agent" }) as const,
     ),
@@ -69,34 +86,28 @@ interface MenuPaint {
 }
 
 /**
- * Answers the menu prompt from a script (throwing the cancel error for
- * "esc"), records every painted menu, and answers each catalog picker
- * prompt from the `picker` queue ("esc" cancels that picker).
+ * Answers the root menu from a script (throwing the cancel error for "esc")
+ * and records every painted menu. The composite model screen is not a prompter
+ * question — tests script it through the `pickModelSettings` dep instead.
  */
-function scriptedPrompter(input: { menu: (PrompterValue | "esc")[]; picker?: string[] }) {
+function scriptedPrompter(input: { menu: (PrompterValue | "esc")[] }) {
   const menuPaints: MenuPaint[] = [];
   const menuScript = [...input.menu];
-  const pickerScript = [...(input.picker ?? [])];
   const fake = createFakePrompter({
     single: (opts: SingleSelectOptions<PrompterValue>) => {
-      if (opts.message === MODEL_MENU_MESSAGE) {
-        menuPaints.push({
-          options: opts.options,
-          notices: opts.notices ?? [],
-          hintLayout: opts.hintLayout,
-          initialValue: opts.initialValue,
-        });
-        const next = menuScript.shift();
-        if (next === undefined) throw new Error("Menu painted more times than scripted.");
-        if (next === "esc") throw new WizardCancelledError();
-        return next;
+      if (opts.message !== MODEL_MENU_MESSAGE) {
+        throw new Error(`Unexpected prompt: "${opts.message}"`);
       }
-      const answer = pickerScript.shift();
-      if (answer === undefined) {
-        throw new Error(`Unexpected picker prompt: "${opts.message}"`);
-      }
-      if (answer === "esc") throw new WizardCancelledError();
-      return answer;
+      menuPaints.push({
+        options: opts.options,
+        notices: opts.notices ?? [],
+        hintLayout: opts.hintLayout,
+        initialValue: opts.initialValue,
+      });
+      const next = menuScript.shift();
+      if (next === undefined) throw new Error("Menu painted more times than scripted.");
+      if (next === "esc") throw new WizardCancelledError();
+      return next;
     },
   });
   return { ...fake, menuPaints };
@@ -117,19 +128,7 @@ describe("runModelFlow", () => {
             value: "model",
             label: "Change model",
             hint: "anthropic/claude-sonnet-5",
-            description: "The model your agent uses",
-          },
-          {
-            value: "reasoning",
-            label: "Reasoning",
-            hint: "Provider default",
-            description: "Effort level; exact support depends on the model and provider",
-          },
-          {
-            value: "fast-mode",
-            label: "Fast mode",
-            hint: "Off (standard)",
-            description: "Requests faster Gateway processing at increased cost",
+            description: "The model, its reasoning effort, and the Gateway service tier",
           },
           {
             value: "provider",
@@ -137,7 +136,7 @@ describe("runModelFlow", () => {
             hint: `AI Gateway (Linked to ${pc.bold("my-agent")})`,
             description: "How your agent reaches the model provider",
           },
-          { value: "done", label: "Done", description: "Return to the prompt" },
+          { value: "done", label: "Done" },
         ],
         notices: [],
         hintLayout: "stacked",
@@ -146,7 +145,25 @@ describe("runModelFlow", () => {
     ]);
   });
 
-  it("disables both rows for an external-provider model and never asks to configure a provider", async () => {
+  it("summarizes authored reasoning and Fast mode on the model row hint", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "xai/grok-4.5",
+        routing: { kind: "gateway", target: "xai" } as const,
+        reasoning: "high" as const,
+        serviceTier: { kind: "priority" } as const,
+        editable: true,
+        settingsEditable: true,
+      })),
+    });
+
+    await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
+
+    expect(menuPaints[0]?.options[0]?.hint).toBe(`xai/grok-4.5${pc.blue("@high")}${pc.blue(" ↯")}`);
+  });
+
+  it("keeps the model row for an external-provider model and never asks to configure a provider", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
@@ -172,21 +189,9 @@ describe("runModelFlow", () => {
           {
             value: "model",
             label: "Change model",
-            disabled: true,
-            description: "Set via an SDK model call in agent.ts; edit the source to change it",
-          },
-          {
-            value: "reasoning",
-            label: "Reasoning",
-            hint: "Provider default",
-            description: "Effort level; exact support depends on the model and provider",
-          },
-          {
-            value: "fast-mode",
-            label: "Fast mode",
-            hint: "Off (standard)",
-            disabled: true,
-            description: "Disabled for a direct external provider",
+            hint: "anthropic/claude-sonnet-5",
+            description:
+              "Reasoning and service tier; the model itself is an SDK model call in agent.ts",
           },
           {
             value: "provider",
@@ -194,22 +199,78 @@ describe("runModelFlow", () => {
             disabled: true,
             description: "Disabled in external endpoint mode",
           },
-          { value: "done", label: "Done", description: "Return to the prompt" },
+          { value: "done", label: "Done" },
         ],
         notices: [
           {
             tone: "warning",
-            text: "`agent.ts` specifies the model provider directly. Model, provider, and Fast mode changes stay source-owned; reasoning remains configurable here.",
+            text: "`agent.ts` specifies the model provider directly. Model, provider, and service-tier changes stay source-owned; reasoning remains configurable here.",
           },
         ],
         hintLayout: "stacked",
-        initialValue: "reasoning",
+        initialValue: "model",
       },
     ]);
   });
 
-  it("disables only Change model for a gateway-routed SDK model call, keeping the provider row", async () => {
+  it("disables the Change model row only when nothing at all is editable", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "anthropic/claude-sonnet-5",
+        routing: { kind: "gateway", target: "anthropic" } as const,
+        reasoning: null,
+        serviceTier: { kind: "standard" } as const,
+        editable: false,
+        settingsEditable: false,
+      })),
+    });
+
+    await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
+
+    expect(menuPaints[0]?.options[0]).toEqual({
+      value: "model",
+      label: "Change model",
+      disabled: true,
+      description: "Set via an SDK model call in agent.ts; edit the source to change it",
+    });
+    expect(menuPaints[0]?.initialValue).toBe("provider");
+  });
+
+  it("opens the composite screen with catalog options, authored values, and capabilities", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["model", "esc"] });
+    let captured: ModelSettingsRequest | undefined;
+    const pickModelSettings = vi.fn(async (request: ModelSettingsRequest) => {
+      captured = request;
+      return undefined;
+    });
+    const deps = flowDeps({ pickModelSettings });
+
+    await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
+
+    expect(captured?.model).toEqual({
+      kind: "pick",
+      options: expect.arrayContaining([
+        expect.objectContaining({ value: "anthropic/claude-sonnet-5", featured: true }),
+        expect.objectContaining({ value: "test/no-frills" }),
+      ]),
+      current: "anthropic/claude-sonnet-5",
+    });
+    expect(captured?.reasoning).toBeNull();
+    expect(captured?.serviceTier).toEqual({ kind: "standard" });
+    expect(captured?.settingsEditable).toBe(true);
+    expect(captured?.externalRouting).toBe(false);
+    expect(captured?.capabilitiesFor("test/no-frills")).toEqual({
+      reasoning: false,
+      reasoningLevels: [],
+      fastMode: false,
+    });
+    expect(captured?.capabilitiesFor("unknown/model")).toBeUndefined();
+  });
+
+  it("fixes the model section for a gateway-routed SDK model call", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["model", "esc"] });
+    let captured: ModelSettingsRequest | undefined;
     const deps = flowDeps({
       // `gateway("…")` instance: gateway-routed, but not a string literal eve can rewrite.
       readCurrentModel: vi.fn(async () => ({
@@ -220,6 +281,10 @@ describe("runModelFlow", () => {
         editable: false,
         settingsEditable: true,
       })),
+      pickModelSettings: vi.fn(async (request: ModelSettingsRequest) => {
+        captured = request;
+        return undefined;
+      }),
       detectProviderStatus: vi.fn(
         async () =>
           ({ kind: "gateway-key", envKey: "AI_GATEWAY_API_KEY", envFile: ".env.local" }) as const,
@@ -228,33 +293,11 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options).toEqual([
-      {
-        value: "model",
-        label: "Change model",
-        disabled: true,
-        description: "Set via an SDK model call in agent.ts; edit the source to change it",
-      },
-      {
-        value: "reasoning",
-        label: "Reasoning",
-        hint: "Provider default",
-        description: "Effort level; exact support depends on the model and provider",
-      },
-      {
-        value: "fast-mode",
-        label: "Fast mode",
-        hint: "Off (standard)",
-        description: "Requests faster Gateway processing at increased cost",
-      },
-      {
-        value: "provider",
-        label: "Change provider",
-        hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)",
-        description: "How your agent reaches the model provider",
-      },
-      { value: "done", label: "Done", description: "Return to the prompt" },
-    ]);
+    expect(captured?.model).toEqual({
+      kind: "fixed",
+      current: "anthropic/claude-sonnet-5",
+      reason: "Set via an SDK model call in agent.ts; edit the source to change it",
+    });
     // Gateway routing gets no external-restriction notice.
     expect(menuPaints[0]?.notices).toEqual([]);
   });
@@ -279,7 +322,7 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options[3]).toEqual({
+    expect(menuPaints[0]?.options[1]).toEqual({
       value: "provider",
       label: "Change provider",
       hint: `AI Gateway (Linked to ${pc.bold("my-agent")} in ${pc.bold("my-team")})`,
@@ -302,7 +345,7 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options[3]).toEqual({
+    expect(menuPaints[0]?.options[1]).toEqual({
       value: "provider",
       label: "Change provider",
       hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)",
@@ -310,24 +353,24 @@ describe("runModelFlow", () => {
     });
   });
 
-  it("applies the model and returns to the prompt", async () => {
+  it("applies a picked model once on Done and returns to the prompt", async () => {
     const { prompter, menuPaints, selectMessages } = scriptedPrompter({
       menu: ["model", "done"],
-      picker: ["openai/gpt-5.5"],
     });
-    const deps = flowDeps();
+    const deps = flowDeps({
+      pickModelSettings: vi.fn(async () => ({ model: "openai/gpt-5.5" })),
+    });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
       modelMessage: `Model changed to ${pc.bold("openai/gpt-5.5")}. Live on your next prompt.`,
     });
 
-    expect(selectMessages).toEqual([
-      MODEL_MENU_MESSAGE,
-      "Which model should your agent use?",
-      MODEL_MENU_MESSAGE,
-    ]);
+    expect(selectMessages).toEqual([MODEL_MENU_MESSAGE, MODEL_MENU_MESSAGE]);
     expect(menuPaints).toHaveLength(2);
+    // The second lap lands on Done and shows the drafted slug on the hint.
+    expect(menuPaints[1]?.initialValue).toBe("done");
+    expect(menuPaints[1]?.options[0]?.hint).toBe("openai/gpt-5.5");
     expect(deps.applySettings).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
       patch: {
@@ -340,11 +383,9 @@ describe("runModelFlow", () => {
   });
 
   it("returns a rejected model result without claiming the model changed", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({
-      menu: ["model", "done"],
-      picker: ["openai/gpt-5.5"],
-    });
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["model", "done"] });
     const deps = flowDeps({
+      pickModelSettings: vi.fn(async () => ({ model: "openai/gpt-5.5" })),
       applySettings: vi.fn(
         async () => ({ kind: "rejected", message: "Couldn't confirm the id." }) as const,
       ),
@@ -358,12 +399,13 @@ describe("runModelFlow", () => {
     expect(menuPaints).toHaveLength(2);
   });
 
-  it("drafts reasoning and Fast mode, then applies both once on Done", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({
-      menu: ["reasoning", "fast-mode", "done"],
-      picker: ["high", "priority"],
-    });
+  it("drafts reasoning and Fast mode from the screen, then applies both once on Done", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["model", "done"] });
     const deps = flowDeps({
+      pickModelSettings: vi.fn(async () => ({
+        reasoning: "high" as const,
+        serviceTier: "priority" as const,
+      })),
       applySettings: vi.fn<ModelFlowDeps["applySettings"]>(async () => ({
         kind: "changed" as const,
         changed: ["reasoning", "fast-mode"] as const,
@@ -378,7 +420,10 @@ describe("runModelFlow", () => {
         "Model settings updated: reasoning high, Fast mode on. Live on your next prompt.",
     });
 
-    expect(menuPaints).toHaveLength(3);
+    expect(menuPaints).toHaveLength(2);
+    expect(menuPaints[1]?.options[0]?.hint).toBe(
+      `anthropic/claude-sonnet-5${pc.blue("@high")}${pc.blue(" ↯")}`,
+    );
     expect(deps.applySettings).toHaveBeenCalledTimes(1);
     expect(deps.applySettings).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
@@ -390,12 +435,40 @@ describe("runModelFlow", () => {
     });
   });
 
-  it("discards a model-settings draft when the root menu is cancelled, and says so", async () => {
-    const { prompter } = scriptedPrompter({
-      menu: ["reasoning", "esc"],
-      picker: ["low"],
+  it("maps the remove sentinels onto remove patches", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["model", "done"] });
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "anthropic/claude-sonnet-5",
+        routing: { kind: "gateway", target: "anthropic" } as const,
+        reasoning: "high" as const,
+        serviceTier: { kind: "priority" } as const,
+        editable: true,
+        settingsEditable: true,
+      })),
+      pickModelSettings: vi.fn(async () => ({
+        reasoning: "default" as const,
+        serviceTier: "standard" as const,
+      })),
     });
-    const deps = flowDeps();
+
+    await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
+
+    expect(deps.applySettings).toHaveBeenCalledWith({
+      appRoot: APP_ROOT,
+      patch: {
+        model: { kind: "keep" },
+        reasoning: { kind: "remove" },
+        gatewayServiceTier: { kind: "remove" },
+      },
+    });
+  });
+
+  it("discards a model-settings draft when the root menu is cancelled, and says so", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["model", "esc"] });
+    const deps = flowDeps({
+      pickModelSettings: vi.fn(async () => ({ reasoning: "low" as const })),
+    });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "cancelled",
@@ -404,8 +477,9 @@ describe("runModelFlow", () => {
     expect(deps.applySettings).not.toHaveBeenCalled();
   });
 
-  it("shows a custom Gateway service tier without allowing the binary toggle to erase it", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
+  it("passes a custom Gateway service tier through to the screen untouched", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["model", "esc"] });
+    let captured: ModelSettingsRequest | undefined;
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
         id: "anthropic/claude-sonnet-5",
@@ -415,17 +489,27 @@ describe("runModelFlow", () => {
         editable: true,
         settingsEditable: true,
       })),
+      pickModelSettings: vi.fn(async (request: ModelSettingsRequest) => {
+        captured = request;
+        return undefined;
+      }),
     });
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options[2]).toEqual({
-      value: "fast-mode",
-      label: "Fast mode",
-      hint: "Custom (flex)",
-      description: "Custom service tier is authored in agent.ts; edit it there",
-      disabled: true,
+    expect(captured?.serviceTier).toEqual({ kind: "custom", value: "flex" });
+    // A custom tier is not Fast mode: no marker on the root hint.
+    expect(menuPaints[0]?.options[0]?.hint).toBe(`anthropic/claude-sonnet-5${pc.blue("@medium")}`);
+  });
+
+  it("folds an unchanged screen and a Done exit into a cancel", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["model", "done"] });
+    const deps = flowDeps({ pickModelSettings: vi.fn(async () => ({})) });
+
+    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
+      kind: "cancelled",
     });
+    expect(deps.applySettings).not.toHaveBeenCalled();
   });
 
   it("opens provider setup directly when none is configured", async () => {
@@ -447,7 +531,10 @@ describe("runModelFlow", () => {
       },
     });
 
-    expect(runProviderFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+    // The sub-flow learns the detected provider so its menu can mark the active row.
+    expect(runProviderFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: APP_ROOT, currentProvider: { kind: "unset" } }),
+    );
     expect(detectProviderStatus).toHaveBeenCalledTimes(2);
     expect(menuPaints).toHaveLength(0);
   });
@@ -550,21 +637,6 @@ describe("runModelFlow", () => {
     expect(deps.applySettings).not.toHaveBeenCalled();
   });
 
-  it("folds a cancelled picker without touching the source", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({
-      menu: ["model", "esc"],
-      picker: ["esc"],
-    });
-    const deps = flowDeps();
-
-    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
-      kind: "cancelled",
-    });
-    // The cancelled picker lands back on the menu before the empty exit.
-    expect(menuPaints).toHaveLength(2);
-    expect(deps.applySettings).not.toHaveBeenCalled();
-  });
-
   describe("cursor pre-selection", () => {
     it("opens on the model row when a provider is already set", async () => {
       const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
@@ -599,7 +671,7 @@ describe("runModelFlow", () => {
       });
       expect(provider.menuPaints[1]?.initialValue).toBe("provider");
 
-      const model = scriptedPrompter({ menu: ["model", "esc"], picker: ["esc"] });
+      const model = scriptedPrompter({ menu: ["model", "esc"] });
       await runModelFlow({ appRoot: APP_ROOT, prompter: model.prompter, deps: flowDeps() });
       expect(model.menuPaints[1]?.initialValue).toBe("model");
     });

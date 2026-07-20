@@ -5,6 +5,7 @@ import { lineOf } from "./line-editor.js";
 import {
   renderAcknowledgeQuestion,
   renderFlowPanel,
+  renderModelEditorQuestion,
   renderSelectQuestion,
   renderTextQuestion,
   type SetupPanelOption,
@@ -392,8 +393,9 @@ describe("renderSelectQuestion", () => {
       80,
     ).join("\n");
 
-    // The reason sits under the row (4-space indent), not as an inline parenthetical.
-    expect(text).toContain("Change model\n    Disabled here");
+    // The reason sits under the row, indented to the label column, not as an
+    // inline parenthetical.
+    expect(text).toContain("Change model\n     Disabled here");
     expect(text).not.toContain("Change model (Disabled here)");
   });
 
@@ -539,15 +541,16 @@ describe("renderSelectQuestion", () => {
       colorTheme,
       width,
     );
-    const row = rows.find((line) => line.includes("Invalid key"));
+    const row = rows.find((line) => line.includes("API key is not valid"));
     const plain = stripAnsi(row ?? "");
 
     expect(plain).toContain("…");
-    expect(plain).toContain("    ⨯ Invalid key");
+    expect(plain).toContain("⨯ API key is not valid");
+    // The masked input rides the elbow rail.
+    expect(plain).toContain("⎿ ");
     expect(plain.length).toBeLessThanOrEqual(width);
-    expect(row).toContain(
-      colorTheme.colors.red(`${colorTheme.glyph.error} ${colorTheme.colors.bold("Invalid key")}`),
-    );
+    // The failure trails the masked key in plain red — no background.
+    expect(row).toContain(colorTheme.colors.red(`${colorTheme.glyph.error} API key is not valid`));
   });
 
   it("hides the rename cursor and hint when the cursor is off the editable row", () => {
@@ -705,6 +708,28 @@ describe("renderSelectQuestion", () => {
     expect(unselectedRows).toContain(`     ${colorTheme.colors.dim(hint)}`);
   });
 
+  it("keeps a blue accent span inside the selected row's hint", () => {
+    const hint = `xai/grok-4.5${colorTheme.colors.blue("@high ↯")}`;
+    const options: SetupPanelOption[] = [
+      { value: "model", label: "Change model", hint },
+      { value: "done", label: "Done" },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options, defaultValue: "model" }),
+      },
+      colorTheme,
+      80,
+    );
+
+    // Blue survives the cursor row's foreground normalization; other authored
+    // colors (see the yellow test above) still strip.
+    expect(rows).toContain(`     xai/grok-4.5${colorTheme.colors.blue("@high ↯")}`);
+  });
+
   it("keeps a warning row yellow under the cursor highlight", () => {
     const options: SetupPanelOption[] = [
       {
@@ -776,12 +801,12 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("space to toggle");
   });
 
-  it("windows a searchable list and advertises the rest", () => {
+  it("windows the railed list to five rows with an Esc-only footer", () => {
     const many = Array.from({ length: 20 }, (_, index) => ({
       value: `model-${index}`,
       label: `Model ${index}`,
     }));
-    const text = renderSelectQuestion(
+    const rows = renderSelectQuestion(
       {
         kind: "search",
         message: "Which model?",
@@ -791,12 +816,19 @@ describe("renderSelectQuestion", () => {
       },
       theme,
       60,
-    ).join("\n");
+    );
+    const text = rows.join("\n");
 
-    expect(text).toContain("type to filter");
-    expect(text).toContain("> type to filter");
-    expect(text).toContain("↑↓ 20 options, showing 1–8");
-    expect(text).not.toContain("Model 12");
+    // The filter rail sits in the option rows' glyph column.
+    expect(text).toContain("   ▏ type to filter");
+    expect(text).toContain("   ▶ Model 0");
+    expect(text).toContain("   ▏ Model 4");
+    expect(text).not.toContain("Model 5");
+    // The list scrolls silently: no count row, Esc is the whole footer.
+    expect(text).not.toContain("options, showing");
+    expect(text).toContain("esc to cancel");
+    expect(text).not.toContain("type to filter ·");
+    expect(text).not.toContain("↑/↓ move");
   });
 
   it("paints a validation error inside the question", () => {
@@ -966,5 +998,158 @@ describe("renderAcknowledgeQuestion", () => {
 
     expect(rows[0]).toBe("  All set");
     expect(rows.filter((row) => row.trim().length > 0)).toHaveLength(2);
+  });
+});
+
+describe("renderModelEditorQuestion", () => {
+  // Editor requests carry id-labeled rows (the flow's modelListRows mapping).
+  const MODEL_IDS = [
+    "anthropic/claude-sonnet-5",
+    "openai/gpt-5.6-sol",
+    "openai/gpt-5.6-terra",
+    "openai/gpt-5.6-luna",
+    "xai/grok-4.5",
+    "google/gemini-3.5",
+    "zai/glm-4.6",
+    "meta/llama-5",
+    "mistral/large-3",
+    "cohere/command-b",
+  ];
+  const MODELS = MODEL_IDS.map((id, index) =>
+    index < 2 ? { value: id, label: id, featured: true } : { value: id, label: id },
+  );
+
+  const CAPS = {
+    reasoning: true,
+    reasoningLevels: ["low", "medium", "high"],
+    fastMode: true,
+  } as const;
+
+  function editorRequest(overrides = {}) {
+    return {
+      model: { kind: "pick", options: MODELS, current: "anthropic/claude-sonnet-5" },
+      reasoning: null,
+      serviceTier: { kind: "standard" },
+      settingsEditable: true,
+      externalRouting: false,
+      capabilitiesFor: () => CAPS,
+      ...overrides,
+    } as never;
+  }
+
+  function editorState(overrides = {}) {
+    return {
+      screen: { kind: "menu", cursor: "model" },
+      draft: { modelId: "anthropic/claude-sonnet-5", reasoning: "medium", tier: "standard" },
+      capabilities: CAPS,
+      ...overrides,
+    } as never;
+  }
+
+  it("paints the value menu with a hint line per row and a bare Done", () => {
+    const text = renderModelEditorQuestion(
+      { request: editorRequest(), state: editorState() },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("▶ Model");
+    expect(text).toContain("anthropic/claude-sonnet-5");
+    expect(text).toContain("Reasoning effort");
+    // The mini track rides the hint: value first, notches joined by ━.
+    expect(text).toContain("●─◉─○ medium");
+    expect(text).toContain("Service tier");
+    expect(text).toContain("normal");
+    expect(text).toContain("Done");
+    expect(text).toContain("↑/↓ move");
+  });
+
+  it("summarizes a fast-mode draft and an unset level on the menu hints", () => {
+    const text = renderModelEditorQuestion(
+      {
+        request: editorRequest(),
+        state: editorState({
+          draft: { modelId: "anthropic/claude-sonnet-5", reasoning: "default", tier: "priority" },
+        }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("○─○─○ provider default");
+    expect(text).toContain("fast ↯");
+  });
+
+  it("paints the hovered row's covered track stretch blue", () => {
+    const text = renderModelEditorQuestion(
+      {
+        request: editorRequest(),
+        state: editorState({ screen: { kind: "menu", cursor: "reasoning" } }),
+      },
+      colorTheme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain(`${colorTheme.colors.blue("●─◉")}─○`);
+  });
+
+  it("disables the reasoning row with its reason and omits the tier for a no-frills model", () => {
+    const noFrills = { reasoning: false, reasoningLevels: [], fastMode: false };
+    const text = renderModelEditorQuestion(
+      {
+        request: editorRequest(),
+        state: editorState({
+          capabilities: noFrills,
+          draft: { modelId: "test/no-frills", reasoning: "default", tier: "standard" },
+        }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("Not supported by the selected model");
+    expect(text).not.toContain("Service tier");
+  });
+
+  it("lists model ids on a caret rail with an inverse cursor row and enter badge", () => {
+    const rows = renderModelEditorQuestion(
+      {
+        request: editorRequest(),
+        state: editorState({
+          screen: {
+            kind: "model",
+            select: initialSelectState({ options: MODELS, defaultValue: "openai/gpt-5.6-sol" }),
+          },
+        }),
+      },
+      theme,
+      80,
+    );
+    const text = rows.join("\n");
+
+    expect(text).toContain("Select the model");
+    expect(text).toContain("   ▏ type to search");
+    expect(text).toContain(" ▶ openai/gpt-5.6-sol ");
+    expect(text).toContain("↵");
+    expect(text).toContain("   ▏ anthropic/claude-sonnet-5");
+    // Five rows in view, no count row, Esc-only footer.
+    expect(text).toContain("openai/gpt-5.6-luna");
+    expect(text).not.toContain("google/gemini-3.5");
+    expect(text).not.toContain("options, showing");
+    expect(text).toContain("esc to cancel");
+  });
+
+  it("falls back to ASCII track glyphs without unicode", () => {
+    const ascii = createTheme({ color: false, unicode: false });
+    const text = renderModelEditorQuestion(
+      {
+        request: editorRequest(),
+        state: editorState({ screen: { kind: "menu", cursor: "reasoning" } }),
+      },
+      ascii,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("*-O-. medium");
   });
 });

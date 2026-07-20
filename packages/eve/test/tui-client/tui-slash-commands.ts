@@ -134,7 +134,7 @@ async function runLocalChannelsCancellation(): Promise<void> {
     input.enter();
     await screen.waitForText("Where will you chat with your agent?", 10_000);
     input.send("\x1b");
-    await screen.waitForText("/channels cancelled.", 5_000);
+    await screen.waitForText("/channels dismissed.", 5_000);
     await screen.waitForText("❯", 5_000);
     console.log(theme.muted("[tui-slash-commands] local /channels cancelled back to prompt"));
 

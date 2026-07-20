@@ -9,6 +9,7 @@ import { createDefaultSetupState } from "../state.js";
 import type { OutputSink } from "../step.js";
 import { runHeadless, runInteractive } from "../runner.js";
 import {
+  modelOptionsFromCatalog,
   parseGatewayCatalog,
   selectModel,
   type GatewayCatalogModel,
@@ -81,6 +82,29 @@ function createSelectPrompter(handler: SingleHandler): {
   const single = vi.fn(handler);
   return { prompter: createFakePrompter({ single }).prompter, single };
 }
+
+describe("modelOptionsFromCatalog", () => {
+  it("filters, sorts newest-first behind the featured lead, and marks the shortlist", () => {
+    const options = modelOptionsFromCatalog(CATALOG);
+
+    expect(options.map((option) => option.value)).toEqual([
+      "anthropic/claude-sonnet-5",
+      "zai/glm-4.6",
+      "openai/gpt-5-mini",
+    ]);
+    expect(options.filter((option) => option.featured).map((o) => o.value)).toEqual([
+      "anthropic/claude-sonnet-5",
+    ]);
+  });
+
+  it("falls back to the static shortlist without a catalog or matches", () => {
+    for (const catalog of [undefined, [] as GatewayCatalogModel[]]) {
+      const values = modelOptionsFromCatalog(catalog).map((option) => option.value);
+      expect(values).toContain(DEFAULT_AGENT_MODEL_ID);
+      expect(values).toContain("google/gemini-3.5");
+    }
+  });
+});
 
 describe("selectModel box", () => {
   it("short-circuits both runners on a preset model", async () => {
@@ -244,6 +268,30 @@ describe("selectModel box", () => {
     });
 
     expect(models.map((model) => model.id)).toEqual(["zai/glm-4.6", "openai/gpt-5-mini"]);
+  });
+
+  it("keeps a model when only its optional catalog metadata is malformed", () => {
+    expect(
+      parseGatewayCatalog({
+        data: [
+          {
+            id: "vendor/experimental",
+            name: "Experimental",
+            type: "language",
+            owned_by: "vendor",
+            released: "unannounced",
+            tags: null,
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: "vendor/experimental",
+        name: "Experimental",
+        type: "language",
+        owned_by: "vendor",
+      },
+    ]);
   });
 
   it("rejects a catalog payload without a data array", () => {
