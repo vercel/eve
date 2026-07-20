@@ -79,13 +79,22 @@ export async function ensureEveVercelJson(input: {
 }): Promise<EnsureVercelJsonResult> {
   const vercelJsonPath = join(input.nuxtRoot, VERCEL_JSON_FILE_NAME);
   const existingConfig = await readVercelJsonConfig(vercelJsonPath);
+
+  // If the developer is explicitly using modern Vercel Services V2 layouts,
+  // skip the legacy experimentalServices injection and file-writing loops entirely.
+  if (existingConfig && "services" in existingConfig && existingConfig.services) {
+    return { servicePrefix: input.servicePrefix };
+  }
+
   const nuxtEntrypoint = ".";
   const eveEntrypoint = resolveRelativeEntrypoint(input.nuxtRoot, input.appRoot);
   const existingServices = existingConfig.experimentalServices ?? {};
   const configuredEveService = findServiceByFramework(existingServices, "eve");
   const configuredNuxtService = findServiceByFramework(existingServices, "nuxtjs");
   const servicePrefix = configuredEveService?.routePrefix ?? input.servicePrefix;
-  const experimentalServices: Record<string, VercelServiceConfig> = { ...existingServices };
+  const experimentalServices: Record<string, VercelServiceConfig> = {
+    ...existingServices,
+  };
 
   if (configuredNuxtService === undefined) {
     experimentalServices.web = {

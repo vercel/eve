@@ -174,29 +174,43 @@ function resolveCoDeployedEveServicePrefix(input: {
     normalizeServiceCollection(input.config.experimentalServicesV2) ??
     normalizeServiceCollection(input.config.services);
 
-  if (services === undefined) {
-    return undefined;
-  }
-
   let hasHostService = false;
   let servicePrefix: string | undefined;
 
-  for (const service of services) {
-    if (service.framework !== "eve") {
-      hasHostService = true;
-      continue;
+  // Run the legacy resolution loop if a services block is present
+  if (services !== undefined) {
+    for (const service of services) {
+      if (service.framework !== "eve") {
+        hasHostService = true;
+        continue;
+      }
+
+      const eveEntrypoint = normalizeServiceRoot(input.configRoot, service);
+      const routePrefix = normalizeServicePrefix(service);
+
+      if (
+        eveEntrypoint !== null &&
+        input.appRoots.includes(eveEntrypoint) &&
+        routePrefix.length > 0 &&
+        routePrefix !== "/"
+      ) {
+        servicePrefix = routePrefix;
+      }
     }
+  }
 
-    const eveEntrypoint = normalizeServiceRoot(input.configRoot, service);
-    const routePrefix = normalizeServicePrefix(service);
-
-    if (
-      eveEntrypoint !== null &&
-      input.appRoots.includes(eveEntrypoint) &&
-      routePrefix.length > 0 &&
-      routePrefix !== "/"
-    ) {
-      servicePrefix = routePrefix;
+  // Fall back to parsing global rewrites if service definitions do not explicitly
+  // specify a route prefix (e.g., in Vercel Services V2 configurations).
+  const rewrites = input.config.rewrites;
+  if (servicePrefix === undefined && Array.isArray(rewrites)) {
+    for (const rule of rewrites) {
+      if (isRecord(rule) && typeof rule.source === "string" && rule.source.includes("/v1")) {
+        const dest = rule.destination;
+        if (isRecord(dest) && dest.service === "eve") {
+          // Extract the base path prefix preceding any regex capture groups
+          return rule.source.split("/(")[0];
+        }
+      }
     }
   }
 
