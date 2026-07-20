@@ -113,6 +113,12 @@ export interface Block {
    * capped subagent run; renders as a single dim `… +N more` line.
    */
   elided?: number;
+  /**
+   * Display-only: this block is the last of its section, so its final row
+   * swaps the nesting rule for the closing `└` — the rail ends on the
+   * newest child instead of a bare corner row.
+   */
+  closesRail?: boolean;
 }
 
 /** One coalesced call's row beneath an aggregated tool header. */
@@ -148,6 +154,11 @@ export function renderBlockLines(
   const prefix = nestingPrefix(depth, theme);
   const avail = Math.max(8, width - visibleLength(prefix));
   const rows = renderBody(block, avail, theme, context);
+  // The section's last row carries the closing corner in place of its rule.
+  if (block.closesRail === true && depth > 0) {
+    const corner = closingPrefix(depth, theme);
+    return rows.map((row, index) => `${index === rows.length - 1 ? corner : prefix}${row}`);
+  }
   return rows.map((row) => `${prefix}${row}`);
 }
 
@@ -162,16 +173,23 @@ function nestingPrefix(depth: number, theme: Theme): string {
   return `  ${rule.repeat(depth)}`;
 }
 
+/** The nesting prefix with its innermost rule swapped for the closing `└`. */
+function closingPrefix(depth: number, theme: Theme): string {
+  const rule = `${theme.colors.orange(theme.glyph.rule)} `;
+  return `  ${rule.repeat(depth - 1)}${theme.colors.orange(theme.glyph.corner)} `;
+}
+
 function renderBody(
   block: Block,
   width: number,
   theme: Theme,
   context: RenderBlockContext,
 ): string[] {
-  // The subagent stand-in row; other kinds (a coalesced log run) render
-  // their elided count inside their own section.
+  // The subagent stand-in row, indented one cell so it aligns with the
+  // tool marks beside it; other kinds (a coalesced log run) render their
+  // elided count inside their own section.
   if (block.elided !== undefined && block.kind === "subagent-step") {
-    return [theme.colors.dim(`${theme.glyph.ellipsis} (${block.elided} more)`)];
+    return [` ${theme.colors.dim(`${theme.glyph.ellipsis} (${block.elided} more)`)}`];
   }
   switch (block.kind) {
     case "user":
@@ -537,23 +555,17 @@ function renderSubagentHeader(block: Block, width: number, theme: Theme): string
   // making the nesting of its railed children evident.
   const lead = `${theme.colors.orange(theme.glyph.corner)} `;
   const coloredName = isSelf ? name : theme.colors.orange(name);
-  // A completed call folds its ordinal into the parens and reports Done on
-  // the header itself — the collapsed section has no corner to carry it.
-  if (block.status === "done") {
-    const ordinal =
-      block.subtitle !== undefined && block.subtitle.startsWith("#")
-        ? `:${block.subtitle.slice(1)}`
-        : "";
-    return [
-      `${lead}${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(
-        `subagent(${coloredName}${ordinal})`,
-      )} ${theme.colors.dim("Done")}`,
-    ];
-  }
+  // The ordinal rides inside the parens (`subagent(self:4)`) in every
+  // state; a completed call reports Done on the header itself — the
+  // collapsed section has no corner to carry it.
+  const isOrdinal = block.subtitle !== undefined && block.subtitle.startsWith("#");
+  const ordinal = isOrdinal ? `:${block.subtitle!.slice(1)}` : "";
   let header = `${lead}${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(
-    `subagent(${coloredName})`,
+    `subagent(${coloredName}${ordinal})`,
   )}`;
-  if (block.subtitle !== undefined && block.subtitle.length > 0) {
+  if (block.status === "done") {
+    header += ` ${theme.colors.dim("Done")}`;
+  } else if (!isOrdinal && block.subtitle !== undefined && block.subtitle.length > 0) {
     header += ` ${theme.colors.dim(block.subtitle)}`;
   }
   return [header];

@@ -229,7 +229,7 @@ describe("renderBlockLines", () => {
       live: false,
       elided: 6,
     });
-    expect(lines).toEqual(["  │ … (6 more)"]);
+    expect(lines).toEqual(["  │  … (6 more)"]);
   });
 
   it("nests subagent tools under the orange rule", () => {

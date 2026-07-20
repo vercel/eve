@@ -42,10 +42,6 @@ function subagentHeader(callId: string, name: string): Block {
   };
 }
 
-function subagentClose(callId: string, live = false): Block {
-  return { kind: "subagent-close", subagentCallId: callId, live };
-}
-
 function subagentStep(callId: string, body: string, live = false): Block {
   return {
     kind: "subagent-step",
@@ -215,8 +211,8 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([subagentHeader("c1", "researcher"), ...run, step]);
 
-    // header, condensed row, verbatim message, closing corner.
-    expect(groups).toHaveLength(4);
+    // header, condensed row, then the message closing the rail.
+    expect(groups).toHaveLength(3);
     expect(groups[1]?.members).toEqual(run);
     expect(groups[1]?.display).toMatchObject({
       kind: "subagent-tool",
@@ -224,8 +220,8 @@ describe("groupToolBlocksForDisplay", () => {
       // Top three kinds by count, then "and more" for the rest.
       title: "Ran 1 command, Read 1 file, Wrote 1 file, and more",
     });
-    expect(groups[2]?.display).toBe(step);
-    expect(groups[3]?.display).toMatchObject({ kind: "subagent-close" });
+    expect(groups[2]?.members).toEqual([step]);
+    expect(groups[2]?.display).toEqual({ ...step, closesRail: true });
   });
 
   it("leaves a settled child-tool run itemized when no message follows", () => {
@@ -271,11 +267,9 @@ describe("groupToolBlocksForDisplay", () => {
     expect(groups.map((group) => group.display)).toEqual([
       ha,
       a1,
-      a2,
-      subagentClose("ca"),
+      { ...a2, closesRail: true },
       hb,
-      b1,
-      subagentClose("cb"),
+      { ...b1, closesRail: true },
     ]);
   });
 
@@ -338,10 +332,8 @@ describe("groupToolBlocksForDisplay", () => {
     expect(groups.map((group) => group.display.kind)).toEqual([
       "subagent",
       "subagent-step",
-      "subagent-close",
       "subagent",
       "subagent-step",
-      "subagent-close",
       "log",
     ]);
   });
@@ -353,12 +345,7 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([header, step, stderr]);
 
-    expect(groups.map((group) => group.display.kind)).toEqual([
-      "subagent",
-      "subagent-step",
-      "subagent-close",
-      "log",
-    ]);
+    expect(groups.map((group) => group.display.kind)).toEqual(["subagent", "subagent-step", "log"]);
   });
 
   it("keeps interleaved same-subagent calls as separate sections with rebucketed children", () => {
@@ -374,14 +361,11 @@ describe("groupToolBlocksForDisplay", () => {
 
     expect(groups.map((group) => group.display)).toEqual([
       h1,
-      s1,
-      subagentClose("c1"),
+      { ...s1, closesRail: true },
       h2,
-      s2,
-      subagentClose("c2"),
+      { ...s2, closesRail: true },
       h3,
-      s3,
-      subagentClose("c3"),
+      { ...s3, closesRail: true },
     ]);
   });
 
@@ -396,7 +380,7 @@ describe("groupToolBlocksForDisplay", () => {
     ]);
 
     expect(groups[0]?.display.live).toBe(false);
-    expect(groups[3]?.display.live).toBe(true);
+    expect(groups[2]?.display.live).toBe(true);
   });
 
   it("keeps the run live while a header still is, even after every child settles", () => {
@@ -425,9 +409,10 @@ describe("groupToolBlocksForDisplay", () => {
     // First section: header, one elision stand-in, then its newest window.
     expect(groups[1]?.members).toEqual(first.slice(0, 3));
     expect(groups[1]?.display).toMatchObject({ kind: "subagent-step", elided: 3 });
-    expect(groups.slice(2, 2 + maxVisibleSubagentRunChildren).map((g) => g.display)).toEqual(
-      first.slice(3),
-    );
+    expect(groups.slice(2, 2 + maxVisibleSubagentRunChildren).map((g) => g.display)).toEqual([
+      ...first.slice(3, -1),
+      { ...first.at(-1)!, closesRail: true },
+    ]);
     // The second section is untouched by the first one's overflow.
     const secondHeader = groups.findIndex(
       (group) => group.display.kind === "subagent" && group.display.subagentCallId === "c2",
@@ -447,8 +432,10 @@ describe("groupToolBlocksForDisplay", () => {
 
     expect(groups[1]?.display.elided).toBe(2);
     expect(groups[1]?.members).toEqual(steps.slice(0, 2));
-    expect(groups.slice(2, -1).map((group) => group.display)).toEqual(steps.slice(2));
-    expect(groups.at(-1)?.display).toEqual(subagentClose("c1"));
+    expect(groups.slice(2).map((group) => group.display)).toEqual([
+      ...steps.slice(2, -1),
+      { ...steps.at(-1)!, closesRail: true },
+    ]);
   });
 
   it("does not elide a run at or under the visible cap", () => {
@@ -460,7 +447,7 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([header, ...steps]);
 
-    expect(groups).toHaveLength(1 + maxVisibleSubagentRunChildren + 1);
+    expect(groups).toHaveLength(1 + maxVisibleSubagentRunChildren);
     expect(groups.every((group) => group.display.elided === undefined)).toBe(true);
   });
 
@@ -488,7 +475,7 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([header, step]);
 
-    expect(groups.map((group) => group.display)).toEqual([header, step, subagentClose("c1")]);
+    expect(groups.map((group) => group.display)).toEqual([header, { ...step, closesRail: true }]);
   });
 
   it("coalesces a contiguous run of same-source log writes into one section", () => {

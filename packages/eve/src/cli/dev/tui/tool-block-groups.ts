@@ -361,14 +361,15 @@ function collectSubagentRun(
         display: { kind: "subagent-step", depth: 1, live, elided: elidedMembers.length },
       });
     }
-    groups.push(...kept);
-    // A section with visible children closes its rail on a bare corner. The
-    // corner is display-only (no member): it re-derives from the same
-    // grouping on every paint and transcript rebuild.
-    if (kept.length > 0) {
+    // The rail closes on the newest child instead of a bare corner row:
+    // the last kept group's display (a clone — displays can be original
+    // blocks, and the flag must re-derive per paint) carries the corner.
+    groups.push(...kept.slice(0, -1));
+    const lastKept = kept.at(-1);
+    if (lastKept !== undefined) {
       groups.push({
-        members: [],
-        display: { kind: "subagent-close", subagentCallId: header.subagentCallId!, live },
+        members: lastKept.members,
+        display: { ...lastKept.display, closesRail: true },
       });
     }
   }

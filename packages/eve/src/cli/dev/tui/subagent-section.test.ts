@@ -67,12 +67,11 @@ describe("subagent section rendering", () => {
     );
 
     expect(rows).toEqual([
-      "└ ※ subagent(self) #3",
+      "└ ※ subagent(self:3)",
       "  │  ⨯ Fetch url99",
       "  │    └ Response too large (exceeds 5 MB limit).",
       "  │  ▪ Searched 10 queries, Fetched 3 URLs, Made 1 tool call",
-      "  │ # Vercel eve competitive capability comparison",
-      "  └",
+      "  └ # Vercel eve competitive capability comparison",
     ]);
   });
 });

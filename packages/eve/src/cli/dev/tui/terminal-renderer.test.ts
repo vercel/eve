@@ -1198,10 +1198,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     // Each call keeps its own persistent section, told apart by ordinal.
-    expect(countOccurrences(snapshot, "※ subagent(echo-marker)")).toBe(3);
-    expect(snapshot).toContain("※ subagent(echo-marker) #1");
-    expect(snapshot).toContain("※ subagent(echo-marker) #2");
-    expect(snapshot).toContain("※ subagent(echo-marker) #3");
+    expect(countOccurrences(snapshot, "※ subagent(echo-marker:")).toBe(3);
+    expect(snapshot).toContain("※ subagent(echo-marker:1)");
+    expect(snapshot).toContain("※ subagent(echo-marker:2)");
+    expect(snapshot).toContain("※ subagent(echo-marker:3)");
     expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-1");
     expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-2");
     expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-3");
