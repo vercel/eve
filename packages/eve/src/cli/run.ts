@@ -585,6 +585,29 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       }
     });
 
+  const logs = program
+    .command("logs")
+    .description("Inspect local `eve dev` diagnostic logs (.eve/logs).");
+
+  logs
+    .command("show [logid]", { isDefault: true })
+    .description("Print a diagnostic log (the most recent when logid is omitted).")
+    .option("--dump", "Prepend the log's environment dump (.dump sibling)")
+    .option("--events", "Interleave session events from the local workflow store")
+    .action(async (logId: string | undefined, options: { dump?: boolean; events?: boolean }) => {
+      const { runLogsShowCommand } = await import("#cli/commands/logs.js");
+      await runLogsShowCommand(logger, appRoot, logId, options);
+    });
+
+  logs
+    .command("ls")
+    .description("List diagnostic logs, most recent first.")
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean }) => {
+      const { runLogsListCommand } = await import("#cli/commands/logs.js");
+      await runLogsListCommand(logger, appRoot, options);
+    });
+
   program
     .command("info")
     .description("Print resolved application information.")

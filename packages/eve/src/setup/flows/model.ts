@@ -1,47 +1,97 @@
-import { join } from "node:path";
-
-import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
-import { discoverAgent } from "#discover/discover-agent.js";
-import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { inspectApplication } from "#services/inspect-application.js";
-import { createStaticSourceChange } from "#source-change/static-source-change.js";
+import type {
+  AgentModelSettingsPatch,
+  FieldPatch,
+} from "#source-change/apply-agent-model-settings.js";
 
 import pc from "picocolors";
 
 import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
-import { interactiveAsker } from "../ask.js";
 import { findEnvFileWithKey } from "../boxes/detect-ai-gateway.js";
 import {
   fetchGatewayCatalog,
-  selectModel,
+  modelOptionsFromCatalog,
+  type GatewayCatalogModel,
   type SelectModelDeps,
-  type SelectModelOptions,
 } from "../boxes/select-model.js";
+import {
+  gatewayModelCapabilities,
+  type GatewayModelCapabilities,
+  type ReasoningLevel,
+} from "../boxes/model-capabilities.js";
 import {
   detectProjectIdentity,
   type VercelProjectOperationOptions,
 } from "../project-resolution.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
+import {
+  readGatewayServiceTier,
+  type GatewayServiceTierState,
+} from "#shared/gateway-service-tier.js";
+import { formatModelSummary } from "#shared/model-summary.js";
 import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
-import { runInteractive } from "../runner.js";
-import { snapshotSetupState } from "../state.js";
 import { WizardCancelledError } from "../step.js";
 import { withSpinner } from "../with-spinner.js";
-
-import { inProjectSetupState, prompterSink } from "./in-project.js";
-import { runProviderFlow } from "./provider.js";
+import {
+  changeAgentModelSettings,
+  formatApplyModelSettingsOutcome,
+  type ApplyModelSettingsOutcome,
+} from "./model-source-change.js";
+import { runProviderFlow, type ModelProviderStatus } from "./provider.js";
 
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
   id: string | null;
   routing: ModelRouting | null;
+  reasoning: AgentReasoningDefinition | null;
+  serviceTier: GatewayServiceTierState;
   /**
    * The authored `model` is a string the source editor can rewrite. False for a
    * source-backed SDK model call (`gateway(...)`, `anthropic(...)`), which is
    * not a string literal — independent of how the model routes.
    */
   editable: boolean;
+  /** Whether the top-level agent config object can carry reasoning/tier edits. */
+  settingsEditable: boolean;
 }
+
+export type { GatewayServiceTierState };
+
+/**
+ * Everything the composite Change-model screen edits, resolved before it
+ * opens. The model section is a searchable catalog pick, or a fixed line when
+ * the authored model is a source-backed SDK call `/model` cannot rewrite.
+ */
+export interface ModelSettingsRequest {
+  model:
+    | { kind: "pick"; options: readonly SelectOption<string>[]; current: string | null }
+    | { kind: "fixed"; current: string | null; reason: string };
+  /** Authored reasoning effort; null means the provider default. */
+  reasoning: ReasoningLevel | null;
+  /** Authored Gateway service tier. */
+  serviceTier: GatewayServiceTierState;
+  /** Whether the agent config object can carry reasoning/tier edits. */
+  settingsEditable: boolean;
+  /** True for a direct external provider, where Gateway tiers do not apply. */
+  externalRouting: boolean;
+  /** Capability lookup over the already-fetched catalog; called on every pick. */
+  capabilitiesFor(modelId: string | null): GatewayModelCapabilities | undefined;
+}
+
+/**
+ * The screen's draft on Done. Each field is present only when it differs from
+ * the authored value; `"default"` and `"standard"` mean "remove the setting".
+ */
+export interface ModelSettingsResult {
+  model?: string;
+  reasoning?: "default" | ReasoningLevel;
+  serviceTier?: "standard" | "priority";
+}
+
+/** Renderer-owned composite model screen; only the dev TUI implements this. */
+export type ModelSettingsPicker = (
+  request: ModelSettingsRequest,
+) => Promise<ModelSettingsResult | undefined>;
 
 /** Injected for tests; defaults to the real reads, fetches, and source edit. */
 export interface ModelFlowDeps {
@@ -50,30 +100,22 @@ export interface ModelFlowDeps {
    * before the first compile.
    */
   readCurrentModel: (appRoot: string) => Promise<CurrentAgentModel>;
-  /** Applies the picked slug to authored source. */
-  applyModel: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
+  /** Applies one completed `/model` draft to authored source. */
+  applySettings: (input: {
+    appRoot: string;
+    patch: AgentModelSettingsPatch;
+  }) => Promise<ApplyModelSettingsOutcome>;
   /** Catalog fetch behind the shared model picker. */
   selectModel?: SelectModelDeps;
+  /** The composite Change-model screen; the dev TUI renderer implements it. */
+  pickModelSettings?: ModelSettingsPicker;
   /** Reads how the model is backed right now, for the menu's provider row. */
   detectProviderStatus: typeof detectModelProviderStatus;
   /** The provider sub-flow behind the menu's provider row. */
   runProviderFlow: typeof runProviderFlow;
 }
 
-/**
- * How the agent's model is backed right now, as far as the local directory
- * shows: a linked Vercel project, a gateway credential in an env file, or
- * nothing detectable. An external provider (own ANTHROPIC_API_KEY etc.)
- * leaves no marker eve owns, so it reads as `unset`.
- */
-export type ModelProviderStatus =
-  | { kind: "unset" }
-  | { kind: "gateway-project"; projectName: string; teamName?: string }
-  | {
-      kind: "gateway-key";
-      envKey: typeof AI_GATEWAY_API_KEY_ENV_VAR | "VERCEL_OIDC_TOKEN";
-      envFile: string;
-    };
+export type { ModelProviderStatus };
 
 /**
  * A provider sub-flow run that actually moved the provider: the credential
@@ -89,7 +131,11 @@ export interface ModelProviderOutcome {
 }
 
 export type ModelFlowResult =
-  | { kind: "cancelled" }
+  | {
+      kind: "cancelled";
+      /** True when Esc dropped drafted setting changes that Done would commit. */
+      discardedDraft?: boolean;
+    }
   | {
       kind: "done";
       /** The last apply line, when the model was changed this session. */
@@ -124,30 +170,71 @@ function providerStatusHint(
 }
 
 /**
- * The two-row configure menu. The two rows answer independent questions.
+ * The composite screen's catalog rows: the ids themselves as labels, so the
+ * railed list shows slugs and the editor's filter matches exactly what the
+ * painter windows. Onboarding keeps the name-labeled options.
+ */
+function modelListRows(
+  catalog: readonly GatewayCatalogModel[] | undefined,
+): SelectOption<string>[] {
+  return modelOptionsFromCatalog(catalog).map((option) => {
+    const row: SelectOption<string> = { value: option.value, label: option.value };
+    if (option.featured === true) row.featured = true;
+    return row;
+  });
+}
+
+/**
+ * The Change model row's value line: the drafted slug plus its reasoning level
+ * and Fast mode marker, mirroring the status line's model segment
+ * (`xai/grok-4.5@high ↯`).
+ */
+function formatModelDraftHint(
+  model: string,
+  reasoning: ReasoningLevel | null,
+  serviceTier: GatewayServiceTierState,
+): string {
+  const summary: Parameters<typeof formatModelSummary>[0] = { model };
+  if (reasoning !== null) summary.reasoning = reasoning;
+  if (serviceTier.kind === "priority") summary.fastGlyph = "↯";
+  return formatModelSummary(summary);
+}
+
+/**
+ * The model configuration menu. The Change model row opens the composite
+ * screen owning the model id, reasoning effort, and service tier; Done is the
+ * only row that commits drafted source changes.
  *
- * The model row keys off `editable`: eve can rewrite `model` only when it is a
- * string literal, so an SDK model call (`gateway(...)` / `anthropic(...)`) is
- * disabled regardless of how it routes. The provider row keys off routing: an
- * external endpoint disables it (gateway credentials don't apply); a gateway
- * endpoint gates it bold-yellow "Configure model access" until a link or credential
- * is detectable (the genuine "no provider connected" state), then "Change
+ * The model row stays enabled while either the model string or the config
+ * object is rewritable — for an SDK model call (`gateway(...)`,
+ * `anthropic(...)`) the composite opens with the model fixed and only the
+ * settings adjustable. The provider row keys off routing: an external endpoint
+ * disables it (gateway credentials don't apply); a gateway endpoint gates it
+ * bold-yellow "Configure model access" until a link or credential is
+ * detectable (the genuine "no provider connected" state), then "Change
  * provider" naming it.
  */
 function modelMenuRows(
   current: string | null,
+  reasoning: ReasoningLevel | null,
+  serviceTier: GatewayServiceTierState,
   provider: ModelProviderStatus,
   routing: ModelRouting | null,
   editable: boolean,
+  settingsEditable: boolean,
 ): SelectOption<ModelMenuRow>[] {
   let modelRow: SelectOption<ModelMenuRow>;
-  if (editable) {
+  if (editable || settingsEditable) {
     modelRow = {
       value: "model",
       label: "Change model",
-      description: "The model your agent uses",
+      description: editable
+        ? "The model, its reasoning effort, and the Gateway service tier"
+        : "Reasoning and service tier; the model itself is an SDK model call in agent.ts",
     };
-    if (current !== null) modelRow.hint = current;
+    if (current !== null) {
+      modelRow.hint = formatModelDraftHint(current, reasoning, serviceTier);
+    }
   } else {
     modelRow = {
       value: "model",
@@ -184,11 +271,7 @@ function modelMenuRows(
 
   // An explicit exit row, like the channels list — Esc works too, but the menu
   // must not make Esc the only way out.
-  return [
-    modelRow,
-    providerRow,
-    { value: "done", label: "Done", description: "Return to the prompt" },
-  ];
+  return [modelRow, providerRow, { value: "done", label: "Done" }];
 }
 
 /**
@@ -224,16 +307,13 @@ export async function detectModelProviderStatus(
 }
 
 /**
- * THE MODEL FLOW for the dev TUI's `/model`: a two-row action menu that
- * loops, uniting the model pick and the provider setup behind one entry
- * point. "Change model" runs the same searchable AI Gateway catalog picker
- * onboarding uses ({@link selectModel}), pre-selected on the model the
- * runtime currently serves, then the static source edit that bakes the
- * choice into `agent.ts` (activation is the dev server's HMR watcher).
- * The provider row runs {@link runProviderFlow}, whose single menu chooses a
- * project-backed gateway, an inline gateway key, or an external provider.
- * A completed model or provider change returns to the prompt with its result.
- * Cancelled flows and external-provider instructions return to the menu.
+ * THE MODEL FLOW for the dev TUI's `/model`: a root menu whose Change model
+ * row opens the composite model screen (catalog pick, reasoning-effort slider,
+ * service-tier toggle) and whose provider row runs {@link runProviderFlow}.
+ * Authored setting changes stay in memory until Done, then land through one
+ * source transform and atomic rename. A completed provider change commits the
+ * current draft and returns to the prompt; cancelled flows and
+ * external-provider instructions return to the menu.
  */
 export async function runModelFlow(input: {
   appRoot: string;
@@ -246,32 +326,54 @@ export async function runModelFlow(input: {
   const { appRoot, prompter, signal } = input;
   const deps: ModelFlowDeps = {
     readCurrentModel: readCurrentAgentModel,
-    applyModel: changeAgentModel,
+    applySettings: changeAgentModelSettings,
     detectProviderStatus: detectModelProviderStatus,
     runProviderFlow,
     ...input.deps,
   };
 
-  // The model read is local, the provider status is a `vercel` round-trip;
-  // one ephemeral spinner covers both so the menu paints with no persisted
-  // loading lines.
+  // The model read is local; the provider status and the catalog are round
+  // trips. One ephemeral spinner covers all three so the menu paints with no
+  // persisted loading lines and already knows what the model supports. A
+  // failed catalog fetch degrades to unknown capabilities, never to an error.
   const detectProvider = (useFlowSignal = true): Promise<ModelProviderStatus> =>
     deps.detectProviderStatus(appRoot, useFlowSignal && signal !== undefined ? { signal } : {});
-  let [{ id: current, routing, editable }, provider] = await withSpinner(
+  const fetchCatalog = deps.selectModel?.fetchModels ?? fetchGatewayCatalog;
+  const [currentModel, initialProvider, catalog] = await withSpinner(
     prompter,
     "Checking the project…",
-    () => Promise.all([deps.readCurrentModel(appRoot), detectProvider()]),
+    () =>
+      Promise.all([
+        deps.readCurrentModel(appRoot),
+        detectProvider(),
+        fetchCatalog(signal).catch((): GatewayCatalogModel[] | undefined => undefined),
+      ]),
   );
   signal?.throwIfAborted();
 
-  let lastApply: ApplyModelOutcome | undefined;
+  let { id: current, routing, serviceTier, editable, settingsEditable } = currentModel;
+  // An authored "provider-default" is the absent-setting sentinel, not a level.
+  let reasoning: ReasoningLevel | null =
+    currentModel.reasoning === "provider-default" ? null : currentModel.reasoning;
+  let provider = initialProvider;
+  const patch: {
+    model: FieldPatch<string>;
+    reasoning: FieldPatch<AgentReasoningDefinition>;
+    gatewayServiceTier: FieldPatch<"priority">;
+  } = {
+    model: { kind: "keep" },
+    reasoning: { kind: "keep" },
+    gatewayServiceTier: { kind: "keep" },
+  };
+
+  let lastApply: ApplyModelSettingsOutcome | undefined;
   let providerOutcome: ModelProviderOutcome | undefined;
-  // Explains, once, why every row is inert for an external-provider model.
+  let commitDraft = false;
   const externalNotice: SelectNotice | undefined =
     routing?.kind === "external"
       ? {
           tone: "warning",
-          text: "`agent.ts` specifies a model provider directly. In-TUI configuration is restricted to AI Gateway endpoints.",
+          text: "`agent.ts` specifies the model provider directly. Model, provider, and service-tier changes stay source-owned; reasoning remains configurable here.",
         }
       : undefined;
 
@@ -279,11 +381,9 @@ export async function runModelFlow(input: {
   let nextSelection: ModelMenuRow =
     provider.kind === "unset" && routing?.kind !== "external"
       ? "provider"
-      : editable
+      : editable || settingsEditable
         ? "model"
-        : routing?.kind === "external"
-          ? "done"
-          : "provider";
+        : "provider";
   // A gateway model with no provider cannot run. Skip the menu's extra Enter
   // and open provider setup as soon as that state is confirmed.
   let openProviderFirst =
@@ -298,38 +398,86 @@ export async function runModelFlow(input: {
       try {
         pick = await prompter.select<ModelMenuRow>({
           message: MODEL_MENU_MESSAGE,
-          options: modelMenuRows(current, provider, routing, editable),
+          options: modelMenuRows(
+            current,
+            reasoning,
+            serviceTier,
+            provider,
+            routing,
+            editable,
+            settingsEditable,
+          ),
           hintLayout: "stacked",
           initialValue: nextSelection,
           notices: externalNotice === undefined ? [] : [externalNotice],
         });
       } catch (error) {
         if (!(error instanceof WizardCancelledError)) throw error;
+        // Esc discards the draft. Say so: before drafts existed, a completed
+        // model pick applied immediately, so a silent drop reads as success.
+        if (hasModelSettingsChanges(patch)) return { kind: "cancelled", discardedDraft: true };
         break;
       }
     }
 
-    if (pick === "done") break;
-
-    if (pick === "model") {
-      const slug = await pickModelFromCatalog({
-        appRoot,
-        prompter,
-        current,
-        signal,
-        deps: deps.selectModel,
-      });
-      if (slug === undefined) {
-        nextSelection = "model";
-        continue;
-      }
-      signal?.throwIfAborted();
-      lastApply = await deps.applyModel({ appRoot, slug });
-      signal?.throwIfAborted();
+    if (pick === "done") {
+      commitDraft = true;
       break;
     }
 
-    const result = await deps.runProviderFlow({ appRoot, prompter, signal });
+    if (pick === "model") {
+      const pickModelSettings = deps.pickModelSettings;
+      if (pickModelSettings === undefined) {
+        throw new Error("runModelFlow requires a pickModelSettings dep to open the model screen.");
+      }
+      const request: ModelSettingsRequest = {
+        model: editable
+          ? { kind: "pick", options: modelListRows(catalog), current }
+          : {
+              kind: "fixed",
+              current,
+              reason: "Set via an SDK model call in agent.ts; edit the source to change it",
+            },
+        reasoning,
+        serviceTier,
+        settingsEditable,
+        externalRouting: routing?.kind === "external",
+        capabilitiesFor: (modelId) => gatewayModelCapabilities(catalog, modelId),
+      };
+      const result = await pickModelSettings(request);
+      signal?.throwIfAborted();
+      if (result === undefined) {
+        nextSelection = "model";
+        continue;
+      }
+      if (result.model !== undefined) {
+        current = result.model;
+        routing = { kind: "gateway", target: result.model.split("/")[0] ?? "" };
+        patch.model = { kind: "set", value: result.model };
+      }
+      if (result.reasoning !== undefined) {
+        reasoning = result.reasoning === "default" ? null : result.reasoning;
+        patch.reasoning =
+          reasoning === null ? { kind: "remove" } : { kind: "set", value: reasoning };
+      }
+      if (result.serviceTier !== undefined) {
+        serviceTier =
+          result.serviceTier === "priority" ? { kind: "priority" } : { kind: "standard" };
+        patch.gatewayServiceTier =
+          result.serviceTier === "priority"
+            ? { kind: "set", value: "priority" }
+            : { kind: "remove" };
+      }
+      nextSelection = "done";
+      continue;
+    }
+
+    const result = await deps.runProviderFlow({
+      appRoot,
+      prompter,
+      signal,
+      currentProvider: provider,
+    });
     // Backing out of the provider sub-flow changed nothing; the cursor stays on
     // the provider row so a retry is one keypress away.
     if (result.kind === "cancelled") {
@@ -350,131 +498,30 @@ export async function runModelFlow(input: {
     provider = await withSpinner(prompter, "Checking the project…", () => detectProvider(false));
     providerOutcome = { status: provider };
     if (result.credential !== undefined) providerOutcome.credential = result.credential;
+    commitDraft = true;
     break;
+  }
+
+  if (commitDraft && hasModelSettingsChanges(patch)) {
+    lastApply = await deps.applySettings({ appRoot, patch });
+    signal?.throwIfAborted();
   }
 
   if (lastApply === undefined && providerOutcome === undefined) {
     return { kind: "cancelled" };
   }
   const done: Extract<ModelFlowResult, { kind: "done" }> = { kind: "done" };
-  if (lastApply !== undefined) done.modelMessage = formatApplyModelOutcome(lastApply);
+  if (lastApply !== undefined) done.modelMessage = formatApplyModelSettingsOutcome(lastApply);
   if (providerOutcome !== undefined) done.providerOutcome = providerOutcome;
   return done;
 }
 
-/**
- * The "Change model" sub-flow: the shared catalog picker pre-selected on
- * `current`. Resolves to the picked slug, or undefined when cancelled —
- * the menu loop treats both as "back to the menu".
- */
-async function pickModelFromCatalog(input: {
-  appRoot: string;
-  prompter: Prompter;
-  current: string | null;
-  signal?: AbortSignal;
-  deps?: SelectModelDeps;
-}): Promise<string | undefined> {
-  const { appRoot, prompter, current, signal } = input;
-  const baseFetch = input.deps?.fetchModels ?? fetchGatewayCatalog;
-  const options: SelectModelOptions = {
-    asker: interactiveAsker(prompter),
-    deps: {
-      // The box fetches inside its gather, so the catalog spinner has to ride
-      // the fetch itself to bracket exactly the slow part.
-      fetchModels: (requestSignal) =>
-        withSpinner(prompter, "Loading the model catalog...", () => baseFetch(requestSignal)),
-    },
-  };
-  if (current !== null) options.defaultModel = current;
-
-  const result = await runInteractive(
-    [selectModel(options)],
-    inProjectSetupState(appRoot, { kind: "unresolved" }),
-    prompterSink(prompter),
-    { snapshot: snapshotSetupState, signal },
+function hasModelSettingsChanges(patch: AgentModelSettingsPatch): boolean {
+  return (
+    patch.model.kind !== "keep" ||
+    patch.reasoning.kind !== "keep" ||
+    patch.gatewayServiceTier.kind !== "keep"
   );
-  return result.kind === "cancelled" ? undefined : result.state.modelId;
-}
-
-/** The outcome of applying a model slug to the agent's authored source. */
-export type ApplyModelOutcome =
-  | { kind: "changed"; to: string }
-  | { kind: "unchanged"; model: string }
-  /** Invalid slug or an uneditable source — `message` says which and why. */
-  | { kind: "rejected"; message: string };
-
-/** The one-line transcript form of an apply outcome (`/model <slug>`'s reply). */
-export function formatApplyModelOutcome(outcome: ApplyModelOutcome): string {
-  switch (outcome.kind) {
-    case "changed":
-      return `Model changed to ${pc.bold(outcome.to)}. Live on your next prompt.`;
-    case "unchanged":
-      return `Model is already \`${outcome.model}\`.`;
-    case "rejected":
-      return outcome.message;
-  }
-}
-
-/**
- * Applies a `/model <slug>` change to the local agent's authored source.
- *
- * This is the caller layer for the static source-change registry: it
- * validates the slug against the AI Gateway model catalog, then edits
- * `agent.ts` via {@link createStaticSourceChange}. Activation is the dev
- * server's HMR watcher; {@link formatApplyModelOutcome} renders the outcome
- * as the TUI's one-line reply.
- */
-export async function changeAgentModel(input: {
-  readonly appRoot: string;
-  readonly slug: string;
-}): Promise<ApplyModelOutcome> {
-  const { appRoot, slug } = input;
-
-  const rejection = await validateModelSlug(appRoot, slug);
-  if (rejection !== null) {
-    return { kind: "rejected", message: rejection };
-  }
-
-  const agentRoot = join(appRoot, "agent");
-  const { manifest } = await discoverAgent({ agentRoot, appRoot });
-  const result = await createStaticSourceChange(manifest).updateModelName(slug);
-
-  if (result.kind === "bail") {
-    return {
-      kind: "rejected",
-      message: `Couldn't edit ${result.at.logicalPath}: ${result.reason}. Change \`model\` by hand.`,
-    };
-  }
-  if (result.from === result.to) {
-    return { kind: "unchanged", model: result.to };
-  }
-  return { kind: "changed", to: result.to };
-}
-
-/**
- * Returns a rejection message when `slug` is malformed or absent from the
- * model catalog, or null when it is safe to apply.
- *
- * UX note: `/model` only reports success after eve confirms the id. A real
- * turn still needs Gateway/provider access, so treating an offline catalog as
- * success would give a false "model changed" result.
- */
-async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
-  if (!slug.includes("/")) {
-    return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-5).`;
-  }
-
-  const catalog = createCompiledRuntimeModelCatalogLoader(appRoot);
-  try {
-    const limits = await catalog.getModelLimits(formatLanguageModelGatewayId(slug));
-    if (limits === null) {
-      return `I couldn't confirm \`${slug}\` in the AI Gateway model catalog, so I didn't change agent.ts.`;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
 }
 
 /**
@@ -485,16 +532,27 @@ async function validateModelSlug(appRoot: string, slug: string): Promise<string 
 async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel> {
   try {
     const { compiledState } = await inspectApplication(appRoot);
-    const model = compiledState?.manifest.config.model;
+    const config = compiledState?.manifest.config;
+    const model = config?.model;
     // A source-backed model (an SDK model call) carries `source`; a string id
     // does not, and only a string is a literal the editor can rewrite.
     return {
       id: model?.id ?? null,
       routing: model?.routing ?? null,
+      reasoning: config?.reasoning ?? null,
+      serviceTier: readGatewayServiceTier(model?.providerOptions),
       editable: model !== undefined && model.source === undefined,
+      settingsEditable: config?.source !== undefined,
     };
   } catch {
-    return { id: null, routing: null, editable: false };
+    return {
+      id: null,
+      routing: null,
+      reasoning: null,
+      serviceTier: { kind: "standard" },
+      editable: false,
+      settingsEditable: false,
+    };
   }
 }
 

@@ -29,6 +29,7 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
     readSelect: vi.fn(async () => []),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
+    readModelEditor: vi.fn(async () => undefined),
     readText: vi.fn(async () => ""),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -193,7 +194,7 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({ kind: "cancelled" })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "/model cancelled.",
+      message: "/model dismissed.",
       preserveFlowDiagnostics: false,
     });
   });
@@ -274,7 +275,7 @@ describe("runTuiSetupCommand", () => {
     });
 
     await expect(run({ command: "channels", flows })).resolves.toEqual({
-      message: "Channels added, but /deploy was cancelled. Run /deploy to ship them.",
+      message: "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
       preserveFlowDiagnostics: true,
       effect: { kind: "channels-added" },
     });
@@ -339,7 +340,7 @@ describe("runTuiSetupCommand", () => {
       "No connections added.",
       { kind: "model-access-changed" },
     ],
-    ["cancelled", { kind: "cancelled" }, "/connect cancelled.", { kind: "model-access-changed" }],
+    ["cancelled", { kind: "cancelled" }, "/connect dismissed.", { kind: "model-access-changed" }],
     [
       "partially failed",
       { kind: "failed", addedConnections: ["linear"], message: "install failed" },
@@ -410,7 +411,7 @@ describe("runTuiSetupCommand", () => {
       }),
     });
     await expect(run({ command: "deploy", flows: cancelling })).resolves.toEqual({
-      message: "/deploy cancelled.",
+      message: "/deploy dismissed.",
       preserveFlowDiagnostics: true,
     });
   });

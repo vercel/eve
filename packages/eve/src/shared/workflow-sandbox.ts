@@ -36,6 +36,7 @@ export function installWorkflowSandboxModule(module: WorkflowSandboxModule): voi
 }
 
 export async function createWorkflowSandboxTool(input: {
+  readonly bridgeRequestLimit: number;
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly hostTools: ToolSet;
   readonly lifecycle?: WorkflowSandboxLifecycle;
@@ -43,7 +44,11 @@ export async function createWorkflowSandboxTool(input: {
   const { createCodeModeTool } = await loadWorkflowSandboxModule();
   return createCodeModeTool(
     input.hostTools,
-    createWorkflowSandboxOptions(input.continuationSecurity, input.lifecycle),
+    createWorkflowSandboxOptions(
+      input.bridgeRequestLimit,
+      input.continuationSecurity,
+      input.lifecycle,
+    ),
   ) as ToolSet[string];
 }
 
@@ -66,6 +71,7 @@ export async function getWorkflowSandboxInterrupt(
 }
 
 export async function continueWorkflowSandboxInterrupt(input: {
+  readonly bridgeRequestLimit: number;
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly interrupt: WorkflowSandboxInterrupt;
   readonly lifecycle?: WorkflowSandboxLifecycle;
@@ -75,7 +81,11 @@ export async function continueWorkflowSandboxInterrupt(input: {
   const { continueCodeModeInterrupt } = await loadWorkflowSandboxModule();
   return continueCodeModeInterrupt({
     interrupt: input.interrupt,
-    options: createWorkflowSandboxOptions(input.continuationSecurity, input.lifecycle),
+    options: createWorkflowSandboxOptions(
+      input.bridgeRequestLimit,
+      input.continuationSecurity,
+      input.lifecycle,
+    ),
     resolution: input.resolution,
     tools: input.tools,
   } as never);
@@ -102,11 +112,16 @@ export function readWorkflowSandboxResolution(options: unknown): unknown {
 }
 
 function createWorkflowSandboxOptions(
+  bridgeRequestLimit: number,
   continuationSecurity: WorkflowSandboxContinuationSecurity,
   lifecycle: WorkflowSandboxLifecycle | undefined,
 ): CodeModeModule.CodeModeOptions {
   const options: CodeModeModule.CodeModeOptions = {
     continuationSecurity,
+    executionPolicy: {
+      maxBridgeRequests: bridgeRequestLimit,
+      maxInFlightBridgeRequests: bridgeRequestLimit,
+    },
   };
   if (lifecycle !== undefined) options.lifecycle = lifecycle;
   return options;

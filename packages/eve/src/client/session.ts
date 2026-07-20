@@ -8,8 +8,7 @@ import {
 } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
-import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
-import { openStreamBody, openStreamIterable } from "#client/open-stream.js";
+import { followStreamIterable } from "#client/open-stream.js";
 import { advanceSession } from "#client/session-utils.js";
 import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
@@ -31,7 +30,6 @@ const DELIVER_RETRY_DELAY_MS = 200;
  */
 interface SessionContext {
   readonly host: string;
-  readonly maxReconnectAttempts: number;
   readonly preserveCompletedSessions: boolean;
   readonly redirect?: ClientRedirectPolicy;
   resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
@@ -147,10 +145,9 @@ export class ClientSession {
    * Opens this session's event stream for the current session ID.
    *
    * Resumes from the session's stored stream cursor unless `options.startIndex`
-   * overrides it. Negative indices read relative to the current tail and do
-   * not reconnect or advance the stored absolute cursor. Other streams
-   * reconnect on transient socket disconnects, up to the client's
-   * `maxReconnectAttempts`.
+   * overrides it. The stream reconnects from its cursor when the connection
+   * ends. Negative indices read relative to the current tail on one connection
+   * and do not advance the stored absolute cursor.
    *
    * @throws {Error} If the session has no session ID (no message has been sent
    *   yet).
@@ -217,7 +214,7 @@ export class ClientSession {
   }
 
   // ---------------------------------------------------------------------------
-  // Internal: event stream with reconnection
+  // Internal: event stream consumption
   // ---------------------------------------------------------------------------
 
   async *#createEventStream(
@@ -229,51 +226,20 @@ export class ClientSession {
     const events: HandleMessageStreamEvent[] = [];
 
     try {
-      let currentStreamIndex = initialState.sessionId === sessionId ? initialState.streamIndex : 0;
-      let remainingReconnectAttempts = this.#context.maxReconnectAttempts;
+      for await (const event of followStreamIterable({
+        host: this.#context.host,
+        resolveHeaders: () => this.#context.resolveHeaders(input.headers),
+        redirect: this.#context.redirect,
+        sessionId,
+        signal: input.signal,
+        startIndex: initialState.sessionId === sessionId ? initialState.streamIndex : 0,
+      })) {
+        events.push(event);
+        yield event;
 
-      while (true) {
-        const body = await this.#openStreamBody(
-          sessionId,
-          currentStreamIndex,
-          input.signal,
-          input.headers,
-        );
-
-        let foundBoundary = false;
-
-        try {
-          for await (const event of readNdjsonStream(body)) {
-            events.push(event);
-            currentStreamIndex += 1;
-            yield event;
-
-            if (isCurrentTurnBoundaryEvent(event)) {
-              foundBoundary = true;
-              break;
-            }
-          }
-        } catch (error) {
-          if (!isStreamDisconnectError(error)) {
-            throw error;
-          }
-        }
-
-        if (foundBoundary) {
+        if (isCurrentTurnBoundaryEvent(event)) {
           break;
         }
-
-        // A caller-initiated abort is a stop signal, not a transient socket
-        // disconnect — do not reconnect.
-        if (input.signal?.aborted) {
-          break;
-        }
-
-        if (remainingReconnectAttempts <= 0) {
-          break;
-        }
-
-        remainingReconnectAttempts -= 1;
       }
     } finally {
       this.#state = advanceSession({
@@ -286,22 +252,6 @@ export class ClientSession {
     }
   }
 
-  async #openStreamBody(
-    sessionId: string,
-    startIndex: number,
-    signal?: AbortSignal,
-    headers?: Readonly<Record<string, string>>,
-  ): Promise<ReadableStream<Uint8Array>> {
-    return await openStreamBody({
-      host: this.#context.host,
-      resolveHeaders: () => this.#context.resolveHeaders(headers),
-      redirect: this.#context.redirect,
-      sessionId,
-      signal,
-      startIndex,
-    });
-  }
-
   async *#streamAndAdvance(
     sessionId: string,
     options?: StreamOptions,
@@ -311,9 +261,8 @@ export class ClientSession {
     const events: HandleMessageStreamEvent[] = [];
 
     try {
-      for await (const event of openStreamIterable({
+      for await (const event of followStreamIterable({
         host: this.#context.host,
-        maxReconnectAttempts: this.#context.maxReconnectAttempts,
         resolveHeaders: () => this.#context.resolveHeaders(),
         redirect: this.#context.redirect,
         sessionId,

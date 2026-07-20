@@ -110,7 +110,7 @@ Custom channel routes request the same cancellation without knowing the session 
 
 ## Reconnect and rewind
 
-The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
+The stream is durable. Every event is recorded before a step completes, so consumers can reconnect from their cursor when an HTTP connection ends. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
 
 ```bash
 curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=<count>"

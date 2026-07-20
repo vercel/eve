@@ -37,9 +37,10 @@ export const SETUP_FLOW_CONFIG = {
 
 /** The prompter surface plus the working-state interrupt trap a command races against. */
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "readProviderPicker" | "waitForInterrupt">;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor" | "waitForInterrupt">;
 
-type MuteableSetupRenderer = TuiPrompterRenderer & Pick<SetupFlowRenderer, "readProviderPicker">;
+type MuteableSetupRenderer = TuiPrompterRenderer &
+  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor">;
 
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
@@ -90,6 +91,8 @@ function muteableRenderer(
       isMuted() ? Promise.resolve(undefined) : renderer.readEditableSelect(options),
     readProviderPicker: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readProviderPicker(options),
+    readModelEditor: (options) =>
+      isMuted() ? Promise.resolve(undefined) : renderer.readModelEditor(options),
     readText: (options) => (isMuted() ? Promise.resolve(undefined) : renderer.readText(options)),
     readAcknowledge: (options) =>
       isMuted() ? Promise.resolve() : renderer.readAcknowledge(options),
@@ -184,6 +187,7 @@ async function executeSetupCommand(
           prompter,
           signal,
           deps: {
+            pickModelSettings: (request) => renderer.readModelEditor(request),
             runProviderFlow: (providerInput) =>
               runProviderFlow({ ...providerInput, picker: pickProvider }),
           },
@@ -193,7 +197,13 @@ async function executeSetupCommand(
         }
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
-          return { message: "/model cancelled.", preserveFlowDiagnostics: false };
+          return {
+            message:
+              result.discardedDraft === true
+                ? "/model dismissed. Drafted changes were discarded; Done commits them."
+                : "/model dismissed.",
+            preserveFlowDiagnostics: false,
+          };
         }
         // One line per completed menu action: the apply line (it already
         // distinguishes success from a rejected slug), then the provider
@@ -226,7 +236,7 @@ async function executeSetupCommand(
               `Channel files changed, but /channels failed: ${result.message}`,
             );
           case "cancelled":
-            return { message: "/channels cancelled.", preserveFlowDiagnostics: true };
+            return { message: "/channels dismissed.", preserveFlowDiagnostics: true };
           case "deploy-and-chat":
             return await runDeployAndChat(flows, { appRoot, prompter, signal }, result.chat);
           case "done":
@@ -250,7 +260,7 @@ async function executeSetupCommand(
         switch (result.kind) {
           case "cancelled":
             return {
-              message: "/connect cancelled.",
+              message: "/connect dismissed.",
               preserveFlowDiagnostics: true,
               effect: { kind: "model-access-changed" },
             };
@@ -283,7 +293,7 @@ async function executeSetupCommand(
       case "deploy": {
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
         if (result.kind === "cancelled") {
-          return { message: "/deploy cancelled.", preserveFlowDiagnostics: true };
+          return { message: "/deploy dismissed.", preserveFlowDiagnostics: true };
         }
         if (result.kind === "needs-link") {
           return {
@@ -302,7 +312,7 @@ async function executeSetupCommand(
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       return {
-        message: `/${command} cancelled.`,
+        message: `/${command} dismissed.`,
         preserveFlowDiagnostics: command !== "model",
       };
     }
@@ -363,7 +373,7 @@ async function runDeployAndChat(
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       return pendingChannelsResult(
-        "Channels added, but /deploy was cancelled. Run /deploy to ship them.",
+        "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
       );
     }
     const routed = vercelActionOutcome(error, "deploy");
@@ -373,7 +383,7 @@ async function runDeployAndChat(
   }
   if (result.kind === "cancelled") {
     return pendingChannelsResult(
-      "Channels added, but /deploy was cancelled. Run /deploy to ship them.",
+      "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
     );
   }
   if (result.kind === "needs-link") {
@@ -404,7 +414,7 @@ async function runDeployAndChat(
 function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetupCommandResult {
   switch (result.kind) {
     case "cancelled":
-      return { message: "/vc:install cancelled.", preserveFlowDiagnostics: false };
+      return { message: "/vc:install dismissed.", preserveFlowDiagnostics: false };
     case "already":
       return { message: "The Vercel CLI is already installed.", preserveFlowDiagnostics: false };
     case "failed":
@@ -427,7 +437,7 @@ function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetup
 function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
   switch (result.kind) {
     case "cancelled":
-      return { message: "/vc:login cancelled.", preserveFlowDiagnostics: false };
+      return { message: "/vc:login dismissed.", preserveFlowDiagnostics: false };
     case "already":
       return { message: "You're already logged in to Vercel.", preserveFlowDiagnostics: false };
     case "cli-missing":

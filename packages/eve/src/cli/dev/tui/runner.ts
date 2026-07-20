@@ -33,11 +33,11 @@ import {
   type FailureStreamEvent,
   failureKey,
   formatFailureDetail,
+  formatFailureHint,
   formatFailureMessage,
-  formatGatewayAuthFailureNotice,
   isAbortLikeError,
-  isGatewayAuthFailure,
   isInterruptedError,
+  localFailureHint,
 } from "./errors.js";
 
 import { pickAgentHeaderTip } from "./agent-header.js";
@@ -92,6 +92,7 @@ import {
 } from "./mcp-connection-status.js";
 import type { detectProjectIdentity } from "#setup/project-resolution.js";
 import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
+import type { DevDiagnostics } from "../diagnostics.js";
 
 export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 
@@ -120,10 +121,11 @@ export type AgentTUIStreamEvent =
   | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
   | { type: "tool-result"; toolCallId: string; output: unknown }
   | { type: "tool-error"; toolCallId: string; errorText: string }
-  | { type: "error"; errorText: string; detail?: string }
+  | { type: "error"; errorText: string; hint?: string; detail?: string }
   | { type: "finish"; usage?: AgentTUIStreamUsage };
 
 export type AgentTUITurnState = {
+  aborted?: boolean;
   boundaryEvent?: "session.completed" | "session.failed" | "session.waiting";
   pendingApprovals: AgentTUIToolApprovalRequest[];
   pendingQuestions: InputRequest[];
@@ -382,6 +384,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
   onBootProgress?: DevBootProgressReporter;
+  /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
+  diagnostics?: DevDiagnostics;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -829,7 +833,16 @@ export class EveTUIRunner {
           }
 
           if (result.turnState && result.turnState.boundaryEvent === undefined) {
-            this.#sessionFailed = true;
+            if (result.turnState.aborted) {
+              this.#sessionFailed = true;
+            } else {
+              const strandedSessionId = this.#session.state.sessionId;
+              this.#renderer.renderNotice?.(
+                strandedSessionId
+                  ? `Lost the event stream — the turn may still be running on the server (session ${strandedSessionId}). Your next message resumes this session; use /cancel to stop the turn.`
+                  : "Lost the connection to the running turn.",
+              );
+            }
           }
           break;
         }
@@ -849,15 +862,17 @@ export class EveTUIRunner {
       pendingInputResponses = undefined;
       prompt = undefined;
 
-      // The active session died terminally this turn (session.failed or a
-      // dead-socket transport error). Replace it with a fresh one so the next
-      // prompt isn't sent into a dead session, but keep the transcript on
-      // screen. Server-side context is gone with the old session.
+      // The session ended terminally this turn (session.failed, a dispatch
+      // failure, or a user interrupt). Replace it with a fresh one so the
+      // next prompt isn't sent into a dead session, but keep the transcript
+      // on screen. Server-side context is gone with the old session.
       if (this.#sessionFailed) {
         this.#sessionFailed = false;
         this.#startNewSession();
         this.#renderer.renderNotice?.(
-          "Session ended — started a new session. Earlier context was cleared.",
+          result.turnState?.aborted
+            ? "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server."
+            : "Session ended — started a new session. Earlier context was cleared.",
         );
       }
     }
@@ -1019,7 +1034,10 @@ export class EveTUIRunner {
   ): AgentTUIStreamResult {
     const turnState = createTurnState();
     return {
-      abort,
+      abort: () => {
+        turnState.aborted = true;
+        abort();
+      },
       events: eveEventsToTUIStream({
         events,
         pendingInputRequests: this.#pendingInputRequests,
@@ -1032,11 +1050,7 @@ export class EveTUIRunner {
         onTerminalFailure: () => {
           this.#sessionFailed = true;
         },
-        failureOverride:
-          this.#appRoot === undefined
-            ? undefined
-            : (event) =>
-                isGatewayAuthFailure(event) ? formatGatewayAuthFailureNotice(event) : undefined,
+        failureHintOverride: this.#appRoot === undefined ? undefined : localFailureHint,
       }),
       turnState,
     };
@@ -1699,6 +1713,7 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     availablePromptCommands: options.availablePromptCommands,
     input: options.userInput,
     output: options.screen,
+    diagnostics: options.diagnostics,
   });
 }
 
@@ -1726,7 +1741,12 @@ type EveStreamTranslatorInput = {
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
   onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
-  failureOverride?: (event: FailureStreamEvent) => string | undefined;
+  /**
+   * Replaces a failure's structured hint with a surface-local one (the
+   * local TUI swaps gateway-auth remediation for the in-session `/model`
+   * fix). Returning `undefined` keeps the hint the harness attached.
+   */
+  failureHintOverride?: (event: FailureStreamEvent) => string | undefined;
 };
 
 /**
@@ -1747,7 +1767,7 @@ async function* eveEventsToTUIStream(
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
     onTerminalFailure,
-    failureOverride,
+    failureHintOverride,
   } = input;
   const textParts = new Map<string, StreamPartState>();
   const reasoningParts = new Map<string, StreamPartState>();
@@ -2009,7 +2029,7 @@ async function* eveEventsToTUIStream(
 
       case "step.failed":
       case "turn.failed": {
-        const failure = toFailureEvent(event, emittedFailures, failureOverride);
+        const failure = toFailureEvent(event, emittedFailures, failureHintOverride);
         if (failure) yield failure;
         break;
       }
@@ -2019,7 +2039,7 @@ async function* eveEventsToTUIStream(
         // recover onto a fresh session before the next prompt.
         turnState.sawSessionFailure = true;
         onTerminalFailure?.(event as SessionFailedStreamEvent);
-        const failure = toFailureEvent(event, emittedFailures, failureOverride);
+        const failure = toFailureEvent(event, emittedFailures, failureHintOverride);
         if (failure) yield failure;
         turnState.boundaryEvent = event.type;
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
@@ -2119,6 +2139,7 @@ async function* errorOnlyTUIStream(input: {
 
 function createTurnState(): AgentTUITurnState {
   return {
+    aborted: false,
     pendingApprovals: [],
     pendingQuestions: [],
     sawSessionFailure: false,
@@ -2250,24 +2271,26 @@ function formatActionResultError(event: ActionResultStreamEvent): string {
 /**
  * Projects one failure event into a renderable `error` stream event, or
  * `undefined` when the same underlying failure was already emitted earlier in
- * the cascade. Attaches the diagnostic dump (stack trace) when the failure
- * carries one — i.e. for unrecognized errors escaping user code.
+ * the cascade. Carries the failure as a structured entity: headline, the
+ * catalog's remediation hint (surface overrides win), and the diagnostic
+ * dump when the failure carries one — i.e. for unrecognized errors escaping
+ * user code.
  */
 function toFailureEvent(
   event: FailureStreamEvent,
   emittedFailures: Set<string>,
-  failureOverride?: (event: FailureStreamEvent) => string | undefined,
+  failureHintOverride?: (event: FailureStreamEvent) => string | undefined,
 ): AgentTUIStreamEvent | undefined {
   const key = failureKey(event);
   if (emittedFailures.has(key)) return undefined;
   emittedFailures.add(key);
 
-  const override = failureOverride?.(event);
   const failure: AgentTUIStreamEvent = {
     type: "error",
-    errorText: override ?? formatFailureMessage(event),
+    errorText: formatFailureMessage(event),
   };
-  if (override !== undefined) return failure;
+  const hint = failureHintOverride?.(event) ?? formatFailureHint(event);
+  if (hint !== undefined) failure.hint = hint;
   const detail = formatFailureDetail(event);
   if (detail !== undefined) failure.detail = detail;
   return failure;

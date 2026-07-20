@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, info, build, start, dev, link, deploy, eval, channels, and extension."
+description: "Reference for every eve CLI command: init, info, build, start, dev, logs, link, deploy, eval, channels, and extension."
 ---
 
 The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
@@ -15,6 +15,8 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
 | `eve dev`                     | Start the local dev server and open the terminal UI                                                                                                   |
 | `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
+| `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                                           |
+| `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                                     |
 | `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
 | `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
 | `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
@@ -173,6 +175,26 @@ Local dev records the last ready URL per resolved app root in `.eve/dev-server-s
 
 Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; use `/new` to start a fresh session. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
 
+## `eve logs`
+
+```bash
+eve logs            # print the most recent diagnostic log
+eve logs ls         # list logs, most recent first
+eve logs <logid>    # print a specific log
+eve logs --dump     # prepend the log's environment dump
+eve logs --events   # interleave session events from the local workflow store
+```
+
+Each interactive `eve dev` process writes a private diagnostic log under `.eve/logs/` capturing stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records — regardless of what the transcript shows. The file is JSON Lines — every line is one JSON record with `at` and `source` fields. `eve logs` reads those files back.
+
+A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.000Z-123`). `eve logs <logid>` also accepts the file name, the `.eve/logs/...` path printed in the dev transcript, or any unambiguous prefix of the id with or without the `dev-` lead — so `eve logs 2026-07-15` works when a single log matches. An ambiguous prefix fails and lists the candidates.
+
+`eve logs` prints nothing but records — no path banner on either stream — so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs ls`; `eve logs ls --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
+
+`eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
+
+Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
+
 ## `eve link`
 
 ```bash
@@ -251,4 +273,4 @@ Related: [Project layout](./project-layout) · [instrumentation.ts](../guides/in
 
 - [Project layout](./project-layout): what `eve info` discovers
 - [instrumentation.ts](../guides/instrumentation): tracing and the error catalog
-- [Deployment](../guides/deployment): `eve build` and `eve start` in production
+- [Deployment](../guides/deployment/overview): `eve build` and `eve start` in production
