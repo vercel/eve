@@ -19,7 +19,7 @@ import {
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { addGatewayUA, isGatewayModel } from "#internal/gateway.js";
+import { resolveProviderHeaders } from "#internal/gateway.js";
 import {
   createErrorId,
   createLogger,
@@ -301,16 +301,17 @@ function buildGatewayAttributionHeaders(
   model: LanguageModel,
   runtimeIdentity: ToolLoopHarnessConfig["runtimeIdentity"],
 ): Record<string, string> | undefined {
-  if (!isGatewayModel(model)) return undefined;
-  const headers = addGatewayUA(new Headers());
+  const providerHeaders = resolveProviderHeaders(model);
+  if (providerHeaders === undefined) return undefined;
 
   const title = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
   const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
   const referer = deploymentHost ? `https://${deploymentHost}` : undefined;
 
-  if (title) headers.set("x-title", title);
-  if (referer) headers.set("http-referer", referer);
-  return Object.fromEntries(headers);
+  const headers: Record<string, string> = { ...providerHeaders };
+  if (title) headers["x-title"] = title;
+  if (referer) headers["http-referer"] = referer;
+  return headers;
 }
 
 async function resolveActiveRuntimeModel(input: {

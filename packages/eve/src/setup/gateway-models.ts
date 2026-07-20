@@ -1,7 +1,6 @@
-import { buildGatewayUA, buildGatewayURL } from "#internal/gateway.js";
+import { AI_GATEWAY_MODELS_URL } from "#internal/gateway.js";
+import { buildPackageUserAgent } from "#internal/user-agent.js";
 import { captureVercel } from "#setup/primitives/index.js";
-
-const AI_GATEWAY_MODELS_URL = buildGatewayURL("/v1/models");
 
 /**
  * Fetches the set of AI Gateway model ids, for validating a `--model` before
@@ -20,7 +19,7 @@ export async function fetchGatewayModelIds(cwd: string): Promise<Set<string> | n
       "--",
       "--silent",
       "--header",
-      `User-Agent: ${buildGatewayUA()}`,
+      `User-Agent: ${buildPackageUserAgent()}`,
     ],
     { cwd },
   );

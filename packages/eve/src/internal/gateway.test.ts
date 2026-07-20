@@ -1,20 +1,50 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { addGatewayUA, buildGatewayURL } from "#internal/gateway.js";
+import {
+  AI_GATEWAY_MODELS_CATALOG_URL,
+  AI_GATEWAY_MODELS_URL,
+  getVercelGatewayFetch,
+  resolveProviderHeaders,
+} from "#internal/gateway.js";
 
-describe("Gateway request helpers", () => {
-  it("builds paths against the Gateway origin", () => {
-    expect(buildGatewayURL("/v1/models/catalog")).toBe(
-      "https://ai-gateway.vercel.sh/v1/models/catalog",
-    );
+describe("Gateway endpoints", () => {
+  it("point at the Gateway origin", () => {
+    expect(AI_GATEWAY_MODELS_URL).toBe("https://ai-gateway.vercel.sh/v1/models");
+    expect(AI_GATEWAY_MODELS_CATALOG_URL).toBe("https://ai-gateway.vercel.sh/v1/models/catalog");
+  });
+});
+
+describe("getVercelGatewayFetch", () => {
+  it("sends the eve product token as the user-agent", async () => {
+    const inner = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response());
+    vi.stubGlobal("fetch", inner);
+    try {
+      await getVercelGatewayFetch()(AI_GATEWAY_MODELS_URL);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const [, init] = inner.mock.calls[0]!;
+    expect(new Headers(init?.headers).get("user-agent")).toMatch(/^eve\/.+/);
+  });
+});
+
+describe("resolveProviderHeaders", () => {
+  it("returns the eve user-agent for bare model ids", () => {
+    expect(resolveProviderHeaders("anthropic/claude-sonnet-4-5")).toEqual({
+      "user-agent": expect.stringMatching(/^eve\/.+/),
+    });
   });
 
-  it("appends the package product to an existing user-agent once", () => {
-    const headers = new Headers({ "user-agent": "ai-sdk/6.0.0" });
+  it("returns the eve user-agent for gateway model instances", () => {
+    const model = { provider: "gateway.language-model", modelId: "anthropic/claude-sonnet-4-5" };
+    expect(resolveProviderHeaders(model as never)).toEqual({
+      "user-agent": expect.stringMatching(/^eve\/.+/),
+    });
+  });
 
-    addGatewayUA(headers);
-    addGatewayUA(headers);
-
-    expect(headers.get("user-agent")).toMatch(/^ai-sdk\/6\.0\.0 eve\/[^ ]+$/);
+  it("returns undefined for direct-provider model instances", () => {
+    const model = { provider: "anthropic.messages", modelId: "claude-sonnet-4-5" };
+    expect(resolveProviderHeaders(model as never)).toBeUndefined();
   });
 });

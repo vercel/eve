@@ -6,7 +6,7 @@ import {
   type ToolSet,
 } from "ai";
 import { Factuality } from "autoevals";
-import { addGatewayUA, isGatewayModel } from "#internal/gateway.js";
+import { resolveProviderHeaders } from "#internal/gateway.js";
 
 import { toInputSchema } from "#shared/tool-schema.js";
 
@@ -70,9 +70,7 @@ async function createChatCompletion(
 ): Promise<{ readonly choices: readonly unknown[] }> {
   const tools = convertTools(params.tools);
   const result = await generateText({
-    headers: isGatewayModel(config.languageModel)
-      ? Object.fromEntries(addGatewayUA(new Headers()))
-      : undefined,
+    headers: resolveProviderHeaders(config.languageModel),
     model: config.languageModel,
     messages: convertMessages(params.messages ?? []),
     tools: Object.keys(tools).length > 0 ? tools : undefined,

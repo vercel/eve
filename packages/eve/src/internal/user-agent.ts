@@ -25,3 +25,20 @@ export function appendPackageUserAgent(headers: Headers): Headers {
   headers.set("user-agent", joinUserAgentProducts(existing, product));
   return headers;
 }
+
+/**
+ * Wraps a `fetch` implementation so every request's `user-agent` carries the
+ * installed package product token (appended after existing products). Without
+ * an explicit `inner`, `globalThis.fetch` is resolved per request rather than
+ * captured at wrap time, so globally installed instrumentation still applies.
+ */
+export function withPackageUserAgent(inner?: typeof globalThis.fetch): typeof globalThis.fetch {
+  return (input, init) => {
+    const headers = new Headers(
+      init?.headers ??
+        (typeof input === "object" && "headers" in input ? (input as Request).headers : undefined),
+    );
+    appendPackageUserAgent(headers);
+    return (inner ?? globalThis.fetch)(input, { ...init, headers });
+  };
+}
