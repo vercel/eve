@@ -1930,7 +1930,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("coalesces contiguous writes into one section and breaks at other blocks", () => {
+  it("coalesces a source's writes into one stream section at the live edge", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
@@ -1949,15 +1949,17 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    // The back-to-back writes merge into one `○ stdout … └` section; the
-    // notice breaks the run, so the post-boundary write opens a fresh one.
-    expect(countOccurrences(snapshot, "○ stdout")).toBe(2);
+    // A stream is continuous: every stdout write — the notice interleaving
+    // included — merges into ONE section riding the live edge, in arrival
+    // order.
+    expect(countOccurrences(snapshot, "○ stdout")).toBe(1);
     expect(snapshot).toContain("│ weather lookup { city: 'NY' }");
     expect(snapshot).toContain("│ weather lookup { city: 'LA' }");
     expect(snapshot).toContain("│ post-turn line");
     expect(snapshot.indexOf("city: 'NY'")).toBeLessThan(snapshot.indexOf("city: 'LA'"));
+    expect(snapshot.indexOf("city: 'LA'")).toBeLessThan(snapshot.indexOf("post-turn line"));
     // The section open at shutdown is committed, not wiped with the live region.
-    expect(snapshot.indexOf("post-turn line")).toBeGreaterThan(snapshot.indexOf("turn boundary"));
+    expect(snapshot.indexOf("○ stdout")).toBeGreaterThan(snapshot.indexOf("turn boundary"));
   });
 
   it("retroactively hides and restores buffered logs when the level changes", () => {
@@ -1985,16 +1987,15 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.setLogDisplayMode("all");
     renderer.shutdown();
 
-    // Restored lines reappear at their original transcript positions:
-    // stdout before the notice, stderr after it.
+    // Restored lines reappear as their stream sections at the live edge:
+    // both writes were still in the live window, so their sections commit
+    // after the notice.
     const restored = screen.snapshot();
     expect(restored.indexOf("before-boundary stdout")).toBeGreaterThan(-1);
-    expect(restored.indexOf("before-boundary stdout")).toBeLessThan(
-      restored.indexOf("turn boundary"),
-    );
     expect(restored.indexOf("turn boundary")).toBeLessThan(
-      restored.indexOf("after-boundary stderr"),
+      restored.indexOf("before-boundary stdout"),
     );
+    expect(restored.indexOf("after-boundary stderr")).toBeGreaterThan(-1);
   });
 
   it("stores long stderr diagnostics and shows concise copy by default", () => {
@@ -2234,13 +2235,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot.indexOf("captured while hidden")).toBeGreaterThan(-1);
-    expect(snapshot.indexOf("captured while hidden")).toBeLessThan(
+    // The buffered write reappears as its stream section at the live edge.
+    expect(snapshot.indexOf("captured while hidden")).toBeGreaterThan(
       snapshot.indexOf("after the log"),
     );
   });
 
-  it("restores a hidden write at its original position between visible sections", () => {
+  it("keeps a hidden write out of the stream section until its filter shows it", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
@@ -2256,23 +2257,23 @@ describe("TerminalRenderer (inline scrollback)", () => {
     process.stdout.write("interleaved stdout line\n");
     process.stderr.write("second stderr line\n");
 
-    // The hidden stdout write contributes no section.
-    expect(countOccurrences(screen.snapshot(), "○ stderr")).toBe(2);
+    // Both stderr writes merge into one stream section; the hidden stdout
+    // write contributes no section of its own.
+    expect(countOccurrences(screen.snapshot(), "○ stderr")).toBe(1);
     expect(screen.snapshot()).not.toContain("○ stdout");
 
     renderer.setLogDisplayMode("all");
     renderer.shutdown();
 
-    // Once visible, the stdout section lands back in capture order.
+    // Once visible, stdout gets its own section; the stderr stream stays
+    // whole and ordered.
     const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "○ stderr")).toBe(2);
+    expect(countOccurrences(snapshot, "○ stderr")).toBe(1);
     expect(countOccurrences(snapshot, "○ stdout")).toBe(1);
     expect(snapshot.indexOf("first stderr line")).toBeLessThan(
-      snapshot.indexOf("interleaved stdout line"),
-    );
-    expect(snapshot.indexOf("interleaved stdout line")).toBeLessThan(
       snapshot.indexOf("second stderr line"),
     );
+    expect(snapshot).toContain("interleaved stdout line");
   });
 
   it("shows sandbox stdout lines and hides ordinary stdout under the sandbox log level", () => {
@@ -2542,9 +2543,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot.indexOf("turn boundary")).toBeLessThan(
       snapshot.indexOf(AUTHORED_ARTIFACTS_UPDATED_LOG_LINE),
     );
-    expect(snapshot.indexOf(AUTHORED_ARTIFACTS_UPDATED_LOG_LINE)).toBeLessThan(
-      snapshot.indexOf("tools/lookup.ts changed · rebuilding…"),
-    );
+    // The orphaned outcome line is an ordinary write now — it rides the
+    // stream section at the live edge, after the in-place status row.
+    expect(snapshot).toContain("tools/lookup.ts changed · rebuilding…");
   });
 
   it("delays dev rebuild errors until explicitly flushed", () => {

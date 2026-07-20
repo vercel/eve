@@ -15,11 +15,42 @@ export interface ToolBlockDisplayGroup {
  * run of same-named subagent calls coalesces the repeated headers into one
  * counted header, reorders the interleaved children call by call, and elides
  * all but the newest {@link maxVisibleSubagentRunChildren} children behind a
- * `… +N more` row. Because of that, a group's members are not always
- * contiguous in the input: callers that consume a group must remove its
- * members by identity, never by prefix length.
+ * `… +N more` row. Captured log writes coalesce per
+ * {@link GroupToolBlocksOptions.logCoalescing}. Because of all this, a
+ * group's members are not always contiguous in the input: callers that
+ * consume a group must remove its members by identity, never by prefix
+ * length.
  */
-export function groupToolBlocksForDisplay(blocks: readonly Block[]): ToolBlockDisplayGroup[] {
+export interface GroupToolBlocksOptions {
+  /**
+   * How captured log writes coalesce. `"window"` (the default, for the live
+   * block window) merges every write of one source across the whole input
+   * into a single section appended after the rest — a process stream is
+   * continuous, so interleaved activity must not fragment it — and the
+   * section commits as one cluster at the turn boundary. `"runs"` (for
+   * committed-transcript rebuilds) merges only contiguous writes, so a
+   * `/loglevel` toggle re-renders history at its committed positions instead
+   * of relocating every past write to the end.
+   */
+  readonly logCoalescing?: "window" | "runs";
+}
+
+export function groupToolBlocksForDisplay(
+  blocks: readonly Block[],
+  options: GroupToolBlocksOptions = {},
+): ToolBlockDisplayGroup[] {
+  if ((options.logCoalescing ?? "window") === "window") {
+    const logWrites: Block[] = [];
+    const rest: Block[] = [];
+    for (const block of blocks) {
+      (isGroupableLogWrite(block) ? logWrites : rest).push(block);
+    }
+    return [...groupBlocks(rest), ...coalesceLogWrites(logWrites)];
+  }
+  return groupBlocks(blocks);
+}
+
+function groupBlocks(blocks: readonly Block[]): ToolBlockDisplayGroup[] {
   const groups: ToolBlockDisplayGroup[] = [];
   for (let index = 0; index < blocks.length;) {
     const first = blocks[index]!;
@@ -31,7 +62,7 @@ export function groupToolBlocksForDisplay(blocks: readonly Block[]): ToolBlockDi
       ) {
         run.push(blocks[index + run.length]!);
       }
-      groups.push(...coalesceLogWriteRun(run));
+      groups.push(...coalesceLogWrites(run));
       index += run.length;
       continue;
     }
@@ -172,16 +203,15 @@ function isGroupableLogWrite(block: Block): boolean {
 }
 
 /**
- * Coalesces a contiguous run of captured writes into one section per
- * (source, visibility) bucket, so a burst of stderr renders as a single
- * `○ stderr` section instead of one per write. Bucketing keeps the
- * concise/raw diagnostic twins apart — only one of the pair is visible
- * under any log filter, and a merged display can carry only one
- * visibility. The section body is MRU-down: the newest lines stay
- * visible, older ones collapse into the display's elided count. A
- * lone write keeps its full body — only runs are windowed.
+ * Coalesces captured writes into one section per (source, visibility)
+ * bucket, so a stream renders as a single `○ stderr` section instead of one
+ * per write. Bucketing keeps the concise/raw diagnostic twins apart — only
+ * one of the pair is visible under any log filter, and a merged display can
+ * carry only one visibility. The section body is MRU-down: the newest lines
+ * stay visible, older ones collapse into the display's elided count. A lone
+ * write keeps its full body — only merges are windowed.
  */
-function coalesceLogWriteRun(run: readonly Block[]): ToolBlockDisplayGroup[] {
+function coalesceLogWrites(run: readonly Block[]): ToolBlockDisplayGroup[] {
   const buckets = new Map<string, Block[]>();
   for (const block of run) {
     const key = `${block.title ?? ""}\u0000${block.logVisibility ?? ""}`;
@@ -321,24 +351,11 @@ function collectSubagentRun(
     }
   }
   // Interrupting pass-through blocks render after the sections they
-  // spliced into; contiguous log writes among them coalesce the same way
-  // they would in the main flow.
-  for (let i = 0; i < passThrough.length;) {
-    const block = passThrough[i]!;
-    if (!isGroupableLogWrite(block)) {
-      groups.push({ members: [block], display: block });
-      i += 1;
-      continue;
-    }
-    const run = [block];
-    while (
-      i + run.length < passThrough.length &&
-      isGroupableLogWrite(passThrough[i + run.length]!)
-    ) {
-      run.push(passThrough[i + run.length]!);
-    }
-    groups.push(...coalesceLogWriteRun(run));
-    i += run.length;
+  // spliced into. Ordinary log writes never reach here — window grouping
+  // extracts them up front — so this is the in-place status block and the
+  // other splice-prone kinds.
+  for (const block of passThrough) {
+    groups.push({ members: [block], display: block });
   }
   return { consumed, groups };
 }

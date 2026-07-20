@@ -15,8 +15,9 @@ import { theme } from "./lib/theme.ts";
  *
  *   - `/loglevel none` hides log lines already in the transcript
  *   - lines captured while hidden stay buffered, invisible
- *   - `/loglevel all` restores every buffered line at its original
- *     chronological position
+ *   - `/loglevel all` restores every buffered line; live writes rejoin
+ *     their source's stream section (one `○ stdout` / `○ stderr` region
+ *     at the live edge, write order preserved within it)
  *
  * Needs no agent server and no model credentials.
  */
@@ -87,10 +88,10 @@ void (async () => {
     if (positions.some((index) => index === -1)) {
       throw new Error(`/loglevel all should restore every buffered line:\n${restored}`);
     }
-    const ordered = positions.every((index, i) => i === 0 || index > positions[i - 1]!);
-    if (!ordered) {
+    // Both stdout marks share one stream section, write order preserved.
+    if (!(restored.indexOf(VISIBLE_STDOUT_MARK) < restored.indexOf(HIDDEN_STDOUT_MARK))) {
       throw new Error(
-        `restored logs should keep their original chronological order (${positions.join(", ")}):\n${restored}`,
+        `stream sections should preserve write order (${positions.join(", ")}):\n${restored}`,
       );
     }
 
@@ -99,7 +100,7 @@ void (async () => {
     await runPromise;
 
     process.stdout.write(
-      `${theme.muted("[tui-loglevel] buffered hide/restore with stable ordering verified")}\n`,
+      `${theme.muted("[tui-loglevel] buffered hide/restore with stream sections verified")}\n`,
     );
   } catch (error) {
     process.stdout.write(

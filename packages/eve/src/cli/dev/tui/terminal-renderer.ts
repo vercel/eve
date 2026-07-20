@@ -2684,25 +2684,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #pushBlock(block: Block) {
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
-    this.#settleOpenLogRun(block);
     this.#blocks.push(block);
     if (block.id) this.#blockById.set(block.id, block);
-  }
-
-  /**
-   * Captured writes are pushed live so a burst coalesces into one section
-   * while it is still the transcript tail (a committed corner can't merge
-   * retroactively). Any push that can't extend the run — a different
-   * source, an in-place status block, or any other kind — settles it, and
-   * the next paint commits the whole run as one grouped section.
-   */
-  #settleOpenLogRun(next: Block): void {
-    for (let index = this.#blocks.length - 1; index >= 0; index -= 1) {
-      const block = this.#blocks[index]!;
-      if (block.kind !== "log" || block.id !== undefined || block.live !== true) break;
-      if (next.kind === "log" && next.id === undefined && next.title === block.title) return;
-      block.live = false;
-    }
   }
 
   #addUserBlock(prompt: string) {
@@ -3406,7 +3389,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const width = this.#width();
     this.#committedTranscriptRows.length = 0;
     let previous: PreviousBlock | undefined;
-    for (const { display: block } of groupToolBlocksForDisplay(this.#transcriptBlocks)) {
+    // Committed log writes re-render at their committed positions —
+    // window-scoped stream coalescing would relocate every past write to
+    // the end of the transcript on a `/loglevel` toggle.
+    for (const { display: block } of groupToolBlocksForDisplay(this.#transcriptBlocks, {
+      logCoalescing: "runs",
+    })) {
       if (this.#isHiddenLog(block)) continue;
       const rows = this.#renderBlock(block, width, previous);
       previous = previousBlockOf(block);

@@ -588,8 +588,24 @@ describe("groupToolBlocksForDisplay", () => {
     const groups = groupToolBlocksForDisplay([lone, status, write]);
 
     // A lone write is never windowed, and the rebuild status row must not
-    // absorb (or be absorbed by) neighboring writes.
-    expect(groups.map((group) => group.display)).toEqual([lone, status, write]);
+    // absorb (or be absorbed by) neighboring writes. Stream sections ride
+    // the live edge: the writes render after the in-place status.
+    expect(groups.map((group) => group.display)).toEqual([status, lone, write]);
+  });
+
+  it("merges a source's writes across interleaved blocks in window mode only", () => {
+    const write = (body: string): Block => ({ kind: "log", title: "stderr", body, live: false });
+    const notice: Block = { kind: "notice", body: "boundary", live: false };
+    const blocks = [write("early failure"), notice, write("late failure")];
+
+    // Window mode: one continuous stream section, appended after the rest.
+    const windowed = groupToolBlocksForDisplay(blocks);
+    expect(windowed.map((group) => group.display.kind)).toEqual(["notice", "log"]);
+    expect(windowed[1]?.display.body).toBe("early failure\nlate failure");
+
+    // Runs mode (transcript rebuilds): committed positions stay put.
+    const runs = groupToolBlocksForDisplay(blocks, { logCoalescing: "runs" });
+    expect(runs.map((group) => group.display.kind)).toEqual(["log", "notice", "log"]);
   });
 
   it("does not group a settled call with a still-running one", () => {
