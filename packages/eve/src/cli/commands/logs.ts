@@ -112,9 +112,11 @@ export interface LogsShowCommandOptions {
 
 /**
  * `eve logs [logid]`: prints one diagnostic log to stdout — the most recent
- * when `logid` is omitted. The resolved file path goes to stderr so piped
- * stdout stays pure log content. With `--dump`, the log's environment dump
- * (a JSON document) is prepended to the JSONL log body, forming one
+ * when `logid` is omitted. The output carries nothing but records (no
+ * resolved-path banner, no progress notes on either stream), so
+ * `eve logs 2>&1 | jq` always parses; discover ids and paths with
+ * `eve logs ls`. With `--dump`, the log's environment dump (a JSON
+ * document) is prepended to the JSONL log body, forming one
  * self-contained, parseable report. With `--events`, session events are
  * resolved from the local workflow store at query time — never duplicated
  * into the log at capture time — and interleaved by timestamp as
@@ -135,7 +137,6 @@ export async function runLogsShowCommand(
   }
 
   const entry = logId === undefined ? logs[0]! : resolveDevDiagnosticLog(logs, logId);
-  logger.error(`${LOG_DISPLAY_DIRECTORY}/${entry.id}.log`);
   let content = await readFile(entry.path, "utf8");
 
   if (options.events === true) {
@@ -143,7 +144,6 @@ export async function runLogsShowCommand(
     const events = await (options.readEvents ?? readDevSessionEvents)(appRoot, window);
     if (events.length > 0) {
       content = mergeLogWithEvents(content, events);
-      logger.error(`(interleaved ${events.length} session events)`);
     }
   }
 
@@ -165,7 +165,6 @@ export async function runLogsShowCommand(
     logger.log(content.trimEnd());
     return;
   }
-  logger.error(`${LOG_DISPLAY_DIRECTORY}/${entry.id}.dump`);
   // A JSON document followed by JSON Lines is one valid JSON value stream,
   // so the combined output stays parseable end to end (`... | jq -c .`).
   logger.log(`${dumpContent.trimEnd()}\n${content.trimEnd()}`);
