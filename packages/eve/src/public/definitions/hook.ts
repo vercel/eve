@@ -63,6 +63,7 @@ export type HookEvent<TKey extends HookEventKey = HookEventType> = TKey extends 
  * `ctx` is always the last argument.
  */
 export interface HookContext extends SessionContext {
+  readonly tenantId?: string;
   readonly agent: {
     readonly name: string;
     readonly nodeId?: string;

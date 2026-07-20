@@ -13,54 +13,54 @@ export const EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION = 1;
 /** Filename emitted at the root of an extension's agent-shaped dist tree. */
 export const EXTENSION_COMPATIBILITY_MANIFEST_FILENAME = "_manifest.json";
 
-/** Current producer contract version for each extension-facing capability. */
-export const EXTENSION_CAPABILITY_VERSIONS = {
-  extension: 1,
-  tool: 1,
-  dynamicTool: 1,
-  connection: 1,
-  hook: 1,
-  skill: 1,
-  dynamicSkill: 1,
-  instructions: 1,
-  dynamicInstructions: 1,
-  config: 1,
-  state: 1,
-} as const;
+interface ExtensionCapabilityContract {
+  readonly current: number;
+  readonly supported: readonly number[];
+  readonly dropped: Readonly<Record<number, string>>;
+}
+
+const EXTENSION_CAPABILITY_CONTRACTS = {
+  extension: { current: 1, supported: [1], dropped: {} },
+  tool: { current: 1, supported: [1], dropped: {} },
+  dynamicTool: { current: 1, supported: [1], dropped: {} },
+  connection: { current: 1, supported: [1], dropped: {} },
+  hook: { current: 1, supported: [1], dropped: {} },
+  skill: { current: 1, supported: [1], dropped: {} },
+  dynamicSkill: { current: 1, supported: [1], dropped: {} },
+  instructions: { current: 1, supported: [1], dropped: {} },
+  dynamicInstructions: { current: 1, supported: [1], dropped: {} },
+  config: { current: 1, supported: [1], dropped: {} },
+  state: { current: 1, supported: [1], dropped: {} },
+} as const satisfies Record<string, ExtensionCapabilityContract>;
 
 /** One independently versioned extension-facing contract. */
-export type ExtensionCapability = keyof typeof EXTENSION_CAPABILITY_VERSIONS;
+export type ExtensionCapability = keyof typeof EXTENSION_CAPABILITY_CONTRACTS;
+
+/** Current producer contract version for each extension-facing capability. */
+export const EXTENSION_CAPABILITY_VERSIONS = Object.fromEntries(
+  Object.entries(EXTENSION_CAPABILITY_CONTRACTS).map(([capability, contract]) => [
+    capability,
+    contract.current,
+  ]),
+) as {
+  readonly [TCapability in ExtensionCapability]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
+};
 
 /** Capability requirements stamped by one extension build. */
 export type ExtensionCapabilityRequirements = Partial<Record<ExtensionCapability, number>>;
 
 /**
- * Older contract versions this eve release still consumes. List a version here
- * only when a capability bump keeps the previous format readable.
- */
-const ADDITIONAL_SUPPORTED_CAPABILITY_VERSIONS: Partial<
-  Record<ExtensionCapability, readonly number[]>
-> = {};
-
-function deriveCapabilitySupport(): Readonly<Record<ExtensionCapability, readonly number[]>> {
-  const support = {} as Record<ExtensionCapability, readonly number[]>;
-  for (const capability of Object.keys(EXTENSION_CAPABILITY_VERSIONS) as ExtensionCapability[]) {
-    support[capability] = [
-      ...(ADDITIONAL_SUPPORTED_CAPABILITY_VERSIONS[capability] ?? []),
-      EXTENSION_CAPABILITY_VERSIONS[capability],
-    ];
-  }
-  return support;
-}
-
-/**
- * Capability contract versions this eve release can consume. Derived from
- * {@link EXTENSION_CAPABILITY_VERSIONS} so the version this release stamps is
- * always one it accepts.
+ * Capability contract versions this eve release can consume.
  */
 export const EXTENSION_CAPABILITY_SUPPORT: Readonly<
   Record<ExtensionCapability, readonly number[]>
-> = deriveCapabilitySupport();
+> = (Object.keys(EXTENSION_CAPABILITY_CONTRACTS) as ExtensionCapability[]).reduce(
+  (support, capability) => {
+    support[capability] = EXTENSION_CAPABILITY_CONTRACTS[capability].supported;
+    return support;
+  },
+  {} as Record<ExtensionCapability, readonly number[]>,
+);
 
 /** Consumer support table used to validate one extension distribution. */
 export type ExtensionCapabilitySupport = Readonly<Record<string, readonly number[]>>;
