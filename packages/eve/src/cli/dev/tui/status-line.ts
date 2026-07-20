@@ -90,7 +90,9 @@ function renderEndpoint(
   if (input.endpoint.kind === "external") {
     const provider =
       EXTERNAL_PROVIDER_DISPLAY_NAMES[input.endpoint.provider] ?? input.endpoint.provider;
-    return { text: c.dim(`via ${provider}${g.external}`), standalone: false };
+    // The `⌝` mark stays at the terminal's default foreground — full
+    // intensity on any theme — while the clause around it is dim.
+    return { text: `${c.dim(`via ${provider}`)}${g.external}`, standalone: false };
   }
   if (!input.endpoint.connected) {
     return { text: c.yellow(`${g.warning} ai-gateway`), standalone: true };

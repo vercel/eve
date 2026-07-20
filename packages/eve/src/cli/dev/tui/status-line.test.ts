@@ -264,13 +264,14 @@ describe("buildStatusLine", () => {
     expect(linked).toContain("\x1b[2mvia \x1b[22m");
     expect(linked).toContain("\x1b[2m(oidc)\x1b[22m");
 
-    // External providers render fully quiet — no bright token.
+    // External providers render quiet — no bright token — with only the
+    // authored-endpoint mark at the default foreground.
     const external = buildStatusLine({
       endpoint: { kind: "external", provider: "codex" },
       theme,
       width: 120,
     });
-    expect(external).toContain("\x1b[2mvia chatgpt-sub⌝\x1b[22m");
+    expect(external).toContain("\x1b[2mvia chatgpt-sub\x1b[22m⌝");
     expect(external).not.toContain("\x1b[97m");
   });
 
