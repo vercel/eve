@@ -167,6 +167,16 @@ export const honeycombLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const kernelLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect width="400" height="400" fill="#81B300" />
+    <path
+      d="M136.2 99c9 0 16.2 7.3 16.2 16.2v7.8c0 1 1.2 1.4 1.8.6l13.7-18.1c5.3-7.2 15.5-8.6 22.7-3.3 7.2 5.4 8.6 15.5 3.2 22.7l-14.1 18.8a2 2 0 0 0 0 2.4l18.1 24.2c5.4 7.1 4 17.3-3.2 22.7-7.2 5.3-17.4 3.9-22.7-3.3l-17.6-23.3c-.6-.8-1.8-.4-1.8.6v13c0 9-7.3 16.2-16.2 16.2S120 189 120 180v-64.8c0-9 7.3-16.2 16.2-16.2Zm109.5.8a32.4 32.4 0 0 1 22.2 56l-.3 2.8 8.8 11.7c5.4 7.1 4 17.3-3.2 22.7-7.2 5.3-17.4 3.9-22.7-3.3l-10.9-19c-.5-.9-1.9-.5-1.9.5v8.8c0 9-7.3 16.2-16.2 16.2s-16.2-7.2-16.2-16.2v-64c0-9 7.3-16.2 16.2-16.2h24.4Zm-4.5 25.5a6.6 6.6 0 1 0 0 13.2 6.6 6.6 0 0 0 0-13.2ZM193 202.8c9 0 16.2 7.2 16.2 16.2v64.8c0 9-7.3 16.2-16.2 16.2-4.5 0-8.3-1.6-11.4-4.8l-27.4-31.1c-.6-.7-1.8-.3-1.8.7v19c0 9-7.3 16.2-16.2 16.2s-16.2-7.2-16.2-16.2V219c0-9 7.3-16.2 16.2-16.2 4.5 0 8.3 1.6 11.5 4.7l27.3 31.1c.6.7 1.8.3 1.8-.7V219c0-9 7.2-16.2 16.2-16.2Zm38.3 0c9 0 16.2 7.2 16.2 16.2v45.8c0 1.1.9 2 2.1 2h14.2c9 0 16.2 7.3 16.2 16.2s-7.3 16.2-16.2 16.2h-32.5c-9 0-16.2-7.2-16.2-16.2v-64c0-9 7.3-16.2 16.2-16.2Zm36.1 0a12.6 12.6 0 1 1 0 25.1 12.6 12.6 0 0 1 0-25.1Z"
+      fill="#1C2024"
+    />
+  </svg>
+);
+
 export const airtableLogo = (props: LogoProps) => <SiAirtable color="default" {...props} />;
 
 export const bitlyLogo = (props: LogoProps) => <SiBitly color="default" {...props} />;
@@ -312,6 +322,7 @@ export const logos = {
   notion: notionLogo,
   datadog: datadogLogo,
   honeycomb: honeycombLogo,
+  kernel: kernelLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,
   brex: brexLogo,

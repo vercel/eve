@@ -39,6 +39,8 @@ export type AuthMode = "user" | "app" | "jwtBearer";
 export interface ConnectionSpec {
   /** Vercel Connect connector UID; defaults to the integration slug. */
   connector?: string;
+  /** Service passed to `vercel connect create` when it differs from the connector UID. */
+  connectorService?: string;
   /** Supported auth modes in display order; the first is the default. */
   authModes: AuthMode[];
   /** Model-facing description; defaults to the integration tagline. */
@@ -97,6 +99,7 @@ interface ChannelPresentation extends Presentation {
 interface ConnectionPresentation extends Presentation {
   authModes: AuthMode[];
   connector?: string;
+  connectorService?: string;
   configureNote?: string;
 }
 
@@ -481,6 +484,16 @@ Credentials come from the \`createMessengerAdapter\` config or the adapter's env
  * note.
  */
 const connectionPresentations: Record<string, ConnectionPresentation> = {
+  kernel: {
+    logo: "kernel",
+    docsHref: "https://www.kernel.sh/docs/reference/mcp-server/",
+    keywords: ["mcp", "browser", "browser automation", "playwright", "cloud browser"],
+    authModes: ["user"],
+    connector: "mcp.onkernel.com/kernel",
+    connectorService: "mcp.onkernel.com",
+    configureNote:
+      "Kernel's MCP server can launch browsers, execute Playwright, and manage recordings. Add approval gates or tool filters before allowing unattended browser actions.",
+  },
   linear: {
     logo: "linear",
     docsHref: "/docs/connections/mcp",
@@ -747,6 +760,9 @@ function buildConnection(entry: IntegrationEntry): Integration {
     description: identity.description,
   };
   if (presentation.connector !== undefined) spec.connector = presentation.connector;
+  if (presentation.connectorService !== undefined) {
+    spec.connectorService = presentation.connectorService;
+  }
   if (identity.mcp !== undefined) spec.mcp = identity.mcp;
   if (identity.openapi !== undefined) spec.openapi = identity.openapi;
   if (presentation.configureNote !== undefined) spec.configureNote = presentation.configureNote;

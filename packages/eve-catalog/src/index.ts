@@ -172,6 +172,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "kernel",
+    name: "Kernel",
+    kind: "connection",
+    tagline: "Launch cloud browsers and automate web interactions through Kernel's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Kernel: launch and automate cloud browsers, run Playwright, and inspect replays.",
+      mcp: { url: "https://mcp.onkernel.com/mcp" },
+    },
+  },
+  {
     slug: "linear",
     name: "Linear",
     kind: "connection",
