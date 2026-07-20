@@ -175,7 +175,7 @@ export async function emitTurnPreamble(
 export async function emitStepStarted(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  messages?: readonly import("ai").ModelMessage[],
+  messages?: readonly ModelMessage[],
 ): Promise<void> {
   await emitFn(
     createStepStartedEvent({

@@ -282,11 +282,6 @@ export function formatCompactTokenCount(count: number): string {
 }
 
 /**
- * The status line's token-flow segment: `↑ 394.4K ↓ 4.3K`, input (prompt)
- * tokens up, output tokens down, both from the latest usage report. A known
- * `--context-size` appends the context-fill percentage of the input side.
- */
-/**
  * Reveals `text` one character per `stepMs` of elapsed time, typewriter
  * style: the first character shows immediately, the full text after
  * `(length - 1) * stepMs`. Painted on the shared ticker beat, so no timer
@@ -313,6 +308,11 @@ export function formatTurnDuration(elapsedMs: number): string {
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}min`;
 }
 
+/**
+ * The turn bar and coda's token-flow segment: `↑ 394.4K ↓ 4.3K`, input
+ * (prompt) tokens up, output tokens down. A known `--context-size` appends
+ * the context-fill percentage of the input side.
+ */
 export function formatTokenFlow(
   flow: { inputTokens: number; outputTokens: number; contextSize?: number },
   glyph: { arrowUp: string; arrowDown: string },

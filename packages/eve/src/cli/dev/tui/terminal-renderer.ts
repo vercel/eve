@@ -286,7 +286,6 @@ type RenderTurnState = {
   text: Map<string, string>;
   reasoning: Map<string, string>;
   tools: Map<string, NativeToolState>;
-  hasPendingToolResults: boolean;
 };
 
 type NativeToolState = {
@@ -315,19 +314,8 @@ const logLevelHintMs = 5_000;
 
 const STATUS = {
   processing: "Working…",
-  toolResults: "Reading results…",
-  streaming: "Responding…",
-  preparingTools: "Preparing tool calls…",
-  executingTools: "Running tools…",
   connectionAuth: "Waiting for connection authorization…",
 } as const;
-
-/**
- * The stream-flavored statuses the live turn bar subsumes. A waiting state
- * carrying any other text (a flowless setup spinner like "Checking the
- * project…") keeps its own status row — the text is the information.
- */
-const STREAM_STATUS_TEXTS: ReadonlySet<string> = new Set(Object.values(STATUS));
 
 /**
  * The end-of-turn stats coda renders only for turns that were long or
@@ -442,6 +430,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Rejects the reader currently awaiting keys, so #stop never strands it. */
   #rejectActiveReader?: (error: Error) => void;
   #status: string = STATUS.processing;
+  /**
+   * A flowless setup spinner's text ("Checking the project…"). Rendered as
+   * its own status row — the text is the information — instead of the live
+   * turn bar the waiting indicator would otherwise show.
+   */
+  #flowlessStatus?: string;
   #title = "eve";
   #isInteractive = false;
   #interrupted = false;
@@ -794,7 +788,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       text: new Map(),
       reasoning: new Map(),
       tools: new Map(),
-      hasPendingToolResults: false,
     };
 
     try {
@@ -1392,18 +1385,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // its rows are only re-emitted via renderAgentHeader.
     this.#agentHeaderRendered = false;
     this.#agentHeaderBody = undefined;
-    this.#childToolCallIds.clear();
-    this.#parentToolBlockIds.clear();
-    this.#subagentHeaders.clear();
-    this.#subagentCallsByName.clear();
-    // The todo list, write-diff bases, and turn stats belong to the
-    // conversation being discarded; a fresh session may even run a fresh
-    // sandbox, where stale diff bases would render confidently wrong diffs.
-    this.#todoItems = undefined;
-    this.#todoCommittedSignature = undefined;
-    this.#fileContents.clear();
-    this.#turnStartedAtMs = undefined;
-    this.#turnUsage = { inputTokens: 0, outputTokens: 0 };
+    this.#clearConversationState();
     // A fresh conversation gets the invitation back.
     this.#hasUserMessage = false;
     this.#pendingEchoedPrompt = undefined;
@@ -1420,11 +1402,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * Commits a single dim informational line to the transcript (e.g. the
-   * session-recovery notice after a terminal server failure). No-op when the
-   * text is blank.
-   */
-  /**
    * The mid-conversation session boundary: one opening-corner line marking
    * where the server-side context was cut and a fresh session took over.
    */
@@ -1432,13 +1409,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The dying turn's stats coda closes before the boundary — it belongs
     // to the session that ended, not the fresh one.
     this.#commitTurnStats();
-    // Conversation state that lived in the old context dies with it: the
-    // pinned todo list is the discarded session's plan (its tasks were not
-    // finished — dismiss, don't commit), and stale write-diff bases would
-    // render confidently wrong diffs against a fresh session's sandbox.
-    this.#todoItems = undefined;
-    this.#todoCommittedSignature = undefined;
-    this.#fileContents.clear();
+    this.#clearConversationState();
 
     const c = this.#theme.colors;
     const g = this.#theme.glyph;
@@ -1447,6 +1418,33 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  /**
+   * THE one authority for state scoped to a server-side conversation
+   * context. Called by both context cuts — `/new` (`reset`) and the
+   * mid-conversation session replacement (`renderSessionBoundary`) — so the
+   * two can never drift on what dies with the old context: the pinned todo
+   * list (its tasks were not finished — dismiss, don't commit), write-diff
+   * bases (a fresh session may run a fresh sandbox, where stale bases
+   * render confidently wrong diffs), subagent call identity (ordinals must
+   * not count across a cut), tool-call ownership maps, and the turn clock.
+   */
+  #clearConversationState(): void {
+    this.#childToolCallIds.clear();
+    this.#parentToolBlockIds.clear();
+    this.#subagentHeaders.clear();
+    this.#subagentCallsByName.clear();
+    this.#todoItems = undefined;
+    this.#todoCommittedSignature = undefined;
+    this.#fileContents.clear();
+    this.#turnStartedAtMs = undefined;
+    this.#turnUsage = { inputTokens: 0, outputTokens: 0 };
+  }
+
+  /**
+   * Commits a single dim informational line to the transcript (e.g. the
+   * session-recovery notice after a terminal server failure). No-op when the
+   * text is blank.
+   */
   renderNotice(text: string): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
@@ -2386,14 +2384,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     if (content === undefined) {
       this.#turnIndicator = { kind: "idle" };
-      this.#status = "";
+      this.#flowlessStatus = undefined;
       this.#stopTicker();
       this.#paint();
       return;
     }
     this.#start();
     this.#startWorking();
-    this.#status = content.text;
+    this.#flowlessStatus = content.text;
     this.#paint();
   }
 
@@ -2865,13 +2863,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     turnState: RenderTurnState,
   ): void {
     switch (event.type) {
-      case "step-start":
-        this.#setStreamStatus(
-          turnState.hasPendingToolResults ? STATUS.toolResults : STATUS.processing,
-        );
-        turnState.hasPendingToolResults = false;
-        break;
-
       case "step-finish":
         // Step usage reports are per-step deltas (extractStepUsage in the
         // harness), so summing them yields true session totals. The
@@ -2892,7 +2883,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "assistant-delta": {
         const text = (turnState.text.get(event.id) ?? "") + stripTerminalControls(event.delta);
-        this.#setStreamStatus(STATUS.streaming);
         turnState.text.set(event.id, text);
         this.#upsertAssistantBlock(event.id, text, true);
         break;
@@ -2914,7 +2904,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const text = (turnState.reasoning.get(event.id) ?? "") + stripTerminalControls(event.delta);
         turnState.reasoning.set(event.id, text);
         if (displayModes.reasoning === "full") {
-          this.#setStreamStatus(STATUS.streaming);
           this.#upsertReasoningBlock(event.id, text, true, displayModes);
           break;
         }
@@ -2939,7 +2928,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         // placeholder would misread an input-less call (e.g. as a todo read).
         if (toolBaseName(event.toolName) === "todo") break;
         if (toolBaseName(event.toolName) === "ask_question") break;
-        this.#setStreamStatus(STATUS.preparingTools);
         this.#upsertNativeTool(
           {
             input: undefined,
@@ -2956,7 +2944,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       case "tool-call":
         this.#diagnostics?.recordToolCall(event.toolName);
         if (displayModes.tools === "hidden") break;
-        this.#setStreamStatus(STATUS.executingTools);
         this.#upsertNativeTool(
           {
             input: event.input,
@@ -2981,8 +2968,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         if (displayModes.tools === "hidden") break;
         const existing = this.#resolveNativeToolState(event.toolCallId, turnState);
         if (existing === undefined) break;
-        turnState.hasPendingToolResults = true;
-        this.#setStreamStatus(STATUS.toolResults);
         this.#upsertNativeTool(
           { ...existing, output: event.output, status: "done" },
           displayModes,
@@ -3001,8 +2986,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         });
         if (displayModes.tools === "hidden") break;
         if (existing === undefined) break;
-        turnState.hasPendingToolResults = true;
-        this.#setStreamStatus(STATUS.toolResults);
         this.#upsertNativeTool(
           { ...existing, errorText: event.errorText, status: "error" },
           displayModes,
@@ -3015,8 +2998,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         if (displayModes.tools === "hidden") break;
         const existing = this.#resolveNativeToolState(event.toolCallId, turnState);
         if (existing === undefined) break;
-        turnState.hasPendingToolResults = true;
-        this.#setStreamStatus(STATUS.toolResults);
         this.#upsertNativeTool(
           { ...existing, errorText: event.reason, status: "denied" },
           displayModes,
@@ -3034,13 +3015,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#paint();
         break;
     }
-  }
-
-  #setStreamStatus(status: string): void {
-    const next = this.#connectionAuthPendingCount > 0 ? STATUS.connectionAuth : status;
-    if (this.#status === next) return;
-    this.#status = next;
-    this.#paint();
   }
 
   #upsertAssistantBlock(id: string, text: string, live: boolean): void {
@@ -3610,9 +3584,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // question answer or approval resuming — shows the one live turn bar,
     // with the inert prompt anchored beneath it while a stream owns the
     // turn. The `└ Done in …` coda is this bar's settled form.
-    const waitingOnStream =
-      turnIndicator.kind === "waiting" &&
-      (this.#status.length === 0 || STREAM_STATUS_TEXTS.has(this.#status));
+    const waitingOnStream = turnIndicator.kind === "waiting" && this.#flowlessStatus === undefined;
     if (this.#streamDraftActive || waitingOnStream) {
       rows.push(this.#streamingTurnBar(width));
       this.#pushStreamingPrompt(rows, width);
@@ -3623,9 +3595,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return rows;
     }
 
-    // Interactive prompts (approvals, connection auth) and transitional
-    // states render as a quiet dot-led status row.
-    const statusText = this.#status.length > 0 ? this.#status : "Ready";
+    // Interactive prompts (approvals, connection auth), the flowless setup
+    // spinner, and transitional states render as a quiet dot-led status row.
+    const statusText = this.#flowlessStatus ?? (this.#status.length > 0 ? this.#status : "Ready");
     const meta = this.#statusMeta();
     const icon = c.dim(this.#theme.glyph.dot);
     const line = meta

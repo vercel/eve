@@ -53,9 +53,9 @@ interface BuiltinToolCopy {
 }
 
 /**
- * Builtin tools whose calls read as one verb plus one argument. The
- * (verb, noun) tuples must stay unique per tool: aggregation treats equal
- * copy as the same run.
+ * Builtin tools whose calls read as one verb plus one argument. Runs group
+ * by tool name; equal copy across two tools only merges their entries in a
+ * completed section's counted summary, which reads fine.
  */
 const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
   agent: {

@@ -169,12 +169,8 @@ function sameRun(first: Block, candidate: Block): boolean {
     candidate.kind === first.kind &&
     candidate.depth === first.depth &&
     candidate.live === first.live &&
-    // Copy tuples are unique per tool today; the name check keeps two tools
-    // that ever converge on the same copy from merging into one count.
-    candidate.toolName === first.toolName &&
-    candidate.toolGroup?.verb === first.toolGroup?.verb &&
-    candidate.toolGroup?.singularNoun === first.toolGroup?.singularNoun &&
-    candidate.toolGroup?.pluralNoun === first.toolGroup?.pluralNoun
+    // Copy derives from the tool name, so name equality implies equal copy.
+    candidate.toolName === first.toolName
   );
 }
 

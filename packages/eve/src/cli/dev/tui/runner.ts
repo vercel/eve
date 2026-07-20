@@ -1467,18 +1467,6 @@ export class EveTUIRunner {
   }
 
   /**
-   * Opens a parallel stream over the child session and folds its events into
-   * nested subagent blocks.
-   *
-   * Pumps are fire-and-forget and must never be awaited at a turn boundary:
-   * a subagent dispatched in `task` mode that parks for HITL never emits a
-   * turn-boundary event on its own stream (`harness/tool-loop.ts` gates
-   * `emitTurnEpilogue` on `mode === "conversation"`), so blocking on a child
-   * stream would stall the prompt until the subagent's serverless function
-   * times out. Pumps stay open across HITL prompts and resume rendering when
-   * the subagent unparks; they end on the child's own boundary or via abort.
-   */
-  /**
    * The moment a dispatch is known to be a subagent call, its section
    * header replaces the parent-level tool row (or its still-preparing
    * placeholder — subagent dispatches never upgrade one, since their
@@ -1492,6 +1480,18 @@ export class EveTUIRunner {
     this.#startSubagentChildPump(called);
   }
 
+  /**
+   * Opens a parallel stream over the child session and folds its events into
+   * nested subagent blocks.
+   *
+   * Pumps are fire-and-forget and must never be awaited at a turn boundary:
+   * a subagent dispatched in `task` mode that parks for HITL never emits a
+   * turn-boundary event on its own stream (`harness/tool-loop.ts` gates
+   * `emitTurnEpilogue` on `mode === "conversation"`), so blocking on a child
+   * stream would stall the prompt until the subagent's serverless function
+   * times out. Pumps stay open across HITL prompts and resume rendering when
+   * the subagent unparks; they end on the child's own boundary or via abort.
+   */
   #startSubagentChildPump(called: SubagentCalledStreamEvent) {
     const callId = called.data.callId;
     if (this.#subagentChildPumps.has(callId)) return;

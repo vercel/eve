@@ -13,7 +13,7 @@ import { visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
 import { clipVisible, renderInputWithBlockCursor, wrapVisibleLine } from "./terminal-text.js";
 
-export const FREEFORM_ROW_LABEL = "Type your own answer";
+const FREEFORM_ROW_LABEL = "Type your own answer";
 
 export interface QuestionPanelState {
   readonly prompt: string;

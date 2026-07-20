@@ -103,7 +103,7 @@ function showToolDetail(block: Block): boolean {
 export const maxVisibleToolGroupItems = 5;
 
 /** A write's visible content is windowed to this many rail rows. */
-export const maxVisibleToolDetailLines = 10;
+const maxVisibleToolDetailLines = 10;
 
 function railRow(body: string, theme: Theme): string {
   return ` ${theme.colors.dim(theme.glyph.rule)} ${body}`;
