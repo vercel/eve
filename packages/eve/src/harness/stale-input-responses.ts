@@ -162,5 +162,5 @@ function appendOptionalUserContent(
     return appended;
   }
 
-  return appendUserContent({ appended, existing });
+  return appendUserContent({ appended, existing }) ?? appended;
 }

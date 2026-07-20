@@ -109,7 +109,7 @@ import {
 } from "#harness/input-requests.js";
 import { convertStaleResponsesToUserMessage } from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
-import { isBlankUserMessage, resolveAssistantStepText } from "#harness/messages.js";
+import { normalizeUserContent, resolveAssistantStepText } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
@@ -637,22 +637,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    if (
-      effectiveStepInput?.message !== undefined &&
-      !pending.deferredMessage &&
-      !pending.consumedMessage &&
-      // A whitespace-only message (e.g. a bare `@bot` mention with its text
-      // stripped) would push an empty text block that the provider rejects
-      // once a prompt-cache breakpoint lands on it. The turn still runs on
-      // the accompanying context blocks.
-      !isBlankUserMessage(effectiveStepInput.message)
-    ) {
+    const userContent = normalizeUserContent(effectiveStepInput?.message);
+    if (userContent !== undefined && !pending.deferredMessage && !pending.consumedMessage) {
       // Staging writes FilePart bytes into the sandbox and replaces
       // each part's `data` with a compact `eve-sandbox:` URL. The
       // `messages` array — and everything that flows into
       // `session.history` from it — therefore never carries raw
       // attachment bytes across step boundaries.
-      const content = await stageAttachmentsToSandbox(effectiveStepInput.message);
+      const content = await stageAttachmentsToSandbox(userContent);
       messages.push({ content, role: "user" });
     }
 

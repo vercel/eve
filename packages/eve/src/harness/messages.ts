@@ -16,9 +16,9 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     a: a.inputResponses,
     b: b.inputResponses,
   });
-  const message = coalesceMessage({
-    a: a.message,
-    b: b.message,
+  const message = appendUserContent({
+    appended: b.message,
+    existing: a.message,
   });
   const context = coalesceContext({
     a: a.context,
@@ -53,20 +53,27 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 }
 
 /**
- * Returns true when a turn message carries no model-visible content — an
- * empty or whitespace-only string, or an array with no parts.
+ * Removes text parts with no model-visible content from a user message.
  *
- * Such a message must not be pushed as a user turn. A bare mention (e.g.
- * `@bot` with no other text) reaches the harness as an empty string; pushing
- * it produces an empty text block, and when a prompt-cache breakpoint lands on
- * that block the provider rejects the request with
- * `cache_control cannot be set for empty text blocks`.
+ * Returns `undefined` when no parts remain, allowing callers to omit the user
+ * turn entirely rather than create an empty model prompt block.
  */
-export function isBlankUserMessage(message: string | UserContent): boolean {
-  if (typeof message === "string") {
-    return message.trim().length === 0;
+export function normalizeUserContent(
+  content: string | UserContent | undefined,
+): string | UserContent | undefined {
+  if (content === undefined) {
+    return undefined;
   }
-  return message.length === 0;
+
+  if (typeof content === "string") {
+    return content.trim().length > 0 ? content : undefined;
+  }
+
+  const parts = content.filter((part) => part.type !== "text" || part.text.trim().length > 0);
+  if (parts.length === 0) {
+    return undefined;
+  }
+  return parts.length === content.length ? content : parts;
 }
 
 /**
@@ -151,56 +158,35 @@ function coalesceContext(input: {
 }
 
 /**
- * Merges two optional turn messages into one.
- *
- * When both sides are strings, concatenates with a blank line. When
- * either side is a structured {@link UserContent} array, promotes both
- * to arrays and concatenates their parts so attachments carried on the
- * deferred or newer input are preserved end-to-end.
- */
-function coalesceMessage(input: {
-  readonly a?: string | UserContent;
-  readonly b?: string | UserContent;
-}): string | UserContent | undefined {
-  if (input.a === undefined) {
-    return input.b;
-  }
-
-  if (input.b === undefined) {
-    return input.a;
-  }
-
-  return appendUserContent({ appended: input.b, existing: input.a });
-}
-
-/**
- * Appends user content while preserving structured attachment parts.
+ * Appends user content while preserving structured attachment parts and
+ * removing blank text through {@link normalizeUserContent}.
  */
 export function appendUserContent(input: {
-  readonly appended: string | UserContent;
-  readonly existing: string | UserContent;
-}): string | UserContent {
-  if (typeof input.existing === "string" && typeof input.appended === "string") {
-    return `${input.existing}\n\n${input.appended}`;
+  readonly appended?: string | UserContent;
+  readonly existing?: string | UserContent;
+}): string | UserContent | undefined {
+  const existing = normalizeUserContent(input.existing);
+  const appended = normalizeUserContent(input.appended);
+
+  if (existing === undefined) {
+    return appended;
+  }
+  if (appended === undefined) {
+    return existing;
+  }
+  if (typeof existing === "string" && typeof appended === "string") {
+    return `${existing}\n\n${appended}`;
   }
 
-  const merged: UserContentArray = [
-    ...toUserContentArray(input.existing),
-    ...toUserContentArray(input.appended),
-  ];
-  return merged;
+  return [...toUserContentArray(existing), ...toUserContentArray(appended)];
 }
 
 type UserContentArray = Exclude<UserContent, string>;
 
 function toUserContentArray(value: string | UserContent): UserContentArray {
-  if (typeof value === "string") {
-    return value.length > 0 ? [{ type: "text", text: value } satisfies TextPart] : [];
-  }
-  if (Array.isArray(value)) {
-    return [...value];
-  }
-  return [];
+  return typeof value === "string"
+    ? [{ type: "text", text: value } satisfies TextPart]
+    : [...value];
 }
 
 /**

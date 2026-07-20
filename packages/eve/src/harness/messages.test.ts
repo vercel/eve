@@ -1,8 +1,9 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  appendUserContent,
   coalesceTurnInputs,
-  isBlankUserMessage,
+  normalizeUserContent,
   resolveAssistantStepText,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
@@ -117,43 +118,47 @@ describe("coalesceTurnInputs", () => {
     expect(merged[3]).toBe(second);
   });
 
-  it("drops an empty string when the other side is a UserContent array", () => {
+  it("drops blank text when coalescing structured content", () => {
     const attachment = textFilePart({ filename: "notes.txt", payload: "hi" });
-    const result = coalesceTurnInputs({ message: "" }, { message: [attachment] });
+    const result = coalesceTurnInputs(
+      { message: [{ text: " \n\t", type: "text" }, attachment] },
+      { message: " " },
+    );
 
-    const merged = result.message as UserContent;
-    expect(merged).toHaveLength(1);
-    expect(merged[0]).toBe(attachment);
+    expect(result.message).toEqual([attachment]);
   });
 });
 
-describe("isBlankUserMessage", () => {
-  it("treats an empty string as blank", () => {
-    expect(isBlankUserMessage("")).toBe(true);
+describe("normalizeUserContent", () => {
+  it.each([
+    ["empty string", ""],
+    ["whitespace-only string", "   \n\t "],
+    ["empty content array", []],
+    ["structured empty text", [{ text: "", type: "text" }]],
+    ["structured whitespace-only text", [{ text: " \n\t", type: "text" }]],
+  ] satisfies ReadonlyArray<readonly [string, string | UserContent]>)(
+    "returns undefined for %s",
+    (_name, content) => {
+      expect(normalizeUserContent(content)).toBeUndefined();
+    },
+  );
+
+  it("preserves visible text", () => {
+    expect(normalizeUserContent("hello")).toBe("hello");
   });
 
-  it("treats a whitespace-only string as blank (e.g. a stripped bare mention)", () => {
-    expect(isBlankUserMessage("   \n\t ")).toBe(true);
+  it("keeps file parts while removing blank text parts", () => {
+    const attachment = textFilePart({ filename: "notes.txt", payload: "contents" });
+
+    expect(
+      normalizeUserContent([{ text: "", type: "text" }, attachment, { text: "  ", type: "text" }]),
+    ).toEqual([attachment]);
   });
 
-  it("treats a non-empty string as content", () => {
-    expect(isBlankUserMessage("hello")).toBe(false);
-  });
+  it("removes a blank string appended to structured content", () => {
+    const attachment = textFilePart({ filename: "notes.txt", payload: "contents" });
 
-  it("treats an empty content array as blank", () => {
-    expect(isBlankUserMessage([])).toBe(true);
-  });
-
-  it("treats an array with parts as content", () => {
-    const message: UserContent = [{ text: "hi", type: "text" }];
-
-    expect(isBlankUserMessage(message)).toBe(false);
-  });
-
-  it("treats an array with only a file part as content", () => {
-    const message: UserContent = [textFilePart({ filename: "notes.txt", payload: "contents" })];
-
-    expect(isBlankUserMessage(message)).toBe(false);
+    expect(appendUserContent({ appended: " ", existing: [attachment] })).toEqual([attachment]);
   });
 });
 
