@@ -250,6 +250,8 @@ export type AgentTUIRenderer = {
    * `preparing` placeholders whose call never materialized.
    */
   removeSubagentTool?(update: { callId: string; childCallId: string }): void;
+  /** Opens a subagent's section the moment its dispatch is known. */
+  beginSubagent?(update: { callId: string; name: string }): void;
   /** Marks a subagent call complete so its section corner reports Done. */
   completeSubagent?(update: { callId: string }): void;
   /**
@@ -1076,7 +1078,7 @@ export class EveTUIRunner {
         pendingInputRequests: this.#pendingInputRequests,
         subagentRuns: this.#subagentRuns,
         turnState,
-        onSubagentCalled: (called) => this.#startSubagentChildPump(called),
+        onSubagentCalled: (called) => this.#beginSubagentSection(called),
         onSubagentCompleted: (callId) => this.#stopSubagentChildPump(callId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
@@ -1476,6 +1478,20 @@ export class EveTUIRunner {
    * times out. Pumps stay open across HITL prompts and resume rendering when
    * the subagent unparks; they end on the child's own boundary or via abort.
    */
+  /**
+   * The moment a dispatch is known to be a subagent call, its section
+   * header replaces the parent-level tool row (or its still-preparing
+   * placeholder — subagent dispatches never upgrade one, since their
+   * actions are not tool-call kind). Without this the placeholder is
+   * swept at the step boundary and nothing shows until the child's first
+   * content arrives.
+   */
+  #beginSubagentSection(called: SubagentCalledStreamEvent): void {
+    this.#renderer.markChildToolCallId?.(called.data.callId);
+    this.#renderer.beginSubagent?.({ callId: called.data.callId, name: called.data.name });
+    this.#startSubagentChildPump(called);
+  }
+
   #startSubagentChildPump(called: SubagentCalledStreamEvent) {
     const callId = called.data.callId;
     if (this.#subagentChildPumps.has(callId)) return;

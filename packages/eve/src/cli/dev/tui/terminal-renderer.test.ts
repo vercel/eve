@@ -1066,6 +1066,48 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("swaps a dispatch's preparing placeholder for the section header", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { continueSession: true },
+    );
+
+    // The model commits to the `agent` tool; its input streams.
+    streamController?.enqueue({
+      type: "tool-call-preparing",
+      toolCallId: "sub1",
+      toolName: "agent",
+    });
+    await screen.waitForText("Delegate");
+
+    // Subagent dispatches never upgrade the placeholder (their actions are
+    // not tool-call kind) — subagent.called supersedes it with the section.
+    renderer.markChildToolCallId("sub1");
+    renderer.beginSubagent({ callId: "sub1", name: "agent" });
+    await screen.waitForText("※ subagent(self)");
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("※ subagent(self)");
+    expect(snapshot).not.toContain("Delegate");
+
+    streamController?.close();
+    await rendering;
+    renderer.shutdown();
+
+    // The step-boundary ghost sweep must not take the section with it.
+    expect(screen.snapshot()).toContain("※ subagent(self)");
+  });
+
   it("reports Done on the section corner once the call completes", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });

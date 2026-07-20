@@ -1287,6 +1287,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
+   * Opens a subagent's section as soon as the dispatch is announced, so the
+   * transcript flows from the `Delegate …` placeholder straight into the
+   * `※ subagent(<name>)` header instead of going blank until the child's
+   * first content streams in.
+   */
+  beginSubagent(update: { callId: string; name: string }): void {
+    if (this.#subagents === "hidden") return;
+    this.#ensureSubagentHeader(update.callId, update.name);
+    this.#paint();
+  }
+
+  /**
    * Marks a subagent call complete — its final message has arrived — so the
    * section's closing corner reports `Done`. The header stays live until the
    * turn finalizes (committing mid-turn would freeze its child window).
