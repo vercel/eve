@@ -259,8 +259,10 @@ describe("buildStatusLine", () => {
       theme,
       width: 120,
     });
-    // Only the gateway is the bright token; via/scope stay dim.
-    expect(linked).toContain("\x1b[97mai-gateway\x1b[39m");
+    // Only the gateway is the bright token — bold at the terminal's default
+    // foreground, never explicit white; via/scope stay dim.
+    expect(linked).toContain("\x1b[1mai-gateway\x1b[22m");
+    expect(linked).not.toContain("\x1b[97m");
     expect(linked).toContain("\x1b[2mvia \x1b[22m");
     expect(linked).toContain("\x1b[2m(oidc)\x1b[22m");
 
@@ -272,7 +274,7 @@ describe("buildStatusLine", () => {
       width: 120,
     });
     expect(external).toContain("\x1b[2mvia chatgpt-sub\x1b[22m⌝");
-    expect(external).not.toContain("\x1b[97m");
+    expect(external).not.toContain("\x1b[1m");
   });
 
   it("renders ASCII glyphs when unicode is unavailable", () => {

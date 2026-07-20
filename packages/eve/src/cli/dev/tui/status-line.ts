@@ -84,9 +84,10 @@ function renderEndpoint(
   const g = input.theme.glyph;
   // Only the gateway earns the clause's one bright token — `via` and the
   // credential scope stay dim around it; external providers render fully
-  // quiet.
+  // quiet. Bold at the terminal's DEFAULT foreground (like the ▲ brand
+  // mark): explicit bright-white (SGR 97) would vanish on light themes.
   const clause = (name: string, suffix: string) =>
-    `${c.dim("via ")}${c.white(name)}${c.dim(suffix)}`;
+    `${c.dim("via ")}${c.bold(name)}${c.dim(suffix)}`;
   if (input.endpoint.kind === "external") {
     const provider =
       EXTERNAL_PROVIDER_DISPLAY_NAMES[input.endpoint.provider] ?? input.endpoint.provider;
