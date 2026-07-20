@@ -203,7 +203,7 @@ function renderBody(
       // Closes the section's rail in its hue; once the call has delivered
       // its final message the corner reports it.
       const corner = `  ${theme.colors.orange(theme.glyph.corner)}`;
-      return [block.status === "done" ? `${corner} ${theme.colors.orange("Done")}` : corner];
+      return [block.status === "done" ? `${corner} ${theme.colors.dim("Done")}` : corner];
     }
     case "turn-stats":
       return renderTurnStats(block, width, theme);

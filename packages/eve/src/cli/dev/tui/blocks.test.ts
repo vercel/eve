@@ -60,8 +60,8 @@ describe("renderBlockLines", () => {
       colored,
       ctx,
     );
-    // The verb closes bold before its argument begins.
-    expect(header).toContain("\x1b[1mRan\x1b[22m find /workspace -maxdepth 3");
+    // The verb closes bold before its argument begins; the argument is dim.
+    expect(header).toContain("\x1b[1mRan\x1b[22m\x1b[2m find /workspace -maxdepth 3\x1b[22m");
   });
 
   it("shows the shared square pulse while a tool runs", () => {

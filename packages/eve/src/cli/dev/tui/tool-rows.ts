@@ -80,12 +80,12 @@ function renderToolRows(
 
 /**
  * Only the verb carries the header's weight: `Ran find /workspace …` reads
- * as an action with its argument, not one long bold banner.
+ * as a bold action with its argument dimmed behind it, not one long banner.
  */
 function boldLeadingWord(text: string, theme: Theme): string {
   const split = text.indexOf(" ");
   if (split === -1) return theme.colors.bold(text);
-  return `${theme.colors.bold(text.slice(0, split))}${text.slice(split)}`;
+  return `${theme.colors.bold(text.slice(0, split))}${theme.colors.dim(text.slice(split))}`;
 }
 
 /** Detail stays up while the call runs; after settling only writes keep it. */
