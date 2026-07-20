@@ -22,7 +22,7 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: { current: 1, supported: [1], dropped: {} },
-  dynamicTool: { current: 1, supported: [1], dropped: {} },
+  dynamicTool: { current: 2, supported: [1, 2], dropped: {} },
   connection: { current: 1, supported: [1], dropped: {} },
   hook: { current: 1, supported: [1], dropped: {} },
   skill: { current: 1, supported: [1], dropped: {} },
