@@ -325,6 +325,12 @@ export interface RunInput {
    * parent depth + 1.
    */
   readonly subagentDepth?: number;
+  /** Framework-internal durable ownership metadata for external invocations. */
+  readonly invocationControl?: {
+    readonly continuationToken: string;
+    readonly idempotencyKeyHash?: string;
+    readonly ownerFingerprint: string;
+  };
 }
 
 export interface DeliverInput {
@@ -411,6 +417,9 @@ export interface Runtime {
     sessionId: string,
     options?: GetEventStreamOptions,
   ): Promise<ReadableStream<HandleMessageStreamEvent>>;
+
+  /** Reads only the events currently persisted, without following the live stream. */
+  getEventSnapshot?(sessionId: string): Promise<readonly HandleMessageStreamEvent[]>;
 }
 
 /**

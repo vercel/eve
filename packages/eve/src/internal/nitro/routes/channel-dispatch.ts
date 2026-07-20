@@ -233,6 +233,12 @@ function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agen
     async getEventStream(sessionId, options) {
       return await runtime.getEventStream(sessionId, options);
     },
+    async getEventSnapshot(sessionId) {
+      if (runtime.getEventSnapshot === undefined) {
+        throw new Error("Runtime does not support event snapshots.");
+      }
+      return await runtime.getEventSnapshot(sessionId);
+    },
     async run(input) {
       const runInput: RunInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
       return await runtime.run(runInput);

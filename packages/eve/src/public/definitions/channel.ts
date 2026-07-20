@@ -157,6 +157,8 @@ export interface Agent {
     sessionId: string,
     options?: GetEventStreamOptions,
   ): Promise<ReadableStream<HandleMessageStreamEvent>>;
+  /** Framework-internal snapshot read used by durable protocol adapters. */
+  getEventSnapshot?(sessionId: string): Promise<readonly HandleMessageStreamEvent[]>;
 }
 
 /**

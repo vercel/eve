@@ -115,7 +115,7 @@ export function createWorkflowRuntime(config: {
       const ctx = buildRunContext({ bundle, run: input });
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
-      const attributes =
+      const sessionAttributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
               inputMessage: input.title ?? input.input.message,
@@ -129,6 +129,19 @@ export function createWorkflowRuntime(config: {
               rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
               serializedContext,
             });
+      const attributes = {
+        ...sessionAttributes,
+        ...(input.invocationControl === undefined
+          ? {}
+          : {
+              "$eve.invocation": "agent",
+              "$eve.invocation_owner": input.invocationControl.ownerFingerprint,
+              "$eve.invocation_token": input.invocationControl.continuationToken,
+              ...(input.invocationControl.idempotencyKeyHash === undefined
+                ? {}
+                : { "$eve.invocation_idempotency": input.invocationControl.idempotencyKeyHash }),
+            }),
+      };
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
@@ -204,6 +217,36 @@ export function createWorkflowRuntime(config: {
       return parseNdjsonStream<HandleMessageStreamEvent>(() =>
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
+    },
+
+    async getEventSnapshot(sessionId: string): Promise<readonly HandleMessageStreamEvent[]> {
+      const readable = getRun(sessionId).getReadable<Uint8Array>({ startIndex: 0 });
+      const tailIndex = await readable.getTailIndex();
+      if (tailIndex < 0) return [];
+
+      let chunksRead = 0;
+      const snapshotBytes = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const reader = readable.getReader();
+          try {
+            while (chunksRead <= tailIndex) {
+              const next = await reader.read();
+              if (next.done) break;
+              controller.enqueue(next.value);
+              chunksRead++;
+            }
+            controller.close();
+          } finally {
+            await reader.cancel("eve event snapshot complete").catch(() => {});
+            reader.releaseLock();
+          }
+        },
+      });
+      const events: HandleMessageStreamEvent[] = [];
+      for await (const event of parseNdjsonStream<HandleMessageStreamEvent>(() => snapshotBytes)) {
+        events.push(event);
+      }
+      return events;
     },
 
     async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
