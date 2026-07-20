@@ -6,10 +6,9 @@
  */
 
 export const PROMPT_PLACEHOLDER_MESSAGES: readonly string[] = [
-  "Chat with your agent",
-  "List your workspace",
-  "Teach your agent a new skill",
   "Ask what your agent can do",
+  "Chat about an improvement",
+  "List your workspace",
   "Refine your agent's instructions",
 ];
 
