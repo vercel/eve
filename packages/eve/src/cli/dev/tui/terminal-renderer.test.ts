@@ -645,7 +645,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.enter();
 
     expect(await prompt).toBe("hello");
-    expect(screen.snapshot()).toContain(" o Working…");
+    expect(screen.snapshot()).toContain("* W 1s");
     expect(screen.snapshot()).not.toContain("⊙");
     renderer.shutdown();
   });
@@ -1383,12 +1383,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("❯ hello");
     expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
     input.enter();
-    expect(screen.snapshot()).toContain("Working…");
+    expect(screen.snapshot()).toContain("W 1s");
     expect(await prompt).toBe("hello");
     renderer.shutdown();
   });
 
-  it("starts the turn pulse as soon as the prompt is submitted", async () => {
+  it("shows the live turn bar as soon as the prompt is submitted", async () => {
     vi.useFakeTimers();
     try {
       const { screen, input, renderer } = makeRenderer();
@@ -1398,11 +1398,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input.enter();
 
       expect(await prompt).toBe("hello");
-      expect(screen.snapshot()).toContain(" ⊙ Working…");
+      expect(screen.snapshot()).toContain("▪ W 1s");
 
+      // The typewriter label advances while the submit wait ticks.
       vi.advanceTimersByTime(450);
-      expect(screen.snapshot()).not.toContain("⊙ Working…");
-      expect(screen.snapshot()).toContain("   Working…");
+      expect(screen.snapshot()).toContain("Workin");
 
       let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
       const rendering = renderer.renderStream(
@@ -1416,9 +1416,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
         { continueSession: true },
       );
       await Promise.resolve();
-      // Once the stream owns the turn, the live bar takes over from the
-      // submit pulse.
-      expect(screen.snapshot()).not.toContain("⊙ Working…");
+      // The stream keeps the same bar — one working indicator end to end.
+      expect(screen.snapshot()).not.toContain("⊙");
       expect(screen.snapshot()).toContain(" 1s");
 
       streamController?.close();
@@ -1705,7 +1704,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("no");
     input.enter();
     await answer;
-    expect(screen.snapshot()).toContain("⊙ Working…");
+    expect(screen.snapshot()).toContain("W 1s");
     renderer.shutdown();
   });
 
@@ -2811,7 +2810,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     input.type("n");
     expect(await approval).toEqual({ approved: false, reason: "Denied by user." });
-    expect(screen.snapshot()).toContain("⊙ Working…");
+    expect(screen.snapshot()).toContain("W 1s");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();

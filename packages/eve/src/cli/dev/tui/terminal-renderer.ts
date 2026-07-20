@@ -302,8 +302,6 @@ type NativeToolState = {
 
 const caretBlinkMs = 500;
 const tickMs = 90;
-const TURN_PULSE_GLYPH = "⊙";
-const TURN_PULSE_ASCII_GLYPH = "o";
 // How long to wait on a lone `ESC` before treating it as the Escape key, so a
 // split arrow sequence (`ESC` then `[A`) has time to reassemble first.
 const escFlushMs = 30;
@@ -323,6 +321,13 @@ const STATUS = {
   executingTools: "Running tools…",
   connectionAuth: "Waiting for connection authorization…",
 } as const;
+
+/**
+ * The stream-flavored statuses the live turn bar subsumes. A waiting state
+ * carrying any other text (a flowless setup spinner like "Checking the
+ * project…") keeps its own status row — the text is the information.
+ */
+const STREAM_STATUS_TEXTS: ReadonlySet<string> = new Set(Object.values(STATUS));
 
 /**
  * The end-of-turn stats coda renders only for turns that were long or
@@ -3601,44 +3606,33 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
 
     const turnIndicator = this.#turnIndicator;
-    // Mid-answer the moving text is the indicator — until the stream stalls
-    // (a model generating a large tool call emits nothing for seconds), at
-    // which point the working pulse returns so the screen never reads as
-    // frozen.
-    // A streaming turn shows one live bar — pulsing mark, activity label,
-    // running duration, per-turn token flow — with the inert prompt anchored
-    // beneath it. The `└ Done in …` coda is this bar's settled form.
-    if (this.#streamDraftActive) {
+    // Every waiting state — a streaming turn, a just-submitted prompt, a
+    // question answer or approval resuming — shows the one live turn bar,
+    // with the inert prompt anchored beneath it while a stream owns the
+    // turn. The `└ Done in …` coda is this bar's settled form.
+    const waitingOnStream =
+      turnIndicator.kind === "waiting" &&
+      (this.#status.length === 0 || STREAM_STATUS_TEXTS.has(this.#status));
+    if (this.#streamDraftActive || waitingOnStream) {
       rows.push(this.#streamingTurnBar(width));
       this.#pushStreamingPrompt(rows, width);
-      this.#pushStatusLine(rows, width);
+      const statusRows: string[] = [];
+      this.#pushStatusLine(statusRows, width);
+      if (!this.#streamDraftActive && statusRows.length > 0) rows.push("");
+      rows.push(...statusRows);
       return rows;
     }
 
-    const working = turnIndicator.kind === "waiting";
-    const icon = working
-      ? c.green(
-          this.#progressPulseGlyph(
-            turnIndicator.startedAtMs,
-            this.#theme.unicode ? TURN_PULSE_GLYPH : TURN_PULSE_ASCII_GLYPH,
-          ),
-        )
-      : c.dim(this.#theme.glyph.dot);
+    // Interactive prompts (approvals, connection auth) and transitional
+    // states render as a quiet dot-led status row.
     const statusText = this.#status.length > 0 ? this.#status : "Ready";
-    // Dim the live streaming status (the pulse carries the eye); keep
-    // interactive prompts (approvals, questions) at full intensity.
-    const status = working ? c.dim(statusText) : statusText;
     const meta = this.#statusMeta();
-    // One-cell indent: the pulse shares a column with the tool markers.
-    const indent = working ? " " : "";
+    const icon = c.dim(this.#theme.glyph.dot);
     const line = meta
-      ? `${indent}${icon} ${status}  ${c.dim(this.#theme.glyph.dot)}  ${meta}`
-      : `${indent}${icon} ${status}`;
+      ? `${icon} ${statusText}  ${c.dim(this.#theme.glyph.dot)}  ${meta}`
+      : `${icon} ${statusText}`;
     rows.push(clip(line, width));
-    const statusRows: string[] = [];
-    this.#pushStatusLine(statusRows, width);
-    if (working && statusRows.length > 0) rows.push("");
-    rows.push(...statusRows);
+    this.#pushStatusLine(rows, width);
     return rows;
   }
 
@@ -3653,7 +3647,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#activityPulseStartedAtMs,
       this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
     );
-    const startedAtMs = this.#turnStartedAtMs ?? this.#streamStartedAt ?? Date.now();
+    // A waiting state without an armed turn clock (a /command flash, an
+    // isolated approval) still gets a ticking duration from its own start.
+    const turnIndicator = this.#turnIndicator;
+    const startedAtMs =
+      this.#turnStartedAtMs ??
+      this.#streamStartedAt ??
+      (turnIndicator.kind === "waiting" ? turnIndicator.startedAtMs : Date.now());
     const elapsedMs = Date.now() - startedAtMs;
     // Anchored to the turn clock, the label's reveal plays once per turn —
     // a question answer's continuation pass resumes fully typed.
