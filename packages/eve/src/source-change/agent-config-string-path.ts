@@ -145,6 +145,18 @@ export async function applyAgentConfigStringPath(
   };
 }
 
+/**
+ * The write-guard invariant: an edited source must still parse and still
+ * carry the `defineAgent({ ... })` object. Returns the failure reason, or
+ * undefined when the source is sound. Callers bail instead of writing, so an
+ * editor bug degrades to a "change it by hand" message rather than a broken
+ * agent.ts.
+ */
+export async function checkAgentConfigSource(sourceText: string): Promise<string | undefined> {
+  const parsed = await parseAgentObject(sourceText);
+  return parsed.kind === "bail" ? parsed.reason : undefined;
+}
+
 async function parseAgentObject(sourceText: string): Promise<ParsedAgentObject> {
   let parsed: ParsedSource;
   try {
@@ -306,9 +318,13 @@ function removeProperty(source: string, object: ObjectExpression, property: Prop
   const next = index >= 0 ? object.properties[index + 1] : undefined;
   if (next?.start !== undefined) return source.slice(0, property.start) + source.slice(next.start);
   if (previous?.end !== undefined) {
+    // The text after the removed span (a trailing comma, whitespace) becomes
+    // the previous property's trailer, which stays valid.
     return source.slice(0, previous.end) + source.slice(property.end);
   }
-  return source.slice(0, property.start) + source.slice(property.end);
+  // Sole property: empty the braces outright. Slicing out only the property
+  // would leave its trailing comma behind (`{ , }`), which does not parse.
+  return source.slice(0, object.start + 1) + source.slice(object.end - 1);
 }
 
 function unwrapExpression(expression: AstNode): AstNode {

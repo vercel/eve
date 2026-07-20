@@ -2,6 +2,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
+import { checkAgentConfigSource } from "#source-change/agent-config-string-path.js";
 import {
   applyAgentModelSettingsToSource,
   type AgentModelSetting,
@@ -81,6 +82,9 @@ async function updateAgentModelSettings(
     };
   }
 
+  const refused = await editedSourceBail(sourceText, edit.nextSource, source.logicalPath);
+  if (refused !== undefined) return refused;
+
   await writeSourceIfChanged(absolutePath, sourceText, edit.nextSource);
   return { kind: "applied", changed: edit.changed };
 }
@@ -110,6 +114,9 @@ async function updateAgentModelName(
     };
   }
 
+  const refused = await editedSourceBail(sourceText, edit.nextSource, source.logicalPath);
+  if (refused !== undefined) return refused;
+
   await writeSourceIfChanged(absolutePath, sourceText, edit.nextSource);
 
   return { kind: "applied", from: edit.from, to: edit.to };
@@ -125,4 +132,26 @@ async function writeSourceIfChanged(
   const temporaryPath = `${absolutePath}.${process.pid}.eve-tmp`;
   await writeFile(temporaryPath, nextSource, "utf8");
   await rename(temporaryPath, absolutePath);
+}
+
+/**
+ * Refuses an edit whose output no longer parses as an agent config. The
+ * transforms are AST-guided string surgery, so this invariant turns any
+ * editor bug into a bail instead of a broken agent.ts.
+ */
+async function editedSourceBail(
+  sourceText: string,
+  nextSource: string,
+  logicalPath: string,
+): Promise<
+  { kind: "bail"; reason: string; at: { logicalPath: string; line: number } } | undefined
+> {
+  if (nextSource === sourceText) return undefined;
+  const invalid = await checkAgentConfigSource(nextSource);
+  if (invalid === undefined) return undefined;
+  return {
+    kind: "bail",
+    reason: `the edit produced source eve refuses to write (${invalid})`,
+    at: { logicalPath, line: 1 },
+  };
 }

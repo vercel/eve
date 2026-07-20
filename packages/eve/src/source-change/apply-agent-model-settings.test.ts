@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { checkAgentConfigSource } from "./agent-config-string-path.js";
 import { applyAgentModelSettingsToSource, type FieldPatch } from "./apply-agent-model-settings.js";
 
 const keep = { kind: "keep" } as const;
@@ -144,5 +145,60 @@ describe("applyAgentModelSettingsToSource", () => {
 
     expect(result).toMatchObject({ kind: "bail", reason: expect.stringContaining("spread") });
     expect("nextSource" in result).toBe(false);
+  });
+
+  it("empties the braces when removing a sole property with a trailing comma", async () => {
+    for (const source of [
+      'export default defineAgent({ reasoning: "high", });\n',
+      'export default defineAgent({\n  reasoning: "high",\n});\n',
+    ]) {
+      const result = await applyAgentModelSettingsToSource(source, {
+        model: keep,
+        reasoning: remove,
+        gatewayServiceTier: keep,
+      });
+
+      expect(result.kind).toBe("applied");
+      if (result.kind !== "applied") return;
+      // Slicing out only the property used to strand its trailing comma as
+      // `defineAgent({ , })` — unparseable source written to agent.ts.
+      expect(result.nextSource).not.toContain(",");
+      await expect(checkAgentConfigSource(result.nextSource)).resolves.toBeUndefined();
+    }
+  });
+
+  it("prunes a sole modelOptions chain without stranding its trailing comma", async () => {
+    const source = `export default defineAgent({
+  modelOptions: {
+    providerOptions: {
+      gateway: { serviceTier: "priority" },
+    },
+  },
+});
+`;
+    const result = await applyAgentModelSettingsToSource(source, {
+      model: keep,
+      reasoning: keep,
+      gatewayServiceTier: remove,
+    });
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") return;
+    expect(result.nextSource).not.toContain("modelOptions");
+    await expect(checkAgentConfigSource(result.nextSource)).resolves.toBeUndefined();
+  });
+});
+
+describe("checkAgentConfigSource", () => {
+  it("accepts a sound config and names the failure for a broken one", async () => {
+    await expect(
+      checkAgentConfigSource('export default defineAgent({ model: "a/b" });'),
+    ).resolves.toBeUndefined();
+
+    await expect(checkAgentConfigSource("export default defineAgent({ , });")).resolves.toContain(
+      "parse",
+    );
+
+    await expect(checkAgentConfigSource("const x = 1;")).resolves.toContain("defineAgent");
   });
 });
