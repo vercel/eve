@@ -1502,6 +1502,7 @@ export class EveTUIRunner {
     this.#subagentChildPumps.set(callId, controller);
 
     void (async () => {
+      let boundaryReached = false;
       try {
         const childSession = client.session({
           sessionId: called.data.childSessionId,
@@ -1512,10 +1513,11 @@ export class EveTUIRunner {
           if (controller.signal.aborted) break;
           this.#applyChildEvent(callId, event);
           if (isCurrentTurnBoundaryEvent(event)) {
-            // Child completed its turn — close the parallel stream
-            // gracefully. The parent's `subagent.completed` is a separate
-            // signal that arrives independently and is handled by
-            // `#stopSubagentChildPump`.
+            // The child's own turn boundary — its final assistant message
+            // is in — is what finishes the section. The parent's
+            // `subagent.completed` arrives independently (often later, once
+            // the parent's turn resumes) and only acts as a fallback.
+            boundaryReached = true;
             break;
           }
         }
@@ -1543,6 +1545,7 @@ export class EveTUIRunner {
       } finally {
         this.#subagentChildPumps.delete(callId);
       }
+      if (boundaryReached) this.#finalizeSubagentRun(callId);
     })();
   }
 
@@ -1598,12 +1601,22 @@ export class EveTUIRunner {
 
   #stopSubagentChildPump(callId: string) {
     // Parent reports subagent.completed. The child stream pump terminates
-    // itself on the child's own turn boundary; we do NOT abort here,
+    // itself on the child's own turn boundary — the authoritative finish
+    // signal, which already finalized the section — so this is a fallback
+    // for runs whose boundary never reached us (a dropped child stream, a
+    // HITL-parked turn resuming later). We do NOT abort the pump here,
     // because the child's `message.completed` event may still be in flight
     // (the parent and child streams are independent HTTP connections).
-    // Re-emit a finalized snapshot for any sections that are still
-    // streaming so their right-title flips off `streaming` even if the
-    // child's boundary event hasn't arrived yet.
+    this.#finalizeSubagentRun(callId);
+  }
+
+  /**
+   * Settles a subagent section: re-emits a finalized snapshot for any
+   * still-streaming step (flipping its right-title off `streaming`), sweeps
+   * preparing ghosts, and marks the section Done. Idempotent — the child's
+   * turn boundary and the parent's `subagent.completed` can both land here.
+   */
+  #finalizeSubagentRun(callId: string): void {
     const run = this.#subagentRuns.get(callId);
     if (!run) return;
     for (const [sectionKey, step] of run.steps) {

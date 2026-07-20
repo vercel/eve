@@ -1841,6 +1841,79 @@ describe("EveTUIRunner renderer teardown", () => {
     expect(shutdown).toHaveBeenCalledTimes(1);
   });
 
+  it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {
+    const client = stubClient();
+    const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
+    vi.spyOn(client, "session").mockReturnValue(childSession);
+    vi.spyOn(childSession, "stream").mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "message.completed",
+          data: {
+            message: { id: "m1", role: "assistant", content: "final answer" },
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn-child",
+          },
+        } as unknown as HandleMessageStreamEvent;
+        yield {
+          type: "session.waiting",
+          data: { wait: "next-user-message" },
+        } as unknown as HandleMessageStreamEvent;
+      },
+    }));
+
+    const completeSubagent = vi.fn();
+    const completed = createDeferred<void>();
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        // Hold the second prompt open until the child boundary finishes the
+        // section — exiting the run loop aborts the child pump.
+        readPrompt: vi
+          .fn()
+          .mockResolvedValueOnce("delegate")
+          .mockImplementationOnce(async () => {
+            await completed.promise;
+            return undefined;
+          }),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+        upsertSubagentStep: vi.fn(),
+        completeSubagent: (update: { callId: string }) => {
+          completeSubagent(update);
+          completed.resolve();
+        },
+      }),
+      session: sessionYielding([
+        {
+          type: "subagent.called",
+          data: {
+            callId: "call-child",
+            childSessionId: "child-session",
+            name: "weather-child",
+            sequence: 0,
+            sessionId: "parent-session",
+            toolName: "delegate_weather",
+            turnId: "turn-parent",
+            workflowId: "workflow-parent",
+          },
+        },
+        // The parent stream never reports subagent.completed — the child's
+        // own boundary must finish the section.
+        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
+      ]),
+    });
+
+    await runner.run();
+    await completed.promise;
+
+    expect(completeSubagent).toHaveBeenCalledWith({ callId: "call-child" });
+  });
+
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
     const client = stubClient();
     const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
