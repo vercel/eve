@@ -221,6 +221,11 @@
       "import": "./dist/src/public/channels/auth.js",
       "default": "./dist/src/public/channels/auth.js"
     },
+    "./channels/mcp": {
+      "types": "./dist/src/public/channels/mcp.d.ts",
+      "import": "./dist/src/public/channels/mcp.js",
+      "default": "./dist/src/public/channels/mcp.js"
+    },
     "./channels/slack": {
       "types": "./dist/src/public/channels/slack/index.d.ts",
       "import": "./dist/src/public/channels/slack/index.js",

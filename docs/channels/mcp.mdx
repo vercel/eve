@@ -1,0 +1,61 @@
+---
+title: MCP
+description: Publish an eve agent as a durable MCP invocation service.
+---
+
+The MCP channel lets external harnesses such as Claude Code delegate durable work to an eve agent. It exposes only agent invocation—not the agent's authored tools, skills, instructions, connections, or subagents.
+
+## Configure the channel
+
+Create `agent/channels/mcp.ts`:
+
+```ts
+import { oidc } from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+
+export default mcpChannel({
+  agent: {
+    description: "Investigates software tasks and returns a concise report.",
+  },
+  auth: oidc({
+    issuer: process.env.MCP_OIDC_ISSUER!,
+    audiences: [process.env.MCP_OIDC_AUDIENCE!],
+  }),
+  oauth: {
+    authorizationServers: [process.env.MCP_OIDC_ISSUER!],
+    resource: process.env.MCP_RESOURCE_URL!,
+  },
+});
+```
+
+The authorization server must accept Claude's OAuth client flow, using dynamic client registration or a configured client ID. eve is an OAuth protected resource and does not issue tokens.
+
+The resource URL should be the canonical deployed MCP URL, for example `https://agent.example/mcp`. Unauthenticated MCP requests receive an RFC 9728 protected-resource challenge.
+
+## Connect Claude Code
+
+```sh
+claude mcp add --transport http eve-demo https://<deployment>/mcp
+claude mcp login eve-demo
+claude mcp get eve-demo
+```
+
+Ask Claude to call `agent_start` once, retain its `invocationId`, and call `agent_get` until the invocation is terminal. Supplying a stable `idempotencyKey` to `agent_start` makes a retry return the same invocation if the initial HTTP response is lost.
+
+The compatibility tools are:
+
+- `agent_start({ message, idempotencyKey?, outputSchema? })`
+- `agent_get({ invocationId, afterRevision?, waitMs? })`
+- `agent_update({ invocationId, responses })`
+- `agent_cancel({ invocationId })`
+
+Every operation reauthenticates and verifies the invocation owner. An invocation ID is not an authorization credential. `agent_get` reads the persisted event snapshot and does not start work or run a model. `afterRevision` with `waitMs` performs a bounded long poll; the framework caps waits at 30 seconds.
+
+## Manual acceptance
+
+1. Ask Claude to start deterministic work with an idempotency key.
+2. Repeat `agent_start` with the same key and confirm the invocation ID is unchanged.
+3. Disconnect and reconnect the MCP server, then retrieve the invocation.
+4. Start work as another principal and confirm it cannot retrieve the first principal's invocation.
+5. Exercise a task that calls `ask_question`, answer it through `agent_update`, and retrieve the result.
+6. Start another task, call `agent_cancel`, and read until cancellation is acknowledged.
