@@ -7,8 +7,7 @@ import {
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
   normalizeModelStreamError,
-  summarizeKnownModelCallConfigError,
-  summarizeKnownModelCallRequestError,
+  extractUpstreamRejectionMessage,
 } from "#harness/model-call-error.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
@@ -25,9 +24,7 @@ function noOutputGeneratedError(): Error {
 
 /**
  * Builds a fake `GatewayAuthenticationError` shape matching what
- * `@ai-sdk/gateway` produces, so we can exercise the three-way
- * disambiguation in `summarizeKnownModelCallConfigError` without
- * importing the upstream class.
+ * `@ai-sdk/gateway` produces, without importing the upstream class.
  */
 function gatewayAuthError(message: string): Error {
   const error = new Error(message);
@@ -239,14 +236,18 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(outer)).toBe("retry");
   });
 
-  it("treats common network error messages as retry-worthy", () => {
+  it("treats known network failures as retry-worthy, by structural signals only", () => {
     const econnreset = Object.assign(new Error("socket error"), {
-      cause: new Error("ECONNRESET fired"),
+      cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
     });
     expect(classifyModelCallError(econnreset)).toBe("retry");
 
     const fetchFailed = new Error("fetch failed");
     expect(classifyModelCallError(fetchFailed)).toBe("retry");
+
+    // The old substring policy is gone: prose that merely mentions a
+    // network token no longer forces a retry loop.
+    expect(classifyModelCallError(new Error("network configuration invalid"))).toBe("recoverable");
   });
 
   it("falls back to recoverable for unknown errors so the session parks instead of dying", () => {
@@ -256,51 +257,9 @@ describe("classifyModelCallError", () => {
   });
 });
 
-describe("summarizeKnownModelCallConfigError", () => {
-  it("tells the user to update or unset AI_GATEWAY_API_KEY when the gateway rejects the api key", () => {
-    // This is the path users hit when a stale `AI_GATEWAY_API_KEY` in
-    // their shell profile shadows the OIDC fallback.
-    const summary = summarizeKnownModelCallConfigError(
-      gatewayAuthError(
-        "AI Gateway authentication failed: Invalid API key.\n\nCreate a new API key…",
-      ),
-    );
-    expect(summary?.name).toBe("AI Gateway authentication failed");
-    expect(summary?.message).toMatch(/AI_GATEWAY_API_KEY/);
-    expect(summary?.message).toMatch(/unset/i);
-  });
-
-  it("tells the user to refresh the OIDC token when the gateway rejects it", () => {
-    const summary = summarizeKnownModelCallConfigError(
-      gatewayAuthError(
-        "AI Gateway authentication failed: Invalid OIDC token.\n\nRun 'npx vercel link'…",
-      ),
-    );
-    expect(summary?.name).toBe("AI Gateway authentication failed");
-    expect(summary?.message).toMatch(/eve link/);
-    expect(summary?.message).toMatch(/VERCEL_OIDC_TOKEN/);
-  });
-
-  it("tells the user to provide credentials when neither was offered", () => {
-    const summary = summarizeKnownModelCallConfigError(
-      gatewayAuthError(
-        "AI Gateway authentication failed: No authentication provided.\n\nOption 1…",
-      ),
-    );
-    expect(summary?.name).toBe("AI Gateway authentication failed");
-    expect(summary?.message).toMatch(/eve link/);
-    expect(summary?.message).toMatch(/AI_GATEWAY_API_KEY/);
-  });
-
-  it("returns null for unrelated errors so the harness uses the raw SDK message", () => {
-    expect(summarizeKnownModelCallConfigError(new Error("something else broke"))).toBeNull();
-    expect(summarizeKnownModelCallConfigError(null)).toBeNull();
-  });
-});
-
-describe("summarizeKnownModelCallRequestError", () => {
+describe("extractUpstreamRejectionMessage", () => {
   it("summarizes Gateway 400 model request failures without blaming tool input", () => {
-    const summary = summarizeKnownModelCallRequestError(
+    const summary = extractUpstreamRejectionMessage(
       gatewayModelCallError({
         gatewayName: "GatewayInternalServerError",
         gatewayType: "internal_server_error",
@@ -324,7 +283,7 @@ describe("summarizeKnownModelCallRequestError", () => {
         type: "invalid_request_error",
       },
     };
-    const summary = summarizeKnownModelCallRequestError(
+    const summary = extractUpstreamRejectionMessage(
       directApiCallError({
         data,
         responseBody: JSON.stringify(data),
@@ -339,7 +298,7 @@ describe("summarizeKnownModelCallRequestError", () => {
   });
 
   it("uses the direct API error message when there is no response body", () => {
-    const summary = summarizeKnownModelCallRequestError(
+    const summary = extractUpstreamRejectionMessage(
       directApiCallError({
         message: "No endpoints found for anthropic/claude-3.5-haiku",
         statusCode: 404,
@@ -359,7 +318,7 @@ describe("summarizeKnownModelCallRequestError", () => {
         type: "invalid_request_error",
       },
     });
-    const summary = summarizeKnownModelCallRequestError(
+    const summary = extractUpstreamRejectionMessage(
       directApiCallError({
         responseBody,
         statusCode: 400,
@@ -380,7 +339,7 @@ describe("summarizeKnownModelCallRequestError", () => {
         param: "input",
       },
     };
-    const summary = summarizeKnownModelCallRequestError(
+    const summary = extractUpstreamRejectionMessage(
       directApiCallError({
         data,
         responseBody: JSON.stringify(data),
@@ -396,7 +355,7 @@ describe("summarizeKnownModelCallRequestError", () => {
     // A 503/429 that exhausts retries is an availability problem, not a
     // request rejection; summarizing it as "rejected" sends users to debug
     // their configuration.
-    const summary = summarizeKnownModelCallRequestError(
+    const summary = extractUpstreamRejectionMessage(
       gatewayModelCallError({
         gatewayName: "GatewayInternalServerError",
         gatewayType: "overloaded_error",

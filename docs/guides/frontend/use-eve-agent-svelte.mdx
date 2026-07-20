@@ -167,10 +167,7 @@ const agent = useEveAgent({
 });
 ```
 
-Two more options tune turn behavior:
-
-- `optimistic` (default `true`): projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only; `events` stays the authoritative eve stream.
-- `maxReconnectAttempts` (default `3`): stream reconnection budget per turn.
+The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only; `events` stays the authoritative eve stream.
 
 ## Custom reducer
 

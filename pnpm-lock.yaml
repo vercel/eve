@@ -45,6 +45,9 @@ catalogs:
     ai:
       specifier: ^7.0.26
       version: 7.0.26
+    marked:
+      specifier: 17.0.6
+      version: 17.0.6
     next:
       specifier: 16.3.0-preview.6
       version: 16.3.0-preview.6
@@ -147,8 +150,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/eve-catalog
       '@vercel/geistdocs':
-        specifier: 1.12.0
-        version: 1.12.0(@svta/cml-cta@1.0.1(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1))(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1)(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(micromark-util-types@2.0.2)(micromark@4.0.2)(next@16.3.0-preview.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(tailwindcss@4.3.0)(unified@11.0.5)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
+        specifier: 1.13.0
+        version: 1.13.0(@svta/cml-cta@1.0.1(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1))(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1)(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(micromark-util-types@2.0.2)(micromark@4.0.2)(next@16.3.0-preview.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(tailwindcss@4.3.0)(unified@11.0.5)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
       '@vercel/speed-insights':
         specifier: 2.0.0
         version: 2.0.0(d14575c04eef7e2c3094b0145364aa47)
@@ -294,6 +297,9 @@ importers:
       typescript:
         specifier: 6.0.3
         version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.7(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
 
   apps/fixtures/agent-tui-client:
     dependencies:
@@ -1289,6 +1295,9 @@ importers:
       just-bash:
         specifier: 3.0.1
         version: 3.0.1
+      marked:
+        specifier: 'catalog:'
+        version: 17.0.6
       microsandbox:
         specifier: 0.5.5
         version: 0.5.5
@@ -7258,8 +7267,8 @@ packages:
   '@vercel/gatsby-plugin-vercel-builder@2.2.19':
     resolution: {integrity: sha512-dA1ZWZHruRjFbLToqjcPHUyh5J7/Cl3qGFDge87ghAInuy/aXfalApzFbw61OIopGx0SSsIYi/8kbpJ+SbQ6ZQ==}
 
-  '@vercel/geistdocs@1.12.0':
-    resolution: {integrity: sha512-IsULtetIzQGC1pu+DWAP6C4sNBnt/pw1FCqU2Fa+swZlakS0Xx7JyQ3reh2x0MK6uKncLAY8c75nlwhY2eyILg==}
+  '@vercel/geistdocs@1.13.0':
+    resolution: {integrity: sha512-vhFr1ocyT0WL+/fSiKIkMvkcMk7Tz4CI8tzH571rAjpuVMgP1L/l7RGGmqiGizPng8vFFTXT5NBLXaDuq5hm/A==}
     hasBin: true
     peerDependencies:
       next: 16.2.6
@@ -19324,7 +19333,7 @@ snapshots:
       etag: 1.8.1
       fs-extra: 11.1.0
 
-  '@vercel/geistdocs@1.12.0(@svta/cml-cta@1.0.1(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1))(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1)(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(micromark-util-types@2.0.2)(micromark@4.0.2)(next@16.3.0-preview.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(tailwindcss@4.3.0)(unified@11.0.5)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))':
+  '@vercel/geistdocs@1.13.0(@svta/cml-cta@1.0.1(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1))(@svta/cml-structured-field-values@1.0.1(@svta/cml-utils@1.0.1))(@svta/cml-utils@1.0.1)(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(micromark-util-types@2.0.2)(micromark@4.0.2)(next@16.3.0-preview.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(tailwindcss@4.3.0)(unified@11.0.5)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))':
     dependencies:
       '@ai-sdk/react': 3.0.193(react@19.2.6)(zod@4.4.3)
       '@clack/prompts': 0.11.0

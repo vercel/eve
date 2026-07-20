@@ -1,5 +1,8 @@
 import type { Writable } from "node:stream";
 
+import { LiveRegion } from "#cli/ui/live-region.js";
+import { clipVisible, visibleLength } from "#cli/ui/terminal-text.js";
+
 import type { ChannelSetupLog } from "./channel-setup-prompter.js";
 import { formatPromptHeader, formatRailLine, RAIL, type PromptColors } from "./prompt-ui.js";
 
@@ -7,14 +10,6 @@ interface PromptOutput extends Writable {
   readonly isTTY?: boolean;
   readonly columns?: number;
 }
-
-type ActiveStatus =
-  | { kind: "idle" }
-  | {
-      kind: "active";
-      commandLines: string[];
-      previewRows: number;
-    };
 
 /**
  * A running spinner anchored to the rail. Call {@link RailSpinner.stop}
@@ -95,129 +90,166 @@ export interface RailLogOptions {
   output: PromptOutput;
 }
 
-function countRows(rendered: string): number {
-  return rendered.split("\n").length - 1;
+interface ActiveOperation {
+  readonly commandLines: string[];
+  view?: ActiveOperationView;
 }
 
+type ActiveStatusView = { kind: "status"; preview?: string };
+type ActiveSpinnerView = {
+  kind: "spinner";
+  frame: number;
+  readonly label: string;
+  preview?: string;
+  timer?: ReturnType<typeof setInterval>;
+};
+
+type ActiveOperationView = ActiveStatusView | ActiveSpinnerView;
+
 /**
- * Renders setup status rows and keeps child command noise inside one live detail row.
- *
- * A TTY sees the latest dim command line below the current status while the command
- * runs. Successful progression removes that transient detail. Warnings and errors
- * commit the captured command transcript before the diagnostic. Non-TTY output is
- * append-only because cursor redraw sequences would corrupt captured logs.
+ * Renders setup status rows above a single {@link LiveRegion}. Committed lines
+ * scroll away; the spinner and the latest command-output line are the region's
+ * live rows. Warnings and errors commit the captured command transcript first.
+ * Non-TTY output is append-only because cursor redraws would corrupt captured logs.
  */
 export function createRailLog(options: RailLogOptions): RailLog {
-  let status: ActiveStatus = { kind: "idle" };
-  const canRedraw = options.output.isTTY === true;
+  const { colors, output } = options;
+  const canRedraw = output.isTTY === true;
+  const columns = canRedraw && output.columns ? output.columns : 80;
+  // Width budget that keeps every live row on one terminal line so it never wraps.
+  const maxContent = Math.max(4, columns - (SPINNER_CELLS + 3));
+
+  // TTY only; non-TTY output is append-only.
+  const live = canRedraw
+    ? new LiveRegion({
+        write: (chunk) => {
+          output.write(chunk);
+          return true;
+        },
+      })
+    : undefined;
+
+  let activeOperation: ActiveOperation | undefined;
+
+  const clip = (text: string): string =>
+    visibleLength(text) > maxContent ? `${clipVisible(text, maxContent - 1)}…` : text;
+
+  // The glyph shares the rail's green so it blends into the border.
+  const spinnerRow = (spinner: ActiveSpinnerView): string => {
+    const glyph = SPINNER_FRAMES[spinner.frame % SPINNER_FRAMES.length] ?? SPINNER_FRAMES[0];
+    return `${colors.green(glyph)}  ${spinner.label}`;
+  };
+  const previewRow = (text: string): string => `${colors.green(RAIL)}  ${colors.dim(clip(text))}`;
+
+  function liveRows(): string[] {
+    const view = activeOperation?.view;
+    if (view === undefined) return [];
+
+    const rows = view.kind === "spinner" ? [colors.green(RAIL), spinnerRow(view)] : [];
+    if (view.preview !== undefined) rows.push(previewRow(view.preview));
+    return rows;
+  }
+
+  // `formatRailLine` output may span several rows and ends in a newline; the
+  // live region wants one entry per screen row.
+  function commit(rendered: string): void {
+    if (live === undefined) {
+      output.write(rendered);
+      return;
+    }
+    live.flush(rendered.replace(/\n+$/u, "").split("\n"), liveRows());
+  }
 
   function writeLine(text: string): void {
-    options.output.write(formatRailLine(text, options.colors, options.output));
+    commit(formatRailLine(text, colors, output));
   }
 
-  function clearPreview(): void {
-    if (!canRedraw || status.kind === "idle" || status.previewRows === 0) {
-      return;
-    }
-    options.output.write(`\u001B[${status.previewRows}A\u001B[J`);
-    status.previewRows = 0;
-  }
+  function settle(preserveCommandOutput: boolean): void {
+    const operation = activeOperation;
+    if (operation === undefined) return;
 
-  function settleStatus(preserveCommandOutput: boolean): void {
-    if (status.kind === "idle") {
-      return;
+    if (operation.view?.kind === "spinner" && operation.view.timer !== undefined) {
+      clearInterval(operation.view.timer);
     }
-    if (canRedraw) {
-      clearPreview();
-      if (preserveCommandOutput) {
-        for (const text of status.commandLines) {
-          writeLine(options.colors.dim(text));
-        }
-      }
+    activeOperation = undefined;
+
+    if (live === undefined) return;
+    if (preserveCommandOutput && operation.commandLines.length > 0) {
+      const evidence = operation.commandLines.flatMap((line) =>
+        formatRailLine(colors.dim(line), colors, output).replace(/\n+$/u, "").split("\n"),
+      );
+      live.flush(evidence, []);
+    } else {
+      live.update([]);
     }
-    status = { kind: "idle" };
   }
 
   return {
     message(text) {
-      settleStatus(false);
+      settle(false);
       writeLine(text);
-      status = { kind: "active", commandLines: [], previewRows: 0 };
+      activeOperation = { commandLines: [], view: { kind: "status" } };
     },
     info(text) {
-      settleStatus(false);
-      writeLine(options.colors.dim(text));
+      settle(false);
+      writeLine(colors.dim(text));
     },
     success(text) {
-      settleStatus(false);
-      writeLine(options.colors.dim(text));
+      settle(false);
+      writeLine(colors.dim(text));
     },
     warning(text) {
-      settleStatus(true);
-      writeLine(options.colors.yellow(text));
+      settle(true);
+      writeLine(colors.yellow(text));
     },
     error(text) {
-      settleStatus(true);
-      writeLine(options.colors.red(text));
+      settle(true);
+      writeLine(colors.red(text));
     },
     commandOutput(text) {
-      if (status.kind === "idle") {
-        writeLine(options.colors.dim(text));
+      if (live === undefined || activeOperation === undefined) {
+        output.write(formatRailLine(colors.dim(text), colors, output));
         return;
       }
-      status.commandLines.push(text);
-      if (!canRedraw) {
-        writeLine(options.colors.dim(text));
-        return;
+      activeOperation.commandLines.push(text);
+      if (activeOperation.view !== undefined) {
+        activeOperation.view.preview = text;
+        live.update(liveRows());
       }
-      clearPreview();
-      const preview = formatRailLine(options.colors.dim(text), options.colors, options.output);
-      options.output.write(preview);
-      status.previewRows = countRows(preview);
     },
     section(title, lines) {
-      settleStatus(false);
-      const body = lines
-        .map((line) => formatRailLine(line, options.colors, options.output))
-        .join("");
-      options.output.write(
-        `${formatPromptHeader("submit", title, { colors: options.colors, leadingRail: "green" })}${body}`,
-      );
+      settle(false);
+      const body = lines.map((line) => formatRailLine(line, colors, output)).join("");
+      const header = formatPromptHeader("submit", title, { colors, leadingRail: "green" });
+      commit(`${header}${body}`);
     },
     spinner(message) {
-      settleStatus(false);
+      settle(false);
 
-      // The breathing cell stands in for the section bullet: a green leading
-      // rail, then an animated `<frame>  <message>` row beneath it.
-      const spacer = `${options.colors.green(RAIL)}\n`;
-
-      // Animation redraws the message row in place (carriage return + clear
-      // line), so it must stay on a single terminal row. Wrapping is what
-      // strands rows, so the label is truncated to the visible width: the
-      // spinner glyph (SPINNER_CELLS) + two spaces, minus a trailing cell to
-      // dodge the auto-wrap margin. Non-TTY output keeps the full message since
-      // it never redraws.
-      const columns = canRedraw && options.output.columns ? options.output.columns : 80;
-      const maxLabel = Math.max(4, columns - (SPINNER_CELLS + 3));
-      const label = message.length > maxLabel ? `${message.slice(0, maxLabel - 1)}…` : message;
-      // Paint the glyph the same green as the rail so it blends into the border.
-      const row = (glyph: string): string => `${options.colors.green(glyph)}  ${label}`;
-
-      if (!canRedraw) {
-        // No animation here, so show the densest frame as a static marker.
-        options.output.write(`${spacer}${row(SPINNER_STATIC)}\n`);
+      if (live === undefined) {
+        // Append-only output is not constrained by terminal repaint geometry.
+        output.write(`${colors.green(RAIL)}\n${colors.green(SPINNER_STATIC)}  ${message}\n`);
         return { stop() {} };
       }
 
-      let frame = 0;
-      options.output.write(`${spacer}${row(SPINNER_FRAMES[0])}`);
+      const spinnerView: ActiveSpinnerView = {
+        kind: "spinner",
+        frame: 0,
+        label: clip(message),
+      };
+      const operation: ActiveOperation = {
+        commandLines: [],
+        view: spinnerView,
+      };
+      activeOperation = operation;
+      live.update(liveRows());
 
       const timer = setInterval(() => {
-        frame += 1;
-        const glyph = SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? SPINNER_FRAMES[0];
-        options.output.write(`\r\u001B[K${row(glyph)}`);
+        if (activeOperation !== operation || operation.view !== spinnerView) return;
+        spinnerView.frame += 1;
+        live.update(liveRows());
       }, SPINNER_FRAME_MS);
-      // Never let the animation keep the process alive on its own.
+      spinnerView.timer = timer;
       timer.unref?.();
 
       let stopped = false;
@@ -226,14 +258,14 @@ export function createRailLog(options: RailLogOptions): RailLog {
           if (stopped) return;
           stopped = true;
           clearInterval(timer);
-          // Erase the animated row, step up, and erase the leading rail spacer
-          // so the spinner leaves no trace before the next prompt draws.
-          options.output.write("\r\u001B[K\u001B[1A\r\u001B[K");
+          if (activeOperation !== operation) return;
+          operation.view = undefined;
+          live.update([]);
         },
       };
     },
     settle() {
-      settleStatus(false);
+      settle(false);
     },
   };
 }

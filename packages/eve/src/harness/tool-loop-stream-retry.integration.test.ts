@@ -159,7 +159,16 @@ describe("tool loop streamed provider retries", () => {
     });
 
     expect(doStream).toHaveBeenCalledTimes(3);
-    expect(result.next).toMatchObject({ done: true, isError: true, output: "Overloaded" });
+    // The exhausted failure reports the catalog's curated summary for the
+    // overloaded shape rather than the provider's raw "Overloaded", with
+    // the remediation hint riding along in the parent-facing output.
+    expect(result.next).toMatchObject({
+      done: true,
+      isError: true,
+      output:
+        "The model provider is overloaded or timing out upstream of AI Gateway. " +
+        "This is transient — retry shortly, or switch models with `/model` in `eve dev`.",
+    });
     expect(events.filter((event) => event.type === "step.failed")).toHaveLength(1);
     expect(events.filter((event) => event.type === "turn.failed")).toHaveLength(1);
     expect(events.filter((event) => event.type === "session.failed")).toHaveLength(1);

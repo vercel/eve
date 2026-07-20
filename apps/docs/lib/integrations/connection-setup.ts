@@ -38,7 +38,7 @@ const buildSnippet = (
   const transport = protocol === "mcp" ? spec.mcp : spec.openapi;
 
   const imports = [
-    `import { connect } from "@vercel/connect/eve";`,
+    ...(auth === "apiKey" ? [] : [`import { connect } from "@vercel/connect/eve";`]),
     `import { ${defineFn} } from "eve/connections";`,
   ];
 
@@ -68,6 +68,9 @@ const buildSnippet = (
   }
 
   const headerLines: string[] = [];
+  if (auth === "apiKey" && spec.apiKey) {
+    headerLines.push(`    "${spec.apiKey.header}": process.env.${spec.apiKey.env}!,`);
+  }
   for (const [name, value] of Object.entries(transport?.headers ?? {})) {
     headerLines.push(`    "${name}": "${value}",`);
   }
@@ -91,6 +94,9 @@ const authNote = (auth: AuthMode): string => {
   }
   if (auth === "app") {
     return "Connect authenticates as the agent itself through one shared installation, with no per-user consent.";
+  }
+  if (auth === "apiKey") {
+    return "Keep the API key in a server-side environment variable. eve sends it directly to the MCP server and does not expose it to the model.";
   }
   return "Connect exchanges a JWT bearer assertion for a provider token. `principalToSubject` maps each principal to the subject your IdP expects.";
 };
@@ -136,11 +142,14 @@ export const buildConnectionInstall = (integration: Integration): string => {
   if (!spec) {
     return "";
   }
+  const usesConnect = spec.authModes.some((auth) => auth !== "apiKey");
   return [
-    "Connections live under `agent/connections/`. Auth is brokered by [Vercel Connect](https://vercel.com/docs/connect), so install the framework and the Connect SDK:",
+    usesConnect
+      ? "Connections live under `agent/connections/`. Auth is brokered by [Vercel Connect](https://vercel.com/docs/connect), so install the framework and the Connect SDK:"
+      : "Connections live under `agent/connections/`. Install the framework:",
     ``,
     "```bash",
-    "npm install eve@latest @vercel/connect",
+    usesConnect ? "npm install eve@latest @vercel/connect" : "npm install eve@latest",
     "```",
   ].join("\n");
 };
@@ -151,18 +160,36 @@ export const buildConnectionConfigure = (integration: Integration): string => {
   if (!spec) {
     return "";
   }
-  const connector = connectorOf(integration.slug, spec);
-  const sections: string[] = [
-    [
-      "Create the connector, link it to your project, and pull OIDC locally:",
-      ``,
-      "```bash",
-      `vercel connect create ${connector}`,
-      "vercel link",
-      "vercel env pull",
-      "```",
-    ].join("\n"),
-  ];
+  const sections: string[] = [];
+  if (spec.authModes.some((auth) => auth !== "apiKey")) {
+    const connector = connectorOf(integration.slug, spec);
+    const connectorService = spec.connectorService ?? connector;
+    sections.push(
+      [
+        "Create the connector, link it to your project, and pull OIDC locally:",
+        ``,
+        "```bash",
+        `vercel connect create ${connectorService}${
+          spec.connectorService === undefined ? "" : ` --name ${integration.slug}`
+        }`,
+        "vercel link",
+        "vercel env pull",
+        "```",
+      ].join("\n"),
+    );
+  }
+
+  if (spec.apiKey) {
+    sections.push(
+      [
+        `Set \`${spec.apiKey.env}\` as a server-side environment variable:`,
+        ``,
+        "```bash",
+        `${spec.apiKey.env}=your_api_key`,
+        "```",
+      ].join("\n"),
+    );
+  }
 
   if (spec.authModes.includes("jwtBearer")) {
     sections.push(

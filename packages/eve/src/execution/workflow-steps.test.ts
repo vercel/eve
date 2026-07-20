@@ -1219,6 +1219,46 @@ describe("emitTerminalSessionFailureStep", () => {
     expect(writes.length).toBe(1);
   });
 
+  it("replaces cataloged failures with their semantic summary while keeping the raw dump", async () => {
+    const sessionFailedCalls: Array<{ data: unknown }> = [];
+    const capturingAdapter: ChannelAdapter = {
+      kind: "thread-context",
+      async "session.failed"(data) {
+        sessionFailedCalls.push({ data });
+      },
+    };
+
+    const serialized = buildSerializedContextWithAdapter(capturingAdapter, "session-semantic");
+
+    const error = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), {
+        code: "ECONNREFUSED",
+      }),
+    });
+
+    await emitTerminalSessionFailureStep({
+      error,
+      parentWritable: createTestWritable(),
+      serializedContext: serialized,
+    });
+
+    expect(sessionFailedCalls).toHaveLength(1);
+    const { data } = sessionFailedCalls[0] as {
+      data: {
+        code: string;
+        message: string;
+        details?: { detail?: string; hint?: string; semanticErrorId?: string };
+      };
+    };
+    expect(data.code).toBe("Network request failed");
+    expect(data.message).toContain("ECONNREFUSED");
+    expect(data.details?.semanticErrorId).toBe("network-request-failed");
+    expect(data.details?.hint).toContain("Check your internet connection");
+    // The raw inspection stays attached so the diagnostic log keeps the
+    // evidence the curated message summarizes away.
+    expect(data.details?.detail).toContain("fetch failed");
+  });
+
   it("does not throw when the adapter handler itself throws", async () => {
     // A throwing handler must not prevent the event from reaching
     // the durable stream. This mirrors `callAdapterEventHandler`'s
