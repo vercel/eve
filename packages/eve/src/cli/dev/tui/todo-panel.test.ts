@@ -89,7 +89,7 @@ describe("renderFinishedTodoRows", () => {
     ).map(stripAnsi);
 
     expect(rows).toEqual([
-      "└─✓ Todo",
+      "└ ✓ Todo",
       "  │ ✓ scope the review",
       "  │ ✓ run the checks",
       "  │ ⨯ optional pass",
@@ -109,7 +109,7 @@ describe("renderTodoPanelRows", () => {
     ]);
 
     expect(rows).toEqual([
-      "└─▪ Todo",
+      "└ ▪ Todo",
       "  │ ✓ theme glyphs",
       "  │ ✓ setup verbiage",
       "  └ ⏺ status line",
@@ -129,7 +129,7 @@ describe("renderTodoPanelRows", () => {
     );
 
     // Off-beat frame: the header mark stays, the active item's dot blinks.
-    expect(rows[0]).toBe("└─▪ Todo");
+    expect(rows[0]).toBe("└ ▪ Todo");
     expect(rows[2]).toBe("  └   b");
   });
 
@@ -143,7 +143,7 @@ describe("renderTodoPanelRows", () => {
       false,
     );
 
-    expect(rows[0]).toBe("└─▪ 2/3 tasks");
+    expect(rows[0]).toBe("└ ▪ 2/3 tasks");
     expect(rows[1]).toBe("  │ ✓ a");
     expect(rows[2]).toBe("  │ ⨯ b");
     expect(rows[3]).toBe("  └ ○ c");

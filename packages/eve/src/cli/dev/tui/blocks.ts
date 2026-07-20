@@ -16,7 +16,7 @@ import type { Theme } from "./theme.js";
 import type { ToolGroupPresentation } from "./tool-presentation.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
 import { renderTool } from "./tool-rows.js";
-import { sliceVisible, visibleLength, wrapVisibleLine } from "#cli/ui/terminal-text.js";
+import { clipVisible, sliceVisible, visibleLength, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 
 export type ToolStatus = "running" | "done" | "error" | "denied" | "approval";
 
@@ -206,10 +206,13 @@ function renderBody(
     case "subagent":
       return renderSubagentHeader(block, width, theme);
     case "subagent-close": {
-      // Closes the section's rail in its hue; once the call has delivered
-      // its final message the corner reports it.
+      // Closes the section's rail in its hue. A completed section's corner
+      // carries the collapsed activity footnote instead of railed children.
       const corner = `  ${theme.colors.orange(theme.glyph.corner)}`;
-      return [block.status === "done" ? `${corner} ${theme.colors.dim("Done")}` : corner];
+      if (block.body !== undefined && block.body.length > 0) {
+        return [clipVisible(`${corner} ${theme.colors.dim(block.body)}`, Math.max(1, width))];
+      }
+      return [corner];
     }
     case "turn-stats":
       return renderTurnStats(block, width, theme);
@@ -530,11 +533,25 @@ function renderSubagentHeader(block: Block, width: number, theme: Theme): string
   const isSelf = block.title === undefined || block.title === "agent";
   const rawName = isSelf ? "self" : block.title!;
   const name = truncatePlain(rawName, Math.max(8, width - 16));
-  // The `└─` lead hangs the persistent section off the flow above it,
+  // The `└ ` lead hangs the persistent section off the flow above it,
   // making the nesting of its railed children evident.
-  const lead = theme.colors.orange(`${theme.glyph.corner}${theme.glyph.dash}`);
+  const lead = `${theme.colors.orange(theme.glyph.corner)} `;
+  const coloredName = isSelf ? name : theme.colors.orange(name);
+  // A completed call folds its ordinal into the parens and reports Done on
+  // the header itself — the collapsed section has no corner to carry it.
+  if (block.status === "done") {
+    const ordinal =
+      block.subtitle !== undefined && block.subtitle.startsWith("#")
+        ? `:${block.subtitle.slice(1)}`
+        : "";
+    return [
+      `${lead}${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(
+        `subagent(${coloredName}${ordinal})`,
+      )} ${theme.colors.dim("Done")}`,
+    ];
+  }
   let header = `${lead}${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(
-    `subagent(${isSelf ? name : theme.colors.orange(name)})`,
+    `subagent(${coloredName})`,
   )}`;
   if (block.subtitle !== undefined && block.subtitle.length > 0) {
     header += ` ${theme.colors.dim(block.subtitle)}`;

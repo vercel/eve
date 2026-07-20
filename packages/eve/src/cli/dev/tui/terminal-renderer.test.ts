@@ -1138,7 +1138,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("reports Done on the section corner once the call completes", () => {
+  it("collapses a completed section to its Done header and activity footnote", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.upsertSubagentStep({
@@ -1149,13 +1149,27 @@ describe("TerminalRenderer (inline scrollback)", () => {
       message: "SUBAGENT_TOKEN=echo-marker-9F2X",
       finalized: true,
     });
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "echo-marker",
+      childCallId: "cc1",
+      toolName: "web_fetch",
+      input: { url: "https://one.example" },
+      status: "done",
+      output: { ok: true },
+    });
 
-    // Mid-flight the section closes on a bare corner.
-    expect(screen.snapshot()).toContain("  └");
-    expect(screen.snapshot()).not.toContain("└ Done");
+    // Mid-flight the section shows its children and closes on a bare corner.
+    expect(screen.snapshot()).toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
+    expect(screen.snapshot()).not.toContain("Done");
 
     renderer.completeSubagent({ callId: "s1" });
-    expect(screen.snapshot()).toContain("  └ Done");
+    const snapshot = screen.snapshot();
+    // Completed: the header carries Done and the children fold into one
+    // counted footnote — the parent's reply carries the conclusion.
+    expect(snapshot).toContain("※ subagent(echo-marker) Done");
+    expect(snapshot).toContain("  └ Fetched 1 URL");
+    expect(snapshot).not.toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
     renderer.shutdown();
   });
 

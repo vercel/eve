@@ -84,9 +84,9 @@ export function renderTodoPanelRows(input: TodoPanelRowsInput): string[] {
   ).length;
   // The header mark holds steady in both states — the active item's `⏺` is
   // the panel's only pulse.
-  // The `└─` lead hangs the panel off the flow above it, making the
+  // The `└ ` lead hangs the panel off the flow above it, making the
   // nesting of its railed items evident.
-  const lead = c.dim(`${g.corner}${g.dash}`);
+  const lead = `${c.dim(g.corner)} `;
   const header = input.working
     ? `${lead}${c.gray(g.square)} ${c.dim("Todo")}`
     : `${lead}${c.gray(g.square)} ${c.dim(`${settled}/${items.length} tasks`)}`;
@@ -121,7 +121,7 @@ export function renderFinishedTodoRows(
 ): string[] {
   const c = theme.colors;
   const g = theme.glyph;
-  const rows = [`${c.dim(`${g.corner}${g.dash}`)}${c.green(g.success)} ${c.dim("Todo")}`];
+  const rows = [`${c.dim(g.corner)} ${c.green(g.success)} ${c.dim("Todo")}`];
   for (const item of items) {
     rows.push(`  ${c.dim(g.rule)} ${settledMark(item, theme)} ${c.dim(item.content)}`);
   }

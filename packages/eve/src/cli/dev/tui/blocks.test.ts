@@ -188,7 +188,18 @@ describe("renderBlockLines", () => {
       subtitle: "3 calls",
       live: false,
     });
-    expect(lines).toEqual(["└─※ subagent(echo-marker) 3 calls"]);
+    expect(lines).toEqual(["└ ※ subagent(echo-marker) 3 calls"]);
+  });
+
+  it("folds the ordinal into a completed header and reports Done", () => {
+    const lines = render({
+      kind: "subagent",
+      title: "agent",
+      subtitle: "#4",
+      status: "done",
+      live: false,
+    });
+    expect(lines).toEqual(["└ ※ subagent(self:4) Done"]);
   });
 
   it("collapses a child message to its first line inside the section", () => {

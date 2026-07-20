@@ -303,10 +303,32 @@ function collectSubagentRun(
     // A section stays live while its own header or any of its children
     // still streams; sibling calls settle independently.
     const live = header.live !== false || children.some((child) => child.live !== false);
-    groups.push({
-      members: [header],
-      display: live === (header.live !== false) ? header : { ...header, live },
-    });
+    const headerDisplay: Block = live === (header.live !== false) ? header : { ...header, live };
+
+    // A completed call collapses whole: the header reports Done and the
+    // children fold into one counted footnote on the closing corner (the
+    // parent's own reply carries the conclusion). Members still ride the
+    // groups so they commit and clear by identity.
+    if (header.status === "done") {
+      const summary = condensedChildSummary(children);
+      if (summary === undefined) {
+        groups.push({ members: [header, ...children], display: headerDisplay });
+      } else {
+        groups.push({ members: [header], display: headerDisplay });
+        groups.push({
+          members: children,
+          display: {
+            kind: "subagent-close",
+            subagentCallId: header.subagentCallId!,
+            live,
+            body: summary,
+          },
+        });
+      }
+      continue;
+    }
+
+    groups.push({ members: [header], display: headerDisplay });
 
     // Group the full child list first — so a condensed row counts every
     // call it stands for — then order MRU-down: each group sorts by its
@@ -344,15 +366,10 @@ function collectSubagentRun(
     // corner is display-only (no member): it re-derives from the same
     // grouping on every paint and transcript rebuild.
     if (kept.length > 0) {
-      const close: Block = {
-        kind: "subagent-close",
-        subagentCallId: header.subagentCallId!,
-        live,
-      };
-      // The header carries the call's completion (its final message has
-      // arrived); the corner is where the section reports it.
-      if (header.status === "done") close.status = "done";
-      groups.push({ members: [], display: close });
+      groups.push({
+        members: [],
+        display: { kind: "subagent-close", subagentCallId: header.subagentCallId!, live },
+      });
     }
   }
   // Interrupting pass-through blocks render after the sections they
@@ -435,10 +452,10 @@ interface CondensedKindCopy {
 const maxCondensedKinds = 3;
 
 /**
- * Folds one settled child-tool run into a single counted row:
+ * The counted multi-kind summary of a settled child-tool run:
  * `Ran 17 commands, Read 10 files, Wrote 6 files, and more`.
  */
-function condenseChildToolRun(run: readonly Block[]): Block {
+function condensedRunTitle(run: readonly Block[]): string {
   const counts = new Map<string, { copy: CondensedKindCopy; count: number }>();
   for (const block of run) {
     const copy = condensedKindCopy(block);
@@ -458,9 +475,30 @@ function condenseChildToolRun(run: readonly Block[]): Block {
       ({ copy, count }) =>
         `${copy.pastVerb} ${count} ${count === 1 ? copy.singularNoun : copy.pluralNoun}`,
     );
-  const title =
-    ranked.length > maxCondensedKinds ? `${named.join(", ")}, and more` : named.join(", ");
+  return ranked.length > maxCondensedKinds ? `${named.join(", ")}, and more` : named.join(", ");
+}
 
+/**
+ * The whole activity footnote of a completed section: counted settled work
+ * plus a failure count — an error may fold into the collapsed form, but it
+ * must never vanish from it. `undefined` when the child ran no tools.
+ */
+function condensedChildSummary(children: readonly Block[]): string | undefined {
+  const tools = children.filter((block) => block.kind === "subagent-tool");
+  if (tools.length === 0) return undefined;
+  const settled = tools.filter((block) => block.status === "done");
+  const failed = tools.filter((block) => block.status === "error").length;
+  const parts: string[] = [];
+  if (settled.length > 0) parts.push(condensedRunTitle(settled));
+  if (failed > 0) parts.push(`${failed} failed`);
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+/**
+ * Folds one settled child-tool run into a single counted row.
+ */
+function condenseChildToolRun(run: readonly Block[]): Block {
+  const title = condensedRunTitle(run);
   const first = run[0]!;
   return {
     kind: "subagent-tool",
