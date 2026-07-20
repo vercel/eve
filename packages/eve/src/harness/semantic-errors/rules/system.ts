@@ -1,4 +1,4 @@
-import { anyOf, codeIs, messageIs, type LinkPredicate, type SemanticErrorRule } from "../rule.js";
+import { codeIs, messageIs, type SemanticErrorRule } from "../rule.js";
 
 /**
  * Node/undici error codes that identify a failed network dial or a
@@ -15,16 +15,6 @@ const NETWORK_ERROR_CODES = [
   "UND_ERR_CONNECT_TIMEOUT",
   "UND_ERR_SOCKET",
 ] as const;
-
-/**
- * The one definition of "this link is a network failure", shared by the
- * catalog rules below and the model-call retry classifier so
- * presentation and recovery policy cannot drift apart.
- */
-export const isNetworkFailureLink: LinkPredicate = anyOf(
-  codeIs(...NETWORK_ERROR_CODES),
-  messageIs("fetch failed", "socket hang up"),
-);
 
 const NETWORK_FAILURE_HINT =
   "Check your internet connection and that the target service is reachable, then try again.";

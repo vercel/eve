@@ -122,10 +122,10 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
-  type ModelCallConfigErrorSummary,
-  summarizeKnownModelCallConfigError,
-  summarizeKnownModelCallRequestError,
+  type UpstreamRejectionSummary,
+  extractUpstreamRejectionMessage,
 } from "#harness/model-call-error.js";
+import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import {
@@ -881,7 +881,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           // the fix, and the terminal-failure path logs the one-line summary
           // and emits the structured step.failed. Unrecognized errors keep
           // the full dump so they stay loud.
-          if (summarizeKnownModelCallConfigError(event.error) !== null) return;
+          if (summarizeKnownError(event.error)?.tags.includes("config") === true) return;
           logError(log, "tool-loop stream error", event.error);
         },
         onStepFinish: hooks.onStepFinish,
@@ -1114,42 +1114,41 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
         const classification = classifyModelCallError(finalError);
         const errorId = createErrorId();
-        const configSummary =
-          classification === "terminal" ? summarizeKnownModelCallConfigError(finalError) : null;
-        const requestSummary =
-          configSummary === null ? summarizeKnownModelCallRequestError(finalError) : null;
+        const catalogSummary = summarizeKnownError(finalError);
+        const upstreamRejection =
+          catalogSummary === null ? extractUpstreamRejectionMessage(finalError) : null;
         const errorMessage =
-          configSummary?.message ?? requestSummary?.message ?? toErrorMessage(finalError);
+          catalogSummary?.message ?? upstreamRejection?.message ?? toErrorMessage(finalError);
         const modelCallDetails = extractModelCallErrorDetails(finalError);
         const details = buildModelCallFailureDetails({
-          configSummary,
+          catalogSummary,
           error: finalError,
           errorId,
           modelCallDetails,
-          requestSummary,
+          upstreamRejection,
         });
         const modelCallLogFields = buildModelCallFailureLogFields({
           error: finalError,
           errorId,
           modelCallDetails,
-          requestSummary,
+          recognized: catalogSummary !== null || upstreamRejection !== null,
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         });
 
         if (classification === "terminal") {
-          if (configSummary !== null) {
+          if (catalogSummary !== null) {
             // Recognized configuration failure: log a concise single line
             // and skip the structured SDK dump so the user sees an
             // actionable hint instead of a wall of inspector output.
-            log.error(`${configSummary.name}: ${configSummary.message}`, {
+            log.error(`${catalogSummary.name}: ${catalogSummary.message}`, {
               errorId,
               sessionId: session.sessionId,
               turnId: emissionState.turnId,
             });
           } else {
             log.error(
-              requestSummary?.message ?? "model call failed terminally",
+              upstreamRejection?.message ?? "model call failed terminally",
               modelCallLogFields,
             );
           }
@@ -1182,7 +1181,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             // that did not already consume the in-process transient budget or
             // the dedicated empty-response reissue.
             log.warn(
-              requestSummary?.message ??
+              upstreamRejection?.message ??
                 "model call failed recoverably in task mode — rethrowing for durable step retry",
               modelCallLogFields,
             );
@@ -1194,7 +1193,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           // here only after their bounded in-process retries are exhausted;
           // empty responses already received their specialized reissue.
           log.error(
-            requestSummary?.message ?? "model call failed; failing the task run",
+            upstreamRejection?.message ?? "model call failed; failing the task run",
             modelCallLogFields,
           );
           await emitFailedStep(emit, emissionState, {
@@ -1210,7 +1209,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         }
 
         log.error(
-          requestSummary?.message ?? "model call failed — parking session for retry by the user",
+          upstreamRejection?.message ?? "model call failed — parking session for retry by the user",
           modelCallLogFields,
         );
         emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
@@ -1327,10 +1326,11 @@ function readGatewayMetadata(
  * Projects a model-call failure into the `step.failed` / `turn.failed`
  * `details` payload. Three mutually exclusive branches:
  *
- * 1. Config summary (known terminal: missing key, gateway auth)  → friendly
- *    `name` + `message`, no SDK inspector dump.
- * 2. Request summary (ambiguous gateway 4xx that we recover from) → raw
- *    error `message`, friendly `name`, no inspector dump.
+ * 1. Catalog match → the rule's curated `name`/`message`/`hint` plus its
+ *    registered `semanticErrorId`, no SDK inspector dump.
+ * 2. Upstream rejection → raw error `message` with the extracted upstream
+ *    identity, no inspector dump. No `semanticErrorId`: the message is
+ *    arbitrary provider prose, not a registered failure shape.
  * 3. Fallback → full {@link formatError} projection (cause chain via
  *    `util.inspect`) so unrecognized failures still carry the upstream
  *    stack to log aggregators.
@@ -1340,32 +1340,31 @@ function readGatewayMetadata(
  * `responseBodySnippet`, ...) always show up next to the message.
  */
 function buildModelCallFailureDetails(input: {
-  readonly configSummary: ModelCallConfigErrorSummary | null;
+  readonly catalogSummary: SemanticErrorSummary | null;
   readonly error: unknown;
   readonly errorId: string;
   readonly modelCallDetails: JsonObject;
-  readonly requestSummary: ModelCallConfigErrorSummary | null;
+  readonly upstreamRejection: UpstreamRejectionSummary | null;
 }): JsonObject {
-  const { configSummary, error, errorId, modelCallDetails, requestSummary } = input;
+  const { catalogSummary, error, errorId, modelCallDetails, upstreamRejection } = input;
 
-  if (configSummary !== null) {
+  if (catalogSummary !== null) {
     const details: Record<string, JsonValue> = {
       errorId,
-      message: configSummary.message,
-      name: configSummary.name,
-      semanticErrorId: configSummary.id,
+      message: catalogSummary.message,
+      name: catalogSummary.name,
+      semanticErrorId: catalogSummary.id,
       ...modelCallDetails,
     };
-    if (configSummary.hint !== undefined) details.hint = configSummary.hint;
+    if (catalogSummary.hint !== undefined) details.hint = catalogSummary.hint;
     return details;
   }
 
-  if (requestSummary !== null) {
+  if (upstreamRejection !== null) {
     return {
       errorId,
       message: toErrorMessage(error),
-      name: requestSummary.name,
-      semanticErrorId: requestSummary.id,
+      name: upstreamRejection.name,
       ...modelCallDetails,
     };
   }
@@ -1374,18 +1373,19 @@ function buildModelCallFailureDetails(input: {
 }
 
 /**
- * Builds the structured log fields for a model-call failure. When we
- * recognized the failure as an ambiguous gateway request rejection, attach
- * the compact `details` payload and *omit* the raw `error` so the logger's
- * `util.inspect` of the cause chain (which would render `[object Object]`
- * for upstream `APICallError` shapes) is bypassed. Otherwise fall back to
- * the raw error so unrecognized failures keep their full stack in logs.
+ * Builds the structured log fields for a model-call failure. When the
+ * failure was recognized (catalog match or extracted upstream rejection),
+ * attach the compact `details` payload and *omit* the raw `error` so the
+ * logger's `util.inspect` of the cause chain (which would render
+ * `[object Object]` for upstream `APICallError` shapes) is bypassed.
+ * Otherwise fall back to the raw error so unrecognized failures keep
+ * their full stack in logs.
  */
 function buildModelCallFailureLogFields(input: {
   readonly error: unknown;
   readonly errorId: string;
   readonly modelCallDetails: JsonObject;
-  readonly requestSummary: ModelCallConfigErrorSummary | null;
+  readonly recognized: boolean;
   readonly sessionId: string;
   readonly turnId: string;
 }): Record<string, unknown> {
@@ -1394,7 +1394,7 @@ function buildModelCallFailureLogFields(input: {
     sessionId: input.sessionId,
     turnId: input.turnId,
   };
-  if (input.requestSummary !== null) {
+  if (input.recognized) {
     return { ...base, details: input.modelCallDetails };
   }
   return { ...base, error: input.error };

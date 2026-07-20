@@ -1,7 +1,7 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toError, walkCauseChain } from "#shared/errors.js";
-import { isKnownNetworkError, summarizeKnownConfigError } from "#harness/semantic-errors/index.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
@@ -22,27 +22,14 @@ const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
 const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supported/i;
 
 /**
- * One human-readable summary of a known model-call configuration failure.
- *
- * Returned by {@link summarizeKnownModelCallConfigError} for terminal
- * failures that point at a fixable setup mistake (missing API key,
- * gateway auth failure). Surfaces actionable text in REPL output and in
- * structured `step.failed` events without dumping the full SDK error
- * inspection into user-facing logs.
- *
- * `id` is the stable semantic-error catalog identifier (see
- * `#harness/semantic-errors/`): one kebab-case slug per recognized
- * failure shape, carried into `step.failed` details as
- * `semanticErrorId` so logs and transcripts can be correlated with the
- * rule that matched.
+ * The most informative human-readable rejection a model-call error
+ * carries, extracted from the upstream response. Not a semantic-error
+ * classification: the message is arbitrary provider prose, so it carries
+ * no catalog id — `semanticErrorId` is reserved for registered rules.
  */
-export interface ModelCallConfigErrorSummary {
-  readonly id: string;
+export interface UpstreamRejectionSummary {
   readonly name: string;
-  /** What happened. */
   readonly message: string;
-  /** What to do about it, when the matched catalog rule carries remediation. */
-  readonly hint?: string;
 }
 
 interface ModelCallErrorSignals {
@@ -59,39 +46,13 @@ interface ModelCallErrorSignals {
 }
 
 /**
- * Returns a concise actionable summary for known terminal configuration
- * errors raised during a model call. Returns `null` for everything else
- * so the caller falls back to the raw SDK message.
- *
- * Delegates to the semantic-error catalog's `config`-tagged rules
- * (`#harness/semantic-errors`), so the catalog stays the single registry
- * of recognized failure shapes and this call site keeps its
- * classification semantics: a match means the failure is terminal.
+ * Extracts the most informative upstream rejection message from a
+ * model-call error that the semantic-error catalog did not recognize.
+ * These failures happen before the agent can produce a response, so the
+ * user-facing message should avoid implying a bad tool call. Returns
+ * `null` when the error carries nothing better than its raw message.
  */
-export function summarizeKnownModelCallConfigError(
-  error: unknown,
-): ModelCallConfigErrorSummary | null {
-  return summarizeKnownConfigError(error);
-}
-
-/**
- * Returns a concise summary for known model-call request failures that are not
- * configuration errors. These failures happen before the agent can produce a
- * response, so the user-facing message should avoid implying a bad tool call.
- */
-export function summarizeKnownModelCallRequestError(
-  error: unknown,
-): ModelCallConfigErrorSummary | null {
-  // Known benign shape: skip the inspector dump and the stack (which would
-  // point at the harness's own throw site, not upstream evidence).
-  if (error instanceof EmptyModelResponseError) {
-    return {
-      id: "empty-model-response",
-      name: "Empty model response",
-      message: error.message,
-    };
-  }
-
+export function extractUpstreamRejectionMessage(error: unknown): UpstreamRejectionSummary | null {
   const signals = readModelCallErrorSignals(error);
 
   // Transient upstream failures (throttles, overloads) keep the generic
@@ -103,15 +64,11 @@ export function summarizeKnownModelCallRequestError(
 
   const apiSummary = signals.apiErrorMessage;
   if (apiSummary !== undefined) {
-    return {
-      ...modelRequestErrorIdentity(signals),
-      message: apiSummary,
-    };
+    return { name: upstreamRejectionName(signals), message: apiSummary };
   }
 
   if (signals.statusCode === 400 && isGatewayErrorSignal(signals)) {
     return {
-      id: "gateway-model-request-rejected",
       name: "AI Gateway model request rejected",
       message: GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE,
     };
@@ -119,21 +76,16 @@ export function summarizeKnownModelCallRequestError(
 
   const apiCallSummary = formatApiCallErrorFallback(signals);
   if (apiCallSummary !== undefined) {
-    return {
-      ...modelRequestErrorIdentity(signals),
-      message: apiCallSummary,
-    };
+    return { name: upstreamRejectionName(signals), message: apiCallSummary };
   }
 
   return null;
 }
 
-function modelRequestErrorIdentity(
-  signals: ModelCallErrorSignals,
-): Pick<ModelCallConfigErrorSummary, "id" | "name"> {
+function upstreamRejectionName(signals: ModelCallErrorSignals): string {
   return isGatewayErrorSignal(signals)
-    ? { id: "gateway-model-request-rejected", name: "AI Gateway model request rejected" }
-    : { id: "model-provider-api-error", name: "Model provider API error" };
+    ? "AI Gateway model request rejected"
+    : "Model provider API error";
 }
 
 function isTransientHttpStatus(status: number | undefined): boolean {
@@ -327,17 +279,29 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     return "retry";
   }
 
-  if (summarizeKnownModelCallConfigError(error) !== null) {
+  // The catalog's tags carry the recovery judgment for every failure
+  // shape it can see on the cause chain: a fixable configuration mistake
+  // is terminal (repeating the request cannot fix a credential), a
+  // transient provider condition retries.
+  const summary = summarizeKnownError(error);
+  if (summary?.tags.includes("config") === true) {
     return "terminal";
+  }
+  if (summary?.tags.includes("transient") === true) {
+    return "retry";
   }
 
   const signals = readModelCallErrorSignals(error);
-  if (isRetryableGatewayType(signals.gatewayType) || isRetryableGatewayType(signals.upstreamType)) {
+  // The catalog matches structural fields on the chain; these checks
+  // cover the one channel it deliberately does not model — discriminators
+  // that only exist inside the deep-parsed upstream response body — plus
+  // the invalid-request shape, whose message is too free-form to catalog.
+  if (isRetryableGatewayType(signals.upstreamType)) {
     return "retry";
   }
   if (
-    isTerminalGatewayType(signals.gatewayType) ||
     isTerminalGatewayType(signals.upstreamType) ||
+    signals.gatewayType === "invalid_request_error" ||
     signals.gatewayName === "GatewayInvalidRequestError"
   ) {
     return "terminal";
@@ -352,10 +316,6 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     if (status === 408 || status === 409 || status === 429 || status >= 500) return "retry";
     if (isAmbiguousGatewayInternalBadRequest(signals)) return "recoverable";
     if (status >= 400 && status < 500) return "terminal";
-  }
-
-  if (isKnownNetworkError(error)) {
-    return "retry";
   }
 
   return "recoverable";

@@ -7,7 +7,7 @@ import { extractErrorSignals } from "./signals.js";
 import { GATEWAY_RULES } from "./rules/gateway.js";
 import { MODEL_PROVIDER_RULES } from "./rules/model-provider.js";
 import { SANDBOX_RULES } from "./rules/sandbox.js";
-import { isNetworkFailureLink, SYSTEM_RULES } from "./rules/system.js";
+import { SYSTEM_RULES } from "./rules/system.js";
 import { WORKFLOW_RULES } from "./rules/workflow.js";
 
 export type { ErrorLink, ErrorSignals } from "./signals.js";
@@ -33,8 +33,6 @@ const CATALOG: readonly SemanticErrorRule[] = [
   ...SYSTEM_RULES,
 ];
 
-const CONFIG_RULES = CATALOG.filter((rule) => rule.tags.includes("config"));
-
 /**
  * Projects any thrown error into its cataloged semantic summary, or
  * `null` when no rule matches — callers then fall back to the raw
@@ -42,23 +40,4 @@ const CONFIG_RULES = CATALOG.filter((rule) => rule.tags.includes("config"));
  */
 export function summarizeKnownError(error: unknown): SemanticErrorSummary | null {
   return evaluateSemanticErrorRules(CATALOG, extractErrorSignals(error));
-}
-
-/**
- * True when the throwable (or anything on its cause chain) is a known
- * network dial or teardown failure. The single network policy shared by
- * the catalog and the model-call retry classifier.
- */
-export function isKnownNetworkError(error: unknown): boolean {
-  return extractErrorSignals(error).chain.some(isNetworkFailureLink);
-}
-
-/**
- * Like {@link summarizeKnownError}, restricted to rules tagged `config` —
- * failures that point at a fixable setup mistake. The model-call
- * classifier treats a match as terminal (retrying the same request cannot
- * fix a missing credential or an unknown model id).
- */
-export function summarizeKnownConfigError(error: unknown): SemanticErrorSummary | null {
-  return evaluateSemanticErrorRules(CONFIG_RULES, extractErrorSignals(error));
 }

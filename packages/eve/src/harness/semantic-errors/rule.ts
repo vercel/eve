@@ -53,6 +53,13 @@ export interface SemanticErrorRule {
 export interface SemanticErrorSummary {
   readonly id: string;
   readonly name: string;
+  /**
+   * The matched rule's tags, carried so consumers with a recovery policy
+   * (the model-call classifier) can read the catalog's judgment —
+   * `config` is terminal, `transient` retries — without a second registry
+   * of the same knowledge.
+   */
+  readonly tags: readonly SemanticErrorTag[];
   /** What happened. */
   readonly message: string;
   /** What to do about it, when the rule carries remediation. */
@@ -72,6 +79,7 @@ export function evaluateSemanticErrorRules(
     } = {
       id: rule.id,
       name: rule.name,
+      tags: rule.tags,
       message: typeof rule.message === "string" ? rule.message : rule.message(link),
     };
     const hint = typeof rule.hint === "function" ? rule.hint(link) : rule.hint;

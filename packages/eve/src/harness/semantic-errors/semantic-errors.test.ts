@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { summarizeKnownConfigError, summarizeKnownError } from "./index.js";
+import { summarizeKnownError } from "./index.js";
 import { allOf, anyOf, codeIs, evaluateSemanticErrorRules, messageIs, nameIs } from "./rule.js";
 import { extractErrorSignals } from "./signals.js";
 
@@ -69,6 +69,14 @@ describe("summarizeKnownError (catalog table)", () => {
       title: "provider api key missing",
       error: named("LoadAPIKeyError", "OpenAI API key is missing."),
       id: "model-provider-api-key-missing",
+    },
+    {
+      title: "empty model response",
+      error: named(
+        "EmptyModelResponseError",
+        "The model did not return a response. Please try again.",
+      ),
+      id: "empty-model-response",
     },
     {
       title: "unsupported model capability",
@@ -208,15 +216,15 @@ describe("summarizeKnownError (catalog table)", () => {
   });
 });
 
-describe("summarizeKnownConfigError", () => {
-  it("matches config-tagged rules only", () => {
+describe("summary tags", () => {
+  it("carries the rule's recovery judgment so classifiers need no second registry", () => {
     expect(
-      summarizeKnownConfigError(named("GatewayModelNotFoundError", "model not found"))?.id,
-    ).toBe("model-not-found");
-    // Transient and non-config rules are excluded: a rate limit must not
-    // classify the model call as a terminal configuration failure.
-    expect(summarizeKnownConfigError(named("GatewayRateLimitError", "rate limited"))).toBeNull();
-    expect(summarizeKnownConfigError(new TypeError("fetch failed"))).toBeNull();
+      summarizeKnownError(named("GatewayModelNotFoundError", "model not found"))?.tags,
+    ).toContain("config");
+    expect(summarizeKnownError(named("GatewayRateLimitError", "rate limited"))?.tags).toContain(
+      "transient",
+    );
+    expect(summarizeKnownError(new TypeError("fetch failed"))?.tags).toContain("transient");
   });
 });
 
@@ -232,7 +240,7 @@ describe("rule engine", () => {
       ],
       signals,
     );
-    expect(summary).toEqual({ id: "second", name: "b", message: "late" });
+    expect(summary).toEqual({ id: "second", name: "b", tags: ["system"], message: "late" });
   });
 
   it("allOf requires all predicates on the same link", () => {

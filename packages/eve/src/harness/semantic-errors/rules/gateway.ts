@@ -16,6 +16,7 @@ const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
  */
 const gatewayAuthenticationFailure = anyOf(
   nameIs("GatewayAuthenticationError"),
+  typeIs("authentication_error"),
   messageMatches(/AI Gateway authentication/i),
 );
 

@@ -22,6 +22,17 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Export the provider's API key environment variable (for example `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and try again.",
   },
   {
+    // eve's own EmptyModelResponseError (harness/model-call-error.ts); its
+    // message is authored for end users, so it passes through. The
+    // model-call classifier special-cases this shape *before* consulting
+    // tags — a same-hooks retry would read a stale step result.
+    id: "empty-model-response",
+    name: "Empty model response",
+    tags: ["model-provider", "transient"],
+    when: nameIs("EmptyModelResponseError"),
+    message: (link) => link.message,
+  },
+  {
     id: "model-capability-unsupported",
     name: "Model capability not supported",
     tags: ["model-provider"],
