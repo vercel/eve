@@ -116,7 +116,7 @@ describe("runExtensionInitCommand", () => {
     expect(packageJson.files).toEqual(["dist"]);
     expect(packageJson.peerDependencies?.eve).toBe("*");
     expect(packageJson.peerDependenciesMeta).toBeUndefined();
-    expect(packageJson.devDependencies?.eve).toBe("^0.6.0");
+    expect(packageJson.devDependencies?.eve).toBe("0.6.0");
     expect(packageJson.dependencies?.zod).toBe("4.0.0");
     expect(packageJson.dependencies?.ai).toBeUndefined();
     expect(packageJson.scripts?.build).toBe("eve extension build");

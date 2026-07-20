@@ -120,7 +120,20 @@ During local development, `eve dev` automatically rebuilds mounted workspace ext
 
 `eve` is a required wildcard **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. The extension's concrete eve version belongs in `devDependencies` for authoring types and build tooling. npm peer semver does not decide extension compatibility; eve validates the generated per-capability requirements. Do not mark the eve peer optional and do not add eve to regular `dependencies`.
 
-Pin that development version exactly—without `^` or `~`—to the oldest eve release the published extension intends to support. The build stamps the capability epochs from that eve version, so resolving a newer builder can otherwise raise the extension's minimum consumer unexpectedly. Build the package once with the minimum version, then test that same dist against both the minimum and latest supported eve consumers. Raise the pinned version when the extension intentionally adopts a newer capability contract.
+#### Choosing the eve development version
+
+Keep `devDependencies.eve` pinned to an exact version. `eve extension init` starts with the exact eve release that created the scaffold:
+
+```jsonc title="package.json"
+{
+  "peerDependencies": { "eve": "*" },
+  "devDependencies": { "eve": "0.25.0" },
+}
+```
+
+The installed development version supplies both the authoring API and the capability epochs written by `eve extension build`. A range such as `^0.25.0` can resolve a newer builder and silently stamp a newer epoch for a capability the extension uses.
+
+Before publishing, set the exact version to the oldest eve release the extension intends to support. Build the distribution once with that version, then test the same dist against both the oldest and latest supported consumer versions. Do not rebuild for each consumer: that would test different artifacts with potentially different capability requirements. Raise the pin when the extension intentionally adopts an API from a newer capability contract.
 
 Everything else the extension imports at execution time (SDKs, `zod`, …) goes in `dependencies`; each extension resolves its own versions. Build-only and test-only packages go in `devDependencies`.
 
