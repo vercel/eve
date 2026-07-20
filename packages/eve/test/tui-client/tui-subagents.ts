@@ -68,23 +68,17 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   });
   console.log(theme.muted("[tui-subagents] subagent message text landed in body"));
 
-  // Wait for the token to appear twice, once inside the subagent step
-  // section, once in the parent's follow-up Assistant reply. This is the
-  // proof that (a) the child stream subscription rendered the subagent's
-  // output, and (b) the parent's verbatim echo flowed through after.
-  await waitForCondition(() => countOccurrences(screen.snapshot(), SUBAGENT_TOKEN) >= 2, {
-    timeoutMs: 120_000,
-    label: "token rendered in both subagent + parent",
-  });
-  console.log(theme.muted("[tui-subagents] token rendered in subagent step + parent assistant"));
-
-  // The parent's own reply must carry the token inside a top-level
-  // `▲`-prefixed assistant section — not just inside the nested `│`
-  // subagent region. Whether the model also emits a pre-delegation
-  // message is model-dependent, so the section count is not asserted.
+  // The child side is proven above (the token streamed into the live
+  // subagent body). Once the child settles, its section collapses to the
+  // `└ Done` footnote and the token leaves the screen — so the parent side
+  // is proven on its own: the verbatim echo must land in a top-level
+  // `▲`-prefixed assistant section, not just inside the nested `│` region.
+  // Whether the model also emits a pre-delegation message is
+  // model-dependent, so the section count is not asserted.
   await waitForCondition(() => assistantSectionContains(screen.snapshot(), SUBAGENT_TOKEN), {
-    timeoutMs: 30_000,
+    timeoutMs: 120_000,
     label: "parent assistant section containing the token",
+    onTimeout: () => screen.snapshot(),
   });
   console.log(theme.muted("[tui-subagents] parent assistant reply rendered with token"));
 
@@ -100,18 +94,6 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.ctrlC();
   await runPromise;
 });
-
-function countOccurrences(haystack: string, needle: string): number {
-  if (needle.length === 0) return 0;
-  let count = 0;
-  let index = 0;
-  while (true) {
-    const next = haystack.indexOf(needle, index);
-    if (next === -1) return count;
-    count += 1;
-    index = next + needle.length;
-  }
-}
 
 /**
  * True when a top-level assistant section (a `▲ `-prefixed line and its
@@ -135,7 +117,7 @@ function assistantSectionContains(snapshot: string, needle: string): boolean {
 
 async function waitForCondition(
   predicate: () => boolean,
-  options: { timeoutMs: number; label: string; intervalMs?: number },
+  options: { timeoutMs: number; label: string; intervalMs?: number; onTimeout?: () => string },
 ): Promise<void> {
   const intervalMs = options.intervalMs ?? 100;
   const deadline = Date.now() + options.timeoutMs;
@@ -143,5 +125,6 @@ async function waitForCondition(
     if (predicate()) return;
     await sleep(intervalMs);
   }
-  throw new Error(`Timed out waiting for: ${options.label}`);
+  const detail = options.onTimeout === undefined ? "" : `\n${options.onTimeout()}`;
+  throw new Error(`Timed out waiting for: ${options.label}${detail}`);
 }
