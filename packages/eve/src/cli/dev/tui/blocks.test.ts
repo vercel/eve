@@ -191,7 +191,9 @@ describe("renderBlockLines", () => {
     expect(lines).toEqual(["  ※ subagent(echo-marker) 3 calls"]);
   });
 
-  it("folds the ordinal into a completed header and reports Done", () => {
+  it("folds the ordinal into a completed header without a Done suffix", () => {
+    // Completion reports on the closing corner; the header only flips its
+    // mark to green.
     const lines = render({
       kind: "subagent",
       title: "agent",
@@ -199,7 +201,7 @@ describe("renderBlockLines", () => {
       status: "done",
       live: false,
     });
-    expect(lines).toEqual(["  ※ subagent(self:4) Done"]);
+    expect(lines).toEqual(["  ※ subagent(self:4)"]);
   });
 
   it("collapses a child message to its first line inside the section", () => {

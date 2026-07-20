@@ -1165,10 +1165,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     renderer.completeSubagent({ callId: "s1" });
     const snapshot = screen.snapshot();
-    // Completed: the header carries Done and the children fold into one
-    // counted footnote — the parent's reply carries the conclusion.
-    expect(snapshot).toContain("※ subagent(echo-marker) Done");
-    expect(snapshot).toContain("  └ Fetched 1 URL");
+    // Completed: the corner reports Done with the counted footnote and the
+    // children fold away — the parent's reply carries the conclusion.
+    expect(snapshot).toContain("※ subagent(echo-marker)");
+    expect(snapshot).toContain("  └ Done. Fetched 1 URL");
     expect(snapshot).not.toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
     renderer.shutdown();
   });

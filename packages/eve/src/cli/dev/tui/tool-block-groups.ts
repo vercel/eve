@@ -328,20 +328,16 @@ function collectSubagentRun(
     // groups so they commit and clear by identity.
     if (header.status === "done") {
       const summary = condensedChildSummary(children);
-      if (summary === undefined) {
-        groups.push({ members: [header, ...children], display: headerDisplay });
-      } else {
-        groups.push({ members: [header], display: headerDisplay });
-        groups.push({
-          members: children,
-          display: {
-            kind: "subagent-close",
-            subagentCallId: header.subagentCallId!,
-            live,
-            body: summary,
-          },
-        });
-      }
+      groups.push({ members: [header], display: headerDisplay });
+      groups.push({
+        members: children,
+        display: {
+          kind: "subagent-close",
+          subagentCallId: header.subagentCallId!,
+          live,
+          body: summary === undefined ? "Done" : `Done. ${summary}`,
+        },
+      });
       continue;
     }
 

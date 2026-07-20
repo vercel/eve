@@ -555,19 +555,16 @@ function renderSubagentHeader(block: Block, width: number, theme: Theme): string
   // Two cells in, so the mark shares the tool column above its rail.
   const lead = "  ";
   // The ordinal rides inside the parens (`subagent(self:4)`) in every
-  // state; a completed call reports Done on the header itself — the
-  // collapsed section has no corner to carry it.
+  // state. Completion reports on the closing corner (`└ Done…`); the
+  // header only flips its mark from working orange to done green.
   const isOrdinal = block.subtitle !== undefined && block.subtitle.startsWith("#");
   const ordinal = isOrdinal ? `:${block.subtitle!.slice(1)}` : "";
-  // Orange marks a section still working; green marks it done.
   const mark =
     block.status === "done"
       ? theme.colors.green(theme.glyph.subagent)
       : theme.colors.orange(theme.glyph.subagent);
   let header = `${lead}${mark} ${theme.colors.bold(`subagent(${name}${ordinal})`)}`;
-  if (block.status === "done") {
-    header += ` ${theme.colors.dim("Done")}`;
-  } else if (!isOrdinal && block.subtitle !== undefined && block.subtitle.length > 0) {
+  if (!isOrdinal && block.subtitle !== undefined && block.subtitle.length > 0) {
     header += ` ${theme.colors.dim(block.subtitle)}`;
   }
   return [header];
