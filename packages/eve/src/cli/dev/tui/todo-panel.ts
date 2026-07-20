@@ -69,8 +69,8 @@ export interface TodoPanelRowsInput {
 }
 
 /**
- * Paints the pinned panel, one cell in from the margin so its marks share
- * the tool column. Settled items ride a `│` rail under the header; the
+ * Paints the pinned panel, indented so its marks share the tool column.
+ * Settled items ride a `│` rail under the header; the
  * first unsettled item closes the rail with `└` and everything after hangs
  * indented — the list reads as progress flowing through the corner.
  */
@@ -85,8 +85,8 @@ export function renderTodoPanelRows(input: TodoPanelRowsInput): string[] {
   // The header mark holds steady in both states — the active item's `⏺` is
   // the panel's only pulse.
   const header = input.working
-    ? ` ${c.gray(g.square)} ${c.dim("Todo")}`
-    : ` ${c.gray(g.square)} ${c.dim(`${settled}/${items.length} tasks`)}`;
+    ? `  ${c.gray(g.square)} ${c.dim("Todo")}`
+    : `  ${c.gray(g.square)} ${c.dim(`${settled}/${items.length} tasks`)}`;
 
   const rows = [header];
   let railClosed = false;
@@ -101,7 +101,7 @@ export function renderTodoPanelRows(input: TodoPanelRowsInput): string[] {
       rail = c.dim(g.corner);
       railClosed = true;
     }
-    rows.push(` ${rail} ${todoItemBody(item, input, theme)}`);
+    rows.push(`  ${rail} ${todoItemBody(item, input, theme)}`);
   }
   return rows.map((row) => clipVisible(row, width));
 }
@@ -118,11 +118,11 @@ export function renderFinishedTodoRows(
 ): string[] {
   const c = theme.colors;
   const g = theme.glyph;
-  const rows = [` ${c.green(g.success)} ${c.dim("Todo")}`];
+  const rows = [`  ${c.green(g.success)} ${c.dim("Todo")}`];
   for (const item of items) {
-    rows.push(` ${c.dim(g.rule)} ${settledMark(item, theme)} ${c.dim(item.content)}`);
+    rows.push(`  ${c.dim(g.rule)} ${settledMark(item, theme)} ${c.dim(item.content)}`);
   }
-  rows.push(` ${c.dim(g.corner)} ${c.dim("Done")}`);
+  rows.push(`  ${c.dim(g.corner)} ${c.dim("Done")}`);
   return rows.map((row) => clipVisible(row, width));
 }
 

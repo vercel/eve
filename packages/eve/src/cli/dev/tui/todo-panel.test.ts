@@ -89,11 +89,11 @@ describe("renderFinishedTodoRows", () => {
     ).map(stripAnsi);
 
     expect(rows).toEqual([
-      " ✓ Todo",
-      " │ ✓ scope the review",
-      " │ ✓ run the checks",
-      " │ ⨯ optional pass",
-      " └ Done",
+      "  ✓ Todo",
+      "  │ ✓ scope the review",
+      "  │ ✓ run the checks",
+      "  │ ⨯ optional pass",
+      "  └ Done",
     ]);
   });
 });
@@ -109,12 +109,12 @@ describe("renderTodoPanelRows", () => {
     ]);
 
     expect(rows).toEqual([
-      " ▪ Todo",
-      " │ ✓ theme glyphs",
-      " │ ✓ setup verbiage",
-      " └ ⏺ status line",
-      "   ○ keep blue",
-      "   ○ root menu",
+      "  ▪ Todo",
+      "  │ ✓ theme glyphs",
+      "  │ ✓ setup verbiage",
+      "  └ ⏺ status line",
+      "    ○ keep blue",
+      "    ○ root menu",
     ]);
   });
 
@@ -129,8 +129,8 @@ describe("renderTodoPanelRows", () => {
     );
 
     // Off-beat frame: the header mark stays, the active item's dot blinks.
-    expect(rows[0]).toBe(" ▪ Todo");
-    expect(rows[2]).toBe(" └   b");
+    expect(rows[0]).toBe("  ▪ Todo");
+    expect(rows[2]).toBe("  └   b");
   });
 
   it("shows settled progress instead of the pulse while the prompt is idle", () => {
@@ -143,10 +143,10 @@ describe("renderTodoPanelRows", () => {
       false,
     );
 
-    expect(rows[0]).toBe(" ▪ 2/3 tasks");
-    expect(rows[1]).toBe(" │ ✓ a");
-    expect(rows[2]).toBe(" │ ⨯ b");
-    expect(rows[3]).toBe(" └ ○ c");
+    expect(rows[0]).toBe("  ▪ 2/3 tasks");
+    expect(rows[1]).toBe("  │ ✓ a");
+    expect(rows[2]).toBe("  │ ⨯ b");
+    expect(rows[3]).toBe("  └ ○ c");
   });
 
   it("clips rows to the panel width", () => {
