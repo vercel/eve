@@ -9,7 +9,6 @@
 import type { Client } from "#client/index.js";
 import {
   isCurrentTurnBoundaryEvent,
-  type ActionPreparingStreamEvent,
   type ActionResultStreamEvent,
   type HandleMessageStreamEvent,
   type SubagentCalledStreamEvent,
@@ -412,20 +411,6 @@ export class SubagentPump {
         // as a placeholder ghost in the section.
         this.#sweepPreparingTools(callId, run);
         break;
-      case "action.preparing": {
-        // The child model committed to a call whose input is still
-        // streaming; show the placeholder row until `actions.requested`
-        // (or `input.requested`) delivers the full input.
-        finalizeCurrent();
-        const data = (event as ActionPreparingStreamEvent).data;
-        this.#registerChildTool(callId, run, {
-          childCallId: data.callId,
-          toolName: data.toolName,
-          input: undefined,
-          status: "preparing",
-        });
-        break;
-      }
       case "actions.requested": {
         // Close any pending text section before the tool call so the
         // tool box renders below it — and the next post-tool message

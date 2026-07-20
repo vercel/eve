@@ -1,6 +1,5 @@
 import {
   type ActionResultStreamEvent,
-  type ActionPreparingStreamEvent,
   type ActionsRequestedStreamEvent,
   type AgentInfoResult,
   type AuthorizationCompletedStreamEvent,
@@ -1693,21 +1692,6 @@ async function* eveEventsToTUIStream(
         state.completed = true;
         state.completedEpoch = stepEpoch;
         yield { type: "reasoning-complete", id };
-        break;
-      }
-
-      case "action.preparing": {
-        // Announces a call whose input is still streaming from the model.
-        // Deliberately not added to `knownToolCalls`: the later tool-call
-        // event with the full input must still flow through and upgrade the
-        // placeholder block in place.
-        const data = (event as ActionPreparingStreamEvent).data;
-        if (knownToolCalls.has(data.callId)) break;
-        yield {
-          type: "tool-call-preparing",
-          toolCallId: data.callId,
-          toolName: data.toolName,
-        };
         break;
       }
 
