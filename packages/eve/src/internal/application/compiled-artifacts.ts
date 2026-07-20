@@ -263,33 +263,39 @@ interface WorkflowWorldWiring {
  */
 function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
   if (packageName === "@workflow/world-local") {
-    const dataDirectoryResolverImportSpecifier = resolvePackageSourceFilePath(
-      "src/internal/workflow/local-world-data-directory.ts",
+    const dataDirectoryImportSpecifier = stringifyEsmImportSpecifier(
+      resolvePackageSourceFilePath("src/internal/workflow/local-world-data-directory.ts"),
     );
+    const moduleImportSpecifier = resolvePackageCompiledFilePath(
+      `src/compiled/${packageName}/index.js`,
+    );
+    const importLines = `
+import { resolveLocalWorkflowWorldDataDirectory } from ${dataDirectoryImportSpecifier};`.trimStart();
+    const createWorldSource = `
+const workflowWorld = await workflowWorldModule.createWorld({
+  dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
+});`.trimStart();
     return {
-      moduleImportSpecifier: resolvePackageCompiledFilePath(`src/compiled/${packageName}/index.js`),
-      extraImportLines: [
-        `import { resolveLocalWorkflowWorldDataDirectory } from ${stringifyEsmImportSpecifier(dataDirectoryResolverImportSpecifier)};`,
-      ],
+      moduleImportSpecifier,
+      extraImportLines: importLines.split("\n"),
       runtimeImports: "getWorld, setWorld",
-      createWorldSource: [
-        "const workflowWorld = await workflowWorldModule.createWorld({",
-        "  dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),",
-        "});",
-      ].join("\n"),
+      createWorldSource,
     };
   }
 
   if (packageName === "@workflow/world-vercel") {
+    const moduleImportSpecifier = resolvePackageCompiledFilePath(
+      `src/compiled/${packageName}/index.js`,
+    );
+    const createWorldSource = `
+const workflowWorld = await workflowWorldModule.createWorld({
+  headers: { "User-Agent": ${JSON.stringify(buildPackageUserAgent())} },
+});`.trimStart();
     return {
-      moduleImportSpecifier: resolvePackageCompiledFilePath(`src/compiled/${packageName}/index.js`),
+      moduleImportSpecifier,
       extraImportLines: [],
       runtimeImports: "getWorld, setWorld",
-      createWorldSource: [
-        "const workflowWorld = await workflowWorldModule.createWorld({",
-        `  headers: { "User-Agent": ${JSON.stringify(buildPackageUserAgent())} },`,
-        "});",
-      ].join("\n"),
+      createWorldSource,
     };
   }
 
