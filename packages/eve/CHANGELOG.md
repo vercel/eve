@@ -1,5 +1,12 @@
 # eve
 
+## 0.25.2
+
+### Patch Changes
+
+- a4c48a9: The integrations catalog gains 4 Chat SDK adapter channels for surfaces without a first-class eve channel (Google Chat, WhatsApp, X, and Messenger), each with a `chatSdkChannel` quick start. The `eve channels add` picker is unchanged.
+- d9c49fc: Tool schemas that cannot be rehydrated into local validators no longer fail the turn. Serialized JSON Schemas first retry rehydration as JSON Schema 2020-12 (so MCP `$defs` references validate correctly), and schemas outside the supported conversion subset (such as inline JSON Pointer `$ref`s) are now advertised to the model unchanged with validation left to the tool's own executor — OpenAPI operations with such schemas are kept instead of omitted.
+
 ## 0.25.1
 
 ### Patch Changes

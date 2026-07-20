@@ -60,6 +60,8 @@ export interface Integration {
   tagline: string;
   /** Brand logo key from `lib/integrations/logos`. */
   logo: LogoKey;
+  /** Optional pill (e.g. "Chat SDK") shown next to the type label. */
+  badge?: string;
   /** Canonical reference doc for deeper details. */
   docsHref: string;
   /** Searchable keywords beyond the name. */
@@ -80,6 +82,8 @@ interface Presentation {
   logo: LogoKey;
   docsHref: string;
   keywords?: string[];
+  /** Optional gallery pill (e.g. "Chat SDK") shown next to the type label. */
+  badge?: string;
 }
 
 /** Channel overlay: presentation plus hand-authored setup markdown. */
@@ -206,24 +210,29 @@ export default telegramChannel({
   twilio: {
     logo: "twilio",
     docsHref: "/docs/channels/twilio",
-    keywords: ["sms", "whatsapp", "messaging", "phone"],
+    keywords: ["sms", "voice", "calls", "phone", "transcription"],
     install: `Install the framework:
 
 \`\`\`bash
 npm install eve@latest
 \`\`\``,
-    quickStart: `Create \`agent/channels/twilio.ts\`:
+    quickStart: `Create \`agent/channels/twilio.ts\`. \`allowFrom\` is required and gates who can reach the inbound hooks:
 
 \`\`\`ts
 // agent/channels/twilio.ts
 import { twilioChannel } from "eve/channels/twilio";
 
 export default twilioChannel({
-  accountSid: () => process.env.TWILIO_ACCOUNT_SID!,
-  authToken: () => process.env.TWILIO_AUTH_TOKEN!,
+  allowFrom: "+15551234567",
+  messaging: { from: "+15557654321" },
 });
+\`\`\`
+
+\`\`\`bash
+TWILIO_ACCOUNT_SID=AC...   # required for default outbound SMS
+TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
 \`\`\``,
-    configure: `In the Twilio console, point your messaging service or phone number webhook at eve's route (\`/eve/v1/twilio\`). Provide the account SID and auth token via environment variables. See the [Twilio channel docs](/docs/channels/twilio) for SMS vs. WhatsApp specifics.`,
+    configure: `In the Twilio console, point your number's Messaging webhook at \`/eve/v1/twilio/messages\` and its Voice webhook at \`/eve/v1/twilio/voice\`. Inbound calls are answered with speech gathering, and the transcript feeds the same session SMS uses. See the [Twilio channel docs](/docs/channels/twilio) for dispatch, streaming, and voice specifics.`,
   },
   github: {
     logo: "github",
@@ -298,6 +307,170 @@ export default eveChannel();
 
 Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client.`,
     configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed. See the [eve channel docs](/docs/channels/eve) and the [Frontend guide](/docs/guides/frontend/overview).`,
+  },
+  "chat-sdk-gchat": {
+    logo: "googlechat",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Chat SDK",
+    keywords: ["chat sdk", "google chat", "spaces", "bot"],
+    install: `Install eve, the Chat SDK core (\`chat\`), the Google Chat adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @chat-adapter/gchat @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is fine for local development; use a durable state adapter (Redis, PostgreSQL) in production so thread subscriptions survive restarts.`,
+    quickStart: `Create \`agent/channels/gchat.ts\`. Register Chat SDK handlers on \`bot\`, call \`send\` to hand each turn to eve, and export the channel:
+
+\`\`\`ts
+// agent/channels/gchat.ts
+import { createGoogleChatAdapter } from "@chat-adapter/gchat";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: { gchat: createGoogleChatAdapter() },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+Credentials come from the \`createGoogleChatAdapter\` config or the adapter's environment variables; see the [Google Chat adapter docs](https://chat-sdk.dev/adapters/official/gchat).`,
+    configure: `The adapter mounts its webhook at \`/eve/v1/gchat\`. Point your Google Chat app's HTTP endpoint at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+  },
+  "chat-sdk-whatsapp": {
+    logo: "whatsapp",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Chat SDK",
+    keywords: ["chat sdk", "whatsapp", "business cloud", "messaging"],
+    install: `Install eve, the Chat SDK core (\`chat\`), the WhatsApp adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @chat-adapter/whatsapp @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is fine for local development; use a durable state adapter (Redis, PostgreSQL) in production so thread subscriptions survive restarts.`,
+    quickStart: `Create \`agent/channels/whatsapp.ts\`. Register Chat SDK handlers on \`bot\`, call \`send\` to hand each turn to eve, and export the channel:
+
+\`\`\`ts
+// agent/channels/whatsapp.ts
+import { createWhatsAppAdapter } from "@chat-adapter/whatsapp";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: { whatsapp: createWhatsAppAdapter() },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+Credentials come from the \`createWhatsAppAdapter\` config or the adapter's environment variables; see the [WhatsApp adapter docs](https://chat-sdk.dev/adapters/official/whatsapp).`,
+    configure: `The adapter mounts its webhook at \`/eve/v1/whatsapp\`. Point your WhatsApp Business Cloud webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+  },
+  "chat-sdk-x": {
+    logo: "x",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Chat SDK",
+    keywords: ["chat sdk", "x", "twitter", "mentions", "dms"],
+    install: `Install eve, the Chat SDK core (\`chat\`), the X adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @chat-adapter/x @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is fine for local development; use a durable state adapter (Redis, PostgreSQL) in production so thread subscriptions survive restarts.`,
+    quickStart: `Create \`agent/channels/x.ts\`. Register Chat SDK handlers on \`bot\`, call \`send\` to hand each turn to eve, and export the channel:
+
+\`\`\`ts
+// agent/channels/x.ts
+import { createXAdapter } from "@chat-adapter/x";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: { x: createXAdapter() },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+Credentials come from the \`createXAdapter\` config or the adapter's environment variables; see the [X adapter docs](https://chat-sdk.dev/adapters/official/x).`,
+    configure: `The adapter mounts its webhook at \`/eve/v1/x\`. Point your X account activity webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+  },
+  "chat-sdk-messenger": {
+    logo: "messenger",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Chat SDK",
+    keywords: ["chat sdk", "messenger", "facebook", "bot"],
+    install: `Install eve, the Chat SDK core (\`chat\`), the Messenger adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @chat-adapter/messenger @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is fine for local development; use a durable state adapter (Redis, PostgreSQL) in production so thread subscriptions survive restarts.`,
+    quickStart: `Create \`agent/channels/messenger.ts\`. Register Chat SDK handlers on \`bot\`, call \`send\` to hand each turn to eve, and export the channel:
+
+\`\`\`ts
+// agent/channels/messenger.ts
+import { createMessengerAdapter } from "@chat-adapter/messenger";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: { messenger: createMessengerAdapter() },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+Credentials come from the \`createMessengerAdapter\` config or the adapter's environment variables; see the [Messenger adapter docs](https://chat-sdk.dev/adapters/official/messenger).`,
+    configure: `The adapter mounts its webhook at \`/eve/v1/messenger\`. Point your Messenger webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
   },
 };
 
@@ -549,6 +722,7 @@ function buildChannel(entry: IntegrationEntry): Integration {
     type: "channel",
     tagline: entry.tagline,
     logo: presentation.logo,
+    badge: presentation.badge,
     docsHref: presentation.docsHref,
     keywords: presentation.keywords,
     install: presentation.install,

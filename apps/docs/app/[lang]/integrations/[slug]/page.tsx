@@ -91,6 +91,11 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
             <span className="rounded-full border px-2.5 py-0.5 text-gray-900 text-xs">
               {typeLabel[integration.type]}
             </span>
+            {integration.badge ? (
+              <span className="rounded-full bg-teal-100 px-2 py-0.5 font-medium text-teal-900 text-xs">
+                {integration.badge}
+              </span>
+            ) : null}
             {integration.protocols?.map((protocol) => (
               <span
                 className={`rounded-full px-2 py-0.5 font-medium text-xs ${protocolBadgeClassName[protocol]}`}

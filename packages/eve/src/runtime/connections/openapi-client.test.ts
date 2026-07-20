@@ -667,7 +667,7 @@ describe("OpenApiConnectionClient", () => {
     expect(props.mix?.type).toEqual(["string", "null"]);
   });
 
-  it("omits only operations whose input schemas cannot be rehydrated", async () => {
+  it("keeps operations whose input schemas cannot be locally validated", async () => {
     const spec: Record<string, unknown> = {
       openapi: "3.0.3",
       info: { title: "T", version: "1" },
@@ -691,10 +691,14 @@ describe("OpenApiConnectionClient", () => {
     };
     const client = new OpenApiConnectionClient(makeConnection({ spec }));
 
-    await expect(client.getToolMetadata()).resolves.toMatchObject([{ name: "getValid" }]);
+    // Schemas outside the local validation subset degrade to passthrough
+    // validation instead of dropping the operation — the API validates.
+    await expect(client.getToolMetadata()).resolves.toMatchObject([
+      { name: "getValid" },
+      { name: "getInvalid" },
+    ]);
     await expect(client.getTools()).resolves.toHaveProperty("getValid");
-    await expect(client.getTools()).resolves.not.toHaveProperty("getInvalid");
-    await expect(client.executeTool("getInvalid", {})).rejects.toThrow(/not found/);
+    await expect(client.getTools()).resolves.toHaveProperty("getInvalid");
   });
 
   it("parses a YAML spec fetched from a URL", async () => {
