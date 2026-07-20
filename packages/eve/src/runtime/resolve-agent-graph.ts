@@ -135,7 +135,10 @@ async function resolveRuntimeAgentNode(
     nodeId: input.nodeId,
   });
   const hasConnections = agent.connections.length > 0;
-  const frameworkTools = getFrameworkToolDefinitions({ hasConnections });
+  const frameworkTools = getFrameworkToolDefinitions({
+    authoredSkills: agent.skills,
+    hasConnections,
+  });
   const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
   const allFrameworkToolNames = getAllFrameworkToolNames();
 

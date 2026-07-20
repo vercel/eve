@@ -1,3 +1,5 @@
+import { FALLBACK_SKILL_ROOT, MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
+
 export interface AvailableSkillDescription {
   readonly description: string;
   readonly name: string;
@@ -12,9 +14,9 @@ interface FormatAvailableSkillsSectionOptions {
  *
  * All skills are always listed regardless of activation state. Active skill
  * instructions are never injected into the system prompt — the model already
- * has them from the `load_skill` tool result. The caller may pass the active
- * sandbox skill root so the model sees only the location that eve selected
- * for this run.
+ * has them from the `load_skill` tool result. Without an active sandbox root,
+ * the formatter uses the canonical symbolic skill root so supporting files
+ * remain discoverable without provisioning a sandbox.
  *
  * Authored skills call this at graph resolution time so the section is
  * part of the turn agent's static instructions. Dynamic skills
@@ -44,11 +46,11 @@ export function formatAvailableSkillsSection(
 }
 
 function formatSkillLocationLine(options: FormatAvailableSkillsSectionOptions): string {
-  if (options.skillRoot === undefined) {
-    return "Skill files are available after load_skill resolves the active sandbox skill location.";
+  if (options.skillRoot !== undefined) {
+    return `Skill files live under \`${options.skillRoot}/<skill>/\`.`;
   }
 
-  return `Skill files live under \`${options.skillRoot}/<skill>/\`.`;
+  return `Skill files live under \`${MODEL_SKILL_ROOT}/<skill>/\`, with \`${FALLBACK_SKILL_ROOT}/<skill>/\` as the fallback when \`$HOME\` is unavailable.`;
 }
 
 function formatAvailableSkillLine(input: {
@@ -57,9 +59,6 @@ function formatAvailableSkillLine(input: {
 }): string {
   const prefix = `- ${input.skill.name}: ${input.skill.description}`;
 
-  if (input.skillRoot === undefined) {
-    return prefix;
-  }
-
-  return `${prefix} (path: ${input.skillRoot}/${input.skill.name}/SKILL.md)`;
+  const skillRoot = input.skillRoot ?? MODEL_SKILL_ROOT;
+  return `${prefix} (path: ${skillRoot}/${input.skill.name}/SKILL.md)`;
 }

@@ -9,7 +9,7 @@ A skill is a model-loadable procedure that follows the `SKILL.md` convention. It
 
 eve scans the files under `agent/skills/` and exposes each one's description to the model alongside a framework-owned `load_skill` tool. When a request matches a skill's description (or you name the skill outright), the model calls `load_skill`, and eve appends that skill's markdown to the active turn's context.
 
-At runtime, skill package files are placed under `$HOME/.agents/skills/<skill>/`. If `$HOME` is unavailable in a sandbox, eve falls back to `/workspace/skills/<skill>/`. `load_skill` reads `SKILL.md` automatically; any sibling references inside that file, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
+Static skills do not require a sandbox: `load_skill` returns their instructions directly from the compiled agent. Dynamic skills and access to supporting package files require a sandbox. Builds may also prewarm sandbox templates that contain static package files. Supporting files are available under `$HOME/.agents/skills/<skill>/`, with `/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable. Sibling references inside `SKILL.md`, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
 
 The description is a routing hint, not a label. Write it as the task that should trigger activation:
 

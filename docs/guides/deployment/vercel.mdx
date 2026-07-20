@@ -1,0 +1,90 @@
+---
+title: "Deploy to Vercel"
+description: "Deploy an eve agent with Vercel Workflow, Sandbox, Cron, and project credentials."
+---
+
+Deploy eve to Vercel when you want the framework’s managed build and runtime integrations. Vercel runs the web service, workflows, sandboxes, schedules, and deployment observability.
+
+## Prepare the Vercel project
+
+Link the agent directory to a Vercel project:
+
+```bash
+eve link
+```
+
+The command links an existing project or creates one, then pulls its environment variables. In continuous integration (CI) environments, use the non-interactive Vercel command instead:
+
+```bash
+vercel link --project your_project_name --yes --non-interactive
+```
+
+## Configure credentials and auth
+
+A string model ID routes requests through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). The deployment authenticates through project OpenID Connect (OIDC), so you don’t need a provider API key for that path.
+
+Add credentials for direct model providers, tools, and connections to the Vercel project environment. Add any signing keys or passwords required by your [route authentication policy](../auth-and-route-protection). Replace `placeholderAuth()` before a browser sends a production request.
+
+## Select the sandbox backend
+
+Leave the sandbox `backend` unset to use `defaultBackend()`. On Vercel, it selects Vercel Sandbox. You can also select the backend explicitly:
+
+```typescript
+import { defineSandbox } from "eve/sandbox";
+import { vercel } from "eve/sandbox/vercel";
+
+export default defineSandbox({
+  backend: vercel(),
+});
+```
+
+See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle hooks.
+
+<Callout type="info" title="Sandbox prewarming">
+  During a Vercel build, eve automatically creates or reuses a sandbox template when your sandbox
+  has `bootstrap()` or seed files. The build needs permission to create Vercel Sandbox templates,
+  and a prewarm failure stops the deployment. See the [sandbox lifecycle](../../sandbox#lifecycle)
+  for template and session setup.
+</Callout>
+
+## Deploy the agent
+
+Deploy the linked project to production:
+
+```bash
+eve deploy
+```
+
+`eve deploy` installs dependencies, runs `vercel deploy --prod`, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
+
+Vercel uses the generated output to configure these services:
+
+- **Web runtime**: serves health, session, stream, channel, callback, and schedule routes
+- **Vercel Workflow**: persists and resumes durable runs
+- **Vercel Cron**: invokes authored schedules
+- **Vercel Sandbox**: runs sandbox sessions selected by `defaultBackend()`
+
+## Verify the deployment
+
+Check the health route and connect the development TUI:
+
+```bash
+curl https://your_agent.vercel.app/eve/v1/health
+eve dev https://your_agent.vercel.app
+```
+
+Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deployment uses Deployment Protection.
+
+## Inspect agent runs
+
+Vercel detects eve and can add an **Agent Runs** tab under the project’s **Observability** view. Use it to browse sessions and inspect each conversation trace.
+
+The Agent Runs tab requires enablement for your Vercel team. Contact your Vercel representative if the tab doesn’t appear. For third-party tracing backends, configure [OpenTelemetry instrumentation](../instrumentation).
+
+## Continue configuring production
+
+Use these guides to secure and observe the deployed agent:
+
+- [Auth and route protection](../auth-and-route-protection): configure who can call the deployed agent
+- [Observability](../instrumentation): export traces and diagnose runtime failures
+- [Sandbox](../../sandbox): configure resources, isolation, and network access
