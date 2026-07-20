@@ -1,3 +1,4 @@
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -37,14 +38,20 @@ describe("resolveProviderHeaders", () => {
   });
 
   it("returns the eve user-agent for gateway model instances", () => {
-    const model = { provider: "gateway.language-model", modelId: "anthropic/claude-sonnet-4-5" };
-    expect(resolveProviderHeaders(model as never)).toEqual({
+    const model = new MockLanguageModelV3({
+      provider: "gateway.language-model",
+      modelId: "anthropic/claude-sonnet-4-5",
+    });
+    expect(resolveProviderHeaders(model)).toEqual({
       "user-agent": expect.stringMatching(/^eve\/.+/),
     });
   });
 
   it("returns undefined for direct-provider model instances", () => {
-    const model = { provider: "anthropic.messages", modelId: "claude-sonnet-4-5" };
-    expect(resolveProviderHeaders(model as never)).toBeUndefined();
+    const model = new MockLanguageModelV3({
+      provider: "anthropic.messages",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(resolveProviderHeaders(model)).toBeUndefined();
   });
 });
