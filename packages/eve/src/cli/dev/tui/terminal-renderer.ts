@@ -1423,6 +1423,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * where the server-side context was cut.
    */
   renderSessionBoundary(): void {
+    // The dying turn's stats coda closes before the boundary — it belongs
+    // to the session that ended, not the fresh one.
+    this.#commitTurnStats();
+    // Conversation state that lived in the old context dies with it: the
+    // pinned todo list is the discarded session's plan (its tasks were not
+    // finished — dismiss, don't commit), and stale write-diff bases would
+    // render confidently wrong diffs against a fresh session's sandbox.
+    this.#todoItems = undefined;
+    this.#todoCommittedSignature = undefined;
+    this.#fileContents.clear();
+
     const c = this.#theme.colors;
     const g = this.#theme.glyph;
     const seg = g.dash.repeat(2);

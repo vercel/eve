@@ -1203,6 +1203,52 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
   });
 
+  it("closes the dying turn's coda and dismisses the todo panel at the boundary", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("hey agent");
+    input.enter();
+    expect(await prompt).toBe("hey agent");
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "step-start" },
+        {
+          type: "tool-call",
+          toolCallId: "t1",
+          toolName: "todo",
+          input: {
+            todos: [
+              { content: "first task", status: "in_progress" },
+              { content: "second task", status: "pending" },
+            ],
+          },
+        },
+        { type: "assistant-delta", id: "m1", delta: "working" },
+        { type: "assistant-complete", id: "m1" },
+        { type: "step-finish", usage: { inputTokens: 25_000, outputTokens: 40 } },
+        { type: "finish", usage: { inputTokens: 25_000, outputTokens: 40 } },
+      ]),
+      { continueSession: true },
+    );
+    expect(screen.snapshot()).toContain("first task");
+
+    renderer.renderSessionBoundary();
+    const snapshot = screen.snapshot();
+    // The dead turn's stats close before the boundary, not after it…
+    expect(snapshot.indexOf("└ Done in")).toBeGreaterThan(-1);
+    expect(snapshot.indexOf("└ Done in")).toBeLessThan(snapshot.indexOf("└── Session ended."));
+    // …and the discarded session's plan dismisses instead of lingering.
+    expect(snapshot).not.toContain("first task");
+
+    // Control returning to the prompt must not add a second coda.
+    const second = renderer.readPrompt();
+    expect(countOccurrences(screen.snapshot(), "└ Done in")).toBe(1);
+    input.ctrlC();
+    await expect(second).rejects.toThrow();
+    renderer.shutdown();
+  });
+
   it("never submits an empty or whitespace-only prompt", async () => {
     const { input, renderer } = makeRenderer();
 
