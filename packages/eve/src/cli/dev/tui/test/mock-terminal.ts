@@ -132,12 +132,16 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
    * readiness — the bar's absence is the discriminator.
    */
   async waitForIdlePrompt(timeoutMs = 1000) {
-    // The live turn bar: `▪ Working… <duration> …` at column 0 (pulse-off
-    // frames blank the mark; the label may be mid-typewriter but always
-    // starts at `W`, and the duration follows it). The label+duration pair
-    // distinguishes it from the `└ Done in …` coda, prompt rows, ordinary
-    // prose, and the todo panel's rail rows.
-    const liveTurnBar = /^[▪* ] W[orking.…]* \d/mu;
+    // The live turn bar: `▪ Working for <duration>…` at column 0 (pulse-off
+    // frames blank the mark; the label may be mid-typewriter but is always
+    // an exact prefix of "Working for", and the duration follows it). The
+    // exact-prefix alternation plus the digit keeps it from matching the
+    // `└ Done in …` coda, prompt rows, ordinary prose, and the todo panel.
+    const barLabel = "Working for";
+    const labelPrefixes = Array.from({ length: barLabel.length }, (_, index) =>
+      barLabel.slice(0, index + 1),
+    );
+    const liveTurnBar = new RegExp(`^[▪* ] (?:${labelPrefixes.join("|")}) \\d`, "mu");
     // Unicode glyphs only: the ASCII prompt mark (`>`) is ambiguous with the
     // ASCII brand mark, and every TUI smoke script pins EVE_TUI_UNICODE=1.
     const idle = () => {

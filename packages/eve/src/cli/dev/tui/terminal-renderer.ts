@@ -3642,7 +3642,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * The live turn bar: `▪ Working… 3min 24s ── ↑ 32.4K ↓ 682`. Duration and
+   * The live turn bar: `▪ Working for 3min 24s… ── ↑ 32.4K ↓ 682`. Duration and
    * token flow tick live on the shared paint beat; the `└`-cornered coda
    * is this bar's settled form.
    */
@@ -3656,14 +3656,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const elapsedMs = Date.now() - startedAtMs;
     // Anchored to the turn clock, the label's reveal plays once per turn —
     // a question answer's continuation pass resumes fully typed.
-    const label = typewriterText(
-      `Working${this.#theme.glyph.ellipsis}`,
-      elapsedMs,
-      turnBarTypewriterMs,
-    );
+    const label = typewriterText("Working for", elapsedMs, turnBarTypewriterMs);
+    const body = `${label} ${formatTurnDuration(elapsedMs)}${this.#theme.glyph.ellipsis}${this.#turnFlowSuffix()}`;
     // Column 0: the bar shares the gutter with the conversation markers and
     // its own settled `└` coda.
-    return clip(`${c.yellow(pulse)} ${c.dim(`${label} ${this.#turnStatsBody(elapsedMs)}`)}`, width);
+    return clip(`${c.yellow(pulse)} ${c.dim(body)}`, width);
   }
 
   /**
@@ -3673,13 +3670,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * typewriter `Working` label followed by this duration.
    */
   #turnStatsBody(elapsedMs: number): string {
-    const seg = this.#theme.glyph.dash.repeat(2);
-    const parts = [formatTurnDuration(elapsedMs)];
+    return `${formatTurnDuration(elapsedMs)}${this.#turnFlowSuffix()}`;
+  }
+
+  /** ` ── ↑ 32.4K ↓ 682` once the turn has moved a token; empty before. */
+  #turnFlowSuffix(): string {
     const { inputTokens, outputTokens } = this.#turnUsage;
-    if (inputTokens > 0 || outputTokens > 0) {
-      parts.push(seg, formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph));
-    }
-    return parts.join(" ");
+    if (inputTokens === 0 && outputTokens === 0) return "";
+    const seg = this.#theme.glyph.dash.repeat(2);
+    return ` ${seg} ${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)}`;
   }
 
   /**
