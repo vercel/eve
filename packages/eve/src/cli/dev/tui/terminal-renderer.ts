@@ -151,6 +151,7 @@ import {
   PROGRESS_PULSE_ASCII_GLYPH,
   PROGRESS_PULSE_GLYPH,
 } from "#cli/ui/progress-pulse.js";
+import { eveVersionTag } from "#cli/banner.js";
 import { readGatewayServiceTier } from "#shared/gateway-service-tier.js";
 import {
   formatAssistantResponseStats,
@@ -2461,7 +2462,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   shutdown(): void {
+    const wasInteractive = this.#isInteractive;
     this.#stop();
+    // The parting line: the boot banner's dim counterpart, written after the
+    // terminal is restored so it lands as the session's last scrollback row.
+    if (wasInteractive) {
+      this.#output.write(`${this.#theme.colors.dim(eveVersionTag())}\n`);
+    }
   }
 
   // ---------------------------------------------------------------------------
