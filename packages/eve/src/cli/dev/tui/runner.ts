@@ -124,6 +124,7 @@ export type AgentTUIStreamEvent =
   | { type: "finish"; usage?: AgentTUIStreamUsage };
 
 export type AgentTUITurnState = {
+  aborted?: boolean;
   boundaryEvent?: "session.completed" | "session.failed" | "session.waiting";
   pendingApprovals: AgentTUIToolApprovalRequest[];
   pendingQuestions: InputRequest[];
@@ -829,7 +830,16 @@ export class EveTUIRunner {
           }
 
           if (result.turnState && result.turnState.boundaryEvent === undefined) {
-            this.#sessionFailed = true;
+            if (result.turnState.aborted) {
+              this.#sessionFailed = true;
+            } else {
+              const strandedSessionId = this.#session.state.sessionId;
+              this.#renderer.renderNotice?.(
+                strandedSessionId
+                  ? `Lost the event stream — the turn may still be running on the server (session ${strandedSessionId}). Your next message resumes this session; use /cancel to stop the turn.`
+                  : "Lost the connection to the running turn.",
+              );
+            }
           }
           break;
         }
@@ -849,15 +859,17 @@ export class EveTUIRunner {
       pendingInputResponses = undefined;
       prompt = undefined;
 
-      // The active session died terminally this turn (session.failed or a
-      // dead-socket transport error). Replace it with a fresh one so the next
-      // prompt isn't sent into a dead session, but keep the transcript on
-      // screen. Server-side context is gone with the old session.
+      // The session ended terminally this turn (session.failed, a dispatch
+      // failure, or a user interrupt). Replace it with a fresh one so the
+      // next prompt isn't sent into a dead session, but keep the transcript
+      // on screen. Server-side context is gone with the old session.
       if (this.#sessionFailed) {
         this.#sessionFailed = false;
         this.#startNewSession();
         this.#renderer.renderNotice?.(
-          "Session ended — started a new session. Earlier context was cleared.",
+          result.turnState?.aborted
+            ? "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server."
+            : "Session ended — started a new session. Earlier context was cleared.",
         );
       }
     }
@@ -1019,7 +1031,10 @@ export class EveTUIRunner {
   ): AgentTUIStreamResult {
     const turnState = createTurnState();
     return {
-      abort,
+      abort: () => {
+        turnState.aborted = true;
+        abort();
+      },
       events: eveEventsToTUIStream({
         events,
         pendingInputRequests: this.#pendingInputRequests,
@@ -2119,6 +2134,7 @@ async function* errorOnlyTUIStream(input: {
 
 function createTurnState(): AgentTUITurnState {
   return {
+    aborted: false,
     pendingApprovals: [],
     pendingQuestions: [],
     sawSessionFailure: false,

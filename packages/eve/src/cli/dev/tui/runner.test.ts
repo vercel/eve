@@ -665,6 +665,71 @@ describe("EveTUIRunner terminal-failure recovery", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("new session");
   });
+
+  it("preserves the session and posts a notice when the stream ends without a boundary", async () => {
+    const notices: string[] = [];
+    const prompts: Array<string | undefined> = ["run something long", undefined];
+
+    const strandedSession = sessionYielding([{ type: "turn.started", data: {} }]);
+    const client = stubClient();
+    const sessionFactory = vi.spyOn(client, "session");
+
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderNotice: (text) => notices.push(text),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+          }
+        }),
+      },
+      session: strandedSession,
+    });
+
+    await runner.run();
+
+    expect(sessionFactory).not.toHaveBeenCalled();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("Lost");
+    expect(notices[0]).not.toContain("new session");
+  });
+
+  it("starts a fresh session when the user interrupts a turn mid-stream", async () => {
+    const notices: string[] = [];
+    const prompts: Array<string | undefined> = ["run something long", undefined];
+
+    const interruptedSession = sessionYielding([{ type: "turn.started", data: {} }]);
+    const replacementSession = sessionYielding([]);
+    const client = stubClient();
+    const sessionFactory = vi.spyOn(client, "session").mockReturnValue(replacementSession);
+
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderNotice: (text) => notices.push(text),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+            result.abort?.();
+            break;
+          }
+        }),
+      },
+      session: interruptedSession,
+    });
+
+    await runner.run();
+
+    expect(sessionFactory).toHaveBeenCalledTimes(1);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("new session");
+    expect(notices[0]).toContain("may still be running");
+  });
 });
 
 describe("EveTUIRunner delayed dev build errors", () => {

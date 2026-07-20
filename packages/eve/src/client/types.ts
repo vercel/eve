@@ -96,13 +96,6 @@ export interface ClientOptions {
   readonly redirect?: ClientRedirectPolicy;
 
   /**
-   * Maximum number of stream reconnection attempts per message turn.
-   *
-   * @default 3
-   */
-  readonly maxReconnectAttempts?: number;
-
-  /**
    * Keep a session's continuation token after a normal `session.completed`
    * boundary.
    *
