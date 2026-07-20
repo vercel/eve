@@ -53,6 +53,23 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 }
 
 /**
+ * Returns true when a turn message carries no model-visible content — an
+ * empty or whitespace-only string, or an array with no parts.
+ *
+ * Such a message must not be pushed as a user turn. A bare mention (e.g.
+ * `@bot` with no other text) reaches the harness as an empty string; pushing
+ * it produces an empty text block, and when a prompt-cache breakpoint lands on
+ * that block the provider rejects the request with
+ * `cache_control cannot be set for empty text blocks`.
+ */
+export function isBlankUserMessage(message: string | UserContent): boolean {
+  if (typeof message === "string") {
+    return message.trim().length === 0;
+  }
+  return message.length === 0;
+}
+
+/**
  * Extracts the final visible assistant text from model response messages.
  *
  * Prefers text extracted from the last assistant message that contains visible

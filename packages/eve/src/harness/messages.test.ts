@@ -1,6 +1,10 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
-import { coalesceTurnInputs, resolveAssistantStepText } from "#harness/messages.js";
+import {
+  coalesceTurnInputs,
+  isBlankUserMessage,
+  resolveAssistantStepText,
+} from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
 
 function textFilePart(overrides: {
@@ -120,6 +124,36 @@ describe("coalesceTurnInputs", () => {
     const merged = result.message as UserContent;
     expect(merged).toHaveLength(1);
     expect(merged[0]).toBe(attachment);
+  });
+});
+
+describe("isBlankUserMessage", () => {
+  it("treats an empty string as blank", () => {
+    expect(isBlankUserMessage("")).toBe(true);
+  });
+
+  it("treats a whitespace-only string as blank (e.g. a stripped bare mention)", () => {
+    expect(isBlankUserMessage("   \n\t ")).toBe(true);
+  });
+
+  it("treats a non-empty string as content", () => {
+    expect(isBlankUserMessage("hello")).toBe(false);
+  });
+
+  it("treats an empty content array as blank", () => {
+    expect(isBlankUserMessage([])).toBe(true);
+  });
+
+  it("treats an array with parts as content", () => {
+    const message: UserContent = [{ text: "hi", type: "text" }];
+
+    expect(isBlankUserMessage(message)).toBe(false);
+  });
+
+  it("treats an array with only a file part as content", () => {
+    const message: UserContent = [textFilePart({ filename: "notes.txt", payload: "contents" })];
+
+    expect(isBlankUserMessage(message)).toBe(false);
   });
 });
 
