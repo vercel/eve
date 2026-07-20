@@ -122,8 +122,9 @@ describe("renderSelectPrompt", () => {
       state: "active",
     });
 
+    // The description indents to the option label column.
     expect(rendered).toContain(
-      "<inverse><blue> ▶ No </blue></inverse>\n│    <dim>Set up locally and wire yourself</dim>",
+      "<inverse><blue> ▶ No </blue></inverse>\n│     <dim>Set up locally and wire yourself</dim>",
     );
     // The non-highlighted option keeps its description hidden.
     expect(rendered).not.toContain("Fastest path to production");

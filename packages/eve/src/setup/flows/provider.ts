@@ -20,6 +20,21 @@ import { runLinkFlow, type LinkFlowResult } from "./link.js";
 
 export type ProviderConnection = "project" | "own-key" | "external";
 
+/**
+ * How the agent's model is backed right now, as far as the local directory
+ * shows: a linked Vercel project, a gateway credential in an env file, or
+ * nothing detectable. An external provider (own ANTHROPIC_API_KEY etc.)
+ * leaves no marker eve owns, so it reads as `unset`.
+ */
+export type ModelProviderStatus =
+  | { kind: "unset" }
+  | { kind: "gateway-project"; projectName: string; teamName?: string }
+  | {
+      kind: "gateway-key";
+      envKey: typeof AI_GATEWAY_API_KEY_ENV_VAR | "VERCEL_OIDC_TOKEN";
+      envFile: string;
+    };
+
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
 
 export const EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE = "Using another model provider";
@@ -86,14 +101,29 @@ function projectConnectionOption(
 
 function providerOptions(
   authStatus: VercelAuthStatus | undefined,
+  current: ModelProviderStatus | undefined,
 ): SelectOption<ProviderConnection>[] {
+  let project = projectConnectionOption(authStatus);
+  if (current?.kind === "gateway-project") {
+    const where =
+      current.teamName === undefined
+        ? pc.bold(current.projectName)
+        : `${pc.bold(current.projectName)} in team ${pc.bold(current.teamName)}`;
+    project = { ...project, checked: true, hint: `Linked to ${where}` };
+  }
+
+  let ownKey: SelectOption<ProviderConnection> = {
+    value: "own-key",
+    label: `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`,
+    hint: "⎿ type your key",
+  };
+  if (current?.kind === "gateway-key") {
+    ownKey = { ...ownKey, checked: true, hint: `${current.envKey} set in ${current.envFile}` };
+  }
+
   return [
-    projectConnectionOption(authStatus),
-    {
-      value: "own-key",
-      label: `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`,
-      hint: ">  type your key",
-    },
+    project,
+    ownKey,
     {
       value: "external",
       label: "Other providers",
@@ -135,6 +165,8 @@ export async function runProviderFlow(input: {
   prompter: Prompter;
   signal?: AbortSignal;
   picker?: ProviderPicker;
+  /** The detected provider, so the chooser can mark and describe the active row. */
+  currentProvider?: ModelProviderStatus;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;
@@ -147,14 +179,17 @@ export async function runProviderFlow(input: {
   };
 
   let authStatus: VercelAuthStatus | undefined;
-  let initialValue: ProviderConnection = "project";
+  // The cursor opens on the active provider; a Vercel auth blocker still
+  // re-homes it onto the key row below.
+  let initialValue: ProviderConnection =
+    input.currentProvider?.kind === "gateway-key" ? "own-key" : "project";
   let keyChoice: Extract<ProviderPickerChoice, { kind: "inline-key" }>;
 
   try {
     while (true) {
       const choice = await selectProvider({
         picker: input.picker,
-        options: providerOptions(authStatus),
+        options: providerOptions(authStatus, input.currentProvider),
         initialValue,
         validateInlineKey: (key, validationSignal) =>
           deps.validateGatewayApiKey(
@@ -212,8 +247,6 @@ export async function runProviderFlow(input: {
     prompter.log.warning(
       `Couldn't reach the gateway to validate (${validation.message}). Saving the key anyway.`,
     );
-  } else {
-    prompter.log.success(`${pc.green("✓")} ${pc.bold("Valid key")}`);
   }
 
   const location = await writeAiGatewayApiKey({
@@ -224,6 +257,6 @@ export async function runProviderFlow(input: {
   // The env write is the commit point. A concurrent interrupt may mute the
   // remaining UI, but the caller must still refresh model access for the key
   // that is now on disk.
-  prompter.log.success(`Saved ${location.envKey} to ${location.envFile}.`);
+  prompter.log.success(`${location.envKey} set.`);
   return { kind: "done", credential: location.envKey };
 }
