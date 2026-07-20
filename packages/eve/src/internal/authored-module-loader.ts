@@ -1,15 +1,21 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { assertNoWorkflowDirectivePrologue } from "#internal/authored-directive-prologue.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
-import { createFixedNamespaceScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
+import {
+  createExtensionScopePlugin,
+  createFixedNamespaceScopePlugin,
+} from "#internal/bundler/extension-scope-plugin.js";
 import {
   CACHED_CHANNEL_PREFIX,
   RESOLVE_EXTENSIONS,
+  createDistributionPackageBoundaryPlugin,
   createGenerationPackageBoundaryPlugin,
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
@@ -19,8 +25,8 @@ import {
 } from "#internal/authored-package-boundary.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import {
+  buildSingleRolldownChunk,
   buildWithNitroRolldown,
-  getSingleRolldownChunk,
 } from "#internal/bundler/nitro-rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
@@ -175,6 +181,151 @@ export async function bundleAuthoredModuleForGeneration(
   return removeRolldownModuleRegionComments(code);
 }
 
+/** One path-preserving entry in an extension distribution graph. */
+export interface ExtensionDistributionGraphEntry {
+  /** Output path relative to `dist/`, without the `.mjs` extension. */
+  readonly name: string;
+  /** Absolute authored module path. */
+  readonly path: string;
+}
+
+/**
+ * Transforms an extension's authored modules as one code-split graph while
+ * preserving an entry for every agent-shaped source module. Package imports
+ * remain external for the consuming app and source maps are omitted.
+ */
+export async function bundleExtensionDistributionGraph(input: {
+  readonly entries: readonly ExtensionDistributionGraphEntry[];
+  readonly packageRoot: string;
+  readonly runtimeDependencies: readonly string[];
+}): Promise<ReadonlyMap<string, string>> {
+  const plugins = [
+    createAuthoredDirectiveGuardPlugin(),
+    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
+    createAuthoredAssetImportPlugin(),
+    createAuthoredPackageTsConfigPathsPlugin({
+      appPackageRoot: input.packageRoot,
+      extensions: RESOLVE_EXTENSIONS,
+    }),
+    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+    createDistributionPackageBoundaryPlugin({
+      packageRoot: input.packageRoot,
+      runtimeDependencies: input.runtimeDependencies,
+    }),
+  ];
+
+  try {
+    const result = await buildWithNitroRolldown({
+      cwd: input.packageRoot,
+      input: Object.fromEntries(input.entries.map((entry) => [entry.name, entry.path])),
+      platform: "node",
+      plugins,
+      resolve: {
+        extensions: [...RESOLVE_EXTENSIONS],
+      },
+      tsconfig: resolveAuthoredTsConfigPath(input.packageRoot),
+      write: false,
+      output: {
+        chunkFileNames: "_chunks/[name]-[hash].mjs",
+        codeSplitting: true,
+        comments: false,
+        entryFileNames: "[name].mjs",
+        format: "esm",
+        sourcemap: false,
+      },
+    });
+
+    const files = new Map<string, string>();
+    for (const item of result.output) {
+      if (item.type === "chunk") {
+        files.set(item.fileName, removeRolldownModuleRegionComments(item.code));
+      }
+    }
+    return files;
+  } catch (error) {
+    throw createAuthoredModuleBundleError(input.packageRoot, error);
+  }
+}
+
+/**
+ * Bundles every runtime-authored module in one immutable generation graph.
+ * Shared dependencies are parsed and emitted once instead of once per authored
+ * entry.
+ */
+export async function bundleAuthoredModuleMapForGeneration(input: {
+  readonly manifest: CompiledAgentManifest;
+  readonly moduleMapPath: string;
+}): Promise<string> {
+  const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
+  const externalDependencies = normalizeExternalDependencies(
+    [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
+      (node) => node.config.build?.externalDependencies ?? [],
+    ),
+  );
+  const moduleMapSource = createCompiledModuleMapSource({
+    manifest: input.manifest,
+    moduleMapPath: input.moduleMapPath,
+  });
+  const extensionScopePlugin = createExtensionScopePlugin(
+    input.manifest.extensionMounts.map((mount) => ({
+      packageNamespace: mount.packageNamespace,
+      sourceRoot: mount.sourceRoot,
+    })),
+  );
+  const plugins = [
+    createVirtualGenerationModuleMapPlugin({
+      id: input.moduleMapPath,
+      source: moduleMapSource,
+    }),
+    createAuthoredDirectiveGuardPlugin(),
+    extensionScopePlugin,
+    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
+    createAuthoredAssetImportPlugin(),
+    createAuthoredPackageTsConfigPathsPlugin({
+      appPackageRoot: packageRoot,
+      extensions: RESOLVE_EXTENSIONS,
+    }),
+    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+    createGenerationPackageBoundaryPlugin({ externalDependencies, packageRoot }),
+  ].filter((plugin) => plugin !== null);
+
+  try {
+    const chunk = await buildSingleRolldownChunk("authored module map", {
+      cwd: packageRoot,
+      input: input.moduleMapPath,
+      platform: "node",
+      plugins,
+      resolve: {
+        extensions: [...RESOLVE_EXTENSIONS],
+      },
+      tsconfig: resolveAuthoredTsConfigPath(packageRoot),
+      output: {
+        comments: false,
+        format: "esm",
+        sourcemap: false,
+      },
+    });
+    return removeRolldownModuleRegionComments(chunk.code);
+  } catch (error) {
+    throw createAuthoredModuleBundleError(input.moduleMapPath, error);
+  }
+}
+
+function createVirtualGenerationModuleMapPlugin(input: {
+  readonly id: string;
+  readonly source: string;
+}): Record<string, unknown> {
+  return {
+    name: "eve-generation-module-map",
+    resolveId(id: string) {
+      return id === input.id ? id : undefined;
+    },
+    load(id: string) {
+      return id === input.id ? { code: input.source, moduleType: "js" as const } : undefined;
+    },
+  };
+}
+
 async function buildAuthoredModuleBundle(
   modulePath: string,
   options: AuthoredModuleLoadOptions,
@@ -252,7 +403,7 @@ async function buildAuthoredModuleBundle(
   ].filter((plugin) => plugin !== null);
 
   try {
-    const result = await buildWithNitroRolldown({
+    const chunk = await buildSingleRolldownChunk(`authored module for "${modulePath}"`, {
       cwd: packageRoot,
       input: modulePath,
       platform: "node",
@@ -261,15 +412,13 @@ async function buildAuthoredModuleBundle(
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: tsconfigPath,
-      write: false,
       output: {
-        codeSplitting: false,
         comments: false,
         format: "esm",
         sourcemap: configuration.sourcemap,
       },
     });
-    return getSingleRolldownChunk(result, `authored module for "${modulePath}"`).code;
+    return chunk.code;
   } catch (error) {
     throw createAuthoredModuleBundleError(modulePath, error);
   }
@@ -348,9 +497,26 @@ function createAuthoredRelativeExtensionResolverPlugin(input: {
         return undefined;
       }
 
-      return { id: resolvedPath };
+      // Standard resolvers realpath resolved modules, so a module reached
+      // through a node_modules symlink resolves its own dependencies from its
+      // real location — with pnpm's store layout they are store siblings that
+      // only exist there. Path imports probed here (the compiled module map
+      // reaches store-installed extension source through the consumer's
+      // node_modules symlink) must get the same treatment, and it keeps one
+      // canonical module identity per real file.
+      return {
+        id: isNodeModulesPath(resolvedPath) ? toRealModulePath(resolvedPath) : resolvedPath,
+      };
     },
   };
+}
+
+function toRealModulePath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 function createInFlightModuleLoadKey(

@@ -87,6 +87,11 @@
  *             engines `eval()` a `---js` frontmatter fence, so every call must
  *             route through `parseFrontmatter`, which is safe by default. A
  *             direct import lets untrusted input reach an evaluating engine.
+ *   rule 36 — Extension capability epochs have immutable hashed API metadata
+ *             and explicit support history. The current hash must match the
+ *             authoring roots, every historical epoch must be supported or
+ *             dropped, every retained epoch needs a compiling fixture, and
+ *             every public authoring value must belong to a capability.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -96,6 +101,7 @@ import { readFile, readdir, lstat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
+import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../..");
 const BASELINE_PATH = join(REPO_ROOT, "scripts/guard-invariants-baseline.json");
@@ -1148,6 +1154,11 @@ async function main() {
 
   // Rule 35
   violations.push(...state.rule35);
+
+  // Rule 36
+  for (const issue of await checkExtensionCapabilityContracts()) {
+    violations.push({ rule: 36, ...issue });
+  }
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

@@ -1,8 +1,46 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { buildSessionHandle } from "#channel/session.js";
+import { buildSessionHandle, createGetSessionFn, createSession } from "#channel/session.js";
+import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+
+function createRuntime(): Runtime {
+  return {
+    cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
+    deliver: vi.fn(),
+    getEventStream: vi.fn(),
+    resolveSession: vi.fn(),
+    run: vi.fn(),
+  };
+}
+
+describe("createSession#cancel", () => {
+  it("cancels this session's turn by session id", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", "C1:T1", runtime);
+
+    await expect(session.cancel()).resolves.toEqual({ status: "accepted" });
+    expect(runtime.cancelTurn).toHaveBeenCalledWith({ sessionId: "sess_1", turnId: undefined });
+  });
+
+  it("forwards the turn guard", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", "C1:T1", runtime);
+
+    await session.cancel({ turnId: "turn_2" });
+
+    expect(runtime.cancelTurn).toHaveBeenCalledWith({ sessionId: "sess_1", turnId: "turn_2" });
+  });
+
+  it("is available on sessions returned by getSession", async () => {
+    const runtime = createRuntime();
+    const session = createGetSessionFn(runtime)("sess_2");
+
+    await expect(session.cancel()).resolves.toEqual({ status: "accepted" });
+    expect(runtime.cancelTurn).toHaveBeenCalledWith({ sessionId: "sess_2", turnId: undefined });
+  });
+});
 
 describe("buildSessionHandle", () => {
   it("exposes sessionId / continuationToken / auth from the live accessor", () => {

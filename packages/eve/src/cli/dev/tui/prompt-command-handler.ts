@@ -1,4 +1,4 @@
-import type { ApplyModelOutcome } from "#setup/flows/model.js";
+import type { ApplyModelOutcome } from "#setup/flows/model-source-change.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import type {
@@ -55,11 +55,9 @@ export function createPromptCommandHandler(
         const appRoot = target.workspaceRoot;
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
-          const {
-            changeAgentModel,
-            formatApplyModelOutcome,
-            modelChangeRefusalForUneditableModel,
-          } = await import("#setup/flows/model.js");
+          const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
+          const { changeAgentModel, formatApplyModelOutcome } =
+            await import("#setup/flows/model-source-change.js");
           // A source-backed model (an SDK model call) isn't a string literal eve
           // can rewrite; refuse with a clear reason rather than silently no-op.
           const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;

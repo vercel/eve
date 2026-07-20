@@ -11,6 +11,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
+import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -26,10 +27,8 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
-import { createLogger, formatError } from "#internal/logging.js";
 import {
   createAuthorizationCompletedEvent,
-  createSessionFailedEvent,
   encodeMessageStreamEvent,
   type HandleMessageStreamEvent,
   timestampHandleMessageStreamEvent,
@@ -76,6 +75,10 @@ import { resumeHook } from "#internal/workflow/runtime.js";
  * `pendingRuntimeActionKeys` so the turn workflow can pick the right
  * {@link import("#execution/next-driver-action.js").NextDriverAction}
  * arm without re-reading the session.
+ *
+ * `cancelled` converts the harness's cancellation throw into a *returned*
+ * result so workflow-core never classifies the abort as a step failure or
+ * retries it; the epilogue runs in `settleCancelledTurnStep`.
  */
 export type DurableStepResult =
   | {
@@ -86,6 +89,11 @@ export type DurableStepResult =
       readonly sessionState: DurableSessionState;
       /** Session-total token usage; set on `done` when the session spent any. */
       readonly usage?: TokenUsage;
+    }
+  | {
+      readonly action: "cancelled";
+      readonly serializedContext: Record<string, unknown>;
+      readonly sessionState: DurableSessionState;
     }
   | {
       readonly action: "park";
@@ -297,66 +305,81 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   const mode = ctx.require(ModeKey);
 
-  let stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
-    const schemaSession = resolveEffectiveOutputSchema({
-      agentOutputSchema: bundle.turnAgent.outputSchema,
-      input: resolved,
-      mode,
-      session: enrichedSession,
-    });
-    if (completedAuths) {
-      const emissionState = getHarnessEmissionState(schemaSession.state);
-      for (const { name, authorization } of completedAuths) {
-        await handleEvent(
-          createAuthorizationCompletedEvent({
-            authorization,
-            name,
-            outcome: "authorized",
-            sequence: emissionState.sequence,
-            stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
-          }),
-        );
-      }
-    }
-
-    const capabilities = ctx.get(CapabilitiesKey);
-
-    const runHarnessStep = async (
-      lifecycleSession: HarnessSession,
-      stepInput: StepInput | undefined,
-    ): Promise<StepResult> => {
-      const skillRoot = await resolveSessionSkillRoot({
-        ctx,
-        turnAgent: bundle.turnAgent,
-      });
-      const refreshedSession = refreshSessionFromTurnAgent({
-        compactionOverrides: {
-          thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
-        },
-        session: lifecycleSession,
-        skillRoot,
-        turnAgent: bundle.turnAgent,
-      });
-
-      const step = createExecutionNodeStep({
-        abortSignal: input.abortSignal,
-        capabilities,
-        createRuntime: createWorkflowRuntime,
-        handleEvent,
+  let stepResult: StepResult;
+  try {
+    // A signal already aborted at entry (cancellation during an in-line
+    // runtime-action wait) must settle before the park-resume stages run,
+    // or the pending batch would re-park and later re-dispatch.
+    throwIfTurnAborted(input.abortSignal);
+    stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
+      const schemaSession = resolveEffectiveOutputSchema({
+        agentOutputSchema: bundle.turnAgent.outputSchema,
+        input: resolved,
         mode,
-        modelResolutionScope: {
-          moduleMap: bundle.moduleMap,
-          nodeId: bundle.nodeId,
-        },
-        node: bundle.graph.root,
-        workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
+        session: enrichedSession,
       });
-      return step(refreshedSession, stepInput);
-    };
+      if (completedAuths) {
+        const emissionState = getHarnessEmissionState(schemaSession.state);
+        for (const { name, authorization } of completedAuths) {
+          await handleEvent(
+            createAuthorizationCompletedEvent({
+              authorization,
+              name,
+              outcome: "authorized",
+              sequence: emissionState.sequence,
+              stepIndex: emissionState.stepIndex,
+              turnId: emissionState.turnId,
+            }),
+          );
+        }
+      }
 
-    return runHarnessStep(schemaSession, resolved);
-  });
+      const capabilities = ctx.get(CapabilitiesKey);
+
+      const runHarnessStep = async (
+        lifecycleSession: HarnessSession,
+        stepInput: StepInput | undefined,
+      ): Promise<StepResult> => {
+        const skillRoot = await resolveSessionSkillRoot({
+          ctx,
+          turnAgent: bundle.turnAgent,
+        });
+        const refreshedSession = refreshSessionFromTurnAgent({
+          compactionOverrides: {
+            thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+          },
+          session: lifecycleSession,
+          skillRoot,
+          turnAgent: bundle.turnAgent,
+        });
+
+        const step = createExecutionNodeStep({
+          abortSignal: input.abortSignal,
+          capabilities,
+          createRuntime: createWorkflowRuntime,
+          handleEvent,
+          mode,
+          modelResolutionScope: {
+            moduleMap: bundle.moduleMap,
+            nodeId: bundle.nodeId,
+          },
+          node: bundle.graph.root,
+          workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
+        });
+        return step(refreshedSession, stepInput);
+      };
+
+      return runHarnessStep(schemaSession, resolved);
+    });
+  } catch (error) {
+    if (!isTurnCancellation(error)) throw error;
+    writer.releaseLock();
+    return {
+      action: "cancelled",
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    };
+  }
 
   // Re-stamp the in-memory session's continuation token in case a
   // handler called `setContinuationToken(...)` (eg. Slack auto-anchor).
@@ -472,68 +495,6 @@ export function resolveEffectiveOutputSchema(input: {
   }
 
   return session;
-}
-
-const log = createLogger("execution.workflow-entry");
-
-/** Emits a terminal `session.failed` to the adapter and durable stream. */
-export async function emitTerminalSessionFailureStep(input: {
-  readonly error: unknown;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-}): Promise<void> {
-  "use step";
-
-  const details = formatError(input.error);
-  const code = typeof details.name === "string" ? details.name : "WORKFLOW_EXECUTION_FAILED";
-  const message = typeof details.message === "string" ? details.message : String(input.error);
-  const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
-
-  log.error("workflow loop threw — emitting terminal session.failed", {
-    sessionId,
-    errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-    code,
-    message,
-    detail: typeof details.detail === "string" ? details.detail : undefined,
-  });
-
-  const event = createSessionFailedEvent({ code, details, message, sessionId });
-
-  // Best-effort: invoke the adapter handler so channels surface the
-  // failure. Errors are logged, never rethrown — the outer workflow
-  // throw must still reach the run handle.
-  try {
-    const ctx = await deserializeContext(input.serializedContext);
-    const adapter = ctx.get(ChannelKey);
-    if (adapter !== undefined) {
-      const adapterCtx = buildAdapterContext(adapter, ctx);
-      await callAdapterEventHandler(adapter, event, adapterCtx);
-    }
-  } catch (notificationError) {
-    log.error("adapter failed to handle terminal session.failed event", {
-      errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-      sessionId,
-      error: notificationError,
-    });
-  }
-
-  // Always write the event to the durable stream so downstream
-  // consumers see a canonical terminal event instead of an abrupt
-  // stream close.
-  try {
-    const writer = input.parentWritable.getWriter();
-    try {
-      await writer.write(encodeMessageStreamEvent(timestampHandleMessageStreamEvent(event)));
-    } finally {
-      writer.releaseLock();
-    }
-  } catch (writeError) {
-    log.error("failed to write terminal session.failed event to durable stream", {
-      errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-      sessionId,
-      error: writeError,
-    });
-  }
 }
 
 export interface RoutedDeliverResult {

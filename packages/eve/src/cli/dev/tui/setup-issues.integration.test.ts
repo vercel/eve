@@ -104,7 +104,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     const order: string[] = [];
     const handle = vi.fn(async () => {
       order.push("model");
-      return { message: "/model cancelled." };
+      return { message: "/model dismissed." };
     });
     const readPrompt = vi.fn(async () => {
       order.push("prompt");

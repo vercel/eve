@@ -3,11 +3,15 @@ import { pathToFileURL } from "node:url";
 
 import type { CompiledAgentManifest, CompiledAgentNodeManifest } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { collectModuleRefsForManifest, type CompiledModuleMap } from "#compiler/module-map.js";
+import {
+  collectModuleRefsForManifest,
+  compiledModuleMapSchema,
+  type CompiledModuleMap,
+} from "#compiler/module-map.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { formatValidationError } from "#runtime/validation.js";
 import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
-import { expectObjectRecord } from "#internal/authored-module.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 
 /**
@@ -48,6 +52,14 @@ async function hydrateCompiledModuleMapFromManifest(
   manifest: CompiledAgentManifest,
   runtimeAppRoot: string,
 ): Promise<CompiledModuleMap> {
+  const materializedIndex = await readMaterializedAuthoredModuleIndex(runtimeAppRoot);
+  if (materializedIndex !== undefined) {
+    return await loadMaterializedCompiledModuleMap({
+      moduleMapPath: materializedIndex.moduleMap,
+      runtimeAppRoot,
+    });
+  }
+
   const nodes: CompiledModuleMap["nodes"] = {};
   const nodeManifests: Array<{
     agentRoot: string;
@@ -76,22 +88,11 @@ async function hydrateCompiledModuleMapFromManifest(
       manifest.extensionMounts.map((mount) => [mount.mountSourceId, mount.packageNamespace]),
     ),
   };
-  const materializedIndex = await readMaterializedAuthoredModuleIndex(runtimeAppRoot);
-
   for (const nodeManifest of nodeManifests) {
-    const materializedModules = materializedIndex?.nodes[nodeManifest.nodeId]?.modules;
-    if (materializedIndex !== undefined && materializedModules === undefined) {
-      throw new Error(
-        `Materialized authored module index is missing node "${nodeManifest.nodeId}".`,
-      );
-    }
-
     nodes[nodeManifest.nodeId] = {
       modules: await hydrateCompiledNodeScope({
         agentRoot: nodeManifest.agentRoot,
         manifest: nodeManifest.manifest,
-        materializedModules,
-        runtimeAppRoot,
         scopeIndex,
       }),
     };
@@ -100,6 +101,27 @@ async function hydrateCompiledModuleMapFromManifest(
   return {
     nodes,
   };
+}
+
+async function loadMaterializedCompiledModuleMap(input: {
+  readonly moduleMapPath: string;
+  readonly runtimeAppRoot: string;
+}): Promise<CompiledModuleMap> {
+  const moduleMapPath = join(input.runtimeAppRoot, ".eve", "compile", input.moduleMapPath);
+  const moduleNamespace = (await import(
+    `${pathToFileURL(moduleMapPath).href}?generation=${encodeURIComponent(input.moduleMapPath)}`
+  )) as { readonly default?: unknown; readonly moduleMap?: unknown };
+  const parsed = compiledModuleMapSchema.safeParse(
+    moduleNamespace.moduleMap ?? moduleNamespace.default,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      `Expected materialized authored module map "${moduleMapPath}" to export a valid compiled eve module map. ${formatValidationError(parsed.error)}`,
+    );
+  }
+
+  return parsed.data;
 }
 
 /**
@@ -117,8 +139,6 @@ function extensionNamespaceForSourceId(
 async function hydrateCompiledNodeScope(input: {
   agentRoot: string;
   manifest: CompiledAgentNodeManifest;
-  materializedModules?: Readonly<Record<string, string>>;
-  runtimeAppRoot: string;
   scopeIndex: ExtensionScopeIndex;
 }): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
   const refs = collectModuleRefsForManifest(input.manifest).sort((left, right) =>
@@ -142,21 +162,6 @@ async function hydrateCompiledNodeScope(input: {
       container[EXT_CONFIG_SCOPE] = mountConfigScope;
     }
     try {
-      const materializedPath = input.materializedModules?.[ref.sourceId];
-      if (input.materializedModules !== undefined && materializedPath === undefined) {
-        throw new Error(`Materialized authored module index is missing source "${ref.sourceId}".`);
-      }
-
-      if (materializedPath !== undefined) {
-        modules[ref.sourceId] = expectObjectRecord(
-          await import(
-            `${pathToFileURL(join(input.runtimeAppRoot, ".eve", "compile", materializedPath)).href}?generation=${encodeURIComponent(materializedPath)}`
-          ),
-          `Expected materialized authored module "${ref.sourceId}" to export a namespace object.`,
-        );
-        continue;
-      }
-
       modules[ref.sourceId] = await loadAuthoredModuleNamespace(modulePath, {
         externalDependencies,
         extensionScopeNamespace,

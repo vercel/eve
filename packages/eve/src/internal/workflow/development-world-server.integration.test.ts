@@ -17,6 +17,10 @@ import {
   type ParentDevelopmentWorkflowWorld,
 } from "#internal/workflow/development-world-server.js";
 import {
+  LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH,
+  resolveLocalWorkflowWorldDataDirectory,
+} from "#internal/workflow/local-world-data-directory.js";
+import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
@@ -41,14 +45,16 @@ afterEach(() => {
 });
 
 describe("parent development Workflow World", () => {
-  it("stores local Workflow state under the app's top-level .workflow-data directory", async () => {
+  it("stores local Workflow state under .eve/.workflow-data", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-data-dir-");
     const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
 
     try {
       await world.start();
-      await expect(access(join(appRoot, ".workflow-data", "version.txt"))).resolves.toBeUndefined();
-      await expect(access(join(appRoot, ".eve", "workflow-data"))).rejects.toMatchObject({
+      await expect(
+        access(join(resolveLocalWorkflowWorldDataDirectory(appRoot), "version.txt")),
+      ).resolves.toBeUndefined();
+      await expect(access(join(appRoot, ".workflow-data"))).rejects.toMatchObject({
         code: "ENOENT",
       });
     } finally {
@@ -153,7 +159,9 @@ describe("parent development Workflow World", () => {
       // the failure is reported explicitly.
       await expect(restarted.start()).resolves.toBeUndefined();
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("generation-a"));
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(".workflow-data"));
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH),
+      );
     } finally {
       errorSpy.mockRestore();
       await restarted.close();

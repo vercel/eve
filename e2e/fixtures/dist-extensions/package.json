@@ -1,0 +1,21 @@
+{
+  "name": "dist-extensions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "test:e2e": "eve eval --strict"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "gadget-extension": "file:../gadget-extension",
+    "gizmo-extension": "file:../gizmo-extension"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

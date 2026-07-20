@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
+import { resolvePackageRoot } from "#internal/application/package.js";
 import {
   discardDevelopmentGeneration,
   stageDevelopmentGeneration,
@@ -16,6 +17,222 @@ import { useScenarioApp } from "#internal/testing/scenario-app.js";
 
 describe("development generation artifacts", () => {
   const scenarioApp = useScenarioApp();
+
+  it("materializes one shared module graph for every authored entry", async () => {
+    const sharedMarker = "eve-shared-generation-module-marker";
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Use the available tools.",
+        "agent/lib/shared.mjs": `export const shared = ${JSON.stringify(sharedMarker)};\n`,
+        "agent/subagents/reader/agent.mjs": [
+          "export default {",
+          '  description: "Read the shared value.",',
+          '  model: "openai/gpt-5.4",',
+          "};",
+          "",
+        ].join("\n"),
+        "agent/subagents/reader/tools/read_shared.mjs": [
+          'import { shared } from "../../../lib/shared.mjs";',
+          'export default { description: "Read shared.", execute: () => shared };',
+          "",
+        ].join("\n"),
+        "agent/tools/first.mjs": [
+          'import { shared } from "../lib/shared.mjs";',
+          'export default { description: "First tool.", execute: () => shared };',
+          "",
+        ].join("\n"),
+        "agent/tools/second.mjs": [
+          'import { shared } from "../lib/shared.mjs";',
+          'export default { description: "Second tool.", execute: () => shared };',
+          "",
+        ].join("\n"),
+      },
+      name: "shared-generation-module-graph",
+    });
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+    const compileRoot = join(snapshot.runtimeAppRoot, ".eve", "compile");
+    const index = JSON.parse(
+      await readFile(join(compileRoot, "authored-modules.json"), "utf8"),
+    ) as { readonly moduleMap?: string };
+    expect(index.moduleMap).toBeDefined();
+    const materializedFiles = await readdir(join(compileRoot, "authored-modules"));
+    const materializedCode = await Promise.all(
+      materializedFiles.map((fileName) =>
+        readFile(join(compileRoot, "authored-modules", fileName), "utf8"),
+      ),
+    );
+
+    expect(materializedFiles).toEqual([basename(index.moduleMap!)]);
+    expect(materializedCode.join("\n").split(sharedMarker)).toHaveLength(2);
+
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        snapshot.runtimeAppRoot,
+      ),
+    });
+    const subagent = compileResult.manifest.subagents[0];
+    const subagentToolSourceId = subagent?.agent.tools[0]?.sourceId;
+    expect(subagentToolSourceId).toBeDefined();
+    const subagentTool = moduleMap.nodes[subagent!.nodeId]?.modules[subagentToolSourceId!] as {
+      default: { execute(): string };
+    };
+    expect(subagentTool.default.execute()).toBe(sharedMarker);
+  });
+
+  it("preserves extension scope in a shared generation graph", async () => {
+    const packageName = "@acme/shared-graph-extension";
+    const app = await scenarioApp({
+      dependencies: {
+        [packageName]: "workspace:*",
+      },
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/extensions/acme.mjs": [
+          `import extension from ${JSON.stringify(packageName)};`,
+          'export default extension({ label: "configured" });',
+          "",
+        ].join("\n"),
+        "agent/instructions.md": "Use the available tools.",
+        "packages/shared-graph-extension/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "const schema = {",
+          '  "~standard": { version: 1, vendor: "fixture", validate: (value) => ({ value }) },',
+          "};",
+          "export default defineExtension({ config: schema });",
+          "",
+        ].join("\n"),
+        "packages/shared-graph-extension/extension/tools/read_label.mjs": [
+          'import extension from "../extension.mjs";',
+          "export default {",
+          '  description: "Read extension config.",',
+          "  execute: () => extension.config.label,",
+          "};",
+          "",
+        ].join("\n"),
+        "packages/shared-graph-extension/package.json": `${JSON.stringify({
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: "./extension/extension.mjs",
+          name: packageName,
+          type: "module",
+        })}\n`,
+        "packages/shared-graph-extension/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 1,
+          builtWithEve: "0.0.0-test",
+          requires: { extension: 1, tool: 1, config: 1 },
+        }),
+        "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+      },
+      name: "shared-generation-extension-scope",
+    });
+    const packageRoot = join(app.appRoot, "packages", "shared-graph-extension");
+    await mkdir(join(app.appRoot, "node_modules", "@acme"), { recursive: true });
+    await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
+    await symlink(
+      packageRoot,
+      join(app.appRoot, "node_modules", "@acme", "shared-graph-extension"),
+      "junction",
+    );
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        snapshot.runtimeAppRoot,
+      ),
+    });
+    const toolSourceId = compileResult.manifest.tools.find((tool) =>
+      tool.sourceId.startsWith("ext:acme:"),
+    )?.sourceId;
+    expect(toolSourceId).toBeDefined();
+    const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
+      default: { execute(): string };
+    };
+
+    expect(tool.default.execute()).toBe("configured");
+  });
+
+  it("materializes a mounted extension from a physical installed directory", async () => {
+    const packageName = "@acme/physical-extension";
+    const app = await scenarioApp({
+      dependencies: {
+        [packageName]: "1.0.0",
+      },
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/extensions/physical.mjs": `export { default } from ${JSON.stringify(packageName)};\n`,
+        "agent/instructions.md": "Use the available tools.",
+      },
+      name: "physical-extension-generation",
+    });
+    const packageRoot = join(app.appRoot, "node_modules", "@acme", "physical-extension");
+    await mkdir(join(packageRoot, "extension", "tools"), { recursive: true });
+    await writeFile(
+      join(packageRoot, "package.json"),
+      `${JSON.stringify({
+        eve: { extension: { dist: "extension" } },
+        exports: "./extension/extension.mjs",
+        name: packageName,
+        type: "module",
+        version: "1.0.0",
+      })}\n`,
+    );
+    await writeFile(
+      join(packageRoot, "extension", "_manifest.json"),
+      `${JSON.stringify({
+        kind: "eve-extension",
+        formatVersion: 1,
+        builtWithEve: "0.0.0-test",
+        requires: { extension: 1, tool: 1 },
+      })}\n`,
+    );
+    await writeFile(
+      join(packageRoot, "extension", "extension.mjs"),
+      'import { defineExtension } from "eve/extension";\nexport default defineExtension();\n',
+    );
+    await writeFile(
+      join(packageRoot, "extension", "tools", "read_marker.mjs"),
+      [
+        "export default {",
+        '  description: "Read the extension marker.",',
+        '  execute: () => "physical-extension-original",',
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await mkdir(join(app.appRoot, "node_modules"), { recursive: true });
+    await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+    const snapshotPackageRoot = join(
+      snapshot.runtimeAppRoot,
+      "node_modules",
+      "@acme",
+      "physical-extension",
+    );
+
+    await expect(realpath(snapshotPackageRoot)).resolves.toBe(await realpath(packageRoot));
+    await rm(packageRoot, { force: true, recursive: true });
+
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        snapshot.runtimeAppRoot,
+      ),
+    });
+    const toolSourceId = compileResult.manifest.tools.find((tool) =>
+      tool.sourceId.startsWith("ext:physical:"),
+    )?.sourceId;
+    expect(toolSourceId).toBeDefined();
+    const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[toolSourceId!] as {
+      default: { execute(): string };
+    };
+
+    expect(tool.default.execute()).toBe("physical-extension-original");
+  });
 
   it("executes dynamic imports after the original bundled dependency is removed", async () => {
     const evaluationMarker = "__eveGenerationDynamicImportEvaluated__";

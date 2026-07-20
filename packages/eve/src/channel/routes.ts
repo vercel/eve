@@ -1,7 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
-import type { SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { Session } from "#channel/session.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -12,13 +12,15 @@ type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Recor
 
 /**
  * Second argument passed to every route handler. `send` starts or continues a
- * session on this channel; `getSession` looks one up by id; `receive` hands
- * inbound work to a different channel; `params` contains the matched path
- * parameters; `waitUntil` keeps background work alive past the response;
+ * session on this channel; `cancel` stops the active turn on a session
+ * addressed by continuation token; `getSession` looks one up by id; `receive`
+ * hands inbound work to a different channel; `params` contains the matched
+ * path parameters; `waitUntil` keeps background work alive past the response;
  * `requestIp` is the client IP, or `null` when the host cannot provide it.
  */
 export interface RouteHandlerArgs<TState = undefined> {
   send: SendFn<TState>;
+  cancel: CancelFn;
   getSession: GetSessionFn;
   /**
    * Starts a session on a different channel to hand off inbound work (e.g. an
@@ -89,6 +91,27 @@ export type SendOptions<TState = undefined> = [TState] extends [undefined]
  * stream from within a route handler.
  */
 export type GetSessionFn = (sessionId: string) => Session;
+
+/**
+ * Options for {@link CancelFn}. `continuationToken` is the channel-local raw
+ * token, exactly as passed to {@link SendFn}. `turnId` limits the request to
+ * the turn the caller observed; a stale guard is consumed as a benign no-op.
+ */
+export interface CancelOptions {
+  readonly continuationToken: string;
+  readonly turnId?: string;
+}
+
+/**
+ * Requests cancellation of the active turn on the session that owns the
+ * continuation token. Never starts a session, sends input, or clears history.
+ *
+ * Both statuses are successful: `"accepted"` means the request was consumed,
+ * and `"no_active_turn"` covers an unknown token and a session with nothing
+ * to cancel. Confirmation is `turn.cancelled` followed by `session.waiting`
+ * on the event stream.
+ */
+export type CancelFn = (options: CancelOptions) => Promise<CancelTurnResult>;
 
 export type RouteHandler<TState = undefined> = (
   req: Request,

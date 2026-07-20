@@ -61,17 +61,27 @@ export interface ThemeColors {
 export interface ThemeGlyphs {
   /** `▲` — the Vercel/eve brand mark; prefixes the agent's own output. */
   brand: string;
-  /** `▌` — left gutter bar marking a user message. */
+  /** `│` — left gutter bar marking a user message. */
   user: string;
   /** `○` — reasoning / "thinking" marker (Next.js "wait" glyph). */
   reasoning: string;
+  /** `▪` — static tool-activity mark (the settled form of the activity pulse). */
+  square: string;
+  /** `└` — closes a `│`-railed detail region under a tool header. */
+  corner: string;
+  /** `┌` — opens a region; pairs with `corner` at session boundaries. */
+  cornerOpen: string;
+  /** `⌝` — marks a provider endpoint authored in the agent's own code. */
+  external: string;
+  /** `⏺` — the in-progress todo item (pulses while the turn runs). */
+  dotActive: string;
   /** `✓` — a completed tool or success state. */
   success: string;
   /** `⨯` — an error or failed tool. */
   error: string;
   /** `⚠` — a warning / attention state. */
   warning: string;
-  /** `◆` — a subagent region header. */
+  /** `※` — a subagent region header. */
   subagent: string;
   /** `│` — vertical rule drawn in the gutter to nest subagent output. */
   rule: string;
@@ -89,10 +99,14 @@ export interface ThemeGlyphs {
   option: string;
   /** `❯` — the input prompt mark. */
   prompt: string;
+  /** `›` — the prompt mark's quiet form while the buffer is empty. */
+  promptIdle: string;
   /** `⎿` — hangs a command's result under its invocation. */
   elbow: string;
   /** `▔` — strong full-width rule opening the bottom question panel. */
   hrule: string;
+  /** `─` — light rule segment framing the end-of-turn stats line. */
+  dash: string;
   /** `▏` — the synthetic input caret. */
   caret: string;
   /** `·` — inline separator for header / status segments. */
@@ -103,16 +117,35 @@ export interface ThemeGlyphs {
   arrowUp: string;
   /** `↓` — output (response) tokens in the token-flow segment. */
   arrowDown: string;
+  /** `↯` — Fast mode (Gateway priority tier) marker beside a model id. */
+  fast: string;
+  /** `●` — a track notch below the current position (already covered). */
+  trackFilled: string;
+  /** `◉` — the track notch at the current position. */
+  trackCurrent: string;
+  /** `○` — a track notch above the current position. */
+  trackEmpty: string;
+  /** `─` — the connector segment between track notches. */
+  trackLine: string;
+  /** `↵` — the Enter affordance inside a selection badge. */
+  enter: string;
+  /** `▪` — the marker beside an in-flight validation badge. */
+  validating: string;
 }
 
 const UNICODE_GLYPHS: ThemeGlyphs = {
   brand: "▲",
-  user: "▌",
+  user: "│",
   reasoning: "○",
+  square: "▪",
+  corner: "└",
+  cornerOpen: "┌",
+  external: "⌝",
+  dotActive: "⏺",
   success: "✓",
   error: "⨯",
   warning: "⚠",
-  subagent: "◆",
+  subagent: "※",
   rule: "│",
   question: "?",
   connection: "●",
@@ -121,19 +154,33 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   selectedPointer: "▶",
   option: "◦",
   prompt: "❯",
+  promptIdle: "›",
   elbow: "⎿",
   hrule: "▔",
+  dash: "─",
   caret: "▏",
   dot: "·",
   ellipsis: "…",
   arrowUp: "↑",
   arrowDown: "↓",
+  fast: "↯",
+  trackFilled: "●",
+  trackCurrent: "◉",
+  trackEmpty: "○",
+  trackLine: "─",
+  enter: "↵",
+  validating: "▪",
 };
 
 const ASCII_GLYPHS: ThemeGlyphs = {
   brand: ">",
   user: "|",
   reasoning: "o",
+  square: "*",
+  corner: "`",
+  cornerOpen: ",",
+  external: "^",
+  dotActive: "*",
   success: "+",
   error: "x",
   warning: "!",
@@ -146,13 +193,22 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   selectedPointer: ">",
   option: ".",
   prompt: ">",
+  promptIdle: ">",
   elbow: "`-",
   hrule: "=",
+  dash: "-",
   caret: "_",
   dot: "-",
   ellipsis: "...",
   arrowUp: "^",
   arrowDown: "v",
+  fast: ">>",
+  trackFilled: "*",
+  trackCurrent: "O",
+  trackEmpty: ".",
+  trackLine: "-",
+  enter: "<-'",
+  validating: "o",
 };
 
 const UNICODE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

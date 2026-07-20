@@ -5,6 +5,7 @@ import {
   channelEntries,
   connectionEntries,
   connectionProtocols,
+  extensionEntries,
   getIntegrationEntry,
 } from "./index.js";
 
@@ -14,8 +15,10 @@ describe("integration catalog", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it("partitions cleanly into channels and connections", () => {
-    expect(channelEntries().length + connectionEntries().length).toBe(INTEGRATIONS.length);
+  it("partitions cleanly into channels, connections, and extensions", () => {
+    expect(channelEntries().length + connectionEntries().length + extensionEntries().length).toBe(
+      INTEGRATIONS.length,
+    );
   });
 
   it("gives every connection a transport and description", () => {
@@ -28,6 +31,12 @@ describe("integration catalog", () => {
 
   it("keeps channels free of connection identity", () => {
     for (const entry of channelEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
+  it("keeps extensions free of connection identity", () => {
+    for (const entry of extensionEntries()) {
       expect(entry.connection).toBeUndefined();
     }
   });
@@ -47,5 +56,17 @@ describe("integration catalog", () => {
 
   it("uses Linear's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
+  });
+
+  it("uses Kernel's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("kernel")!.connection!.mcp!.url).toBe(
+      "https://mcp.onkernel.com/mcp",
+    );
+  });
+
+  it("uses Browser Use's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
+      "https://api.browser-use.com/v3/mcp",
+    );
   });
 });

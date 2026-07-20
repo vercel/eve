@@ -21,6 +21,7 @@ export {
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
+  resolveVercelHostFrameworkPreset,
   type ChannelKind,
   type ChannelMutationResult,
   type EnsureChannelOptions,

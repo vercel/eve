@@ -1,6 +1,13 @@
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  EntityConflictError,
+  HookNotFoundError,
+  RunExpiredError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 
 import type {
+  CancelTurnInput,
+  CancelTurnResult,
   DeliverInput,
   GetEventStreamOptions,
   HookPayload,
@@ -18,6 +25,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  getHookByToken,
   getRun,
   resumeHook,
   start,
@@ -34,6 +42,10 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import {
+  sessionCancelHookToken,
+  type TurnCancelPayload,
+} from "#execution/turn-cancellation-token.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -158,6 +170,10 @@ export function createWorkflowRuntime(config: {
       };
     },
 
+    async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
+      return await requestWorkflowTurnCancellation(input);
+    },
+
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
       const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
@@ -189,7 +205,48 @@ export function createWorkflowRuntime(config: {
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
     },
+
+    async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
+      try {
+        const hook = await getHookByToken(continuationToken);
+        return { sessionId: hook.runId };
+      } catch (error) {
+        if (HookNotFoundError.is(error)) {
+          return undefined;
+        }
+        logError(log, "failed to resolve session by continuation token", error, {
+          continuationToken,
+        });
+        throw error;
+      }
+    },
   };
+}
+
+/** Requests cancellation through a session's stable workflow hook. */
+export async function requestWorkflowTurnCancellation(
+  input: CancelTurnInput,
+): Promise<CancelTurnResult> {
+  const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
+
+  try {
+    await resumeHook(sessionCancelHookToken(input.sessionId), payload);
+    return { status: "accepted" };
+  } catch (error) {
+    if (isInactiveCancelTarget(error)) {
+      return { status: "no_active_turn" };
+    }
+    throw error;
+  }
+}
+
+function isInactiveCancelTarget(error: unknown): boolean {
+  return (
+    HookNotFoundError.is(error) ||
+    WorkflowRunNotFoundError.is(error) ||
+    RunExpiredError.is(error) ||
+    EntityConflictError.is(error)
+  );
 }
 
 /**

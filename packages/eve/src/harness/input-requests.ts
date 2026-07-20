@@ -1,4 +1,4 @@
-import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
+import type { ModelMessage } from "ai";
 
 import type {
   RuntimeToolCallActionRequest,
@@ -340,6 +340,13 @@ export function hasPendingInputBatch(state: SessionStateMap | undefined): boolea
   return getPendingInputBatch(state) !== undefined;
 }
 
+/**
+ * Returns the request IDs in the currently pending HITL batch.
+ */
+export function getPendingInputRequestIds(state: SessionStateMap | undefined): ReadonlySet<string> {
+  return new Set(getPendingInputBatch(state)?.requests.map((request) => request.requestId));
+}
+
 function getPendingInputBatch(state: SessionStateMap | undefined): PendingInputBatch | undefined {
   const value = state?.[PENDING_INPUT_BATCH_KEY];
 
@@ -636,7 +643,8 @@ function buildToolResponsePartsForRequest(
   ];
 }
 
-function isApprovalRequest(request: InputRequest): boolean {
+/** Shared approval predicate: a request whose options are exactly `approve` / `deny`. */
+export function isApprovalRequest(request: InputRequest): boolean {
   return (
     request.options?.length === 2 &&
     request.options[0]?.id === "approve" &&
@@ -652,7 +660,11 @@ function isApprovalRequest(request: InputRequest): boolean {
  * Creates a runtime tool-call action shape from an AI SDK tool call.
  */
 export function createRuntimeToolCallActionFromToolCall(input: {
-  readonly toolCall: TypedToolCall<ToolSet>;
+  readonly toolCall: {
+    readonly input: unknown;
+    readonly toolCallId: string;
+    readonly toolName: string;
+  };
 }): RuntimeToolCallActionRequest {
   return {
     callId: input.toolCall.toolCallId,

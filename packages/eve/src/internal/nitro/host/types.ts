@@ -5,6 +5,7 @@ import type { GeneratedCompiledArtifactsFiles } from "#internal/application/comp
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import type { DevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import type { DevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
+import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
 
 /**
  * Route surface included in one programmatic Nitro host build.
@@ -13,6 +14,8 @@ export type NitroBuildSurface = "all" | "app" | "flow";
 
 /** Options for one production application build. */
 export interface ApplicationBuildOptions {
+  /** Absolute path for an optional machine-readable profile of a successful build. */
+  readonly profileOutputPath?: string;
   readonly skipVercelSandboxPrewarm: boolean;
   readonly vercelServiceOutput?: {
     readonly hostOutputDirectory: string;
@@ -79,5 +82,6 @@ export interface PreparedApplicationHost {
 
 export interface PreparedDevelopmentApplicationHost extends PreparedApplicationHost {
   generation: DevelopmentGeneration;
+  workspaceExtensions: readonly DevelopmentWorkspaceExtension[];
   workspace: DevelopmentHostWorkspace;
 }

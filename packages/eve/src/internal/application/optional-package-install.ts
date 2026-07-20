@@ -170,7 +170,8 @@ export async function loadOptionalEnginePackage<T>(input: {
   }
 }
 
-async function importInstalledEnginePackage<T>(input: {
+/** Imports an optional engine from the application without installing it. */
+export async function importInstalledEnginePackage<T>(input: {
   readonly appRoot: string;
   readonly packageName: string;
 }): Promise<T> {

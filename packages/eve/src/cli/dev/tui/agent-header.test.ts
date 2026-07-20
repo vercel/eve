@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
-import { stripAnsi } from "./terminal-text.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const FRAMEWORK_TOOL: AgentInfoToolEntry = {

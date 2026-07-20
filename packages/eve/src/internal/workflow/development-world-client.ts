@@ -20,6 +20,7 @@ import {
   getDevelopmentWorkflowGeneration,
   withDevelopmentWorkflowGeneration,
 } from "#internal/workflow/development-generation-context.js";
+import { LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH } from "#internal/workflow/local-world-data-directory.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
@@ -46,7 +47,7 @@ export class MissingDevelopmentGenerationError extends Error {
   constructor(generationId: string, cause?: unknown) {
     super(
       `Workflow run references missing development generation "${generationId}". ` +
-        `Remove ".workflow-data" to discard the app's active local Workflow runs.`,
+        `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard the app's active local Workflow runs.`,
       cause === undefined ? undefined : { cause },
     );
     this.name = "MissingDevelopmentGenerationError";

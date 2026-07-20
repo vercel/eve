@@ -32,10 +32,7 @@ import {
   type WorkflowBundleCreateWorkflowsBundleResult,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { writeNitroStepEntrypoint } from "#internal/workflow-bundle/nitro-step-entry.js";
 import {
   copyNitroFunctionDirectory,
@@ -273,42 +270,39 @@ export class WorkflowBundleBuilder {
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
       ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
     ].join("\n");
-    const output = await buildWithNitroRolldown({
-      cwd: this.config.workingDir,
-      input: WORKFLOW_VIRTUAL_ENTRY_ID,
-      platform: "neutral",
-      plugins: [
-        createWorkflowVirtualEntryPlugin(virtualEntrySource),
-        createWorkflowPseudoPackagePlugin(),
-        createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
-        createWorkflowTransformPlugin({
-          manifest: workflowManifest,
-          projectRoot: this.transformProjectRoot,
-          sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
-          workingDir: this.config.workingDir,
-        }),
-        // Must run after the transform so `"use step"` bodies are already
-        // stubbed and their node:* imports stripped from this graph.
-        createWorkflowNodeBuiltinGuardPlugin(),
-      ],
-      resolve: {
-        conditionNames: ["eve-source", "workflow", "node", "import", "default"],
-        extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
-        mainFields: ["module", "main"],
-      },
-      tsconfig: tsconfigPath ?? false,
-      write: false,
-      output: {
-        banner: "globalThis.__private_workflows = new Map();",
-        codeSplitting: false,
-        comments: false,
-        format: "cjs",
-        sourcemap: "inline",
-      },
-    });
-    const interimBundle = getSingleRolldownChunk(
-      output,
+    const interimBundle = await buildSingleRolldownChunk(
       `intermediate workflow bundle for "${outfile}"`,
+      {
+        cwd: this.config.workingDir,
+        input: WORKFLOW_VIRTUAL_ENTRY_ID,
+        platform: "neutral",
+        plugins: [
+          createWorkflowVirtualEntryPlugin(virtualEntrySource),
+          createWorkflowPseudoPackagePlugin(),
+          createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
+          createWorkflowTransformPlugin({
+            manifest: workflowManifest,
+            projectRoot: this.transformProjectRoot,
+            sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
+            workingDir: this.config.workingDir,
+          }),
+          // Must run after the transform so `"use step"` bodies are already
+          // stubbed and their node:* imports stripped from this graph.
+          createWorkflowNodeBuiltinGuardPlugin(),
+        ],
+        resolve: {
+          conditionNames: ["eve-source", "workflow", "node", "import", "default"],
+          extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+          mainFields: ["module", "main"],
+        },
+        tsconfig: tsconfigPath ?? false,
+        output: {
+          banner: "globalThis.__private_workflows = new Map();",
+          comments: false,
+          format: "cjs",
+          sourcemap: "inline",
+        },
+      },
     );
 
     await bundleFinalWorkflowOutput({

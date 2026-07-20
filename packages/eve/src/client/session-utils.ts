@@ -15,7 +15,8 @@ export function createInitialSessionState(): SessionState {
  *
  * When the boundary event is `session.waiting`, the session is preserved for
  * the next message. For `session.completed` and `session.failed`, the session
- * resets so the next call starts a new conversation.
+ * resets so the next call starts a new conversation. Without a boundary, the
+ * session stays resumable from its advanced cursor.
  */
 export function advanceSession(input: {
   readonly continuationToken?: string;
@@ -31,6 +32,17 @@ export function advanceSession(input: {
     boundaryEvent?.type === "session.waiting" ||
     (input.preserveCompletedSessions === true && boundaryEvent?.type === "session.completed")
   ) {
+    return {
+      continuationToken:
+        boundaryEvent?.type === "session.waiting"
+          ? boundaryEvent.data.continuationToken
+          : (input.continuationToken ?? input.session.continuationToken),
+      sessionId: input.sessionId,
+      streamIndex,
+    };
+  }
+
+  if (boundaryEvent === undefined) {
     return {
       continuationToken: input.continuationToken ?? input.session.continuationToken,
       sessionId: input.sessionId,

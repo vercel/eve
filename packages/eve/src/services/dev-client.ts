@@ -1,5 +1,4 @@
 import type { UserContent } from "ai";
-import type { ClientSession } from "#client/session.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import { isLocalDevelopmentServerUrl } from "#services/dev-client/local-host.js";
 import {
@@ -8,50 +7,43 @@ import {
 } from "#services/dev-client/runtime-artifacts.js";
 
 /**
- * Tracks local dev runtime-artifact revisions and starts a fresh session for
- * normal prompts after HMR, while preserving the current session for
- * input-response resumes.
+ * Tracks local dev runtime-artifact revisions so callers can refresh their
+ * presentation before delivering the next turn.
  */
-export interface DevelopmentRuntimeArtifactSessionRefresher {
+export interface DevelopmentRuntimeArtifactRefresher {
   /**
    * Clears the remembered runtime-artifact revision.
    */
   clear(): void;
 
   /**
-   * Returns the session that should dispatch the next turn.
+   * Refreshes the artifact revision before a normal turn.
    */
   refresh(input: {
-    readonly createSession: () => ClientSession;
     readonly inputResponses?: readonly InputResponse[];
     readonly message?: string | UserContent;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
-    readonly session: ClientSession;
-  }): Promise<ClientSession>;
+  }): Promise<void>;
 
   /**
    * Forces one rebuild after a local setup action wrote authored source.
    */
   refreshAfterSourceChange(input: {
-    readonly createSession: () => ClientSession;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
-    readonly session: ClientSession;
-  }): Promise<ClientSession>;
+  }): Promise<void>;
 
   /**
    * Checks for a runtime-artifact revision change while the UI is idle.
    */
   refreshIdle(input: {
-    readonly createSession: () => ClientSession;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
-    readonly session: ClientSession;
-  }): Promise<ClientSession>;
+  }): Promise<void>;
 }
 
 export interface DevelopmentRuntimeArtifactChange {
@@ -59,7 +51,7 @@ export interface DevelopmentRuntimeArtifactChange {
   readonly revision: string;
 }
 
-class LocalDevelopmentRuntimeArtifactSessionRefresher implements DevelopmentRuntimeArtifactSessionRefresher {
+class LocalDevelopmentRuntimeArtifactRefresher implements DevelopmentRuntimeArtifactRefresher {
   readonly #isLocal: boolean;
   readonly #serverUrl: string;
   #artifactRevision: string | undefined;
@@ -74,58 +66,48 @@ class LocalDevelopmentRuntimeArtifactSessionRefresher implements DevelopmentRunt
   }
 
   async refresh(input: {
-    readonly createSession: () => ClientSession;
     readonly inputResponses?: readonly InputResponse[];
     readonly message?: string | UserContent;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
-    readonly session: ClientSession;
-  }): Promise<ClientSession> {
+  }): Promise<void> {
     if (!shouldRefreshRuntimeArtifactsForTurn(input)) {
-      return input.session;
+      return;
     }
 
-    return await this.#refreshSession({ ...input, rebuild: true });
+    await this.#refreshRuntimeArtifacts({ ...input, rebuild: true });
   }
 
   async refreshIdle(input: {
-    readonly createSession: () => ClientSession;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
-    readonly session: ClientSession;
-  }): Promise<ClientSession> {
-    return await this.#refreshSession({ ...input, rebuild: false });
+  }): Promise<void> {
+    await this.#refreshRuntimeArtifacts({ ...input, rebuild: false });
   }
 
   async refreshAfterSourceChange(input: {
-    readonly createSession: () => ClientSession;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
-    readonly session: ClientSession;
-  }): Promise<ClientSession> {
-    return await this.#refreshSession({
+  }): Promise<void> {
+    await this.#refreshRuntimeArtifacts({
       ...input,
       force: true,
       rebuild: true,
-      resetActiveSession: true,
     });
   }
 
-  async #refreshSession(input: {
-    readonly createSession: () => ClientSession;
+  async #refreshRuntimeArtifacts(input: {
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
     readonly force?: boolean;
     readonly rebuild: boolean;
-    readonly resetActiveSession?: boolean;
-    readonly session: ClientSession;
-  }): Promise<ClientSession> {
+  }): Promise<void> {
     if (!this.#isLocal) {
-      return input.session;
+      return;
     }
 
     const revision =
@@ -137,22 +119,15 @@ class LocalDevelopmentRuntimeArtifactSessionRefresher implements DevelopmentRunt
         : undefined) ??
       (await readDevelopmentRuntimeArtifactsRevision({ serverUrl: this.#serverUrl }));
     if (revision === undefined) {
-      return input.session;
+      return;
     }
 
-    let session = input.session;
     const previousRevision = this.#artifactRevision;
     const revisionChanged = previousRevision !== undefined && previousRevision !== revision;
-    if (revisionChanged || input.resetActiveSession === true) {
-      if (session.state.continuationToken !== undefined) {
-        session = input.createSession();
-      }
-    }
     if (revisionChanged) {
       await input.onRuntimeArtifactsChanged?.({ previousRevision, revision });
     }
     this.#artifactRevision = revision;
-    return session;
   }
 }
 
@@ -164,10 +139,10 @@ function shouldRefreshRuntimeArtifactsForTurn(input: {
 }
 
 /**
- * Creates a revision-aware local dev session refresher.
+ * Creates a revision-aware local dev runtime-artifact refresher.
  */
-export function createDevelopmentRuntimeArtifactSessionRefresher(input: {
+export function createDevelopmentRuntimeArtifactRefresher(input: {
   readonly serverUrl: string;
-}): DevelopmentRuntimeArtifactSessionRefresher {
-  return new LocalDevelopmentRuntimeArtifactSessionRefresher(input);
+}): DevelopmentRuntimeArtifactRefresher {
+  return new LocalDevelopmentRuntimeArtifactRefresher(input);
 }

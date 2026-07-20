@@ -92,8 +92,6 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly initialEvents?: readonly HandleMessageStreamEvent[];
   /** Prior session cursor to resume from on mount. */
   readonly initialSession?: SessionState;
-  /** Maximum SSE reconnection attempts per turn. @default 3 */
-  readonly maxReconnectAttempts?: number;
   /**
    * Project submitted user messages before eve confirms them with a
    * `message.received` stream event.
@@ -148,7 +146,6 @@ export function useEveAgent<TData>(
     host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
-    maxReconnectAttempts: options.maxReconnectAttempts,
     optimistic: options.optimistic,
     reducer,
     session: options.session,

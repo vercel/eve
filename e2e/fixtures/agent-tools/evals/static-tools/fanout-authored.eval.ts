@@ -1,13 +1,13 @@
 import { defineEval } from "eve/evals";
 
 import {
-  authoredFanoutExecutionsOverlap,
   FANOUT_SIZE,
+  fanoutExecutionsReachBarrier,
   fanoutRequestsPrecedeFirstResult,
   fanoutRequestsUseExpectedLabels,
 } from "./fanout";
 
-const TOOL_NAME = "streamed-action";
+const TOOL_NAME = "fanout-barrier";
 const LABELS = [
   "fanout-authored-01",
   "fanout-authored-02",
@@ -43,8 +43,8 @@ export default defineEval({
     turn.eventsSatisfy("ten authored requests use their distinct labels", (events) =>
       fanoutRequestsUseExpectedLabels({ events, labels: LABELS, toolName: TOOL_NAME }),
     );
-    turn.eventsSatisfy("ten authored executions overlap", (events) =>
-      authoredFanoutExecutionsOverlap({ events, toolName: TOOL_NAME }),
+    turn.eventsSatisfy("ten authored executions reach the concurrency barrier", (events) =>
+      fanoutExecutionsReachBarrier({ events, toolName: TOOL_NAME }),
     );
   },
 });

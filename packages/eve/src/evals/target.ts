@@ -116,6 +116,23 @@ function createHandle(input: {
       return await sessions.attachSession(sessionId, opts);
     },
 
+    watchTurn(sessionId: string, opts?: { readonly startIndex?: number }) {
+      if (input.sessions !== undefined) {
+        return input.sessions.watchTurn(sessionId, opts);
+      }
+
+      if (base !== undefined) {
+        return base.watchTurn(sessionId, opts);
+      }
+
+      if (client === undefined) {
+        throw new Error("Eval target cannot watch sessions without a client.");
+      }
+
+      const sessions = new EvalSessionManager({ client });
+      return sessions.watchTurn(sessionId, opts);
+    },
+
     async dispatchSchedule(scheduleId: string): Promise<EveEvalScheduleDispatchResult> {
       if (!input.capabilities.devRoutes) {
         throw new Error("target.dispatchSchedule() requires a target with dev routes enabled.");

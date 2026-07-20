@@ -48,7 +48,7 @@ export async function pruneMicrosandboxTemplates(input: {
       if (index < retainCount || now - template.mtimeMs <= recentWindowMs) {
         return;
       }
-      await removeTemplateDirectory(template.path, template.metadata);
+      await removeTemplateDirectory(input.appRoot, template.path, template.metadata);
     }),
     ...directories
       .filter((directory) => directory.isTemporary)
@@ -56,7 +56,7 @@ export async function pruneMicrosandboxTemplates(input: {
         if (now - directory.mtimeMs <= recentWindowMs) {
           return;
         }
-        await removeTemplateDirectory(directory.path, directory.metadata);
+        await removeTemplateDirectory(input.appRoot, directory.path, directory.metadata);
       }),
   ]);
 }
@@ -123,6 +123,7 @@ async function readMicrosandboxTemplateDirectories(templatesDirectory: string): 
 }
 
 async function removeTemplateDirectory(
+  appRoot: string,
   path: string,
   metadata: MicrosandboxTemplateMetadata | null,
 ): Promise<void> {
@@ -130,7 +131,7 @@ async function removeTemplateDirectory(
   if (metadata === null) {
     return;
   }
-  const module = await loadMicrosandboxWithoutInstall();
+  const module = await loadMicrosandboxWithoutInstall(appRoot);
   if (module !== null) {
     await removeSnapshotIfExists(module, metadata.snapshotName);
   }

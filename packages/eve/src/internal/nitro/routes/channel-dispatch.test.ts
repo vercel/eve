@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
-import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
+import type { CancelTurnInput, DeliverInput, RunInput, Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { resolveVercelOidcCurrentProject } from "#runtime/governance/auth/vercel-oidc-project.js";
@@ -232,7 +232,9 @@ describe("dispatchChannelRequest", () => {
 
   it("tags route sends with Vercel's request id", async () => {
     const runtimeForTest: Runtime = {
+      cancelTurn: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
+      resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn(),
     };
@@ -277,7 +279,9 @@ describe("dispatchChannelRequest", () => {
 
   it("does not invent a channel request id when Vercel did not send one", async () => {
     const runtimeForTest: Runtime = {
+      cancelTurn: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
+      resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn(),
     };
@@ -317,7 +321,9 @@ describe("dispatchChannelRequest", () => {
 
   it("does not mutate route-owned run and deliver inputs", async () => {
     const runtimeForTest: Runtime = {
+      cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_deliver" }),
+      resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn().mockResolvedValue({
         continuationToken: "route-token",
@@ -336,11 +342,16 @@ describe("dispatchChannelRequest", () => {
       input: { message: "start" },
       mode: "conversation",
     } satisfies RunInput);
+    const cancelInput = Object.freeze({
+      sessionId: "sess_run",
+      turnId: "turn_1",
+    } satisfies CancelTurnInput);
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
         {
           fetch: async (_request: Request, ctx: RouteContext) => {
+            await ctx.agent.cancelTurn(cancelInput);
             await ctx.agent.deliver(deliverInput);
             await ctx.agent.run(runInput);
             return new Response("ok");
@@ -368,6 +379,7 @@ describe("dispatchChannelRequest", () => {
     expect(response.status).toBe(200);
     const deliveredInput = vi.mocked(runtimeForTest.deliver).mock.calls[0]?.[0];
     const startedInput = vi.mocked(runtimeForTest.run).mock.calls[0]?.[0];
+    expect(runtimeForTest.cancelTurn).toHaveBeenCalledWith(cancelInput);
     expect(deliveredInput).not.toBe(deliverInput);
     expect(startedInput).not.toBe(runInput);
     expect(deliveredInput?.requestId).toBe("iad1::abc123-1710000000000-deadbeef");

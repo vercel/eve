@@ -19,6 +19,7 @@ export function isStreamDisconnectError(error: unknown): boolean {
     error.name === "AbortError" ||
     error.message === "terminated" ||
     errorCode === "UND_ERR_SOCKET" ||
+    (error instanceof TypeError && /^(?:failed to fetch|fetch failed)$/i.test(error.message)) ||
     /abort|cancel|disconnect|premature close|socket|terminated/i.test(error.message)
   );
 }

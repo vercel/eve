@@ -1,6 +1,7 @@
 import { RuntimeRegistry } from "#internal/runtime-registry.js";
 import type { PreparedRuntimeAuthoredTool } from "#runtime/sessions/turn.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
 
 /**
  * One executable authored tool tracked by the runtime-owned registry.
@@ -74,11 +75,11 @@ async function createPreparedRuntimeTool(
 ): Promise<PreparedRuntimeAuthoredTool> {
   return {
     description: definition.description,
-    inputSchema: definition.inputSchema,
+    inputSchema: serializeInputSchema(definition.inputSchema),
     kind: "authored-tool",
     logicalPath: definition.logicalPath,
     name: definition.name,
-    outputSchema: definition.outputSchema,
+    outputSchema: serializeOutputSchema(definition.outputSchema),
     sourceId: definition.sourceId,
   };
 }

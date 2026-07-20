@@ -38,6 +38,7 @@ export interface TurnWorkflowInput {
    */
   readonly driverCapabilities?: {
     readonly turnInbox?: true;
+    readonly cancelledTurnSettle?: true;
   };
   readonly mode: RunMode;
   readonly stepInput: TurnStepInput;
@@ -59,7 +60,7 @@ export function createTurnWorkflowInput(input: TurnWorkflowDispatchInput): TurnW
   return {
     capabilities: input.capabilities,
     completionToken: input.completionToken,
-    driverCapabilities: { turnInbox: true },
+    driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
     mode: input.mode,
     stepInput: {
       input: input.delivery,

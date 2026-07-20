@@ -41,7 +41,10 @@ import {
   createRuntimeActionRequestFromToolCall,
   resolveToolCallInputObject,
 } from "#harness/runtime-actions.js";
-import { createInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
+import {
+  createInvalidToolCallInputError,
+  isInvalidToolCall,
+} from "#harness/tool-call-input-errors.js";
 import type {
   RuntimeActionRequest,
   RuntimeToolResultActionResult,
@@ -242,10 +245,10 @@ export async function emitFailedStep(
 export async function emitRecoverableFailedTurn(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  input: FailedStepPayload,
+  input: FailedStepPayload & { readonly continuationToken: string },
 ): Promise<HarnessEmissionState> {
   await emitStepAndTurnFailed(emitFn, state, input);
-  await emitFn(createSessionWaitingEvent());
+  await emitFn(createSessionWaitingEvent(input.continuationToken));
 
   return {
     sessionStarted: state.sessionStarted,
@@ -273,6 +276,7 @@ export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
+  continuationToken: string,
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
@@ -282,7 +286,7 @@ export async function emitTurnEpilogue(
   );
 
   if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent());
+    await emitFn(createSessionWaitingEvent(continuationToken));
   } else {
     await emitFn(createSessionCompletedEvent());
   }
@@ -478,11 +482,11 @@ async function consumeStreamContent(
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
-    if (
-      options === undefined ||
-      toolCall.invalid === true ||
-      options.excludedActionToolNames.has(toolCall.toolName)
-    ) {
+    if (isInvalidToolCall(toolCall)) {
+      invalidInputToolCallIds.add(toolCall.toolCallId);
+      return;
+    }
+    if (options === undefined || options.excludedActionToolNames.has(toolCall.toolName)) {
       return;
     }
 

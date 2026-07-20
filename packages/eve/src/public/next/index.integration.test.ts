@@ -4,6 +4,17 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("./resolve-eve-binary.js", async () => {
+  const { join } = await import("node:path");
+  return {
+    // Pin resolution to the conventional app-local path so build-command
+    // assertions stay deterministic without a real eve install on disk. The
+    // real resolver is exercised in resolve-eve-binary.integration.test.ts.
+    resolveEveBinaryPath: (nextRoot: string) =>
+      join(nextRoot, "node_modules", "eve", "bin", "eve.js"),
+  };
+});
+
 import { withEve, type EveNextConfig, type EveNextRewriteSections } from "./index.js";
 
 interface TestConfig extends EveNextConfig {

@@ -7,7 +7,10 @@ import { ContextKey } from "#context/key.js";
 import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import {
+  getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
+} from "#harness/runtime-actions.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -24,9 +27,9 @@ import { projectToDurableSession } from "#execution/session.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import {
   dispatchTurnStep,
-  emitTerminalSessionFailureStep,
   resolveEffectiveOutputSchema,
   turnStep,
 } from "#execution/workflow-steps.js";
@@ -296,7 +299,7 @@ describe("dispatchTurnStep", () => {
 });
 
 describe("dispatchRuntimeActionsStep", () => {
-  it("starts a declared subagent named agent in a deeply nested session", async () => {
+  it("preserves a started local child when a later start fails", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as never;
     const compiledBundle = {
@@ -330,7 +333,9 @@ describe("dispatchRuntimeActionsStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    startMock.mockResolvedValue({ runId: "child-run" });
+    startMock
+      .mockResolvedValueOnce({ runId: "child-run" })
+      .mockRejectedValueOnce(new Error("child start failed"));
     getRunMock.mockReturnValue({
       getReadable: () =>
         new ReadableStream<Uint8Array>({
@@ -346,6 +351,15 @@ describe("dispatchRuntimeActionsStep", () => {
           callId: "call-1",
           description: "Runtime action event description.",
           input: { message: "investigate latest routing" },
+          kind: "subagent-call",
+          name: "agent",
+          nodeId: "subagents/agent",
+          subagentName: "agent",
+        },
+        {
+          callId: "call-2",
+          description: "Second runtime action event description.",
+          input: { message: "investigate fallback routing" },
           kind: "subagent-call",
           name: "agent",
           nodeId: "subagents/agent",
@@ -375,7 +389,31 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionState,
     });
 
-    expect(result).toEqual({ results: [], sessionState: expect.any(Object) });
+    expect(result).toEqual({
+      results: [
+        {
+          callId: "call-2",
+          isError: true,
+          kind: "subagent-result",
+          output: {
+            code: "SUBAGENT_START_FAILED",
+            message: "child start failed",
+          },
+          subagentName: "agent",
+        },
+      ],
+      sessionState: expect.any(Object),
+    });
+    expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
+      {
+        childContinuationTokens: {
+          "call-1": "subagent:parent-session:call-1",
+        },
+        childSessionIds: {
+          "call-1": "child-run",
+        },
+      },
+    );
     expect(startMock).toHaveBeenCalledWith(
       workflowEntryReference,
       [
@@ -520,6 +558,90 @@ describe("dispatchRuntimeActionsStep", () => {
       "turn-inbox",
     );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
+  });
+
+  it("records a successfully started remote child session for cancellation", async () => {
+    const remote = {
+      definition: {
+        description: "Research remote",
+        kind: "remote",
+        name: "research",
+        nodeId: "remote/research",
+        path: "/eve/v1/session",
+        url: "https://remote.example.com",
+      },
+    };
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([["remote/research", remote]]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { ok: true, sessionId: "remote-child" },
+            { headers: { "x-eve-session-id": "remote-child" }, status: 202 },
+          ),
+        ),
+    );
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-remote",
+          description: "Delegate the work.",
+          input: { message: "investigate latest routing" },
+          kind: "remote-agent-call",
+          name: "research",
+          nodeId: "remote/research",
+          remoteAgentName: "research",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(result.results).toEqual([]);
+    expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
+      {
+        childSessionIds: { "call-remote": "remote-child" },
+      },
+    );
   });
 
   it("blocks a stale recursive agent call from a delegated session", async () => {
@@ -1095,6 +1217,46 @@ describe("emitTerminalSessionFailureStep", () => {
     // of an abrupt close.
     const writes = workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? [];
     expect(writes.length).toBe(1);
+  });
+
+  it("replaces cataloged failures with their semantic summary while keeping the raw dump", async () => {
+    const sessionFailedCalls: Array<{ data: unknown }> = [];
+    const capturingAdapter: ChannelAdapter = {
+      kind: "thread-context",
+      async "session.failed"(data) {
+        sessionFailedCalls.push({ data });
+      },
+    };
+
+    const serialized = buildSerializedContextWithAdapter(capturingAdapter, "session-semantic");
+
+    const error = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), {
+        code: "ECONNREFUSED",
+      }),
+    });
+
+    await emitTerminalSessionFailureStep({
+      error,
+      parentWritable: createTestWritable(),
+      serializedContext: serialized,
+    });
+
+    expect(sessionFailedCalls).toHaveLength(1);
+    const { data } = sessionFailedCalls[0] as {
+      data: {
+        code: string;
+        message: string;
+        details?: { detail?: string; hint?: string; semanticErrorId?: string };
+      };
+    };
+    expect(data.code).toBe("Network request failed");
+    expect(data.message).toContain("ECONNREFUSED");
+    expect(data.details?.semanticErrorId).toBe("network-request-failed");
+    expect(data.details?.hint).toContain("Check your internet connection");
+    // The raw inspection stays attached so the diagnostic log keeps the
+    // evidence the curated message summarizes away.
+    expect(data.details?.detail).toContain("fetch failed");
   });
 
   it("does not throw when the adapter handler itself throws", async () => {

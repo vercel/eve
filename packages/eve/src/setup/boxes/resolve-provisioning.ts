@@ -350,8 +350,11 @@ export function resolveProvisioning(
           modelWiring: "gateway",
         };
       }
+      // Creating would name the project after the agent, so linking suggests
+      // the existing project already carrying that name.
       const pickedProject = await deps.pickProject(prompter, parent(), team, {
         allowCreateWhenEmpty: options.projectSelection !== "existing-only",
+        suggestedName: agentName,
         signal,
       });
       return {

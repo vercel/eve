@@ -1,6 +1,8 @@
 import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import {
   ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
@@ -160,7 +162,11 @@ function shouldHideDelegationTool(
   definition: HarnessToolDefinition,
   session: AdvertisedToolSession,
 ): boolean {
-  if (definition.runtimeAction?.recursive !== true) {
+  if (
+    definition.name !== AGENT_TOOL_NAME ||
+    definition.runtimeAction?.kind !== "subagent-call" ||
+    definition.runtimeAction.nodeId !== ROOT_RUNTIME_AGENT_NODE_ID
+  ) {
     return false;
   }
 

@@ -36,7 +36,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.sh$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.sh$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -110,8 +110,30 @@ jobs:
         # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
         run: pnpm --filter eve run build
 
+      - name: Build extension fixtures
+        if: needs.changes.outputs.relevant == 'true'
+        # Extension fixtures ship no committed `dist/`; produce it here so
+        # consuming fixtures resolve the built artifacts. `--if-present` skips
+        # extension fixtures without a build script. The update re-packs the
+        # `file:`-protocol store copies so they pick up the fresh dist —
+        # a plain reinstall short-circuits and leaves them stale.
+        run: |
+          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
+          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+
+      - name: Stage workspace extension fixtures as dist-only
+        if: needs.changes.outputs.relevant == 'true'
+        # Removing author source proves the deployment consumes the same
+        # agent-shaped dist trees registry packages ship. Toolkit covers the
+        # rich TypeScript surface; js-only covers pure JavaScript authoring.
+        run: |
+          mv e2e/fixtures/toolkit-extension/extension "$RUNNER_TEMP/toolkit-extension-source"
+          mv e2e/fixtures/js-only-extension/extension "$RUNNER_TEMP/js-only-extension-source"
+
       - name: Deploy fixture and run evals
         if: needs.changes.outputs.relevant == 'true'
+        env:
+          EVE_BUILD_PROFILE: ${{ runner.temp }}/eve-build-profile-${{ matrix.fixture.name }}-${{ matrix.model.name }}.json
         run: |
           set -euo pipefail
           mkdir -p "$EVE_EVAL_JUNIT_DIR"
@@ -137,7 +159,7 @@ jobs:
             VERCEL_ENV=preview \
             VERCEL_TARGET_ENV=preview \
             VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
-            pnpm exec eve build
+            pnpm exec eve build --profile "$EVE_BUILD_PROFILE"
           DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview \
             --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" "${token_args[@]}" | tail -n 1)"
 
@@ -159,6 +181,19 @@ jobs:
               --url "https://$ALIAS" \
               --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.fixture.name }}-${{ matrix.model.name }}-redeploy.xml"
           fi
+
+      - name: Log deployable build timing
+        if: needs.changes.outputs.relevant == 'true'
+        env:
+          BUILD_PROFILE: ${{ runner.temp }}/eve-build-profile-${{ matrix.fixture.name }}-${{ matrix.model.name }}.json
+          FIXTURE_PATH: ${{ matrix.fixture.dir }}
+        run: |
+          node ./scripts/build-profile-report.mjs \
+            --profile "$BUILD_PROFILE" \
+            --app-label "$FIXTURE_PATH" \
+            --sandbox-prewarm included \
+            --require-phase sandbox.prewarm \
+            --output-format build-time
 
       - name: Upload eval artifacts
         if: (failure()) && needs.changes.outputs.relevant == 'true'
