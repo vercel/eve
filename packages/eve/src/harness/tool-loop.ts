@@ -53,7 +53,10 @@ import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
-import { buildWorkflowHostTools } from "#harness/workflow-sandbox.js";
+import {
+  buildWorkflowHostTools,
+  resolveWorkflowSandboxBridgeRequestLimit,
+} from "#harness/workflow-sandbox.js";
 import {
   getWorkflowContinuationSecurity,
   readWorkflowContinuationSecurity,
@@ -2241,6 +2244,9 @@ async function continuePendingWorkflowInterrupt(input: {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       continuationOutput = await continueWorkflowSandboxInterrupt({
+        bridgeRequestLimit: resolveWorkflowSandboxBridgeRequestLimit(
+          input.config.workflowMaxSubagents,
+        ),
         continuationSecurity,
         interrupt: currentInterrupt,
         lifecycle,
