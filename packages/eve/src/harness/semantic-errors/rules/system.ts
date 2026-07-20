@@ -44,11 +44,13 @@ export const SYSTEM_RULES: readonly SemanticErrorRule[] = [
     message: (link) => networkFailureMessage(link.code ?? "network error"),
   },
   {
-    // Exact-equality message fallback for undici's bare `fetch failed`
-    // TypeError and Node's socket teardown, whose structured codes live on
-    // a cause that is sometimes stripped. Equality, never containment: a
-    // user error that merely mentions "fetch failed" must not be
-    // reclassified as a connectivity problem.
+    // Exact-equality message fallback, verified empirically on Node 26:
+    // a failed `fetch` rejects with a TypeError whose message is exactly
+    // "fetch failed" (the coded cause is sometimes stripped in transit),
+    // and a peer-destroyed HTTP socket errors with exactly "socket hang
+    // up" (code ECONNRESET — the code rule above normally wins).
+    // Equality, never containment: a user error that merely mentions
+    // "fetch failed" must not be reclassified as a connectivity problem.
     id: "network-request-failed",
     name: "Network request failed",
     tags: ["system", "transient"],

@@ -15,12 +15,15 @@ export const GATEWAY_AUTHENTICATION_ERROR_NAME = "GatewayAuthenticationError";
 export const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
 
 /**
- * The upstream `GatewayAuthenticationError` builds one of three contextual
- * messages depending on which credential was offered (api-key, oidc,
- * neither). Each variant gets its own rule so the remediation matches the
- * credential that actually failed — collapsing all three into a single
- * "set AI_GATEWAY_API_KEY" hint misleads users whose shell already exports
- * a stale `AI_GATEWAY_API_KEY` that shadows the OIDC fallback.
+ * The upstream `GatewayAuthenticationError` builds one of exactly three
+ * contextual messages depending on which credential was offered — verbatim
+ * in the vendored `@ai-sdk/gateway` source: "AI Gateway authentication
+ * failed: Invalid API key." / ": Invalid OIDC token." / ": No
+ * authentication provided.". Each variant gets its own rule so the
+ * remediation matches the credential that actually failed — collapsing all
+ * three into a single "set AI_GATEWAY_API_KEY" hint misleads users whose
+ * shell already exports a stale `AI_GATEWAY_API_KEY` that shadows the OIDC
+ * fallback.
  */
 const gatewayAuthenticationFailure = anyOf(
   nameIs(GATEWAY_AUTHENTICATION_ERROR_NAME),
@@ -28,9 +31,13 @@ const gatewayAuthenticationFailure = anyOf(
 );
 
 /**
- * Error class names and body `type` discriminators come from
- * `@ai-sdk/gateway` (`GatewayAuthenticationError`, `GatewayRateLimitError`,
- * `GatewayModelNotFoundError`, `GatewayTimeoutError`, …).
+ * Error class names and body `type` discriminators are verified against
+ * the vendored `@ai-sdk/gateway` source: the `Gateway*Error` classes and
+ * the body types `authentication_error`, `invalid_request_error`,
+ * `model_not_found`, `rate_limit_exceeded`, `timeout_error`,
+ * `internal_server_error` all appear there verbatim. `overloaded_error`
+ * is not gateway vocabulary — it is the Anthropic upstream error type the
+ * gateway relays on provider overload.
  */
 export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
   {
