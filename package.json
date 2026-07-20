@@ -31,10 +31,12 @@
     "typecheck": "turbo run typecheck",
     "version-packages": "changeset version",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
-    "test:tui": "pnpm --filter eve run test:tui"
+    "test:tui": "pnpm --filter eve run test:tui",
+    "update:extension-contracts": "node ./scripts/extension-capability-contracts.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "2.31.0",
+    "@microsoft/api-extractor": "7.58.10",
     "@types/node": "catalog:",
     "ai": "catalog:",
     "gray-matter": "4.0.3",

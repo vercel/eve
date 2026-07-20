@@ -764,7 +764,7 @@ describe("scaffoldExtensionProject", () => {
       },
       engines: { node: "24.x" },
     });
-    expect(packageJson.devDependencies?.eve).toBe("^0.25.0");
+    expect(packageJson.devDependencies?.eve).toBe("0.25.0");
     expect(packageJson.peerDependenciesMeta).toBeUndefined();
     expect(packageJson.devDependencies?.typescript).toBe("7.0.2");
     expect(packageJson.dependencies?.ai).toBeUndefined();
@@ -788,6 +788,7 @@ describe("scaffoldExtensionProject", () => {
     const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
     expect(agentsMd).toContain("eve extension");
     expect(agentsMd).toContain("extensions.md");
+    expect(agentsMd).toContain("development dependency pinned exactly");
     expect(agentsMd).toContain("cannot declare");
   });
 });

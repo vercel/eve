@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 
 import { source } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
+import { templateEntries } from "@/lib/templates/data";
 
 const baseUrl = getSiteOrigin();
 
@@ -35,8 +36,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
     {
       changeFrequency: "weekly",
       priority: 0.5,
-      url: url("/resources"),
+      url: url("/templates"),
     },
+    ...templateEntries.map((entry) => ({
+      changeFrequency: "weekly" as const,
+      priority: 0.4,
+      url: url(`/templates/${entry.slug}`),
+    })),
     ...pages,
   ];
 }
