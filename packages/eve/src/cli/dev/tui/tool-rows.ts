@@ -11,7 +11,7 @@ import type { ToolDetailLine } from "./line-diff.js";
 import type { Theme } from "./theme.js";
 import { formatValuePretty, truncate } from "./tool-format.js";
 import { elisionText } from "./rail.js";
-import { clipVisible, visibleLength, wrapVisibleLine } from "./terminal-text.js";
+import { clipVisible, visibleLength, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 
 export function renderTool(
   block: DisplayBlock,

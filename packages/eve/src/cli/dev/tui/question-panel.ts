@@ -11,7 +11,7 @@
 import type { AgentTUIInputOption } from "./runner.js";
 import { visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
-import { clipVisible, renderInputWithBlockCursor, wrapVisibleLine } from "./terminal-text.js";
+import { clipVisible, renderInputWithBlockCursor, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 
 const FREEFORM_ROW_LABEL = "Type your own answer";
 

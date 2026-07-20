@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { EMPTY_LINE, type LineState } from "./line-editor.js";
 import { renderQuestionPanel } from "./question-panel.js";
-import { stripAnsi } from "./terminal-text.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const theme = createTheme({ color: false, unicode: true });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { renderMarkdown } from "./markdown.js";
-import { stripAnsi } from "./terminal-text.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 
 describe("renderMarkdown", () => {
   it("preserves underscores inside URLs", () => {

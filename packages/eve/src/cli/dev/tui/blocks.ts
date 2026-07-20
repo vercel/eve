@@ -17,7 +17,12 @@ import type { ToolGroupPresentation } from "./tool-presentation.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
 import { renderTool } from "./tool-rows.js";
 import { elisionText, TOOL_COLUMN_LEAD } from "./rail.js";
-import { clipVisible, sliceVisible, visibleLength, wrapVisibleLine } from "#cli/ui/terminal-text.js";
+import {
+  clipVisible,
+  sliceVisible,
+  visibleLength,
+  wrapVisibleLine,
+} from "#cli/ui/terminal-text.js";
 
 export type ToolStatus = "running" | "done" | "error" | "denied" | "approval";
 

@@ -1,5 +1,5 @@
 import { diffWriteDetail, type ToolDetailLine } from "./line-diff.js";
-import { stripTerminalControls } from "./terminal-text.js";
+import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */

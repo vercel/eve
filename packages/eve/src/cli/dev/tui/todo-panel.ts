@@ -10,7 +10,7 @@
 import type { Theme } from "./theme.js";
 import { toolBaseName } from "./tool-presentation.js";
 import { TOOL_COLUMN_LEAD } from "./rail.js";
-import { clipVisible, stripTerminalControls } from "./terminal-text.js";
+import { clipVisible, stripTerminalControls } from "#cli/ui/terminal-text.js";
 
 /** One panel row parsed from the `todo` tool's replacement-write input. */
 export interface TodoPanelItem {

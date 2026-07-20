@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { renderBlockLines, type Block } from "./blocks.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
-import { stripAnsi } from "./terminal-text.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const theme = createTheme({ color: false, unicode: true });
