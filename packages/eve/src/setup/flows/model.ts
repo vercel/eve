@@ -28,6 +28,7 @@ import {
   readGatewayServiceTier,
   type GatewayServiceTierState,
 } from "#shared/gateway-service-tier.js";
+import { formatModelSummary } from "#shared/model-summary.js";
 import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
 import { WizardCancelledError } from "../step.js";
 import { withSpinner } from "../with-spinner.js";
@@ -193,9 +194,10 @@ function formatModelDraftHint(
   reasoning: ReasoningLevel | null,
   serviceTier: GatewayServiceTierState,
 ): string {
-  const level = reasoning === null ? "" : `@${reasoning}`;
-  const fast = serviceTier.kind === "priority" ? " ↯" : "";
-  return `${model}${level}${fast}`;
+  const summary: Parameters<typeof formatModelSummary>[0] = { model };
+  if (reasoning !== null) summary.reasoning = reasoning;
+  if (serviceTier.kind === "priority") summary.fastGlyph = "↯";
+  return formatModelSummary(summary);
 }
 
 /**

@@ -1,4 +1,13 @@
-import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
+import {
+  escapeForQuote,
+  isAstNode,
+  keyMatches,
+  lineAt,
+  parseAgentObject,
+  unwrapExpression,
+  type AstNode,
+  type ObjectExpression,
+} from "./agent-config-ast.js";
 
 /**
  * Outcome of a source-to-source edit attempt. Pure data. On success it carries
@@ -16,45 +25,6 @@ export type SourceEdit =
       readonly reason: string;
       readonly line: number;
     };
-
-const AGENT_FACTORY = "defineAgent";
-
-type Program = {
-  readonly body?: readonly AstNode[];
-};
-
-type AstNode = {
-  readonly arguments?: readonly AstNode[];
-  readonly callee?: AstNode;
-  readonly computed?: boolean;
-  readonly declaration?: AstNode | null;
-  readonly end?: number;
-  readonly expression?: AstNode | null;
-  readonly key?: AstNode;
-  readonly name?: string;
-  readonly properties?: readonly AstNode[];
-  readonly raw?: string;
-  readonly start?: number;
-  readonly type?: string;
-  readonly value?: AstNode | string | number | boolean | null;
-};
-
-type ParsedSource = Program & {
-  readonly errors?: readonly ParseError[];
-  readonly program?: Program;
-};
-
-type ParseError = {
-  readonly labels?: readonly { readonly start?: number }[];
-  readonly loc?: { readonly line?: number };
-  readonly message?: string;
-  readonly start?: number;
-};
-
-type ObjectExpression = AstNode & {
-  readonly properties: readonly AstNode[];
-  readonly type: "ObjectExpression";
-};
 
 type StringLiteral = AstNode & {
   readonly end: number;
@@ -76,29 +46,9 @@ export async function applyModelNameToSource(
   sourceText: string,
   modelName: string,
 ): Promise<SourceEdit> {
-  const parsed = await parseAgentSource(sourceText);
-  if ("kind" in parsed) {
-    return parsed;
-  }
-
-  if ((parsed.errors?.length ?? 0) > 0) {
-    const first = parsed.errors?.[0];
-    return {
-      kind: "bail",
-      reason: `agent.ts does not parse: ${first?.message ?? "unknown parse error"}`,
-      line: parseErrorLine(sourceText, first),
-    };
-  }
-
-  const program = parsed.program ?? parsed;
-  const object = findDefineAgentObject(program, AGENT_FACTORY);
-  if (object === undefined) {
-    return {
-      kind: "bail",
-      reason: `no \`export default ${AGENT_FACTORY}({ ... })\` call found`,
-      line: 1,
-    };
-  }
+  const parsed = await parseAgentObject(sourceText);
+  if (parsed.kind === "bail") return parsed;
+  const object = parsed.object;
 
   const literal = findStringLiteralProperty(object, "model");
   if (literal === undefined) {
@@ -106,7 +56,7 @@ export async function applyModelNameToSource(
       kind: "bail",
       reason:
         "`model` is absent or is not a string literal (e.g. an env reference, a template, an inlined SDK model, or a defineDynamic() dynamic model)",
-      line: lineAt(sourceText, object.start ?? 0),
+      line: lineAt(sourceText, object.start),
     };
   }
 
@@ -123,76 +73,12 @@ export async function applyModelNameToSource(
   return { kind: "applied", from, to: modelName, nextSource };
 }
 
-async function parseAgentSource(sourceText: string): Promise<ParsedSource | SourceEdit> {
-  try {
-    return (await parseWithNitroRolldownAst("agent.ts", sourceText)) as ParsedSource;
-  } catch (error) {
-    const parseError = error as ParseError;
-    return {
-      kind: "bail",
-      reason: `agent.ts does not parse: ${parseError.message ?? "unknown parse error"}`,
-      line: parseErrorLine(sourceText, parseError),
-    };
-  }
-}
-
-/** Strips `as`, `satisfies`, and parentheses to reach the underlying expression. */
-function unwrapExpression(expression: AstNode): AstNode {
-  let node: AstNode = expression;
-  while (
-    node.type === "ParenthesizedExpression" ||
-    node.type === "TSAsExpression" ||
-    node.type === "TSSatisfiesExpression"
-  ) {
-    if (node.expression === undefined || node.expression === null) {
-      return node;
-    }
-    node = node.expression;
-  }
-  return node;
-}
-
-/** Locates the object literal of a top-level `export default factory({ ... })`. */
-function findDefineAgentObject(program: Program, factory: string): ObjectExpression | undefined {
-  for (const statement of program.body ?? []) {
-    if (statement.type !== "ExportDefaultDeclaration") {
-      continue;
-    }
-    const declaration = statement.declaration;
-    if (declaration === undefined || declaration === null) {
-      continue;
-    }
-    if (
-      declaration.type !== "CallExpression" &&
-      declaration.type !== "ParenthesizedExpression" &&
-      declaration.type !== "TSAsExpression" &&
-      declaration.type !== "TSSatisfiesExpression"
-    ) {
-      continue;
-    }
-    const call = unwrapExpression(declaration);
-    if (call.type !== "CallExpression" || !isFactoryCallee(call.callee, factory)) {
-      continue;
-    }
-    const firstArgument = call.arguments?.[0];
-    if (firstArgument === undefined || firstArgument.type === "SpreadElement") {
-      continue;
-    }
-    const argument = unwrapExpression(firstArgument);
-    if (argument.type === "ObjectExpression") {
-      return argument as ObjectExpression;
-    }
-  }
-  return undefined;
-}
-
-function isFactoryCallee(callee: AstNode | undefined, factory: string): boolean {
-  return callee?.type === "Identifier" && callee.name === factory;
-}
-
 /**
  * Returns the string-literal value node for `key`, or undefined when the
  * property is missing, spread, computed, or resolves to a non-string value.
+ * Deliberately more permissive than the path editor's lookup: a spread
+ * elsewhere in the object does not block rewriting an explicit `model`
+ * literal, matching the original `/model <slug>` contract.
  */
 function findStringLiteralProperty(
   object: ObjectExpression,
@@ -219,43 +105,4 @@ function findStringLiteralProperty(
     return undefined;
   }
   return undefined;
-}
-
-function keyMatches(key: AstNode | undefined, name: string): boolean {
-  if (key === undefined) {
-    return false;
-  }
-  if (key.type === "Identifier") {
-    return key.name === name;
-  }
-  if (key.type === "Literal") {
-    return typeof key.value === "string" && key.value === name;
-  }
-  return false;
-}
-
-function isAstNode(value: unknown): value is AstNode {
-  return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
-}
-
-function parseErrorLine(source: string, error: ParseError | undefined): number {
-  if (typeof error?.loc?.line === "number") {
-    return error.loc.line;
-  }
-  const offset = error?.labels?.[0]?.start ?? error?.start;
-  return lineAt(source, offset ?? 0);
-}
-
-function escapeForQuote(value: string, quote: '"' | "'"): string {
-  return value.replaceAll("\\", "\\\\").replaceAll(quote, `\\${quote}`);
-}
-
-function lineAt(source: string, offset: number): number {
-  let line = 1;
-  for (let index = 0; index < offset && index < source.length; index += 1) {
-    if (source[index] === "\n") {
-      line += 1;
-    }
-  }
-  return line;
 }

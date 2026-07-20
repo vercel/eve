@@ -5,6 +5,7 @@ import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { remoteHost } from "./target.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+import { formatModelSummary } from "#shared/model-summary.js";
 
 export interface StatusLineInput {
   /** Port of the connected local development server; omitted for remote sessions. */
@@ -37,17 +38,18 @@ function renderModel(
 ): string | undefined {
   if (input.model === undefined) return undefined;
   const c = input.theme.colors;
-  const level = input.reasoning === undefined ? "" : `@${input.reasoning}`;
-  const fast = input.fastMode === true ? ` ${input.theme.glyph.fast}` : "";
+  const summary: Parameters<typeof formatModelSummary>[0] = { model: input.model };
+  if (input.reasoning !== undefined) summary.reasoning = input.reasoning;
+  if (input.fastMode === true) summary.fastGlyph = input.theme.glyph.fast;
   if (input.remote !== undefined) {
     // Sanitize the untrusted remote id before appending suffixes, so its
     // trailing whitespace is trimmed instead of collapsing into an interior
     // space ahead of the reasoning level.
-    const id = stripAnsi(input.model).replace(/\s+/gu, " ").trim();
-    const plain = stripAnsi(`${id}${level}${fast}`).replace(/\s+/gu, " ").trim();
+    summary.model = stripAnsi(input.model).replace(/\s+/gu, " ").trim();
+    const plain = stripAnsi(formatModelSummary(summary)).replace(/\s+/gu, " ").trim();
     return c.dim(plain);
   }
-  return c.dim(`${input.model}${level}${fast}`);
+  return c.dim(formatModelSummary(summary));
 }
 
 function renderServerPort(
