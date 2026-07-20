@@ -1,5 +1,5 @@
 import { watch } from "node:fs";
-import { mkdir, readdir, rm, stat, utimes } from "node:fs/promises";
+import { mkdir, readdir, realpath, rm, stat, utimes } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
@@ -315,7 +315,9 @@ async function waitForPublicationLockChange(lockPath: string, deadline: number):
     );
   }
 
-  const locksDirectory = dirname(lockPath);
+  // libuv resolves Windows event paths to their long form, so watching an
+  // 8.3 short path can abort Node when it tries to strip the original prefix.
+  const locksDirectory = await realpath(dirname(lockPath));
   const watchedPrefix = basename(lockPath);
   const initialState = await readPublicationLockState(lockPath);
   await new Promise<void>((resolvePromise, reject) => {
