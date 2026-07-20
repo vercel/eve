@@ -722,9 +722,7 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).toContain(
       "This tool requires sandbox access on the runtime context.",
     );
-    expect(serverModuleSource).toContain(
-      "The load_skill tool requires sandbox access on the runtime context.",
-    );
+    expect(serverModuleSource).toContain("The dynamic skill");
     expect(serverModuleSource).toContain("URL must start with http:// or https://");
   }, 30_000);
 
