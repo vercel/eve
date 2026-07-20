@@ -3,7 +3,7 @@ title: "Overview"
 description: "Choose a deployment strategy and prepare an eve agent for production."
 ---
 
-Every eve deployment builds the same agent and serves the same web API. Choose a platform based on how you want to run workflows, sandboxes, routing, and supporting infrastructure.
+Deploy eve to Vercel or run it as a Node service on your own infrastructure. Your deployment strategy determines the build output, workflow storage, sandbox backend, and routing. The agent’s filesystem-based configuration remains portable across these strategies.
 
 ## Choose a deployment strategy
 
