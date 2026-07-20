@@ -70,7 +70,7 @@ import type {
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
-import { summarizeKnownError } from "#harness/semantic-errors.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { inspectError, setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 import {
   parseDevRebuildLogLine,

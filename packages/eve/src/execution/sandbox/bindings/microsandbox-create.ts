@@ -59,7 +59,14 @@ export function enrichMicrosandboxError(input: {
   );
 }
 
-class MicrosandboxDiagnosticError extends Error {}
+class MicrosandboxDiagnosticError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    // Stable discriminator for the semantic-error catalog's sandbox rules;
+    // subclassing alone leaves `name` as "Error".
+    this.name = "MicrosandboxDiagnosticError";
+  }
+}
 
 async function reportMicrosandboxCreateProgress(
   events: AsyncIterable<PullProgressEvent>,

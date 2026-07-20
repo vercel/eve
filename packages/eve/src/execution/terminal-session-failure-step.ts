@@ -1,7 +1,7 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { deserializeContext } from "#context/serialize.js";
-import { summarizeKnownError } from "#harness/semantic-errors.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import {
   createSessionFailedEvent,
