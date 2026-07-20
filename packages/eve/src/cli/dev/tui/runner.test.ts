@@ -1881,10 +1881,16 @@ describe("EveTUIRunner renderer teardown", () => {
         renderStream: vi.fn(async (result) => {
           for await (const event of result.events as AsyncIterable<unknown>) void event;
         }),
-        upsertSubagentStep: vi.fn(),
-        completeSubagent: (update: { callId: string }) => {
-          completeSubagent(update);
-          completed.resolve();
+        subagents: {
+          begin: vi.fn(),
+          upsertStep: vi.fn(),
+          upsertTool: vi.fn(),
+          removeTool: vi.fn(),
+          markChildToolCallId: vi.fn(),
+          complete: (update: { callId: string }) => {
+            completeSubagent(update);
+            completed.resolve();
+          },
         },
       }),
       session: sessionYielding([

@@ -14,6 +14,7 @@ import type {
   AgentTUIToolApprovalResponse,
   ConnectionAuthUpdate,
   SubagentStepUpdate,
+  SubagentView,
   SubagentToolUpdate,
 } from "./runner.js";
 import { interruptedError } from "./errors.js";
@@ -1283,14 +1284,30 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
+   * The runner-facing subagent surface (see {@link SubagentView}); the
+   * public methods below are its implementation and the unit tests' seam.
+   */
+  readonly subagents: SubagentView = {
+    begin: (update) => this.beginSubagent(update),
+    upsertStep: (update) => this.upsertSubagentStep(update),
+    upsertTool: (update) => this.upsertSubagentTool(update),
+    removeTool: (update) => this.removeSubagentTool(update),
+    complete: (update) => this.completeSubagent(update),
+    markChildToolCallId: (callId) => this.markChildToolCallId(callId),
+  };
+
+  /**
    * Opens a subagent's section as soon as the dispatch is announced, so the
    * transcript flows from the `Delegate …` placeholder straight into the
    * `※ subagent(<name>)` header instead of going blank until the child's
-   * first content streams in.
+   * first content streams in. Re-opening a completed section (a HITL-parked
+   * child resuming) clears its Done mark.
    */
   beginSubagent(update: { callId: string; name: string }): void {
     if (this.#subagents === "hidden") return;
     this.#ensureSubagentHeader(update.callId, update.name);
+    const header = this.#blockById.get(subagentHeaderId(update.callId));
+    if (header?.status === "done") delete header.status;
     this.#paint();
   }
 
