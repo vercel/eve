@@ -160,7 +160,7 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options[0]?.hint).toBe(`xai/grok-4.5${pc.blue("@high")}${pc.blue(" ↯")}`);
+    expect(menuPaints[0]?.options[0]?.hint).toBe("xai/grok-4.5@high ↯");
   });
 
   it("keeps the model row for an external-provider model and never asks to configure a provider", async () => {
@@ -421,9 +421,7 @@ describe("runModelFlow", () => {
     });
 
     expect(menuPaints).toHaveLength(2);
-    expect(menuPaints[1]?.options[0]?.hint).toBe(
-      `anthropic/claude-sonnet-5${pc.blue("@high")}${pc.blue(" ↯")}`,
-    );
+    expect(menuPaints[1]?.options[0]?.hint).toBe("anthropic/claude-sonnet-5@high ↯");
     expect(deps.applySettings).toHaveBeenCalledTimes(1);
     expect(deps.applySettings).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
@@ -499,7 +497,7 @@ describe("runModelFlow", () => {
 
     expect(captured?.serviceTier).toEqual({ kind: "custom", value: "flex" });
     // A custom tier is not Fast mode: no marker on the root hint.
-    expect(menuPaints[0]?.options[0]?.hint).toBe(`anthropic/claude-sonnet-5${pc.blue("@medium")}`);
+    expect(menuPaints[0]?.options[0]?.hint).toBe("anthropic/claude-sonnet-5@medium");
   });
 
   it("folds an unchanged screen and a Done exit into a cancel", async () => {
