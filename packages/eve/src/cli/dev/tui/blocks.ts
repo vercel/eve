@@ -164,19 +164,20 @@ export function renderBlockLines(
 
 /**
  * The gutter prefix for nested rows: the section's two-cell tool-column
- * indent, then a Vercel-orange vertical rule per nesting level to contain a
- * subagent's output beneath its header.
+ * indent, then a dim vertical rule per nesting level to contain a
+ * subagent's output beneath its header — the `※` mark alone carries the
+ * section's orange.
  */
 function nestingPrefix(depth: number, theme: Theme): string {
   if (depth <= 0) return "";
-  const rule = `${theme.colors.orange(theme.glyph.rule)} `;
+  const rule = `${theme.colors.dim(theme.glyph.rule)} `;
   return `  ${rule.repeat(depth)}`;
 }
 
 /** The nesting prefix with its innermost rule swapped for the closing `└`. */
 function closingPrefix(depth: number, theme: Theme): string {
-  const rule = `${theme.colors.orange(theme.glyph.rule)} `;
-  return `  ${rule.repeat(depth - 1)}${theme.colors.orange(theme.glyph.corner)} `;
+  const rule = `${theme.colors.dim(theme.glyph.rule)} `;
+  return `  ${rule.repeat(depth - 1)}${theme.colors.dim(theme.glyph.corner)} `;
 }
 
 function renderBody(
@@ -224,9 +225,9 @@ function renderBody(
     case "subagent":
       return renderSubagentHeader(block, width, theme);
     case "subagent-close": {
-      // Closes the section's rail in its hue. A completed section's corner
-      // carries the collapsed activity footnote instead of railed children.
-      const corner = `  ${theme.colors.orange(theme.glyph.corner)}`;
+      // Closes the section's rail. A completed section's corner carries
+      // the collapsed activity footnote instead of railed children.
+      const corner = `  ${theme.colors.dim(theme.glyph.corner)}`;
       if (block.body !== undefined && block.body.length > 0) {
         return [clipVisible(`${corner} ${theme.colors.dim(block.body)}`, Math.max(1, width))];
       }
@@ -545,23 +546,22 @@ function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
 }
 
 function renderSubagentHeader(block: Block, width: number, theme: Theme): string[] {
-  // `subagent(<name>)` with the name in the section's orange; the generic
-  // self-delegation tool (literally named `agent`) reads as a plain
-  // `subagent(self)`.
+  // `subagent(<name>)`; the generic self-delegation tool (literally named
+  // `agent`) reads as `subagent(self)`. Only the `※` mark carries orange —
+  // lead, rails, and name stay quiet around it.
   const isSelf = block.title === undefined || block.title === "agent";
   const rawName = isSelf ? "self" : block.title!;
   const name = truncatePlain(rawName, Math.max(8, width - 16));
   // The `└ ` lead hangs the persistent section off the flow above it,
   // making the nesting of its railed children evident.
-  const lead = `${theme.colors.orange(theme.glyph.corner)} `;
-  const coloredName = isSelf ? name : theme.colors.orange(name);
+  const lead = `${theme.colors.dim(theme.glyph.corner)} `;
   // The ordinal rides inside the parens (`subagent(self:4)`) in every
   // state; a completed call reports Done on the header itself — the
   // collapsed section has no corner to carry it.
   const isOrdinal = block.subtitle !== undefined && block.subtitle.startsWith("#");
   const ordinal = isOrdinal ? `:${block.subtitle!.slice(1)}` : "";
   let header = `${lead}${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(
-    `subagent(${coloredName}${ordinal})`,
+    `subagent(${name}${ordinal})`,
   )}`;
   if (block.status === "done") {
     header += ` ${theme.colors.dim("Done")}`;
