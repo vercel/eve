@@ -2088,7 +2088,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("coalesces a source's writes into one stream section at the live edge", () => {
+  it("coalesces a source's writes into one section showing the newest write", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
@@ -2108,15 +2108,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     // A stream is continuous: every stdout write — the notice interleaving
-    // included — merges into ONE section riding the live edge, in arrival
-    // order.
+    // included — merges into ONE section anchored at the newest write,
+    // showing only that write with the rest behind the elided count.
     expect(countOccurrences(snapshot, "○ stdout")).toBe(1);
-    expect(snapshot).toContain("│ weather lookup { city: 'NY' }");
-    expect(snapshot).toContain("│ weather lookup { city: 'LA' }");
+    expect(snapshot).toContain("│ … (2 more)");
     expect(snapshot).toContain("│ post-turn line");
-    expect(snapshot.indexOf("city: 'NY'")).toBeLessThan(snapshot.indexOf("city: 'LA'"));
-    expect(snapshot.indexOf("city: 'LA'")).toBeLessThan(snapshot.indexOf("post-turn line"));
-    // The section open at shutdown is committed, not wiped with the live region.
+    expect(snapshot).not.toContain("city: 'NY'");
+    // The section sits at the last write's position — after the notice.
     expect(snapshot.indexOf("○ stdout")).toBeGreaterThan(snapshot.indexOf("turn boundary"));
   });
 
@@ -2145,15 +2143,17 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.setLogDisplayMode("all");
     renderer.shutdown();
 
-    // Restored lines reappear as their stream sections at the live edge:
-    // both writes were still in the live window, so their sections commit
-    // after the notice.
+    // Restored sections sit at their newest write's position: stdout
+    // before the notice, stderr after it — later events display after the
+    // last error, never behind it.
     const restored = screen.snapshot();
     expect(restored.indexOf("before-boundary stdout")).toBeGreaterThan(-1);
-    expect(restored.indexOf("turn boundary")).toBeLessThan(
-      restored.indexOf("before-boundary stdout"),
+    expect(restored.indexOf("before-boundary stdout")).toBeLessThan(
+      restored.indexOf("turn boundary"),
     );
-    expect(restored.indexOf("after-boundary stderr")).toBeGreaterThan(-1);
+    expect(restored.indexOf("turn boundary")).toBeLessThan(
+      restored.indexOf("after-boundary stderr"),
+    );
   });
 
   it("stores long stderr diagnostics and shows concise copy by default", () => {
@@ -2393,8 +2393,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    // The buffered write reappears as its stream section at the live edge.
-    expect(snapshot.indexOf("captured while hidden")).toBeGreaterThan(
+    // The buffered write reappears at its own position, before the notice
+    // that followed it.
+    expect(snapshot.indexOf("captured while hidden")).toBeGreaterThan(-1);
+    expect(snapshot.indexOf("captured while hidden")).toBeLessThan(
       snapshot.indexOf("after the log"),
     );
   });

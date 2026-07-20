@@ -15,9 +15,9 @@ import { theme } from "./lib/theme.ts";
  *
  *   - `/loglevel none` hides log lines already in the transcript
  *   - lines captured while hidden stay buffered, invisible
- *   - `/loglevel all` restores every buffered line; live writes rejoin
- *     their source's stream section (one `○ stdout` / `○ stderr` region
- *     at the live edge, write order preserved within it)
+ *   - `/loglevel all` restores the streams: each source renders one
+ *     section showing its NEWEST write, with earlier writes behind an
+ *     `… (N more)` count (the diagnostics file carries the history)
  *
  * Needs no agent server and no model credentials.
  */
@@ -79,20 +79,13 @@ void (async () => {
     await screen.waitForText("Showing all logs", 5_000);
 
     const restored = screen.snapshot();
-    const positions = [
-      restored.indexOf(VISIBLE_STDOUT_MARK),
-      restored.indexOf(VISIBLE_STDERR_MARK),
-      restored.indexOf("Logs hidden"),
-      restored.indexOf(HIDDEN_STDOUT_MARK),
-    ];
-    if (positions.some((index) => index === -1)) {
-      throw new Error(`/loglevel all should restore every buffered line:\n${restored}`);
+    // The stdout section shows only its newest write (the one captured
+    // while hidden); the earlier mark sits behind the elided count.
+    if (!restored.includes(HIDDEN_STDOUT_MARK) || !restored.includes(VISIBLE_STDERR_MARK)) {
+      throw new Error(`/loglevel all should restore each stream's newest write:\n${restored}`);
     }
-    // Both stdout marks share one stream section, write order preserved.
-    if (!(restored.indexOf(VISIBLE_STDOUT_MARK) < restored.indexOf(HIDDEN_STDOUT_MARK))) {
-      throw new Error(
-        `stream sections should preserve write order (${positions.join(", ")}):\n${restored}`,
-      );
+    if (restored.includes(VISIBLE_STDOUT_MARK) || !restored.includes("(1 more)")) {
+      throw new Error(`earlier writes should collapse behind the elided count:\n${restored}`);
     }
 
     input.type("/exit");
@@ -100,7 +93,7 @@ void (async () => {
     await runPromise;
 
     process.stdout.write(
-      `${theme.muted("[tui-loglevel] buffered hide/restore with stream sections verified")}\n`,
+      `${theme.muted("[tui-loglevel] buffered hide/restore with newest-write sections verified")}\n`,
     );
   } catch (error) {
     process.stdout.write(

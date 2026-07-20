@@ -40,21 +40,41 @@ export function groupToolBlocksForDisplay(
   options: GroupToolBlocksOptions = {},
 ): ToolBlockDisplayGroup[] {
   if ((options.logCoalescing ?? "window") === "window") {
-    const logWrites: Block[] = [];
-    const rest: Block[] = [];
+    // Bucket every write by (source, visibility) and anchor each bucket at
+    // its NEWEST member: the merged section renders where the last write
+    // landed, so everything that happened after it displays after it.
+    const buckets = new Map<string, Block[]>();
     for (const block of blocks) {
-      (isGroupableLogWrite(block) ? logWrites : rest).push(block);
+      if (!isGroupableLogWrite(block)) continue;
+      const key = logBucketKey(block);
+      const bucket = buckets.get(key);
+      if (bucket === undefined) buckets.set(key, [block]);
+      else bucket.push(block);
     }
-    return [...groupBlocks(rest), ...coalesceLogWrites(logWrites)];
+    const anchors = new Map<Block, readonly Block[]>();
+    for (const members of buckets.values()) anchors.set(members.at(-1)!, members);
+    return groupBlocks(blocks, anchors);
   }
   return groupBlocks(blocks);
 }
 
-function groupBlocks(blocks: readonly Block[]): ToolBlockDisplayGroup[] {
+function groupBlocks(
+  blocks: readonly Block[],
+  logAnchors?: ReadonlyMap<Block, readonly Block[]>,
+): ToolBlockDisplayGroup[] {
   const groups: ToolBlockDisplayGroup[] = [];
   for (let index = 0; index < blocks.length;) {
     const first = blocks[index]!;
     if (isGroupableLogWrite(first)) {
+      if (logAnchors !== undefined) {
+        // Window mode: only a bucket's newest member emits (the merged
+        // section, at the last write's position); earlier members are
+        // carried as that group's members.
+        const members = logAnchors.get(first);
+        if (members !== undefined) groups.push(...coalesceLogWrites(members));
+        index += 1;
+        continue;
+      }
       const run = [first];
       while (
         index + run.length < blocks.length &&
@@ -67,7 +87,7 @@ function groupBlocks(blocks: readonly Block[]): ToolBlockDisplayGroup[] {
       continue;
     }
     if (first.kind === "subagent" && first.subagentCallId !== undefined) {
-      const run = collectSubagentRun(blocks, index);
+      const run = collectSubagentRun(blocks, index, logAnchors);
       groups.push(...run.groups);
       index += run.consumed;
       continue;
@@ -189,12 +209,6 @@ function partitionRunByStatus(run: readonly Block[]): ToolBlockDisplayGroup[] {
 export const maxVisibleSubagentRunChildren = 3;
 
 /**
- * A coalesced log run windows to this many newest lines; older lines
- * collapse into a `… (N more)` row under the section header.
- */
-export const maxVisibleLogRunLines = 10;
-
-/**
  * An ordinary captured write. In-place log status blocks (the dev rebuild
  * cycle) carry an id and must never merge into a run.
  */
@@ -202,19 +216,24 @@ function isGroupableLogWrite(block: Block): boolean {
   return block.kind === "log" && block.id === undefined;
 }
 
+/** The (source, visibility) identity a write merges under. */
+function logBucketKey(block: Block): string {
+  return `${block.title ?? ""}\u0000${block.logVisibility ?? ""}`;
+}
+
 /**
  * Coalesces captured writes into one section per (source, visibility)
  * bucket, so a stream renders as a single `○ stderr` section instead of one
  * per write. Bucketing keeps the concise/raw diagnostic twins apart — only
  * one of the pair is visible under any log filter, and a merged display can
- * carry only one visibility. The section body is MRU-down: the newest lines
- * stay visible, older ones collapse into the display's elided count. A lone
- * write keeps its full body — only merges are windowed.
+ * carry only one visibility. The section shows only the NEWEST write —
+ * every stored diagnostic points at the log file, so history on screen is
+ * redundant — with earlier writes collapsed into the elided count.
  */
 function coalesceLogWrites(run: readonly Block[]): ToolBlockDisplayGroup[] {
   const buckets = new Map<string, Block[]>();
   for (const block of run) {
-    const key = `${block.title ?? ""}\u0000${block.logVisibility ?? ""}`;
+    const key = logBucketKey(block);
     const bucket = buckets.get(key);
     if (bucket === undefined) {
       buckets.set(key, [block]);
@@ -224,18 +243,15 @@ function coalesceLogWrites(run: readonly Block[]): ToolBlockDisplayGroup[] {
   }
   return [...buckets.values()].map((members) => {
     if (members.length === 1) return { members, display: members[0]! };
-    const lines = members.flatMap((member) => (member.body ?? "").split("\n"));
-    const visible = lines.slice(-maxVisibleLogRunLines);
-    const hidden = lines.length - visible.length;
-    const first = members[0]!;
+    const newest = members.at(-1)!;
     const display: Block = {
       kind: "log",
       live: members.some((member) => member.live !== false),
-      body: visible.join("\n"),
+      body: newest.body ?? "",
+      elided: members.length - 1,
     };
-    if (first.title !== undefined) display.title = first.title;
-    if (first.logVisibility !== undefined) display.logVisibility = first.logVisibility;
-    if (hidden > 0) display.elided = hidden;
+    if (newest.title !== undefined) display.title = newest.title;
+    if (newest.logVisibility !== undefined) display.logVisibility = newest.logVisibility;
     return { members, display };
   });
 }
@@ -264,6 +280,7 @@ const RUN_PASS_THROUGH_KINDS: ReadonlySet<Block["kind"]> = new Set([
 function collectSubagentRun(
   blocks: readonly Block[],
   start: number,
+  logAnchors?: ReadonlyMap<Block, readonly Block[]>,
 ): { consumed: number; groups: ToolBlockDisplayGroup[] } {
   const first = blocks[start]!;
   const headers = [first];
@@ -374,10 +391,15 @@ function collectSubagentRun(
     }
   }
   // Interrupting pass-through blocks render after the sections they
-  // spliced into. Ordinary log writes never reach here — window grouping
-  // extracts them up front — so this is the in-place status block and the
-  // other splice-prone kinds.
+  // spliced into. In window mode a spliced log write emits only if it is
+  // its bucket's anchor (the merged section); earlier members ride that
+  // group instead.
   for (const block of passThrough) {
+    if (logAnchors !== undefined && isGroupableLogWrite(block)) {
+      const members = logAnchors.get(block);
+      if (members !== undefined) groups.push(...coalesceLogWrites(members));
+      continue;
+    }
     groups.push({ members: [block], display: block });
   }
   return { consumed, groups };

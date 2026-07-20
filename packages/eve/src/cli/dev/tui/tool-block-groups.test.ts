@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Block } from "./blocks.js";
-import {
-  groupToolBlocksForDisplay,
-  maxVisibleLogRunLines,
-  maxVisibleSubagentRunChildren,
-} from "./tool-block-groups.js";
+import { groupToolBlocksForDisplay, maxVisibleSubagentRunChildren } from "./tool-block-groups.js";
 
 function fetchBlock(
   id: string,
@@ -493,34 +489,16 @@ describe("groupToolBlocksForDisplay", () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0]?.members).toHaveLength(2);
-    // The merged section carries every member's lines and stays live while
-    // any write still is, so the run keeps accumulating in the live region.
+    // The merged section shows only the newest write — every stored
+    // diagnostic points at the log file, so on-screen history is redundant
+    // — and stays live while any write still is.
     expect(groups[0]?.display).toMatchObject({
       kind: "log",
       title: "stderr",
-      body: "warning one\ndetail one\nwarning two",
+      body: "warning two",
       live: true,
+      elided: 1,
     });
-    expect(groups[0]?.display.elided).toBeUndefined();
-  });
-
-  it("windows a coalesced log run to its newest lines", () => {
-    const writes: Block[] = Array.from({ length: 2 }, (_, index) => ({
-      kind: "log",
-      title: "stderr",
-      body: Array.from(
-        { length: maxVisibleLogRunLines },
-        (_, line) => `w${index + 1} line ${line + 1}`,
-      ).join("\n"),
-      live: false,
-    }));
-
-    const [group] = groupToolBlocksForDisplay(writes);
-
-    // MRU-down: the newest lines survive; older ones collapse into the count.
-    expect(group?.display.elided).toBe(maxVisibleLogRunLines);
-    expect(group?.display.body?.startsWith("w2 line 1")).toBe(true);
-    expect(group?.display.body?.split("\n")).toHaveLength(maxVisibleLogRunLines);
   });
 
   it("buckets a log run by source and visibility without merging across them", () => {
@@ -547,11 +525,13 @@ describe("groupToolBlocksForDisplay", () => {
     // mixed section would double the content under one log filter.
     expect(groups).toHaveLength(2);
     expect(groups[0]?.display).toMatchObject({
-      body: "concise one\nconcise two",
+      body: "concise two",
+      elided: 1,
       logVisibility: "stderr-only",
     });
     expect(groups[1]?.display).toMatchObject({
-      body: "raw one\nraw two",
+      body: "raw two",
+      elided: 1,
       logVisibility: "all-only",
     });
   });
@@ -560,7 +540,7 @@ describe("groupToolBlocksForDisplay", () => {
     const lone: Block = {
       kind: "log",
       title: "stderr",
-      body: Array.from({ length: maxVisibleLogRunLines + 5 }, (_, i) => `line ${i}`).join("\n"),
+      body: Array.from({ length: 15 }, (_, i) => `line ${i}`).join("\n"),
       live: false,
     };
     const status: Block = {
@@ -575,9 +555,9 @@ describe("groupToolBlocksForDisplay", () => {
     const groups = groupToolBlocksForDisplay([lone, status, write]);
 
     // A lone write is never windowed, and the rebuild status row must not
-    // absorb (or be absorbed by) neighboring writes. Stream sections ride
-    // the live edge: the writes render after the in-place status.
-    expect(groups.map((group) => group.display)).toEqual([status, lone, write]);
+    // absorb (or be absorbed by) neighboring writes. Single-member buckets
+    // sit at their own positions.
+    expect(groups.map((group) => group.display)).toEqual([lone, status, write]);
   });
 
   it("merges a source's writes across interleaved blocks in window mode only", () => {
@@ -585,10 +565,11 @@ describe("groupToolBlocksForDisplay", () => {
     const notice: Block = { kind: "notice", body: "boundary", live: false };
     const blocks = [write("early failure"), notice, write("late failure")];
 
-    // Window mode: one continuous stream section, appended after the rest.
+    // Window mode: one stream section anchored at the newest write, so
+    // everything that happened after the last error displays after it.
     const windowed = groupToolBlocksForDisplay(blocks);
     expect(windowed.map((group) => group.display.kind)).toEqual(["notice", "log"]);
-    expect(windowed[1]?.display.body).toBe("early failure\nlate failure");
+    expect(windowed[1]?.display).toMatchObject({ body: "late failure", elided: 1 });
 
     // Runs mode (transcript rebuilds): committed positions stay put.
     const runs = groupToolBlocksForDisplay(blocks, { logCoalescing: "runs" });
