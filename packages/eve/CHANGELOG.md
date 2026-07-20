@@ -1,5 +1,28 @@
 # eve
 
+## 0.26.0
+
+### Minor Changes
+
+- 26504e9: The client now reconnects durable event streams from their last cursor, so long turns continue across transient connection cuts without replaying events. Stream retries are now managed internally, interrupted sessions remain resumable, and `maxReconnectAttempts` has been removed from `ClientOptions`, `EveAgentStoreInit`, and the React, Svelte, and Vue `UseEveAgentOptions` APIs.
+
+### Patch Changes
+
+- 82fba04: Provide dynamic tools with the full auth-capable `ToolContext`, including `ctx.getToken(provider)` and `ctx.requireAuth(provider)`, across live execution and durable replay.
+- 82fba04: Canonicalize Windows publication-lock watcher paths to avoid Node/libuv crashes when temporary directories use 8.3 short names.
+- 51beea7: Workflow now keeps sandbox bridge capacity aligned with its configured `maxSubagents` budget, so large `Promise.all` fan-outs park and dispatch child sessions instead of failing at code mode's lower internal concurrency limit.
+- 9a1800f: Fix `experimental_chatgpt` sending requests in an improper format that the
+  Codex backend rejected with a 400 Bad Request: system instructions are now sent
+  in the top-level `instructions` field and the unsupported `max_output_tokens`
+  parameter is dropped.
+- 65a7823: `eve dev` now writes a private per-process diagnostic log under `.eve/logs/` capturing stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records (stored structured, with level, namespace, and JSON fields). The file is JSON Lines: every line is one JSON record with `at` and `source` fields. Long stderr output collapses in the transcript to a one-line summary pointing at the log file (the raw text stays available in the `all` log mode), and error details reference the log instead of flooding the transcript.
+- 65a7823: `eve dev` now writes an environment dump next to each diagnostic log (`.eve/logs/dev-<instance>.dump`): one JSON document capturing eve, Node.js, and Vercel CLI versions, the Vercel CLI path, local session-store size, and running session stats (prompts, token usage, tool calls by name, subagent dispatches). `eve logs --dump` prints the dump and its JSONL log together as one parseable report.
+- 65a7823: The dev TUI's `/model` "Change model" row now opens a value menu — Model, Reasoning effort, Service tier, Done. Reasoning and tier adjust inline with `←`/`→` (Tab acts as `→`, both wrap as a ring): a `●─◉─○` track slides over the model's supported effort levels — snapping to the closest supported level when a pick changes what the model serves — and the tier flips between `fast ↯` and `normal`; the tier row disappears when the catalog prices no priority tier for the model. Enter on Model opens the searchable catalog as model ids on a `▏` rail — the same railed list component the team and project pickers now render with. All drafted changes commit through one atomic `agent.ts` edit. The provider picker marks and describes the currently-active provider and reports an accepted key as `AI_GATEWAY_API_KEY set.`. Linking an existing project now suggests the team project named after the agent, searching for it when it is not among the recents. Command cancellations now read "dismissed". The status line drops its `·` separators and shows the model as `slug@level ↯`.
+- 65a7823: New `eve logs` command for reading the diagnostic logs `eve dev` writes under `.eve/logs/`: `eve logs` prints the most recent log, `eve logs ls [--json]` lists them, and `eve logs <logid>` prints a specific log by id, file name, transcript path, or unambiguous prefix.
+- 65a7823: `eve logs --events` interleaves session events (session/turn/step lifecycle, message deltas) into the diagnostic-log output, resolved at query time from the local workflow store — nothing extra is written while `eve dev` runs.
+- b53d713: Fixed transient TUI and CLI output rendering by standardizing spinners and progress rows on the shared `LiveRegion`. Streamed command output now stays aligned beneath active spinners, while failed operations preserve their command transcript for diagnostics.
+- 65a7823: Errors that escape a session — not just model-call failures — now pass through a semantic-error catalog: declarative, linter-style rules applied to any thrown error. Rules cover AI Gateway (auth, model-not-found, rate limits, upstream availability), model providers (missing API keys, unsupported capabilities), the durable workflow runtime (store version/access, replay divergence, corrupted event logs), sandbox backends (Docker CLI/daemon, provisioning), and system failures (port in use, disk full, network dials). Matched failures render a stable, actionable summary in the transcript with the raw error routed to the `eve dev` diagnostic log, and failure events carry a stable `semanticErrorId` for correlation.
+
 ## 0.25.3
 
 ### Patch Changes
