@@ -296,6 +296,7 @@
     "generate:web-template": "node src/setup/build.ts --write",
     "check:web-template": "node src/setup/build.ts --check",
     "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs",
+    "mcp:inspector-smoke": "node scripts/mcp-inspector-smoke.mjs",
     "test:vercel": "vitest run --config vitest.vercel.config.ts"
   },
   "dependencies": {
