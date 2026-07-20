@@ -16,9 +16,9 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     a: a.inputResponses,
     b: b.inputResponses,
   });
-  const message = appendUserContent({
-    appended: b.message,
-    existing: a.message,
+  const message = coalesceMessage({
+    a: a.message,
+    b: b.message,
   });
   const context = coalesceContext({
     a: a.context,
@@ -158,35 +158,54 @@ function coalesceContext(input: {
 }
 
 /**
- * Appends user content while preserving structured attachment parts and
- * removing blank text through {@link normalizeUserContent}.
+ * Merges two optional turn messages into one after removing blank content.
+ */
+function coalesceMessage(input: {
+  readonly a?: string | UserContent;
+  readonly b?: string | UserContent;
+}): string | UserContent | undefined {
+  const a = normalizeUserContent(input.a);
+  const b = normalizeUserContent(input.b);
+
+  if (a === undefined) {
+    return b;
+  }
+
+  if (b === undefined) {
+    return a;
+  }
+
+  return appendUserContent({ appended: b, existing: a });
+}
+
+/**
+ * Appends user content while preserving structured attachment parts.
  */
 export function appendUserContent(input: {
-  readonly appended?: string | UserContent;
-  readonly existing?: string | UserContent;
-}): string | UserContent | undefined {
-  const existing = normalizeUserContent(input.existing);
-  const appended = normalizeUserContent(input.appended);
-
-  if (existing === undefined) {
-    return appended;
-  }
-  if (appended === undefined) {
-    return existing;
-  }
-  if (typeof existing === "string" && typeof appended === "string") {
-    return `${existing}\n\n${appended}`;
+  readonly appended: string | UserContent;
+  readonly existing: string | UserContent;
+}): string | UserContent {
+  if (typeof input.existing === "string" && typeof input.appended === "string") {
+    return `${input.existing}\n\n${input.appended}`;
   }
 
-  return [...toUserContentArray(existing), ...toUserContentArray(appended)];
+  const merged: UserContentArray = [
+    ...toUserContentArray(input.existing),
+    ...toUserContentArray(input.appended),
+  ];
+  return merged;
 }
 
 type UserContentArray = Exclude<UserContent, string>;
 
 function toUserContentArray(value: string | UserContent): UserContentArray {
-  return typeof value === "string"
-    ? [{ type: "text", text: value } satisfies TextPart]
-    : [...value];
+  if (typeof value === "string") {
+    return value.length > 0 ? [{ type: "text", text: value } satisfies TextPart] : [];
+  }
+  if (Array.isArray(value)) {
+    return [...value];
+  }
+  return [];
 }
 
 /**

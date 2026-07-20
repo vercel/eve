@@ -1,7 +1,6 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
 import {
-  appendUserContent,
   coalesceTurnInputs,
   normalizeUserContent,
   resolveAssistantStepText,
@@ -155,10 +154,12 @@ describe("normalizeUserContent", () => {
     ).toEqual([attachment]);
   });
 
-  it("removes a blank string appended to structured content", () => {
+  it("removes a blank string coalesced with structured content", () => {
     const attachment = textFilePart({ filename: "notes.txt", payload: "contents" });
 
-    expect(appendUserContent({ appended: " ", existing: [attachment] })).toEqual([attachment]);
+    expect(coalesceTurnInputs({ message: [attachment] }, { message: " " }).message).toEqual([
+      attachment,
+    ]);
   });
 });
 
