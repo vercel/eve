@@ -213,6 +213,28 @@ export interface ActionsRequestedStreamEvent {
 }
 
 /**
+ * Stream event emitted the moment the model commits to a tool call, while its
+ * input is still streaming from the provider.
+ *
+ * Generating a large input (a long `write_file` body, a batch of parallel
+ * calls) can take seconds during which no other event fires; this early
+ * signal lets consumers show the upcoming call instead of a stale transcript.
+ * The matching `actions.requested` event follows with the complete input,
+ * correlated by `callId` — consumers that only care about executable calls
+ * can ignore this event entirely.
+ */
+export interface ActionPreparingStreamEvent {
+  data: {
+    callId: string;
+    sequence: number;
+    stepIndex: number;
+    toolName: string;
+    turnId: string;
+  };
+  type: "action.preparing";
+}
+
+/**
  * Stream event emitted when the harness needs human input before it can
  * continue the run.
  */
@@ -600,6 +622,7 @@ export type HandleMessageStreamEvent = (
   | SubagentChildEventStreamEvent
   | SubagentCompletedStreamEvent
   | SubagentStartedStreamEvent
+  | ActionPreparingStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
   | ActionResultStreamEvent
@@ -925,6 +948,29 @@ export function createActionsRequestedEvent(input: {
       turnId: input.turnId,
     },
     type: "actions.requested",
+  };
+}
+
+/**
+ * Creates the `action.preparing` event announcing one tool call whose input
+ * is still streaming from the model.
+ */
+export function createActionPreparingEvent(input: {
+  readonly callId: string;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly toolName: string;
+  readonly turnId: string;
+}): ActionPreparingStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      toolName: input.toolName,
+      turnId: input.turnId,
+    },
+    type: "action.preparing",
   };
 }
 

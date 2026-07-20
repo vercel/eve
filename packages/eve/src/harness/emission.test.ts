@@ -2,11 +2,11 @@ import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  emitStreamContent,
   getHarnessEmissionState,
   type HarnessEmissionState,
   setHarnessEmissionState,
 } from "#harness/emission.js";
+import { emitStreamContent } from "#harness/stream-emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
@@ -250,6 +250,40 @@ describe("emitStreamContent empty delivery", () => {
 });
 
 describe("emitStreamContent action requests", () => {
+  it("announces a call while its input still streams, before the full request", async () => {
+    const events: Parameters<HarnessEmitFn>[0][] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+    };
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "search-1", toolName: "web_search", type: "tool-input-start" },
+        // Defensive repeat — providers must not produce a second announcement.
+        { id: "search-1", toolName: "web_search", type: "tool-input-start" },
+        {
+          input: { query: "eve" },
+          providerExecuted: true,
+          toolCallId: "search-1",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+      ] as TextStreamPart<ToolSet>[]),
+    );
+
+    const types = events.map((event) => event.type);
+    expect(types.filter((type) => type === "action.preparing")).toHaveLength(1);
+    const preparingIndex = types.indexOf("action.preparing");
+    const requestedIndex = types.indexOf("actions.requested");
+    expect(preparingIndex).toBeGreaterThanOrEqual(0);
+    expect(requestedIndex).toBeGreaterThan(preparingIndex);
+    expect(events[preparingIndex]).toMatchObject({
+      data: { callId: "search-1", toolName: "web_search", turnId: "turn_0" },
+    });
+  });
+
   it("cancels a pending provider action batch when the stream aborts", async () => {
     vi.useFakeTimers();
     const emit = createEmitStub();

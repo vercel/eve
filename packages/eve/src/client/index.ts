@@ -83,6 +83,7 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
+  ActionPreparingStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
   AssistantStepFinishReason,
