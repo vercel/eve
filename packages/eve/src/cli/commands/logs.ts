@@ -1,6 +1,12 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 
+import {
+  readDevSessionEvents,
+  type DevSessionEventLine,
+  type DevSessionEventWindow,
+} from "./logs-events.js";
+
 interface CliLogsLogger {
   error(message: string): void;
   log(message: string): void;
@@ -97,6 +103,11 @@ export function resolveDevDiagnosticLog(
 export interface LogsShowCommandOptions {
   /** Prepend the log's environment dump (the same-instance `.dump` sibling). */
   dump?: boolean;
+  /** Interleave session events resolved from the local workflow store. */
+  events?: boolean;
+  /** Injectable event reader and clock; defaults to the real store and `Date.now`. */
+  readEvents?: (appRoot: string, window: DevSessionEventWindow) => Promise<DevSessionEventLine[]>;
+  now?: () => Date;
 }
 
 /**
@@ -104,7 +115,10 @@ export interface LogsShowCommandOptions {
  * when `logid` is omitted. The resolved file path goes to stderr so piped
  * stdout stays pure log content. With `--dump`, the log's environment dump
  * (a JSON document) is prepended to the JSONL log body, forming one
- * self-contained, parseable report.
+ * self-contained, parseable report. With `--events`, session events are
+ * resolved from the local workflow store at query time — never duplicated
+ * into the log at capture time — and interleaved by timestamp as
+ * `source: "event"` records.
  */
 export async function runLogsShowCommand(
   logger: CliLogsLogger,
@@ -122,7 +136,16 @@ export async function runLogsShowCommand(
 
   const entry = logId === undefined ? logs[0]! : resolveDevDiagnosticLog(logs, logId);
   logger.error(`${LOG_DISPLAY_DIRECTORY}/${entry.id}.log`);
-  const content = await readFile(entry.path, "utf8");
+  let content = await readFile(entry.path, "utf8");
+
+  if (options.events === true) {
+    const window = eventWindowForLog(logs, entry, options.now ?? (() => new Date()));
+    const events = await (options.readEvents ?? readDevSessionEvents)(appRoot, window);
+    if (events.length > 0) {
+      content = mergeLogWithEvents(content, events);
+      logger.error(`(interleaved ${events.length} session events)`);
+    }
+  }
 
   if (options.dump !== true) {
     logger.log(content.trimEnd());
@@ -146,6 +169,63 @@ export async function runLogsShowCommand(
   // A JSON document followed by JSON Lines is one valid JSON value stream,
   // so the combined output stays parseable end to end (`... | jq -c .`).
   logger.log(`${dumpContent.trimEnd()}\n${content.trimEnd()}`);
+}
+
+/**
+ * The wall-clock window one diagnostic log covers: its encoded start time
+ * through the next log's start (logs are per-process and MRU-sorted), or
+ * `now` for the most recent log. The store does not attribute runs to
+ * processes, so window selection is by time; concurrent `eve dev`
+ * processes will see each other's events.
+ */
+function eventWindowForLog(
+  logs: readonly DevDiagnosticLogEntry[],
+  entry: DevDiagnosticLogEntry,
+  now: () => Date,
+): DevSessionEventWindow {
+  const index = logs.findIndex((log) => log.id === entry.id);
+  const nextStart = index > 0 ? logs[index - 1]!.startedAt : undefined;
+  return {
+    from: entry.startedAt ?? new Date(0),
+    to: nextStart ?? now(),
+  };
+}
+
+/**
+ * Interleaves event lines into the JSONL log by each record's `at`. Log
+ * lines keep their relative order; an unparseable line inherits its
+ * predecessor's timestamp so it cannot drift.
+ */
+function mergeLogWithEvents(content: string, events: readonly DevSessionEventLine[]): string {
+  const logLines: { at: string; line: string }[] = [];
+  let lastAt = "";
+  for (const line of content.split("\n")) {
+    if (line.trim().length === 0) continue;
+    try {
+      const at = (JSON.parse(line) as { at?: unknown }).at;
+      if (typeof at === "string") lastAt = at;
+    } catch {
+      // Keep position relative to the previous record.
+    }
+    logLines.push({ at: lastAt, line });
+  }
+
+  const eventLines = events.map((event) => ({ at: event.at, line: JSON.stringify(event) }));
+  const merged: string[] = [];
+  let logIndex = 0;
+  let eventIndex = 0;
+  while (logIndex < logLines.length || eventIndex < eventLines.length) {
+    const nextLog = logLines[logIndex];
+    const nextEvent = eventLines[eventIndex];
+    if (nextEvent === undefined || (nextLog !== undefined && nextLog.at <= nextEvent.at)) {
+      merged.push(nextLog!.line);
+      logIndex += 1;
+    } else {
+      merged.push(nextEvent.line);
+      eventIndex += 1;
+    }
+  }
+  return `${merged.join("\n")}\n`;
 }
 
 /** Options accepted by {@link runLogsListCommand}. */

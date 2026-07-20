@@ -182,6 +182,7 @@ eve logs            # print the most recent diagnostic log
 eve logs ls         # list logs, most recent first
 eve logs <logid>    # print a specific log
 eve logs --dump     # prepend the log's environment dump
+eve logs --events   # interleave session events from the local workflow store
 ```
 
 Each interactive `eve dev` process writes a private diagnostic log under `.eve/logs/` capturing stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records — regardless of what the transcript shows. The file is JSON Lines — every line is one JSON record with `at` and `source` fields. `eve logs` reads those files back.
@@ -189,6 +190,8 @@ Each interactive `eve dev` process writes a private diagnostic log under `.eve/l
 A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.000Z-123`). `eve logs <logid>` also accepts the file name, the `.eve/logs/...` path printed in the dev transcript, or any unambiguous prefix of the id with or without the `dev-` lead — so `eve logs 2026-07-15` works when a single log matches. An ambiguous prefix fails and lists the candidates.
 
 `eve logs` prints the log content on stdout and the resolved file path on stderr, so piped output stays pure log content. `eve logs ls --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
+
+`eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
 
 Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
 

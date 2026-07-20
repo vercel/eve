@@ -593,7 +593,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("show [logid]", { isDefault: true })
     .description("Print a diagnostic log (the most recent when logid is omitted).")
     .option("--dump", "Prepend the log's environment dump (.dump sibling)")
-    .action(async (logId: string | undefined, options: { dump?: boolean }) => {
+    .option("--events", "Interleave session events from the local workflow store")
+    .action(async (logId: string | undefined, options: { dump?: boolean; events?: boolean }) => {
       const { runLogsShowCommand } = await import("#cli/commands/logs.js");
       await runLogsShowCommand(logger, appRoot, logId, options);
     });

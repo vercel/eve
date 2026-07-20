@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   listDevDiagnosticLogs,
@@ -122,6 +122,57 @@ describe("eve logs", () => {
     await runLogsShowCommand(missingDump.logger, root, "2026-07-14", { dump: true });
     expect(missingDump.out).toEqual(["older content"]);
     expect(missingDump.err).toEqual([`.eve/logs/${FIRST}`]);
+  });
+
+  it("interleaves session events by timestamp with --events and stays silent when none match", async () => {
+    const logLine = (at: string, detail: string) =>
+      `${JSON.stringify({ at, source: "stderr", detail })}\n`;
+    const root = await appRootWithLogs({
+      [FIRST]: logLine("2026-07-14T09:31:00.000Z", "older"),
+      [SECOND]:
+        logLine("2026-07-15T12:00:10.000Z", "early") + logLine("2026-07-15T12:00:30.000Z", "late"),
+    });
+
+    const readEvents = vi.fn().mockResolvedValue([
+      {
+        at: "2026-07-15T12:00:20.000Z",
+        source: "event",
+        runId: "wrun_1",
+        type: "turn.started",
+      },
+    ]);
+    const withEvents = collectingLogger();
+    await runLogsShowCommand(withEvents.logger, root, undefined, {
+      events: true,
+      readEvents,
+      now: () => new Date("2026-07-15T13:00:00.000Z"),
+    });
+
+    // Window: this log's encoded start through `now` (it is the newest log).
+    expect(readEvents).toHaveBeenCalledWith(root, {
+      from: new Date("2026-07-15T12:00:00.000Z"),
+      to: new Date("2026-07-15T13:00:00.000Z"),
+    });
+    const lines = withEvents.out.join("\n").split("\n");
+    expect(lines.map((line) => (JSON.parse(line) as { at: string }).at)).toEqual([
+      "2026-07-15T12:00:10.000Z",
+      "2026-07-15T12:00:20.000Z",
+      "2026-07-15T12:00:30.000Z",
+    ]);
+    expect(withEvents.err).toContain("(interleaved 1 session events)");
+
+    // Older log: window ends at the next log's start; zero events stay silent.
+    const older = collectingLogger();
+    const readNone = vi.fn().mockResolvedValue([]);
+    await runLogsShowCommand(older.logger, root, "2026-07-14", {
+      events: true,
+      readEvents: readNone,
+    });
+    expect(readNone).toHaveBeenCalledWith(root, {
+      from: new Date("2026-07-14T09:30:00.000Z"),
+      to: new Date("2026-07-15T12:00:00.000Z"),
+    });
+    expect(older.err).toEqual([`.eve/logs/${FIRST}`]);
   });
 
   it("reports missing logs without failing, but fails for an explicit reference", async () => {
