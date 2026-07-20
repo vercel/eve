@@ -1,6 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import type { DevDiagnosticDump, DevSessionStats } from "../diagnostic-dump.js";
-import type { DevDiagnosticSink } from "../diagnostic-sink.js";
+import type { DevDiagnostics } from "../diagnostics.js";
 
 import type {
   AgentTUIInputOption,
@@ -78,8 +77,8 @@ import type {
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
-import { summarizeKnownError } from "#harness/semantic-errors.js";
-import { inspectError, setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { inspectError, type LogRecord } from "#internal/logging.js";
 import {
   parseDevRebuildLogLine,
   type DevRebuildLogUpdate,
@@ -241,9 +240,8 @@ export type TerminalRendererOptions = {
   logs?: LogDisplayMode;
   color?: boolean;
   unicode?: boolean;
-  diagnostics?: DevDiagnosticSink;
-  /** Companion environment dump updated with session stats at turn boundaries. */
-  diagnosticsDump?: DevDiagnosticDump;
+  /** The process's diagnostics recorder (log, dump, stats); local sessions only. */
+  diagnostics?: DevDiagnostics;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
 };
@@ -312,16 +310,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #connectionAuth: TerminalPartDisplayMode;
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #captureForeignOutput: boolean;
-  readonly #diagnostics?: DevDiagnosticSink;
-  readonly #diagnosticsDump?: DevDiagnosticDump;
-  // Session-wide activity counters reported into the diagnostics dump at
-  // turn boundaries. Accumulated ahead of every display guard so hidden
-  // tools and collapsed subagents still count.
-  #statsPrompts = 0;
-  #statsInputTokens = 0;
-  #statsOutputTokens = 0;
-  readonly #statsToolCalls = new Map<string, number>();
-  readonly #statsSubagentCallIds = new Set<string>();
+  readonly #diagnostics?: DevDiagnostics;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   /** Which captured log sources render. Mutable via {@link setLogDisplayMode}. */
   #logs: LogDisplayMode;
@@ -464,7 +453,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#assistantResponseStats = options?.assistantResponseStats ?? defaultAssistantResponseStats;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#diagnostics = options?.diagnostics;
-    this.#diagnosticsDump = options?.diagnosticsDump;
     this.#logs = options?.logs ?? "none";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
@@ -674,7 +662,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     this.#status = this.#connectionAuthPendingCount > 0 ? STATUS.connectionAuth : STATUS.processing;
     this.#addSubmittedPrompt(options?.submittedPrompt);
-    if (options?.submittedPrompt !== undefined) this.#statsPrompts += 1;
+    if (options?.submittedPrompt !== undefined) this.#diagnostics?.recordPrompt();
     this.#interrupted = false;
     this.#totalTokens = undefined;
     this.#assistantOutputTokens = undefined;
@@ -711,9 +699,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // evidence and the transcript shows only the pointer.
       const summary = summarizeKnownError(error);
       if (summary === null) {
-        this.#addErrorBlock("Error", toErrorMessage(error), inspectError(error));
+        this.#addErrorBlock("Error", toErrorMessage(error), { detail: inspectError(error) });
       } else {
-        this.#addErrorBlock(summary.name, summary.message, inspectError(error));
+        this.#addErrorBlock(summary.name, summary.message, {
+          detail: inspectError(error),
+          hint: summary.hint,
+        });
       }
     } finally {
       this.#resolveStreamInterrupt = undefined;
@@ -725,7 +716,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       this.#status = completedTurnStatus(this.#interrupted, options?.continueSession === true);
       this.#finalizeAllBlocks();
-      this.#reportSessionStats();
+      this.#diagnostics?.reportStats();
       this.#paint();
 
       if (!options?.continueSession) {
@@ -974,7 +965,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   upsertSubagentStep(update: SubagentStepUpdate): void {
-    this.#statsSubagentCallIds.add(update.callId);
+    this.#diagnostics?.recordSubagentDispatch(update.callId);
     if (this.#subagents === "hidden") return;
     const reasoningText = stripTerminalControls(update.reasoning ?? "").trim();
     const messageText = stripTerminalControls(update.message ?? "").trim();
@@ -998,7 +989,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   upsertSubagentTool(update: SubagentToolUpdate): void {
-    this.#statsSubagentCallIds.add(update.callId);
+    this.#diagnostics?.recordSubagentDispatch(update.callId);
     if (update.status === "failed" && update.errorText !== undefined) {
       // Captured before the display guards: hidden or collapsed subagent
       // views must not keep tool failures out of the diagnostic log.
@@ -2364,35 +2355,32 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#pushBlock({ kind: "user", body: stripTerminalControls(prompt), live: false });
   }
 
-  #reportSessionStats(): void {
-    if (this.#diagnosticsDump === undefined) return;
-    const stats: DevSessionStats = {
-      prompts: this.#statsPrompts,
-      inputTokens: this.#statsInputTokens,
-      outputTokens: this.#statsOutputTokens,
-      toolCalls: Object.fromEntries(this.#statsToolCalls),
-      subagents: this.#statsSubagentCallIds.size,
-    };
-    this.#diagnosticsDump.updateSessionStats(stats);
-  }
-
-  #addErrorBlock(title: string, content: string, detail?: string) {
+  #addErrorBlock(
+    title: string,
+    content: string,
+    extras: { detail?: string | undefined; hint?: string | undefined } = {},
+  ) {
     const cleanTitle = stripTerminalControls(title);
     const cleanBody = stripTerminalControls(content);
-    const cleanDetail = detail === undefined ? undefined : stripTerminalControls(detail);
+    const cleanDetail =
+      extras.detail === undefined ? undefined : stripTerminalControls(extras.detail);
+    const cleanHint = extras.hint === undefined ? undefined : stripTerminalControls(extras.hint);
     // Every error block lands in the log, detail or not, so the file is a
-    // complete failure record for the session.
-    this.#diagnostics?.append({
-      source: "workflow",
+    // complete failure record for the session. The hint stays a structured
+    // field of the record, mirroring the failure event's shape.
+    const entry = {
+      source: "workflow" as const,
       summary: `${cleanTitle}: ${cleanBody}`,
       detail: cleanDetail ?? cleanBody,
-    });
+    };
+    this.#diagnostics?.append(cleanHint === undefined ? entry : { ...entry, hint: cleanHint });
     const block: Block = {
       kind: "error",
       title: cleanTitle,
       body: cleanBody,
       live: false,
     };
+    if (cleanHint !== undefined) block.hint = cleanHint;
     if (cleanDetail !== undefined) {
       block.detail =
         this.#diagnostics === undefined ? cleanDetail : `details: ${this.#diagnostics.displayPath}`;
@@ -2462,8 +2450,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         // Step usage reports are per-step deltas (extractStepUsage in the
         // harness), so summing them yields true session totals. The
         // `finish` event replays the last step's usage — don't sum there.
-        this.#statsInputTokens += event.usage?.inputTokens ?? 0;
-        this.#statsOutputTokens += event.usage?.outputTokens ?? 0;
+        this.#diagnostics?.recordStepUsage(event.usage);
         this.#applyUsage(event.usage);
         this.#paint();
         break;
@@ -2508,10 +2495,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
 
       case "tool-call":
-        this.#statsToolCalls.set(
-          event.toolName,
-          (this.#statsToolCalls.get(event.toolName) ?? 0) + 1,
-        );
+        this.#diagnostics?.recordToolCall(event.toolName);
         if (displayModes.tools === "hidden") break;
         this.#setStreamStatus(STATUS.executingTools);
         this.#upsertNativeTool(
@@ -2569,7 +2553,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
 
       case "error":
-        this.#addErrorBlock("Error", event.errorText, event.detail);
+        this.#addErrorBlock("Error", event.errorText, { detail: event.detail, hint: event.hint });
         break;
 
       case "finish":
@@ -3103,14 +3087,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const restoreStdout = capture(process.stdout, "stdout");
     const restoreStderr = capture(process.stderr, "stderr");
-    // Take ownership of eve's own structured log records for the same
-    // window the stream capture is installed. Records arrive here directly
-    // — never rendered to the console — so the stderr scrape below only
-    // carries genuinely foreign output and each record lands in the
-    // diagnostic log exactly once, with its structure intact.
-    setLogRecordSubscriber((record) => this.#handleLogRecord(record));
+    // The recorder takes ownership of eve's own structured log records for
+    // the same window the stream capture is installed: it persists each one
+    // structured, then hands it here for display. Records never reach the
+    // console, so the stderr scrape below only carries genuinely foreign
+    // output.
+    this.#diagnostics?.subscribeLogRecords((record) => this.#displayLogRecord(record));
     this.#restoreLogCapture = () => {
-      setLogRecordSubscriber(undefined);
+      this.#diagnostics?.unsubscribeLogRecords();
       restoreStdout();
       restoreStderr();
     };
@@ -3135,28 +3119,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * One structured record from eve's own logger. Persisted with its level,
-   * namespace, and JSON fields, then displayed through the stderr path so
+   * Displays one structured record from eve's own logger (the diagnostics
+   * recorder already persisted it). Routed through the stderr path so
    * `/loglevel` semantics and long-output collapsing match what the same
    * record looked like when it arrived as scraped console output.
    */
-  #handleLogRecord(record: LogRecord): void {
-    if (this.#diagnostics !== undefined) {
-      const entry: {
-        source: "log";
-        level: LogRecord["level"];
-        namespace: string;
-        message: string;
-        fields?: LogRecord["fields"];
-      } = {
-        source: "log",
-        level: record.level,
-        namespace: record.namespace,
-        message: record.message,
-      };
-      if (record.fields !== undefined) entry.fields = record.fields;
-      this.#diagnostics.append(entry);
-    }
+  #displayLogRecord(record: LogRecord): void {
     const fieldsText = record.fields === undefined ? "" : ` ${JSON.stringify(record.fields)}`;
     this.#handleCapturedStderr(`[eve:${record.namespace}] ${record.message}${fieldsText}`);
     this.#paint();

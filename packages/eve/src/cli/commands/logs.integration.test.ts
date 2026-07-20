@@ -93,7 +93,8 @@ describe("eve logs", () => {
     const mru = collectingLogger();
     await runLogsShowCommand(mru.logger, root);
     expect(mru.out).toEqual(["newer content"]);
-    expect(mru.err).toEqual([`.eve/logs/${SECOND}`]);
+    // Output carries records only: nothing on stderr, so `2>&1 | jq` parses.
+    expect(mru.err).toEqual([]);
 
     const named = collectingLogger();
     await runLogsShowCommand(named.logger, root, "2026-07-14");
@@ -113,15 +114,12 @@ describe("eve logs", () => {
     expect(withDump.out).toEqual([
       `${dump.trimEnd()}\n{"at":"2026-07-15T12:00:01.000Z","source":"stderr","detail":"newer content"}`,
     ]);
-    expect(withDump.err).toEqual([
-      `.eve/logs/${SECOND}`,
-      `.eve/logs/${SECOND.replace(/\.log$/, ".dump")}`,
-    ]);
+    expect(withDump.err).toEqual([]);
 
     const missingDump = collectingLogger();
     await runLogsShowCommand(missingDump.logger, root, "2026-07-14", { dump: true });
     expect(missingDump.out).toEqual(["older content"]);
-    expect(missingDump.err).toEqual([`.eve/logs/${FIRST}`]);
+    expect(missingDump.err).toEqual([]);
   });
 
   it("interleaves session events by timestamp with --events and stays silent when none match", async () => {
@@ -159,7 +157,7 @@ describe("eve logs", () => {
       "2026-07-15T12:00:20.000Z",
       "2026-07-15T12:00:30.000Z",
     ]);
-    expect(withEvents.err).toContain("(interleaved 1 session events)");
+    expect(withEvents.err).toEqual([]);
 
     // Older log: window ends at the next log's start; zero events stay silent.
     const older = collectingLogger();
@@ -172,7 +170,7 @@ describe("eve logs", () => {
       from: new Date("2026-07-14T09:30:00.000Z"),
       to: new Date("2026-07-15T12:00:00.000Z"),
     });
-    expect(older.err).toEqual([`.eve/logs/${FIRST}`]);
+    expect(older.err).toEqual([]);
   });
 
   it("reports missing logs without failing, but fails for an explicit reference", async () => {

@@ -66,6 +66,8 @@ export interface Block {
    * rendered dim beneath the headline, capped to a handful of lines.
    */
   detail?: string;
+  /** Structured remediation shown between an error's body and its detail. */
+  hint?: string;
 
   /** Tool, connection, or synthetic command lifecycle status. */
   status?: ToolStatus;
@@ -313,6 +315,14 @@ function renderError(block: Block, width: number, theme: Theme): string[] {
   const rows = [`${icon} ${theme.colors.red(theme.colors.bold(title))}`];
   for (const line of wrap(block.body ?? "", width - 2)) {
     rows.push(`  ${colorizeError(line, theme)}`);
+  }
+  if (block.hint !== undefined && block.hint.trim().length > 0) {
+    // Remediation renders distinct from the failure description: calm
+    // color, arrow lead-in, so "what to do" is scannable under "what broke".
+    for (const [index, line] of wrap(block.hint, width - 4).entries()) {
+      const lead = index === 0 ? `${theme.glyph.arrow} ` : "  ";
+      rows.push(`  ${theme.colors.cyan(`${lead}${line}`)}`);
+    }
   }
   rows.push(...renderErrorDetail(block.detail, width, theme));
   return rows;

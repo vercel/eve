@@ -1,26 +1,13 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toError, walkCauseChain } from "#shared/errors.js";
+import { isKnownNetworkError, summarizeKnownConfigError } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
 const API_ERROR_SUMMARY_LIMIT = 800;
 const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
   "AI Gateway rejected the model request before the agent produced a response.";
-
-/**
- * The upstream error name the AI Gateway uses for authentication failures.
- * Exported so consumers of `step.failed` details (the dev TUI's `/model`
- * hint) match the same identifier this module classifies on.
- */
-export const GATEWAY_AUTHENTICATION_ERROR_NAME = "GatewayAuthenticationError";
-
-/**
- * The summary `name` this module assigns to recognized gateway-auth
- * failures, carried into failure-event details. Exported for the same
- * consumers as {@link GATEWAY_AUTHENTICATION_ERROR_NAME}.
- */
-export const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
 
 /**
  * Anchored regex for the upstream "unsupported tool" rejection message
@@ -44,15 +31,18 @@ const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supporte
  * inspection into user-facing logs.
  *
  * `id` is the stable semantic-error catalog identifier (see
- * `#harness/semantic-errors.js`): one kebab-case slug per recognized
+ * `#harness/semantic-errors/`): one kebab-case slug per recognized
  * failure shape, carried into `step.failed` details as
  * `semanticErrorId` so logs and transcripts can be correlated with the
- * catalog entry that matched.
+ * rule that matched.
  */
 export interface ModelCallConfigErrorSummary {
   readonly id: string;
   readonly name: string;
+  /** What happened. */
   readonly message: string;
+  /** What to do about it, when the matched catalog rule carries remediation. */
+  readonly hint?: string;
 }
 
 interface ModelCallErrorSignals {
@@ -72,57 +62,16 @@ interface ModelCallErrorSignals {
  * Returns a concise actionable summary for known terminal configuration
  * errors raised during a model call. Returns `null` for everything else
  * so the caller falls back to the raw SDK message.
+ *
+ * Delegates to the semantic-error catalog's `config`-tagged rules
+ * (`#harness/semantic-errors`), so the catalog stays the single registry
+ * of recognized failure shapes and this call site keeps its
+ * classification semantics: a match means the failure is terminal.
  */
 export function summarizeKnownModelCallConfigError(
   error: unknown,
 ): ModelCallConfigErrorSummary | null {
-  const rawName = readErrorName(error);
-  const rawMessage = readErrorMessage(error);
-
-  if (
-    rawName === GATEWAY_AUTHENTICATION_ERROR_NAME ||
-    /AI Gateway authentication/i.test(rawMessage)
-  ) {
-    // The upstream `GatewayAuthenticationError` builds one of three
-    // contextual messages depending on which credential was offered
-    // (api-key, oidc, neither). Surface a remediation that matches the
-    // one that actually failed — collapsing all three into a single
-    // "set AI_GATEWAY_API_KEY" hint misleads users whose shell already
-    // exports a stale `AI_GATEWAY_API_KEY` that shadows the OIDC fallback.
-    if (/Invalid API key/i.test(rawMessage)) {
-      return {
-        id: "gateway-auth-invalid-api-key",
-        name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
-        message:
-          "AI Gateway rejected the provided API key. Update or unset `AI_GATEWAY_API_KEY` (check your shell profile if you did not set it for this project) — manage keys at https://vercel.com/dashboard/ai/api-keys. Unsetting it falls back to OIDC via `eve link`.",
-      };
-    }
-    if (/Invalid OIDC token/i.test(rawMessage)) {
-      return {
-        id: "gateway-auth-invalid-oidc-token",
-        name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
-        message:
-          "AI Gateway rejected the OIDC token. Run `eve link` to refresh `VERCEL_OIDC_TOKEN` in `.env.local`, or set `AI_GATEWAY_API_KEY` — create a key at https://vercel.com/dashboard/ai/api-keys.",
-      };
-    }
-    return {
-      id: "gateway-auth-missing-credentials",
-      name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
-      message:
-        "AI Gateway received no credentials. Run `eve link` to populate `VERCEL_OIDC_TOKEN`, or set `AI_GATEWAY_API_KEY` — create a key at https://vercel.com/dashboard/ai/api-keys.",
-    };
-  }
-
-  if (rawName === "LoadAPIKeyError" || /API key is missing/i.test(rawMessage)) {
-    return {
-      id: "model-provider-api-key-missing",
-      name: "Model provider API key missing",
-      message:
-        "The model provider could not load an API key. Export the provider's API key environment variable (for example `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and try again.",
-    };
-  }
-
-  return null;
+  return summarizeKnownConfigError(error);
 }
 
 /**
@@ -405,7 +354,7 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     if (status >= 400 && status < 500) return "terminal";
   }
 
-  if (isLikelyNetworkError(error)) {
+  if (isKnownNetworkError(error)) {
     return "retry";
   }
 
@@ -417,25 +366,6 @@ function hasRetryableFlag(error: unknown): boolean {
     if (isObject(candidate) && candidate.isRetryable === true) {
       return true;
     }
-  }
-  return false;
-}
-
-function isLikelyNetworkError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  if (
-    message.includes("econnreset") ||
-    message.includes("etimedout") ||
-    message.includes("eai_again") ||
-    message.includes("socket hang up") ||
-    message.includes("network") ||
-    message.includes("fetch failed")
-  ) {
-    return true;
-  }
-  if (error.cause !== undefined && error.cause !== error) {
-    return isLikelyNetworkError(error.cause);
   }
   return false;
 }

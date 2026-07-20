@@ -1349,13 +1349,15 @@ function buildModelCallFailureDetails(input: {
   const { configSummary, error, errorId, modelCallDetails, requestSummary } = input;
 
   if (configSummary !== null) {
-    return {
+    const details: Record<string, JsonValue> = {
       errorId,
       message: configSummary.message,
       name: configSummary.name,
       semanticErrorId: configSummary.id,
       ...modelCallDetails,
     };
+    if (configSummary.hint !== undefined) details.hint = configSummary.hint;
+    return details;
   }
 
   if (requestSummary !== null) {

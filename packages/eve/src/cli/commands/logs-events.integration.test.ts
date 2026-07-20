@@ -34,13 +34,13 @@ describe("readDevSessionEvents", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("drains runs without session streams via the idle timeout instead of hanging", async () => {
+  it("skips runs without session streams via the listStreams prefilter", async () => {
     // A hermetic happy-path test would need serde-encoded chunks, which only
     // real workflow execution produces (`getWritable` is workflow-context
     // only); the decode path is exercised against real stores by the TUI
     // smoke flows. This pins the failure-mode invariants instead: a run with
-    // no session stream contributes nothing, and an unclosed/absent stream
-    // cannot hang the CLI read.
+    // no session stream contributes nothing and costs a directory listing,
+    // not an idle-timeout wait.
     const root = await mkdtemp(join(tmpdir(), "eve-logs-events-"));
     roots.push(root);
     const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(root) });
@@ -60,7 +60,7 @@ describe("readDevSessionEvents", () => {
     });
 
     expect(events).toEqual([]);
-    // One idle-timeout budget, not an unbounded wait.
-    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    // The prefilter answers from storage; no stream is ever opened.
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
   });
 });

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
-import { createLogger } from "#internal/logging.js";
+import type { LogRecord } from "#internal/logging.js";
+import type { DevDiagnostics } from "../diagnostics.js";
 import { searchActionValue } from "#setup/cli/select-state.js";
 import {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
@@ -35,6 +36,45 @@ function makeRenderer(columns = 80, rows = 30) {
     unicode: true,
   });
   return { screen, input, renderer };
+}
+
+function stubDiagnostics() {
+  const append = vi.fn();
+  const recordPrompt = vi.fn();
+  const recordStepUsage = vi.fn();
+  const recordToolCall = vi.fn();
+  const recordSubagentDispatch = vi.fn();
+  const reportStats = vi.fn();
+  let subscriber: ((record: LogRecord) => void) | undefined;
+  const diagnostics: DevDiagnostics = {
+    displayPath: ".eve/logs/dev.log",
+    append,
+    recordPrompt,
+    recordStepUsage,
+    recordToolCall,
+    recordSubagentDispatch,
+    reportStats,
+    subscribeLogRecords: (onRecord) => {
+      subscriber = onRecord;
+    },
+    unsubscribeLogRecords: () => {
+      subscriber = undefined;
+    },
+    close: async () => {},
+  };
+  return {
+    diagnostics,
+    append,
+    recordPrompt,
+    recordStepUsage,
+    recordToolCall,
+    recordSubagentDispatch,
+    reportStats,
+    emitLogRecord: (record: LogRecord) => subscriber?.(record),
+    get subscribed() {
+      return subscriber !== undefined;
+    },
+  };
 }
 
 function agentInfoWithModel(
@@ -1215,19 +1255,15 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("stores long stderr diagnostics and shows concise copy by default", () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();
-    const append = vi.fn();
+    const stub = stubDiagnostics();
+    const append = stub.append;
     const renderer = new TerminalRenderer({
       input,
       output: screen,
       captureForeignOutput: true,
       logs: "stderr",
       unicode: true,
-      diagnostics: {
-        path: "/app/.eve/logs/dev.log",
-        displayPath: ".eve/logs/dev.log",
-        append,
-        close: async () => {},
-      },
+      diagnostics: stub.diagnostics,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     const detail = [
@@ -1254,64 +1290,45 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("captures eve log records structured, once, and releases the console on shutdown", () => {
+  it("subscribes the recorder to log records, displays them, and releases on shutdown", () => {
     const screen = new MockScreen({ columns: 120, rows: 30 });
     const input = new MockUserInput();
-    const append = vi.fn();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stub = stubDiagnostics();
     const renderer = new TerminalRenderer({
       input,
       output: screen,
       captureForeignOutput: true,
       logs: "stderr",
       unicode: true,
-      diagnostics: {
-        path: "/app/.eve/logs/dev.log",
-        displayPath: ".eve/logs/dev.log",
-        append,
-        close: async () => {},
-      },
+      diagnostics: stub.diagnostics,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    createLogger("harness.tool-loop").error("tool execution failed", { toolName: "always_fail" });
-
-    // Structured, exactly once: never rendered to the console, so the
-    // stderr scrape cannot log the same record a second time.
-    expect(append).toHaveBeenCalledTimes(1);
-    expect(append).toHaveBeenCalledWith({
-      source: "log",
+    expect(stub.subscribed).toBe(true);
+    stub.emitLogRecord({
       level: "error",
       namespace: "harness.tool-loop",
       message: "tool execution failed",
       fields: { toolName: "always_fail" },
     });
-    expect(errorSpy).not.toHaveBeenCalled();
     expect(screen.snapshot()).toContain("[eve:harness.tool-loop] tool execution failed");
 
     renderer.shutdown();
-    createLogger("harness.tool-loop").error("after shutdown");
-    expect(append).toHaveBeenCalledTimes(1);
-    expect(errorSpy).toHaveBeenCalledWith("[eve:harness.tool-loop] after shutdown");
-    errorSpy.mockRestore();
+    expect(stub.subscribed).toBe(false);
   });
 
   it("records tool failures in the diagnostic log even when tools are hidden", async () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
-    const append = vi.fn();
+    const stub = stubDiagnostics();
+    const append = stub.append;
     const renderer = new TerminalRenderer({
       input,
       output: screen,
       captureForeignOutput: false,
       tools: "hidden",
       unicode: true,
-      diagnostics: {
-        path: "/app/.eve/logs/dev.log",
-        displayPath: ".eve/logs/dev.log",
-        append,
-        close: async () => {},
-      },
+      diagnostics: stub.diagnostics,
     });
 
     await renderer.renderStream(
@@ -1345,18 +1362,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("renders a cataloged summary for a recognized stream error and logs the raw dump", async () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();
-    const append = vi.fn();
+    const stub = stubDiagnostics();
+    const append = stub.append;
     const renderer = new TerminalRenderer({
       input,
       output: screen,
       captureForeignOutput: false,
       unicode: true,
-      diagnostics: {
-        path: "/app/.eve/logs/dev.log",
-        displayPath: ".eve/logs/dev.log",
-        append,
-        close: async () => {},
-      },
+      diagnostics: stub.diagnostics,
     });
 
     const failure = new TypeError("fetch failed", {
@@ -1375,23 +1388,26 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "hello", continueSession: false },
     );
 
-    // Transcript: curated headline plus the log pointer, no stack dump.
+    // Transcript: curated headline, the structured hint, and the log
+    // pointer — no stack dump.
     expect(screen.snapshot()).toContain("Network request failed");
+    expect(screen.snapshot()).toContain("Check your internet connection");
     expect(screen.snapshot()).toContain("details: .eve/logs/dev.log");
     expect(screen.snapshot()).not.toContain("    at ");
-    // Log: the raw inspection, cause chain included.
+    // Log: the raw inspection, cause chain included, hint structured.
     expect(append).toHaveBeenCalledWith({
       source: "workflow",
       summary: expect.stringContaining("Network request failed"),
       detail: expect.stringContaining("ECONNREFUSED"),
+      hint: expect.stringContaining("Check your internet connection"),
     });
     renderer.shutdown();
   });
 
-  it("accumulates session stats past display guards and reports them to the dump", async () => {
+  it("records session stats past display guards and reports at the turn boundary", async () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
-    const updateSessionStats = vi.fn();
+    const stub = stubDiagnostics();
     const renderer = new TerminalRenderer({
       input,
       output: screen,
@@ -1399,12 +1415,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       tools: "hidden",
       subagents: "hidden",
       unicode: true,
-      diagnosticsDump: {
-        path: "/app/.eve/logs/dev.dump",
-        displayPath: ".eve/logs/dev.dump",
-        updateSessionStats,
-        close: async () => {},
-      },
+      diagnostics: stub.diagnostics,
     });
 
     renderer.upsertSubagentTool({
@@ -1422,37 +1433,35 @@ describe("TerminalRenderer (inline scrollback)", () => {
         { type: "tool-call", toolCallId: "c3", toolName: "weather", input: {} },
         { type: "step-finish", usage: { inputTokens: 100, outputTokens: 20 } },
         { type: "step-finish", usage: { inputTokens: 40, outputTokens: 5 } },
-        // `finish` replays the last step's usage; it must not double-count.
+        // `finish` replays the last step's usage; only step-finish records.
         { type: "finish", usage: { inputTokens: 40, outputTokens: 5 } },
       ]),
       { submittedPrompt: "run it", continueSession: false },
     );
 
-    expect(updateSessionStats).toHaveBeenLastCalledWith({
-      prompts: 1,
-      inputTokens: 140,
-      outputTokens: 25,
-      toolCalls: { bash: 2, weather: 1 },
-      subagents: 1,
-    });
+    expect(stub.recordPrompt).toHaveBeenCalledTimes(1);
+    expect(stub.recordSubagentDispatch).toHaveBeenCalledWith("sub-1");
+    expect(stub.recordToolCall.mock.calls.map(([name]) => name)).toEqual([
+      "bash",
+      "bash",
+      "weather",
+    ]);
+    expect(stub.recordStepUsage).toHaveBeenCalledTimes(2);
+    expect(stub.reportStats).toHaveBeenCalled();
     renderer.shutdown();
   });
 
   it("records sandbox log lines in the diagnostic log", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
-    const append = vi.fn();
+    const stub = stubDiagnostics();
+    const append = stub.append;
     const renderer = new TerminalRenderer({
       input,
       output: screen,
       captureForeignOutput: false,
       unicode: true,
-      diagnostics: {
-        path: "/app/.eve/logs/dev.log",
-        displayPath: ".eve/logs/dev.log",
-        append,
-        close: async () => {},
-      },
+      diagnostics: stub.diagnostics,
     });
 
     renderer.renderSandboxLog('eve: sandbox template "root" (microsandbox): apt-get update');
