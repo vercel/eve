@@ -5,7 +5,7 @@ import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk
 
 export function getVercelSandboxFetch(createOptions: VercelCreateOptions): typeof globalThis.fetch {
   const fetchOverride = (createOptions as { readonly fetch?: typeof globalThis.fetch }).fetch;
-  return withPackageUserAgent(fetchOverride ?? globalThis.fetch);
+  return withPackageUserAgent(fetchOverride);
 }
 
 export async function getVercelSandboxCredentials(
