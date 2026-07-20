@@ -273,7 +273,10 @@ function renderProse(block: Block, width: number, theme: Theme): string[] {
     if (line === undefined) return [];
     return [theme.colors.dim(sliceVisible(line, Math.max(1, width)))];
   }
-  const glyph = isSubagent ? "" : `${theme.colors.bold(theme.colors.white(theme.glyph.brand))} `;
+  // Bold at the terminal's DEFAULT foreground: black on a light theme,
+  // white on a dark one. Explicit bright-white (SGR 97) would vanish on
+  // light backgrounds.
+  const glyph = isSubagent ? "" : `${theme.colors.bold(theme.glyph.brand)} `;
   const indent = isSubagent ? "" : "  ";
 
   if (block.reasoning && block.reasoning.trim().length > 0) {
