@@ -2,7 +2,7 @@ import type { ModelMessage, UserContent } from "ai";
 
 import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
 import { isApprovalRequest } from "#harness/input-requests.js";
-import { appendUserContent } from "#harness/messages.js";
+import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 
@@ -158,9 +158,10 @@ function appendOptionalUserContent(
   existing: string | UserContent | undefined,
   appended: string,
 ): string | UserContent {
-  if (existing === undefined) {
+  const normalizedExisting = normalizeUserContent(existing);
+  if (normalizedExisting === undefined) {
     return appended;
   }
 
-  return appendUserContent({ appended, existing });
+  return appendUserContent({ appended, existing: normalizedExisting });
 }
