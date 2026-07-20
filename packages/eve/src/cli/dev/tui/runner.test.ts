@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   Client,
@@ -144,6 +144,14 @@ const AGENT_INFO: AgentInfoResult = {
     rootEntries: [],
   },
 };
+
+beforeEach(() => {
+  // The runner normalizes header endpoints from the real process.env; a
+  // developer shell exporting gateway credentials must not leak into these
+  // boot-state assertions.
+  vi.stubEnv("AI_GATEWAY_API_KEY", "");
+  vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
