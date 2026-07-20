@@ -175,6 +175,25 @@ export interface SubagentInputRequestHookPayload {
   readonly subagentName: string;
 }
 
+/** Action-result lifecycle event forwarded from a delegated child. */
+export type SubagentActionResultEvent = Extract<
+  HandleMessageStreamEvent,
+  { type: "action.result" }
+>;
+
+/**
+ * Proxy payload sent from a child subagent when one of its actions settles.
+ * The parent re-keys the event to its own turn and retains child linkage in
+ * stream metadata.
+ */
+export interface SubagentActionResultHookPayload {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly event: SubagentActionResultEvent;
+  readonly kind: "subagent-action-result";
+  readonly subagentName: string;
+}
+
 /** Authorization lifecycle event forwarded from a delegated child. */
 export type SubagentAuthorizationEvent = Extract<
   HandleMessageStreamEvent,
@@ -201,6 +220,7 @@ export interface SubagentAuthorizationEventHookPayload {
 export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
+  | SubagentActionResultHookPayload
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 

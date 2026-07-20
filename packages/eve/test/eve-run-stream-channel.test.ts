@@ -34,6 +34,7 @@ describe("eveChannel GET stream", () => {
       {
         type: "message.completed",
         data: {
+          blockIndex: 0,
           finishReason: "stop",
           message: "second turn reply",
           sequence: 0,
@@ -120,6 +121,7 @@ describe("eveChannel GET stream", () => {
       {
         type: "message.completed",
         data: {
+          blockIndex: 0,
           finishReason: "stop",
           message: "hello",
           sequence: 0,

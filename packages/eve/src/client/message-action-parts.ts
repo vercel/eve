@@ -1,5 +1,5 @@
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type {
   EveDynamicToolPart,
   EveMessageInputRequest,
@@ -33,11 +33,15 @@ export function toMessageInputRequest(request: InputRequest): EveMessageInputReq
 /** Builds tool metadata for a freshly projected tool part. */
 export function createToolMetadata(
   descriptor: ActionDescriptor,
-  extra?: { readonly inputRequest?: EveMessageInputRequest },
+  extra?: {
+    readonly inputRequest?: EveMessageInputRequest;
+    readonly inputResponse?: InputResponse;
+  },
 ): EveMessageToolMetadata {
   return {
     eve: {
       inputRequest: extra?.inputRequest,
+      inputResponse: extra?.inputResponse,
       kind: descriptor.kind,
       name: descriptor.name,
     },

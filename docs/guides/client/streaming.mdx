@@ -56,7 +56,7 @@ for await (const event of response) {
 }
 ```
 
-`message.appended` and `reasoning.appended` are incremental delta events. eve may combine adjacent deltas of the same type while a durable stream write is in flight, but preserves their text and event ordering; any different event is a barrier. Their completed forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas.
+`message.appended` and `reasoning.appended` are incremental delta events. eve may combine adjacent deltas of the same type while a durable stream write is in flight, but preserves their text and event ordering; any different event is a barrier. Append and completed text/reasoning events carry `data.blockIndex`, a zero-based occurrence within the model step that distinguishes repeated equal blocks. Their completed forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas.
 
 ## Handle event types
 
@@ -81,7 +81,7 @@ The most common UI events are:
 | `reasoning.appended` | Render reasoning deltas when the model provides them.                          |
 | `message.appended`   | Render assistant text deltas.                                                  |
 | `actions.requested`  | Show tool calls as the model requests them, before execution.                  |
-| `action.result`      | Show tool call results.                                                        |
+| `action.result`      | Show tool results and durable HITL settlements (`data.inputSettlement`).       |
 | `input.requested`    | Pause the UI for approval or a question answer.                                |
 | `result.completed`   | Read structured output from an [output schema](./output-schema).               |
 | `session.waiting`    | Enable the composer and read the current `data.continuationToken`.             |
@@ -89,6 +89,22 @@ The most common UI events are:
 | `session.failed`     | Mark the conversation failed.                                                  |
 
 For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
+
+### Build integration fixtures
+
+Tests that exercise authored hooks or client replay can import contract-valid event builders from `eve/testing` instead of hand-authoring protocol objects:
+
+```ts
+import {
+  createActionResultEvent,
+  createInputRequestedEvent,
+  createInputResponseActionResultEvent,
+  createInputTerminalActionResultEvent,
+  createMessageCompletedEvent,
+} from "eve/testing";
+```
+
+Use the real eve harness when testing emitter ordering. The builders target lifecycle seams and require the same coordinates, including `blockIndex`, as the public stream contract.
 
 When a submitted message includes attachments, `message.received.data.message` stays the
 flattened compatibility summary, while `message.received.data.parts` carries renderable text and
@@ -100,6 +116,8 @@ client-resolvable `http(s)` and `data:` URLs.
 `authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
 
 If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load. Do not treat a missing `session.waiting` after `authorization.required` as a finished conversation; the callback or a structured decline should resume the same eve session.
+
+When a delegated child needs input or authorization, eve projects that lifecycle onto the parent stream using the parent turn coordinates. `event.meta.subagent` retains the child session, child turn, parent call, and subagent name so parent consumers can correlate the projection without reading a child turn ID as parent ownership.
 
 ## Reconnection
 

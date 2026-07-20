@@ -66,6 +66,11 @@
       "import": "./dist/src/client/index.js",
       "default": "./dist/src/client/index.js"
     },
+    "./testing": {
+      "types": "./dist/src/public/testing/index.d.ts",
+      "import": "./dist/src/public/testing/index.js",
+      "default": "./dist/src/public/testing/index.js"
+    },
     "./react": {
       "types": "./dist/src/react/index.d.ts",
       "import": "./dist/src/react/index.js",

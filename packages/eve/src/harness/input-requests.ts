@@ -1,36 +1,31 @@
 import type { ModelMessage } from "ai";
 
-import type {
-  RuntimeToolCallActionRequest,
-  RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
+import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { coalesceTurnInputs } from "#harness/messages.js";
 import {
-  isSessionLimitContinuationRequest,
-  resolveSessionLimitContinuation,
-} from "#harness/session-limit-continuation.js";
+  buildRejectedActionBatch,
+  buildToolResponseParts,
+  isApprovalRequest,
+  recordApprovedTools,
+  type RejectedActionBatch,
+} from "#harness/input-approval.js";
+export { getApprovedTools, isApprovalRequest } from "#harness/input-approval.js";
+export type { RejectedActionBatch } from "#harness/input-approval.js";
+
+import { coalesceTurnInputs } from "#harness/messages.js";
+import { resolveSessionLimitContinuation } from "#harness/session-limit-continuation.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 
 const PENDING_INPUT_BATCH_KEY = "eve.runtime.pendingInputBatch";
-const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
 const DEFERRED_STEP_INPUT_KEY = "eve.runtime.deferredStepInput";
-
-const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
-
-const TOOL_EXECUTION_DENIED_CODE = "TOOL_EXECUTION_DENIED";
-const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
-const TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE = "Invalid approval response.";
-
-type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 
 /**
  * Stream-emit coordinates carried so a parked batch's resolution can attribute
  * its events to the turn and step that requested the input.
  */
-interface PendingInputBatchEvent {
+export interface PendingInputBatchEvent {
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -39,22 +34,24 @@ interface PendingInputBatchEvent {
 /**
  * Serializable pending input batch stored on the session state.
  */
-interface PendingInputBatch {
+export interface PendingInputBatch {
   readonly event?: PendingInputBatchEvent;
   readonly requests: readonly InputRequest[];
   readonly responseMessages: readonly ModelMessage[];
 }
 
-/**
- * Denied tool-call approvals from one resolved batch, ready for the caller to
- * emit as `rejected` `action.result` events against the originating turn.
- */
-export interface RejectedActionBatch {
+type ResolvedInputSettlement = {
   readonly event: PendingInputBatchEvent;
-  readonly results: readonly RuntimeToolResultActionResult[];
-}
-
-type ApprovalTerminalStatus = "approved" | "denied" | "ignored" | "invalid";
+  readonly request: InputRequest;
+} & (
+  | {
+      readonly outcome: "responded";
+      readonly response: InputResponse;
+    }
+  | {
+      readonly outcome: "ignored";
+    }
+);
 
 /**
  * Returns true when the step input carries user-facing turn input.
@@ -175,6 +172,7 @@ export function resolvePendingInput(input: {
 
     return {
       consumedMessage: resolvedStepInput?.messageConsumed,
+      inputSettlements: buildInputSettlements(pendingBatch, []),
       outcome: "resolved",
       messages,
       rejectedActions,
@@ -182,6 +180,7 @@ export function resolvePendingInput(input: {
     };
   }
 
+  const inputSettlements = buildInputSettlements(pendingBatch, responses);
   const limitContinuation = resolveSessionLimitContinuation({
     requests: pendingBatch.requests,
     responses,
@@ -228,6 +227,7 @@ export function resolvePendingInput(input: {
         consumedMessage: resolvedStepInput?.messageConsumed,
         deferredContext: deferredInput.context === undefined ? undefined : true,
         deferredMessage: deferredInput.message === undefined ? undefined : true,
+        inputSettlements,
         limitContinuation,
         outcome: "resolved",
         messages,
@@ -239,12 +239,33 @@ export function resolvePendingInput(input: {
 
   return {
     consumedMessage: resolvedStepInput?.messageConsumed,
+    inputSettlements,
     limitContinuation,
     outcome: "resolved",
     messages,
     rejectedActions,
     session,
   };
+}
+
+function buildInputSettlements(
+  pendingBatch: PendingInputBatch,
+  responses: readonly InputResponse[],
+): readonly ResolvedInputSettlement[] | undefined {
+  const event = pendingBatch.event;
+  if (event === undefined) {
+    return undefined;
+  }
+
+  const responsesByRequestId = new Map(
+    responses.map((response) => [response.requestId, response] as const),
+  );
+  return pendingBatch.requests.map((request): ResolvedInputSettlement => {
+    const response = responsesByRequestId.get(request.requestId);
+    return response === undefined
+      ? { event, outcome: "ignored", request }
+      : { event, outcome: "responded", request, response };
+  });
 }
 
 function resolveTextMessageInput(
@@ -321,6 +342,7 @@ type ResolvePendingInputResult = {
    * prompt. The tool loop grants a fresh token budget window or terminates
    * the session based on `granted`.
    */
+  readonly inputSettlements?: readonly ResolvedInputSettlement[];
   readonly limitContinuation?: { readonly granted: boolean };
   readonly outcome: "resolved" | "continue" | "unresolved";
   readonly messages: ModelMessage[];
@@ -425,231 +447,6 @@ function clearDeferredStepInput(session: HarnessSession): HarnessSession {
     ...session,
     state: Object.keys(state).length > 0 ? state : undefined,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Approval tracking
-// ---------------------------------------------------------------------------
-
-/**
- * Returns the set of tool names that have been approved at least once
- * during this session.
- */
-export function getApprovedTools(session: HarnessSession): ReadonlySet<string> {
-  const value = session.state?.[APPROVED_TOOLS_KEY];
-
-  if (!Array.isArray(value)) {
-    return new Set();
-  }
-
-  return new Set(value as string[]);
-}
-
-/**
- * Resolves the approval key for a request. When a `resolveApprovalKey`
- * function is provided and returns a string, that compound key is recorded
- * instead of the bare tool name.
- */
-function recordApprovedTools(input: {
-  readonly pendingBatch: PendingInputBatch;
-  readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
-  readonly responses: readonly InputResponse[];
-  readonly session: HarnessSession;
-}): HarnessSession {
-  const approvedIds = new Set(
-    input.responses.filter((r) => r.optionId === "approve").map((r) => r.requestId),
-  );
-
-  const newKeys = input.pendingBatch.requests
-    .filter((r) => approvedIds.has(r.requestId))
-    .map((r) => input.resolveApprovalKey?.(r) ?? r.action.toolName);
-
-  if (newKeys.length === 0) {
-    return input.session;
-  }
-
-  const existing = getApprovedTools(input.session);
-  const combined = [...new Set([...existing, ...newKeys])];
-  const state = { ...input.session.state };
-  state[APPROVED_TOOLS_KEY] = combined;
-
-  return { ...input.session, state };
-}
-
-// ---------------------------------------------------------------------------
-// Tool response building
-// ---------------------------------------------------------------------------
-
-/**
- * Resolves whether an approval request was granted and, when auto-denied
- * because the user continued without responding, the reason to record.
- */
-function resolveApprovalOutcome(response: InputResponse | undefined): {
-  readonly approved: boolean;
-  readonly reason: string | undefined;
-  readonly status: ApprovalTerminalStatus;
-} {
-  if (response === undefined) {
-    return {
-      approved: false,
-      reason: IGNORED_INPUT_REASON,
-      status: "ignored",
-    };
-  }
-
-  if (response.optionId === "approve") {
-    return {
-      approved: true,
-      reason: undefined,
-      status: "approved",
-    };
-  }
-
-  if (response.optionId === "deny") {
-    return {
-      approved: false,
-      reason: TOOL_EXECUTION_DENIED_MESSAGE,
-      status: "denied",
-    };
-  }
-
-  return {
-    approved: false,
-    reason: TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE,
-    status: "invalid",
-  };
-}
-
-/**
- * Builds one rejected `action.result` payload per denied tool-call approval so
- * the stream records denials that otherwise live only in model history.
- */
-function buildRejectedActionBatch(
-  batch: PendingInputBatch,
-  responses: readonly InputResponse[],
-): RejectedActionBatch | undefined {
-  if (batch.event === undefined) {
-    return undefined;
-  }
-
-  const responseMap = new Map(responses.map((r) => [r.requestId, r]));
-  const results: RuntimeToolResultActionResult[] = [];
-  for (const request of batch.requests) {
-    if (!isApprovalRequest(request)) {
-      continue;
-    }
-
-    const { approved, reason, status } = resolveApprovalOutcome(responseMap.get(request.requestId));
-    if (approved) {
-      continue;
-    }
-
-    results.push({
-      callId: request.action.callId,
-      isError: true,
-      kind: "tool-result",
-      output: {
-        approval: {
-          requestId: request.requestId,
-          status,
-        },
-        code: TOOL_EXECUTION_DENIED_CODE,
-        message: reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-        tool: {
-          result: "not_run",
-        },
-      },
-      toolName: request.action.toolName,
-    });
-  }
-
-  return results.length > 0 ? { event: batch.event, results } : undefined;
-}
-
-function buildToolResponseParts(
-  batch: PendingInputBatch,
-  responses: readonly InputResponse[],
-): ToolResponsePart[] {
-  const responseMap = new Map(responses.map((r) => [r.requestId, r]));
-
-  const parts: ToolResponsePart[] = [];
-  for (const request of batch.requests) {
-    parts.push(...buildToolResponsePartsForRequest(request, responseMap.get(request.requestId)));
-  }
-  return parts;
-}
-
-function buildToolResponsePartsForRequest(
-  request: InputRequest,
-  response: InputResponse | undefined,
-): ToolResponsePart[] {
-  // A session-limit continuation prompt is harness-authored: no matching
-  // tool call exists in model history, so resolving it must not append a
-  // tool message the provider would reject as unmatched. This is currently
-  // the only harness-authored request type; if another appears, replace this
-  // toolName predicate with a generic synthetic-request marker instead of
-  // stacking a second special case here.
-  if (isSessionLimitContinuationRequest(request)) {
-    return [];
-  }
-
-  if (isApprovalRequest(request)) {
-    const { approved, reason } = resolveApprovalOutcome(response);
-    const parts: ToolResponsePart[] = [
-      {
-        approvalId: request.requestId,
-        approved,
-        reason,
-        type: "tool-approval-response",
-      },
-    ];
-    /*
-     * On denial (explicit "deny" or auto-deny when the user continues
-     * without responding), splice in the matching `execution-denied`
-     * tool-result. AI SDK's `streamText` synthesizes this for the
-     * current turn's `initialResponseMessages`, but that synthesis is
-     * gated on the input messages' last entry being a tool message —
-     * on subsequent turns (when a new user message is the tail of
-     * history) the synthesis is skipped, and the persisted
-     * `tool-approval-response` is stripped during provider prompt
-     * conversion. Without an own `tool-result` in history, the prior
-     * `tool_use` block replays unmatched and some providers reject
-     * the request with 400.
-     */
-    if (!approved) {
-      parts.push({
-        output: { type: "execution-denied", reason },
-        toolCallId: request.action.callId,
-        toolName: request.action.toolName,
-        type: "tool-result",
-      });
-    }
-    return parts;
-  }
-
-  return [
-    {
-      output: {
-        type: "json",
-        value:
-          response !== undefined
-            ? { optionId: response.optionId, text: response.text, status: "answered" }
-            : { status: "ignored" },
-      },
-      toolCallId: request.action.callId,
-      toolName: request.action.toolName,
-      type: "tool-result",
-    },
-  ];
-}
-
-/** Shared approval predicate: a request whose options are exactly `approve` / `deny`. */
-export function isApprovalRequest(request: InputRequest): boolean {
-  return (
-    request.options?.length === 2 &&
-    request.options[0]?.id === "approve" &&
-    request.options[1]?.id === "deny"
-  );
 }
 
 // ---------------------------------------------------------------------------

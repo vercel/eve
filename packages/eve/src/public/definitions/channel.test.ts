@@ -462,6 +462,7 @@ describe("defineChannel", () => {
         {
           type: "reasoning.appended",
           data: {
+            blockIndex: 0,
             reasoningDelta: "Need",
             reasoningSoFar: "Need",
             sequence: 0,
@@ -476,6 +477,7 @@ describe("defineChannel", () => {
         {
           type: "reasoning.completed",
           data: {
+            blockIndex: 0,
             reasoning: "Need to inspect the repo.",
             sequence: 0,
             stepIndex: 0,

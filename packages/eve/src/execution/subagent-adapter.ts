@@ -2,6 +2,8 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
+  SubagentActionResultEvent,
+  SubagentActionResultHookPayload,
   SubagentAuthorizationEvent,
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
@@ -73,6 +75,9 @@ export function isSubagentAdapterState(value: unknown): value is SubagentAdapter
  */
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
+  async "action.result"(data, ctx) {
+    await forwardSubagentActionResult({ data, type: "action.result" }, ctx);
+  },
   async "authorization.required"(data, ctx) {
     await forwardSubagentAuthorizationEvent({ data, type: "authorization.required" }, ctx);
   },
@@ -107,6 +112,28 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
   },
 };
 
+async function forwardSubagentActionResult(
+  event: SubagentActionResultEvent,
+  ctx: ChannelAdapterContext,
+): Promise<void> {
+  const state = ctx.state;
+
+  if (!isSubagentAdapterState(state)) {
+    return;
+  }
+
+  await forwardSubagentActionResultStep({
+    hookPayload: {
+      callId: state.callId,
+      childSessionId: ctx.ctx.require(SessionIdKey),
+      event,
+      kind: "subagent-action-result",
+      subagentName: state.subagentName,
+    },
+    parentContinuationToken: state.parentContinuationToken,
+  });
+}
+
 async function forwardSubagentAuthorizationEvent(
   event: SubagentAuthorizationEvent,
   ctx: ChannelAdapterContext,
@@ -127,6 +154,29 @@ async function forwardSubagentAuthorizationEvent(
     },
     parentContinuationToken: state.parentContinuationToken,
   });
+}
+
+/** Forwards one child action result to its active parent turn. */
+async function forwardSubagentActionResultStep(input: {
+  readonly hookPayload: SubagentActionResultHookPayload;
+  readonly parentContinuationToken: string;
+}): Promise<void> {
+  "use step";
+
+  try {
+    await resumeHook(input.parentContinuationToken, input.hookPayload);
+  } catch (error) {
+    const errorId = createErrorId();
+    log.warn("failed to forward subagent action result to parent", {
+      callId: input.hookPayload.callId,
+      childSessionId: input.hookPayload.childSessionId,
+      errorId,
+      parentContinuationToken: input.parentContinuationToken,
+      subagentName: input.hookPayload.subagentName,
+      error,
+    });
+    throw error;
+  }
 }
 
 /** Forwards one child authorization event to its active parent turn. */

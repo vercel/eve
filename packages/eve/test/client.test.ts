@@ -97,6 +97,7 @@ function singleTurnEvents(input: {
       turnId: input.turnId,
     }),
     createMessageCompletedEvent({
+      blockIndex: 0,
       message: `Reply: ${input.message}`,
       sequence: input.sequence,
       stepIndex: 0,
@@ -411,6 +412,7 @@ describe("Session.send (result)", () => {
     const events: HandleMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Done",
         sequence: 1,
         stepIndex: 0,
@@ -445,6 +447,7 @@ describe("Session.send (result)", () => {
         turnId: "turn_001",
       }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Done",
         sequence: 1,
         stepIndex: 0,
@@ -481,6 +484,7 @@ describe("Session.send (result)", () => {
     const firstEvents: HandleMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Done",
         sequence: 1,
         stepIndex: 0,
@@ -550,6 +554,7 @@ describe("Session.send (stream)", () => {
       stream.pushEvent(createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }));
       stream.pushEvent(
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "Hi",
           sequence: 1,
           stepIndex: 0,
@@ -618,6 +623,7 @@ describe("Session.send (reconnection)", () => {
     const reconnectEvents: HandleMessageStreamEvent[] = [
       createMessageReceivedEvent({ message: "Hello", sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Reply",
         sequence: 1,
         stepIndex: 0,
@@ -810,6 +816,7 @@ describe("Session.stream", () => {
   it("uses the session sessionId and streamIndex", async () => {
     const events: HandleMessageStreamEvent[] = [
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Hi",
         sequence: 2,
         stepIndex: 0,

@@ -417,6 +417,7 @@ function finalOutputResult(text: string, structured: unknown): Record<string, un
 
 function createPendingBashApprovalSession(): HarnessSession {
   return setPendingInputBatch({
+    event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
     requests: [
       {
         action: {
@@ -467,6 +468,7 @@ function createPendingBashApprovalSession(): HarnessSession {
 
 function createPendingProtectedActionApprovalSession(): HarnessSession {
   return setPendingInputBatch({
+    event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
     requests: [
       {
         action: {
@@ -2383,6 +2385,7 @@ describe("createToolLoopHarness", () => {
     ]);
 
     expect(events.find((e) => e.type === "message.completed")?.data).toEqual({
+      blockIndex: 0,
       finishReason: "tool-calls",
       message: "Let me add those.",
       sequence: 0,
@@ -4431,6 +4434,7 @@ describe("createToolLoopHarness", () => {
       events.filter((event) => event.type === "message.completed").map((event) => event.data),
     ).toEqual([
       {
+        blockIndex: 0,
         finishReason: "tool-calls",
         message: "I'll search for that.",
         sequence: 0,
@@ -4438,6 +4442,7 @@ describe("createToolLoopHarness", () => {
         turnId: "turn_0",
       },
       {
+        blockIndex: 1,
         finishReason: "stop",
         message: "The answer is 42.",
         sequence: 0,
@@ -4839,7 +4844,20 @@ describe("createToolLoopHarness", () => {
       });
 
       const actionResults = events.filter((event) => event.type === "action.result");
-      expect(actionResults).toHaveLength(0);
+      expect(actionResults).toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            inputSettlement: {
+              outcome: "responded",
+              response: { optionId: "approve", requestId: "approval-1" },
+            },
+            result: expect.objectContaining({ callId: "call-1" }),
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_0",
+          }),
+        }),
+      ]);
     });
 
     it("still parks on authorization without emitting action.result when interactive auth fires in the same step", async () => {
@@ -6990,6 +7008,7 @@ describe("createToolLoopHarness", () => {
       : never);
 
     const session = setPendingInputBatch({
+      event: { sequence: 6, stepIndex: 3, turnId: "approval-turn" },
       requests: [
         {
           action: {
@@ -7167,6 +7186,205 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("durably settles an accepted question response once across restart and duplicate delivery", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Accepted.", role: "assistant" }] },
+      text: "Accepted.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const request = {
+      action: {
+        callId: "question-accepted",
+        input: { options: [{ id: "one", label: "One" }], prompt: "Choose one." },
+        kind: "tool-call" as const,
+        toolName: "ask_question",
+      },
+      display: "select" as const,
+      options: [{ id: "one", label: "One" }],
+      prompt: "Choose one.",
+      requestId: "question-accepted",
+    };
+    const parked = setPendingInputBatch({
+      event: { sequence: 3, stepIndex: 1, turnId: "request-turn" },
+      requests: [request],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: request.action.input,
+              toolCallId: request.action.callId,
+              toolName: request.action.toolName,
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: createTestSession({ history: [{ content: "Help me choose.", role: "user" }] }),
+    });
+    const restarted = JSON.parse(JSON.stringify(parked)) as HarnessSession;
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const settled = await runStep(restarted, {
+      inputResponses: [{ optionId: "one", requestId: request.requestId }],
+    });
+
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "action.result" && event.data.inputSettlement?.outcome === "responded",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inputSettlement: {
+            outcome: "responded",
+            response: { optionId: "one", requestId: request.requestId },
+          },
+          result: expect.objectContaining({ callId: request.action.callId }),
+          sequence: 3,
+          stepIndex: 1,
+          turnId: "request-turn",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    expect(settled.session.history.filter((message) => message.role === "tool")).toHaveLength(1);
+
+    await runStep(settled.session, {
+      inputResponses: [{ optionId: "one", requestId: request.requestId }],
+    });
+    expect(
+      events.filter(
+        (event) => event.type === "action.result" && event.data.inputSettlement !== undefined,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("durably settles an explicit approval denial without an execution result", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Understood.", role: "assistant" }] },
+      text: "Understood.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        tools: new Map([
+          [
+            "bash",
+            {
+              description: "Run shell commands",
+              execute: vi.fn().mockResolvedValue("ok"),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
+            },
+          ],
+        ]),
+      }),
+    );
+
+    await runStep(createPendingBashApprovalSession(), {
+      inputResponses: [{ optionId: "deny", requestId: "approval-1" }],
+    });
+
+    expect(
+      events.filter(
+        (event) => event.type === "action.result" && event.data.inputSettlement !== undefined,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inputSettlement: {
+            outcome: "responded",
+            response: { optionId: "deny", requestId: "approval-1" },
+          },
+          result: expect.objectContaining({ callId: "call-1" }),
+          sequence: 0,
+          status: "rejected",
+          stepIndex: 0,
+          turnId: "turn_0",
+        }),
+        type: "action.result",
+      }),
+    ]);
+  });
+
+  it("durably marks an unmatched ordinary message as ignored without inventing an answer", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Starting over.", role: "assistant" }] },
+      text: "Starting over.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const request = {
+      action: {
+        callId: "question-ignored",
+        input: { options: [{ id: "one", label: "One" }], prompt: "Choose one." },
+        kind: "tool-call" as const,
+        toolName: "ask_question",
+      },
+      display: "select" as const,
+      options: [{ id: "one", label: "One" }],
+      prompt: "Choose one.",
+      requestId: "question-ignored",
+    };
+    const parked = setPendingInputBatch({
+      event: { sequence: 5, stepIndex: 2, turnId: "ignored-request-turn" },
+      requests: [request],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: request.action.input,
+              toolCallId: request.action.callId,
+              toolName: request.action.toolName,
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: createTestSession({ history: [{ content: "Help me choose.", role: "user" }] }),
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const result = await runStep(parked, { message: "Start a different task." });
+
+    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(
+      events.find(
+        (event) =>
+          event.type === "action.result" && event.data.result.callId === request.action.callId,
+      ),
+    ).toMatchObject({
+      data: {
+        inputSettlement: { outcome: "ignored", requestId: request.requestId },
+        result: { callId: request.action.callId, output: { status: "ignored" } },
+        sequence: 5,
+        stepIndex: 2,
+        turnId: "ignored-request-turn",
+      },
+      type: "action.result",
+    });
+    expect(
+      events.some(
+        (event) =>
+          event.type === "action.result" && event.data.inputSettlement?.outcome === "responded",
+      ),
+    ).toBe(false);
+  });
+
   it("delivers a stale ask_question selection as a new user turn while another question is pending", async () => {
     const nextQuestionInput = {
       allowFreeform: false,
@@ -7320,6 +7538,7 @@ describe("createToolLoopHarness", () => {
       prompt: "Which context should I use?",
     };
     const session = setPendingInputBatch({
+      event: { sequence: 4, stepIndex: 2, turnId: "question-turn" },
       requests: [
         {
           action: {
@@ -7361,6 +7580,23 @@ describe("createToolLoopHarness", () => {
 
     expect(followupResult.next).toBeNull();
     expect(hasPendingInputBatch(followupResult.session.state)).toBe(false);
+    expect(
+      events.find(
+        (event) => event.type === "action.result" && event.data.inputSettlement !== undefined,
+      ),
+    ).toMatchObject({
+      data: {
+        inputSettlement: {
+          outcome: "responded",
+          response: { requestId: "question-1", text: "Use current context instead." },
+        },
+        result: { callId: "question-1" },
+        sequence: 4,
+        stepIndex: 2,
+        turnId: "question-turn",
+      },
+      type: "action.result",
+    });
 
     const secondTurnEventIndex = events.length;
     const result = await runStep(followupResult.session, {
@@ -7558,6 +7794,7 @@ describe("createToolLoopHarness", () => {
       "session.waiting",
     ]);
     expect(events.find((event) => event.type === "reasoning.appended")?.data).toEqual({
+      blockIndex: 0,
       reasoningDelta: "Need to check the known constraints first.",
       reasoningSoFar: "Need to check the known constraints first.",
       sequence: 0,
@@ -7565,12 +7802,14 @@ describe("createToolLoopHarness", () => {
       turnId: "turn_0",
     });
     expect(events.find((event) => event.type === "reasoning.completed")?.data).toEqual({
+      blockIndex: 0,
       reasoning: "Need to check the known constraints first.",
       sequence: 0,
       stepIndex: 0,
       turnId: "turn_0",
     });
     expect(events.find((event) => event.type === "message.appended")?.data).toEqual({
+      blockIndex: 1,
       messageDelta: "Answer ready.",
       messageSoFar: "Answer ready.",
       sequence: 0,
@@ -7616,6 +7855,7 @@ describe("createToolLoopHarness", () => {
       events.filter((event) => event.type === "message.appended").map((event) => event.data),
     ).toEqual([
       {
+        blockIndex: 0,
         messageDelta: "Hello",
         messageSoFar: "Hello",
         sequence: 0,
@@ -7623,6 +7863,7 @@ describe("createToolLoopHarness", () => {
         turnId: "turn_0",
       },
       {
+        blockIndex: 0,
         messageDelta: " there.",
         messageSoFar: "Hello there.",
         sequence: 0,
@@ -7631,6 +7872,7 @@ describe("createToolLoopHarness", () => {
       },
     ]);
     expect(events.find((event) => event.type === "message.completed")?.data).toEqual({
+      blockIndex: 0,
       finishReason: "stop",
       message: "Hello there.",
       sequence: 0,

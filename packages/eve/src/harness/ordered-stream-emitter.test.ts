@@ -16,8 +16,9 @@ function deferred(): { readonly promise: Promise<void>; resolve(): void } {
   return { promise, resolve };
 }
 
-function message(delta: string, soFar: string, stepIndex = 0) {
+function message(delta: string, soFar: string, stepIndex = 0, blockIndex = 0) {
   return createMessageAppendedEvent({
+    blockIndex,
     messageDelta: delta,
     messageSoFar: soFar,
     sequence: 1,
@@ -28,6 +29,7 @@ function message(delta: string, soFar: string, stepIndex = 0) {
 
 function reasoning(delta: string, soFar: string) {
   return createReasoningAppendedEvent({
+    blockIndex: 0,
     reasoningDelta: delta,
     reasoningSoFar: soFar,
     sequence: 1,
@@ -69,6 +71,7 @@ describe("createOrderedStreamEmitter", () => {
     });
     const emitter = createOrderedStreamEmitter(emitFn);
     const completed = createMessageCompletedEvent({
+      blockIndex: 0,
       message: "CD",
       sequence: 1,
       stepIndex: 1,
@@ -93,6 +96,24 @@ describe("createOrderedStreamEmitter", () => {
       reasoning("RS", "RS"),
       completed,
     ]);
+  });
+
+  it("does not merge adjacent appends from distinct same-step blocks", async () => {
+    const firstWrite = deferred();
+    const events: HandleMessageStreamEvent[] = [];
+    const emitter = createOrderedStreamEmitter(async (event) => {
+      events.push(event);
+      if (events.length === 1) await firstWrite.promise;
+    });
+
+    await emitter.emit(message("A", "A"));
+    await emitter.emit(message("B", "B", 0, 1));
+    await emitter.emit(message("C", "C", 0, 2));
+
+    firstWrite.resolve();
+    await emitter.closeAndDrain();
+
+    expect(events).toEqual([message("A", "A"), message("B", "B", 0, 1), message("C", "C", 0, 2)]);
   });
 
   it("surfaces sink failures from close and later emissions", async () => {

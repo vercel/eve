@@ -637,6 +637,20 @@ describe("turn cancellation integration", () => {
 
         expect(followUpTurn.at(-1)?.type).toBe("session.waiting");
         expect(filterEventsByType(followUpTurn, "turn.cancelled")).toHaveLength(0);
+        expect(
+          filterEventsByType(followUpTurn, "action.result").filter(
+            (event) => event.data.inputSettlement?.outcome === "cancelled",
+          ),
+        ).toEqual([
+          expect.objectContaining({
+            data: expect.objectContaining({
+              inputSettlement: { outcome: "cancelled", requestId },
+            }),
+            meta: expect.objectContaining({
+              subagent: expect.objectContaining({ childSessionId }),
+            }),
+          }),
+        ]);
         expect(filterEventsByType(followUpTurn, "turn.started")).toHaveLength(1);
         expect(filterEventsByType(followUpTurn, "step.completed")).toHaveLength(1);
         expect(filterEventsByType(followUpTurn, "session.waiting")).toHaveLength(1);

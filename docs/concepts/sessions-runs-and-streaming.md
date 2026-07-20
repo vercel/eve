@@ -41,7 +41,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                    |
 | `step.started`            | A model step began.                                                                                              |
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
-| `action.result`           | A tool call returned.                                                                                            |
+| `action.result`           | A tool returned or a HITL request settled; settlements carry `inputSettlement`.                                  |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
 | `subagent.completed`      | A delegated subagent finished.                                                                                   |
@@ -63,13 +63,13 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `session.failed`          | The session failed.                                                                                              |
 | `session.completed`       | The session reached a terminal end.                                                                              |
 
-`reasoning.appended` and `message.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+`reasoning.appended` and `message.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. Append and completed text/reasoning events also carry `data.blockIndex`, the zero-based block occurrence within that model step, so repeated equal blocks remain distinct on replay. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
 
 Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
 
 `message.completed` can fire more than once in a turn: the agent often emits interim assistant text before a tool call. To tell tool-call narration from a terminal reply, check `message.completed.data.finishReason`. `step.completed.data.finishReason` mirrors the step outcome, and usage lives on `step.completed`.
 
-A delegated subagent publishes progress on its own child-session stream. The parent only emits `subagent.called` with a `childSessionId`, which a client uses to attach.
+A delegated subagent publishes its full progress on the child-session stream. The parent emits `subagent.called` with a `childSessionId` and projects child input, authorization, and input-settlement events onto the parent stream using parent turn coordinates. Projected events carry `meta.subagent` with the child session and turn, parent call, and subagent name.
 
 `step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally — whatever the turn streamed before cancellation stays on the stream, while durable history keeps only what had already settled. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
 

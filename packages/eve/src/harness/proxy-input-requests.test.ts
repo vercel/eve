@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  clearProxyInputRequest,
   clearProxyInputRequestsForChild,
   getProxyInputRequests,
   hasProxyInputRequests,
+  type ProxyInputRequestEntry,
   upsertProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -23,105 +25,92 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
   };
 }
 
+function createEntry(childContinuationToken: string, requestId: string): ProxyInputRequestEntry {
+  return {
+    childContinuationToken,
+    event: { sequence: 2, stepIndex: 1, turnId: "parent-turn" },
+    request: {
+      action: {
+        callId: `call-${requestId}`,
+        input: {},
+        kind: "tool-call",
+        toolName: "ask_question",
+      },
+      prompt: "Choose",
+      requestId,
+    },
+    subagent: {
+      childSessionId: `session-${childContinuationToken}`,
+      childTurnId: "child-turn",
+      parentCallId: "parent-call",
+      subagentName: "researcher",
+    },
+  };
+}
+
 describe("upsertProxyInputRequests", () => {
-  it("records a fresh batch of proxy entries", () => {
-    const session = createSession();
+  it("records complete parent and child lifecycle identity", () => {
+    const entry = createEntry("child-a", "req-1");
     const next = upsertProxyInputRequests({
-      entries: [["req-1", "child-a"]],
+      entries: [["req-1", entry]],
       forChildContinuationToken: "child-a",
-      session,
+      session: createSession(),
     });
 
     expect(hasProxyInputRequests(next.state)).toBe(true);
-    expect(getProxyInputRequests(next.state).get("req-1")).toBe("child-a");
+    expect(getProxyInputRequests(next.state).get("req-1")).toEqual(entry);
   });
 
-  it("replaces prior entries for the same child continuation token", () => {
+  it("replaces one child's old batch while preserving another child", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-1", "child-a"]],
+      entries: [["req-a", createEntry("child-a", "req-a")]],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
-
     session = upsertProxyInputRequests({
-      entries: [["req-2", "child-a"]],
-      forChildContinuationToken: "child-a",
-      session,
-    });
-
-    const entries = getProxyInputRequests(session.state);
-    expect(entries.size).toBe(1);
-    expect(entries.get("req-2")).toBe("child-a");
-    expect(entries.has("req-1")).toBe(false);
-  });
-
-  it("keeps entries from other children when upserting", () => {
-    let session = upsertProxyInputRequests({
-      entries: [["req-a", "child-a"]],
-      forChildContinuationToken: "child-a",
-      session: createSession(),
-    });
-
-    session = upsertProxyInputRequests({
-      entries: [["req-b", "child-b"]],
+      entries: [["req-b", createEntry("child-b", "req-b")]],
       forChildContinuationToken: "child-b",
       session,
     });
+    session = upsertProxyInputRequests({
+      entries: [["req-c", createEntry("child-a", "req-c")]],
+      forChildContinuationToken: "child-a",
+      session,
+    });
 
     const entries = getProxyInputRequests(session.state);
-    expect(entries.size).toBe(2);
-    expect(entries.get("req-a")).toBe("child-a");
-    expect(entries.get("req-b")).toBe("child-b");
+    expect([...entries.keys()].sort()).toEqual(["req-b", "req-c"]);
   });
 });
 
-describe("clearProxyInputRequestsForChild", () => {
-  it("removes only the target child's entries", () => {
+describe("proxy input settlement", () => {
+  it("clears one settled request", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-a", "child-a"]],
+      entries: [
+        ["req-a", createEntry("child-a", "req-a")],
+        ["req-b", createEntry("child-a", "req-b")],
+      ],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
+    session = clearProxyInputRequest(session, "req-a");
+    expect([...getProxyInputRequests(session.state).keys()]).toEqual(["req-b"]);
+  });
+
+  it("clears every remaining request for a completed child", () => {
+    let session = upsertProxyInputRequests({
+      entries: [["req-a", createEntry("child-a", "req-a")]],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
     session = upsertProxyInputRequests({
-      entries: [["req-b", "child-b"]],
+      entries: [["req-b", createEntry("child-b", "req-b")]],
       forChildContinuationToken: "child-b",
       session,
     });
 
     session = clearProxyInputRequestsForChild(session, "child-a");
-    const entries = getProxyInputRequests(session.state);
-
-    expect(entries.size).toBe(1);
-    expect(entries.get("req-b")).toBe("child-b");
-  });
-
-  it("returns the same session when there is nothing to clear", () => {
-    const session = createSession();
-    const next = clearProxyInputRequestsForChild(session, "missing");
-    expect(next).toBe(session);
-  });
-});
-
-describe("getProxyInputRequests type safety", () => {
-  it("returns an empty map when the session carries no proxy state", () => {
-    const entries = getProxyInputRequests(createSession().state);
-    expect(entries.size).toBe(0);
-  });
-
-  it("ignores malformed values in the state map", () => {
-    const session = createSession({
-      "eve.runtime.proxyInputRequests": { "req-1": 42, "req-2": "child-b" },
-    });
-    const entries = getProxyInputRequests(session.state);
-    expect(entries.size).toBe(1);
-    expect(entries.get("req-2")).toBe("child-b");
-  });
-
-  it("ignores a legacy array-shaped value", () => {
-    const session = createSession({
-      "eve.runtime.proxyInputRequests": [{ requestId: "req-1" }],
-    });
-    expect(getProxyInputRequests(session.state).size).toBe(0);
+    expect([...getProxyInputRequests(session.state).keys()]).toEqual(["req-b"]);
   });
 });

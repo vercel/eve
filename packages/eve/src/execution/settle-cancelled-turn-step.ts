@@ -19,11 +19,13 @@ import {
 } from "#harness/emission.js";
 import {
   clearAllProxyInputRequests,
+  getProxyInputRequests,
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
+  createInputTerminalActionResultEvent,
   encodeMessageStreamEvent,
   type HandleMessageStreamEvent,
   timestampHandleMessageStreamEvent,
@@ -69,7 +71,8 @@ export async function settleCancelledTurnStep(input: {
   const alreadyEpilogued =
     isHarnessBetweenTurns(session) && hasProxyInputRequests(durableSession.state);
 
-  if (!alreadyEpilogued) {
+  const proxyRequests = [...getProxyInputRequests(session.state).values()];
+  if (!alreadyEpilogued || proxyRequests.length > 0) {
     const writer = input.parentWritable.getWriter();
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
@@ -85,8 +88,24 @@ export async function settleCancelledTurnStep(input: {
             registry: bundle.hookRegistry,
           });
         };
+
+        for (const entry of proxyRequests) {
+          await emit({
+            ...createInputTerminalActionResultEvent({
+              outcome: "cancelled",
+              request: entry.request,
+              sequence: entry.event.sequence,
+              stepIndex: entry.event.stepIndex,
+              turnId: entry.event.turnId,
+            }),
+            meta: { at: new Date().toISOString(), subagent: entry.subagent },
+          });
+        }
+
         return {
-          result: await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
+          result: alreadyEpilogued
+            ? emissionState
+            : await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
           session: enrichedSession,
         };
       });

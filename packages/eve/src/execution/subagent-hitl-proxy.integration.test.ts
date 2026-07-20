@@ -6,18 +6,37 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
+import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { projectToDurableSession } from "#execution/session.js";
+import { emitProxiedSubagentEvent } from "#execution/subagent-event-proxy-step.js";
+import {
+  getProxyInputRequests,
+  hasProxyInputRequests,
+  upsertProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import {
+  createEmptyHookRegistry,
+  createRuntimeHookRegistry,
+  type RuntimeHookRegistry,
+} from "#runtime/hooks/registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import {
+  createActionResultEvent,
+  createAuthorizationCompletedEvent,
+  createAuthorizationRequiredEvent,
+  createInputResponseActionResultEvent,
+} from "#protocol/message.js";
 
 /**
  * Integration coverage for subagent HITL proxy emission and routing.
@@ -33,7 +52,10 @@ import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagen
  * rehydrates the adapter by `kind`. Every other bundle field is
  * unused by the proxy path under test.
  */
-function buildMockBundle(adapters: readonly ChannelAdapter[]): CompiledBundle {
+function buildMockBundle(
+  adapters: readonly ChannelAdapter[],
+  hookRegistry: RuntimeHookRegistry = createEmptyHookRegistry(),
+): CompiledBundle {
   const channels: readonly ResolvedChannelDefinition[] = adapters.map((adapter, index) => ({
     adapter,
     fetch: async () => new Response(null),
@@ -53,7 +75,7 @@ function buildMockBundle(adapters: readonly ChannelAdapter[]): CompiledBundle {
     adapterRegistry: createRuntimeAdapterRegistry({ channels }),
     compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
     graph: {} as CompiledBundle["graph"],
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry,
     moduleMap: {} as CompiledBundle["moduleMap"],
     resolvedAgent: {} as CompiledBundle["resolvedAgent"],
     subagentRegistry: {} as CompiledBundle["subagentRegistry"],
@@ -223,6 +245,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
       emit,
       hookPayload,
       mode: "conversation",
+      parentEvent: { sequence: 0, stepIndex: 0, turnId: "parent-turn" },
       session: buildEmptySession("parent-token", "sess-parent"),
     });
     // Simulate the workflow step's post-step
@@ -237,7 +260,16 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     expect((afterEmitAdapter.state as SlackishState | undefined)?.pendingRequests).toEqual([
       approvalRequest,
     ]);
-    expect(entries).toEqual([["req-approve-1", "subagent:parent:call-1"]]);
+    expect(entries).toEqual([
+      [
+        "req-approve-1",
+        expect.objectContaining({
+          childContinuationToken: "subagent:parent:call-1",
+          event: { sequence: 0, stepIndex: 0, turnId: "parent-turn" },
+          request: approvalRequest,
+        }),
+      ],
+    ]);
 
     // The parent is in conversation mode, so the helper follows the
     // proxied `input.requested` with a `turn.completed` +
@@ -329,10 +361,348 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         subagentName: "linear",
       }),
       mode: "task",
+      parentEvent: { sequence: 0, stepIndex: 0, turnId: "parent-turn" },
       session: buildEmptySession("task-parent-token", "sess-task-parent"),
     });
 
     expect(events.map((event) => event.type)).toEqual(["input.requested"]);
+  });
+});
+
+describe("parent-authored proxied HITL lifecycle", () => {
+  it("re-keys child request and settlement events and dispatches parent hooks", async () => {
+    const hookCalls: Array<{
+      readonly childTurnId: string | undefined;
+      readonly settlement?: string;
+      readonly turnId: string;
+      readonly type: string;
+    }> = [];
+    const hookRegistry = createRuntimeHookRegistry([
+      {
+        events: {
+          "action.result": (event) => {
+            if (event.type !== "action.result") {
+              throw new Error("action.result hook received the wrong event type.");
+            }
+            hookCalls.push({
+              childTurnId: event.meta?.subagent?.childTurnId,
+              settlement: event.data.inputSettlement?.outcome,
+              turnId: event.data.turnId,
+              type: event.type,
+            });
+          },
+          "authorization.completed": (event) => {
+            if (event.type !== "authorization.completed") {
+              throw new Error("authorization.completed hook received the wrong event type.");
+            }
+            hookCalls.push({
+              childTurnId: event.meta?.subagent?.childTurnId,
+              turnId: event.data.turnId,
+              type: event.type,
+            });
+          },
+          "authorization.required": (event) => {
+            if (event.type !== "authorization.required") {
+              throw new Error("authorization.required hook received the wrong event type.");
+            }
+            hookCalls.push({
+              childTurnId: event.meta?.subagent?.childTurnId,
+              turnId: event.data.turnId,
+              type: event.type,
+            });
+          },
+          "input.requested": (event) => {
+            if (event.type !== "input.requested") {
+              throw new Error("input.requested hook received the wrong event type.");
+            }
+            hookCalls.push({
+              childTurnId: event.meta?.subagent?.childTurnId,
+              turnId: event.data.turnId,
+              type: event.type,
+            });
+          },
+        },
+        exportName: undefined,
+        logicalPath: "hooks/audit.ts",
+        slug: "audit",
+        sourceId: "hooks/audit.ts",
+        sourceKind: "module",
+      },
+    ]);
+    const adapter: ChannelAdapter = { kind: "parent-lifecycle" };
+    const turnAgent: RuntimeTurnAgent = {
+      id: "parent-agent",
+      instructions: [],
+      model: { contextWindowTokens: 128_000, id: "test-model" },
+      tools: [],
+      workspaceSpec: { rootEntries: [] },
+    };
+    const bundle = {
+      ...buildMockBundle([adapter], hookRegistry),
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          agent: { connections: [] },
+          sandboxRegistry: { sandbox: null },
+          turnAgent,
+        },
+      },
+      resolvedAgent: { config: { name: "parent-agent" } },
+      turnAgent,
+    } as never;
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "http:parent");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "parent-session");
+
+    let session = buildEmptySession("http:parent", "parent-session");
+    session = {
+      ...session,
+      state: {
+        "eve.harness.emission": {
+          sequence: 4,
+          sessionStarted: true,
+          stepIndex: 2,
+          turnId: "parent-turn",
+        },
+      },
+    };
+    session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "parent-call",
+          description: "Delegate",
+          input: { message: "ask" },
+          kind: "subagent-call",
+          name: "child",
+          nodeId: "subagents/child",
+          subagentName: "child",
+        },
+      ],
+      event: { sequence: 4, stepIndex: 2, turnId: "parent-turn" },
+      responseMessages: [],
+      session,
+    });
+
+    const events: HandleMessageStreamEvent[] = [];
+    const parentWritable = new WritableStream<Uint8Array>({
+      write(chunk) {
+        const line = new TextDecoder().decode(chunk).trim();
+        if (line.length > 0) {
+          events.push(JSON.parse(line) as HandleMessageStreamEvent);
+        }
+      },
+    });
+    const approvalRequest = buildApprovalRequest("request-1");
+    const requestResult = await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: projectToDurableSession(session),
+      hookPayload: buildHitlPayload({
+        callId: "parent-call",
+        childContinuationToken: "subagent:child",
+        childSessionId: "child-session",
+        request: approvalRequest,
+        subagentName: "child",
+      }),
+      parentWritable,
+    });
+
+    const requested = events.find((event) => event.type === "input.requested");
+    expect(requested).toMatchObject({
+      data: { sequence: 4, stepIndex: 2, turnId: "parent-turn" },
+      meta: {
+        subagent: {
+          childSessionId: "child-session",
+          childTurnId: "turn_0",
+          parentCallId: "parent-call",
+          subagentName: "child",
+        },
+      },
+    });
+    expect(hookCalls).toEqual([
+      {
+        childTurnId: "turn_0",
+        turnId: "parent-turn",
+        type: "input.requested",
+      },
+    ]);
+
+    const requestSnapshot = requestResult.sessionState.snapshot?.session;
+    if (requestSnapshot === undefined) {
+      throw new Error("Proxy request step did not persist a session snapshot.");
+    }
+    const settlementResult = await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: requestSnapshot,
+      hookPayload: {
+        callId: "parent-call",
+        childSessionId: "child-session",
+        event: createInputResponseActionResultEvent({
+          request: approvalRequest,
+          response: { optionId: "approve", requestId: "request-1" },
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "child-answer-turn",
+        }),
+        kind: "subagent-action-result",
+        subagentName: "child",
+      },
+      parentWritable,
+    });
+
+    expect(events.at(-1)).toMatchObject({
+      data: {
+        inputSettlement: { outcome: "responded" },
+        sequence: 4,
+        stepIndex: 2,
+        turnId: "parent-turn",
+      },
+      meta: {
+        subagent: {
+          childTurnId: "child-answer-turn",
+          parentCallId: "parent-call",
+        },
+      },
+      type: "action.result",
+    });
+    expect(hookCalls.at(-1)).toEqual({
+      childTurnId: "child-answer-turn",
+      settlement: "responded",
+      turnId: "parent-turn",
+      type: "action.result",
+    });
+    expect(getProxyInputRequests(settlementResult.sessionState.snapshot?.session.state).size).toBe(
+      0,
+    );
+
+    const settlementSnapshot = settlementResult.sessionState.snapshot?.session;
+    if (settlementSnapshot === undefined) {
+      throw new Error("Proxy settlement step did not persist a session snapshot.");
+    }
+    const authorizationRequiredResult = await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: settlementSnapshot,
+      hookPayload: {
+        callId: "parent-call",
+        childSessionId: "child-session",
+        event: createAuthorizationRequiredEvent({
+          description: "Authorize the child tool",
+          name: "child-connection",
+          sequence: 2,
+          stepIndex: 1,
+          turnId: "child-answer-turn",
+        }),
+        kind: "subagent-authorization-event",
+        subagentName: "child",
+      },
+      parentWritable,
+    });
+    expect(events.at(-1)).toMatchObject({
+      data: { sequence: 4, stepIndex: 2, turnId: "parent-turn" },
+      meta: {
+        subagent: {
+          childSessionId: "child-session",
+          childTurnId: "child-answer-turn",
+          parentCallId: "parent-call",
+        },
+      },
+      type: "authorization.required",
+    });
+
+    const authorizationRequiredSnapshot =
+      authorizationRequiredResult.sessionState.snapshot?.session;
+    if (authorizationRequiredSnapshot === undefined) {
+      throw new Error("Proxy authorization step did not persist a session snapshot.");
+    }
+    const authorizationCompletedResult = await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: authorizationRequiredSnapshot,
+      hookPayload: {
+        callId: "parent-call",
+        childSessionId: "child-session",
+        event: createAuthorizationCompletedEvent({
+          name: "child-connection",
+          outcome: "authorized",
+          sequence: 2,
+          stepIndex: 1,
+          turnId: "child-answer-turn",
+        }),
+        kind: "subagent-authorization-event",
+        subagentName: "child",
+      },
+      parentWritable,
+    });
+    expect(events.at(-1)).toMatchObject({
+      data: { sequence: 4, stepIndex: 2, turnId: "parent-turn" },
+      meta: {
+        subagent: {
+          childSessionId: "child-session",
+          childTurnId: "child-answer-turn",
+          parentCallId: "parent-call",
+        },
+      },
+      type: "authorization.completed",
+    });
+
+    const authorizationCompletedSnapshot =
+      authorizationCompletedResult.sessionState.snapshot?.session;
+    if (authorizationCompletedSnapshot === undefined) {
+      throw new Error("Proxy authorization completion did not persist a session snapshot.");
+    }
+    await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: authorizationCompletedSnapshot,
+      hookPayload: {
+        callId: "parent-call",
+        childSessionId: "child-session",
+        event: createActionResultEvent({
+          result: {
+            callId: approvalRequest.action.callId,
+            kind: "tool-result",
+            output: { created: true },
+            toolName: approvalRequest.action.toolName,
+          },
+          sequence: 2,
+          stepIndex: 1,
+          turnId: "child-answer-turn",
+        }),
+        kind: "subagent-action-result",
+        subagentName: "child",
+      },
+      parentWritable,
+    });
+    expect(events.at(-1)).toMatchObject({
+      data: { sequence: 4, stepIndex: 2, turnId: "parent-turn" },
+      meta: {
+        subagent: {
+          childSessionId: "child-session",
+          childTurnId: "child-answer-turn",
+          parentCallId: "parent-call",
+        },
+      },
+      type: "action.result",
+    });
+    expect(hookCalls.slice(-3)).toEqual([
+      {
+        childTurnId: "child-answer-turn",
+        turnId: "parent-turn",
+        type: "authorization.required",
+      },
+      {
+        childTurnId: "child-answer-turn",
+        turnId: "parent-turn",
+        type: "authorization.completed",
+      },
+      {
+        childTurnId: "child-answer-turn",
+        settlement: undefined,
+        turnId: "parent-turn",
+        type: "action.result",
+      },
+    ]);
   });
 });
 
@@ -370,6 +740,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       emit,
       hookPayload: payloadA,
       mode: "conversation",
+      parentEvent: { sequence: 0, stepIndex: 0, turnId: "parent-turn" },
       session: buildEmptySession("parent-token", "sess-parent"),
     });
 
@@ -386,6 +757,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       emit,
       hookPayload: payloadB,
       mode: "conversation",
+      parentEvent: { sequence: 0, stepIndex: 0, turnId: "parent-turn" },
       session: buildEmptySession("parent-token", "sess-parent"),
     });
     persistAdapterState();

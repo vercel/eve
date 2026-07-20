@@ -26,9 +26,14 @@ export async function emitProxiedInputRequest(input: {
   readonly emit: HarnessEmitFn;
   readonly hookPayload: SubagentInputRequestHookPayload;
   readonly mode: RunMode;
+  readonly parentEvent: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
   readonly session: HarnessSession;
 }): Promise<{
-  readonly entries: readonly (readonly [requestId: string, childContinuationToken: string])[];
+  readonly entries: ReturnType<typeof toProxyInputRequestEntries>;
   readonly session: HarnessSession;
 }> {
   await input.emit(
@@ -54,7 +59,7 @@ export async function emitProxiedInputRequest(input: {
   }
 
   return {
-    entries: toProxyInputRequestEntries(input.hookPayload),
+    entries: toProxyInputRequestEntries(input.hookPayload, input.parentEvent),
     session: nextSession,
   };
 }
@@ -88,17 +93,17 @@ export function routeDeliverPayload(input: {
   const unroutedResponses: InputResponse[] = [];
 
   for (const response of inputResponses) {
-    const childContinuationToken = entries.get(response.requestId);
+    const entry = entries.get(response.requestId);
 
-    if (childContinuationToken === undefined) {
+    if (entry === undefined) {
       unroutedResponses.push(response);
       continue;
     }
 
-    const existing = responsesByChild.get(childContinuationToken);
+    const existing = responsesByChild.get(entry.childContinuationToken);
 
     if (existing === undefined) {
-      responsesByChild.set(childContinuationToken, [response]);
+      responsesByChild.set(entry.childContinuationToken, [response]);
     } else {
       existing.push(response);
     }

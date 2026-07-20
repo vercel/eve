@@ -9,6 +9,7 @@ import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#execution/subagent-event-proxy-step.js";
 import { projectToDurableSession } from "#execution/session.js";
+import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { TimedHandleMessageStreamEvent } from "#protocol/message.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
@@ -101,14 +102,31 @@ function rehydrateContext(input: {
   return ctx;
 }
 
+const parentEvent = { sequence: 4, stepIndex: 2, turnId: "parent-turn" };
+
 function createSession(sessionId: string): HarnessSession {
-  return {
-    agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
-    continuationToken: "http:parent",
-    history: [],
-    sessionId,
-  };
+  return setPendingRuntimeActionBatch({
+    actions: [
+      {
+        callId: "call-child",
+        description: "Delegate authorization work.",
+        input: { message: "Authorize Linear." },
+        kind: "subagent-call",
+        name: "researcher",
+        nodeId: "subagents/researcher",
+        subagentName: "researcher",
+      },
+    ],
+    event: parentEvent,
+    responseMessages: [],
+    session: {
+      agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
+      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      continuationToken: "http:parent",
+      history: [],
+      sessionId,
+    },
+  });
 }
 
 function authorizationPayload(
@@ -199,7 +217,21 @@ describe("subagent authorization proxy", () => {
       state: { outcome: "authorized" },
     });
     expect(chunks).toHaveLength(2);
-    expect(decodeEvent(chunks[0]!)).toMatchObject(requiredEvent);
-    expect(decodeEvent(chunks[1]!)).toMatchObject(completedEvent);
+    const subagent = {
+      childSessionId: "child-session",
+      childTurnId: "child-turn",
+      parentCallId: "call-child",
+      subagentName: "researcher",
+    };
+    expect(decodeEvent(chunks[0]!)).toMatchObject({
+      ...requiredEvent,
+      data: { ...requiredEvent.data, ...parentEvent },
+      meta: { at: expect.any(String), subagent },
+    });
+    expect(decodeEvent(chunks[1]!)).toMatchObject({
+      ...completedEvent,
+      data: { ...completedEvent.data, ...parentEvent },
+      meta: { at: expect.any(String), subagent },
+    });
   });
 });

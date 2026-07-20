@@ -7,6 +7,8 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createInputRequestedEvent,
+  createInputResponseActionResultEvent,
+  createInputTerminalActionResultEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createReasoningAppendedEvent,
@@ -32,6 +34,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createReasoningCompletedEvent({
+        blockIndex: 0,
         reasoning: "Need the weather tool.",
         sequence: 1,
         stepIndex: 0,
@@ -88,6 +91,7 @@ describe("defaultMessageReducer", () => {
         parts: [
           { type: "step-start" },
           {
+            blockIndex: 0,
             state: "done",
             stepIndex: 0,
             text: "Need the weather tool.",
@@ -506,6 +510,118 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("replays accepted and terminal input settlements as non-actionable", () => {
+    const request = {
+      action: {
+        callId: "question-1",
+        input: { prompt: "Choose" },
+        kind: "tool-call" as const,
+        toolName: "ask_question",
+      },
+      display: "select" as const,
+      options: [{ id: "one", label: "One" }],
+      prompt: "Choose",
+      requestId: "request-1",
+    };
+    const requested = createInputRequestedEvent({
+      requests: [request],
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "request-turn",
+    });
+    const responded = createInputResponseActionResultEvent({
+      request,
+      response: { optionId: "one", requestId: "request-1" },
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "request-turn",
+    });
+    const reducer = defaultMessageReducer();
+    let respondedData = reducer.reduce(reducer.initial(), requested);
+    respondedData = reducer.reduce(respondedData, responded);
+    const respondedReplay = reducer.reduce(respondedData, responded);
+
+    expect(respondedReplay).toEqual(respondedData);
+    expect(
+      respondedData.messages.flatMap((message) =>
+        message.parts.filter((part) => part.type === "dynamic-tool"),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        output: { optionId: "one", status: "answered" },
+        state: "output-available",
+        toolCallId: "question-1",
+        toolMetadata: expect.objectContaining({
+          eve: expect.objectContaining({
+            inputResponse: { optionId: "one", requestId: "request-1" },
+          }),
+        }),
+      }),
+    ]);
+
+    for (const outcome of ["ignored", "cancelled", "failed"] as const) {
+      let terminalData = reducer.reduce(reducer.initial(), requested);
+      terminalData = reducer.reduce(
+        terminalData,
+        createInputTerminalActionResultEvent({
+          outcome,
+          request,
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "request-turn",
+        }),
+      );
+      expect(
+        terminalData.messages.some((message) =>
+          message.parts.some(
+            (part) => part.type === "dynamic-tool" && part.state === "approval-requested",
+          ),
+        ),
+      ).toBe(false);
+      expect(
+        terminalData.messages.flatMap((message) =>
+          message.parts.filter((part) => part.type === "dynamic-tool"),
+        )[0],
+      ).toMatchObject({ output: { status: outcome }, state: "output-available" });
+    }
+  });
+
+  it("preserves equal completed blocks in one step across duplicate replay", () => {
+    const reducer = defaultMessageReducer();
+    const blocks = [
+      createMessageCompletedEvent({
+        blockIndex: 0,
+        finishReason: "tool-calls",
+        message: "Repeated narration.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      createMessageCompletedEvent({
+        blockIndex: 1,
+        message: "Repeated narration.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+    ];
+    let data = reducer.initial();
+    for (const event of [...blocks, ...blocks]) {
+      data = reducer.reduce(data, event);
+    }
+
+    expect(
+      data.messages.flatMap((message) =>
+        message.parts
+          .filter((part) => part.type === "text")
+          .map((part) => ({ blockIndex: part.blockIndex, text: part.text })),
+      ),
+    ).toEqual([
+      { blockIndex: 0, text: "Repeated narration." },
+      { blockIndex: 1, text: "Repeated narration." },
+    ]);
+  });
+
   it("merges resumed approval results back into the requested tool part", () => {
     const reducer = defaultMessageReducer();
     let data = reducer.reduce(
@@ -607,6 +723,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "First step.",
         sequence: 0,
         stepIndex: 0,
@@ -616,6 +733,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Second step.",
         sequence: 1,
         stepIndex: 1,
@@ -633,6 +751,7 @@ describe("defaultMessageReducer", () => {
         parts: [
           { type: "step-start" },
           {
+            blockIndex: 0,
             state: "done",
             stepIndex: 0,
             text: "First step.",
@@ -640,6 +759,7 @@ describe("defaultMessageReducer", () => {
           },
           { type: "step-start" },
           {
+            blockIndex: 0,
             state: "done",
             stepIndex: 1,
             text: "Second step.",
@@ -662,6 +782,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageAppendedEvent({
+        blockIndex: 0,
         messageDelta: "Checking Vienna",
         messageSoFar: "Checking Vienna",
         sequence: 0,
@@ -672,6 +793,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageCompletedEvent({
+        blockIndex: 0,
         finishReason: "tool-calls",
         message: "Checking Vienna first.",
         sequence: 1,
@@ -698,6 +820,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageAppendedEvent({
+        blockIndex: 1,
         messageDelta: "Now Berlin",
         messageSoFar: "Now Berlin",
         sequence: 3,
@@ -708,6 +831,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageCompletedEvent({
+        blockIndex: 1,
         message: "Now checking Berlin.",
         sequence: 4,
         stepIndex: 0,
@@ -728,6 +852,7 @@ describe("defaultMessageReducer", () => {
     let data = reducer.reduce(
       reducer.initial(),
       createReasoningAppendedEvent({
+        blockIndex: 0,
         reasoningDelta: "Thinking",
         reasoningSoFar: "Thinking",
         sequence: 0,
@@ -738,6 +863,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageAppendedEvent({
+        blockIndex: 1,
         messageDelta: "Partial",
         messageSoFar: "Partial",
         sequence: 1,
@@ -757,12 +883,14 @@ describe("defaultMessageReducer", () => {
         parts: [
           { type: "step-start" },
           {
+            blockIndex: 0,
             state: "done",
             stepIndex: 0,
             text: "Thinking",
             type: "reasoning",
           },
           {
+            blockIndex: 1,
             state: "done",
             stepIndex: 0,
             text: "Partial",
@@ -779,6 +907,7 @@ describe("defaultMessageReducer", () => {
     let data = reducer.reduce(
       reducer.initial(),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Earlier step.",
         sequence: 0,
         stepIndex: 0,
@@ -788,6 +917,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageAppendedEvent({
+        blockIndex: 0,
         messageDelta: "<eve-empty-delivery/>",
         messageSoFar: "<eve-empty-delivery/>",
         sequence: 1,
@@ -798,6 +928,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(
       data,
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: null,
         sequence: 1,
         stepIndex: 1,
@@ -808,6 +939,7 @@ describe("defaultMessageReducer", () => {
     expect(data.messages[0]?.parts).toEqual([
       { type: "step-start" },
       {
+        blockIndex: 0,
         state: "done",
         stepIndex: 0,
         text: "Earlier step.",

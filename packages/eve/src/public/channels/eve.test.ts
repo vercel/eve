@@ -355,6 +355,7 @@ describe("eveChannel — events", () => {
       await callAdapterEventHandler(
         adapter,
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "done",
           sequence: 1,
           stepIndex: 0,

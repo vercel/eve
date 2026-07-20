@@ -257,11 +257,19 @@ describe("deriveRunFacts", () => {
     const events: HandleMessageStreamEvent[] = [
       {
         type: "message.completed",
-        data: { finishReason: "stop", message: "hello", stepIndex: 0, turnId: "t1", sequence: 1 },
+        data: {
+          blockIndex: 0,
+          finishReason: "stop",
+          message: "hello",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
       },
       {
         type: "message.completed",
         data: {
+          blockIndex: 0,
           finishReason: "tool-calls",
           message: null,
           stepIndex: 1,
@@ -271,7 +279,14 @@ describe("deriveRunFacts", () => {
       },
       {
         type: "message.completed",
-        data: { finishReason: "stop", message: "world", stepIndex: 2, turnId: "t1", sequence: 3 },
+        data: {
+          blockIndex: 0,
+          finishReason: "stop",
+          message: "world",
+          sequence: 3,
+          stepIndex: 2,
+          turnId: "t1",
+        },
       },
     ];
     const facts = deriveRunFacts(events);
@@ -282,11 +297,17 @@ describe("deriveRunFacts", () => {
     const events: HandleMessageStreamEvent[] = [
       {
         type: "reasoning.completed",
-        data: { reasoning: "thinking...", stepIndex: 0, turnId: "t1", sequence: 1 },
+        data: { blockIndex: 0, reasoning: "thinking...", sequence: 1, stepIndex: 0, turnId: "t1" },
       },
       {
         type: "reasoning.completed",
-        data: { reasoning: "more thinking...", stepIndex: 1, turnId: "t1", sequence: 2 },
+        data: {
+          blockIndex: 0,
+          reasoning: "more thinking...",
+          sequence: 2,
+          stepIndex: 1,
+          turnId: "t1",
+        },
       },
     ];
     const facts = deriveRunFacts(events);

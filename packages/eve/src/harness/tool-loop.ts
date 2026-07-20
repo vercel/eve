@@ -40,6 +40,8 @@ import {
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createInputRequestedEvent,
+  createInputResponseActionResultEvent,
+  createInputTerminalActionResultEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
 } from "#protocol/message.js";
@@ -578,12 +580,59 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return { next: null, session: pending.session };
     }
 
+    const inputSettledRejectedCalls = new Set<string>();
+    if (emit && pending.inputSettlements) {
+      for (const settlement of pending.inputSettlements) {
+        const rejectedResult = pending.rejectedActions?.results.find(
+          (result) => result.callId === settlement.request.action.callId,
+        );
+        if (rejectedResult !== undefined) {
+          await emit(
+            createActionResultEvent({
+              inputSettlement:
+                settlement.outcome === "responded"
+                  ? { outcome: "responded", response: settlement.response }
+                  : { outcome: "ignored", requestId: settlement.request.requestId },
+              rejected: true,
+              result: rejectedResult,
+              sequence: settlement.event.sequence,
+              stepIndex: settlement.event.stepIndex,
+              turnId: settlement.event.turnId,
+            }),
+          );
+          inputSettledRejectedCalls.add(rejectedResult.callId);
+          continue;
+        }
+
+        await emit(
+          settlement.outcome === "responded"
+            ? createInputResponseActionResultEvent({
+                request: settlement.request,
+                response: settlement.response,
+                sequence: settlement.event.sequence,
+                stepIndex: settlement.event.stepIndex,
+                turnId: settlement.event.turnId,
+              })
+            : createInputTerminalActionResultEvent({
+                outcome: "ignored",
+                request: settlement.request,
+                sequence: settlement.event.sequence,
+                stepIndex: settlement.event.stepIndex,
+                turnId: settlement.event.turnId,
+              }),
+        );
+      }
+    }
+
     // Surface denied tool-call approvals as rejected `action.result` events.
     // The denial otherwise lives only in model history, so consumers (e.g.
     // observability) never see the tool call resolve. Attributed to the turn
     // that requested approval via the parked batch's emit coordinates.
     if (emit && pending.rejectedActions) {
       for (const result of pending.rejectedActions.results) {
+        if (inputSettledRejectedCalls.has(result.callId)) {
+          continue;
+        }
         await emit(
           createActionResultEvent({
             rejected: true,

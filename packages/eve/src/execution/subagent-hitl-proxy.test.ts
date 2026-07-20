@@ -1,8 +1,34 @@
 import { describe, expect, it } from "vitest";
 
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import {
+  type ProxyInputRequestEntry,
+  upsertProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+
+function proxyEntry(childContinuationToken: string, requestId: string): ProxyInputRequestEntry {
+  return {
+    childContinuationToken,
+    event: { sequence: 0, stepIndex: 0, turnId: "parent-turn" },
+    request: {
+      action: {
+        callId: `call-${requestId}`,
+        input: {},
+        kind: "tool-call",
+        toolName: "ask_question",
+      },
+      prompt: "Choose",
+      requestId,
+    },
+    subagent: {
+      childSessionId: `session-${childContinuationToken}`,
+      childTurnId: "child-turn",
+      parentCallId: "parent-call",
+      subagentName: "child",
+    },
+  };
+}
 
 function createSession(state?: Record<string, unknown>): HarnessSession {
   return {
@@ -22,10 +48,10 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
 describe("routeDeliverPayload", () => {
   it("routes responses to matching descendants and keeps unknown ones on forSelf", () => {
     const session = upsertProxyInputRequests({
-      entries: [["req-a", "child-a"]],
+      entries: [["req-a", proxyEntry("child-a", "req-a")]],
       forChildContinuationToken: "child-a",
       session: upsertProxyInputRequests({
-        entries: [["req-b", "child-b"]],
+        entries: [["req-b", proxyEntry("child-b", "req-b")]],
         forChildContinuationToken: "child-b",
         session: createSession(),
       }),
@@ -69,7 +95,7 @@ describe("routeDeliverPayload", () => {
 
   it("returns forSelf as undefined when every response routes to a descendant", () => {
     const session = upsertProxyInputRequests({
-      entries: [["req-a", "child-a"]],
+      entries: [["req-a", proxyEntry("child-a", "req-a")]],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });

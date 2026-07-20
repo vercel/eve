@@ -163,13 +163,19 @@ export class EveAgentStore<TData> {
       }
 
       this.#projectOptimisticMessage(preparedInput);
-      this.#projectInputResponses(preparedInput);
       this.#publish();
 
       const response = await this.#session.send({
         ...preparedInput,
         signal: createAbortSignal(preparedInput.signal, abortController.signal),
       });
+
+      if (!this.#isCurrentOperation(operationId)) {
+        return;
+      }
+
+      this.#projectInputResponses(preparedInput);
+      this.#publish();
 
       let sawEvent = false;
       for await (const event of response) {

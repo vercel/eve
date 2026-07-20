@@ -77,6 +77,7 @@ function completedTurnData(input: {
               parts: [
                 { type: "step-start" as const },
                 {
+                  blockIndex: 0,
                   state: "done" as const,
                   stepIndex: 0,
                   text: input.assistantMessage,
@@ -133,6 +134,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
         turnId: "turn_1",
       }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Hi there.",
         sequence: 1,
         stepIndex: 0,
@@ -292,7 +294,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     expect(callCount).toBe(1);
   });
 
-  it("projects input responses before the resumed stream returns", async () => {
+  it("projects input responses only after the resumed request is accepted", async () => {
     const startResponse = createDeferred<Response>();
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
@@ -322,7 +324,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     await Promise.resolve();
 
     expect(store.snapshot.status).toBe("submitted");
-    expect(store.snapshot.data).toEqual(["client.input.responded"]);
+    expect(store.snapshot.data).toEqual([]);
 
     startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
     await sendPromise;
@@ -338,6 +340,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     const events = [
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Hi there.",
         sequence: 1,
         stepIndex: 0,
@@ -406,6 +409,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
       initialEvents: [
         createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "Hi there.",
           sequence: 1,
           stepIndex: 0,

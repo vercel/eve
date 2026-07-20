@@ -224,6 +224,7 @@ function sameCoordinates(
   right: MessageAppendedStreamEvent | ReasoningAppendedStreamEvent,
 ): boolean {
   return (
+    left.data.blockIndex === right.data.blockIndex &&
     left.data.sequence === right.data.sequence &&
     left.data.stepIndex === right.data.stepIndex &&
     left.data.turnId === right.data.turnId

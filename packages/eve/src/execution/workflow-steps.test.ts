@@ -1385,9 +1385,24 @@ describe("runProxySubagentEventStep", () => {
       },
     };
 
-    const session: HarnessSession = createStubSession({
-      continuationToken: "http:proxy-test",
-      sessionId: "parent-session",
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Delegate to linear.",
+          input: { message: "update the issue" },
+          kind: "subagent-call",
+          name: "linear",
+          nodeId: "subagents/linear",
+          subagentName: "linear",
+        },
+      ],
+      event: { sequence: 4, stepIndex: 2, turnId: "parent-turn" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:proxy-test",
+        sessionId: "parent-session",
+      }),
     });
     installSessionStoreMocks([session]);
 
@@ -1415,7 +1430,7 @@ describe("runProxySubagentEventStep", () => {
     expect(channel.kind).toBe("thread-context");
     expect(channel.state.pendingRequests).toHaveLength(1);
     expect(channel.state.pendingRequests?.[0]).toMatchObject({
-      turnId: "child-turn",
+      turnId: "parent-turn",
       requests: [expect.objectContaining({ requestId: "req-1" })],
     });
 
@@ -1442,9 +1457,24 @@ describe("runProxySubagentEventStep", () => {
       },
     };
 
-    const session: HarnessSession = createStubSession({
-      continuationToken: "http:proxy-test",
-      sessionId: "parent-session",
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Delegate to linear.",
+          input: { message: "update the issue" },
+          kind: "subagent-call",
+          name: "linear",
+          nodeId: "subagents/linear",
+          subagentName: "linear",
+        },
+      ],
+      event: { sequence: 4, stepIndex: 2, turnId: "parent-turn" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:proxy-test",
+        sessionId: "parent-session",
+      }),
     });
     installSessionStoreMocks([session]);
 

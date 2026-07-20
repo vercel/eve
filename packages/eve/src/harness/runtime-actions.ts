@@ -1,10 +1,17 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
-import { createActionResultEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
+import {
+  createActionResultEvent,
+  createInputTerminalActionResultEvent,
+  type HandleMessageStreamEvent,
+} from "#protocol/message.js";
 import { getRuntimeActionRequestKey, getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
+import {
+  clearProxyInputRequestsForChild,
+  getProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
@@ -259,6 +266,27 @@ export async function resolvePendingRuntimeActions(input: {
 
   if (input.emit !== undefined) {
     for (const result of readyResults) {
+      if (result.kind === "subagent-result") {
+        const childToken = batch.childContinuationTokens?.[result.callId];
+        if (childToken !== undefined) {
+          for (const entry of getProxyInputRequests(input.session.state).values()) {
+            if (entry.childContinuationToken !== childToken) {
+              continue;
+            }
+            await input.emit({
+              ...createInputTerminalActionResultEvent({
+                outcome: result.isError === true ? "failed" : "ignored",
+                request: entry.request,
+                sequence: entry.event.sequence,
+                stepIndex: entry.event.stepIndex,
+                turnId: entry.event.turnId,
+              }),
+              meta: { at: new Date().toISOString(), subagent: entry.subagent },
+            });
+          }
+        }
+      }
+
       if (result.kind === "subagent-result" && result.isError !== true) {
         await input.emit({
           data: {

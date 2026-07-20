@@ -137,6 +137,7 @@ describe("sendDevelopmentMessage", () => {
       );
       firstStream.pushEvent(
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "Bootstrap reply: Brooklyn",
           sequence: 1,
           stepIndex: 0,
@@ -170,6 +171,7 @@ describe("sendDevelopmentMessage", () => {
       );
       secondStream.pushEvent(
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "Bootstrap reply: Thanks",
           sequence: 2,
           stepIndex: 0,
@@ -215,6 +217,7 @@ describe("sendDevelopmentMessage", () => {
       },
       {
         data: {
+          blockIndex: 0,
           finishReason: "stop",
           message: "Bootstrap reply: Thanks",
           sequence: 2,
@@ -288,6 +291,7 @@ describe("sendDevelopmentMessage", () => {
         turnId: "turn_002",
       }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Bootstrap reply: Sunny in Brooklyn.",
         sequence: 2,
         stepIndex: 0,
@@ -332,6 +336,7 @@ describe("sendDevelopmentMessage", () => {
       );
       firstStream.pushEvent(
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "Bootstrap reply: Brooklyn",
           sequence: 1,
           stepIndex: 0,
@@ -417,6 +422,7 @@ describe("sendDevelopmentMessage", () => {
       },
       {
         data: {
+          blockIndex: 0,
           finishReason: "stop",
           message: "Bootstrap reply: Sunny in Brooklyn.",
           sequence: 2,
@@ -492,6 +498,7 @@ describe("sendDevelopmentMessage", () => {
       );
       stream.pushEvent(
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "Bootstrap reply: Brooklyn",
           sequence: 1,
           stepIndex: 0,
@@ -556,6 +563,7 @@ describe("sendDevelopmentMessage", () => {
       );
       stream.pushEvent(
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "Bootstrap reply: Brooklyn",
           sequence: 1,
           stepIndex: 0,

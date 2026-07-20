@@ -101,6 +101,7 @@ function completedTurnData(input: {
               parts: [
                 { type: "step-start" as const },
                 {
+                  blockIndex: 0,
                   state: "done" as const,
                   stepIndex: 0,
                   text: input.assistantMessage,
@@ -149,6 +150,7 @@ describe("useEveAgent", () => {
         turnId: "turn_1",
       }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Hi there.",
         sequence: 1,
         stepIndex: 0,
@@ -355,6 +357,7 @@ describe("useEveAgent", () => {
         turnId: "turn_2",
       }),
       createMessageCompletedEvent({
+        blockIndex: 0,
         message: "Second reply.",
         sequence: 1,
         stepIndex: 0,
@@ -551,7 +554,7 @@ describe("useEveAgent", () => {
     expect(helpers?.events).toEqual(events);
   });
 
-  it("projects input responses before the resumed stream returns", async () => {
+  it("projects input responses only after the resumed request is accepted", async () => {
     const startResponse = createDeferred<Response>();
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
@@ -593,7 +596,7 @@ describe("useEveAgent", () => {
     });
 
     expect(helpers?.status).toBe("submitted");
-    expect(helpers?.data).toEqual(["client.input.responded"]);
+    expect(helpers?.data).toEqual([]);
 
     await act(async () => {
       startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
@@ -602,5 +605,38 @@ describe("useEveAgent", () => {
 
     expect(helpers?.status).toBe("ready");
     expect(helpers?.data).toEqual(["client.input.responded", "session.waiting"]);
+  });
+
+  it("does not project an input response when the resumed request fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
+    let helpers: UseEveAgentHelpers<readonly string[]> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent<readonly string[]>({
+        initialSession: {
+          continuationToken: "http:session_1",
+          sessionId: "session_1",
+          streamIndex: 0,
+        },
+        reducer: {
+          initial: () => [],
+          reduce: (data, event) => [...data, event.type],
+        },
+      });
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(TestComponent));
+    });
+    await act(async () => {
+      await helpers?.send({
+        inputResponses: [{ optionId: "deny", requestId: "approval_1" }],
+      });
+    });
+
+    expect(helpers?.status).toBe("error");
+    expect(helpers?.data).toEqual([]);
+    expect(helpers?.events).toEqual([]);
   });
 });

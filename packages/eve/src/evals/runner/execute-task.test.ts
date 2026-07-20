@@ -701,7 +701,7 @@ function sessionCompleted(): HandleMessageStreamEvent {
 
 function messageCompleted(message: string, turnId: string): HandleMessageStreamEvent {
   return {
-    data: { finishReason: "stop", message, sequence: 1, stepIndex: 0, turnId },
+    data: { blockIndex: 0, finishReason: "stop", message, sequence: 1, stepIndex: 0, turnId },
     type: "message.completed",
   };
 }

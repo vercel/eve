@@ -44,6 +44,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
       initialEvents: [
         createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
         createMessageCompletedEvent({
+          blockIndex: 0,
           message: "Hi there.",
           sequence: 1,
           stepIndex: 0,

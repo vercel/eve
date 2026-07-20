@@ -17,7 +17,7 @@ export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "19";
+export const EVE_MESSAGE_STREAM_VERSION = "20";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -44,13 +44,29 @@ export interface StepCompletedProviderMetadata {
 }
 
 /**
+ * Child linkage retained when a subagent lifecycle event is projected onto
+ * its parent stream.
+ *
+ * Parent stream events use the parent turn coordinates. These fields preserve
+ * the originating child identity without overloading `data.turnId`.
+ */
+export interface ProxiedSubagentEventMetadata {
+  readonly childSessionId: string;
+  readonly childTurnId: string;
+  readonly parentCallId: string;
+  readonly subagentName: string;
+}
+
+/**
  * Durable metadata attached to one persisted session stream event.
  *
- * Runtime code stamps this immediately before writing the event to the
- * workflow-owned stream so replay preserves the original timing.
+ * Runtime code stamps `at` immediately before writing the event to the
+ * workflow-owned stream so replay preserves the original timing. `subagent`
+ * identifies a child lifecycle event projected onto a parent stream.
  */
 export interface HandleMessageStreamEventMeta {
   readonly at: string;
+  readonly subagent?: ProxiedSubagentEventMetadata;
 }
 
 /**
@@ -72,6 +88,22 @@ export interface ActionResultError {
   readonly code: string;
   readonly message: string;
 }
+
+/**
+ * Why an `action.result` settled a pending HITL request.
+ *
+ * A responded settlement retains the accepted response. Terminal outcomes use
+ * the request ID without inventing a response the user never submitted.
+ */
+export type InputActionResultSettlement =
+  | {
+      readonly outcome: "responded";
+      readonly response: InputResponse;
+    }
+  | {
+      readonly outcome: "cancelled" | "failed" | "ignored";
+      readonly requestId: string;
+    };
 
 /**
  * Invocation metadata attached to the `session.started` event for one child
@@ -233,6 +265,12 @@ export interface InputRequestedStreamEvent {
 export interface ActionResultStreamEvent {
   data: {
     error?: ActionResultError;
+    /**
+     * Present when this result durably settles a HITL request rather than
+     * reporting a newly executed action. Consumers that persist action steps
+     * can use this marker to avoid recording a second tool execution.
+     */
+    inputSettlement?: InputActionResultSettlement;
     result: RuntimeActionResult;
     sequence: number;
     stepIndex: number;
@@ -241,6 +279,23 @@ export interface ActionResultStreamEvent {
   };
   type: "action.result";
 }
+
+/**
+ * An `action.result` that durably records an accepted HITL response.
+ *
+ * `data.result.callId` keys the original `InputRequest.action`, while
+ * `data.inputSettlement.response.requestId` keys the original request. The
+ * event is a stream-only lifecycle projection; model history keeps using the
+ * existing input-resolution path.
+ */
+export type InputResponseActionResultStreamEvent = ActionResultStreamEvent & {
+  readonly data: ActionResultStreamEvent["data"] & {
+    readonly inputSettlement: {
+      readonly outcome: "responded";
+      readonly response: InputResponse;
+    };
+  };
+};
 
 /**
  * Stream event emitted when the parent workflow starts a child subagent session.
@@ -305,6 +360,8 @@ export interface SubagentCompletedStreamEvent {
  */
 export interface MessageAppendedStreamEvent {
   data: {
+    /** Zero-based occurrence of this assistant block within the model step. */
+    blockIndex: number;
     messageDelta: string;
     messageSoFar: string;
     sequence: number;
@@ -320,6 +377,8 @@ export interface MessageAppendedStreamEvent {
  */
 export interface ReasoningAppendedStreamEvent {
   data: {
+    /** Zero-based occurrence of this assistant block within the model step. */
+    blockIndex: number;
     reasoningDelta: string;
     reasoningSoFar: string;
     sequence: number;
@@ -339,6 +398,11 @@ export interface ReasoningAppendedStreamEvent {
  */
 export interface MessageCompletedStreamEvent {
   data: {
+    /**
+     * Zero-based occurrence of this assistant block within the model step.
+     * Stable replays retain the same ordinal even when equal text repeats.
+     */
+    blockIndex: number;
     finishReason: AssistantStepFinishReason;
     message: string | null;
     sequence: number;
@@ -354,6 +418,8 @@ export interface MessageCompletedStreamEvent {
  */
 export interface ReasoningCompletedStreamEvent {
   data: {
+    /** Zero-based occurrence of this assistant block within the model step. */
+    blockIndex: number;
     reasoning: string;
     sequence: number;
     stepIndex: number;
@@ -630,7 +696,7 @@ export type TurnFailureStreamEvent =
  * original `meta.at` value instead of recomputing it.
  */
 export type TimedHandleMessageStreamEvent = HandleMessageStreamEvent & {
-  readonly meta: HandleMessageStreamEventMeta;
+  readonly meta: HandleMessageStreamEventMeta & { readonly at: string };
 };
 
 const textEncoder = new TextEncoder();
@@ -1025,6 +1091,7 @@ export function createInputRequestedEvent(input: {
  * derived from the synthesized denial output.
  */
 export function createActionResultEvent(input: {
+  readonly inputSettlement?: InputActionResultSettlement;
   readonly rejected?: boolean;
   readonly result: RuntimeActionResult;
   readonly sequence: number;
@@ -1039,6 +1106,7 @@ export function createActionResultEvent(input: {
   return {
     data: {
       error: outcome.error,
+      inputSettlement: input.inputSettlement,
       result: input.result,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
@@ -1047,6 +1115,73 @@ export function createActionResultEvent(input: {
     },
     type: "action.result",
   };
+}
+
+/**
+ * Creates the durable `action.result` projection for one accepted HITL
+ * response. This records stream lifecycle only; input resolution remains the
+ * sole writer of model history.
+ */
+export function createInputResponseActionResultEvent(input: {
+  readonly request: InputRequest;
+  readonly response: InputResponse;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): InputResponseActionResultStreamEvent {
+  const output: { optionId?: string; status: "answered"; text?: string } = {
+    status: "answered",
+  };
+  if (input.response.optionId !== undefined) {
+    output.optionId = input.response.optionId;
+  }
+  if (input.response.text !== undefined) {
+    output.text = input.response.text;
+  }
+
+  const event = createActionResultEvent({
+    result: {
+      callId: input.request.action.callId,
+      kind: "tool-result",
+      output,
+      toolName: input.request.action.toolName,
+    },
+    sequence: input.sequence,
+    stepIndex: input.stepIndex,
+    turnId: input.turnId,
+  });
+  return {
+    ...event,
+    data: {
+      ...event.data,
+      inputSettlement: { outcome: "responded", response: input.response },
+    },
+  };
+}
+
+/**
+ * Creates an `action.result` that closes a HITL request without fabricating a
+ * user response.
+ */
+export function createInputTerminalActionResultEvent(input: {
+  readonly outcome: "cancelled" | "failed" | "ignored";
+  readonly request: InputRequest;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): ActionResultStreamEvent {
+  return createActionResultEvent({
+    inputSettlement: { outcome: input.outcome, requestId: input.request.requestId },
+    result: {
+      callId: input.request.action.callId,
+      kind: "tool-result",
+      output: { status: input.outcome },
+      toolName: input.request.action.toolName,
+    },
+    sequence: input.sequence,
+    stepIndex: input.stepIndex,
+    turnId: input.turnId,
+  });
 }
 
 /**
@@ -1085,6 +1220,7 @@ export function createSubagentCalledEvent(input: {
  * Creates the `message.appended` event for one streamed assistant text delta.
  */
 export function createMessageAppendedEvent(input: {
+  readonly blockIndex: number;
   readonly messageDelta: string;
   readonly messageSoFar: string;
   readonly sequence: number;
@@ -1093,6 +1229,7 @@ export function createMessageAppendedEvent(input: {
 }): MessageAppendedStreamEvent {
   return {
     data: {
+      blockIndex: input.blockIndex,
       messageDelta: input.messageDelta,
       messageSoFar: input.messageSoFar,
       sequence: input.sequence,
@@ -1107,6 +1244,7 @@ export function createMessageAppendedEvent(input: {
  * Creates the `reasoning.appended` event for one streamed reasoning delta.
  */
 export function createReasoningAppendedEvent(input: {
+  readonly blockIndex: number;
   readonly reasoningDelta: string;
   readonly reasoningSoFar: string;
   readonly sequence: number;
@@ -1115,6 +1253,7 @@ export function createReasoningAppendedEvent(input: {
 }): ReasoningAppendedStreamEvent {
   return {
     data: {
+      blockIndex: input.blockIndex,
       reasoningDelta: input.reasoningDelta,
       reasoningSoFar: input.reasoningSoFar,
       sequence: input.sequence,
@@ -1129,6 +1268,7 @@ export function createReasoningAppendedEvent(input: {
  * Creates the `message.completed` event for one completed assistant text chunk.
  */
 export function createMessageCompletedEvent(input: {
+  readonly blockIndex: number;
   readonly finishReason?: AssistantStepFinishReason;
   readonly message: string | null;
   readonly sequence: number;
@@ -1137,6 +1277,7 @@ export function createMessageCompletedEvent(input: {
 }): MessageCompletedStreamEvent {
   return {
     data: {
+      blockIndex: input.blockIndex,
       finishReason: input.finishReason ?? "stop",
       message: input.message,
       sequence: input.sequence,
@@ -1151,6 +1292,7 @@ export function createMessageCompletedEvent(input: {
  * Creates the `reasoning.completed` event for one completed reasoning block.
  */
 export function createReasoningCompletedEvent(input: {
+  readonly blockIndex: number;
   readonly reasoning: string;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1158,6 +1300,7 @@ export function createReasoningCompletedEvent(input: {
 }): ReasoningCompletedStreamEvent {
   return {
     data: {
+      blockIndex: input.blockIndex,
       reasoning: input.reasoning,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
@@ -1418,6 +1561,7 @@ export function timestampHandleMessageStreamEvent(
   return {
     ...event,
     meta: {
+      ...event.meta,
       at,
     },
   };

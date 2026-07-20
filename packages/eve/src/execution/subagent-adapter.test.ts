@@ -6,12 +6,17 @@ import { type SubagentAdapterState } from "#execution/subagent-adapter.js";
 import { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import type { InputRequest } from "#runtime/input/types.js";
+import { createInputResponseActionResultEvent } from "#protocol/message.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 
+const SUBAGENT_ACTION_RESULT = SUBAGENT_ADAPTER["action.result"];
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
 const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
 const SUBAGENT_AUTHORIZATION_COMPLETED = SUBAGENT_ADAPTER["authorization.completed"];
 
+if (SUBAGENT_ACTION_RESULT === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its action.result handler.");
+}
 if (SUBAGENT_INPUT_REQUESTED === undefined) {
   throw new Error("SUBAGENT_ADAPTER is missing its input.requested handler.");
 }
@@ -134,6 +139,29 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
     );
 
     expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("SUBAGENT_ADAPTER action.result handler", () => {
+  it("forwards input settlement through each nested subagent adapter hop", async () => {
+    resumeHookMock.mockClear();
+    const event = createInputResponseActionResultEvent({
+      request: sampleRequest(),
+      response: { optionId: "approve", requestId: "req-1" },
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "child-answer-turn",
+    });
+
+    await SUBAGENT_ACTION_RESULT(event.data, makeContext());
+
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event,
+      kind: "subagent-action-result",
+      subagentName: "linear",
+    });
   });
 });
 

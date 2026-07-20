@@ -1,124 +1,134 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { InputRequest } from "#runtime/input/types.js";
+import type { ProxiedSubagentEventMetadata } from "#protocol/message.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
-/** `requestId → childContinuationToken` map stored on the parent session. */
-type ProxyInputRequestMap = Readonly<Record<string, string>>;
+/** Durable parent-owned routing and lifecycle identity for one child request. */
+export interface ProxyInputRequestEntry {
+  readonly childContinuationToken: string;
+  readonly event: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
+  readonly request: InputRequest;
+  readonly subagent: ProxiedSubagentEventMetadata;
+}
 
-/**
- * Returns the proxy-routing map as a fresh `Map`. Never returns a live
- * reference so accidental mutation cannot corrupt session state.
- */
+type ProxyInputRequestMap = Readonly<Record<string, ProxyInputRequestEntry>>;
+
+/** Returns the proxy-routing map as a fresh `Map`. */
 export function getProxyInputRequests(
   state: SessionStateMap | undefined,
-): ReadonlyMap<string, string> {
+): ReadonlyMap<string, ProxyInputRequestEntry> {
   return new Map(Object.entries(readMap(state)));
 }
 
-/**
- * Returns true when the session is currently proxying one or more
- * HITL requests on behalf of a descendant subagent.
- */
+/** Returns true while the parent owns at least one descendant HITL request. */
 export function hasProxyInputRequests(state: SessionStateMap | undefined): boolean {
-  for (const _ of Object.keys(readMap(state))) {
-    return true;
-  }
-  return false;
+  return Object.keys(readMap(state)).length > 0;
 }
 
 /**
- * Replaces prior entries for `forChildContinuationToken` with the
- * provided ones. A child raising a fresh batch overwrites its prior
- * batch — the parent never keeps stale request metadata.
+ * Replaces prior entries for `forChildContinuationToken` with the provided
+ * batch. A fresh child batch supersedes that child's stale request metadata.
  */
 export function upsertProxyInputRequests(input: {
-  readonly entries: readonly (readonly [requestId: string, childContinuationToken: string])[];
+  readonly entries: readonly (readonly [requestId: string, entry: ProxyInputRequestEntry])[];
   readonly forChildContinuationToken: string;
   readonly session: HarnessSession;
 }): HarnessSession {
-  const next: Record<string, string> = {};
+  const next: Record<string, ProxyInputRequestEntry> = {};
 
-  for (const [requestId, childToken] of Object.entries(readMap(input.session.state))) {
-    if (childToken !== input.forChildContinuationToken) {
-      next[requestId] = childToken;
+  for (const [requestId, entry] of Object.entries(readMap(input.session.state))) {
+    if (entry.childContinuationToken !== input.forChildContinuationToken) {
+      next[requestId] = entry;
     }
   }
 
-  for (const [requestId, childToken] of input.entries) {
-    next[requestId] = childToken;
+  for (const [requestId, entry] of input.entries) {
+    next[requestId] = entry;
   }
 
   return writeMap(input.session, next);
 }
 
-/**
- * Removes every entry for `childContinuationToken`. Called when a
- * child subagent finishes so stale clicks no longer route to it.
- */
+/** Removes one request after its child forwards a durable settlement result. */
+export function clearProxyInputRequest(session: HarnessSession, requestId: string): HarnessSession {
+  const current = readMap(session.state);
+  if (current[requestId] === undefined) {
+    return session;
+  }
+
+  const next = { ...current };
+  delete next[requestId];
+  return writeMap(session, next);
+}
+
+/** Removes every entry for a completed child. */
 export function clearProxyInputRequestsForChild(
   session: HarnessSession,
   childContinuationToken: string,
 ): HarnessSession {
   const current = readMap(session.state);
-  const next: Record<string, string> = {};
+  const next: Record<string, ProxyInputRequestEntry> = {};
   let changed = false;
 
-  for (const [requestId, childToken] of Object.entries(current)) {
-    if (childToken === childContinuationToken) {
+  for (const [requestId, entry] of Object.entries(current)) {
+    if (entry.childContinuationToken === childContinuationToken) {
       changed = true;
       continue;
     }
-    next[requestId] = childToken;
+    next[requestId] = entry;
   }
 
-  if (!changed) {
-    return session;
-  }
-
-  return writeMap(session, next);
+  return changed ? writeMap(session, next) : session;
 }
 
-/**
- * Removes every proxy entry. Called when a cancelled turn orphans its
- * descendants so stale HITL responses no longer route to them.
- */
+/** Removes every proxy entry after cancellation or parent teardown. */
 export function clearAllProxyInputRequests(session: HarnessSession): HarnessSession {
-  if (!hasProxyInputRequests(session.state)) {
-    return session;
-  }
-  return writeMap(session, {});
+  return hasProxyInputRequests(session.state) ? writeMap(session, {}) : session;
 }
 
-/**
- * Projects a {@link SubagentInputRequestHookPayload} into the
- * `(requestId, childContinuationToken)` tuples the session stores.
- */
+/** Projects one child batch into durable parent routing entries. */
 export function toProxyInputRequestEntries(
   payload: SubagentInputRequestHookPayload,
-): readonly (readonly [requestId: string, childContinuationToken: string])[] {
+  parentEvent: ProxyInputRequestEntry["event"],
+): readonly (readonly [requestId: string, entry: ProxyInputRequestEntry])[] {
+  const subagent: ProxiedSubagentEventMetadata = {
+    childSessionId: payload.childSessionId,
+    childTurnId: payload.event.turnId,
+    parentCallId: payload.callId,
+    subagentName: payload.subagentName,
+  };
+
   return payload.event.requests.map(
-    (request) => [request.requestId, payload.childContinuationToken] as const,
+    (request) =>
+      [
+        request.requestId,
+        {
+          childContinuationToken: payload.childContinuationToken,
+          event: parentEvent,
+          request,
+          subagent,
+        },
+      ] as const,
   );
 }
 
 function readMap(state: SessionStateMap | undefined): ProxyInputRequestMap {
   const raw = state?.[PROXY_INPUT_REQUESTS_KEY];
-
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    return {};
-  }
-
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "string") {
-      result[key] = value;
-    }
-  }
-  return result;
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as ProxyInputRequestMap)
+    : {};
 }
 
-function writeMap(session: HarnessSession, entries: Record<string, string>): HarnessSession {
+function writeMap(
+  session: HarnessSession,
+  entries: Readonly<Record<string, ProxyInputRequestEntry>>,
+): HarnessSession {
   const state = { ...session.state };
 
   if (Object.keys(entries).length === 0) {

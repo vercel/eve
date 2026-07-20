@@ -20,7 +20,7 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("19");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("20");
   });
 
   it("publishes the channel-local continuation token on session.waiting", () => {
@@ -61,16 +61,33 @@ describe("message stream protocol", () => {
 
   it("stamps durable timing metadata and preserves it through encoding", () => {
     const timed = timestampHandleMessageStreamEvent(
-      createStepStartedEvent({
-        sequence: 0,
-        stepIndex: 1,
-        turnId: "turn_0",
-      }),
+      {
+        ...createStepStartedEvent({
+          sequence: 0,
+          stepIndex: 1,
+          turnId: "turn_0",
+        }),
+        meta: {
+          at: "2026-04-17T10:14:21.000Z",
+          subagent: {
+            childSessionId: "child-session",
+            childTurnId: "child-turn",
+            parentCallId: "parent-call",
+            subagentName: "research",
+          },
+        },
+      },
       "2026-04-17T10:14:22.123Z",
     );
 
     expect(timed.meta).toEqual({
       at: "2026-04-17T10:14:22.123Z",
+      subagent: {
+        childSessionId: "child-session",
+        childTurnId: "child-turn",
+        parentCallId: "parent-call",
+        subagentName: "research",
+      },
     });
 
     const encoded = encodeMessageStreamEvent(timed);

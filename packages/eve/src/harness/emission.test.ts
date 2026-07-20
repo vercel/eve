@@ -381,6 +381,60 @@ describe("emitStreamContent action requests", () => {
     });
   });
 
+  it("assigns replay-stable block ordinals to equal text around an action", async () => {
+    const emit = createEmitStub();
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "delegate",
+        {
+          description: "Delegate work to a subagent.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "delegate",
+          runtimeAction: {
+            kind: "subagent-call",
+            nodeId: "subagents/researcher",
+            subagentName: "researcher",
+          },
+        },
+      ],
+    ]);
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "message-1", text: "Repeated narration.", type: "text-delta" },
+        {
+          input: { task: "research" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+        { id: "message-2", text: "Repeated narration.", type: "text-delta" },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools,
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(
+      events
+        .filter((event) => event.type === "message.completed")
+        .map((event) => ({
+          blockIndex: event.data.blockIndex,
+          message: event.data.message,
+          sequence: event.data.sequence,
+          stepIndex: event.data.stepIndex,
+        })),
+    ).toEqual([
+      { blockIndex: 0, message: "Repeated narration.", sequence: 0, stepIndex: 0 },
+      { blockIndex: 1, message: "Repeated narration.", sequence: 0, stepIndex: 0 },
+    ]);
+  });
+
   it("projects local and provider tool results at the same stream position", async () => {
     const tools = new Map<string, HarnessToolDefinition>([
       [

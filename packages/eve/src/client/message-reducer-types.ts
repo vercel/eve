@@ -42,10 +42,12 @@ export interface EveMessageMetadata {
  * or `"done"`; `file` carries user-attachment metadata; `step-start` marks the
  * boundary of an agent step; and `dynamic-tool` ({@link EveDynamicToolPart})
  * holds the tool call and its lifecycle state. `stepIndex` ties a part to the
- * agent step that produced it.
+ * agent step that produced it; `blockIndex` distinguishes ordered text and
+ * reasoning blocks within that step.
  */
 export type EveMessagePart =
   | {
+      readonly blockIndex?: number;
       readonly providerMetadata?: Record<string, unknown>;
       readonly state?: "done" | "streaming";
       readonly stepIndex?: number;
@@ -53,6 +55,7 @@ export type EveMessagePart =
       readonly type: "text";
     }
   | {
+      readonly blockIndex?: number;
       readonly providerMetadata?: Record<string, unknown>;
       readonly state?: "done" | "streaming";
       readonly stepIndex?: number;
