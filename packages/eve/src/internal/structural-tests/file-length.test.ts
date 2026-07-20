@@ -16,6 +16,10 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
   "cli/dev/tui/setup-panel.ts",
   "cli/dev/tui/terminal-renderer.ts",
   "compiler/manifest.ts",
+  // Tipped one case over the cap when action.preparing landed; kept whole so
+  // the harness's stream translation stays a single-file diff against its
+  // history. Split stream consumption out if it grows again.
+  "harness/emission.ts",
   "harness/tool-loop.ts",
   "internal/nitro/host/create-application-nitro.ts",
   "protocol/message.ts",

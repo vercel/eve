@@ -89,12 +89,12 @@ import {
   emitFailedStep,
   emitRecoverableFailedTurn,
   emitStepStarted,
+  emitStreamContent,
   emitTurnEpilogue,
   emitTurnPreamble,
   getHarnessEmissionState,
   setHarnessEmissionState,
 } from "#harness/emission.js";
-import { emitStreamContent } from "#harness/stream-emission.js";
 import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,

@@ -2,11 +2,11 @@ import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  emitStreamContent,
   getHarnessEmissionState,
   type HarnessEmissionState,
   setHarnessEmissionState,
 } from "#harness/emission.js";
-import { emitStreamContent } from "#harness/stream-emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
