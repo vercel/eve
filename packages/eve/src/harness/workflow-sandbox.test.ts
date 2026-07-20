@@ -57,7 +57,9 @@ describe("applyWorkflowTool", () => {
   it("keeps sandbox bridge capacity above the configured dispatch budget", () => {
     expect(resolveWorkflowSandboxBridgeRequestLimit()).toBe(256);
     expect(resolveWorkflowSandboxBridgeRequestLimit(100)).toBe(256);
-    expect(resolveWorkflowSandboxBridgeRequestLimit(300)).toBe(300);
+    expect(resolveWorkflowSandboxBridgeRequestLimit(255)).toBe(256);
+    expect(resolveWorkflowSandboxBridgeRequestLimit(256)).toBe(257);
+    expect(resolveWorkflowSandboxBridgeRequestLimit(300)).toBe(301);
   });
 
   it("adds only agent runtime actions to the sandbox", async () => {

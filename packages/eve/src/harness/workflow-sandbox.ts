@@ -72,15 +72,13 @@ export async function applyWorkflowTool(input: {
 }
 
 /**
- * Keeps code mode's bridge capacity at least as large as eve's dispatch budget.
- * The 256-request floor preserves room for over-budget calls to resolve through
- * eve's `WORKFLOW_SUBAGENT_LIMIT_REACHED` result instead of failing the sandbox.
+ * Keeps code mode's bridge capacity strictly above eve's dispatch budget.
+ * The extra request lets the first over-budget call resolve through eve's
+ * `WORKFLOW_SUBAGENT_LIMIT_REACHED` result instead of failing the sandbox.
  */
 export function resolveWorkflowSandboxBridgeRequestLimit(maxSubagents?: number): number {
-  return Math.max(
-    DEFAULT_WORKFLOW_SANDBOX_BRIDGE_REQUEST_LIMIT,
-    maxSubagents ?? DEFAULT_WORKFLOW_MAX_SUBAGENTS,
-  );
+  const dispatchBudget = maxSubagents ?? DEFAULT_WORKFLOW_MAX_SUBAGENTS;
+  return Math.max(DEFAULT_WORKFLOW_SANDBOX_BRIDGE_REQUEST_LIMIT, dispatchBudget + 1);
 }
 
 function workflowApiReference(generatedDescription: string): string {

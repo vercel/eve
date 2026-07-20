@@ -47,6 +47,11 @@ const highFanOutProgram = `return await Promise.all(Array.from(
   { length: ${String(highFanOutCount)} },
   (_, index) => tools["echo-marker"]({ message: "marker-" + String(index) }),
 ));`;
+const overBudgetFanOutCount = 257;
+const overBudgetFanOutProgram = `return await Promise.all(Array.from(
+  { length: ${String(overBudgetFanOutCount)} },
+  (_, index) => tools["echo-marker"]({ message: "over-budget-" + String(index) }),
+));`;
 const continuationSecurity = {
   maxAgeMs: 365 * 24 * 60 * 60 * 1000,
   signingKey: "workflow-sandbox-scenario-test-key",
@@ -78,6 +83,27 @@ describe("Workflow concurrent continuation", () => {
     const interrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
 
     expect(getWorkflowRuntimeActionInterrupts(interrupt!)).toHaveLength(highFanOutCount);
+  });
+
+  it("collects an over-budget call above the default bridge-request floor", async () => {
+    const tools = orchestrationTools();
+    const { modelTools } = await applyWorkflowTool({
+      continuationSecurity,
+      harnessTools: tools,
+      maxSubagents: 256,
+      tools: buildToolSet({ tools }),
+    });
+    const execute = modelTools.Workflow?.execute as
+      | ((input: { js: string }, options: { messages: []; toolCallId: string }) => Promise<unknown>)
+      | undefined;
+
+    const initialOutput = await execute!(
+      { js: overBudgetFanOutProgram },
+      { messages: [], toolCallId: "workflow-over-budget-fan-out" },
+    );
+    const interrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
+
+    expect(getWorkflowRuntimeActionInterrupts(interrupt!)).toHaveLength(overBudgetFanOutCount);
   });
 
   it("collects promptly interrupted Promise.all siblings in one ledger", async () => {
