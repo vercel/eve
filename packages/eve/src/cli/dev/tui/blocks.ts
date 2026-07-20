@@ -559,10 +559,10 @@ function renderSubagentHeader(block: Block, width: number, theme: Theme): string
   // collapsed section has no corner to carry it.
   const isOrdinal = block.subtitle !== undefined && block.subtitle.startsWith("#");
   const ordinal = isOrdinal ? `:${block.subtitle!.slice(1)}` : "";
-  // Orange marks a section still working; a completed one goes quiet.
+  // Orange marks a section still working; green marks it done.
   const mark =
     block.status === "done"
-      ? theme.colors.dim(theme.glyph.subagent)
+      ? theme.colors.green(theme.glyph.subagent)
       : theme.colors.orange(theme.glyph.subagent);
   let header = `${lead}${mark} ${theme.colors.bold(`subagent(${name}${ordinal})`)}`;
   if (block.status === "done") {
