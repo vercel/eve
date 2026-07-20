@@ -442,6 +442,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #flowlessStatus?: string;
   #title = "eve";
   #isInteractive = false;
+  /**
+   * Whether this renderer ever ran a live session — the parting-line gate.
+   * `#isInteractive` is useless for that: Ctrl-C tears down via `#stop()`
+   * inside the reader before the runner's `shutdown()` ever observes it.
+   */
+  #everInteractive = false;
+  #partingLinePrinted = false;
   #interrupted = false;
   #caretVisible = true;
   #spinnerIndex = 0;
@@ -2462,11 +2469,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   shutdown(): void {
-    const wasInteractive = this.#isInteractive;
     this.#stop();
     // The parting line: the boot banner's dim counterpart, written after the
     // terminal is restored so it lands as the session's last scrollback row.
-    if (wasInteractive) {
+    // Gated on the session having ever gone live (Ctrl-C stops the terminal
+    // inside the reader long before the runner's teardown reaches here) and
+    // printed at most once.
+    if (this.#everInteractive && !this.#partingLinePrinted) {
+      this.#partingLinePrinted = true;
       this.#output.write(`${this.#theme.colors.dim(eveVersionTag())}\n`);
     }
   }
@@ -2482,6 +2492,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#isInteractive) return;
 
     this.#isInteractive = true;
+    this.#everInteractive = true;
     this.#live.reset();
     this.#live.hideCursor();
     this.#installLogCapture();

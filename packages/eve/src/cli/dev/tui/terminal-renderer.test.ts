@@ -146,19 +146,23 @@ function agentInfoWithModel(
 }
 
 describe("TerminalRenderer (inline scrollback)", () => {
-  it("prints the dim wordmark tag as the parting line on shutdown", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderNotice("bye soon");
+  it("prints the dim wordmark tag as the parting line after a Ctrl-C exit", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    // Ctrl-C at the prompt restores the terminal inside the reader itself;
+    // the runner's teardown-time shutdown() must still print the tag.
+    input.ctrlC();
+    await expect(prompt).rejects.toThrow("Interrupted");
     renderer.shutdown();
 
-    // The boot banner's dim counterpart, once, as the last row — and only
-    // when a live session actually tore down.
     const lines = screen.snapshot().trimEnd().split("\n");
     expect(lines.at(-1)).toMatch(/^☰eve {2}v\d+\.\d+\.\d+/u);
     expect(screen.rawOutput()).toContain(`\x1b[2m☰eve  v`);
+    // Once, ever — repeated teardown must not repeat the tag.
     renderer.shutdown();
     expect(screen.snapshot().match(/☰eve/gu)).toHaveLength(1);
 
+    // A renderer that never went live exits silently.
     const idle = makeRenderer();
     idle.renderer.shutdown();
     expect(idle.screen.snapshot()).not.toContain("☰eve");
