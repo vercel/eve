@@ -107,7 +107,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "reasoning.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+        upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
           state: "streaming",
           stepIndex: event.data.stepIndex,
           text: event.data.reasoningSoFar,
@@ -117,7 +117,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "reasoning.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+        upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
           text: event.data.reasoning,
@@ -238,7 +238,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+        upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
           state: "streaming",
           stepIndex: event.data.stepIndex,
           text: event.data.messageSoFar,
@@ -252,7 +252,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           return removeTextPart(message, event.data.stepIndex);
         }
 
-        return upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+        return upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
           text: event.data.message,
@@ -381,6 +381,41 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
     index === -1
       ? [...message.parts, next]
       : [...message.parts.slice(0, index), next, ...message.parts.slice(index + 1)];
+
+  return {
+    ...message,
+    metadata: {
+      ...message.metadata,
+      status: next.type === "text" && next.state === "done" ? "complete" : "streaming",
+    },
+    parts,
+  };
+}
+
+type EveRunPart = Extract<EveMessagePart, { readonly type: "text" | "reasoning" }>;
+
+// Upserts a text/reasoning part, keeping multiple runs per step distinct: one
+// step can produce text, call tools, then produce more text (see
+// `MessageCompletedStreamEvent`), so a step-only key would collapse them.
+//
+// We find the latest same-step run of this type: while it is still streaming,
+// its snapshots replace it in place; once it is done (or there is none), `next`
+// begins a new run appended in arrival order.
+function upsertRun(message: EveAssistantMessage, next: EveRunPart): EveAssistantMessage {
+  let lastIndex = -1;
+  for (let index = message.parts.length - 1; index >= 0; index -= 1) {
+    const part = message.parts[index];
+    if (part?.type === next.type && part.stepIndex === next.stepIndex) {
+      lastIndex = index;
+      break;
+    }
+  }
+
+  const openRun =
+    lastIndex !== -1 && (message.parts[lastIndex] as EveRunPart).state === "streaming";
+  const parts = openRun
+    ? [...message.parts.slice(0, lastIndex), next, ...message.parts.slice(lastIndex + 1)]
+    : [...message.parts, next];
 
   return {
     ...message,
