@@ -2461,9 +2461,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // Commit any leading finalized blocks (e.g. freshly captured log lines)
     // before the live region is wiped, so they land in scrollback instead of
-    // vanishing with the repaint area. The in-place rebuild status settles
-    // first so its last state survives as scrollback too.
+    // vanishing with the repaint area. The in-place rebuild status and any
+    // open log run settle first so their last state survives as scrollback.
     this.#settleDevRebuildStatus();
+    for (const block of this.#blocks) {
+      if (block.kind === "log" && block.id === undefined) block.live = false;
+    }
     this.#paint();
 
     this.#live.clear();
@@ -2669,8 +2672,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #pushBlock(block: Block) {
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
+    this.#settleOpenLogRun(block);
     this.#blocks.push(block);
     if (block.id) this.#blockById.set(block.id, block);
+  }
+
+  /**
+   * Captured writes are pushed live so a burst coalesces into one section
+   * while it is still the transcript tail (a committed corner can't merge
+   * retroactively). Any push that can't extend the run — a different
+   * source, an in-place status block, or any other kind — settles it, and
+   * the next paint commits the whole run as one grouped section.
+   */
+  #settleOpenLogRun(next: Block): void {
+    for (let index = this.#blocks.length - 1; index >= 0; index -= 1) {
+      const block = this.#blocks[index]!;
+      if (block.kind !== "log" || block.id !== undefined || block.live !== true) break;
+      if (next.kind === "log" && next.id === undefined && next.title === block.title) return;
+      block.live = false;
+    }
   }
 
   #addUserBlock(prompt: string) {
@@ -3343,7 +3363,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const body = this.#delayedDevBuildError;
     if (body === undefined) return;
     this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stderr", body, live: false });
+    this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
     this.#paint();
   }
 
@@ -3858,7 +3878,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const body = pending.join("\n");
       pending = [];
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stdout", body, live: false });
+      this.#pushBlock({ kind: "log", title: "stdout", body, live: true });
     };
 
     for (const line of content.split("\n")) {
@@ -3887,12 +3907,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
     if (failedIndex === -1) {
       if (this.#diagnostics === undefined) {
-        this.#pushBlock({ kind: "log", title: "stderr", body: content, live: false });
+        this.#pushBlock({ kind: "log", title: "stderr", body: content, live: true });
         return;
       }
       const presentation = presentDiagnostic(content, this.#diagnostics.displayPath);
       if (presentation.kind === "inline") {
-        this.#pushBlock({ kind: "log", title: "stderr", body: presentation.text, live: false });
+        this.#pushBlock({ kind: "log", title: "stderr", body: presentation.text, live: true });
         return;
       }
       this.#pushBlock({
@@ -3900,21 +3920,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
         title: "stderr",
         body: formatStoredDiagnostic(presentation),
         logVisibility: "stderr-only",
-        live: false,
+        live: true,
       });
       this.#pushBlock({
         kind: "log",
         title: "stderr",
         body: content,
         logVisibility: "all-only",
-        live: false,
+        live: true,
       });
       return;
     }
 
     const previous = lines.slice(0, failedIndex).join("\n");
     if (previous.trim().length > 0) {
-      this.#pushBlock({ kind: "log", title: "stderr", body: previous, live: false });
+      this.#pushBlock({ kind: "log", title: "stderr", body: previous, live: true });
     }
     const failedBody = lines.slice(failedIndex).join("\n");
     this.#handleDevRebuildFailure(failedBody);
@@ -3923,7 +3943,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #handleDevRebuildFailure(body: string): void {
     if (this.#logs === "all") {
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stderr", body, live: false });
+      this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
       return;
     }
     this.#delayedDevBuildError = body;
@@ -3971,7 +3991,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
     if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: false });
+    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: true });
   }
 
   /** The rebuild status block still cycling in place, if any. */

@@ -290,6 +290,16 @@ describe("renderBlockLines", () => {
     ]);
   });
 
+  it("renders a coalesced run's elided count under the section header", () => {
+    const lines = render({
+      kind: "log",
+      title: "stderr",
+      body: "newest line",
+      elided: 52,
+    });
+    expect(lines).toEqual(["○ stderr", "│ … (52 more)", "│ newest line", "└"]);
+  });
+
   it("renders a one-line log under its source header", () => {
     const lines = render({ kind: "log", title: "stdout", body: "weather lookup { city: 'SF' }" });
     expect(lines).toEqual(["○ stdout", "│ weather lookup { city: 'SF' }", "└"]);

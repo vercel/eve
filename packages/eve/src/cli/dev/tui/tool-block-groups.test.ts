@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { Block } from "./blocks.js";
-import { groupToolBlocksForDisplay, maxVisibleSubagentRunChildren } from "./tool-block-groups.js";
+import {
+  groupToolBlocksForDisplay,
+  maxVisibleLogRunLines,
+  maxVisibleSubagentRunChildren,
+} from "./tool-block-groups.js";
 
 function fetchBlock(
   id: string,
@@ -485,6 +489,107 @@ describe("groupToolBlocksForDisplay", () => {
     const groups = groupToolBlocksForDisplay([header, step]);
 
     expect(groups.map((group) => group.display)).toEqual([header, step, subagentClose("c1")]);
+  });
+
+  it("coalesces a contiguous run of same-source log writes into one section", () => {
+    const write = (title: string, body: string, live = false): Block => ({
+      kind: "log",
+      title,
+      body,
+      live,
+    });
+
+    const groups = groupToolBlocksForDisplay([
+      write("stderr", "warning one\ndetail one"),
+      write("stderr", "warning two", true),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.members).toHaveLength(2);
+    // The merged section carries every member's lines and stays live while
+    // any write still is, so the run keeps accumulating in the live region.
+    expect(groups[0]?.display).toMatchObject({
+      kind: "log",
+      title: "stderr",
+      body: "warning one\ndetail one\nwarning two",
+      live: true,
+    });
+    expect(groups[0]?.display.elided).toBeUndefined();
+  });
+
+  it("windows a coalesced log run to its newest lines", () => {
+    const writes: Block[] = Array.from({ length: 2 }, (_, index) => ({
+      kind: "log",
+      title: "stderr",
+      body: Array.from(
+        { length: maxVisibleLogRunLines },
+        (_, line) => `w${index + 1} line ${line + 1}`,
+      ).join("\n"),
+      live: false,
+    }));
+
+    const [group] = groupToolBlocksForDisplay(writes);
+
+    // MRU-down: the newest lines survive; older ones collapse into the count.
+    expect(group?.display.elided).toBe(maxVisibleLogRunLines);
+    expect(group?.display.body?.startsWith("w2 line 1")).toBe(true);
+    expect(group?.display.body?.split("\n")).toHaveLength(maxVisibleLogRunLines);
+  });
+
+  it("buckets a log run by source and visibility without merging across them", () => {
+    const concise: Block = {
+      kind: "log",
+      title: "stderr",
+      body: "concise one",
+      logVisibility: "stderr-only",
+      live: false,
+    };
+    const raw: Block = {
+      kind: "log",
+      title: "stderr",
+      body: "raw one",
+      logVisibility: "all-only",
+      live: false,
+    };
+    const conciseTwo: Block = { ...concise, body: "concise two" };
+    const rawTwo: Block = { ...raw, body: "raw two" };
+
+    const groups = groupToolBlocksForDisplay([concise, raw, conciseTwo, rawTwo]);
+
+    // The concise/raw diagnostic twins each merge with their own kind — a
+    // mixed section would double the content under one log filter.
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.display).toMatchObject({
+      body: "concise one\nconcise two",
+      logVisibility: "stderr-only",
+    });
+    expect(groups[1]?.display).toMatchObject({
+      body: "raw one\nraw two",
+      logVisibility: "all-only",
+    });
+  });
+
+  it("keeps a lone write and in-place log status blocks out of coalescing", () => {
+    const lone: Block = {
+      kind: "log",
+      title: "stderr",
+      body: Array.from({ length: maxVisibleLogRunLines + 5 }, (_, i) => `line ${i}`).join("\n"),
+      live: false,
+    };
+    const status: Block = {
+      kind: "log",
+      id: "dev-rebuild:1",
+      title: "stdout",
+      body: "3 files changed · rebuilding…",
+      live: true,
+    };
+    const write: Block = { kind: "log", title: "stdout", body: "ordinary", live: false };
+
+    const groups = groupToolBlocksForDisplay([lone, status, write]);
+
+    // A lone write is never windowed, and the rebuild status row must not
+    // absorb (or be absorbed by) neighboring writes.
+    expect(groups.map((group) => group.display)).toEqual([lone, status, write]);
   });
 
   it("does not group a settled call with a still-running one", () => {

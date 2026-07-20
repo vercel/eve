@@ -1909,7 +1909,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("renders each captured write as its own closed log section", () => {
+  it("coalesces contiguous writes into one section and breaks at other blocks", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
@@ -1928,11 +1928,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    // Three writes → three self-contained `○ stdout … └` sections.
-    expect(countOccurrences(snapshot, "○ stdout")).toBe(3);
+    // The back-to-back writes merge into one `○ stdout … └` section; the
+    // notice breaks the run, so the post-boundary write opens a fresh one.
+    expect(countOccurrences(snapshot, "○ stdout")).toBe(2);
     expect(snapshot).toContain("│ weather lookup { city: 'NY' }");
     expect(snapshot).toContain("│ weather lookup { city: 'LA' }");
     expect(snapshot).toContain("│ post-turn line");
+    expect(snapshot.indexOf("city: 'NY'")).toBeLessThan(snapshot.indexOf("city: 'LA'"));
     // The section open at shutdown is committed, not wiped with the live region.
     expect(snapshot.indexOf("post-turn line")).toBeGreaterThan(snapshot.indexOf("turn boundary"));
   });

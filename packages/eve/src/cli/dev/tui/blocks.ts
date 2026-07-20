@@ -161,7 +161,9 @@ function renderBody(
   theme: Theme,
   context: RenderBlockContext,
 ): string[] {
-  if (block.elided !== undefined) {
+  // The subagent stand-in row; other kinds (a coalesced log run) render
+  // their elided count inside their own section.
+  if (block.elided !== undefined && block.kind === "subagent-step") {
     return [theme.colors.dim(`${theme.glyph.ellipsis} (${block.elided} more)`)];
   }
   switch (block.kind) {
@@ -474,14 +476,14 @@ function renderSandbox(
 }
 
 /**
- * Renders one captured server-output write as a closed section: a `○ stderr`
- * (or `○ stdout`) header, every body line — wrapped continuations included —
- * behind a `│` rail, and a bare `└` corner. Each write is its own complete,
- * immediately-committed section, so rendering needs no knowledge of
- * neighboring blocks. A rendered block is never truncated: a transcript
- * can't be clicked open, so the full output is shown, kept legible by the
- * rail. Whether a source renders at all is the renderer's `LogDisplayMode`
- * filter — this function only ever sees visible blocks.
+ * Renders captured server output as a closed section: a `○ stderr` (or
+ * `○ stdout`) header, body lines — wrapped continuations included — behind
+ * a `│` rail, and a bare `└` corner. A lone write shows its full body; a
+ * coalesced run (contiguous writes merged by the display grouping) arrives
+ * pre-windowed to its newest lines with the older count on `elided`,
+ * rendered as an `… (N more)` row under the header. Whether a source
+ * renders at all is the renderer's `LogDisplayMode` filter — this function
+ * only ever sees visible blocks.
  */
 function renderLog(block: Block, width: number, theme: Theme): string[] {
   const isErr = block.title === "stderr";
@@ -490,6 +492,9 @@ function renderLog(block: Block, width: number, theme: Theme): string[] {
   const source = isErr ? "stderr" : "stdout";
 
   const rows = [`${theme.colors.dim(theme.glyph.reasoning)} ${theme.colors.dim(source)}`];
+  if (block.elided !== undefined && block.elided > 0) {
+    rows.push(`${rule} ${theme.colors.dim(`${theme.glyph.ellipsis} (${block.elided} more)`)}`);
+  }
   for (const raw of (block.body ?? "").split("\n")) {
     for (const line of wrapVisibleLine(raw, Math.max(1, width - 2))) {
       rows.push(`${rule} ${theme.colors.dim(color(line))}`);

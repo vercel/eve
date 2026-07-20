@@ -23,6 +23,18 @@ export function groupToolBlocksForDisplay(blocks: readonly Block[]): ToolBlockDi
   const groups: ToolBlockDisplayGroup[] = [];
   for (let index = 0; index < blocks.length;) {
     const first = blocks[index]!;
+    if (isGroupableLogWrite(first)) {
+      const run = [first];
+      while (
+        index + run.length < blocks.length &&
+        isGroupableLogWrite(blocks[index + run.length]!)
+      ) {
+        run.push(blocks[index + run.length]!);
+      }
+      groups.push(...coalesceLogWriteRun(run));
+      index += run.length;
+      continue;
+    }
     if (first.kind === "subagent" && first.subagentCallId !== undefined) {
       const run = collectSubagentRun(blocks, index);
       groups.push(...run.groups);
@@ -146,6 +158,59 @@ function partitionRunByStatus(run: readonly Block[]): ToolBlockDisplayGroup[] {
 export const maxVisibleSubagentRunChildren = 3;
 
 /**
+ * A coalesced log run windows to this many newest lines; older lines
+ * collapse into a `… (N more)` row under the section header.
+ */
+export const maxVisibleLogRunLines = 10;
+
+/**
+ * An ordinary captured write. In-place log status blocks (the dev rebuild
+ * cycle) carry an id and must never merge into a run.
+ */
+function isGroupableLogWrite(block: Block): boolean {
+  return block.kind === "log" && block.id === undefined;
+}
+
+/**
+ * Coalesces a contiguous run of captured writes into one section per
+ * (source, visibility) bucket, so a burst of stderr renders as a single
+ * `○ stderr` section instead of one per write. Bucketing keeps the
+ * concise/raw diagnostic twins apart — only one of the pair is visible
+ * under any log filter, and a merged display can carry only one
+ * visibility. The section body is MRU-down: the newest lines stay
+ * visible, older ones collapse into the display's elided count. A
+ * lone write keeps its full body — only runs are windowed.
+ */
+function coalesceLogWriteRun(run: readonly Block[]): ToolBlockDisplayGroup[] {
+  const buckets = new Map<string, Block[]>();
+  for (const block of run) {
+    const key = `${block.title ?? ""}\u0000${block.logVisibility ?? ""}`;
+    const bucket = buckets.get(key);
+    if (bucket === undefined) {
+      buckets.set(key, [block]);
+    } else {
+      bucket.push(block);
+    }
+  }
+  return [...buckets.values()].map((members) => {
+    if (members.length === 1) return { members, display: members[0]! };
+    const lines = members.flatMap((member) => (member.body ?? "").split("\n"));
+    const visible = lines.slice(-maxVisibleLogRunLines);
+    const hidden = lines.length - visible.length;
+    const first = members[0]!;
+    const display: Block = {
+      kind: "log",
+      live: members.some((member) => member.live !== false),
+      body: visible.join("\n"),
+    };
+    if (first.title !== undefined) display.title = first.title;
+    if (first.logVisibility !== undefined) display.logVisibility = first.logVisibility;
+    if (hidden > 0) display.elided = hidden;
+    return { members, display };
+  });
+}
+
+/**
  * Block kinds that may splice into a subagent run (captured output, stream
  * errors, notices) without belonging to it. They pass through and re-emit
  * after the sections they interrupted instead of splitting a run into
@@ -251,9 +316,24 @@ function collectSubagentRun(
     }
   }
   // Interrupting pass-through blocks render after the sections they
-  // spliced into.
-  for (const block of passThrough) {
-    groups.push({ members: [block], display: block });
+  // spliced into; contiguous log writes among them coalesce the same way
+  // they would in the main flow.
+  for (let i = 0; i < passThrough.length;) {
+    const block = passThrough[i]!;
+    if (!isGroupableLogWrite(block)) {
+      groups.push({ members: [block], display: block });
+      i += 1;
+      continue;
+    }
+    const run = [block];
+    while (
+      i + run.length < passThrough.length &&
+      isGroupableLogWrite(passThrough[i + run.length]!)
+    ) {
+      run.push(passThrough[i + run.length]!);
+    }
+    groups.push(...coalesceLogWriteRun(run));
+    i += run.length;
   }
   return { consumed, groups };
 }
