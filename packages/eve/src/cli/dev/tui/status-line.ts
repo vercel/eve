@@ -60,17 +60,46 @@ function renderServerPort(
   return c.inverse(c.gray(` :${input.serverPort} `));
 }
 
+/** Provider slugs whose display name differs from the AI SDK's identifier. */
+const EXTERNAL_PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  // `experimental_chatgpt` wraps the Codex backend; what the user connected
+  // is their ChatGPT subscription, so the bar names that, not the transport.
+  codex: "chatgpt-sub",
+};
+
+/**
+ * The endpoint reads as the model's routing clause (`via ai-gateway(oidc:…)`),
+ * so it fuses onto the model segment with a plain space instead of standing
+ * behind a `·` separator. Only the disconnected warning stands alone. The
+ * clause is keyed strictly off the credential the AI SDK will actually use —
+ * an `api-key` never shows the linked project, because the link is not what
+ * authenticates the call.
+ */
 function renderEndpoint(
   input: Pick<StatusLineInput, "endpoint" | "remote" | "theme" | "vercel">,
-): string | undefined {
+): { readonly text: string; readonly standalone: boolean } | undefined {
   if (input.remote !== undefined || input.endpoint === undefined) return undefined;
 
   const c = input.theme.colors;
-  if (input.endpoint.kind === "external") return c.dim("External endpoint");
-  if (!input.endpoint.connected) return c.yellow(`${input.theme.glyph.warning} AI Gateway`);
-
+  const g = input.theme.glyph;
+  // The endpoint name is the clause's one bright token; `via` and the
+  // credential scope stay dim around it.
+  const clause = (name: string, suffix: string) =>
+    `${c.dim("via ")}${c.white(name)}${c.dim(suffix)}`;
+  if (input.endpoint.kind === "external") {
+    const provider =
+      EXTERNAL_PROVIDER_DISPLAY_NAMES[input.endpoint.provider] ?? input.endpoint.provider;
+    return { text: clause(provider, g.external), standalone: false };
+  }
+  if (!input.endpoint.connected) {
+    return { text: c.yellow(`${g.warning} ai-gateway`), standalone: true };
+  }
+  if (input.endpoint.credential === "api-key") {
+    return { text: clause("ai-gateway", "(api-key)"), standalone: false };
+  }
   const projectName = input.vercel?.identity?.projectName;
-  return c.dim(projectName === undefined ? "AI Gateway" : `AI Gateway (${projectName})`);
+  const scope = projectName === undefined ? "oidc" : `oidc:${projectName}`;
+  return { text: clause("ai-gateway", `(${scope})`), standalone: false };
 }
 
 /**
@@ -92,6 +121,12 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   const leading = remote?.full ?? serverPort;
   const badge = remote?.badge ?? serverPort;
 
+  // A routing clause rides the model segment itself; the disconnected
+  // warning (or a clause with no model to attach to) stays its own segment.
+  const fused = endpoint !== undefined && !endpoint.standalone && model !== undefined;
+  const modelSegment = fused ? `${model} ${endpoint.text}` : model;
+  const endpointSegment = endpoint === undefined || fused ? undefined : endpoint.text;
+
   // Whitespace separators: the dim segments read as columns without bullets.
   const separator = "  ";
   const compose = (
@@ -107,7 +142,7 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   // leads every variant and gets the final stand-alone fallback. Without one,
   // the logs hint retains its previous priority.
   const variants = [
-    compose(leading, [logLevel, model, endpoint, pending]),
+    compose(leading, [logLevel, modelSegment, endpointSegment, pending]),
     compose(leading, [logLevel, model, pending]),
     compose(leading, [logLevel, pending]),
     compose(leading, [logLevel]),
@@ -119,7 +154,7 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   for (const variant of variants) {
     if (variant.length > 0 && visibleLength(variant) <= width) return variant;
   }
-  // Later variants can be empty, for example when a model-only line has no tokens.
+  // Later variants can be empty, for example when a badge-only line has no hint.
   const narrowest = variants.findLast((variant) => variant.length > 0)!;
   return clipVisible(narrowest, width);
 }

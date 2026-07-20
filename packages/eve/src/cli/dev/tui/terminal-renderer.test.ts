@@ -3880,7 +3880,7 @@ describe("TerminalRenderer status line", () => {
     const prompt = renderer.readPrompt();
     renderer.setVercelStatus(vercelStatus);
 
-    expect(screen.snapshot()).toContain("⚠ AI Gateway");
+    expect(screen.snapshot()).toContain("⚠ ai-gateway");
 
     renderer.renderAgentHeader({
       name: "Weather Agent",
@@ -3900,8 +3900,8 @@ describe("TerminalRenderer status line", () => {
     expect(statusRow).toContain("anthropic/claude-sonnet-5");
     expect(statusRow.indexOf(":3000")).toBeLessThan(statusRow.indexOf("anthropic/claude-sonnet-5"));
     // The linked project folds into the connected gateway label.
-    expect(statusRow).toContain("AI Gateway (my-agent)");
-    expect(statusRow).not.toContain("⚠ AI Gateway");
+    expect(statusRow).toContain("via ai-gateway(oidc:my-agent)");
+    expect(statusRow).not.toContain("⚠ ai-gateway");
     // No token segment before any turn reports usage (↑ 0 ↓ 0 is noise).
     expect(statusRow).not.toContain("↑ 0");
     expect(statusRow).not.toContain("/deploy pending");
@@ -3936,13 +3936,13 @@ describe("TerminalRenderer status line", () => {
       }),
     });
     renderer.setVercelStatus(vercelStatus);
-    expect(screen.snapshot()).toContain("AI Gateway (my-agent)");
+    expect(screen.snapshot()).toContain("via ai-gateway(oidc:my-agent)");
 
     renderer.setupFlow.begin("Connect to Vercel");
-    expect(screen.snapshot()).not.toContain("AI Gateway (my-agent)");
+    expect(screen.snapshot()).not.toContain("via ai-gateway(oidc:my-agent)");
 
     renderer.setupFlow.end({ preserveDiagnostics: false });
-    expect(screen.snapshot()).toContain("AI Gateway (my-agent)");
+    expect(screen.snapshot()).toContain("via ai-gateway(oidc:my-agent)");
     renderer.shutdown();
   });
 
@@ -4084,7 +4084,7 @@ describe("TerminalRenderer status line", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("anthropic/claude-sonnet-5");
-    expect(snapshot).toContain("AI Gateway (my-agent)");
+    expect(snapshot).toContain("via ai-gateway(oidc:my-agent)");
     expect(snapshot).toContain("/deploy pending");
     // A fresh conversation clears the token flow entirely (↑ 0 ↓ 0 is noise).
     expect(snapshot).not.toContain("↑ 0");

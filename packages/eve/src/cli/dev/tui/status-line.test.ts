@@ -59,7 +59,7 @@ describe("buildStatusLine", () => {
       width: 120,
     });
 
-    expect(line).toBe("anthropic/claude-sonnet-5  AI Gateway (my-agent)  /deploy pending");
+    expect(line).toBe("anthropic/claude-sonnet-5 via ai-gateway(oidc:my-agent)  /deploy pending");
   });
 
   it("folds the reasoning level and Fast mode marker into the model segment", () => {
@@ -73,7 +73,7 @@ describe("buildStatusLine", () => {
       width: 120,
     });
 
-    expect(line).toBe("xai/grok-4.5@xhigh ↯  AI Gateway (my-agent)");
+    expect(line).toBe("xai/grok-4.5@xhigh ↯ via ai-gateway(oidc:my-agent)");
   });
 
   it("dims the whole model segment, reasoning level and fast marker included", () => {
@@ -134,16 +134,16 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(withProject).toBe("m  AI Gateway (my-agent)");
+    expect(withProject).toBe("m via ai-gateway(oidc:my-agent)");
 
-    // Connected without a linked project (a raw key): bare "AI Gateway".
+    // OIDC without a resolved project name: bare scope.
     const noProject = buildStatusLine({
       model: "m",
       endpoint: connected,
       theme: plain,
       width: 120,
     });
-    expect(noProject).toBe("m  AI Gateway");
+    expect(noProject).toBe("m via ai-gateway(oidc)");
   });
 
   it("renders the pending marker even when no segment else resolved", () => {
@@ -190,10 +190,10 @@ describe("buildStatusLine", () => {
       theme: plain,
     };
     const full = buildStatusLine({ ...input, width: 200 })!;
-    expect(full).toContain("AI Gateway (my-agent)");
+    expect(full).toContain("via ai-gateway(oidc:my-agent)");
 
     const noEndpoint = buildStatusLine({ ...input, width: visibleLength(full) - 1 })!;
-    expect(noEndpoint).not.toContain("AI Gateway");
+    expect(noEndpoint).not.toContain("ai-gateway");
     expect(noEndpoint).toContain("anthropic/claude-sonnet-5");
 
     const noModel = buildStatusLine({ ...input, width: visibleLength(noEndpoint) - 1 })!;
@@ -207,7 +207,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(external).toBe("anthropic/claude-sonnet-5  External endpoint");
+    expect(external).toBe("anthropic/claude-sonnet-5 via anthropic⌝");
 
     const linked = buildStatusLine({
       model: "m",
@@ -216,7 +216,26 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(linked).toBe("m  AI Gateway (my-agent)");
+    expect(linked).toBe("m via ai-gateway(oidc:my-agent)");
+
+    const apiKey = buildStatusLine({
+      model: "m",
+      endpoint: { kind: "gateway", connected: true, credential: "api-key" },
+      // A linked project must NOT surface here: the key is what
+      // authenticates, and the bar reports the credential in use.
+      vercel: { identity, pendingDeploy: false },
+      theme: plain,
+      width: 120,
+    });
+    expect(apiKey).toBe("m via ai-gateway(api-key)");
+
+    const chatgpt = buildStatusLine({
+      model: "openai/gpt-5.6-sol",
+      endpoint: { kind: "external", provider: "codex" },
+      theme: plain,
+      width: 120,
+    });
+    expect(chatgpt).toBe("openai/gpt-5.6-sol via chatgpt-sub⌝");
 
     const notConnected = buildStatusLine({
       model: "m",
@@ -224,7 +243,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(notConnected).toBe("m  ⚠ AI Gateway");
+    expect(notConnected).toBe("m  ⚠ ai-gateway");
   });
 
   it("paints only the not-connected endpoint yellow", () => {
@@ -233,14 +252,17 @@ describe("buildStatusLine", () => {
       theme,
       width: 120,
     });
-    expect(notConnected).toContain("\x1b[33m⚠ AI Gateway\x1b[39m");
+    expect(notConnected).toContain("\x1b[33m⚠ ai-gateway\x1b[39m");
 
     const linked = buildStatusLine({
       endpoint: connected,
       theme,
       width: 120,
     });
-    expect(linked).toContain("\x1b[2mAI Gateway\x1b[22m");
+    // The endpoint name is the one bright token; via/scope stay dim.
+    expect(linked).toContain("\x1b[97mai-gateway\x1b[39m");
+    expect(linked).toContain("\x1b[2mvia \x1b[22m");
+    expect(linked).toContain("\x1b[2m(oidc)\x1b[22m");
   });
 
   it("renders ASCII glyphs when unicode is unavailable", () => {
@@ -250,7 +272,7 @@ describe("buildStatusLine", () => {
       theme: ascii,
       width: 120,
     });
-    expect(stripAnsi(line!)).toBe("m  ! AI Gateway");
+    expect(stripAnsi(line!)).toBe("m  ! ai-gateway");
   });
 
   it("renders the remote badge first and projects each authentication state", () => {
@@ -357,7 +379,7 @@ describe("buildStatusLine", () => {
       width: 120,
     })!;
 
-    expect(stripAnsi(line)).not.toContain("AI Gateway");
+    expect(stripAnsi(line)).not.toContain("ai-gateway");
     expect(
       stripAnsi(
         buildStatusLine({
