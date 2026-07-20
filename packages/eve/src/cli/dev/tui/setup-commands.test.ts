@@ -172,6 +172,27 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
+  it("names the shadow when a gateway key outranks the freshly linked OIDC token", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
+        kind: "done",
+        providerOutcome: {
+          credential: "AI_GATEWAY_API_KEY",
+          shadowedOidc: { keySource: "shell" },
+          status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
+        },
+      })),
+    });
+    await expect(run({ command: "model", flows })).resolves.toEqual({
+      message:
+        "Project linked. AI_GATEWAY_API_KEY (shell) outranks the project's " +
+        "VERCEL_OIDC_TOKEN and stays the active credential — unset it in your shell to run " +
+        "on the project.",
+      preserveFlowDiagnostics: false,
+      effect: { kind: "model-access-changed" },
+    });
+  });
+
   it("does not claim a link for a pasted key — the outcome names the env file", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({

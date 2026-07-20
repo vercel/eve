@@ -32,8 +32,18 @@ export interface LinkFlowDeps {
 export type LinkFlowResult =
   | {
       kind: "done";
-      /** The model credential verified in an env file, when one landed. */
+      /**
+       * The credential the runtime will actually resolve, ranked exactly as
+       * the AI SDK gateway provider ranks them: a gateway API key (env file
+       * or shell) outranks the pulled OIDC token.
+       */
       credential?: "VERCEL_OIDC_TOKEN" | typeof AI_GATEWAY_API_KEY_ENV_VAR;
+      /**
+       * Present when the link landed an OIDC token that a gateway API key
+       * shadows; `keySource` names where the winning key lives (an env file
+       * path, or `"shell"` for an exported variable eve cannot remove).
+       */
+      shadowedOidc?: { keySource: string };
     }
   | { kind: "cancelled" };
 
@@ -53,6 +63,10 @@ export type LinkFlowResult =
  * Ends by verifying a model credential actually landed (`VERCEL_OIDC_TOKEN`
  * or `AI_GATEWAY_API_KEY` in an env file) — an env pull can succeed without
  * granting gateway access, and the difference is what the user acts on next.
+ * The reported credential mirrors runtime resolution — `AI_GATEWAY_API_KEY`
+ * (env file or shell) outranks the OIDC token, exactly as the AI SDK gateway
+ * provider resolves it — so the outcome message, the status bar, and the
+ * actual authentication can never disagree.
  */
 export async function runLinkFlow(input: {
   appRoot: string;
@@ -168,7 +182,24 @@ export async function runLinkFlow(input: {
     );
   }
   const done: LinkFlowResult = { kind: "done" };
-  if (oidcFile !== undefined) done.credential = "VERCEL_OIDC_TOKEN";
-  else if (gatewayKeyFile !== undefined) done.credential = AI_GATEWAY_API_KEY_ENV_VAR;
+  // Ranked as the runtime resolves credentials: a gateway API key — from an
+  // env file or exported in the shell — outranks the pulled OIDC token. The
+  // link provisioned OIDC, but reporting it while a key shadows it would
+  // claim a credential that never authenticates a call.
+  if (gatewayKeyFile !== undefined) {
+    done.credential = AI_GATEWAY_API_KEY_ENV_VAR;
+    if (oidcFile !== undefined) done.shadowedOidc = { keySource: gatewayKeyFile };
+  } else if (hasShellGatewayKey()) {
+    done.credential = AI_GATEWAY_API_KEY_ENV_VAR;
+    if (oidcFile !== undefined) done.shadowedOidc = { keySource: "shell" };
+  } else if (oidcFile !== undefined) {
+    done.credential = "VERCEL_OIDC_TOKEN";
+  }
   return done;
+}
+
+/** A gateway key exported in the shell shadows OIDC exactly like a file one. */
+function hasShellGatewayKey(): boolean {
+  const value = process.env[AI_GATEWAY_API_KEY_ENV_VAR];
+  return value !== undefined && value.trim().length > 0;
 }

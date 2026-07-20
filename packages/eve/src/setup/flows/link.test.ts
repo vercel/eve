@@ -1,6 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import type { ApplyAiGatewayCredentialDeps } from "#setup/boxes/apply-ai-gateway-credential.js";
@@ -84,7 +84,68 @@ function flowDeps(args: {
   };
 }
 
+beforeEach(() => {
+  // The flow reads the shell for a gateway key that would shadow the pulled
+  // OIDC token; a developer shell exporting one must not leak in.
+  vi.stubEnv("AI_GATEWAY_API_KEY", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("runLinkFlow", () => {
+  it("reports the gateway key as the active credential when it shadows the pulled OIDC token", async () => {
+    const { prompter } = createFakePrompter({
+      single: (opts) => {
+        if (stripVTControlCharacters(opts.message) === "Vercel project") return "new";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+    });
+    const deps = flowDeps({
+      envFilesByKey: { VERCEL_OIDC_TOKEN: ".env.local", AI_GATEWAY_API_KEY: ".env.local" },
+    });
+
+    const result = await runLinkFlow({
+      appRoot: APP_ROOT,
+      prompter,
+      deps,
+      projectSelection: "create-or-link",
+    });
+
+    // Runtime resolution ranks the key first; reporting OIDC here would
+    // claim a credential that never authenticates a call.
+    expect(result).toEqual({
+      kind: "done",
+      credential: "AI_GATEWAY_API_KEY",
+      shadowedOidc: { keySource: ".env.local" },
+    });
+  });
+
+  it("reports a shell-exported gateway key shadowing the pulled OIDC token", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "vck_shell");
+    const { prompter } = createFakePrompter({
+      single: (opts) => {
+        if (stripVTControlCharacters(opts.message) === "Vercel project") return "new";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+    });
+    const deps = flowDeps({ envFilesByKey: { VERCEL_OIDC_TOKEN: ".env.local" } });
+
+    const result = await runLinkFlow({
+      appRoot: APP_ROOT,
+      prompter,
+      deps,
+      projectSelection: "create-or-link",
+    });
+
+    expect(result).toEqual({
+      kind: "done",
+      credential: "AI_GATEWAY_API_KEY",
+      shadowedOidc: { keySource: "shell" },
+    });
+  });
+
   it("shows the current link, then goes directly from team to the existing-project picker", async () => {
     const { prompter, selectMessages } = createFakePrompter({
       single: (opts) => {

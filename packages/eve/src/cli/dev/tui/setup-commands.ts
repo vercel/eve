@@ -484,11 +484,26 @@ function pendingChannelsResult(message: string): TuiSetupCommandResult {
  * without linking anything.
  */
 function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
-  const { credential, status } = outcome;
+  const { credential, shadowedOidc, status } = outcome;
   if (status.kind === "gateway-project") {
-    return credential === undefined
-      ? "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local."
-      : `Project linked. Connected to AI Gateway via ${credential}.`;
+    if (credential === undefined) {
+      return "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local.";
+    }
+    // A gateway key outranks the project's OIDC token at runtime — claiming
+    // the OIDC connection while the key authenticates every call would split
+    // this message from the status bar and the actual resolution.
+    if (shadowedOidc !== undefined) {
+      const remove =
+        shadowedOidc.keySource === "shell"
+          ? "unset it in your shell"
+          : `remove it from ${shadowedOidc.keySource}`;
+      return (
+        `Project linked. AI_GATEWAY_API_KEY (${shadowedOidc.keySource}) outranks the ` +
+        `project's VERCEL_OIDC_TOKEN and stays the active credential — ${remove} to run ` +
+        "on the project."
+      );
+    }
+    return `Project linked. Connected to AI Gateway via ${credential}.`;
   }
   if (status.kind === "gateway-key") {
     return `Connected to AI Gateway via ${status.envKey} in ${status.envFile}.`;

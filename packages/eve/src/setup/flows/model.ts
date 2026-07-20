@@ -127,6 +127,8 @@ export type { ModelProviderStatus };
  */
 export interface ModelProviderOutcome {
   credential?: "VERCEL_OIDC_TOKEN" | typeof AI_GATEWAY_API_KEY_ENV_VAR;
+  /** A linked project's OIDC token shadowed by a gateway API key; see {@link LinkFlowResult}. */
+  shadowedOidc?: { keySource: string };
   status: ModelProviderStatus;
 }
 
@@ -498,6 +500,9 @@ export async function runModelFlow(input: {
     provider = await withSpinner(prompter, "Checking the project…", () => detectProvider(false));
     providerOutcome = { status: provider };
     if (result.credential !== undefined) providerOutcome.credential = result.credential;
+    if (result.kind === "done" && result.shadowedOidc !== undefined) {
+      providerOutcome.shadowedOidc = result.shadowedOidc;
+    }
     commitDraft = true;
     break;
   }
