@@ -44,6 +44,7 @@ export async function emitTerminalSessionFailureStep(input: {
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
     code,
     message,
+    hint: summary?.hint,
     detail: typeof details.detail === "string" ? details.detail : undefined,
   });
 

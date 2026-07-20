@@ -1130,6 +1130,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           catalogSummary === null ? extractUpstreamRejectionMessage(finalError) : null;
         const errorMessage =
           catalogSummary?.message ?? upstreamRejection?.message ?? toErrorMessage(finalError);
+        // Task failures surface as the parent agent's tool-result text, so
+        // the remediation rides along in prose — the parent can act on it
+        // or relay it. Event payloads keep hint structured in details.
+        const taskFailureOutput =
+          catalogSummary?.hint === undefined
+            ? errorMessage
+            : `${errorMessage} ${catalogSummary.hint}`;
         const modelCallDetails = extractModelCallErrorDetails(finalError);
         const details = buildModelCallFailureDetails({
           catalogSummary,
@@ -1154,6 +1161,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             // actionable hint instead of a wall of inspector output.
             log.error(`${catalogSummary.name}: ${catalogSummary.message}`, {
               errorId,
+              hint: catalogSummary.hint,
               sessionId: session.sessionId,
               turnId: emissionState.turnId,
             });
@@ -1176,7 +1184,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           return {
             next:
               config.mode === "task"
-                ? { done: true, isError: true, output: errorMessage }
+                ? { done: true, isError: true, output: taskFailureOutput }
                 : { done: true, output: "" },
             session,
           };
@@ -1214,7 +1222,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             sessionId: session.sessionId,
           });
           return {
-            next: { done: true, isError: true, output: errorMessage },
+            next: { done: true, isError: true, output: taskFailureOutput },
             session,
           };
         }
