@@ -4224,9 +4224,12 @@ function previousBlockOf(block: Block): PreviousBlock {
  * their corners and headers.
  */
 function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolean {
-  // A tool run breathes after whoever spoke last — the prompt or the
-  // agent's own prose — and stays tight within the run itself.
-  if (block.kind === "tool" && (previous?.kind === "user" || previous?.kind === "assistant")) {
+  // A tool run breathes after whoever spoke last — the prompt, the agent's
+  // own prose, or an answered question — and stays tight within the run.
+  if (
+    block.kind === "tool" &&
+    (previous?.kind === "user" || previous?.kind === "assistant" || previous?.kind === "question")
+  ) {
     return true;
   }
   if (block.kind === "sandbox" && previous?.kind === "sandbox") {

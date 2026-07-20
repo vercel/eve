@@ -1699,6 +1699,37 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("breathes between an answered question and the next tool block", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "Which framework do you mean?",
+      display: "text",
+    });
+    input.type("eve");
+    input.enter();
+    await answer;
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "step-start" },
+        {
+          type: "tool-call",
+          toolCallId: "t1",
+          toolName: "web_search",
+          input: { query: "eve framework" },
+        },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+
+    // The answered question and the following tool are separated by air.
+    expect(screen.snapshot()).toContain("⎿  eve\n\n");
+    renderer.shutdown();
+  });
+
   it("preserves bracketed multi-line paste in freeform question input", async () => {
     const { input, renderer } = makeRenderer();
 
