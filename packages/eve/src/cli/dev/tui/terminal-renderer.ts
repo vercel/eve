@@ -3642,7 +3642,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * The live turn bar: `▪ Working for 3min 24s… ── ↑ 32.4K ↓ 682`. Duration and
+   * The live turn bar: `▪ Working for 3min 24s ── ↑ 32.4K ↓ 682`. Duration and
    * token flow tick live on the shared paint beat; the `└`-cornered coda
    * is this bar's settled form.
    */
@@ -3657,7 +3657,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // Anchored to the turn clock, the label's reveal plays once per turn —
     // a question answer's continuation pass resumes fully typed.
     const label = typewriterText("Working for", elapsedMs, turnBarTypewriterMs);
-    const body = `${label} ${formatTurnDuration(elapsedMs)}${this.#theme.glyph.ellipsis}${this.#turnFlowSuffix()}`;
+    const body = `${label} ${this.#turnStatsBody(elapsedMs)}`;
     // Column 0: the bar shares the gutter with the conversation markers and
     // its own settled `└` coda.
     return clip(`${c.yellow(pulse)} ${c.dim(body)}`, width);

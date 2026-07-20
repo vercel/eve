@@ -605,7 +605,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       await Promise.resolve();
       let lines = screen.snapshot().split("\n");
       // The label types itself out: one character at t=0.
-      let barRow = lines.findIndex((line) => line === "▪ W 1s…");
+      let barRow = lines.findIndex((line) => line === "▪ W 1s");
       expect(barRow).toBeGreaterThan(-1);
       // The pending prompt row wears the same quiet `›` as the idle one
       // beneath the bar; the status line follows it.
@@ -617,7 +617,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       await vi.advanceTimersByTimeAsync(2_000);
       lines = screen.snapshot().split("\n");
       // Fully revealed once the reveal window has passed.
-      barRow = lines.findIndex((line) => line.includes("Working for 2s…"));
+      barRow = lines.findIndex((line) => line.includes("Working for 2s"));
       expect(barRow).toBeGreaterThan(-1);
       expect(lines[barRow + 2]).toContain("›");
       expect(lines[barRow + 4]).toContain("gpt-5");
