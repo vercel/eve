@@ -259,12 +259,11 @@ describe("buildStatusLine", () => {
       theme,
       width: 120,
     });
-    // Only the gateway is the bright token — bold at the terminal's default
-    // foreground, never explicit white; via/scope stay dim.
-    expect(linked).toContain("\x1b[1mai-gateway\x1b[22m");
+    // Only the gateway stands at the terminal's default foreground — no
+    // explicit white, no bold; via/scope stay dim around it.
+    expect(linked).toContain("\x1b[2mvia \x1b[22mai-gateway\x1b[2m(oidc)\x1b[22m");
     expect(linked).not.toContain("\x1b[97m");
-    expect(linked).toContain("\x1b[2mvia \x1b[22m");
-    expect(linked).toContain("\x1b[2m(oidc)\x1b[22m");
+    expect(linked).not.toContain("\x1b[1mai-gateway");
 
     // External providers render quiet — no bright token — with only the
     // authored-endpoint mark at the default foreground.
