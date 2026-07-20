@@ -1,9 +1,9 @@
-import type { Block, ToolGroupItem } from "./blocks.js";
+import type { Block, DisplayBlock, ToolGroupItem } from "./blocks.js";
 import { toolBaseName } from "./tool-presentation.js";
 
 export interface ToolBlockDisplayGroup {
   readonly members: readonly Block[];
-  readonly display: Block;
+  readonly display: DisplayBlock;
 }
 
 /**
@@ -40,9 +40,11 @@ export function groupToolBlocksForDisplay(
   options: GroupToolBlocksOptions = {},
 ): ToolBlockDisplayGroup[] {
   if ((options.logCoalescing ?? "window") === "window") {
-    // Bucket every write by (source, visibility) and anchor each bucket at
-    // its NEWEST member: the merged section renders where the last write
-    // landed, so everything that happened after it displays after it.
+    // Bucket every write by (source, visibility) and anchor each bucket's
+    // ready-made merged group at its NEWEST member: the section renders
+    // where the last write landed, so everything that happened after it
+    // displays after it. Non-anchor members simply drop from the walk —
+    // they ride the anchored group's member list.
     const buckets = new Map<string, Block[]>();
     for (const block of blocks) {
       if (!isGroupableLogWrite(block)) continue;
@@ -51,8 +53,10 @@ export function groupToolBlocksForDisplay(
       if (bucket === undefined) buckets.set(key, [block]);
       else bucket.push(block);
     }
-    const anchors = new Map<Block, readonly Block[]>();
-    for (const members of buckets.values()) anchors.set(members.at(-1)!, members);
+    const anchors = new Map<Block, ToolBlockDisplayGroup>();
+    for (const members of buckets.values()) {
+      anchors.set(members.at(-1)!, coalesceLogBucket(members));
+    }
     return groupBlocks(blocks, anchors);
   }
   return groupBlocks(blocks);
@@ -60,18 +64,17 @@ export function groupToolBlocksForDisplay(
 
 function groupBlocks(
   blocks: readonly Block[],
-  logAnchors?: ReadonlyMap<Block, readonly Block[]>,
+  logAnchors?: ReadonlyMap<Block, ToolBlockDisplayGroup>,
 ): ToolBlockDisplayGroup[] {
   const groups: ToolBlockDisplayGroup[] = [];
   for (let index = 0; index < blocks.length;) {
     const first = blocks[index]!;
     if (isGroupableLogWrite(first)) {
       if (logAnchors !== undefined) {
-        // Window mode: only a bucket's newest member emits (the merged
-        // section, at the last write's position); earlier members are
-        // carried as that group's members.
-        const members = logAnchors.get(first);
-        if (members !== undefined) groups.push(...coalesceLogWrites(members));
+        // Window mode: only a bucket's newest member emits its prebuilt
+        // merged group, at the last write's position.
+        const group = logAnchors.get(first);
+        if (group !== undefined) groups.push(group);
         index += 1;
         continue;
       }
@@ -237,19 +240,22 @@ function coalesceLogWrites(run: readonly Block[]): ToolBlockDisplayGroup[] {
       bucket.push(block);
     }
   }
-  return [...buckets.values()].map((members) => {
-    if (members.length === 1) return { members, display: members[0]! };
-    const newest = members.at(-1)!;
-    const display: Block = {
-      kind: "log",
-      live: members.some((member) => member.live !== false),
-      body: newest.body ?? "",
-      elided: members.length - 1,
-    };
-    if (newest.title !== undefined) display.title = newest.title;
-    if (newest.logVisibility !== undefined) display.logVisibility = newest.logVisibility;
-    return { members, display };
-  });
+  return [...buckets.values()].map(coalesceLogBucket);
+}
+
+/** One already-bucketed stream's merged group: the newest write, counted. */
+function coalesceLogBucket(members: readonly Block[]): ToolBlockDisplayGroup {
+  if (members.length === 1) return { members, display: members[0]! };
+  const newest = members.at(-1)!;
+  const display: DisplayBlock = {
+    kind: "log",
+    live: members.some((member) => member.live !== false),
+    body: newest.body ?? "",
+    elided: members.length - 1,
+  };
+  if (newest.title !== undefined) display.title = newest.title;
+  if (newest.logVisibility !== undefined) display.logVisibility = newest.logVisibility;
+  return { members, display };
 }
 
 /**
@@ -276,7 +282,7 @@ const RUN_PASS_THROUGH_KINDS: ReadonlySet<Block["kind"]> = new Set([
 function collectSubagentRun(
   blocks: readonly Block[],
   start: number,
-  logAnchors?: ReadonlyMap<Block, readonly Block[]>,
+  logAnchors?: ReadonlyMap<Block, ToolBlockDisplayGroup>,
 ): { consumed: number; groups: ToolBlockDisplayGroup[] } {
   const first = blocks[start]!;
   const headers = [first];
@@ -316,7 +322,8 @@ function collectSubagentRun(
     // A section stays live while its own header or any of its children
     // still streams; sibling calls settle independently.
     const live = header.live !== false || children.some((child) => child.live !== false);
-    const headerDisplay: Block = live === (header.live !== false) ? header : { ...header, live };
+    const headerDisplay: DisplayBlock =
+      live === (header.live !== false) ? header : { ...header, live };
 
     // A completed call collapses whole: the header reports Done and the
     // children fold into one counted footnote on the closing corner (the
@@ -347,14 +354,11 @@ function collectSubagentRun(
     // (they must still commit and clear by identity) but collapse into one
     // display-only `… (N more)` row that counts raw events, not display
     // rows.
-    const indexByBlock = new Map(children.map((block, position) => [block, position] as const));
     // Activity stamps rank a just-updated call above a later-announced idle
-    // one; list position is the fallback for stamp-less (test-built) blocks.
+    // one. The renderer stamps every push and in-place update; grouping
+    // reads exactly one ordering semantic.
     const recency = (group: ToolBlockDisplayGroup) =>
-      group.members.reduce(
-        (max, member) => Math.max(max, member.updateSeq ?? indexByBlock.get(member) ?? -1),
-        -1,
-      );
+      group.members.reduce((max, member) => Math.max(max, updateRecency(member)), -1);
     const childGroups = groupToolBlocksForDisplay(children)
       .slice()
       .sort((a, b) => recency(a) - recency(b));
@@ -388,8 +392,8 @@ function collectSubagentRun(
   // group instead.
   for (const block of passThrough) {
     if (logAnchors !== undefined && isGroupableLogWrite(block)) {
-      const members = logAnchors.get(block);
-      if (members !== undefined) groups.push(...coalesceLogWrites(members));
+      const group = logAnchors.get(block);
+      if (group !== undefined) groups.push(group);
       continue;
     }
     groups.push({ members: [block], display: block });
@@ -397,7 +401,7 @@ function collectSubagentRun(
   return { consumed, groups };
 }
 
-function aggregateToolBlocks(members: readonly Block[]): Block {
+function aggregateToolBlocks(members: readonly Block[]): DisplayBlock {
   const first = members[0]!;
   const group = first.toolGroup!;
   const count = members.length;
@@ -415,7 +419,7 @@ function aggregateToolBlocks(members: readonly Block[]): Block {
  * list every announced call, newest first, so fresh calls surface at the top
  * of the rail while earlier ones slide toward the elision line.
  */
-function aggregateLiveToolBlocks(members: readonly Block[]): Block {
+function aggregateLiveToolBlocks(members: readonly Block[]): DisplayBlock {
   return {
     ...aggregateToolBlocks(members),
     status: "running",
@@ -428,7 +432,7 @@ function aggregateLiveToolBlocks(members: readonly Block[]): Block {
  * tense, with the item rail dropped — completed activity compresses to one
  * line in the transcript.
  */
-function collapseSettledToolBlocks(members: readonly Block[]): Block {
+function collapseSettledToolBlocks(members: readonly Block[]): DisplayBlock {
   const first = members[0]!;
   const group = first.toolGroup!;
   const count = members.length;
@@ -512,7 +516,7 @@ function condensedChildSummary(children: readonly Block[]): string | undefined {
 /**
  * Folds one settled child-tool run into a single counted row.
  */
-function condenseChildToolRun(run: readonly Block[]): Block {
+function condenseChildToolRun(run: readonly Block[]): DisplayBlock {
   const title = condensedRunTitle(run);
   const first = run[0]!;
   return {
@@ -542,15 +546,20 @@ function condensedKindCopy(block: Block): CondensedKindCopy {
   return { pastVerb: "Made", singularNoun: "tool call", pluralNoun: "tool calls" };
 }
 
+/** A block's activity stamp; unstamped (test-built) blocks all tie at 0. */
+function updateRecency(block: Block): number {
+  return block.updateSeq ?? 0;
+}
+
 /**
  * Most recently active call first: the rail reads bottom-up, like changes
  * arriving. Activity stamps put a just-settled parallel call ahead of a
- * later-announced one still idle; announce order is the stamp-less fallback.
+ * later-announced one still idle.
  */
 function newestFirstItems(members: readonly Block[]): ToolGroupItem[] {
   return members
-    .map((member, position) => ({ member, order: member.updateSeq ?? position }))
-    .sort((a, b) => b.order - a.order)
+    .map((member, position) => ({ member, order: updateRecency(member), position }))
+    .sort((a, b) => b.order - a.order || b.position - a.position)
     .map(({ member }): ToolGroupItem => {
       const item: ToolGroupItem = { text: member.toolGroup!.item };
       // Failed calls keep their individual error summaries visible per row.

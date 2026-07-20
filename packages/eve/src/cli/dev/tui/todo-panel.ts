@@ -9,6 +9,7 @@
 
 import type { Theme } from "./theme.js";
 import { toolBaseName } from "./tool-presentation.js";
+import { TOOL_COLUMN_LEAD } from "./rail.js";
 import { clipVisible, stripTerminalControls } from "./terminal-text.js";
 
 /** One panel row parsed from the `todo` tool's replacement-write input. */
@@ -84,8 +85,7 @@ export function renderTodoPanelRows(input: TodoPanelRowsInput): string[] {
   ).length;
   // The header mark holds steady in both states — the active item's `⏺` is
   // the panel's only pulse.
-  // Two cells in, so the marks share the tool column above the rail.
-  const lead = "  ";
+  const lead = TOOL_COLUMN_LEAD;
   const header = input.working
     ? `${lead}${c.gray(g.square)} ${c.dim("Todo")}`
     : `${lead}${c.gray(g.square)} ${c.dim(`${settled}/${items.length} tasks`)}`;
@@ -103,7 +103,7 @@ export function renderTodoPanelRows(input: TodoPanelRowsInput): string[] {
       rail = c.dim(g.corner);
       railClosed = true;
     }
-    rows.push(`  ${rail} ${todoItemBody(item, input, theme)}`);
+    rows.push(`${TOOL_COLUMN_LEAD}${rail} ${todoItemBody(item, input, theme)}`);
   }
   return rows.map((row) => clipVisible(row, width));
 }
@@ -120,11 +120,13 @@ export function renderFinishedTodoRows(
 ): string[] {
   const c = theme.colors;
   const g = theme.glyph;
-  const rows = [`  ${c.green(g.success)} ${c.dim("Todo")}`];
+  const rows = [`${TOOL_COLUMN_LEAD}${c.green(g.success)} ${c.dim("Todo")}`];
   for (const item of items) {
-    rows.push(`  ${c.dim(g.rule)} ${settledMark(item, theme)} ${c.dim(item.content)}`);
+    rows.push(
+      `${TOOL_COLUMN_LEAD}${c.dim(g.rule)} ${settledMark(item, theme)} ${c.dim(item.content)}`,
+    );
   }
-  rows.push(`  ${c.dim(g.corner)} ${c.green("Done")}`);
+  rows.push(`${TOOL_COLUMN_LEAD}${c.dim(g.corner)} ${c.green("Done")}`);
   return rows.map((row) => clipVisible(row, width));
 }
 

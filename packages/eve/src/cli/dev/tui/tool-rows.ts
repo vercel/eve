@@ -6,14 +6,15 @@
  * model and its per-kind renderers stay separable concerns.
  */
 
-import type { Block, RenderBlockContext, ToolGroupItem, ToolStatus } from "./blocks.js";
+import type { DisplayBlock, RenderBlockContext, ToolGroupItem, ToolStatus } from "./blocks.js";
 import type { ToolDetailLine } from "./line-diff.js";
 import type { Theme } from "./theme.js";
 import { formatValuePretty, truncate } from "./tool-format.js";
+import { elisionText } from "./rail.js";
 import { clipVisible, visibleLength, wrapVisibleLine } from "./terminal-text.js";
 
 export function renderTool(
-  block: Block,
+  block: DisplayBlock,
   width: number,
   theme: Theme,
   context: RenderBlockContext,
@@ -22,13 +23,15 @@ export function renderTool(
   // prose text column (the character after the `│`/`▲` gutter). Nested
   // subagent rows keep the tighter lead inside their section's rail.
   if ((block.depth ?? 0) === 0) {
+    // One cell here plus the row's own one-cell indent lands the mark at
+    // the shared tool column.
     return renderToolRows(block, width - 1, theme, context).map((row) => ` ${row}`);
   }
   return renderToolRows(block, width, theme, context);
 }
 
 function renderToolRows(
-  block: Block,
+  block: DisplayBlock,
   width: number,
   theme: Theme,
   context: RenderBlockContext,
@@ -89,7 +92,7 @@ function boldLeadingWord(text: string, theme: Theme): string {
 }
 
 /** Detail stays up while the call runs; after settling only writes keep it. */
-function showToolDetail(block: Block): boolean {
+function showToolDetail(block: DisplayBlock): boolean {
   if (block.detailLines === undefined || block.detailLines.length === 0) return false;
   const status = block.status ?? "running";
   if (status === "running" || status === "approval") return true;
@@ -110,7 +113,7 @@ function railRow(body: string, theme: Theme): string {
 }
 
 function elisionRow(hidden: number, theme: Theme): string {
-  return railRow(theme.colors.dim(`${theme.glyph.ellipsis} (${hidden} more)`), theme);
+  return railRow(elisionText(hidden, theme), theme);
 }
 
 function toolGroupItemRows(items: readonly ToolGroupItem[], width: number, theme: Theme): string[] {
@@ -181,7 +184,7 @@ function itemRows(items: readonly ToolGroupItem[], width: number, theme: Theme):
   });
 }
 
-function renderToolExpanded(block: Block, width: number, theme: Theme): string[] {
+function renderToolExpanded(block: DisplayBlock, width: number, theme: Theme): string[] {
   const rows: string[] = [];
   const push = (label: string, value: unknown, color: (text: string) => string) => {
     if (value === undefined) return;

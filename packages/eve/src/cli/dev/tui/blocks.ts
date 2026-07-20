@@ -16,6 +16,7 @@ import type { Theme } from "./theme.js";
 import type { ToolGroupPresentation } from "./tool-presentation.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
 import { renderTool } from "./tool-rows.js";
+import { elisionText, TOOL_COLUMN_LEAD } from "./rail.js";
 import { clipVisible, sliceVisible, visibleLength, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 
 export type ToolStatus = "running" | "done" | "error" | "denied" | "approval";
@@ -94,8 +95,6 @@ export interface Block {
   toolName?: string;
   /** Optional aggregation metadata; execution state remains on this call's block. */
   toolGroup?: ToolGroupPresentation;
-  /** Display-only items populated when equivalent tool blocks are coalesced. */
-  toolGroupItems?: readonly ToolGroupItem[];
   /** Salient body lines rendered behind the `│` rail under the tool header. */
   detailLines?: readonly ToolDetailLine[];
   /** When true, `detailLines` stay visible after the call settles (writes). */
@@ -108,15 +107,27 @@ export interface Block {
    * settled counts as newer than a later-announced one still idle.
    */
   updateSeq?: number;
+}
+
+/**
+ * What the renderers actually draw: an execution {@link Block} plus the
+ * synthesized presentation the display grouping may attach. Only the
+ * grouping layer creates these fields, so an execution block can never
+ * smuggle display state — the type boundary enforces what used to be a
+ * comment.
+ */
+export interface DisplayBlock extends Block {
+  /** Items listed when equivalent tool calls are coalesced into one row. */
+  toolGroupItems?: readonly ToolGroupItem[];
   /**
-   * Display-only stand-in for this many earlier sibling rows elided from a
-   * capped subagent run; renders as a single dim `… +N more` line.
+   * Stand-in for this many earlier sibling rows elided from a capped
+   * subagent run; renders as a single dim `… +N more` line.
    */
   elided?: number;
   /**
-   * Display-only: this block is the last of its section, so its final row
-   * swaps the nesting rule for the closing `└` — the rail ends on the
-   * newest child instead of a bare corner row.
+   * This block is the last of its section, so its final row swaps the
+   * nesting rule for the closing `└` — the rail ends on the newest child
+   * instead of a bare corner row.
    */
   closesRail?: boolean;
 }
@@ -145,7 +156,7 @@ export interface RenderBlockContext {
  * to `width` visible columns.
  */
 export function renderBlockLines(
-  block: Block,
+  block: DisplayBlock,
   width: number,
   theme: Theme,
   context: RenderBlockContext,
@@ -171,17 +182,17 @@ export function renderBlockLines(
 function nestingPrefix(depth: number, theme: Theme): string {
   if (depth <= 0) return "";
   const rule = `${theme.colors.dim(theme.glyph.rule)} `;
-  return `  ${rule.repeat(depth)}`;
+  return `${TOOL_COLUMN_LEAD}${rule.repeat(depth)}`;
 }
 
 /** The nesting prefix with its innermost rule swapped for the closing `└`. */
 function closingPrefix(depth: number, theme: Theme): string {
   const rule = `${theme.colors.dim(theme.glyph.rule)} `;
-  return `  ${rule.repeat(depth - 1)}${theme.colors.dim(theme.glyph.corner)} `;
+  return `${TOOL_COLUMN_LEAD}${rule.repeat(depth - 1)}${theme.colors.dim(theme.glyph.corner)} `;
 }
 
 function renderBody(
-  block: Block,
+  block: DisplayBlock,
   width: number,
   theme: Theme,
   context: RenderBlockContext,
@@ -190,7 +201,7 @@ function renderBody(
   // tool marks beside it; other kinds (a coalesced log run) render their
   // elided count inside their own section.
   if (block.elided !== undefined && block.kind === "subagent-step") {
-    return [` ${theme.colors.dim(`${theme.glyph.ellipsis} (${block.elided} more)`)}`];
+    return [` ${elisionText(block.elided, theme)}`];
   }
   switch (block.kind) {
     case "user":
@@ -227,7 +238,7 @@ function renderBody(
     case "subagent-close": {
       // Closes the section's rail. A completed section's corner carries
       // the collapsed activity footnote instead of railed children.
-      const corner = `  ${theme.colors.dim(theme.glyph.corner)}`;
+      const corner = `${TOOL_COLUMN_LEAD}${theme.colors.dim(theme.glyph.corner)}`;
       if (block.body !== undefined && block.body.length > 0) {
         return [clipVisible(`${corner} ${theme.colors.dim(block.body)}`, Math.max(1, width))];
       }
@@ -516,7 +527,7 @@ function renderSandbox(
  * renders at all is the renderer's `LogDisplayMode` filter — this function
  * only ever sees visible blocks.
  */
-function renderLog(block: Block, width: number, theme: Theme): string[] {
+function renderLog(block: DisplayBlock, width: number, theme: Theme): string[] {
   const isErr = block.title === "stderr";
   const color = isErr ? theme.colors.red : theme.colors.gray;
   const rule = theme.colors.dim(theme.glyph.rule);
@@ -524,7 +535,7 @@ function renderLog(block: Block, width: number, theme: Theme): string[] {
 
   const rows = [`${theme.colors.dim(theme.glyph.reasoning)} ${theme.colors.dim(source)}`];
   if (block.elided !== undefined && block.elided > 0) {
-    rows.push(`${rule} ${theme.colors.dim(`${theme.glyph.ellipsis} (${block.elided} more)`)}`);
+    rows.push(`${rule} ${elisionText(block.elided, theme)}`);
   }
   for (const raw of (block.body ?? "").split("\n")) {
     for (const line of wrapVisibleLine(raw, Math.max(1, width - 2))) {
@@ -552,8 +563,7 @@ function renderSubagentHeader(block: Block, width: number, theme: Theme): string
   const isSelf = block.title === undefined || block.title === "agent";
   const rawName = isSelf ? "self" : block.title!;
   const name = truncatePlain(rawName, Math.max(8, width - 16));
-  // Two cells in, so the mark shares the tool column above its rail.
-  const lead = "  ";
+  const lead = TOOL_COLUMN_LEAD;
   // The ordinal rides inside the parens (`subagent(self:4)`) in every
   // state. Completion reports on the closing corner (`└ Done…`); the
   // header only flips its mark from working orange to done green.

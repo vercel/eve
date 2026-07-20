@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type Block, renderBlockLines } from "./blocks.js";
+import { type DisplayBlock, renderBlockLines } from "./blocks.js";
 import { maxVisibleToolGroupItems } from "./tool-rows.js";
 import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
@@ -8,7 +8,7 @@ import { createTheme } from "./theme.js";
 const theme = createTheme({ color: false, unicode: true });
 const ctx = { activityPulse: "▪" };
 
-function render(block: Block, width = 60): string[] {
+function render(block: DisplayBlock, width = 60): string[] {
   return renderBlockLines(block, width, theme, ctx).map(stripAnsi);
 }
 

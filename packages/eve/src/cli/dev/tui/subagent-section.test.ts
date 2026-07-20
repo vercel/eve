@@ -62,6 +62,11 @@ describe("subagent section rendering", () => {
       },
     ];
 
+    // The renderer stamps every block it pushes; mirror that here so the
+    // MRU window has real recency to rank on.
+    blocks.forEach((block, index) => {
+      block.updateSeq = index + 1;
+    });
     const rows = groupToolBlocksForDisplay(blocks).flatMap((group) =>
       renderBlockLines(group.display, 78, theme, { activityPulse: "▪" }).map(stripAnsi),
     );

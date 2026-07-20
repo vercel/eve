@@ -86,6 +86,7 @@ import {
 import { toErrorMessage } from "#shared/errors.js";
 import {
   type Block,
+  type DisplayBlock,
   type BlockKind,
   type ToolStatus,
   renderAttentionRows,
@@ -3419,7 +3420,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return buildAgentHeader(input);
   }
 
-  #renderBlock(block: Block, width: number, previous: PreviousBlock | undefined): string[] {
+  #renderBlock(block: DisplayBlock, width: number, previous: PreviousBlock | undefined): string[] {
     const context: Parameters<typeof renderBlockLines>[3] = {
       activityPulse: this.#progressPulseGlyph(
         this.#activityPulseStartedAtMs,
