@@ -299,6 +299,21 @@ export const messengerLogo = (props: LogoProps) => <SiMessenger color="default" 
 
 export const xLogo = (props: LogoProps) => <SiX {...props} />;
 
+export const agentBrowserLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect height="16" rx="2" stroke="currentColor" strokeWidth="1.5" width="20" x="2" y="4" />
+    <path d="M2 8h20" stroke="currentColor" strokeWidth="1.5" />
+    <path
+      d="m8 12 2 2-2 2m4 0h4"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+    />
+    <circle cx="5" cy="6" fill="currentColor" r=".75" />
+  </svg>
+);
+
 export const logos = {
   eve: eveLogo,
   web: webLogo,
@@ -350,6 +365,7 @@ export const logos = {
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
   x: xLogo,
+  "agent-browser": agentBrowserLogo,
 } as const;
 
 export type LogoKey = keyof typeof logos;

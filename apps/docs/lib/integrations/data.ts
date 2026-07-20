@@ -4,6 +4,7 @@ import {
   channelEntries,
   connectionEntries,
   connectionProtocols as protocolsForIdentity,
+  extensionEntries,
 } from "@vercel/eve-catalog";
 import type { LogoKey } from "./logos";
 
@@ -16,7 +17,7 @@ import type { LogoKey } from "./logos";
  * keyed by slug.
  */
 
-export type IntegrationType = "channel" | "connection";
+export type IntegrationType = "channel" | "connection" | "extension";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
 export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@vercel/eve-catalog";
@@ -67,8 +68,8 @@ export interface Integration {
   /** Searchable keywords beyond the name. */
   keywords?: string[];
   /**
-   * Channels author their setup as markdown. Connections leave these unset
-   * and supply a `connection` spec, from which content is generated.
+   * Channels and extensions author their setup as markdown. Connections leave
+   * these unset and supply a `connection` spec, from which content is generated.
    */
   install?: string;
   quickStart?: string;
@@ -88,6 +89,13 @@ interface Presentation {
 
 /** Channel overlay: presentation plus hand-authored setup markdown. */
 interface ChannelPresentation extends Presentation {
+  install: string;
+  quickStart: string;
+  configure: string;
+}
+
+/** Extension overlay with hand-authored package setup. */
+interface ExtensionPresentation extends Presentation {
   install: string;
   quickStart: string;
   configure: string;
@@ -474,6 +482,57 @@ Credentials come from the \`createMessengerAdapter\` config or the adapter's env
   },
 };
 
+const extensionPresentations: Record<string, ExtensionPresentation> = {
+  "agent-browser": {
+    logo: "agent-browser",
+    docsHref:
+      "https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve",
+    keywords: [
+      "browser",
+      "browser automation",
+      "web automation",
+      "cli",
+      "chrome",
+      "playwright",
+      "puppeteer",
+      "kernel",
+      "browserbase",
+      "browser use",
+    ],
+    install: `Install the agent-browser extension for eve:
+
+\`\`\`bash
+npm install @agent-browser/eve
+\`\`\`
+
+The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox, Docker, or microsandbox.`,
+    quickStart: `Mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/browser.ts"
+import browser from "@agent-browser/eve";
+
+export default browser({});
+\`\`\`
+
+The filename supplies the \`browser\` namespace. The extension adds tools such as \`browser__navigate\`, \`browser__snapshot\`, \`browser__click\`, \`browser__fill\`, \`browser__find\`, and \`browser__screenshot\`. agent-browser keeps the underlying browser process and session state in the eve sandbox.`,
+    configure: `Restrict browser access to the sites the agent needs with the extension's domain allow-list:
+
+\`\`\`ts title="agent/extensions/browser.ts"
+import browser from "@agent-browser/eve";
+
+export default browser({
+  allowedDomains: ["example.com", "*.example.com"],
+  contentBoundaries: true,
+  maxOutputChars: 50_000,
+});
+\`\`\`
+
+Also configure the [sandbox network policy](/docs/sandbox#network-policy) for defense in depth. Treat saved browser state, cookies, screenshots, downloads, and recordings as sensitive data. Do not place passwords or session tokens in prompts. Use the extension's per-tool overrides to gate or disable actions your agent should not take unattended.
+
+The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) for the complete options and example app.`,
+  },
+};
+
 /**
  * Connection presentation overlay, keyed by catalog slug. Transport (`mcp`,
  * `openapi`) and the model-facing description come from `@vercel/eve-catalog`;
@@ -763,6 +822,27 @@ function buildConnection(entry: IntegrationEntry): Integration {
   };
 }
 
+function buildExtension(entry: IntegrationEntry): Integration {
+  const presentation = extensionPresentations[entry.slug];
+  if (presentation === undefined) {
+    throw new Error(
+      `Extension "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
+    );
+  }
+  return {
+    slug: entry.slug,
+    name: entry.name,
+    type: "extension",
+    tagline: entry.tagline,
+    logo: presentation.logo,
+    docsHref: presentation.docsHref,
+    keywords: presentation.keywords,
+    install: presentation.install,
+    quickStart: presentation.quickStart,
+    configure: presentation.configure,
+  };
+}
+
 const channels: Integration[] = channelEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildChannel);
@@ -770,6 +850,10 @@ const channels: Integration[] = channelEntries()
 const connections: Integration[] = connectionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildConnection);
+
+const extensions: Integration[] = extensionEntries()
+  .filter((entry) => entry.surfaces.gallery)
+  .map(buildExtension);
 
 /** Display label for each connection protocol. */
 export const protocolLabel: Record<ConnectionProtocol, string> = {
@@ -790,7 +874,7 @@ export const authModeLabel: Record<AuthMode, string> = {
   jwtBearer: "JWT bearer",
 };
 
-export const integrations: Integration[] = [...channels, ...connections];
+export const integrations: Integration[] = [...channels, ...extensions, ...connections];
 
 export const getIntegration = (slug: string): Integration | undefined =>
   integrations.find((integration) => integration.slug === slug);
