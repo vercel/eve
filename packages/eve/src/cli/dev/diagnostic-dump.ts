@@ -1,6 +1,6 @@
 import { access, readdir, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter, join, relative } from "node:path";
+import { delimiter, join, relative, sep } from "node:path";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH } from "#internal/workflow/local-world-data-directory.js";
@@ -44,6 +44,7 @@ export interface DevSessionStats {
 
 export interface DevDiagnosticDump {
   readonly path: string;
+  /** Project-relative reference, forward slashes on every platform. */
   readonly displayPath: string;
   updateSessionStats(stats: DevSessionStats): void;
   close(): Promise<void>;
@@ -104,7 +105,7 @@ export function createDevDiagnosticDump(
 
   return {
     path,
-    displayPath: relative(appRoot, path),
+    displayPath: relative(appRoot, path).split(sep).join("/"),
     updateSessionStats(next) {
       stats = next;
       write();

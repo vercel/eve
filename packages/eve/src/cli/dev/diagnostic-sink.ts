@@ -1,5 +1,5 @@
 import { chmod, mkdir, open, type FileHandle } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 import type { LogLevel } from "#internal/logging.js";
 import type { JsonObject } from "#shared/json.js";
@@ -28,6 +28,11 @@ export type DevDiagnosticEntry = DevDiagnosticOutputEntry | DevDiagnosticLogReco
 
 export interface DevDiagnosticSink {
   readonly path: string;
+  /**
+   * Project-relative reference with forward slashes on every platform:
+   * it is a display and correlation token (transcript pointers,
+   * `eve logs <ref>` input), not a filesystem path.
+   */
   readonly displayPath: string;
   append(entry: DevDiagnosticEntry): void;
   close(): Promise<void>;
@@ -67,7 +72,7 @@ function createOpenSink(
 
   return {
     path,
-    displayPath: relative(appRoot, path),
+    displayPath: relative(appRoot, path).split(sep).join("/"),
     append(entry) {
       if (closed || failed) return;
       const record = formatDiagnosticEntry(entry, now());
