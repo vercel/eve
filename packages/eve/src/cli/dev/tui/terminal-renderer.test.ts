@@ -1233,18 +1233,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("SUBAGENT_TOKEN=token-8");
   });
 
-  it("commits the two-line session boundary", () => {
+  it("commits the one-line session boundary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderNotice("anchor");
     renderer.renderSessionBoundary();
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("└── Session ended.");
-    expect(snapshot).toContain("┌── Session started (clear context).");
-    expect(snapshot.indexOf("└── Session ended.")).toBeLessThan(
-      snapshot.indexOf("┌── Session started"),
-    );
+    expect(snapshot).toContain("┌── Session restarted, clear context.");
   });
 
   it("closes the dying turn's coda and dismisses the todo panel at the boundary", async () => {
@@ -1281,7 +1277,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     // The dead turn's stats close before the boundary, not after it…
     expect(snapshot.indexOf("└ Done in")).toBeGreaterThan(-1);
-    expect(snapshot.indexOf("└ Done in")).toBeLessThan(snapshot.indexOf("└── Session ended."));
+    expect(snapshot.indexOf("└ Done in")).toBeLessThan(snapshot.indexOf("┌── Session restarted"));
     // …and the discarded session's plan dismisses instead of lingering.
     expect(snapshot).not.toContain("first task");
 

@@ -207,9 +207,9 @@ export type AgentTUIRenderer = {
    */
   renderNotice?(text: string): void;
   /**
-   * Commits the two-line session boundary (`└── Session ended.` /
-   * `┌── Session started (clear context).`) when a dead session is replaced
-   * mid-conversation. Optional; renderers without it get the plain notice.
+   * Commits the session boundary (`┌── Session restarted, clear context.`)
+   * when a dead session is replaced mid-conversation. Optional; renderers
+   * without it get the plain notice.
    */
   renderSessionBoundary?(): void;
   /**

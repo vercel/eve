@@ -1420,9 +1420,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * text is blank.
    */
   /**
-   * The mid-conversation session boundary: the old session's context closes
-   * on a corner and the replacement opens on one, so the transcript shows
-   * where the server-side context was cut.
+   * The mid-conversation session boundary: one opening-corner line marking
+   * where the server-side context was cut and a fresh session took over.
    */
   renderSessionBoundary(): void {
     // The dying turn's stats coda closes before the boundary — it belongs
@@ -1438,11 +1437,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const c = this.#theme.colors;
     const g = this.#theme.glyph;
-    const seg = g.dash.repeat(2);
-    const body = [
-      c.dim(`${g.corner}${seg} Session ended.`),
-      c.dim(`${g.cornerOpen}${seg} Session started (clear context).`),
-    ].join("\n");
+    const body = c.dim(`${g.cornerOpen}${g.dash.repeat(2)} Session restarted, clear context.`);
     this.#pushBlock({ kind: "session-boundary", body, live: false });
     this.#paint();
   }
