@@ -210,7 +210,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("›", 5_000);
+    await screen.waitForIdlePrompt(5_000);
 
     // ---- Turn 1: stub-mcp, ends in `authorized` ----
 
@@ -315,7 +315,7 @@ void (async () => {
     // The turn is complete; wait until the runner is back at the prompt so
     // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
     // turn and returns to the prompt (Claude Code's two-step exit).
-    await screen.waitForText("›", 10_000);
+    await screen.waitForIdlePrompt(10_000);
     input.ctrlC();
     await runPromise;
   } catch (error) {

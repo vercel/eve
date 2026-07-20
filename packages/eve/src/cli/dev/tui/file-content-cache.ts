@@ -43,6 +43,15 @@ export class FileContentCache {
   }
 
   /**
+   * Forgets everything. A new conversation runs against a fresh session —
+   * possibly a fresh sandbox — so stale bases would produce confidently
+   * wrong diffs.
+   */
+  clear(): void {
+    this.#byPath.clear();
+  }
+
+  /**
    * Records a read result when it provably covers the whole file: not
    * truncated, starting at line 1, with exactly `totalLines` numbered lines.
    * Partial or truncated reads are ignored — caching them would produce

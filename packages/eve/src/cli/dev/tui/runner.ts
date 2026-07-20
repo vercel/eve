@@ -1,5 +1,6 @@
 import {
   type ActionResultStreamEvent,
+  type ActionPreparingStreamEvent,
   type ActionsRequestedStreamEvent,
   type AgentInfoResult,
   type AuthorizationCompletedStreamEvent,
@@ -117,6 +118,7 @@ export type AgentTUIStreamEvent =
   | { type: "assistant-complete"; id: string; text?: string | null }
   | { type: "reasoning-delta"; id: string; delta: string }
   | { type: "reasoning-complete"; id: string }
+  | { type: "tool-call-preparing"; toolCallId: string; toolName: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
   | { type: "tool-result"; toolCallId: string; output: unknown }
@@ -205,6 +207,12 @@ export type AgentTUIRenderer = {
    */
   renderNotice?(text: string): void;
   /**
+   * Commits the two-line session boundary (`└── Session ended.` /
+   * `┌── Session started (clear context).`) when a dead session is replaced
+   * mid-conversation. Optional; renderers without it get the plain notice.
+   */
+  renderSessionBoundary?(): void;
+  /**
    * Commits one development sandbox lifecycle line to the transcript.
    * Optional so non-terminal renderers can ignore local prewarm progress.
    */
@@ -237,6 +245,11 @@ export type AgentTUIRenderer = {
    * Out-of-band update for one child tool call of a subagent dispatch.
    */
   upsertSubagentTool?(update: SubagentToolUpdate): void;
+  /**
+   * Removes one child tool row from a subagent section. Used to drop
+   * `preparing` placeholders whose call never materialized.
+   */
+  removeSubagentTool?(update: { callId: string; childCallId: string }): void;
   /**
    * Registers a tool call id as originating from a subagent's child
    * session. The renderer must skip or remove parent-level tool blocks for
@@ -879,11 +892,19 @@ export class EveTUIRunner {
       if (this.#sessionFailed) {
         this.#sessionFailed = false;
         this.#startNewSession();
-        this.#renderer.renderNotice?.(
-          result.turnState?.aborted
-            ? "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server."
-            : "Session ended — started a new session. Earlier context was cleared.",
-        );
+        // An aborted turn keeps its explicit notice — the boundary line alone
+        // would hide that the interrupted turn may still run on the server.
+        if (result.turnState?.aborted) {
+          this.#renderer.renderNotice?.(
+            "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
+          );
+        } else if (this.#renderer.renderSessionBoundary !== undefined) {
+          this.#renderer.renderSessionBoundary();
+        } else {
+          this.#renderer.renderNotice?.(
+            "Session ended — started a new session. Earlier context was cleared.",
+          );
+        }
       }
     }
   }
@@ -1528,16 +1549,21 @@ export class EveTUIRunner {
       // approval-requested → executing once the parent approves, but
       // never demote from done/failed back to executing.
       const priority: Record<SubagentToolState["status"], number> = {
-        "approval-requested": 0,
-        executing: 1,
-        done: 2,
-        failed: 2,
-        rejected: 2,
+        preparing: 0,
+        "approval-requested": 1,
+        executing: 2,
+        done: 3,
+        failed: 3,
+        rejected: 3,
       };
       if (priority[request.status] > priority[existing.status]) {
         existing.status = request.status;
       }
-      existing.input = request.input;
+      // A late `preparing` announcement must not wipe input the full call
+      // already delivered.
+      if (request.input !== undefined) {
+        existing.input = request.input;
+      }
     } else {
       run.tools.set(request.childCallId, tool);
     }
@@ -1576,6 +1602,21 @@ export class EveTUIRunner {
       }
     }
     run.currentSectionKey = null;
+    this.#sweepPreparingChildTools(callId, run);
+  }
+
+  /**
+   * Drops child tool placeholders that never left `preparing` — their input
+   * never parsed (the child model emitted bad JSON, or the stream ended
+   * mid-generation), so no upgrade is coming and the row would linger as a
+   * `Search …` ghost inside the section.
+   */
+  #sweepPreparingChildTools(callId: string, run: SubagentRun): void {
+    for (const [childCallId, tool] of run.tools) {
+      if (tool.status !== "preparing") continue;
+      run.tools.delete(childCallId);
+      this.#renderer.removeSubagentTool?.({ callId, childCallId });
+    }
   }
 
   #applyChildEvent(callId: string, event: HandleMessageStreamEvent) {
@@ -1637,7 +1678,25 @@ export class EveTUIRunner {
       }
       case "step.completed":
         finalizeCurrent();
+        // A valid child call upgrades from `preparing` within its own step;
+        // one still preparing at the boundary never parsed and would linger
+        // as a placeholder ghost in the section.
+        this.#sweepPreparingChildTools(callId, run);
         break;
+      case "action.preparing": {
+        // The child model committed to a call whose input is still
+        // streaming; show the placeholder row until `actions.requested`
+        // (or `input.requested`) delivers the full input.
+        finalizeCurrent();
+        const data = (event as ActionPreparingStreamEvent).data;
+        this.#registerChildTool(callId, run, {
+          childCallId: data.callId,
+          toolName: data.toolName,
+          input: undefined,
+          status: "preparing",
+        });
+        break;
+      }
       case "actions.requested": {
         // Close any pending text section before the tool call so the
         // tool box renders below it — and the next post-tool message
@@ -1959,6 +2018,21 @@ async function* eveEventsToTUIStream(
         state.completed = true;
         state.completedEpoch = stepEpoch;
         yield { type: "reasoning-complete", id };
+        break;
+      }
+
+      case "action.preparing": {
+        // Announces a call whose input is still streaming from the model.
+        // Deliberately not added to `knownToolCalls`: the later tool-call
+        // event with the full input must still flow through and upgrade the
+        // placeholder block in place.
+        const data = (event as ActionPreparingStreamEvent).data;
+        if (knownToolCalls.has(data.callId)) break;
+        yield {
+          type: "tool-call-preparing",
+          toolCallId: data.callId,
+          toolName: data.toolName,
+        };
         break;
       }
 
@@ -2371,7 +2445,7 @@ type SubagentChildStep = {
 type SubagentToolState = {
   toolName: string;
   input: unknown;
-  status: "approval-requested" | "executing" | "done" | "failed" | "rejected";
+  status: "preparing" | "approval-requested" | "executing" | "done" | "failed" | "rejected";
   output?: unknown;
   errorText?: string;
 };
@@ -2412,7 +2486,7 @@ export type SubagentToolUpdate = {
   childCallId: string;
   toolName: string;
   input: unknown;
-  status: "approval-requested" | "executing" | "done" | "failed" | "rejected";
+  status: "preparing" | "approval-requested" | "executing" | "done" | "failed" | "rejected";
   output?: unknown;
   errorText?: string;
 };

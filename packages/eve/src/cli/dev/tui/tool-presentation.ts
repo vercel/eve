@@ -24,6 +24,12 @@ export interface ToolPresentation {
 export interface ToolPresentationContext {
   readonly previousContent?: string;
   readonly existed?: boolean;
+  /**
+   * True when the tool dispatches a named subagent (each subagent exposes a
+   * tool bearing its own name). The presentation reads as a delegation —
+   * `Delegate stock-price` — instead of a generic tool call.
+   */
+  readonly isSubagent?: boolean;
 }
 
 /** Copy needed to aggregate equivalent calls without merging their state. */
@@ -40,6 +46,8 @@ interface BuiltinToolCopy {
   readonly verb: string;
   readonly pastVerb: string;
   readonly argKey: string;
+  /** Alternate keys provider-managed variants of the tool send instead. */
+  readonly fallbackArgKeys?: readonly string[];
   readonly singularNoun: string;
   readonly pluralNoun: string;
 }
@@ -117,6 +125,10 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     verb: "Search",
     pastVerb: "Searched",
     argKey: "query",
+    // Provider-managed variants disagree on the argument name: some send an
+    // `objective`/`search_query` pair instead of Anthropic's `query` (the
+    // OpenAI `action` nesting is handled separately).
+    fallbackArgKeys: ["objective", "search_query", "searchQuery"],
     singularNoun: "query",
     pluralNoun: "queries",
   },
@@ -189,6 +201,17 @@ export function presentTool(
   const baseName = toolBaseName(toolName);
   if (baseName === "todo") return presentTodoTool(input);
   if (baseName === "write_file") return presentWriteFileTool(toolName, input, context);
+  if (context?.isSubagent === true) {
+    // Named subagent dispatch: the tool name is the delegation target; the
+    // message rides as the quiet subtitle. The block is transient — the
+    // nested subagent section replaces it once the child registers.
+    return {
+      title: `Delegate ${baseName}`,
+      doneTitle: `Delegated ${baseName}`,
+      subtitle: salientArg(input, "message") ?? "",
+      summarizeResult: () => undefined,
+    };
+  }
   if (baseName === "final_output") {
     // Task-mode terminal signal (subagent streams): its input is the
     // structured result itself, kept behind the expanded `--tools full` view.
@@ -198,8 +221,10 @@ export function presentTool(
   const copy = BUILTIN_TOOL_COPY[baseName];
   if (copy !== undefined) {
     const item =
-      salientArg(input, copy.argKey) ??
-      (baseName === "web_search" ? webSearchActionArg(input) : undefined);
+      [copy.argKey, ...(copy.fallbackArgKeys ?? [])].reduce<string | undefined>(
+        (found, key) => found ?? salientArg(input, key),
+        undefined,
+      ) ?? (baseName === "web_search" ? webSearchActionArg(input) : undefined);
     if (item !== undefined) {
       return {
         title: `${copy.verb} ${item}`,
@@ -223,6 +248,33 @@ export function presentTool(
     title: toolName,
     subtitle: summarizeToolArgs(input),
     summarizeResult: summarizeToolResult,
+  };
+}
+
+/**
+ * Placeholder copy for a call whose input is still streaming from the model
+ * (`action.preparing`). Known tools lead with their activity verb so the row
+ * already reads as intent (`Fetch …`); unknown tools keep their name with a
+ * quiet hint. The full presentation replaces this once the input arrives.
+ */
+export function presentPreparingTool(
+  toolName: string,
+  context?: ToolPresentationContext,
+): ToolPresentation {
+  const baseName = toolBaseName(toolName);
+  if (baseName === "final_output") {
+    return { title: "Return final output", subtitle: "", summarizeResult: () => undefined };
+  }
+  if (context?.isSubagent === true) {
+    // A named subagent's tool carries the delegation target in its name —
+    // showable before the message finishes streaming.
+    return { title: `Delegate ${baseName} …`, subtitle: "", summarizeResult: () => undefined };
+  }
+  const verb = baseName === "write_file" ? "Write" : BUILTIN_TOOL_COPY[baseName]?.verb;
+  return {
+    title: verb === undefined ? toolName : `${verb} …`,
+    subtitle: verb === undefined ? "preparing…" : "",
+    summarizeResult: () => undefined,
   };
 }
 

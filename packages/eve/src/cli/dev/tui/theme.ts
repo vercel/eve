@@ -61,7 +61,7 @@ export interface ThemeColors {
 export interface ThemeGlyphs {
   /** `▲` — the Vercel/eve brand mark; prefixes the agent's own output. */
   brand: string;
-  /** `▌` — left gutter bar marking a user message. */
+  /** `│` — left gutter bar marking a user message. */
   user: string;
   /** `○` — reasoning / "thinking" marker (Next.js "wait" glyph). */
   reasoning: string;
@@ -69,8 +69,10 @@ export interface ThemeGlyphs {
   square: string;
   /** `└` — closes a `│`-railed detail region under a tool header. */
   corner: string;
-  /** `●` — a completed todo item. */
-  dotFilled: string;
+  /** `┌` — opens a region; pairs with `corner` at session boundaries. */
+  cornerOpen: string;
+  /** `⌝` — marks a provider endpoint authored in the agent's own code. */
+  external: string;
   /** `⏺` — the in-progress todo item (pulses while the turn runs). */
   dotActive: string;
   /** `✓` — a completed tool or success state. */
@@ -79,7 +81,7 @@ export interface ThemeGlyphs {
   error: string;
   /** `⚠` — a warning / attention state. */
   warning: string;
-  /** `◆` — a subagent region header. */
+  /** `※` — a subagent region header. */
   subagent: string;
   /** `│` — vertical rule drawn in the gutter to nest subagent output. */
   rule: string;
@@ -133,16 +135,17 @@ export interface ThemeGlyphs {
 
 const UNICODE_GLYPHS: ThemeGlyphs = {
   brand: "▲",
-  user: "▌",
+  user: "│",
   reasoning: "○",
   square: "▪",
   corner: "└",
-  dotFilled: "●",
+  cornerOpen: "┌",
+  external: "⌝",
   dotActive: "⏺",
   success: "✓",
   error: "⨯",
   warning: "⚠",
-  subagent: "◆",
+  subagent: "※",
   rule: "│",
   question: "?",
   connection: "●",
@@ -175,7 +178,8 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   reasoning: "o",
   square: "*",
   corner: "`",
-  dotFilled: "*",
+  cornerOpen: ",",
+  external: "^",
   dotActive: "*",
   success: "+",
   error: "x",

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   allTodoItemsSettled,
   readTodoToolItems,
+  renderFinishedTodoRows,
   renderTodoPanelRows,
   type TodoPanelItem,
 } from "./todo-panel.js";
@@ -75,6 +76,28 @@ describe("allTodoItemsSettled", () => {
   });
 });
 
+describe("renderFinishedTodoRows", () => {
+  it("checks every item on the rail and closes with Done", () => {
+    const rows = renderFinishedTodoRows(
+      [
+        { content: "scope the review", status: "completed" },
+        { content: "run the checks", status: "completed" },
+        { content: "optional pass", status: "cancelled" },
+      ],
+      60,
+      theme,
+    ).map(stripAnsi);
+
+    expect(rows).toEqual([
+      " ✓ Todo",
+      " │ ✓ scope the review",
+      " │ ✓ run the checks",
+      " │ ⨯ optional pass",
+      " └ Done",
+    ]);
+  });
+});
+
 describe("renderTodoPanelRows", () => {
   it("rails settled items and closes the rail at the active item", () => {
     const rows = render([
@@ -86,16 +109,16 @@ describe("renderTodoPanelRows", () => {
     ]);
 
     expect(rows).toEqual([
-      "▪ Working…",
-      "│ ● theme glyphs",
-      "│ ● setup verbiage",
-      "└ ⏺ status line",
-      "  ○ keep blue",
-      "  ○ root menu",
+      " ▪ Todo",
+      " │ ✓ theme glyphs",
+      " │ ✓ setup verbiage",
+      " └ ⏺ status line",
+      "   ○ keep blue",
+      "   ○ root menu",
     ]);
   });
 
-  it("pulses the header and active item on the shared off-beat", () => {
+  it("holds the header steady while only the active item pulses", () => {
     const rows = render(
       [
         { content: "a", status: "completed" },
@@ -105,8 +128,9 @@ describe("renderTodoPanelRows", () => {
       " ",
     );
 
-    expect(rows[0]).toBe("  Working…");
-    expect(rows[2]).toBe("└   b");
+    // Off-beat frame: the header mark stays, the active item's dot blinks.
+    expect(rows[0]).toBe(" ▪ Todo");
+    expect(rows[2]).toBe(" └   b");
   });
 
   it("shows settled progress instead of the pulse while the prompt is idle", () => {
@@ -119,10 +143,10 @@ describe("renderTodoPanelRows", () => {
       false,
     );
 
-    expect(rows[0]).toBe("▪ 2/3 tasks");
-    expect(rows[1]).toBe("│ ● a");
-    expect(rows[2]).toBe("│ ● b");
-    expect(rows[3]).toBe("└ ○ c");
+    expect(rows[0]).toBe(" ▪ 2/3 tasks");
+    expect(rows[1]).toBe(" │ ✓ a");
+    expect(rows[2]).toBe(" │ ⨯ b");
+    expect(rows[3]).toBe(" └ ○ c");
   });
 
   it("clips rows to the panel width", () => {

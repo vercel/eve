@@ -14,7 +14,7 @@ function render(block: Block, width = 60): string[] {
 
 describe("renderBlockLines", () => {
   it("renders a user message behind a left bar", () => {
-    expect(render({ kind: "user", body: "hello there" })).toEqual(["▌ hello there"]);
+    expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
 
   it("marks the assistant with the brand triangle", () => {
@@ -30,8 +30,8 @@ describe("renderBlockLines", () => {
       status: "done",
       result: "73°F",
     });
-    expect(lines[0]).toBe(' ▪ get_weather  city="SF"');
-    expect(lines[1]).toBe("  → 73°F");
+    expect(lines[0]).toBe('  ▪ get_weather  city="SF"');
+    expect(lines[1]).toBe("   → 73°F");
   });
 
   it("swaps in the past-tense title once the call settles", () => {
@@ -41,7 +41,7 @@ describe("renderBlockLines", () => {
       doneTitle: "Fetched https://one.example",
       status: "running",
     });
-    expect(running[0]).toBe(" ▪ Fetch https://one.example");
+    expect(running[0]).toBe("  ▪ Fetch https://one.example");
 
     const done = render({
       kind: "tool",
@@ -49,7 +49,7 @@ describe("renderBlockLines", () => {
       doneTitle: "Fetched https://one.example",
       status: "done",
     });
-    expect(done).toEqual([" ▪ Fetched https://one.example"]);
+    expect(done).toEqual(["  ▪ Fetched https://one.example"]);
   });
 
   it("bolds only the leading verb of a tool header", () => {
@@ -66,7 +66,7 @@ describe("renderBlockLines", () => {
 
   it("shows the shared square pulse while a tool runs", () => {
     const lines = render({ kind: "tool", title: "search", status: "running", live: true });
-    expect(lines[0]).toBe(" ▪ search");
+    expect(lines[0]).toBe("  ▪ search");
   });
 
   it("renders a coalesced tool presentation as a railed item region", () => {
@@ -77,10 +77,10 @@ describe("renderBlockLines", () => {
       toolGroupItems: [{ text: "https://two.example" }, { text: "https://one.example" }],
     });
     expect(lines).toEqual([
-      " ▪ Fetch 2 URLs",
-      " │ https://two.example",
-      " │ https://one.example",
-      " └",
+      "  ▪ Fetch 2 URLs",
+      "  │ https://two.example",
+      "  │ https://one.example",
+      "  └",
     ]);
   });
 
@@ -94,12 +94,12 @@ describe("renderBlockLines", () => {
       })),
     });
     expect(lines).toHaveLength(1 + maxVisibleToolGroupItems + 2);
-    expect(lines[1]).toBe(" │ https://example.com/1");
+    expect(lines[1]).toBe("  │ https://example.com/1");
     expect(lines[maxVisibleToolGroupItems]).toBe(
-      ` │ https://example.com/${maxVisibleToolGroupItems}`,
+      `  │ https://example.com/${maxVisibleToolGroupItems}`,
     );
-    expect(lines.at(-2)).toBe(" │ … (25 more)");
-    expect(lines.at(-1)).toBe(" └");
+    expect(lines.at(-2)).toBe("  │ … (25 more)");
+    expect(lines.at(-1)).toBe("  └");
   });
 
   it("renders a coalesced failed batch as an aligned per-item summary table", () => {
@@ -113,10 +113,10 @@ describe("renderBlockLines", () => {
       ],
     });
     expect(lines).toEqual([
-      " ⨯ Fetch 2 URLs",
-      " │ https://one.example        status 403",
-      " │ https://two.example/nested status 429",
-      " └",
+      "  ⨯ Fetch 2 URLs",
+      "  │ https://one.example        status 403",
+      "  │ https://two.example/nested status 429",
+      "  └",
     ]);
   });
 
@@ -130,11 +130,11 @@ describe("renderBlockLines", () => {
       keepDetailWhenDone: true,
     });
     expect(lines).toEqual([
-      " ▪ Wrote ~/app/package.json",
-      " │ {",
-      ' │   "name": "app"',
-      " │ }",
-      " └",
+      "  ▪ Wrote ~/app/package.json",
+      "  │ {",
+      '  │   "name": "app"',
+      "  │ }",
+      "  └",
     ]);
   });
 
@@ -154,13 +154,13 @@ describe("renderBlockLines", () => {
       keepDetailWhenDone: true,
     });
     expect(lines).toEqual([
-      " ▪ Wrote ~/app/package.json",
-      ' │    "dev": "eve dev",',
-      ' │+   "typecheck": "eve build && tsc"',
-      ' │-   "zod": "^5.6.0"',
-      " │ …",
-      " │    }",
-      " └",
+      "  ▪ Wrote ~/app/package.json",
+      '  │    "dev": "eve dev",',
+      '  │+   "typecheck": "eve build && tsc"',
+      '  │-   "zod": "^5.6.0"',
+      "  │ …",
+      "  │    }",
+      "  └",
     ]);
   });
 
@@ -172,12 +172,12 @@ describe("renderBlockLines", () => {
       status: "done",
       detailLines: [{ text: "line one" }, { text: "line two" }],
     });
-    expect(lines).toEqual([" ▪ Ran pnpm test"]);
+    expect(lines).toEqual(["  ▪ Ran pnpm test"]);
   });
 
-  it("renders the end-of-turn stats as a dim framed coda", () => {
-    expect(render({ kind: "turn-stats", body: "3min 24s ↑ 32.4K ↓ 682" })).toEqual([
-      "  ─── 3min 24s ↑ 32.4K ↓ 682 ───",
+  it("renders the end-of-turn stats as a dim cornered coda", () => {
+    expect(render({ kind: "turn-stats", body: "Done in 3min 24s ── ↑ 32.4K ↓ 682" })).toEqual([
+      "└ Done in 3min 24s ── ↑ 32.4K ↓ 682",
     ]);
   });
 
@@ -188,7 +188,27 @@ describe("renderBlockLines", () => {
       subtitle: "3 calls",
       live: false,
     });
-    expect(lines).toEqual(["◆ echo-marker subagent · 3 calls"]);
+    expect(lines).toEqual(["※ echo-marker 3 calls"]);
+  });
+
+  it("collapses a child message to its first line inside the section", () => {
+    const lines = render({
+      kind: "subagent-step",
+      depth: 1,
+      collapsed: true,
+      body: "The trade-off is abstraction.\n\nMore detail…",
+      live: false,
+    });
+    expect(lines).toEqual(["│ The trade-off is abstraction."]);
+
+    // `--subagents full` keeps the verbatim prose.
+    const full = render({
+      kind: "subagent-step",
+      depth: 1,
+      body: "First paragraph.\n\nSecond paragraph.",
+      live: false,
+    });
+    expect(full.length).toBeGreaterThan(1);
   });
 
   it("renders an elided stand-in row inside the subagent gutter", () => {
@@ -198,7 +218,7 @@ describe("renderBlockLines", () => {
       live: false,
       elided: 6,
     });
-    expect(lines).toEqual(["│ … +6 more"]);
+    expect(lines).toEqual(["│ … (6 more)"]);
   });
 
   it("nests subagent tools under the orange rule", () => {
@@ -253,25 +273,26 @@ describe("renderBlockLines", () => {
     ]);
   });
 
-  it("renders a multi-line log run with the label once and a hanging indent", () => {
-    const indent = " ".repeat("stderr · ".length);
+  it("renders a multi-line log write as one closed section", () => {
     const lines = render({
       kind: "log",
       title: "stderr",
       body: "turn completed {\n  sessionId: 'x',\n  turnId: 't',\n  sequence: 0\n}",
     });
     expect(lines).toEqual([
-      "│ stderr · turn completed {",
-      `│ ${indent}  sessionId: 'x',`,
-      `│ ${indent}  turnId: 't',`,
-      `│ ${indent}  sequence: 0`,
-      `│ ${indent}}`,
+      "○ stderr",
+      "│ turn completed {",
+      "│   sessionId: 'x',",
+      "│   turnId: 't',",
+      "│   sequence: 0",
+      "│ }",
+      "└",
     ]);
   });
 
-  it("renders a one-line log with its source label", () => {
+  it("renders a one-line log under its source header", () => {
     const lines = render({ kind: "log", title: "stdout", body: "weather lookup { city: 'SF' }" });
-    expect(lines).toEqual(["│ stdout · weather lookup { city: 'SF' }"]);
+    expect(lines).toEqual(["○ stdout", "│ weather lookup { city: 'SF' }", "└"]);
   });
 
   it("renders sandbox lifecycle lines as first-class progress", () => {
@@ -299,23 +320,12 @@ describe("renderBlockLines", () => {
     expect(lines).toEqual([`│ ${indent}sandbox template "root" (microsandbox): apt-get update`]);
   });
 
-  it("suppresses the label when a log continues a same-source run", () => {
-    const indent = " ".repeat("stdout · ".length);
-    const lines = renderBlockLines(
-      { kind: "log", title: "stdout", body: "weather lookup { city: 'LA' }" },
-      60,
-      theme,
-      { activityPulse: "▪", previous: { kind: "log", title: "stdout" } },
-    ).map(stripAnsi);
-    expect(lines).toEqual([`│ ${indent}weather lookup { city: 'LA' }`]);
-  });
-
-  it("keeps the label when the previous log block has a different source", () => {
+  it("renders a log section identically regardless of what precedes it", () => {
     const lines = renderBlockLines({ kind: "log", title: "stderr", body: "boom" }, 60, theme, {
       activityPulse: "▪",
-      previous: { kind: "log", title: "stdout" },
+      previous: { kind: "log", title: "stderr" },
     }).map(stripAnsi);
-    expect(lines).toEqual(["│ stderr · boom"]);
+    expect(lines).toEqual(["○ stderr", "│ boom", "└"]);
   });
 
   it("renders an error's diagnostic detail beneath the headline", () => {

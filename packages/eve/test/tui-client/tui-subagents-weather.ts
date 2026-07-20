@@ -17,7 +17,7 @@ import { theme } from "./lib/theme.ts";
  * landing under `stepIndex: 0` and collapsing into one box.
  *
  * Pass conditions:
- *   1. A `◆ stock-price subagent` region header exists.
+ *   1. A `※ stock-price` region header exists.
  *   2. The child's `get_stock_price` tool row renders nested inside the
  *      subagent's `│` rule gutter (proves the child tool surfaces under
  *      the subagent flow).
@@ -61,7 +61,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
     throw error;
   });
 
-  await screen.waitForText("›", 5_000);
+  await screen.waitForIdlePrompt(5_000);
 
   // Delegate explicitly. An implicit prompt ("what is the value of GOOG?")
   // leaves the choice to the model, which may answer directly instead of
@@ -73,7 +73,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   input.enter();
 
   // The subagent region header should appear once the parent delegates.
-  await waitForCondition(() => screen.snapshot().includes("stock-price subagent"), {
+  await waitForCondition(() => screen.snapshot().includes("※ stock-price"), {
     timeoutMs: 120_000,
     label: "subagent region header",
     onTimeout: () => screen.snapshot(),
@@ -141,10 +141,10 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
 
   // No parent-level tool row for the child's call should remain: a tool
   // row at the parent level is a status glyph in the indented header cell
-  // (e.g. ` ▪ get_stock_price`), while the legitimate one is prefixed by
+  // (e.g. `  ▪ get_stock_price`), while the legitimate one is prefixed by
   // the subagent's `│` rule. Assistant prose lines start with `▲ `, so
   // they cannot false-positive here.
-  const parentToolRowRegex = /^ ?[^\s│▲▌] get_stock_price/mu;
+  const parentToolRowRegex = /^ {0,2}[^\s│▲] get_stock_price/mu;
   if (parentToolRowRegex.test(finalSnapshot)) {
     throw new Error(
       `Final screen still contains a parent-level tool row for the child's get_stock_price call. The nested subagent region should be the only place it appears.\n\n${finalSnapshot}`,
@@ -159,7 +159,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   // The turn is complete; wait until the runner is back at the prompt so
   // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
   // turn and returns to the prompt (Claude Code's two-step exit).
-  await screen.waitForText("›", 30_000);
+  await screen.waitForIdlePrompt(30_000);
   input.ctrlC();
   await runPromise;
 });

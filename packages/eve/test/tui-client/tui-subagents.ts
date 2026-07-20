@@ -23,7 +23,7 @@ import { theme } from "./lib/theme.ts";
  *   1. Start the apps/fixtures/agent-tui-client server.
  *   2. Boot an `EveTUIRunner` with a mock terminal.
  *   3. Type the same delegation prompt the non-TUI subagent smoke uses.
- *   4. Wait for the `◆ echo-marker subagent` region header to appear.
+ *   4. Wait for the `※ echo-marker` region header to appear.
  *   5. Wait for the nested region to contain the marker token.
  *   6. Verify the parent assistant message also contains the token. The
  *      rendering side-channel must not have broken the harness path.
@@ -52,14 +52,14 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     throw error;
   });
 
-  await screen.waitForText("›", 5_000);
+  await screen.waitForIdlePrompt(5_000);
 
   input.type(
     "Use the echo marker subagent to process the input 'ping'. Once it returns, reply with the subagent's exact output included verbatim in your message.",
   );
   input.enter();
 
-  await screen.waitForText("echo-marker subagent", 90_000);
+  await screen.waitForText("※ echo-marker", 90_000);
   console.log(theme.muted("[tui-subagents] subagent region header appeared"));
 
   await waitForCondition(() => screen.snapshot().includes(SUBAGENT_TOKEN), {
@@ -96,7 +96,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   // The turn is complete; wait until the runner is back at the prompt so
   // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
   // turn and returns to the prompt (Claude Code's two-step exit).
-  await screen.waitForText("›", 30_000);
+  await screen.waitForIdlePrompt(30_000);
   input.ctrlC();
   await runPromise;
 });

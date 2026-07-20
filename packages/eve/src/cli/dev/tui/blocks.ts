@@ -35,10 +35,13 @@ export type BlockKind =
   | "subagent"
   | "subagent-step"
   | "subagent-tool"
+  | "subagent-close"
   | "connection-auth"
   | "sandbox"
   | "log"
   | "turn-stats"
+  | "session-boundary"
+  | "todo-list"
   | "agent-header";
 
 /**
@@ -118,9 +121,9 @@ export interface RenderBlockContext {
   activityPulse: string;
   /**
    * Kind and title of the block rendered immediately above this one. Lets a
-   * log block detect that it continues a same-source run (label suppressed,
-   * lines hang under the previous block's label) without any mutable run
-   * state — each captured write stays its own immediately-committed block.
+   * sandbox block detect that it continues a run (label suppressed, lines
+   * hang under the previous block's label) without any mutable run state —
+   * each captured write stays its own immediately-committed block.
    */
   previous?: { kind: BlockKind; title?: string };
 }
@@ -159,7 +162,7 @@ function renderBody(
   context: RenderBlockContext,
 ): string[] {
   if (block.elided !== undefined) {
-    return [theme.colors.dim(`${theme.glyph.ellipsis} +${block.elided} more`)];
+    return [theme.colors.dim(`${theme.glyph.ellipsis} (${block.elided} more)`)];
   }
   switch (block.kind) {
     case "user":
@@ -190,13 +193,18 @@ function renderBody(
     case "sandbox":
       return renderSandbox(block, width, theme, context);
     case "log":
-      return renderLog(block, width, theme, context);
+      return renderLog(block, width, theme);
     case "subagent":
       return renderSubagentHeader(block, width, theme);
+    case "subagent-close":
+      // The bare corner closing a subagent section's rail, matching its hue.
+      return [theme.colors.orange(theme.glyph.corner)];
     case "turn-stats":
       return renderTurnStats(block, width, theme);
+    case "session-boundary":
+    case "todo-list":
     case "agent-header":
-      // Rows arrive fully styled and width-fit from `buildAgentHeader`.
+      // Rows arrive fully styled and width-fit from their builders.
       return (block.body ?? "").split("\n");
   }
 }
@@ -210,6 +218,16 @@ function renderUser(block: Block, width: number, theme: Theme): string[] {
 function renderProse(block: Block, width: number, theme: Theme): string[] {
   const rows: string[] = [];
   const isSubagent = block.kind === "subagent-step";
+  // A collapsed child message is one activity row in its section — the
+  // parent's own `▲` reply carries the conclusion. `--subagents full`
+  // restores the verbatim prose.
+  if (isSubagent && block.collapsed === true) {
+    const line =
+      firstNonEmptyLine(block.body) ??
+      (block.reasoning === undefined ? undefined : firstNonEmptyLine(block.reasoning));
+    if (line === undefined) return [];
+    return [theme.colors.dim(sliceVisible(line, Math.max(1, width)))];
+  }
   const glyph = isSubagent ? "" : `${theme.colors.bold(theme.colors.white(theme.glyph.brand))} `;
   const indent = isSubagent ? "" : "  ";
 
@@ -240,7 +258,11 @@ function renderProse(block: Block, width: number, theme: Theme): string[] {
 
 function renderReasoning(block: Block, width: number, theme: Theme): string[] {
   if (block.collapsed) {
-    return [`${theme.colors.gray(theme.glyph.reasoning)} ${theme.colors.dim("thinking")}`];
+    // A persisted thought labels itself (`Thought for 12s`); a still-live
+    // collapse keeps the generic marker.
+    return [
+      `${theme.colors.gray(theme.glyph.reasoning)} ${theme.colors.dim(block.title ?? "thinking")}`,
+    ];
   }
   return renderReasoningLines(block.body ?? "", width, theme, theme.glyph.reasoning);
 }
@@ -382,7 +404,7 @@ function renderFlow(block: Block, width: number, theme: Theme): string[] {
 /**
  * One command's outcome, hung under its invocation with the elbow connector
  * (`   ⎿  Login interrupted` in Claude Code's grammar), indented so the body
- * nests under the echoed command's text rather than its `▌` marker.
+ * nests under the echoed command's text rather than its `│` marker.
  */
 function renderResult(block: Block, width: number, theme: Theme): string[] {
   const marker = theme.colors.dim(theme.glyph.elbow);
@@ -452,62 +474,59 @@ function renderSandbox(
 }
 
 /**
- * Renders one captured server-output write. The source label (`stdout ·` /
- * `stderr ·`) appears on the first row; every following line — wrapped
- * continuations included — hangs indented beneath it. When the block
- * directly continues a same-source log block (`context.previous`), the label
- * is suppressed entirely so consecutive writes read as one run, while each
- * write remains its own immediately-committed block (no unbounded live
- * state). A rendered block is never truncated: a transcript can't be clicked
- * open, so the full output is shown, kept legible by the `│` rule and the
- * hanging indent. Whether a source renders at all is the renderer's
- * `LogDisplayMode` filter — this function only ever sees visible blocks.
+ * Renders one captured server-output write as a closed section: a `○ stderr`
+ * (or `○ stdout`) header, every body line — wrapped continuations included —
+ * behind a `│` rail, and a bare `└` corner. Each write is its own complete,
+ * immediately-committed section, so rendering needs no knowledge of
+ * neighboring blocks. A rendered block is never truncated: a transcript
+ * can't be clicked open, so the full output is shown, kept legible by the
+ * rail. Whether a source renders at all is the renderer's `LogDisplayMode`
+ * filter — this function only ever sees visible blocks.
  */
-function renderLog(
-  block: Block,
-  width: number,
-  theme: Theme,
-  context: RenderBlockContext,
-): string[] {
+function renderLog(block: Block, width: number, theme: Theme): string[] {
   const isErr = block.title === "stderr";
   const color = isErr ? theme.colors.red : theme.colors.gray;
   const rule = theme.colors.dim(theme.glyph.rule);
   const source = isErr ? "stderr" : "stdout";
-  const label = theme.colors.dim(`${source} ${theme.glyph.dot} `);
-  const labelWidth = visibleLength(label);
-  const labelIndent = " ".repeat(labelWidth);
-  const continuesRun = context.previous?.kind === "log" && context.previous.title === block.title;
-  const logical = (block.body ?? "").split("\n");
 
-  const rows: string[] = [];
-  for (const raw of logical) {
-    const wrapped = wrapVisibleLine(raw, Math.max(1, width - 2 - labelWidth));
-    for (const line of wrapped) {
-      const prefix = rows.length === 0 && !continuesRun ? label : labelIndent;
-      rows.push(`${rule} ${prefix}${theme.colors.dim(color(line))}`);
+  const rows = [`${theme.colors.dim(theme.glyph.reasoning)} ${theme.colors.dim(source)}`];
+  for (const raw of (block.body ?? "").split("\n")) {
+    for (const line of wrapVisibleLine(raw, Math.max(1, width - 2))) {
+      rows.push(`${rule} ${theme.colors.dim(color(line))}`);
     }
   }
-  return rows.length > 0 ? rows : [`${rule}`];
+  rows.push(theme.colors.dim(theme.glyph.corner));
+  return rows;
 }
 
 /**
- * The end-of-turn coda: a dim rule fragment carrying the turn's wall-clock
- * duration and token flow, hung under the assistant's final prose at its
- * body indent. A closing mark, not a section divider — it stays short.
+ * The end-of-turn coda: `└ Done in 3min 24s ── ↑ 32.4K ↓ 682`, dim,
+ * closing the turn under the assistant's final prose. The corner is the
+ * settled form of the live `▪ Working… <duration> ── <flow>` turn bar; the
+ * body arrives fully composed from the renderer's shared stats builder.
  */
 function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
-  const rule = theme.glyph.dash.repeat(3);
-  const line = `${rule} ${block.body ?? ""} ${rule}`;
-  return [`  ${theme.colors.dim(truncatePlain(line, Math.max(1, width - 2)))}`];
+  const line = `${theme.glyph.corner} ${block.body ?? ""}`;
+  return [theme.colors.dim(truncatePlain(line, Math.max(1, width)))];
 }
 
 function renderSubagentHeader(block: Block, width: number, theme: Theme): string[] {
-  const name = truncatePlain(block.title ?? "subagent", Math.max(8, width - 14));
-  let header = `${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(name)} ${theme.colors.dim("subagent")}`;
+  // The `※` mark already says "subagent", so the header carries only the
+  // name and ordinal. The generic self-delegation tool is literally named
+  // `agent`; showing it as "subagent" avoids the redundant "agent agent".
+  const rawName = block.title === undefined || block.title === "agent" ? "subagent" : block.title;
+  const name = truncatePlain(rawName, Math.max(8, width - 8));
+  let header = `${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(name)}`;
   if (block.subtitle !== undefined && block.subtitle.length > 0) {
-    header += ` ${theme.colors.dim(`${theme.glyph.dot} ${block.subtitle}`)}`;
+    header += ` ${theme.colors.dim(block.subtitle)}`;
   }
   return [header];
+}
+
+function firstNonEmptyLine(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  const line = text.split(/\r?\n/u).find((candidate) => candidate.trim().length > 0);
+  return line?.trim();
 }
 
 function wrap(text: string, width: number): string[] {

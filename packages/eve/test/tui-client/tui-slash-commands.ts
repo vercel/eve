@@ -58,7 +58,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("›", 5_000);
+    await screen.waitForIdlePrompt(5_000);
 
     input.type("boom");
     input.enter();
@@ -67,10 +67,10 @@ void (async () => {
 
     // Wait until `readPrompt` is active again so the next keystrokes
     // aren't dropped in the gap between turns.
-    await screen.waitForText("›", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     input.type("/new");
     input.enter();
-    await screen.waitForText("›", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     if (screen.snapshot().includes("Error")) {
       throw new Error(`/new did not clear the transcript:\n${screen.snapshot()}`);
     }
@@ -82,7 +82,7 @@ void (async () => {
     await screen.waitForText("/deploy needs eve dev running the local server", 5_000);
     console.log(theme.muted("[tui-slash-commands] /deploy rendered the local-only notice"));
 
-    await screen.waitForText("›", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     input.type("/exit");
     input.enter();
 
@@ -129,13 +129,13 @@ async function runLocalChannelsCancellation(): Promise<void> {
       "utf8",
     );
 
-    await screen.waitForText("›", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     input.type("/channels");
     input.enter();
     await screen.waitForText("Where will you chat with your agent?", 10_000);
     input.send("\x1b");
     await screen.waitForText("/channels dismissed.", 5_000);
-    await screen.waitForText("›", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     console.log(theme.muted("[tui-slash-commands] local /channels cancelled back to prompt"));
 
     input.type("/exit");

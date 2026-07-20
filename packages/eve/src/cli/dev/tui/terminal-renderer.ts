@@ -123,6 +123,7 @@ import {
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import {
+  presentPreparingTool,
   presentTool,
   readWriteFileInput,
   toolBaseName,
@@ -135,6 +136,7 @@ import { promptPlaceholder } from "./prompt-placeholder.js";
 import {
   allTodoItemsSettled,
   readTodoToolItems,
+  renderFinishedTodoRows,
   renderTodoPanelRows,
   type TodoPanelItem,
 } from "./todo-panel.js";
@@ -150,6 +152,7 @@ import {
   formatAssistantResponseStats,
   formatTokenFlow,
   formatTurnDuration,
+  typewriterText,
   isIncompletePaste,
   nextKey,
   sanitizePastedText,
@@ -212,10 +215,7 @@ type SetupFlowStatusState =
   | { kind: "progress"; text: string }
   | { kind: "external-action"; text: string; emphasis: string };
 
-type TurnIndicatorState =
-  | { kind: "idle" }
-  | { kind: "waiting"; startedAtMs: number }
-  | { kind: "answering" };
+type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: number };
 
 type SetupFlowState = {
   title: string;
@@ -231,6 +231,11 @@ type SetupFlowState = {
   taskListLineStart?: number;
   /** Task-list questions render their latest outcomes inside the question. */
   hideLinesWhileQuestion?: boolean;
+  /**
+   * Fabricated by {@link TerminalRenderer.#requireSetupFlow} for a bare
+   * question without a begin/end pair; closed with the question.
+   */
+  implicit?: boolean;
 };
 
 /**
@@ -289,6 +294,8 @@ type NativeToolState = {
   toolName: string;
   input: unknown;
   status: ToolStatus;
+  /** True while the model is still streaming this call's input. */
+  preparing?: boolean;
   output?: unknown;
   errorText?: string;
 };
@@ -312,18 +319,21 @@ const STATUS = {
   processing: "Working…",
   toolResults: "Reading results…",
   streaming: "Responding…",
+  preparingTools: "Preparing tool calls…",
   executingTools: "Running tools…",
   connectionAuth: "Waiting for connection authorization…",
 } as const;
 
 /**
- * How long the stream may go quiet mid-answer before the footer restores the
- * working pulse. The `answering` state deliberately shows no indicator — the
- * moving text is the motion — but a model generating a large tool call (a
- * multi-option `ask_question`, a big write) emits nothing for seconds, and a
- * fully static screen reads as a freeze.
+ * The end-of-turn stats coda renders only for turns that were long or
+ * expensive: past this wall-clock duration, or past this many input tokens
+ * summed across the turn's own steps. A quick cheap exchange closes silently.
  */
-const streamStallPulseMs = 2_000;
+const turnStatsMinDurationMs = 10_000;
+const turnStatsMinInputTokens = 20_000;
+
+/** One typed character of the turn bar's label per this many milliseconds. */
+const turnBarTypewriterMs = 80;
 
 export class TerminalRenderer implements AgentTUIRenderer {
   readonly #input: TerminalInput;
@@ -357,6 +367,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   readonly #childToolCallIds = new Set<string>();
   readonly #parentToolBlockIds = new Map<string, string>();
+  /** Call ids per subagent name, for the sections' ordinal subtitles. */
+  readonly #subagentCallsByName = new Map<string, string[]>();
   /** Session-local file contents, so write blocks can render real diffs. */
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
@@ -405,9 +417,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #hasUserMessage = false;
   /** Armed by a chat submit; the end-of-turn stats line consumes it. */
   #turnStartedAtMs?: number;
-  /** Wall clock of the latest stream event, for the mid-answer stall pulse. */
-  #lastStreamEventAtMs = Date.now();
+  /**
+   * Draft typed while a turn streams. The prompt row stays in place with
+   * Enter inert (no mid-turn submits yet); the draft seeds the next prompt.
+   */
+  #streamDraft: LineState = EMPTY_LINE;
+  /** True while renderStream owns the keyboard — gates the inert prompt row. */
+  #streamDraftActive = false;
+  /**
+   * Token usage summed across the turn's steps — what this message actually
+   * cost, unlike the last step's report (whose input restates the whole
+   * context). Accumulated on `step-finish` only: the `finish` event repeats
+   * the final step's usage and would double-count it.
+   */
+  #turnUsage = { inputTokens: 0, outputTokens: 0 };
   #turnIndicator: TurnIndicatorState = { kind: "idle" };
+  /** Rejects the reader currently awaiting keys, so #stop never strands it. */
+  #rejectActiveReader?: (error: Error) => void;
   #status: string = STATUS.processing;
   #title = "eve";
   #isInteractive = false;
@@ -503,10 +529,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       unicode: options?.unicode ?? detectUnicode(),
     });
     this.#tools = options?.tools ?? "auto-collapsed";
-    this.#reasoning = options?.reasoning ?? "full";
+    this.#reasoning = options?.reasoning ?? "auto-collapsed";
     this.#subagents = options?.subagents ?? "auto-collapsed";
     this.#connectionAuth = options?.connectionAuth ?? "full";
     this.#assistantResponseStats = options?.assistantResponseStats ?? defaultAssistantResponseStats;
+    this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#diagnostics = options?.diagnostics;
     this.#logs = options?.logs ?? "none";
@@ -551,7 +578,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#promptPlaceholderActive = true;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    let editor: LineState = lineOf(stripPromptControlCharacters(options?.initialDraft ?? ""));
+    // A draft typed during the turn carries into the prompt; an explicit
+    // initial draft (`eve dev --input`) wins over it.
+    let editor: LineState = lineOf(
+      stripPromptControlCharacters(options?.initialDraft ?? this.#streamDraft.text),
+    );
+    this.#streamDraft = EMPTY_LINE;
     this.#promptHistory.begin(editor.text);
     this.#syncInput(editor);
     this.#typeahead = typeaheadFor(this.#availablePromptCommands, editor.text);
@@ -559,6 +591,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
 
     return await new Promise((resolve, reject) => {
+      this.#rejectActiveReader = reject;
       const apply = (next: LineState) => {
         editor = next;
         this.#showCaret();
@@ -649,7 +682,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#promptHistory.add(prompt);
             this.#inputActive = false;
             this.#stopCaretBlink();
-            this.#startWorking();
             this.#status = STATUS.processing;
             if (isPromptControlCommand(prompt)) {
               // Commands echo as their own line (blue, under the prompt
@@ -661,9 +693,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
                 live: false,
               });
             } else {
+              this.#startWorking();
               this.#addUserBlock(prompt);
               this.#pendingEchoedPrompt = prompt;
               this.#turnStartedAtMs = Date.now();
+              this.#turnUsage = { inputTokens: 0, outputTokens: 0 };
             }
             this.#syncInput(EMPTY_LINE);
             this.#paint();
@@ -724,6 +758,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#status = this.#connectionAuthPendingCount > 0 ? STATUS.connectionAuth : STATUS.processing;
     this.#addSubmittedPrompt(options?.submittedPrompt);
     if (options?.submittedPrompt !== undefined) this.#diagnostics?.recordPrompt();
+    // A turn not born at the prompt (`eve dev --input`) arms its own clock;
+    // continuation passes (no submitted prompt) keep the original.
+    if (options?.submittedPrompt !== undefined && this.#turnStartedAtMs === undefined) {
+      this.#turnStartedAtMs = Date.now();
+      this.#turnUsage = { inputTokens: 0, outputTokens: 0 };
+    }
     this.#interrupted = false;
     this.#totalTokens = undefined;
     this.#assistantOutputTokens = undefined;
@@ -735,6 +775,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       assistantResponseStats: options?.assistantResponseStats ?? this.#assistantResponseStats,
     };
     this.#startTicker();
+    this.#streamDraftActive = true;
     this.#paint();
 
     const streamInterrupted = new Promise<void>((resolve) => {
@@ -772,10 +813,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#interrupted) result.abort?.();
       this.#detachInput();
       this.#stopTicker();
+      this.#streamDraftActive = false;
       if (this.#turnIndicator.kind === "waiting") {
         this.#turnIndicator = { kind: "idle" };
       }
       this.#status = completedTurnStatus(this.#interrupted, options?.continueSession === true);
+      // Placeholders whose call never materialized (interrupted mid-input)
+      // must vanish rather than commit.
+      this.#sweepPreparingToolBlocks(turnState);
+      // An interrupted turn gets no terminal updates for its in-flight
+      // calls; a block left `running` would keep the settled prefix wedged
+      // and freeze scrollback for the rest of the session.
+      if (this.#interrupted) this.#settleInterruptedToolBlocks();
       this.#finalizeAllBlocks();
       this.#diagnostics?.reportStats();
       this.#paint();
@@ -799,6 +848,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
 
     return await new Promise((resolve, reject) => {
+      this.#rejectActiveReader = reject;
       this.#consumeKey = (key) => {
         switch (key.type) {
           case "text": {
@@ -909,7 +959,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#inputActive = false;
       this.#removeBlock(sectionKey);
       this.#questionPanel = overlayPanel;
-      this.#status = "Enter to select · ↑/↓ to navigate · Esc to dismiss";
+      this.#status = "";
       syncFreeformCaret();
       this.#paint();
     };
@@ -992,6 +1042,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     let resolve!: (value: AgentTUIInputQuestionResponse | undefined) => void;
 
     return await new Promise<AgentTUIInputQuestionResponse | undefined>((res, reject) => {
+      this.#rejectActiveReader = reject;
       resolve = res;
       this.#consumeKey = (key) => {
         if (key.type === "ctrl-c") {
@@ -1138,6 +1189,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       depth: 1,
       reasoning: reasoningText,
       body: messageText,
+      // Child prose collapses to one activity row; the parent's reply is
+      // the conclusion. `--subagents full` keeps the verbatim text.
+      collapsed: this.#subagents !== "full",
       live: !update.finalized,
     });
     this.#paint();
@@ -1164,16 +1218,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const status = subagentToolStatus(update.status);
     // Subagents share the session's sandbox, so their reads and writes feed
     // the same file-content cache and their write blocks diff the same way.
-    const presentation = presentTool(
-      update.toolName,
-      update.input,
-      this.#toolPresentationContext({
-        input: update.input,
-        output: update.output,
-        toolCallId: update.childCallId,
-        toolName: update.toolName,
-      }),
-    );
+    const presentation =
+      update.status === "preparing"
+        ? presentPreparingTool(update.toolName)
+        : presentTool(
+            update.toolName,
+            update.input,
+            this.#toolPresentationContext({
+              input: update.input,
+              output: update.output,
+              toolCallId: update.childCallId,
+              toolName: update.toolName,
+            }),
+          );
     const block: Block = {
       id: subagentToolSectionId(update.callId, update.childCallId),
       kind: "subagent-tool",
@@ -1202,6 +1259,30 @@ export class TerminalRenderer implements AgentTUIRenderer {
       block.result = stripTerminalControls(update.errorText);
     }
     this.#upsertBlock(block);
+    this.#syncSubagentChildLiveness(update.callId);
+    this.#paint();
+  }
+
+  /**
+   * Cohort liveness for one section's child tools, mirroring the top-level
+   * `#syncNativeToolBlockLiveness`: while any of a call's children still
+   * runs, settled siblings stay live so an in-flight batch accumulates as
+   * one group instead of fragmenting on every status flip.
+   */
+  #syncSubagentChildLiveness(callId: string): void {
+    const children = this.#blocks.filter(
+      (block) => block.kind === "subagent-tool" && block.subagentCallId === callId,
+    );
+    const cohortActive = children.some(
+      (block) => block.status === "running" || block.status === "approval",
+    );
+    for (const block of children) {
+      block.live = cohortActive || block.status === "running" || block.status === "approval";
+    }
+  }
+
+  removeSubagentTool(update: { callId: string; childCallId: string }): void {
+    this.#removeBlock(subagentToolSectionId(update.callId, update.childCallId));
     this.#paint();
   }
 
@@ -1283,6 +1364,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
     this.#subagentHeaders.clear();
+    this.#subagentCallsByName.clear();
+    // The todo list, write-diff bases, and turn stats belong to the
+    // conversation being discarded; a fresh session may even run a fresh
+    // sandbox, where stale diff bases would render confidently wrong diffs.
+    this.#todoItems = undefined;
+    this.#todoCommittedSignature = undefined;
+    this.#fileContents.clear();
+    this.#turnStartedAtMs = undefined;
+    this.#turnUsage = { inputTokens: 0, outputTokens: 0 };
+    // A fresh conversation gets the invitation back.
+    this.#hasUserMessage = false;
     this.#pendingEchoedPrompt = undefined;
     this.#devRebuild = undefined;
     this.#connectionAuthPendingCount = 0;
@@ -1301,6 +1393,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * session-recovery notice after a terminal server failure). No-op when the
    * text is blank.
    */
+  /**
+   * The mid-conversation session boundary: the old session's context closes
+   * on a corner and the replacement opens on one, so the transcript shows
+   * where the server-side context was cut.
+   */
+  renderSessionBoundary(): void {
+    const c = this.#theme.colors;
+    const g = this.#theme.glyph;
+    const seg = g.dash.repeat(2);
+    const body = [
+      c.dim(`${g.corner}${seg} Session ended.`),
+      c.dim(`${g.cornerOpen}${seg} Session started (clear context).`),
+    ].join("\n");
+    this.#pushBlock({ kind: "session-boundary", body, live: false });
+    this.#paint();
+  }
+
   renderNotice(text: string): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
@@ -2094,13 +2203,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
         indicator: { kind: "spinner" },
         lines: [],
         outputBuffer: [],
+        // Fabricated for a bare question (no begin/end pair) — closed with
+        // the question, or it would mask the prompt's footer forever.
+        implicit: true,
       };
     }
     return this.#setupFlow;
   }
 
   #closeSetupQuestion(): void {
-    if (this.#setupFlow !== undefined) {
+    if (this.#setupFlow?.implicit === true) {
+      // A flow fabricated for this one question dies with it.
+      this.#setupFlow = undefined;
+    } else if (this.#setupFlow !== undefined) {
       this.#setupFlow.question = undefined;
       this.#setupFlow.hideLinesWhileQuestion = false;
     }
@@ -2108,7 +2223,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#detachInput();
     // Back to the working state: the interrupt trap covers the gap until the
     // next question (or the flow's end).
-    this.#armFlowIdleTrap();
+    if (this.#setupFlow !== undefined) this.#armFlowIdleTrap();
     this.#paint();
   }
 
@@ -2146,6 +2261,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#closeSetupQuestion();
       rejectPromise(error);
     };
+    // See #armFlowIdleTrap: stale deferred keys die with the old consumer.
+    this.#clearKeyFlush();
     this.#consumeKey = (key) => consume(key, settle, reject);
     this.#attachInput();
     return { promise, settle };
@@ -2187,6 +2304,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (key.type === "ctrl-r") this.#paint();
     };
     this.#flowIdleConsumer = consumer;
+    // A deferred ESC/paste flush armed under the previous consumer must not
+    // fire into this one.
+    this.#clearKeyFlush();
     this.#consumeKey = consumer;
     this.#attachInput();
   }
@@ -2220,6 +2340,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#setupFlow.status = content;
       if (content === undefined) this.#setupFlow.preview = undefined;
       this.#paint();
+      return;
+    }
+    if (this.#inputActive || this.#streamDraftActive) {
+      // The prompt or a streaming turn owns the footer; a flowless spinner
+      // must not steal its ticker or indicator.
       return;
     }
     if (content === undefined) {
@@ -2293,6 +2418,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #start(options?: AgentTUISessionOptions) {
     this.#title = options?.title ?? this.#title;
+    if (options?.contextSize !== undefined) this.#contextSize = options.contextSize;
 
     if (this.#isInteractive) return;
 
@@ -2317,6 +2443,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #stop() {
+    // A reader still awaiting keys can never settle once input detaches;
+    // rejecting a promise that already settled is a no-op.
+    const rejectReader = this.#rejectActiveReader;
+    this.#rejectActiveReader = undefined;
+    rejectReader?.(interruptedError());
     this.#detachInput();
     this.#stopCaretBlink();
     this.#stopTicker();
@@ -2362,13 +2493,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // subscription would deliver every key twice.
     this.#input.off("data", this.#feedRaw);
     this.#input.on("data", this.#feedRaw);
+    // Replay keys carried over from the previous mode's detach. Deferred a
+    // microtask so the new mode finishes installing #consumeKey first.
+    if (this.#keyBuffer.length > 0) {
+      queueMicrotask(() => {
+        if (this.#consumeKey !== undefined && this.#keyBuffer.length > 0) {
+          this.#drainKeys();
+          this.#armKeyFlush();
+        }
+      });
+    }
   }
 
   #detachInput() {
     this.#input.off("data", this.#feedRaw);
     this.#clearKeyFlush();
-    this.#keyBuffer = "";
-    this.#inputDecoder = new StringDecoder("utf8");
+    // The undrained tail of the current chunk survives the handoff: a mode
+    // ending mid-chunk (Enter in a paste, `y` for the first of two queued
+    // approvals) must not eat the keys behind it. The next #attachInput
+    // drains the carry-over into the new consumer.
     this.#consumeKey = undefined;
   }
 
@@ -2455,8 +2598,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#paint();
         }
         break;
-      default:
+      case "enter":
+        // Inert while the turn streams — no mid-turn submits yet. The draft
+        // carries into the next prompt instead.
         break;
+      default: {
+        const edited = applyLineEditorKey(this.#streamDraft, key, { multiline: true });
+        if (edited !== undefined) {
+          this.#streamDraft = edited;
+          this.#paint();
+        }
+        break;
+      }
     }
   }
 
@@ -2538,13 +2691,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (startedAtMs === undefined) return;
     this.#turnStartedAtMs = undefined;
 
-    const parts = [formatTurnDuration(Date.now() - startedAtMs)];
-    const inputTokens = this.#promptTokens ?? 0;
-    const outputTokens = this.#assistantOutputTokens ?? 0;
-    if (inputTokens > 0 || outputTokens > 0) {
-      parts.push(formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph));
+    const elapsedMs = Date.now() - startedAtMs;
+    const { inputTokens } = this.#turnUsage;
+    // Quick, cheap turns close silently — the coda earns its row only when
+    // the turn was long or expensive.
+    if (elapsedMs <= turnStatsMinDurationMs && inputTokens <= turnStatsMinInputTokens) {
+      return;
     }
-    this.#pushBlock({ kind: "turn-stats", body: parts.join(" "), live: false });
+
+    let body = `Done in ${this.#turnStatsBody(elapsedMs)}`;
+    // Context fill is a different measurement than the turn's summed flow —
+    // it reads off the last step's absolute input — so it rides separately.
+    const contextTokens = this.#promptTokens ?? 0;
+    if (this.#contextSize !== undefined && this.#contextSize > 0 && contextTokens > 0) {
+      const fill = Math.round((contextTokens / this.#contextSize) * 100);
+      body += ` ${this.#theme.glyph.dot} ${fill}% context`;
+    }
+    this.#pushBlock({ kind: "turn-stats", body, live: false });
   }
 
   #addSubmittedPrompt(prompt: string | undefined) {
@@ -2593,17 +2756,30 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #ensureSubagentHeader(callId: string, name: string) {
     if (this.#subagentHeaders.has(callId)) return;
     this.#subagentHeaders.add(callId);
-    this.#pushBlock({
+
+    // Parallel calls to the same subagent are individual sections; ordinal
+    // subtitles (`#1`, `#2`) tell them apart. The first call gains its `#1`
+    // retroactively the moment a sibling appears.
+    const cleanName = stripTerminalControls(name);
+    const siblings = this.#subagentCallsByName.get(cleanName) ?? [];
+    siblings.push(callId);
+    this.#subagentCallsByName.set(cleanName, siblings);
+    if (siblings.length === 2) {
+      const firstHeader = this.#blockById.get(subagentHeaderId(siblings[0]!));
+      if (firstHeader !== undefined) firstHeader.subtitle = "#1";
+    }
+
+    const block: Block = {
       id: subagentHeaderId(callId),
       kind: "subagent",
       subagentCallId: callId,
-      title: stripTerminalControls(name),
-      // Live until the turn's #finalizeAllBlocks so the run keeps accumulating:
-      // a header that settled with its batch would commit to scrollback and
-      // fragment the turn's later calls to the same subagent into a new
-      // counted region.
+      title: cleanName,
+      // Live until the turn's #finalizeAllBlocks: committing a section
+      // mid-turn would freeze its child window in scrollback.
       live: true,
-    });
+    };
+    if (siblings.length > 1) block.subtitle = `#${siblings.length}`;
+    this.#pushBlock(block);
   }
 
   #upsertBlock(block: Block) {
@@ -2644,7 +2820,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     displayModes: DisplayModes,
     turnState: RenderTurnState,
   ): void {
-    this.#lastStreamEventAtMs = Date.now();
     switch (event.type) {
       case "step-start":
         this.#setStreamStatus(
@@ -2658,13 +2833,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
         // harness), so summing them yields true session totals. The
         // `finish` event replays the last step's usage — don't sum there.
         this.#diagnostics?.recordStepUsage(event.usage);
+        if (event.usage !== undefined) {
+          this.#turnUsage.inputTokens += event.usage.inputTokens ?? 0;
+          this.#turnUsage.outputTokens += event.usage.outputTokens ?? 0;
+        }
+        // A valid call upgrades from its `preparing` placeholder within its
+        // own step; one still preparing at the boundary never parsed (the
+        // model emitted bad JSON and will retry under a fresh call id) and
+        // must not linger as a `Search …` ghost.
+        this.#sweepPreparingToolBlocks(turnState);
         this.#applyUsage(event.usage);
         this.#paint();
         break;
 
       case "assistant-delta": {
         const text = (turnState.text.get(event.id) ?? "") + stripTerminalControls(event.delta);
-        this.#showAnswerContent(text);
         this.#setStreamStatus(STATUS.streaming);
         turnState.text.set(event.id, text);
         this.#upsertAssistantBlock(event.id, text, true);
@@ -2677,7 +2860,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
           event.text !== undefined && existing.length === 0
             ? stripTerminalControls(event.text ?? "")
             : existing;
-        this.#showAnswerContent(text);
         turnState.text.set(event.id, text);
         this.#upsertAssistantBlock(event.id, text, false);
         break;
@@ -2686,20 +2868,46 @@ export class TerminalRenderer implements AgentTUIRenderer {
       case "reasoning-delta": {
         if (displayModes.reasoning === "hidden") break;
         const text = (turnState.reasoning.get(event.id) ?? "") + stripTerminalControls(event.delta);
-        this.#showAnswerContent(text);
-        this.#setStreamStatus(STATUS.streaming);
         turnState.reasoning.set(event.id, text);
-        this.#upsertReasoningBlock(event.id, text, true, displayModes);
+        if (displayModes.reasoning === "full") {
+          this.#setStreamStatus(STATUS.streaming);
+          this.#upsertReasoningBlock(event.id, text, true, displayModes);
+          break;
+        }
+        // Collapsed modes: the trace never reaches the transcript — the live
+        // turn bar and the end-of-turn coda carry the turn's progress.
         break;
       }
 
       case "reasoning-complete": {
         if (displayModes.reasoning === "hidden") break;
         const text = turnState.reasoning.get(event.id) ?? "";
-        this.#showAnswerContent(text);
-        this.#upsertReasoningBlock(event.id, text, false, displayModes);
+        if (displayModes.reasoning === "full") {
+          this.#upsertReasoningBlock(event.id, text, false, displayModes);
+          break;
+        }
         break;
       }
+
+      case "tool-call-preparing":
+        if (displayModes.tools === "hidden") break;
+        // The todo panel and question overlay need the real input; their
+        // placeholder would misread an input-less call (e.g. as a todo read).
+        if (toolBaseName(event.toolName) === "todo") break;
+        if (toolBaseName(event.toolName) === "ask_question") break;
+        this.#setStreamStatus(STATUS.preparingTools);
+        this.#upsertNativeTool(
+          {
+            input: undefined,
+            preparing: true,
+            status: "running",
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+          },
+          displayModes,
+          turnState,
+        );
+        break;
 
       case "tool-call":
         this.#diagnostics?.recordToolCall(event.toolName);
@@ -2791,10 +2999,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  #showAnswerContent(text: string): void {
-    if (text.trim().length > 0) this.#turnIndicator = { kind: "answering" };
-  }
-
   #upsertAssistantBlock(id: string, text: string, live: boolean): void {
     const content = stripTerminalControls(text).trim();
     if (content.length === 0) return;
@@ -2849,18 +3053,61 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }): ToolPresentationContext | undefined {
     if (tool.output !== undefined) this.#fileContents.observeRead(tool.output);
 
+    const context: { previousContent?: string; existed?: boolean; isSubagent?: boolean } = {};
+    if (this.#isSubagentToolName(tool.toolName)) context.isSubagent = true;
+
     const write = readWriteFileInput(tool.toolName, tool.input);
-    if (write === undefined) return undefined;
+    if (write === undefined) {
+      return context.isSubagent === true ? context : undefined;
+    }
     const previous = this.#fileContents.observeWrite({
       path: write.path,
       content: write.content,
       callId: tool.toolCallId,
     });
-    const context: { previousContent?: string; existed?: boolean } = {};
     if (previous !== undefined) context.previousContent = previous;
     const existed = writeExistedFlag(tool.output);
     if (existed !== undefined) context.existed = existed;
     return context;
+  }
+
+  /** True when a tool name matches a subagent from the agent's roster. */
+  #isSubagentToolName(toolName: string): boolean {
+    const local = this.#agentHeader?.info?.subagents.local;
+    if (local === undefined || local.length === 0) return false;
+    const baseName = toolBaseName(toolName);
+    return local.some((subagent) => subagent.name === baseName);
+  }
+
+  /**
+   * Flips still-running tool blocks of an interrupted turn to a terminal
+   * state. Approval-parked blocks are spared — a later pass can still
+   * settle them.
+   */
+  #settleInterruptedToolBlocks(): void {
+    for (const block of this.#blocks) {
+      if (block.kind !== "tool" && block.kind !== "subagent-tool") continue;
+      if (block.status !== "running") continue;
+      block.status = "error";
+      block.result = "interrupted";
+      block.live = false;
+    }
+  }
+
+  /**
+   * Removes tool blocks that never left their `preparing` placeholder. Runs
+   * at step boundaries and at stream teardown: an announced call whose input
+   * never parsed (invalid JSON, an interrupted generation) has no
+   * `actions.requested` coming and would otherwise commit as a `… ` ghost.
+   */
+  #sweepPreparingToolBlocks(turnState: RenderTurnState): void {
+    for (const [toolCallId, tool] of turnState.tools) {
+      if (tool.preparing !== true) continue;
+      turnState.tools.delete(toolCallId);
+      const id = this.#parentToolBlockIds.get(toolCallId) ?? toolSectionId(toolCallId);
+      this.#removeBlock(id);
+      this.#parentToolBlockIds.delete(toolCallId);
+    }
   }
 
   /**
@@ -2880,7 +3127,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const signature = JSON.stringify(items);
       if (this.#todoCommittedSignature !== signature) {
         this.#todoCommittedSignature = signature;
-        this.#pushBlock(finishedTodoBlock(items));
+        this.#pushBlock({
+          kind: "todo-list",
+          body: renderFinishedTodoRows(items, this.#width(), this.#theme).join("\n"),
+          live: false,
+        });
       }
       this.#todoItems = undefined;
     } else {
@@ -3185,11 +3436,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const c = this.#theme.colors;
     const rows: string[] = [""];
 
-    // The HITL question overlay sits directly under the transcript, above
-    // every other footer element; the status line beneath it carries the
-    // interaction hints.
+    // The HITL question overlay owns the footer down to the status bar —
+    // no indicator or hint row beneath it (the panel carries its own).
     if (this.#questionPanel !== undefined) {
       rows.push(...this.#questionPanel(width), "");
+      this.#pushStatusLine(rows, width);
+      return rows;
     }
 
     const flow = this.#setupFlow;
@@ -3243,7 +3495,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           items: this.#todoItems,
           width,
           theme: this.#theme,
-          working: !this.#inputActive,
+          working: this.#streamDraftActive || this.#turnIndicator.kind === "waiting",
           pulse: this.#progressPulseGlyph(
             this.#activityPulseStartedAtMs,
             this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
@@ -3309,20 +3561,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // (a model generating a large tool call emits nothing for seconds), at
     // which point the working pulse returns so the screen never reads as
     // frozen.
-    const streamStalled =
-      turnIndicator.kind === "answering" &&
-      Date.now() - this.#lastStreamEventAtMs >= streamStallPulseMs;
-    if (turnIndicator.kind === "answering" && !streamStalled) {
+    // A streaming turn shows one live bar — pulsing mark, activity label,
+    // running duration, per-turn token flow — with the inert prompt anchored
+    // beneath it. The `└ Done in …` coda is this bar's settled form.
+    if (this.#streamDraftActive) {
+      rows.push(this.#streamingTurnBar(width));
+      this.#pushStreamingPrompt(rows, width);
       this.#pushStatusLine(rows, width);
       return rows;
     }
-    const working = turnIndicator.kind === "waiting" || streamStalled;
-    const pulseStartedAtMs =
-      turnIndicator.kind === "waiting" ? turnIndicator.startedAtMs : this.#lastStreamEventAtMs;
+
+    const working = turnIndicator.kind === "waiting";
     const icon = working
       ? c.green(
           this.#progressPulseGlyph(
-            pulseStartedAtMs,
+            turnIndicator.startedAtMs,
             this.#theme.unicode ? TURN_PULSE_GLYPH : TURN_PULSE_ASCII_GLYPH,
           ),
         )
@@ -3332,7 +3585,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // interactive prompts (approvals, questions) at full intensity.
     const status = working ? c.dim(statusText) : statusText;
     const meta = this.#statusMeta();
-    const indent = working ? "  " : "";
+    // One-cell indent: the pulse shares a column with the tool markers.
+    const indent = working ? " " : "";
     const line = meta
       ? `${indent}${icon} ${status}  ${c.dim(this.#theme.glyph.dot)}  ${meta}`
       : `${indent}${icon} ${status}`;
@@ -3342,6 +3596,72 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (working && statusRows.length > 0) rows.push("");
     rows.push(...statusRows);
     return rows;
+  }
+
+  /**
+   * The live turn bar: `▪ Working… 3min 24s ── ↑ 32.4K ↓ 682`. Duration and
+   * token flow tick live on the shared paint beat; the `└`-cornered coda
+   * is this bar's settled form.
+   */
+  #streamingTurnBar(width: number): string {
+    const c = this.#theme.colors;
+    const pulse = this.#progressPulseGlyph(
+      this.#activityPulseStartedAtMs,
+      this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
+    );
+    const startedAtMs = this.#turnStartedAtMs ?? this.#streamStartedAt ?? Date.now();
+    const elapsedMs = Date.now() - startedAtMs;
+    // Anchored to the turn clock, the label's reveal plays once per turn —
+    // a question answer's continuation pass resumes fully typed.
+    const label = typewriterText(
+      `Working${this.#theme.glyph.ellipsis}`,
+      elapsedMs,
+      turnBarTypewriterMs,
+    );
+    // Column 0: the bar shares the gutter with the conversation markers and
+    // its own settled `└` coda.
+    return clip(`${c.yellow(pulse)} ${c.dim(`${label} ${this.#turnStatsBody(elapsedMs)}`)}`, width);
+  }
+
+  /**
+   * The shared body of the live turn bar and the settled coda:
+   * `3min 24s ── ↑ 32.4K ↓ 682` (token flow only once the turn has moved a
+   * token). `MockScreen.waitForIdlePrompt` recognizes the live bar by its
+   * typewriter `Working` label followed by this duration.
+   */
+  #turnStatsBody(elapsedMs: number): string {
+    const seg = this.#theme.glyph.dash.repeat(2);
+    const parts = [formatTurnDuration(elapsedMs)];
+    const { inputTokens, outputTokens } = this.#turnUsage;
+    if (inputTokens > 0 || outputTokens > 0) {
+      parts.push(seg, formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph));
+    }
+    return parts.join(" ");
+  }
+
+  /**
+   * The prompt row held in place while a turn streams: the draft under a
+   * live caret, Enter inert. Keeps the input anchored instead of vanishing
+   * for the duration of the turn.
+   */
+  #pushStreamingPrompt(rows: string[], width: number): void {
+    if (!this.#streamDraftActive) return;
+    rows.push("");
+    const prompt: Parameters<typeof promptInputRows>[0] = {
+      text: this.#streamDraft.text,
+      cursor: this.#streamDraft.cursor,
+      width,
+      theme: this.#theme,
+      caretVisible: true,
+      isCommand: false,
+      ghost: "",
+      maxRows: 4,
+    };
+    // The pending prompt wears the same quiet `›` as the idle one. Readiness
+    // is therefore NOT detectable from the glyph — MockScreen's
+    // `waitForIdlePrompt` discriminates by the live turn bar's absence.
+    if (this.#streamDraft.text.length === 0) prompt.placeholder = "";
+    rows.push(...promptInputRows(prompt));
   }
 
   /** Appends the persistent bottom status line below the prompt when it has content. */
@@ -3371,6 +3691,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // header, so the status bar consumes that shared snapshot.
     const endpoint = agentModel?.endpoint;
     if (endpoint !== undefined) input.endpoint = endpoint;
+    // Token flow lives in the end-of-turn coda, not the persistent bar — a
+    // live counter mostly restates the last step's context size.
     if (this.#vercelStatus !== undefined) input.vercel = this.#vercelStatus;
     if (this.#remoteConnection !== undefined) input.remote = this.#remoteConnection;
     const line = buildStatusLine(input);
@@ -3798,7 +4120,7 @@ function promptInputRows({
   const ellipsis = c.dim(theme.glyph.ellipsis);
   // Reserve the gutter and the block cursor's trailing cell at end-of-line.
   // The gutter sits at column 0, sharing a column with the conversation
-  // markers (`▌`, `▲`).
+  // markers (`│`, `▲`).
   const budget = Math.max(1, width - 3);
   const out: string[] = [];
   for (let r = top; r < top + visibleCount; r += 1) {
@@ -3849,10 +4171,9 @@ function previousBlockOf(block: Block): PreviousBlock {
  * Decides whether a block gets a blank line above it. Top-level "speakers"
  * (user, assistant, reasoning, …) always breathe. The first tool block after
  * a user prompt breathes too; subsequent tool rows stay tight within the run.
- * Log runs breathe on both sides — the run leads with a gap and whatever
- * follows it gets one too — except between
- * consecutive same-source log blocks, which read as one continuous run
- * (their labels are suppressed by the renderer for the same reason).
+ * Log sections breathe on both sides — every captured write renders as a
+ * closed `○ <source> … └` section, so consecutive writes get air between
+ * their corners and headers.
  */
 function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolean {
   // A tool run breathes after whoever spoke last — the prompt or the
@@ -3864,12 +4185,7 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
     return false;
   }
   if (previous?.kind === "sandbox" && block.kind !== "sandbox") return true;
-  if (block.kind === "log" && previous?.kind === "log") {
-    // stdout → stderr (or vice versa) gets air; a same-source continuation
-    // stays tight beneath the run it extends.
-    return previous.title !== block.title;
-  }
-  if (previous?.kind === "log" && block.kind !== "log") return true;
+  if (previous?.kind === "log") return true;
   switch (block.kind) {
     case "user":
     case "assistant":
@@ -3888,6 +4204,8 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
     case "warning":
     case "flow":
     case "turn-stats":
+    case "session-boundary":
+    case "todo-list":
     case "agent-header":
       return true;
     // The elbow result hangs tight under its invocation — never a gap.
@@ -3961,7 +4279,10 @@ function renderNativeToolBlock(
   expanded: boolean,
   context?: ToolPresentationContext,
 ): Block {
-  const presentation = presentTool(tool.toolName, tool.input, context);
+  const presentation =
+    tool.preparing === true
+      ? presentPreparingTool(tool.toolName, context)
+      : presentTool(tool.toolName, tool.input, context);
   const block: Block = {
     id,
     kind: "tool",
@@ -3992,27 +4313,6 @@ function renderNativeToolBlock(
   return block;
 }
 
-/**
- * The transcript form of a finished todo list: a settled tool block whose
- * rail lists every task, with cancelled ones carrying their outcome in the
- * result column.
- */
-function finishedTodoBlock(items: readonly TodoPanelItem[]): Block {
-  const completed = items.filter((item) => item.status === "completed").length;
-  const title = `Completed ${completed} task${completed === 1 ? "" : "s"}`;
-  return {
-    kind: "tool",
-    status: "done",
-    live: false,
-    title,
-    toolGroupItems: items.map((item) =>
-      item.status === "cancelled"
-        ? { text: item.content, result: "cancelled" }
-        : { text: item.content },
-    ),
-  };
-}
-
 /** Reads the shared write-file result's `existed` flag, whatever the tool. */
 function writeExistedFlag(output: unknown): boolean | undefined {
   if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
@@ -4022,6 +4322,8 @@ function writeExistedFlag(output: unknown): boolean | undefined {
 
 function subagentToolStatus(status: SubagentToolUpdate["status"]): ToolStatus {
   switch (status) {
+    case "preparing":
+      return "running";
     case "approval-requested":
       return "approval";
     case "executing":

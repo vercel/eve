@@ -1,9 +1,9 @@
 /**
- * Renders a tool block's terminal rows: the one-cell-indented header
- * (status glyph, verb-bold title, summarized args), the `│`-railed detail
- * region — aggregated batch items or a write's diffed content — closed by a
- * `└` corner, and the settled result line. Split from `blocks.ts` so the
- * block model and its per-kind renderers stay separable concerns.
+ * Renders a tool block's terminal rows: the indented header (status glyph,
+ * verb-bold title, summarized args), the `│`-railed detail region —
+ * aggregated batch items or a write's diffed content — closed by a `└`
+ * corner, and the settled result line. Split from `blocks.ts` so the block
+ * model and its per-kind renderers stay separable concerns.
  */
 
 import type { Block, RenderBlockContext, ToolGroupItem, ToolStatus } from "./blocks.js";
@@ -13,6 +13,21 @@ import { formatValuePretty, truncate } from "./tool-format.js";
 import { clipVisible, visibleLength, wrapVisibleLine } from "./terminal-text.js";
 
 export function renderTool(
+  block: Block,
+  width: number,
+  theme: Theme,
+  context: RenderBlockContext,
+): string[] {
+  // Top-level tool rows sit one extra level in so their marks start at the
+  // prose text column (the character after the `│`/`▲` gutter). Nested
+  // subagent rows keep the tighter lead inside their section's rail.
+  if ((block.depth ?? 0) === 0) {
+    return renderToolRows(block, width - 1, theme, context).map((row) => ` ${row}`);
+  }
+  return renderToolRows(block, width, theme, context);
+}
+
+function renderToolRows(
   block: Block,
   width: number,
   theme: Theme,
@@ -53,7 +68,9 @@ export function renderTool(
   } else if (block.status === "done" && block.result && block.result.length > 0) {
     rows.push(resultLine(theme.glyph.arrow, block.result, width, theme, accent));
   } else if (block.status === "error" && block.result) {
-    rows.push(resultLine(theme.glyph.arrow, block.result, width, theme, theme.colors.red));
+    // The failure summary hangs on a corner aligned under the title text,
+    // reading as the call's closing line rather than a returned value.
+    rows.push(errorDetailLine(block.result, width, theme));
   } else if (block.status === "denied") {
     rows.push(resultLine(theme.glyph.arrow, "denied", width, theme, theme.colors.yellow));
   }
@@ -193,6 +210,11 @@ function resultLine(
 ): string {
   const budget = width - 4;
   return `  ${theme.colors.dim(marker)} ${color(truncate(text, budget))}`;
+}
+
+function errorDetailLine(text: string, width: number, theme: Theme): string {
+  const budget = width - 5;
+  return `   ${theme.colors.dim(theme.glyph.corner)} ${theme.colors.red(truncate(text, budget))}`;
 }
 
 function toolGlyph(

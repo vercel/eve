@@ -69,9 +69,10 @@ export interface TodoPanelRowsInput {
 }
 
 /**
- * Paints the pinned panel. Settled items ride a `│` rail under the header;
- * the first unsettled item closes the rail with `└` and everything after
- * hangs indented — the list reads as progress flowing through the corner.
+ * Paints the pinned panel, one cell in from the margin so its marks share
+ * the tool column. Settled items ride a `│` rail under the header; the
+ * first unsettled item closes the rail with `└` and everything after hangs
+ * indented — the list reads as progress flowing through the corner.
  */
 export function renderTodoPanelRows(input: TodoPanelRowsInput): string[] {
   const { items, width, theme } = input;
@@ -81,9 +82,11 @@ export function renderTodoPanelRows(input: TodoPanelRowsInput): string[] {
   const settled = items.filter(
     (item) => item.status === "completed" || item.status === "cancelled",
   ).length;
+  // The header mark holds steady in both states — the active item's `⏺` is
+  // the panel's only pulse.
   const header = input.working
-    ? `${c.yellow(input.pulse)} ${c.dim(`Working${g.ellipsis}`)}`
-    : `${c.gray(g.square)} ${c.dim(`${settled}/${items.length} tasks`)}`;
+    ? ` ${c.gray(g.square)} ${c.dim("Todo")}`
+    : ` ${c.gray(g.square)} ${c.dim(`${settled}/${items.length} tasks`)}`;
 
   const rows = [header];
   let railClosed = false;
@@ -98,9 +101,35 @@ export function renderTodoPanelRows(input: TodoPanelRowsInput): string[] {
       rail = c.dim(g.corner);
       railClosed = true;
     }
-    rows.push(`${rail} ${todoItemBody(item, input, theme)}`);
+    rows.push(` ${rail} ${todoItemBody(item, input, theme)}`);
   }
   return rows.map((row) => clipVisible(row, width));
+}
+
+/**
+ * The transcript form of a finished list: every item checked on the rail,
+ * closed by `└ Done`. Committed verbatim (pre-styled rows) once every item
+ * settles.
+ */
+export function renderFinishedTodoRows(
+  items: readonly TodoPanelItem[],
+  width: number,
+  theme: Theme,
+): string[] {
+  const c = theme.colors;
+  const g = theme.glyph;
+  const rows = [` ${c.green(g.success)} ${c.dim("Todo")}`];
+  for (const item of items) {
+    rows.push(` ${c.dim(g.rule)} ${settledMark(item, theme)} ${c.dim(item.content)}`);
+  }
+  rows.push(` ${c.dim(g.corner)} ${c.dim("Done")}`);
+  return rows.map((row) => clipVisible(row, width));
+}
+
+function settledMark(item: TodoPanelItem, theme: Theme): string {
+  return item.status === "cancelled"
+    ? theme.colors.red(theme.glyph.error)
+    : theme.colors.green(theme.glyph.success);
 }
 
 function todoItemBody(item: TodoPanelItem, input: TodoPanelRowsInput, theme: Theme): string {
@@ -108,9 +137,9 @@ function todoItemBody(item: TodoPanelItem, input: TodoPanelRowsInput, theme: The
   const g = theme.glyph;
   switch (item.status) {
     case "completed":
-      return `${c.green(g.dotFilled)} ${c.dim(item.content)}`;
+      return `${c.green(g.success)} ${c.dim(item.content)}`;
     case "cancelled":
-      return `${c.red(g.dotFilled)} ${c.dim(item.content)}`;
+      return `${c.red(g.error)} ${c.dim(item.content)}`;
     case "in_progress": {
       // The active item pulses on the shared beat while the turn runs, and
       // holds a steady mark between turns so the panel never looks dead.

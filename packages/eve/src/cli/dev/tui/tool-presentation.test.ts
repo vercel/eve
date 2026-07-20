@@ -2,7 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import { getAllFrameworkToolNames } from "#runtime/framework-tools/index.js";
 
-import { presentTool } from "./tool-presentation.js";
+import { presentPreparingTool, presentTool } from "./tool-presentation.js";
+
+describe("presentPreparingTool", () => {
+  it("leads with the activity verb while the input still streams", () => {
+    expect(presentPreparingTool("web_fetch").title).toBe("Fetch …");
+    expect(presentPreparingTool("bash").title).toBe("Run …");
+    expect(presentPreparingTool("write_file").title).toBe("Write …");
+    expect(presentPreparingTool("eve.web_search").title).toBe("Search …");
+    expect(presentPreparingTool("final_output").title).toBe("Return final output");
+  });
+
+  it("keeps unknown tools on their name with a quiet hint", () => {
+    const presentation = presentPreparingTool("linear__list_issues");
+    expect(presentation.title).toBe("linear__list_issues");
+    expect(presentation.subtitle).toBe("preparing…");
+  });
+});
 
 describe("presentTool", () => {
   it("renders web_fetch as a semantic URL activity", () => {
@@ -99,6 +115,17 @@ describe("presentTool", () => {
       group: { verb: "Search", singularNoun: "query", pluralNoun: "queries" },
     });
 
+    // Provider-managed variants send an objective/search_query pair.
+    expect(
+      presentTool("web_search", {
+        objective: "Find confirmed public events",
+        search_query: "public events 2026",
+      }).title,
+    ).toBe("Search Find confirmed public events");
+    expect(presentTool("web_search", { search_query: "public events 2026" }).title).toBe(
+      "Search public events 2026",
+    );
+
     // OpenAI nests the argument under `action`.
     expect(
       presentTool("web_search", { action: { type: "search", queries: ["smoke"] } }).title,
@@ -172,6 +199,24 @@ describe("presentTool", () => {
 
     expect(presentation.title).toBe("web_fetch");
     expect(presentation.subtitle).toContain('format="markdown"');
+  });
+
+  it("presents a named subagent dispatch as a delegation", () => {
+    const parsed = presentTool(
+      "stock-price",
+      { message: "Look up GOOG.\nDetails…" },
+      { isSubagent: true },
+    );
+    expect(parsed.title).toBe("Delegate stock-price");
+    expect(parsed.doneTitle).toBe("Delegated stock-price");
+    expect(parsed.subtitle).toBe("Look up GOOG.");
+
+    // The tool's name carries the target, so it shows before args parse.
+    expect(presentPreparingTool("stock-price", { isSubagent: true }).title).toBe(
+      "Delegate stock-price …",
+    );
+    // Without roster knowledge the generic formatter keeps its shape.
+    expect(presentTool("stock-price", { message: "x" }).title).toBe("stock-price");
   });
 
   it("keeps unknown tools on the generic formatter", () => {

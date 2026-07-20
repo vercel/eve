@@ -287,6 +287,17 @@ export function formatCompactTokenCount(count: number): string {
  * `--context-size` appends the context-fill percentage of the input side.
  */
 /**
+ * Reveals `text` one character per `stepMs` of elapsed time, typewriter
+ * style: the first character shows immediately, the full text after
+ * `(length - 1) * stepMs`. Painted on the shared ticker beat, so no timer
+ * of its own.
+ */
+export function typewriterText(text: string, elapsedMs: number, stepMs: number): string {
+  const visible = Math.floor(Math.max(0, elapsedMs) / stepMs) + 1;
+  return visible >= text.length ? text : text.slice(0, visible);
+}
+
+/**
  * Formats a turn's wall-clock duration for the end-of-turn stats line:
  * `42s`, `3min 24s`, `1h 12min`. Sub-second turns round up to `1s` — a
  * `0s` coda would read as a measurement error.

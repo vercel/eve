@@ -47,7 +47,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("›", 5_000);
+    await screen.waitForIdlePrompt(5_000);
 
     // Foreign writes are captured synchronously, so snapshots reflect them
     // immediately.

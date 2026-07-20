@@ -38,6 +38,10 @@ function subagentHeader(callId: string, name: string): Block {
   };
 }
 
+function subagentClose(callId: string, live = false): Block {
+  return { kind: "subagent-close", subagentCallId: callId, live };
+}
+
 function subagentStep(callId: string, body: string, live = false): Block {
   return {
     kind: "subagent-step",
@@ -145,7 +149,215 @@ describe("groupToolBlocksForDisplay", () => {
     expect(groups[1]?.display.result).toBe("status 404");
   });
 
-  it("coalesces interleaved same-subagent sections into one counted header", () => {
+  it("condenses a settled child-tool run into one counted row once a message follows", () => {
+    const child = (id: string, toolName: string, verb: [string, string], noun: [string, string]) =>
+      ({
+        kind: "subagent-tool",
+        id,
+        subagentCallId: "c1",
+        depth: 1,
+        live: false,
+        status: "done",
+        toolName,
+        title: `${verb[0]} x`,
+        toolGroup: {
+          verb: verb[0],
+          pastVerb: verb[1],
+          singularNoun: noun[0],
+          pluralNoun: noun[1],
+          item: "x",
+        },
+      }) satisfies Block;
+
+    const run = [
+      child("b1", "bash", ["Run", "Ran"], ["command", "commands"]),
+      child("r1", "read_file", ["Read", "Read"], ["file", "files"]),
+      {
+        kind: "subagent-tool",
+        id: "w1",
+        subagentCallId: "c1",
+        depth: 1,
+        live: false,
+        status: "done",
+        toolName: "write_file",
+        title: "Write /a",
+      } satisfies Block,
+      {
+        kind: "subagent-tool",
+        id: "s1",
+        subagentCallId: "c1",
+        depth: 1,
+        live: false,
+        status: "done",
+        toolName: "web_search",
+        title: "Search x",
+        toolGroup: {
+          verb: "Search",
+          pastVerb: "Searched",
+          singularNoun: "query",
+          pluralNoun: "queries",
+          item: "x",
+        },
+      } satisfies Block,
+    ];
+    const step: Block = {
+      kind: "subagent-step",
+      id: "m1",
+      subagentCallId: "c1",
+      depth: 1,
+      live: false,
+      body: "Here is what I found.",
+    };
+
+    const groups = groupToolBlocksForDisplay([subagentHeader("c1", "researcher"), ...run, step]);
+
+    // header, condensed row, verbatim message, closing corner.
+    expect(groups).toHaveLength(4);
+    expect(groups[1]?.members).toEqual(run);
+    expect(groups[1]?.display).toMatchObject({
+      kind: "subagent-tool",
+      status: "done",
+      // Top three kinds by count, then "and more" for the rest.
+      title: "Ran 1 command, Read 1 file, Wrote 1 file, and more",
+    });
+    expect(groups[2]?.display).toBe(step);
+    expect(groups[3]?.display).toMatchObject({ kind: "subagent-close" });
+  });
+
+  it("leaves a settled child-tool run itemized when no message follows", () => {
+    const tool = (id: string): Block => ({
+      kind: "subagent-tool",
+      id,
+      subagentCallId: "c1",
+      depth: 1,
+      live: false,
+      status: "done",
+      toolName: "bash",
+      title: "Run x",
+      toolGroup: {
+        verb: "Run",
+        pastVerb: "Ran",
+        singularNoun: "command",
+        pluralNoun: "commands",
+        item: "x",
+      },
+    });
+
+    const groups = groupToolBlocksForDisplay([
+      subagentHeader("c1", "researcher"),
+      tool("b1"),
+      tool("b2"),
+    ]);
+
+    // Falls back to the ordinary per-kind aggregation, items intact.
+    expect(groups[1]?.display).toMatchObject({ title: "Run 2 commands" });
+  });
+
+  it("keeps interleaved different-named subagent calls as whole sections", () => {
+    const ha = subagentHeader("ca", "researcher");
+    const hb = subagentHeader("cb", "reviewer");
+    const a1 = { ...subagentStep("ca", "finding one"), id: "ca:1", subagentCallId: "ca" };
+    const b1 = { ...subagentStep("cb", "critique one"), id: "cb:1", subagentCallId: "cb" };
+    const a2 = { ...subagentStep("ca", "finding two"), id: "ca:2", subagentCallId: "ca" };
+
+    // Parallel different subagents interleave; neither may fragment the
+    // other into headerless children.
+    const groups = groupToolBlocksForDisplay([ha, hb, a1, b1, a2]);
+
+    expect(groups.map((group) => group.display)).toEqual([
+      ha,
+      a1,
+      a2,
+      subagentClose("ca"),
+      hb,
+      b1,
+      subagentClose("cb"),
+    ]);
+  });
+
+  it("does not condense a run against a sibling section's message", () => {
+    const tool = (id: string): Block => ({
+      kind: "subagent-tool",
+      id,
+      subagentCallId: "ca",
+      depth: 1,
+      live: false,
+      status: "done",
+      toolName: "bash",
+      title: "Run x",
+      toolGroup: {
+        verb: "Run",
+        pastVerb: "Ran",
+        singularNoun: "command",
+        pluralNoun: "commands",
+        item: "x",
+      },
+    });
+    const foreignStep: Block = {
+      kind: "subagent-step",
+      id: "cb:1",
+      subagentCallId: "cb",
+      depth: 1,
+      live: false,
+      body: "sibling's message",
+    };
+
+    // Headerless layout (worst case): the foreign message directly follows
+    // the run but belongs to another call — no condensation.
+    const groups = groupToolBlocksForDisplay([tool("a"), tool("b"), foreignStep]);
+
+    expect(groups[0]?.display).toMatchObject({ title: "Run 2 commands" });
+    expect(groups[0]?.display.title).not.toContain("Ran");
+  });
+
+  it("passes captured log blocks through a subagent run without splitting it", () => {
+    const header = subagentHeader("c1", "researcher");
+    const s1 = subagentStep("c1", "finding one");
+    const stderr: Block = {
+      kind: "log",
+      title: "stderr",
+      body: "tool execution failed",
+      live: false,
+    };
+    const s2 = subagentStep("c2", "other call");
+
+    // The stderr write spliced itself between the run's children; the
+    // section must stay whole, with the log re-emitted after it.
+    const groups = groupToolBlocksForDisplay([
+      header,
+      stderr,
+      { ...s1, id: "c1:s1" },
+      subagentHeader("c2", "researcher"),
+      { ...s2, id: "c2:s2", subagentCallId: "c2" },
+    ]);
+
+    expect(groups.map((group) => group.display.kind)).toEqual([
+      "subagent",
+      "subagent-step",
+      "subagent-close",
+      "subagent",
+      "subagent-step",
+      "subagent-close",
+      "log",
+    ]);
+  });
+
+  it("hands trailing logs back to the main loop after a run", () => {
+    const header = subagentHeader("c1", "researcher");
+    const step = subagentStep("c1", "finding");
+    const stderr: Block = { kind: "log", title: "stderr", body: "late failure", live: false };
+
+    const groups = groupToolBlocksForDisplay([header, step, stderr]);
+
+    expect(groups.map((group) => group.display.kind)).toEqual([
+      "subagent",
+      "subagent-step",
+      "subagent-close",
+      "log",
+    ]);
+  });
+
+  it("keeps interleaved same-subagent calls as separate sections with rebucketed children", () => {
     const h1 = subagentHeader("c1", "echo-marker");
     const s1 = subagentStep("c1", "token one");
     const h2 = subagentHeader("c2", "echo-marker");
@@ -153,30 +365,34 @@ describe("groupToolBlocksForDisplay", () => {
     const h3 = subagentHeader("c3", "echo-marker");
     const s3 = subagentStep("c3", "token three");
 
-    const groups = groupToolBlocksForDisplay([h1, s1, h2, s2, h3, s3]);
+    // Children arrive interleaved; each call's section reassembles its own.
+    const groups = groupToolBlocksForDisplay([h1, h2, h3, s1, s2, s3]);
 
-    expect(groups).toHaveLength(4);
-    expect(groups[0]?.members).toEqual([h1, h2, h3]);
-    expect(groups[0]?.display).toMatchObject({
-      kind: "subagent",
-      id: undefined,
-      title: "echo-marker",
-      subtitle: "3 calls",
-      live: false,
-    });
-    // Children re-order call by call beneath the shared header.
-    expect(groups.slice(1).map((group) => group.display)).toEqual([s1, s2, s3]);
+    expect(groups.map((group) => group.display)).toEqual([
+      h1,
+      s1,
+      subagentClose("c1"),
+      h2,
+      s2,
+      subagentClose("c2"),
+      h3,
+      s3,
+      subagentClose("c3"),
+    ]);
   });
 
-  it("keeps a counted subagent header live while any call still streams", () => {
+  it("keeps a section live while its own children stream, independent of siblings", () => {
+    const settledHeader = { ...subagentHeader("c1", "echo-marker"), live: false };
+    const liveChildHeader = { ...subagentHeader("c2", "echo-marker"), live: false };
     const groups = groupToolBlocksForDisplay([
-      subagentHeader("c1", "echo-marker"),
+      settledHeader,
       subagentStep("c1", "token one"),
-      subagentHeader("c2", "echo-marker"),
+      liveChildHeader,
       subagentStep("c2", "token two", true),
     ]);
 
-    expect(groups[0]?.display.live).toBe(true);
+    expect(groups[0]?.display.live).toBe(false);
+    expect(groups[3]?.display.live).toBe(true);
   });
 
   it("keeps the run live while a header still is, even after every child settles", () => {
@@ -190,27 +406,30 @@ describe("groupToolBlocksForDisplay", () => {
     expect(groups[0]?.display.live).toBe(true);
   });
 
-  it("elides all but the newest children behind a counted stand-in row", () => {
-    const blocks: Block[] = [];
-    const steps: Block[] = [];
-    for (let call = 1; call <= 16; call += 1) {
-      const step = subagentStep(`c${call}`, `token ${call}`);
-      blocks.push(subagentHeader(`c${call}`, "echo-marker"), step);
-      steps.push(step);
+  it("windows each section to its newest children independently", () => {
+    const blocks: Block[] = [subagentHeader("c1", "echo-marker")];
+    const first: Block[] = [];
+    for (let index = 1; index <= maxVisibleSubagentRunChildren + 3; index += 1) {
+      const step = { ...subagentStep("c1", `one ${index}`), id: `c1:step:${index}` };
+      blocks.push(step);
+      first.push(step);
     }
+    blocks.push(subagentHeader("c2", "echo-marker"), subagentStep("c2", "two 1"));
 
     const groups = groupToolBlocksForDisplay(blocks);
 
-    const elidedCount = 16 - maxVisibleSubagentRunChildren;
-    expect(groups).toHaveLength(2 + maxVisibleSubagentRunChildren);
-    expect(groups[0]?.display.subtitle).toBe("16 calls");
-    expect(groups[1]?.members).toEqual(steps.slice(0, elidedCount));
-    expect(groups[1]?.display).toMatchObject({
-      kind: "subagent-step",
-      depth: 1,
-      elided: elidedCount,
-    });
-    expect(groups.slice(2).map((group) => group.display)).toEqual(steps.slice(elidedCount));
+    // First section: header, one elision stand-in, then its newest window.
+    expect(groups[1]?.members).toEqual(first.slice(0, 3));
+    expect(groups[1]?.display).toMatchObject({ kind: "subagent-step", elided: 3 });
+    expect(groups.slice(2, 2 + maxVisibleSubagentRunChildren).map((g) => g.display)).toEqual(
+      first.slice(3),
+    );
+    // The second section is untouched by the first one's overflow.
+    const secondHeader = groups.findIndex(
+      (group) => group.display.kind === "subagent" && group.display.subagentCallId === "c2",
+    );
+    expect(secondHeader).toBeGreaterThan(-1);
+    expect(groups[secondHeader + 1]?.display.body).toBe("two 1");
   });
 
   it("caps a single call's long child list too", () => {
@@ -224,7 +443,8 @@ describe("groupToolBlocksForDisplay", () => {
 
     expect(groups[1]?.display.elided).toBe(2);
     expect(groups[1]?.members).toEqual(steps.slice(0, 2));
-    expect(groups.slice(2).map((group) => group.display)).toEqual(steps.slice(2));
+    expect(groups.slice(2, -1).map((group) => group.display)).toEqual(steps.slice(2));
+    expect(groups.at(-1)?.display).toEqual(subagentClose("c1"));
   });
 
   it("does not elide a run at or under the visible cap", () => {
@@ -236,7 +456,7 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([header, ...steps]);
 
-    expect(groups).toHaveLength(1 + maxVisibleSubagentRunChildren);
+    expect(groups).toHaveLength(1 + maxVisibleSubagentRunChildren + 1);
     expect(groups.every((group) => group.display.elided === undefined)).toBe(true);
   });
 
@@ -248,7 +468,8 @@ describe("groupToolBlocksForDisplay", () => {
       subagentStep("c2", "finding"),
     ]);
 
-    expect(groups.map((group) => group.display.title ?? group.display.body)).toEqual([
+    const sections = groups.filter((group) => group.display.kind !== "subagent-close");
+    expect(sections.map((group) => group.display.title ?? group.display.body)).toEqual([
       "echo-marker",
       "token one",
       "researcher",
@@ -263,7 +484,7 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([header, step]);
 
-    expect(groups.map((group) => group.display)).toEqual([header, step]);
+    expect(groups.map((group) => group.display)).toEqual([header, step, subagentClose("c1")]);
   });
 
   it("does not group a settled call with a still-running one", () => {

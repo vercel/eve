@@ -4,6 +4,7 @@ import {
   formatCompactTokenCount,
   formatTokenFlow,
   formatTurnDuration,
+  typewriterText,
   isIncompletePaste,
   nextKey,
   parseKey,
@@ -71,6 +72,16 @@ describe("formatTokenFlow", () => {
       ),
     ).toBe("↑ 24K ↓ 300 12%");
     expect(formatTokenFlow({ inputTokens: 0, outputTokens: 0 }, FLOW_GLYPHS)).toBe("↑ 0 ↓ 0");
+  });
+});
+
+describe("typewriterText", () => {
+  it("reveals one character per step, then holds the full text", () => {
+    expect(typewriterText("Working…", 0, 80)).toBe("W");
+    expect(typewriterText("Working…", 79, 80)).toBe("W");
+    expect(typewriterText("Working…", 160, 80)).toBe("Wor");
+    expect(typewriterText("Working…", 560, 80)).toBe("Working…");
+    expect(typewriterText("Working…", 60_000, 80)).toBe("Working…");
   });
 });
 

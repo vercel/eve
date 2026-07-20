@@ -1,4 +1,5 @@
 import type { Block, ToolGroupItem } from "./blocks.js";
+import { toolBaseName } from "./tool-presentation.js";
 
 export interface ToolBlockDisplayGroup {
   readonly members: readonly Block[];
@@ -28,6 +29,39 @@ export function groupToolBlocksForDisplay(blocks: readonly Block[]): ToolBlockDi
       index += run.consumed;
       continue;
     }
+    // Inside a subagent's flow, a settled tool run directly followed by a
+    // message condenses to one multi-kind row — the message is the story,
+    // the tools its footnote. Failed calls ride the run without breaking
+    // it: they group with the other tools but stay itemized as their own
+    // rows, because an error must not vanish into a count.
+    if (isCondensableChildTool(first)) {
+      const run = [first];
+      while (index + run.length < blocks.length) {
+        const candidate = blocks[index + run.length]!;
+        if (candidate.subagentCallId !== first.subagentCallId) break;
+        if (!isCondensableChildTool(candidate) && !isItemizedChildFailure(candidate)) break;
+        run.push(candidate);
+      }
+      const next = blocks[index + run.length];
+      const condensable = run.filter(isCondensableChildTool);
+      if (
+        condensable.length >= 2 &&
+        next?.kind === "subagent-step" &&
+        // The message must belong to the same call — a sibling section's
+        // prose must not trigger a foreign run's condensation.
+        next.subagentCallId === first.subagentCallId
+      ) {
+        groups.push({ members: condensable, display: condenseChildToolRun(condensable) });
+        for (const failure of run) {
+          if (!isCondensableChildTool(failure)) {
+            groups.push({ members: [failure], display: failure });
+          }
+        }
+        index += run.length;
+        continue;
+      }
+    }
+
     if (!isGroupable(first)) {
       groups.push({ members: [first], display: first });
       index += 1;
@@ -105,11 +139,33 @@ function partitionRunByStatus(run: readonly Block[]): ToolBlockDisplayGroup[] {
 }
 
 /**
- * A subagent run renders at most this many child blocks; earlier ones
- * collapse into a single `… +N more` line under the header.
+ * One subagent section renders at most this many of its most recently
+ * active child rows; earlier ones collapse into a single `… (N more)` line
+ * under the header.
  */
-export const maxVisibleSubagentRunChildren = 10;
+export const maxVisibleSubagentRunChildren = 3;
 
+/**
+ * Block kinds that may splice into a subagent run (captured output, stream
+ * errors, notices) without belonging to it. They pass through and re-emit
+ * after the sections they interrupted instead of splitting a run into
+ * headerless fragments.
+ */
+const RUN_PASS_THROUGH_KINDS: ReadonlySet<Block["kind"]> = new Set([
+  "log",
+  "sandbox",
+  "error",
+  "warning",
+  "notice",
+]);
+
+/**
+ * Unscrambles a run of interleaved subagent calls — any names — into
+ * individual sections: each call keeps its own header (ordinal subtitles
+ * tell parallel same-named calls apart) followed by its own newest-window
+ * of child rows. Collection is run-wide because parallel calls' children
+ * arrive interleaved in block order.
+ */
 function collectSubagentRun(
   blocks: readonly Block[],
   start: number,
@@ -117,11 +173,16 @@ function collectSubagentRun(
   const first = blocks[start]!;
   const headers = [first];
   const childrenByCall = new Map<string, Block[]>([[first.subagentCallId!, []]]);
+  const passThrough: Block[] = [];
   let consumed = 1;
   for (; start + consumed < blocks.length; consumed += 1) {
     const candidate = blocks[start + consumed]!;
+    if (RUN_PASS_THROUGH_KINDS.has(candidate.kind)) {
+      passThrough.push(candidate);
+      continue;
+    }
     if (candidate.kind === "subagent") {
-      if (candidate.title !== first.title || candidate.subagentCallId === undefined) break;
+      if (candidate.subagentCallId === undefined) break;
       if (childrenByCall.has(candidate.subagentCallId)) break;
       headers.push(candidate);
       childrenByCall.set(candidate.subagentCallId, []);
@@ -134,54 +195,65 @@ function collectSubagentRun(
     if (children === undefined) break;
     children.push(candidate);
   }
+  // Trailing pass-through blocks did not interrupt anything — hand them
+  // back to the main loop so they keep their position after the run.
+  while (passThrough.length > 0 && blocks[start + consumed - 1] === passThrough.at(-1)) {
+    passThrough.pop();
+    consumed -= 1;
+  }
 
-  // The run stays live while any of its headers or calls still streams.
-  // Headers are born live and settle only at the turn boundary: committing a
-  // batch to scrollback as soon as its children finalized would strand the
-  // turn's later calls to the same subagent in a fresh fragment header.
-  const live =
-    headers.some((header) => header.live !== false) ||
-    [...childrenByCall.values()].some((children) => children.some((child) => child.live !== false));
   const groups: ToolBlockDisplayGroup[] = [];
-  if (headers.length === 1) {
-    groups.push({ members: [first], display: live ? { ...first, live: true } : first });
-  } else {
-    groups.push({
-      members: headers,
-      display: {
-        ...first,
-        id: undefined,
-        live,
-        subtitle: `${headers.length} calls`,
-      },
-    });
-  }
-
-  // Cap the run's visible children at the newest `maxVisibleSubagentRunChildren`
-  // blocks. Elided blocks stay members (they must still commit and clear by
-  // identity) but collapse into one display-only `… +N more` row.
-  const childCount = [...childrenByCall.values()].reduce(
-    (total, children) => total + children.length,
-    0,
-  );
-  const elidedCount = Math.max(0, childCount - maxVisibleSubagentRunChildren);
-  let remainingToElide = elidedCount;
-  const elided: Block[] = [];
-  const keptByCall = headers.map((header) => {
+  for (const header of headers) {
     const children = childrenByCall.get(header.subagentCallId!)!;
-    const take = Math.min(remainingToElide, children.length);
-    remainingToElide -= take;
-    elided.push(...children.slice(0, take));
-    return children.slice(take);
-  });
-  if (elidedCount > 0) {
+    // A section stays live while its own header or any of its children
+    // still streams; sibling calls settle independently.
+    const live = header.live !== false || children.some((child) => child.live !== false);
     groups.push({
-      members: elided,
-      display: { kind: "subagent-step", depth: 1, live, elided: elidedCount },
+      members: [header],
+      display: live === (header.live !== false) ? header : { ...header, live },
     });
+
+    // Group the full child list first — so a condensed row counts every
+    // call it stands for — then order MRU-down: each group sorts by its
+    // newest member, so the latest activity sits nearest the live edge and
+    // an accumulating batch sinks as it receives calls. The window keeps
+    // the most recent display rows; dropped groups' blocks stay members
+    // (they must still commit and clear by identity) but collapse into one
+    // display-only `… (N more)` row that counts raw events, not display
+    // rows.
+    const indexByBlock = new Map(children.map((block, position) => [block, position] as const));
+    const recency = (group: ToolBlockDisplayGroup) =>
+      group.members.reduce((max, member) => Math.max(max, indexByBlock.get(member) ?? -1), -1);
+    const childGroups = groupToolBlocksForDisplay(children)
+      .slice()
+      .sort((a, b) => recency(a) - recency(b));
+    const dropped = childGroups.slice(
+      0,
+      Math.max(0, childGroups.length - maxVisibleSubagentRunChildren),
+    );
+    const kept = childGroups.slice(dropped.length);
+    const elidedMembers = dropped.flatMap((group) => group.members);
+    if (elidedMembers.length > 0) {
+      groups.push({
+        members: elidedMembers,
+        display: { kind: "subagent-step", depth: 1, live, elided: elidedMembers.length },
+      });
+    }
+    groups.push(...kept);
+    // A section with visible children closes its rail on a bare corner. The
+    // corner is display-only (no member): it re-derives from the same
+    // grouping on every paint and transcript rebuild.
+    if (kept.length > 0) {
+      groups.push({
+        members: [],
+        display: { kind: "subagent-close", subagentCallId: header.subagentCallId!, live },
+      });
+    }
   }
-  for (const kept of keptByCall) {
-    if (kept.length > 0) groups.push(...groupToolBlocksForDisplay(kept));
+  // Interrupting pass-through blocks render after the sections they
+  // spliced into.
+  for (const block of passThrough) {
+    groups.push({ members: [block], display: block });
   }
   return { consumed, groups };
 }
@@ -229,6 +301,85 @@ function collapseSettledToolBlocks(members: readonly Block[]): Block {
     title: `${group.verb} ${count} ${noun}`,
     doneTitle: `${group.pastVerb} ${count} ${noun}`,
   };
+}
+
+/**
+ * A settled child tool can fold into the multi-kind condensed row once a
+ * message follows it. Failures stay itemized — an error must not vanish
+ * into a count.
+ */
+function isCondensableChildTool(block: Block): boolean {
+  return block.kind === "subagent-tool" && block.status === "done" && block.expanded !== true;
+}
+
+/** A failed child call: rides a condensable run but keeps its own row. */
+function isItemizedChildFailure(block: Block): boolean {
+  return block.kind === "subagent-tool" && block.status === "error" && block.expanded !== true;
+}
+
+/** The (past verb, noun) copy one condensed-count entry renders with. */
+interface CondensedKindCopy {
+  readonly pastVerb: string;
+  readonly singularNoun: string;
+  readonly pluralNoun: string;
+}
+
+/** How many tool kinds the condensed row names before "and more". */
+const maxCondensedKinds = 3;
+
+/**
+ * Folds one settled child-tool run into a single counted row:
+ * `Ran 17 commands, Read 10 files, Wrote 6 files, and more`.
+ */
+function condenseChildToolRun(run: readonly Block[]): Block {
+  const counts = new Map<string, { copy: CondensedKindCopy; count: number }>();
+  for (const block of run) {
+    const copy = condensedKindCopy(block);
+    const key = `${copy.pastVerb} ${copy.pluralNoun}`;
+    const entry = counts.get(key);
+    if (entry === undefined) {
+      counts.set(key, { copy, count: 1 });
+    } else {
+      entry.count += 1;
+    }
+  }
+
+  const ranked = [...counts.values()].sort((a, b) => b.count - a.count);
+  const named = ranked
+    .slice(0, maxCondensedKinds)
+    .map(
+      ({ copy, count }) =>
+        `${copy.pastVerb} ${count} ${count === 1 ? copy.singularNoun : copy.pluralNoun}`,
+    );
+  const title =
+    ranked.length > maxCondensedKinds ? `${named.join(", ")}, and more` : named.join(", ");
+
+  const first = run[0]!;
+  return {
+    kind: "subagent-tool",
+    subagentCallId: first.subagentCallId,
+    depth: first.depth,
+    live: first.live,
+    status: "done",
+    title,
+    doneTitle: title,
+    subtitle: "",
+  };
+}
+
+function condensedKindCopy(block: Block): CondensedKindCopy {
+  const group = block.toolGroup;
+  if (group !== undefined) {
+    return {
+      pastVerb: group.pastVerb,
+      singularNoun: group.singularNoun,
+      pluralNoun: group.pluralNoun,
+    };
+  }
+  if (toolBaseName(block.toolName ?? "") === "write_file") {
+    return { pastVerb: "Wrote", singularNoun: "file", pluralNoun: "files" };
+  }
+  return { pastVerb: "Made", singularNoun: "tool call", pluralNoun: "tool calls" };
 }
 
 /** Newest call first: the rail reads bottom-up, like changes arriving. */

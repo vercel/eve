@@ -493,10 +493,12 @@ describe("resolveDevUiMode", () => {
 });
 
 describe("resolveTuiDisplayOptions", () => {
-  it("defaults tools to auto-collapsed, reasoning to full, and stderr logs visible", () => {
+  it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
       logs: "stderr",
-      reasoning: "full",
+      // Collapsed reasoning is the fixed thinking line; `--reasoning full`
+      // restores the streaming transcript trace.
+      reasoning: "auto-collapsed",
       tools: "auto-collapsed",
     });
   });
