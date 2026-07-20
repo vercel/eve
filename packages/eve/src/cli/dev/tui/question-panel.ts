@@ -40,7 +40,8 @@ export function renderQuestionPanel(
 ): string[] {
   const c = theme.colors;
   const g = theme.glyph;
-  const rows: string[] = [c.dim(g.hrule.repeat(Math.max(1, width))), ""];
+  // The rule hugs the question — no blank row between them.
+  const rows: string[] = [c.dim(g.hrule.repeat(Math.max(1, width)))];
 
   // The prompt is model-authored and can span paragraphs. Embedded newlines
   // MUST split before width-wrapping: a row that secretly holds newlines
@@ -65,8 +66,9 @@ export function renderQuestionPanel(
     }
   }
 
-  // Interaction hints live on the status line beneath the panel — one
-  // surface, not a panel footer duplicating it.
+  // One quiet hint; arrow/enter affordances are carried by the cursor row
+  // itself. The overlay suppresses the footer's status hint row entirely.
+  rows.push("", `  ${c.dim("Esc to dismiss")}`);
   return rows.map((row) => clipVisible(row, width));
 }
 

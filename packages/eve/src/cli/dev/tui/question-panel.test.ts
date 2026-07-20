@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { EMPTY_LINE, type LineState } from "./line-editor.js";
-import { FREEFORM_ROW_LABEL, renderQuestionPanel } from "./question-panel.js";
+import { renderQuestionPanel } from "./question-panel.js";
 import { stripAnsi } from "./terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -31,7 +31,7 @@ function render(state: {
 }
 
 describe("renderQuestionPanel", () => {
-  it("opens with a rule, the prompt, and numbered options", () => {
+  it("opens with the rule hugging the prompt and closes on the dismiss hint", () => {
     const rows = render({ cursor: 0 });
 
     expect(rows[0]).toBe("▔".repeat(60));
@@ -39,8 +39,9 @@ describe("renderQuestionPanel", () => {
     expect(rows.find((row) => row.includes("1. Available Tools"))).toContain("▶");
     expect(rows).toContain("        See 4 tools I can use");
     expect(rows).toContain("     2. Connected Services");
-    // Interaction hints live on the status line, not in a panel footer.
-    expect(rows.at(-1)).toBe(`     3. ${FREEFORM_ROW_LABEL}`);
+    // The rule hugs the question; the panel closes on its one quiet hint.
+    expect(rows[1]).toBe("  What type of options would you like to see?");
+    expect(rows.at(-1)).toBe("  Esc to dismiss");
   });
 
   it("marks only the cursor row with the pointer and enter badge", () => {
