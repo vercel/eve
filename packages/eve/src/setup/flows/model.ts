@@ -1,13 +1,9 @@
-import { join } from "node:path";
 import {
   hasEnvValue,
   resolveGatewayCredential,
   type GatewayCredentialResolution,
 } from "#internal/resolve-model-endpoint-status.js";
 
-import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
-import { discoverAgent } from "#discover/discover-agent.js";
-import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import type {
   AgentModelSettingsPatch,

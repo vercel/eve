@@ -4218,8 +4218,9 @@ describe("TerminalRenderer status line", () => {
       { submittedPrompt: "hello", continueSession: true },
     );
 
+    // Token flow belongs to the end-of-turn coda; the settled footer keeps
+    // only the quiet `· Ready` row and its turn-scoped stats.
     const snapshot = screen.snapshot();
-    expect(snapshot).not.toContain("Ready");
     expect(snapshot).not.toContain("↑ 500");
     expect(snapshot).not.toContain("↓ 300");
     renderer.shutdown();

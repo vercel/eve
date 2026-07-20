@@ -12,7 +12,6 @@ type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
 import type { AssistantStepFinishReason, RuntimeIdentity } from "#protocol/message.js";
 import {
-  createActionPreparingEvent,
   createActionsRequestedEvent,
   createActionResultEvent,
   createMessageAppendedEvent,
@@ -176,7 +175,7 @@ export async function emitTurnPreamble(
 export async function emitStepStarted(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  messages?: readonly ModelMessage[],
+  messages?: readonly import("ai").ModelMessage[],
 ): Promise<void> {
   await emitFn(
     createStepStartedEvent({
@@ -395,7 +394,6 @@ async function consumeStreamContent(
   let streamError: Error | undefined;
   const toolCallIdsSeenInStream = new Set<string>();
   const emittedActionCallIds = new Set<string>();
-  const announcedPreparingCallIds = new Set<string>();
   const emittedActionResultCallIds = new Set<string>();
   const providerToolCallIdsSeen = new Set<string>();
   const handledInlineToolResultCallIds = new Set<string>();
@@ -555,24 +553,6 @@ async function consumeStreamContent(
             messageSoFar: currentMessage,
             sequence: state.sequence,
             stepIndex: state.stepIndex,
-            turnId: state.turnId,
-          }),
-        );
-        break;
-      case "tool-input-start":
-        // The model has committed to this call; its input is still streaming.
-        // Announcing the (callId, toolName) pair now lets consumers surface
-        // the upcoming call during the otherwise event-less generation window.
-        // The part's `id` is the tool call id of the later `tool-call` part.
-        if (emittedActionCallIds.has(part.id)) break;
-        if (announcedPreparingCallIds.has(part.id)) break;
-        announcedPreparingCallIds.add(part.id);
-        await emitFn(
-          createActionPreparingEvent({
-            callId: part.id,
-            sequence: state.sequence,
-            stepIndex: state.stepIndex,
-            toolName: part.toolName,
             turnId: state.turnId,
           }),
         );

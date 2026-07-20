@@ -462,6 +462,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #paintAgain = false;
 
   #totalTokens?: number;
+  /** Input (prompt) tokens from the latest usage report — the ↑ side. */
+  #promptTokens?: number;
+  #contextSize?: number;
   #assistantOutputTokens?: number;
   #assistantTokensPerSecond?: number;
   /** Wall-clock start of the current stream, for the tok/s status stat. */
@@ -768,6 +771,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     this.#interrupted = false;
     this.#totalTokens = undefined;
+    this.#promptTokens = undefined;
     this.#assistantOutputTokens = undefined;
     this.#assistantTokensPerSecond = undefined;
     this.#streamStartedAt = Date.now();
@@ -1405,6 +1409,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#devRebuild = undefined;
     this.#connectionAuthPendingCount = 0;
     this.#totalTokens = undefined;
+    this.#promptTokens = undefined;
     this.#assistantOutputTokens = undefined;
     this.#assistantTokensPerSecond = undefined;
     this.#streamStartedAt = undefined;
@@ -3217,6 +3222,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (inputTokens != null || outputTokens != null) {
       this.#totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0);
     }
+    this.#promptTokens = inputTokens ?? this.#promptTokens;
     this.#assistantOutputTokens = outputTokens ?? this.#assistantOutputTokens;
 
     if (this.#assistantOutputTokens != null && this.#streamStartedAt !== undefined) {

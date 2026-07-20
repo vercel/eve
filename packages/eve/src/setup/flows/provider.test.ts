@@ -106,7 +106,7 @@ describe("runProviderFlow", () => {
       currentProvider: {
         kind: "gateway-key",
         envKey: "AI_GATEWAY_API_KEY",
-        envFile: ".env.local",
+        source: { kind: "env-file", path: ".env.local" },
       },
       deps,
     });

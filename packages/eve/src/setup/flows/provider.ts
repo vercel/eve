@@ -121,7 +121,8 @@ function providerOptions(
     hint: "⎿ type your key",
   };
   if (current?.kind === "gateway-key") {
-    ownKey = { ...ownKey, checked: true, hint: `${current.envKey} set in ${current.envFile}` };
+    const where = current.source.kind === "shell" ? "your shell" : current.source.path;
+    ownKey = { ...ownKey, checked: true, hint: `${current.envKey} set in ${where}` };
   }
 
   return [
