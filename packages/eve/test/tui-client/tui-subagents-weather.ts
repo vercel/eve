@@ -17,7 +17,7 @@ import { theme } from "./lib/theme.ts";
  * landing under `stepIndex: 0` and collapsing into one box.
  *
  * Pass conditions:
- *   1. A `※ stock-price` region header exists.
+ *   1. A `※ subagent(stock-price)` region header exists.
  *   2. The child's `get_stock_price` tool row renders nested inside the
  *      subagent's `│` rule gutter (proves the child tool surfaces under
  *      the subagent flow).
@@ -73,7 +73,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   input.enter();
 
   // The subagent region header should appear once the parent delegates.
-  await waitForCondition(() => screen.snapshot().includes("※ stock-price"), {
+  await waitForCondition(() => screen.snapshot().includes("※ subagent(stock-price)"), {
     timeoutMs: 120_000,
     label: "subagent region header",
     onTimeout: () => screen.snapshot(),

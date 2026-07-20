@@ -188,7 +188,7 @@ describe("renderBlockLines", () => {
       subtitle: "3 calls",
       live: false,
     });
-    expect(lines).toEqual(["※ echo-marker 3 calls"]);
+    expect(lines).toEqual(["  ※ subagent(echo-marker) 3 calls"]);
   });
 
   it("collapses a child message to its first line inside the section", () => {
@@ -199,7 +199,7 @@ describe("renderBlockLines", () => {
       body: "The trade-off is abstraction.\n\nMore detail…",
       live: false,
     });
-    expect(lines).toEqual(["│ The trade-off is abstraction."]);
+    expect(lines).toEqual(["  │ The trade-off is abstraction."]);
 
     // `--subagents full` keeps the verbatim prose.
     const full = render({
@@ -218,7 +218,7 @@ describe("renderBlockLines", () => {
       live: false,
       elided: 6,
     });
-    expect(lines).toEqual(["│ … (6 more)"]);
+    expect(lines).toEqual(["  │ … (6 more)"]);
   });
 
   it("nests subagent tools under the orange rule", () => {
@@ -229,7 +229,7 @@ describe("renderBlockLines", () => {
       status: "done",
       result: "ok",
     });
-    expect(lines[0]?.startsWith("│  ▪ fetch")).toBe(true);
+    expect(lines[0]?.startsWith("  │  ▪ fetch")).toBe(true);
   });
 
   it("collapses reasoning to a single line when requested", () => {
@@ -286,7 +286,6 @@ describe("renderBlockLines", () => {
       "│   turnId: 't',",
       "│   sequence: 0",
       "│ }",
-      "└",
     ]);
   });
 
@@ -297,12 +296,12 @@ describe("renderBlockLines", () => {
       body: "newest line",
       elided: 52,
     });
-    expect(lines).toEqual(["○ stderr", "│ … (52 more)", "│ newest line", "└"]);
+    expect(lines).toEqual(["○ stderr", "│ … (52 more)", "│ newest line"]);
   });
 
   it("renders a one-line log under its source header", () => {
     const lines = render({ kind: "log", title: "stdout", body: "weather lookup { city: 'SF' }" });
-    expect(lines).toEqual(["○ stdout", "│ weather lookup { city: 'SF' }", "└"]);
+    expect(lines).toEqual(["○ stdout", "│ weather lookup { city: 'SF' }"]);
   });
 
   it("renders sandbox lifecycle lines as first-class progress", () => {
@@ -335,7 +334,7 @@ describe("renderBlockLines", () => {
       activityPulse: "▪",
       previous: { kind: "log", title: "stderr" },
     }).map(stripAnsi);
-    expect(lines).toEqual(["○ stderr", "│ boom", "└"]);
+    expect(lines).toEqual(["○ stderr", "│ boom"]);
   });
 
   it("renders an error's diagnostic detail beneath the headline", () => {

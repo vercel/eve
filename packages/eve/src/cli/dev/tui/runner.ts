@@ -250,6 +250,8 @@ export type AgentTUIRenderer = {
    * `preparing` placeholders whose call never materialized.
    */
   removeSubagentTool?(update: { callId: string; childCallId: string }): void;
+  /** Marks a subagent call complete so its section corner reports Done. */
+  completeSubagent?(update: { callId: string }): void;
   /**
    * Registers a tool call id as originating from a subagent's child
    * session. The renderer must skip or remove parent-level tool blocks for
@@ -1603,6 +1605,7 @@ export class EveTUIRunner {
     }
     run.currentSectionKey = null;
     this.#sweepPreparingChildTools(callId, run);
+    this.#renderer.completeSubagent?.({ callId });
   }
 
   /**

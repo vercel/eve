@@ -146,13 +146,14 @@ export function renderBlockLines(
 }
 
 /**
- * The gutter prefix repeated for each nesting level: a Vercel-orange vertical
- * rule that visually contains a subagent's output beneath its header.
+ * The gutter prefix for nested rows: the section's two-cell tool-column
+ * indent, then a Vercel-orange vertical rule per nesting level to contain a
+ * subagent's output beneath its header.
  */
 function nestingPrefix(depth: number, theme: Theme): string {
   if (depth <= 0) return "";
   const rule = `${theme.colors.orange(theme.glyph.rule)} `;
-  return rule.repeat(depth);
+  return `  ${rule.repeat(depth)}`;
 }
 
 function renderBody(
@@ -198,9 +199,12 @@ function renderBody(
       return renderLog(block, width, theme);
     case "subagent":
       return renderSubagentHeader(block, width, theme);
-    case "subagent-close":
-      // The bare corner closing a subagent section's rail, matching its hue.
-      return [theme.colors.orange(theme.glyph.corner)];
+    case "subagent-close": {
+      // Closes the section's rail in its hue; once the call has delivered
+      // its final message the corner reports it.
+      const corner = `  ${theme.colors.orange(theme.glyph.corner)}`;
+      return [block.status === "done" ? `${corner} ${theme.colors.orange("Done")}` : corner];
+    }
     case "turn-stats":
       return renderTurnStats(block, width, theme);
     case "session-boundary":
@@ -476,10 +480,11 @@ function renderSandbox(
 }
 
 /**
- * Renders captured server output as a closed section: a `○ stderr` (or
- * `○ stdout`) header, body lines — wrapped continuations included — behind
- * a `│` rail, and a bare `└` corner. A lone write shows its full body; a
- * coalesced run (contiguous writes merged by the display grouping) arrives
+ * Renders captured server output: a `○ stderr` (or `○ stdout`) header with
+ * body lines — wrapped continuations included — behind a `│` rail. The rail
+ * stays open (no closing corner): a process stream is continuous, and the
+ * next write may extend it. A lone write shows its full body; a coalesced
+ * run (contiguous writes merged by the display grouping) arrives
  * pre-windowed to its newest lines with the older count on `elided`,
  * rendered as an `… (N more)` row under the header. Whether a source
  * renders at all is the renderer's `LogDisplayMode` filter — this function
@@ -500,7 +505,6 @@ function renderLog(block: Block, width: number, theme: Theme): string[] {
       rows.push(`${rule} ${theme.colors.dim(color(line))}`);
     }
   }
-  rows.push(theme.colors.dim(theme.glyph.corner));
   return rows;
 }
 
@@ -516,12 +520,15 @@ function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
 }
 
 function renderSubagentHeader(block: Block, width: number, theme: Theme): string[] {
-  // The `※` mark already says "subagent", so the header carries only the
-  // name and ordinal. The generic self-delegation tool is literally named
-  // `agent`; showing it as "subagent" avoids the redundant "agent agent".
-  const rawName = block.title === undefined || block.title === "agent" ? "subagent" : block.title;
-  const name = truncatePlain(rawName, Math.max(8, width - 8));
-  let header = `${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(name)}`;
+  // `subagent(<name>)` with the name in the section's orange; the generic
+  // self-delegation tool (literally named `agent`) reads as a plain
+  // `subagent(self)`.
+  const isSelf = block.title === undefined || block.title === "agent";
+  const rawName = isSelf ? "self" : block.title!;
+  const name = truncatePlain(rawName, Math.max(8, width - 16));
+  let header = `  ${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(
+    `subagent(${isSelf ? name : theme.colors.orange(name)})`,
+  )}`;
   if (block.subtitle !== undefined && block.subtitle.length > 0) {
     header += ` ${theme.colors.dim(block.subtitle)}`;
   }

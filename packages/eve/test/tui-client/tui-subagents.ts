@@ -23,7 +23,7 @@ import { theme } from "./lib/theme.ts";
  *   1. Start the apps/fixtures/agent-tui-client server.
  *   2. Boot an `EveTUIRunner` with a mock terminal.
  *   3. Type the same delegation prompt the non-TUI subagent smoke uses.
- *   4. Wait for the `※ echo-marker` region header to appear.
+ *   4. Wait for the `※ subagent(echo-marker)` region header to appear.
  *   5. Wait for the nested region to contain the marker token.
  *   6. Verify the parent assistant message also contains the token. The
  *      rendering side-channel must not have broken the harness path.
@@ -59,7 +59,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   );
   input.enter();
 
-  await screen.waitForText("※ echo-marker", 90_000);
+  await screen.waitForText("※ subagent(echo-marker)", 90_000);
   console.log(theme.muted("[tui-subagents] subagent region header appeared"));
 
   await waitForCondition(() => screen.snapshot().includes(SUBAGENT_TOKEN), {

@@ -1061,8 +1061,29 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("※ researcher");
+    expect(snapshot).toContain("※ subagent(researcher)");
     expect(snapshot).toContain("get_weather");
+    renderer.shutdown();
+  });
+
+  it("reports Done on the section corner once the call completes", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.upsertSubagentStep({
+      callId: "s1",
+      subagentName: "echo-marker",
+      sectionKey: 0,
+      reasoning: "",
+      message: "SUBAGENT_TOKEN=echo-marker-9F2X",
+      finalized: true,
+    });
+
+    // Mid-flight the section closes on a bare corner.
+    expect(screen.snapshot()).toContain("  └");
+    expect(screen.snapshot()).not.toContain("└ Done");
+
+    renderer.completeSubagent({ callId: "s1" });
+    expect(screen.snapshot()).toContain("  └ Done");
     renderer.shutdown();
   });
 
@@ -1091,10 +1112,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     // Each call keeps its own persistent section, told apart by ordinal.
-    expect(countOccurrences(snapshot, "※ echo-marker")).toBe(3);
-    expect(snapshot).toContain("※ echo-marker #1");
-    expect(snapshot).toContain("※ echo-marker #2");
-    expect(snapshot).toContain("※ echo-marker #3");
+    expect(countOccurrences(snapshot, "※ subagent(echo-marker)")).toBe(3);
+    expect(snapshot).toContain("※ subagent(echo-marker) #1");
+    expect(snapshot).toContain("※ subagent(echo-marker) #2");
+    expect(snapshot).toContain("※ subagent(echo-marker) #3");
     expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-1");
     expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-2");
     expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-3");
@@ -1117,7 +1138,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "※ echo-marker")).toBe(1);
+    expect(countOccurrences(snapshot, "※ subagent(echo-marker)")).toBe(1);
     // A lone call carries no ordinal.
     expect(snapshot).not.toContain("#1");
     expect(snapshot).toContain("(5 more)");

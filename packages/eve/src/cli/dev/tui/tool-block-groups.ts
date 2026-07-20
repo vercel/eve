@@ -309,10 +309,15 @@ function collectSubagentRun(
     // corner is display-only (no member): it re-derives from the same
     // grouping on every paint and transcript rebuild.
     if (kept.length > 0) {
-      groups.push({
-        members: [],
-        display: { kind: "subagent-close", subagentCallId: header.subagentCallId!, live },
-      });
+      const close: Block = {
+        kind: "subagent-close",
+        subagentCallId: header.subagentCallId!,
+        live,
+      };
+      // The header carries the call's completion (its final message has
+      // arrived); the corner is where the section reports it.
+      if (header.status === "done") close.status = "done";
+      groups.push({ members: [], display: close });
     }
   }
   // Interrupting pass-through blocks render after the sections they

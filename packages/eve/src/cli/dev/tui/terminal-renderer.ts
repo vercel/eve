@@ -1286,6 +1286,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  /**
+   * Marks a subagent call complete — its final message has arrived — so the
+   * section's closing corner reports `Done`. The header stays live until the
+   * turn finalizes (committing mid-turn would freeze its child window).
+   */
+  completeSubagent(update: { callId: string }): void {
+    const header = this.#blockById.get(subagentHeaderId(update.callId));
+    if (header === undefined) return;
+    header.status = "done";
+    this.#paint();
+  }
+
   markChildToolCallId(callId: string): void {
     this.#childToolCallIds.add(callId);
     const staleId = this.#parentToolBlockIds.get(callId);
