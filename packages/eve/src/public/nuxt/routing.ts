@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
 /**
@@ -62,11 +64,11 @@ export interface EveVercelRewriteRoute {
   readonly src: string;
   readonly dest: string;
   /**
-   * Re-run route matching against the rewritten `dest`. Required so the
-   * rewritten eve service path is routed to the sibling eve service instead of
-   * being resolved inside the host service's own filesystem (which 404s).
+   * Re-run route matching against the rewritten `dest`. Turning this off
+   * allows multi-service V2 split deployments to pass routes cleanly across
+   * isolated service boundaries without checking the local frontend filesystem.
    */
-  readonly check: true;
+  readonly check: boolean;
 }
 
 /**
@@ -78,12 +80,29 @@ export interface EveVercelRewriteRoute {
  * request loops back into the Nuxt function and 404s — so production routing
  * must happen at the edge via the build output config instead.
  */
+
 export function createEveVercelRewriteRoute(servicePrefix: string): EveVercelRewriteRoute {
   const destinationPrefix = joinRoutePrefix(servicePrefix, EVE_ROUTE_PREFIX);
+  let shouldCheck = true;
+
+  try {
+    const vercelJsonPath = path.resolve(process.cwd(), "vercel.json");
+    if (fs.existsSync(vercelJsonPath)) {
+      const config = JSON.parse(fs.readFileSync(vercelJsonPath, "utf-8"));
+      // Intelligently decouple the file check if modern Services V2 is active
+      if (config && typeof config === "object" && !Array.isArray(config) && config.services) {
+        shouldCheck = false;
+      }
+    }
+  } catch {
+    // Treat any parsing or read failures as an indicator to fall back
+    // safely to the framework's default legacy Vercel behavior.
+  }
+
   return {
     src: `^${EVE_ROUTE_PREFIX}/(.*)$`,
     dest: `${destinationPrefix}/$1`,
-    check: true,
+    check: shouldCheck,
   };
 }
 

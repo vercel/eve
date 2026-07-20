@@ -1228,7 +1228,7 @@ importers:
         version: 1.28.1
       '@workflow/core':
         specifier: 5.0.0-beta.35
-        version: 5.0.0-beta.35(@opentelemetry/api@1.9.1)(ws@8.21.0)
+        version: 5.0.0-beta.35(@opentelemetry/api@1.9.1)(ws@8.21.1)
       '@workflow/errors':
         specifier: 5.0.0-beta.11
         version: 5.0.0-beta.11
@@ -1252,7 +1252,7 @@ importers:
         version: 7.0.26(zod@4.4.3)
       autoevals:
         specifier: 0.0.132
-        version: 0.0.132(ws@8.21.0)
+        version: 0.0.132(ws@8.21.1)
       chat:
         specifier: 4.31.0
         version: 4.31.0(ai@7.0.26(zod@4.4.3))(zod@4.4.3)
@@ -11619,10 +11619,6 @@ packages:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
 
-  postcss@8.5.19:
-    resolution: {integrity: sha512-Mz8SaolMd8nB+G13WkORcxQKHZ/NE4xXevtkJHVuG+guo9/wYKlIMTKAqGdEmYOXR2ijPjTYNHssizdaVSUNdQ==}
-    engines: {node: ^10 || ^12 || >=14}
-
   powershell-utils@0.1.0:
     resolution: {integrity: sha512-dM0jVuXJPsDN6DvRpea484tCUaMiXWjuCn++HGTqUWzGDjv5tZkEZldAJ/UMlqRYGFrD/etByo4/xOuC/snX2A==}
     engines: {node: '>=20'}
@@ -13534,18 +13530,6 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.21.0:
-    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   ws@8.21.1:
     resolution: {integrity: sha512-+0NTnW77fFN/DjQi6k/Sq/Yvk4Sgajw7urW8V+asjXnRgDs9gyGkdb7EzgfhA4goXsRIZKE28fzIXBHEzhuiWw==}
     engines: {node: '>=10.0.0'}
@@ -15280,7 +15264,7 @@ snapshots:
       magicast: 0.5.3
       pathe: 2.0.3
       pkg-types: 2.3.1
-      semver: 7.8.5
+      semver: 7.8.4
 
   '@nuxt/devtools@3.2.4(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue@3.5.35(typescript@6.0.3))':
     dependencies:
@@ -15307,7 +15291,7 @@ snapshots:
       pathe: 2.0.3
       perfect-debounce: 2.1.0
       pkg-types: 2.3.1
-      semver: 7.8.5
+      semver: 7.8.4
       simple-git: 3.36.0
       sirv: 3.0.2
       structured-clone-es: 2.0.0
@@ -15349,7 +15333,7 @@ snapshots:
       pathe: 2.0.3
       perfect-debounce: 2.1.0
       pkg-types: 2.3.1
-      semver: 7.8.5
+      semver: 7.8.4
       simple-git: 3.36.0
       sirv: 3.0.2
       structured-clone-es: 2.0.0
@@ -18204,7 +18188,7 @@ snapshots:
       '@types/node': 25.9.1
       '@types/ws': 8.18.1
       eventemitter3: 5.0.4
-      ws: 8.21.0
+      ws: 8.21.1
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -19150,20 +19134,12 @@ snapshots:
     optionalDependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
 
-  '@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0)':
-    dependencies:
-      '@vercel/oidc': 3.8.0
-    optionalDependencies:
-      '@aws-sdk/credential-provider-web-identity': 3.972.49
-      ws: 8.21.0
-
   '@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.1)':
     dependencies:
       '@vercel/oidc': 3.8.0
     optionalDependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       ws: 8.21.1
-    optional: true
 
   '@vercel/gatsby-plugin-vercel-analytics@1.0.11':
     dependencies:
@@ -19746,13 +19722,13 @@ snapshots:
 
   '@webgpu/types@0.1.71': {}
 
-  '@workflow/core@5.0.0-beta.35(@opentelemetry/api@1.9.1)(ws@8.21.0)':
+  '@workflow/core@5.0.0-beta.35(@opentelemetry/api@1.9.1)(ws@8.21.1)':
     dependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       '@jridgewell/trace-mapping': 0.3.31
       '@standard-schema/spec': 1.0.0
       '@types/ms': 2.1.0
-      '@vercel/functions': 3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0)
+      '@vercel/functions': 3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.1)
       '@workflow/errors': 5.0.0-beta.11
       '@workflow/serde': 5.0.0-beta.2
       '@workflow/utils': 5.0.0-beta.6
@@ -20061,7 +20037,7 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  autoevals@0.0.132(ws@8.21.0):
+  autoevals@0.0.132(ws@8.21.1):
     dependencies:
       ajv: 8.20.0
       compute-cosine-similarity: 1.1.0
@@ -20069,7 +20045,7 @@ snapshots:
       js-yaml: 4.1.1
       linear-sum-assignment: 1.0.9
       mustache: 4.2.0
-      openai: 6.39.1(ws@8.21.0)(zod@3.25.76)
+      openai: 6.39.1(ws@8.21.1)(zod@3.25.76)
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
     transitivePeerDependencies:
@@ -24090,7 +24066,7 @@ snapshots:
       rollup: 4.62.2
       rollup-plugin-visualizer: 7.0.1(rolldown@1.1.0)(rollup@4.62.2)
       scule: 1.3.0
-      semver: 7.8.5
+      semver: 7.8.4
       serve-placeholder: 2.0.2
       serve-static: 2.2.1
       source-map: 0.7.6
@@ -24202,7 +24178,7 @@ snapshots:
       rollup: 4.62.2
       rollup-plugin-visualizer: 7.0.1(rolldown@1.1.0)(rollup@4.62.2)
       scule: 1.3.0
-      semver: 7.8.5
+      semver: 7.8.4
       serve-placeholder: 2.0.2
       serve-static: 2.2.1
       source-map: 0.7.6
@@ -24379,7 +24355,7 @@ snapshots:
       pkg-types: 2.3.1
       rou3: 0.8.1
       scule: 1.3.0
-      semver: 7.8.5
+      semver: 7.8.4
       std-env: 4.2.0
       tinyglobby: 0.2.17
       ufo: 1.6.4
@@ -24515,7 +24491,7 @@ snapshots:
       pkg-types: 2.3.1
       rou3: 0.8.1
       scule: 1.3.0
-      semver: 7.8.5
+      semver: 7.8.4
       std-env: 4.2.0
       tinyglobby: 0.2.17
       ufo: 1.6.4
@@ -24721,9 +24697,9 @@ snapshots:
       is-docker: 2.2.1
       is-wsl: 2.2.0
 
-  openai@6.39.1(ws@8.21.0)(zod@3.25.76):
+  openai@6.39.1(ws@8.21.1)(zod@3.25.76):
     optionalDependencies:
-      ws: 8.21.0
+      ws: 8.21.1
       zod: 3.25.76
 
   optionator@0.9.4:
@@ -25270,12 +25246,6 @@ snapshots:
   postcss@8.5.15:
     dependencies:
       nanoid: 3.3.12
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
-
-  postcss@8.5.19:
-    dependencies:
-      nanoid: 3.3.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -27489,7 +27459,7 @@ snapshots:
       '@oxc-project/runtime': 0.115.0
       lightningcss: 1.32.0
       picomatch: 4.0.5
-      postcss: 8.5.19
+      postcss: 8.5.15
       rolldown: 1.0.0-rc.9(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       tinyglobby: 0.2.17
     optionalDependencies:
@@ -27738,8 +27708,6 @@ snapshots:
       strip-ansi: 7.2.0
 
   wrappy@1.0.2: {}
-
-  ws@8.21.0: {}
 
   ws@8.21.1: {}
 
