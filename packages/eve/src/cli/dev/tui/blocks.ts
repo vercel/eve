@@ -103,6 +103,12 @@ export interface Block {
   /** Links a subagent section's header and children so calls can coalesce. */
   subagentCallId?: string;
   /**
+   * Monotonic activity stamp, bumped on every push and in-place update.
+   * Recency windows key on it so a parallel-announced call that just
+   * settled counts as newer than a later-announced one still idle.
+   */
+  updateSeq?: number;
+  /**
    * Display-only stand-in for this many earlier sibling rows elided from a
    * capped subagent run; renders as a single dim `… +N more` line.
    */

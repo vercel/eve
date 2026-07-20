@@ -317,8 +317,13 @@ function collectSubagentRun(
     // display-only `… (N more)` row that counts raw events, not display
     // rows.
     const indexByBlock = new Map(children.map((block, position) => [block, position] as const));
+    // Activity stamps rank a just-updated call above a later-announced idle
+    // one; list position is the fallback for stamp-less (test-built) blocks.
     const recency = (group: ToolBlockDisplayGroup) =>
-      group.members.reduce((max, member) => Math.max(max, indexByBlock.get(member) ?? -1), -1);
+      group.members.reduce(
+        (max, member) => Math.max(max, member.updateSeq ?? indexByBlock.get(member) ?? -1),
+        -1,
+      );
     const childGroups = groupToolBlocksForDisplay(children)
       .slice()
       .sort((a, b) => recency(a) - recency(b));
@@ -484,12 +489,16 @@ function condensedKindCopy(block: Block): CondensedKindCopy {
   return { pastVerb: "Made", singularNoun: "tool call", pluralNoun: "tool calls" };
 }
 
-/** Newest call first: the rail reads bottom-up, like changes arriving. */
+/**
+ * Most recently active call first: the rail reads bottom-up, like changes
+ * arriving. Activity stamps put a just-settled parallel call ahead of a
+ * later-announced one still idle; announce order is the stamp-less fallback.
+ */
 function newestFirstItems(members: readonly Block[]): ToolGroupItem[] {
   return members
-    .slice()
-    .reverse()
-    .map((member): ToolGroupItem => {
+    .map((member, position) => ({ member, order: member.updateSeq ?? position }))
+    .sort((a, b) => b.order - a.order)
+    .map(({ member }): ToolGroupItem => {
       const item: ToolGroupItem = { text: member.toolGroup!.item };
       // Failed calls keep their individual error summaries visible per row.
       return member.status === "error" && member.result !== undefined

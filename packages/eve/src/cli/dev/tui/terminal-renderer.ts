@@ -367,6 +367,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   readonly #childToolCallIds = new Set<string>();
   readonly #parentToolBlockIds = new Map<string, string>();
+  /** Monotonic counter behind every block's `updateSeq` activity stamp. */
+  #updateSequence = 0;
   /** Call ids per subagent name, for the sections' ordinal subtitles. */
   readonly #subagentCallsByName = new Map<string, string[]>();
   /** Session-local file contents, so write blocks can render real diffs. */
@@ -2707,6 +2709,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #pushBlock(block: Block) {
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
+    block.updateSeq = ++this.#updateSequence;
     this.#blocks.push(block);
     if (block.id) this.#blockById.set(block.id, block);
   }
@@ -2827,6 +2830,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const existing = block.id ? this.#blockById.get(block.id) : undefined;
     if (existing) {
       Object.assign(existing, block);
+      // An in-place update is activity: recency windows must treat this
+      // block as the newest, not leave it at its announce position.
+      existing.updateSeq = ++this.#updateSequence;
       return;
     }
     this.#pushBlock(block);

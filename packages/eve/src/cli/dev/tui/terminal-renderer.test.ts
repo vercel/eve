@@ -1108,6 +1108,36 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("※ subagent(self)");
   });
 
+  it("windows subagent children by latest activity, not announce order", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+    // A parallel batch: every call announced up front…
+    const names = ["web_fetch", "web_search", "bash", "read_file"];
+    const upsert = (i: number, status: "executing" | "done") =>
+      renderer.upsertSubagentTool({
+        callId: "s1",
+        subagentName: "agent",
+        childCallId: `c${i}`,
+        toolName: names[i % names.length]!,
+        input: { url: `u${i}`, query: `q${i}`, command: `cmd${i}`, filePath: `f${i}` },
+        status,
+        ...(status === "done" ? { output: { ok: true } } : {}),
+      });
+    for (let i = 1; i <= 8; i += 1) upsert(i, "executing");
+    // …then the FIRST two settle: they are the most recent activity and
+    // must enter the window, displacing later-announced idle calls.
+    upsert(1, "done");
+    upsert(2, "done");
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Searched q1");
+    expect(snapshot).toContain("Ran cmd2");
+    expect(snapshot).toContain("(5 more)");
+    expect(snapshot).not.toContain("cmd6");
+    renderer.shutdown();
+  });
+
   it("reports Done on the section corner once the call completes", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
