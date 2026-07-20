@@ -46,8 +46,12 @@ interface BuiltinToolCopy {
   readonly verb: string;
   readonly pastVerb: string;
   readonly argKey: string;
-  /** Alternate keys provider-managed variants of the tool send instead. */
-  readonly fallbackArgKeys?: readonly string[];
+  /**
+   * Tool-specific extraction for provider-managed input shapes the plain
+   * `argKey` lookup can't reach (alternate key names, nested objects).
+   * Runs after `argKey` misses.
+   */
+  readonly extractItem?: (input: unknown) => string | undefined;
   readonly singularNoun: string;
   readonly pluralNoun: string;
 }
@@ -125,10 +129,14 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     verb: "Search",
     pastVerb: "Searched",
     argKey: "query",
-    // Provider-managed variants disagree on the argument name: some send an
-    // `objective`/`search_query` pair instead of Anthropic's `query` (the
-    // OpenAI `action` nesting is handled separately).
-    fallbackArgKeys: ["objective", "search_query", "searchQuery"],
+    // Provider-managed variants disagree on the argument shape: some send
+    // an `objective`/`search_query` pair instead of Anthropic's `query`,
+    // and OpenAI nests it under `action`.
+    extractItem: (input) =>
+      salientArg(input, "objective") ??
+      salientArg(input, "search_query") ??
+      salientArg(input, "searchQuery") ??
+      webSearchActionArg(input),
     singularNoun: "query",
     pluralNoun: "queries",
   },
@@ -220,11 +228,7 @@ export function presentTool(
 
   const copy = BUILTIN_TOOL_COPY[baseName];
   if (copy !== undefined) {
-    const item =
-      [copy.argKey, ...(copy.fallbackArgKeys ?? [])].reduce<string | undefined>(
-        (found, key) => found ?? salientArg(input, key),
-        undefined,
-      ) ?? (baseName === "web_search" ? webSearchActionArg(input) : undefined);
+    const item = salientArg(input, copy.argKey) ?? copy.extractItem?.(input);
     if (item !== undefined) {
       return {
         title: `${copy.verb} ${item}`,
@@ -276,6 +280,17 @@ export function presentPreparingTool(
     subtitle: verb === undefined ? "preparing…" : "",
     summarizeResult: () => undefined,
   };
+}
+
+/**
+ * Tools whose whole story renders through a dedicated surface — the pinned
+ * todo panel, the question overlay — instead of a transcript tool block.
+ * Both the preparing announcement and the full call must agree on this
+ * set, or a panel-routed tool ghosts as a preparing block.
+ */
+export function isPanelRoutedTool(toolName: string): boolean {
+  const baseName = toolBaseName(toolName);
+  return baseName === "todo" || baseName === "ask_question";
 }
 
 /** The tool's short name with any connection/server namespace stripped. */
