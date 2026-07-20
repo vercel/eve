@@ -7,14 +7,20 @@ import type {
   EveAuthorizationPart,
   EveMessageData,
   EveDynamicToolPart,
-  EveMessageInputRequest,
   EveMessage,
   EveMessageMetadata,
   EveMessagePart,
-  EveMessageToolMetadata,
 } from "#client/message-reducer-types.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import {
+  approvedApproval,
+  createToolMetadata,
+  mergeToolMetadata,
+  normalizeActionRequest,
+  normalizeActionResult,
+  stringifyUnknown,
+  toMessageInputRequest,
+} from "#client/message-action-parts.js";
+import type { InputResponse } from "#runtime/input/types.js";
 import type { AuthorizationCompletedStreamEvent, MessageReceivedPart } from "#protocol/message.js";
 
 export type {
@@ -31,12 +37,6 @@ export type {
 } from "#client/message-reducer-types.js";
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
-
-interface ActionDescriptor {
-  readonly kind: "load-skill" | "subagent-call" | "tool-call";
-  readonly name: string;
-  readonly toolName: string;
-}
 
 /**
  * Creates a UIMessage-compatible eve reducer for chat and agent UIs.
@@ -591,128 +591,6 @@ function upsertMessage(data: EveMessageData, next: EveMessage): EveMessageData {
   };
 }
 
-function toMessageInputRequest(request: InputRequest): EveMessageInputRequest {
-  return {
-    allowFreeform: request.allowFreeform,
-    display: request.display,
-    options: request.options,
-    prompt: request.prompt,
-    requestId: request.requestId,
-  };
-}
-
-function createToolMetadata(
-  descriptor: ActionDescriptor,
-  extra?: { readonly inputRequest?: EveMessageInputRequest },
-): EveMessageToolMetadata {
-  return {
-    eve: {
-      inputRequest: extra?.inputRequest,
-      kind: descriptor.kind,
-      name: descriptor.name,
-    },
-  };
-}
-
-function mergeToolMetadata(
-  current: EveMessageToolMetadata | undefined,
-  next: EveMessageToolMetadata,
-): EveMessageToolMetadata {
-  const kind = next.eve?.kind ?? current?.eve?.kind ?? "unknown";
-  const name = next.eve?.name ?? current?.eve?.name ?? "unknown";
-
-  return {
-    eve: {
-      ...current?.eve,
-      ...next.eve,
-      inputRequest: next.eve?.inputRequest ?? current?.eve?.inputRequest,
-      inputResponse: next.eve?.inputResponse ?? current?.eve?.inputResponse,
-      kind,
-      name,
-    },
-  };
-}
-
-function approvedApproval(part: EveDynamicToolPart | undefined):
-  | {
-      readonly id: string;
-      readonly approved: true;
-      readonly reason?: string;
-      readonly isAutomatic?: boolean;
-    }
-  | undefined {
-  if (!part?.approval?.id) {
-    return undefined;
-  }
-  return {
-    approved: true,
-    id: part.approval.id,
-    isAutomatic: part.approval.isAutomatic,
-    reason: part.approval.reason,
-  };
-}
-
-function normalizeActionRequest(action: RuntimeActionRequest): ActionDescriptor {
-  switch (action.kind) {
-    case "load-skill":
-      return {
-        kind: "load-skill",
-        name: "load_skill",
-        toolName: "eve:load-skill",
-      };
-    case "tool-call":
-      return {
-        kind: "tool-call",
-        name: action.toolName,
-        toolName: action.toolName,
-      };
-    case "subagent-call":
-      return {
-        kind: "subagent-call",
-        name: action.subagentName,
-        toolName: `eve:subagent:${action.subagentName}`,
-      };
-    case "remote-agent-call":
-      return {
-        kind: "subagent-call",
-        name: action.remoteAgentName,
-        toolName: `eve:subagent:${action.remoteAgentName}`,
-      };
-  }
-}
-
-function normalizeActionResult(result: RuntimeActionResult): ActionDescriptor {
-  switch (result.kind) {
-    case "load-skill-result":
-      return {
-        kind: "load-skill",
-        name: result.name ?? "load_skill",
-        toolName: "eve:load-skill",
-      };
-    case "tool-result":
-      return {
-        kind: "tool-call",
-        name: result.toolName,
-        toolName: result.toolName,
-      };
-    case "subagent-result":
-      return {
-        kind: "subagent-call",
-        name: result.subagentName,
-        toolName: `eve:subagent:${result.subagentName}`,
-      };
-  }
-}
-
 function optimisticUserMessageId(submissionId: string): string {
   return `optimistic:${submissionId}:user`;
-}
-
-function stringifyUnknown(value: unknown): string {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "Action failed.";
-  }
 }
