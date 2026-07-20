@@ -188,7 +188,7 @@ describe("renderBlockLines", () => {
       subtitle: "3 calls",
       live: false,
     });
-    expect(lines).toEqual(["  ※ subagent(echo-marker) 3 calls"]);
+    expect(lines).toEqual(["└─※ subagent(echo-marker) 3 calls"]);
   });
 
   it("collapses a child message to its first line inside the section", () => {

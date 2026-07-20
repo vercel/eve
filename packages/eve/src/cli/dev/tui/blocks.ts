@@ -524,7 +524,10 @@ function renderSubagentHeader(block: Block, width: number, theme: Theme): string
   const isSelf = block.title === undefined || block.title === "agent";
   const rawName = isSelf ? "self" : block.title!;
   const name = truncatePlain(rawName, Math.max(8, width - 16));
-  let header = `  ${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(
+  // The `└─` lead hangs the persistent section off the flow above it,
+  // making the nesting of its railed children evident.
+  const lead = theme.colors.orange(`${theme.glyph.corner}${theme.glyph.dash}`);
+  let header = `${lead}${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.bold(
     `subagent(${isSelf ? name : theme.colors.orange(name)})`,
   )}`;
   if (block.subtitle !== undefined && block.subtitle.length > 0) {
