@@ -147,7 +147,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | Flag                                | Type   | Default            | Description                                                                               |
 | ----------------------------------- | ------ | ------------------ | ----------------------------------------------------------------------------------------- |
 | `--host <host>`                     | string | all interfaces     | Host interface to bind                                                                    |
-| `--port <port>`                     | number | `$PORT`, then 3000 | Port to listen on                                                                         |
+| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                                                                         |
 | `-u, --url <url>`                   | string | none               | Connect to an existing server URL instead of starting one                                 |
 | `-H, --header <header>`             | string | none               | Request header for a URL target, in `Name: value` form; repeat for multiple headers       |
 | `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                                                |
