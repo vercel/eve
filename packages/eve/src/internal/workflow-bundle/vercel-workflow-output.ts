@@ -40,6 +40,7 @@ export const WORKFLOW_STEP_EXTERNAL_PACKAGES = [
 export const WORKFLOW_BUILDER_DEFERRED_PACKAGES = ["@chat-adapter/slack", "chat"] as const;
 
 const WORKFLOW_FUNCTION_NODE_OPTIONS = "--experimental-require-module";
+const WORKFLOW_PRECONDITION_GUARD_ENABLED = "1";
 
 /**
  * Builds the environment block every generated Vercel workflow function needs.
@@ -51,6 +52,8 @@ export function createWorkflowFunctionEnvironment(environment?: unknown): Record
     Object.assign(nextEnvironment, environment);
   }
 
+  // Reject replay decisions made from an event log that missed a concurrent wake.
+  nextEnvironment.WORKFLOW_PRECONDITION_GUARD = WORKFLOW_PRECONDITION_GUARD_ENABLED;
   nextEnvironment.NODE_OPTIONS = WORKFLOW_FUNCTION_NODE_OPTIONS;
   return nextEnvironment;
 }
