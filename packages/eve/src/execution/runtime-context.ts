@@ -5,11 +5,13 @@ import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
+  ChannelRequestIdKey,
   ContinuationTokenKey,
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
   SessionCallbackKey,
+  SubagentDepthKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -44,6 +46,10 @@ export function buildRunContext(input: {
     ctx.set(CapabilitiesKey, run.capabilities);
   }
 
+  if (run.requestId !== undefined) {
+    ctx.set(ChannelRequestIdKey, run.requestId);
+  }
+
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
   }
@@ -51,6 +57,14 @@ export function buildRunContext(input: {
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
   }
+
+  if (run.subagentDepth !== undefined) {
+    ctx.set(SubagentDepthKey, run.subagentDepth);
+  }
+
+  // `run.limits` deliberately never enters the context: inherited limits ride
+  // the typed workflow-entry payload into `createSessionStep` and live on the
+  // session from then on.
 
   return ctx;
 }

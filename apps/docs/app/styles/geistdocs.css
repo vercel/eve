@@ -8,6 +8,29 @@ html {
   scroll-padding-top: 5rem;
 }
 
+/* Tint the root + body so overscroll and any gaps match the page background
+   instead of showing white. */
+html,
+body {
+  background-color: var(--ds-background-200);
+}
+
+/* Tint the global footer to match the landing background, but only on the
+   home route (`/`), which renders the [data-home-route] marker. */
+body:has([data-home-route]) footer {
+  @apply bg-background-200;
+}
+
+/* On home routes the navbar starts borderless and fades its bottom border in
+   only once the page is scrolled (ScrollState toggles [data-scrolled]). */
+body:has([data-home-route]) header {
+  border-bottom-color: transparent !important;
+  transition: border-color 200ms ease;
+}
+html[data-scrolled] body:has([data-home-route]) header {
+  border-bottom-color: var(--ds-gray-alpha-400) !important;
+}
+
 /* Align docs content with navbar on mobile. */
 #nd-page {
   @apply max-md:px-6;

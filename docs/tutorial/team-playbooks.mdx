@@ -71,7 +71,7 @@ const devTeam: AuthFn<Request> = () =>
       };
 
 export default eveChannel({
-  auth: [devTeam, localDev(), vercelOidc(), placeholderAuth()],
+  auth: [devTeam, vercelOidc(), localDev(), placeholderAuth()],
 });
 ```
 

@@ -19,7 +19,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext } from "#context/serialize.js";
 import {
   getPendingRuntimeActionBatch,
-  recordPendingSubagentChildToken,
+  recordPendingSubagentChild,
 } from "#harness/runtime-actions.js";
 import {
   createSubagentCalledEvent,
@@ -27,7 +27,9 @@ import {
   timestampHandleMessageStreamEvent,
 } from "#protocol/message.js";
 import type {
+  RuntimeActionRequest,
   RuntimeRemoteAgentCallActionRequest,
+  RuntimeSubagentCallActionRequest,
   RuntimeSubagentResultActionResult,
 } from "#runtime/actions/types.js";
 import {
@@ -40,15 +42,18 @@ import {
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { buildSubagentRunInput } from "#execution/subagent-tool.js";
+import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
 export async function dispatchRuntimeActionsStep(input: {
   readonly callbackBaseUrl?: string;
+  /** Internal hook that receives child completion and HITL payloads. */
+  readonly parentContinuationToken?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -82,12 +87,32 @@ export async function dispatchRuntimeActionsStep(input: {
   const writer = input.parentWritable.getWriter();
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
+  const subagentDepth = resolveSubagentDepth(session);
+  // Split the parent's remaining token quota across the batch's local
+  // subagent calls, the children that actually receive an enforced cap.
+  // Remote agents run on their own deployment under their own limits and
+  // do not dilute the local shares.
+  const fanoutSize = batch.actions.filter((action) => action.kind === "subagent-call").length;
 
   let nextSession = session;
   const results: RuntimeSubagentResultActionResult[] = [];
 
   try {
     for (const action of batch.actions) {
+      if (
+        isRecursiveAgentAction(action, bundle.subagentRegistry.subagentsByNodeId) &&
+        (session.rootSessionId !== undefined || subagentDepth.currentDepth > 0)
+      ) {
+        log.warn("recursive agent call blocked outside the root session", {
+          callId: action.callId,
+          currentDepth: subagentDepth.currentDepth,
+          nodeId: action.nodeId,
+          subagentName: action.subagentName,
+        });
+        results.push(createRecursiveAgentRootOnlyResult(action));
+        continue;
+      }
+
       let childSessionId: string;
       let name: string;
       let remote: { readonly url: string } | undefined;
@@ -95,6 +120,11 @@ export async function dispatchRuntimeActionsStep(input: {
 
       switch (action.kind) {
         case "subagent-call": {
+          const registered = bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId);
+          const source: SubagentInputSource =
+            registered?.definition.kind === "subagent"
+              ? { description: registered.definition.description, type: "local" }
+              : { type: "runtime" };
           const childRuntime = createWorkflowRuntime({
             compiledArtifactsSource: bundle.compiledArtifactsSource,
             nodeId: action.nodeId,
@@ -105,17 +135,43 @@ export async function dispatchRuntimeActionsStep(input: {
             batchEvent: batch.event,
             capabilities,
             channelMetadata,
+            fanoutSize,
             initiatorAuth,
+            parentContinuationToken: input.parentContinuationToken,
             session,
+            source,
           });
-          const handle = await childRuntime.run(runInput);
+          try {
+            const handle = await childRuntime.run(runInput);
+            childSessionId = handle.sessionId;
+          } catch (error) {
+            logError(log, "local subagent start failed", error, {
+              callId: action.callId,
+              nodeId: action.nodeId,
+              subagentName: action.subagentName,
+            });
+            results.push({
+              callId: action.callId,
+              isError: true,
+              kind: "subagent-result",
+              output: {
+                code: "SUBAGENT_START_FAILED",
+                message: toErrorMessage(error),
+              },
+              subagentName: action.subagentName,
+            });
+            continue;
+          }
 
-          nextSession = recordPendingSubagentChildToken({
+          nextSession = recordPendingSubagentChild({
             callId: action.callId,
-            childContinuationToken,
+            child: {
+              continuationToken: childContinuationToken,
+              kind: "local",
+              sessionId: childSessionId,
+            },
             session: nextSession,
           });
-          childSessionId = handle.sessionId;
           name = action.name;
           toolName = action.subagentName;
           break;
@@ -131,6 +187,7 @@ export async function dispatchRuntimeActionsStep(input: {
             childSessionId = await startRemoteAgentSession({
               action,
               callbackBaseUrl: input.callbackBaseUrl,
+              callbackToken: input.parentContinuationToken,
               remote: resolvedRemote,
               session,
             });
@@ -146,6 +203,11 @@ export async function dispatchRuntimeActionsStep(input: {
           name = action.name;
           remote = { url: resolvedRemote.url };
           toolName = action.remoteAgentName;
+          nextSession = recordPendingSubagentChild({
+            callId: action.callId,
+            child: { kind: "remote", sessionId: childSessionId },
+            session: nextSession,
+          });
           break;
         }
         default:
@@ -195,4 +257,30 @@ function createRemoteAgentStartFailureResult(input: {
     },
     subagentName: input.action.remoteAgentName,
   };
+}
+
+function createRecursiveAgentRootOnlyResult(
+  action: RuntimeSubagentCallActionRequest,
+): RuntimeSubagentResultActionResult {
+  return {
+    callId: action.callId,
+    isError: true,
+    kind: "subagent-result",
+    output: {
+      code: "RECURSIVE_AGENT_ROOT_ONLY",
+      message: 'The built-in "agent" tool is only available to the root session.',
+    },
+    subagentName: action.subagentName,
+  };
+}
+
+function isRecursiveAgentAction(
+  action: RuntimeActionRequest,
+  subagentsByNodeId: ReadonlyMap<string, unknown>,
+): action is RuntimeSubagentCallActionRequest {
+  return (
+    action.kind === "subagent-call" &&
+    action.subagentName === "agent" &&
+    !subagentsByNodeId.has(action.nodeId)
+  );
 }

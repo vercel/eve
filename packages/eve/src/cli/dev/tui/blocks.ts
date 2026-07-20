@@ -67,7 +67,7 @@ export interface Block {
    */
   detail?: string;
 
-  /** Tool / connection lifecycle status. */
+  /** Tool, connection, or synthetic command lifecycle status. */
   status?: ToolStatus;
   /** When true, treat `body` as pre-styled and only wrap + indent it. */
   preformatted?: boolean;
@@ -376,21 +376,20 @@ function renderWarning(block: Block, width: number, theme: Theme): string[] {
 }
 
 function paintCommands(line: string, theme: Theme): string {
-  return line.replace(/\/[a-z-]+/g, (token) =>
+  return line.replace(/\/[a-z:-]+/g, (token) =>
     isPromptControlCommand(token) ? theme.colors.blue(token) : token,
   );
 }
 
 /**
- * A typed slash command, echoed in the user-message grammar (the gutter bar —
- * the user typed it) with the command itself blue to mark the dispatch.
- * Deliberately NOT the prompt glyph: `❯` marks the live input line, and
- * consumers (the e2e harness, anything reading scrollback) rendezvous on it
- * to know a prompt is ready — an echo reusing it would match forever.
+ * A slash command invocation under the user gutter. Automatic commands use
+ * the same row so their result can follow it. The `❯` glyph remains exclusive
+ * to live input because the TUI tests use it to detect a ready prompt.
  */
 function renderCommand(block: Block, theme: Theme): string[] {
   const c = theme.colors;
-  return [`${c.cyan(theme.glyph.user)} ${c.blue(block.body ?? "")}`];
+  const status = block.status === "error" ? `${c.red(theme.glyph.error)} ` : "";
+  return [`${c.cyan(theme.glyph.user)} ${status}${c.blue(block.body ?? "")}`];
 }
 
 /**

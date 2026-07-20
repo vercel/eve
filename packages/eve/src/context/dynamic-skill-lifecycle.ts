@@ -8,6 +8,7 @@ import type { SkillPackageDefinition } from "#shared/skill-definition.js";
 import {
   type MaterializableSkillPackage,
   normalizeSkillPackage,
+  removeSkillPackageFromSandbox,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -22,6 +23,7 @@ import {
   SandboxKey,
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
 
 const log = createLogger("dynamic-skills");
 
@@ -30,7 +32,7 @@ const log = createLogger("dynamic-skills");
 // ---------------------------------------------------------------------------
 
 function qualifyDynamicSkillNames(
-  slug: string,
+  resolver: { readonly slug: string; readonly extensionNamespace?: string },
   isSingle: boolean,
   entries: Readonly<Record<string, SkillPackageDefinition>>,
 ): Array<{ name: string; entryKey: string; entry: SkillPackageDefinition }> {
@@ -39,15 +41,20 @@ function qualifyDynamicSkillNames(
 
   if (keys.length === 0) return result;
 
-  // A single returned defineSkill is named after the file slug; a map names
-  // each entry by its bare key (authors namespace keys themselves if needed).
+  // A single returned defineSkill is named after the file slug (already
+  // namespaced for an extension). A map names each entry by its bare key.
   if (isSingle) {
-    result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
+    result.push({ name: resolver.slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
+  // Map entries from an extension resolver are prefixed with the mount
+  // namespace so extension-produced skills are namespaced like the extension's
+  // static skills; a non-extension resolver's keys stay bare.
+  const prefix =
+    resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
   for (const key of keys) {
-    result.push({ name: key, entryKey: key, entry: entries[key]! });
+    result.push({ name: `${prefix}${key}`, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -62,10 +69,13 @@ interface DynamicSkillResolution {
   readonly named: readonly { name: string; entry: SkillPackageDefinition }[];
 }
 
-function formatDynamicSkillAnnouncement(
-  manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>,
-): string {
-  return formatAvailableSkillsSection(Object.values(manifest).flat()) ?? "";
+async function formatDynamicSkillAnnouncement(input: {
+  readonly ctx: ContextContainer;
+  readonly manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
+}): Promise<string> {
+  const sandbox = await input.ctx.require(SandboxKey).get();
+  const skillRoot = sandbox === null ? undefined : await resolveSandboxSkillRoot({ sandbox });
+  return formatAvailableSkillsSection(Object.values(input.manifest).flat(), { skillRoot }) ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +120,10 @@ export async function dispatchDynamicSkillEvent(input: {
   if (ctx.get(PendingSkillAnnouncementKey) === undefined) {
     const manifest = ctx.get(DynamicSkillManifestKey);
     if (manifest !== undefined && Object.keys(manifest).length > 0) {
-      ctx.setVirtualContext(PendingSkillAnnouncementKey, formatDynamicSkillAnnouncement(manifest));
+      ctx.setVirtualContext(
+        PendingSkillAnnouncementKey,
+        await formatDynamicSkillAnnouncement({ ctx, manifest }),
+      );
     }
   }
 
@@ -141,7 +154,7 @@ export async function dispatchDynamicSkillEvent(input: {
         isSingle = false;
       }
 
-      const named = qualifyDynamicSkillNames(resolver.slug, isSingle, entries);
+      const named = qualifyDynamicSkillNames(resolver, isSingle, entries);
       return { resolver, named } satisfies DynamicSkillResolution;
     }),
   );
@@ -196,6 +209,25 @@ export async function dispatchDynamicSkillEvent(input: {
   const sandbox = await ctx.require(SandboxKey).get();
 
   if (sandbox !== null) {
+    const finalDynamicSkillNames = new Set(
+      Object.values(newManifest)
+        .flat()
+        .map((skill) => skill.name),
+    );
+    const removedSkillNames = new Set<string>();
+
+    for (const { resolver } of updates) {
+      for (const skill of manifest[resolver.slug] ?? []) {
+        if (!finalDynamicSkillNames.has(skill.name)) {
+          removedSkillNames.add(skill.name);
+        }
+      }
+    }
+
+    for (const name of removedSkillNames) {
+      await removeSkillPackageFromSandbox({ name, sandbox });
+    }
+
     for (const { skills } of updates) {
       for (const skill of skills) {
         await writeSkillPackageToSandbox({ sandbox, skill });
@@ -204,5 +236,8 @@ export async function dispatchDynamicSkillEvent(input: {
   }
 
   ctx.set(DynamicSkillManifestKey, newManifest);
-  ctx.setVirtualContext(PendingSkillAnnouncementKey, formatDynamicSkillAnnouncement(newManifest));
+  ctx.setVirtualContext(
+    PendingSkillAnnouncementKey,
+    await formatDynamicSkillAnnouncement({ ctx, manifest: newManifest }),
+  );
 }

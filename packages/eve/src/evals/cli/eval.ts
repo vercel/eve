@@ -2,12 +2,17 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
+import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
-import { type DevelopmentServerHandle, startDevelopmentServer } from "#internal/nitro/host.js";
+import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
-import { discoverAndImportEvals, discoverEvalConfig } from "#evals/runner/discover.js";
+import {
+  discoverAndImportEvals,
+  discoverEvalConfig,
+  findMisplacedEvalDirs,
+} from "#evals/runner/discover.js";
 import { runEvals } from "#evals/runner/run-evals.js";
-import { ConsoleReporter } from "#evals/runner/reporters/console.js";
+import { Console } from "#evals/runner/reporters/console.js";
 import { JUnit } from "#evals/runner/reporters/junit.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import { resolveEvalTargetHandle } from "#evals/target.js";
@@ -48,7 +53,15 @@ export async function runEvalCommand(
   const discovered = await discoverAndImportEvals(appRoot, requestedEvalIds);
 
   if (discovered.length === 0) {
-    if (requestedEvalIds) {
+    const misplaced = await findMisplacedEvalDirs(appRoot);
+    if (misplaced.length > 0) {
+      logger.error(
+        "No evals found under evals/, but eval files are present inside agent/:\n" +
+          misplaced.map((dir) => `  - ${dir}`).join("\n") +
+          "\neve eval only scans the top-level evals/ directory (a sibling of agent/). " +
+          "Move these files there.",
+      );
+    } else if (requestedEvalIds) {
       logger.error(`No evals found matching: ${requestedEvalIds.join(", ")}`);
     } else {
       logger.error("No evals found. Create files under evals/ with the *.eval.ts extension.");
@@ -90,7 +103,7 @@ export async function runEvalCommand(
   }
 
   // Resolve target
-  let server: DevelopmentServerHandle | undefined;
+  let devServer: DevelopmentServer | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
 
@@ -107,17 +120,18 @@ export async function runEvalCommand(
         url: options.url,
       });
     } else {
-      server = await startDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
-      client = await createEvalClient({ kind: "local", url: server.url });
+      devServer = createDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
+      const started = await devServer.start();
+      client = await createEvalClient({ kind: "local", url: started.url });
       target = await resolveEvalTargetHandle({
         client,
         expectedAgentName: await readExpectedAgentName(appRoot),
         kind: "local",
-        url: server.url,
+        url: started.url,
       });
     }
 
-    const reporters: EvalReporter[] = options.json === true ? [] : [new ConsoleReporter()];
+    const reporters: EvalReporter[] = options.json === true ? [] : [Console()];
     if (options.junit !== undefined) {
       reporters.push(JUnit({ filePath: options.junit }));
     }
@@ -151,8 +165,11 @@ export async function runEvalCommand(
       process.exitCode = 1;
     }
   } finally {
-    if (server) {
-      await server.close();
+    if (devServer) {
+      await devServer.close();
+      await shutdownActiveSandboxHandles({
+        log: (message) => logger.error(message),
+      });
     }
   }
 

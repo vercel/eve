@@ -9,6 +9,8 @@ import {
   type CompiledRemoteAgentNode,
 } from "#compiler/remote-agent-node.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
+import type { InternalInstructionsDefinition } from "#shared/instructions-definition.js";
 import { jsonObjectSchema } from "#shared/json-schemas.js";
 import type { Node } from "#shared/node.js";
 import type {
@@ -39,7 +41,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 30;
+export const COMPILED_AGENT_MANIFEST_VERSION = 36;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -68,6 +70,11 @@ export interface CompiledChannelDefinition {
    * Omitted when the route does not register an adapter.
    */
   readonly adapterKind?: string;
+  /**
+   * Serializable CORS options to apply to this channel route. Omitted when the
+   * channel leaves CORS untouched.
+   */
+  readonly cors?: NormalizedChannelCorsOptions;
 }
 
 /**
@@ -94,6 +101,14 @@ export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
 };
 
 /**
+ * Dynamic model resolver source preserved in the compiled manifest; the
+ * compiled `config.model` remains the fallback model.
+ */
+export type CompiledDynamicModelDefinition = ModuleSourceRef & {
+  readonly eventNames: readonly string[];
+};
+
+/**
  * Normalized hosted-build configuration preserved in the compiled manifest.
  */
 type CompiledAgentBuildDefinition = AgentBuildDefinition;
@@ -112,13 +127,15 @@ type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition,
 export type CompiledAgentDefinition = Omit<InternalAgentDefinition, "model" | "compaction"> & {
   model: CompiledRuntimeModelReference;
   compaction?: CompiledAgentCompactionDefinition;
+  dynamicModel?: CompiledDynamicModelDefinition;
 };
 
 /**
  * Normalized authored instructions prompt preserved in the compiled
  * manifest.
  */
-export type CompiledInstructions = z.infer<typeof compiledInstructionsSchema>;
+export type CompiledInstructionsDefinition = InternalInstructionsDefinition &
+  (Omit<MarkdownSourceRef<undefined>, "definition"> | Omit<ModuleSourceRef, "exportName">);
 
 /**
  * Normalized authored skill preserved in the compiled manifest.
@@ -161,6 +178,13 @@ export type CompiledConnectionDefinition = z.infer<typeof compiledConnectionDefi
 export type CompiledToolDefinition = InternalToolDefinition & ModuleSourceRef;
 
 /**
+ * Serializable configuration for the experimental framework `Workflow` tool.
+ */
+export interface CompiledWorkflowToolDefinition {
+  readonly maxSubagents?: number;
+}
+
+/**
  * Compiled dynamic tool resolver entry. The resolver function lives in the
  * compiled module map; the manifest entry carries only the metadata needed
  * to load and invoke it at runtime.
@@ -168,6 +192,13 @@ export type CompiledToolDefinition = InternalToolDefinition & ModuleSourceRef;
 export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
+  /**
+   * Mount namespace when this resolver comes from an extension. The runtime
+   * prefixes the names of tools the resolver produces (`forecast` →
+   * `crm__forecast`) so extension-produced tools are namespaced like every
+   * other extension contribution. Absent for consumer-authored resolvers.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
@@ -178,6 +209,11 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
 export interface CompiledDynamicSkillDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
+  /**
+   * Mount namespace when this resolver comes from an extension. Names of skills
+   * a map resolver produces are prefixed with `${extensionNamespace}__`.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
@@ -250,6 +286,16 @@ const moduleSourceRefSchema: z.ZodType<ModuleSourceRef> = z
   })
   .strict();
 
+const compiledDynamicModelDefinitionSchema: z.ZodType<CompiledDynamicModelDefinition> = z
+  .object({
+    eventNames: z.array(z.string()).readonly(),
+    exportName: z.string().optional(),
+    sourceKind: z.literal("module"),
+    logicalPath: z.string(),
+    sourceId: z.string(),
+  })
+  .strict();
+
 const channelMethodSchema = z.union([
   z.literal("GET"),
   z.literal("POST"),
@@ -258,6 +304,23 @@ const channelMethodSchema = z.union([
   z.literal("DELETE"),
   z.literal("WEBSOCKET"),
 ]);
+
+const compiledChannelCorsSchema = z
+  .object({
+    origin: z.union([z.literal("*"), z.literal("null"), z.array(z.string())]).optional(),
+    methods: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    allowHeaders: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    exposeHeaders: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    credentials: z.boolean().optional(),
+    maxAge: z.union([z.string(), z.literal(false)]).optional(),
+    preflight: z
+      .object({
+        statusCode: z.number().int().min(100).max(599).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict() satisfies z.ZodType<NormalizedChannelCorsOptions>;
 
 const compiledChannelDefinitionSchema = z
   .object({
@@ -270,6 +333,7 @@ const compiledChannelDefinitionSchema = z
     sourceKind: z.literal("module"),
     exportName: z.string().optional(),
     adapterKind: z.string().optional(),
+    cors: compiledChannelCorsSchema.optional(),
   })
   .strict();
 
@@ -333,14 +397,29 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   })
   .strict();
 
+const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
+
+const compiledAgentLimitsDefinitionSchema = z
+  .object({
+    maxInputTokensPerSession: sessionTokenLimitSchema.optional(),
+    maxOutputTokensPerSession: sessionTokenLimitSchema.optional(),
+  })
+  .strict();
+
+const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefinition> = z
+  .object({
+    maxSubagents: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
   .object({
     build: compiledAgentBuildDefinitionSchema.optional(),
     compaction: compiledAgentCompactionDefinitionSchema.optional(),
     description: z.string().optional(),
+    dynamicModel: compiledDynamicModelDefinitionSchema.optional(),
     experimental: z
       .object({
-        codeMode: z.boolean().optional(),
         workflow: compiledAgentWorkflowDefinitionSchema.optional(),
       })
       .strict()
@@ -348,11 +427,15 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     model: compiledRuntimeModelReferenceSchema,
     name: z.string(),
     outputSchema: jsonObjectSchema.optional(),
+    reasoning: z
+      .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
+      .optional(),
     source: moduleSourceRefSchema.optional(),
+    limits: compiledAgentLimitsDefinitionSchema.optional(),
   })
   .strict();
 
-const compiledInstructionsSchema = z
+const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z
   .object({
     name: z.string(),
     logicalPath: z.string(),
@@ -506,6 +589,7 @@ const compiledDynamicToolDefinitionSchema: z.ZodType<CompiledDynamicToolDefiniti
   .object({
     eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
+    extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
     slug: z.string(),
     sourceId: z.string(),
@@ -517,6 +601,7 @@ const compiledDynamicSkillDefinitionSchema: z.ZodType<CompiledDynamicSkillDefini
   .object({
     eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
+    extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
     slug: z.string(),
     sourceId: z.string(),
@@ -558,7 +643,7 @@ const compiledAgentNodeManifestSchema = z
     connections: z.array(compiledConnectionDefinitionSchema),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     disabledFrameworkTools: z.array(z.string()).readonly(),
-    workflowEnabled: z.boolean().default(false),
+    workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -597,18 +682,55 @@ const compiledSubagentEdgeSchema: z.ZodType<CompiledSubagentEdge> = z
   .strict();
 
 /**
+ * One mounted extension recorded on the root compiled manifest. The runtime
+ * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
+ * call binds the extension's config before any tool runs.
+ */
+export interface CompiledExtensionMount {
+  /** Mount-derived namespace that prefixes the extension's tool/skill names. */
+  readonly namespace: string;
+  readonly packageName: string;
+  /**
+   * Package-derived namespace that scopes the extension's durable state keys and
+   * config binding. Distinct from {@link namespace}: state stays keyed to the
+   * package so a consumer renaming the mount file cannot orphan persisted state.
+   */
+  readonly packageNamespace: string;
+  /**
+   * Absolute path to the extension's source root on disk. The extension-scope
+   * bundler plugin treats any module under this root as extension-owned and
+   * rewrites its `eve/context`/`eve/extension` imports to bake in the namespace.
+   */
+  readonly sourceRoot: string;
+  readonly mountSourceId: string;
+  readonly mountLogicalPath: string;
+}
+
+const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
+  .object({
+    namespace: z.string(),
+    packageName: z.string(),
+    packageNamespace: z.string(),
+    sourceRoot: z.string(),
+    mountSourceId: z.string(),
+    mountLogicalPath: z.string(),
+  })
+  .strict();
+
+/**
  * Zod schema for the versioned compiled manifest emitted by the compiler.
  */
 export const compiledAgentManifestSchema = z
   .object({
     agentRoot: z.string(),
     appRoot: z.string(),
+    extensionMounts: z.array(compiledExtensionMountSchema).default([]),
     channels: z.array(compiledChannelEntrySchema),
     config: compiledAgentConfigSchema,
     connections: z.array(compiledConnectionDefinitionSchema),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     disabledFrameworkTools: z.array(z.string()).readonly(),
-    workflowEnabled: z.boolean().default(false),
+    workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -639,7 +761,7 @@ export function createCompiledAgentNodeManifest(input: {
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
-  readonly workflowEnabled?: boolean;
+  readonly workflowTool?: CompiledWorkflowToolDefinition;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
@@ -649,7 +771,7 @@ export function createCompiledAgentNodeManifest(input: {
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];
-  readonly instructions?: CompiledInstructions;
+  readonly instructions?: CompiledInstructionsDefinition;
   readonly tools?: readonly CompiledToolDefinition[];
   readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
 }): CompiledAgentNodeManifest {
@@ -676,11 +798,16 @@ export function createCompiledAgentNodeManifest(input: {
         thresholdPercent: input.config.compaction?.thresholdPercent,
       },
       description: input.config.description,
+      dynamicModel:
+        input.config.dynamicModel === undefined
+          ? undefined
+          : {
+              ...input.config.dynamicModel,
+            },
       experimental:
         input.config.experimental === undefined
           ? undefined
           : {
-              codeMode: input.config.experimental.codeMode,
               workflow:
                 input.config.experimental.workflow === undefined
                   ? undefined
@@ -691,6 +818,14 @@ export function createCompiledAgentNodeManifest(input: {
       model: cloneCompiledRuntimeModelReference(input.config.model),
       name: input.config.name,
       outputSchema: input.config.outputSchema,
+      reasoning: input.config.reasoning,
+      limits:
+        input.config.limits === undefined
+          ? undefined
+          : {
+              maxInputTokensPerSession: input.config.limits.maxInputTokensPerSession,
+              maxOutputTokensPerSession: input.config.limits.maxOutputTokensPerSession,
+            },
       source:
         input.config.source === undefined
           ? undefined
@@ -703,7 +838,10 @@ export function createCompiledAgentNodeManifest(input: {
       warnings: 0,
     },
     disabledFrameworkTools: [...(input.disabledFrameworkTools ?? [])],
-    workflowEnabled: input.workflowEnabled ?? false,
+    workflowTool:
+      input.workflowTool === undefined
+        ? undefined
+        : { maxSubagents: input.workflowTool.maxSubagents },
     dynamicInstructions: [...(input.dynamicInstructions ?? [])],
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
@@ -744,10 +882,6 @@ export function deriveResourceRootEntries(input: {
 }): readonly string[] {
   const rootEntries = new Set<string>();
 
-  if ((input.skills ?? []).length > 0) {
-    rootEntries.add("skills/");
-  }
-
   for (const workspace of input.sandboxWorkspaces ?? []) {
     for (const entry of workspace.rootEntries) {
       rootEntries.add(entry);
@@ -780,7 +914,7 @@ export function createCompiledAgentManifest(input: {
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
-  readonly workflowEnabled?: boolean;
+  readonly workflowTool?: CompiledWorkflowToolDefinition;
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
   readonly hooks?: readonly CompiledHookDefinition[];
@@ -791,12 +925,14 @@ export function createCompiledAgentManifest(input: {
   readonly skills?: readonly CompiledSkillDefinition[];
   readonly subagentEdges?: readonly CompiledSubagentEdge[];
   readonly subagents?: readonly CompiledSubagentNode[];
-  readonly instructions?: CompiledInstructions;
+  readonly instructions?: CompiledInstructionsDefinition;
   readonly tools?: readonly CompiledToolDefinition[];
+  readonly extensionMounts?: readonly CompiledExtensionMount[];
 }): CompiledAgentManifest {
   return {
     ...createCompiledAgentNodeManifest(input),
     kind: COMPILED_AGENT_MANIFEST_KIND,
+    extensionMounts: [...(input.extensionMounts ?? [])],
     subagentEdges: [...(input.subagentEdges ?? [])],
     subagents: [...(input.subagents ?? [])],
     version: COMPILED_AGENT_MANIFEST_VERSION,

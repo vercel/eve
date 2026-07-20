@@ -9,15 +9,10 @@ const OVERRIDE_TOKEN = "dynamic-override-ok-K2P7";
 export default defineEval({
   description: "Dynamic tools smoke: a dynamic tool overrides a same-named authored tool.",
   async test(t) {
-    const turn = await t.send(
-      "Call the `override-target` tool and report the `source` value it returns.",
-    );
-    turn.expectOk();
+    await t.send("Call the `override-target` tool and report the `source` value it returns.");
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.calledTool("override-target", {
-      isError: false,
       output: { source: "dynamic", token: OVERRIDE_TOKEN },
     });
   },

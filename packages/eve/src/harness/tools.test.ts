@@ -1,18 +1,24 @@
 import { type JSONSchema7, jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey, type Session } from "#context/keys.js";
+import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { always, never, once } from "#public/tools/approval/approval-helpers.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
-  WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA,
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
+  WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
 } from "#runtime/framework-tools/web-search.js";
 import type { JsonObject } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
+import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import type { ToolContext } from "#public/definitions/tool.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 function getJsonSchema(tool: unknown): unknown {
   return (tool as { inputSchema: { jsonSchema: unknown } }).inputSchema.jsonSchema;
@@ -22,7 +28,210 @@ function getOutputJsonSchema(tool: unknown): unknown {
   return (tool as { outputSchema: { jsonSchema: unknown } }).outputSchema.jsonSchema;
 }
 
+async function resolveApproval(
+  tools: ReturnType<typeof buildToolSet>,
+  toolName: string,
+  input: unknown,
+  session: Session = {
+    auth: { current: null, initiator: null },
+    sessionId: "session-1",
+    turn: { id: "turn-1", sequence: 0 },
+  },
+): Promise<unknown> {
+  const approval = buildToolApproval(tools);
+  if (typeof approval !== "function") throw new TypeError("Expected generic approval function.");
+  const ctx = new ContextContainer();
+  ctx.set(SessionKey, session);
+  return contextStorage.run(ctx, () =>
+    approval({
+      messages: [],
+      runtimeContext: {},
+      toolCall: { input, toolCallId: "call_1", toolName } as never,
+      tools,
+      toolsContext: {} as never,
+    }),
+  );
+}
+
+async function executeSdkTool(input: {
+  readonly abortSignal?: AbortSignal;
+  readonly tool: unknown;
+  readonly toolCallId?: string;
+  readonly toolInput?: unknown;
+}): Promise<unknown> {
+  const execute = (
+    input.tool as {
+      readonly execute?: (
+        toolInput: unknown,
+        options: ToolExecuteOptions,
+      ) => Promise<unknown> | unknown;
+    }
+  ).execute;
+  expect(execute).toBeTypeOf("function");
+  return await execute!(input.toolInput ?? {}, {
+    abortSignal: input.abortSignal,
+    messages: [],
+    toolCallId: input.toolCallId ?? "call_1",
+  });
+}
+
+async function projectSdkToolOutput(input: {
+  readonly output: unknown;
+  readonly tool: unknown;
+  readonly toolCallId?: string;
+}): Promise<unknown> {
+  const toModelOutput = (
+    input.tool as {
+      readonly toModelOutput?: (options: {
+        readonly input: unknown;
+        readonly output: unknown;
+        readonly toolCallId: string;
+      }) => Promise<unknown> | unknown;
+    }
+  ).toModelOutput;
+  expect(toModelOutput).toBeTypeOf("function");
+  return await toModelOutput!({
+    input: {},
+    output: input.output,
+    toolCallId: input.toolCallId ?? "call_1",
+  });
+}
+
 describe("buildToolSet", () => {
+  it("forwards the AI SDK execute options to the tool definition", async () => {
+    const abortController = new AbortController();
+    let receivedOptions: ToolExecuteOptions | undefined;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "observe_options",
+        {
+          description: "Observe the AI SDK execute options.",
+          execute: (_input: unknown, options?: ToolExecuteOptions) => {
+            receivedOptions = options;
+            return { ok: true };
+          },
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "observe_options",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+    await executeSdkTool({
+      abortSignal: abortController.signal,
+      tool: result.observe_options,
+      toolCallId: "call_observe",
+    });
+
+    expect(receivedOptions?.abortSignal).toBe(abortController.signal);
+    expect(receivedOptions?.toolCallId).toBe("call_observe");
+  });
+
+  it("passes the AI SDK abort signal to the authored tool context", async () => {
+    const abortController = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "observe_signal",
+        {
+          description: "Observe the active turn signal.",
+          execute: createToolExecuteWithAuth({
+            execute(_input, ctx) {
+              receivedSignal = (ctx as ToolContext).abortSignal;
+              return { ok: true };
+            },
+            scope: "observe_signal",
+          }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "observe_signal",
+        },
+      ],
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+
+    const result = buildToolSet({ tools });
+    await contextStorage.run(ctx, () =>
+      executeSdkTool({
+        abortSignal: abortController.signal,
+        tool: result.observe_signal,
+      }),
+    );
+
+    expect(receivedSignal).toBe(abortController.signal);
+  });
+
+  it("supplies an inert abort signal when the SDK provides none", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "observe_signal",
+        {
+          description: "Observe the active turn signal.",
+          execute: createToolExecuteWithAuth({
+            execute(_input, ctx) {
+              receivedSignal = (ctx as ToolContext).abortSignal;
+              return { ok: true };
+            },
+            scope: "observe_signal",
+          }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "observe_signal",
+        },
+      ],
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+
+    const result = buildToolSet({ tools });
+    await contextStorage.run(ctx, () => executeSdkTool({ tool: result.observe_signal }));
+
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+    expect(receivedSignal?.aborted).toBe(false);
+  });
+
+  it("passes the AI SDK toolCallId to the authored tool context as callId", async () => {
+    let receivedCallId: string | undefined;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "observe_call_id",
+        {
+          description: "Observe the tool call id.",
+          execute: createToolExecuteWithAuth({
+            execute(_input, ctx) {
+              receivedCallId = (ctx as ToolContext).callId;
+              return { ok: true };
+            },
+            scope: "observe_call_id",
+          }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "observe_call_id",
+        },
+      ],
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+
+    const result = buildToolSet({ tools });
+    await contextStorage.run(ctx, () =>
+      executeSdkTool({ tool: result.observe_call_id, toolCallId: "call_observe" }),
+    );
+
+    expect(receivedCallId).toBe("call_observe");
+  });
+
   it("passes through the input schema to the SDK tool", () => {
     const schema = {
       properties: { city: { type: "string" } },
@@ -126,8 +335,32 @@ describe("buildToolSet", () => {
   });
 
   it.each([
-    [{ id: "openai/gpt-5.4" }, WEB_SEARCH_OPENAI_OUTPUT_SCHEMA],
-    [{ id: "anthropic/claude-opus-4.6" }, WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA],
+    [{ id: "openai/gpt-5.4" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
+    [{ id: "anthropic/claude-opus-4.6" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
+    [
+      {
+        id: "openai.chat/gpt-5.4",
+        source: {
+          exportName: "model",
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
+      },
+      WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
+    ],
+    [
+      {
+        id: "anthropic.messages/claude-opus-4.6",
+        source: {
+          exportName: "model",
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
+      },
+      WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
+    ],
     [
       {
         id: "google.generative-ai/gemini-3.1-pro",
@@ -140,7 +373,7 @@ describe("buildToolSet", () => {
       },
       WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
     ],
-    [{ id: "mistral/mistral-large" }, WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA],
+    [{ id: "mistral/mistral-large" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
   ] satisfies Array<readonly [RuntimeModelReference, JsonObject]>)(
     "injects the selected web_search provider output schema",
     async (modelReference, expectedOutputSchema) => {
@@ -214,7 +447,7 @@ describe("buildToolSet", () => {
     expect(withCapability.ask_question).toBeDefined();
   });
 
-  it("defaults to no approval when no needsApproval function is set", async () => {
+  it("defaults to no approval when no approval function is set", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
         "dangerous_tool",
@@ -231,14 +464,7 @@ describe("buildToolSet", () => {
       tools,
     });
 
-    const needsApproval = (
-      result.dangerous_tool as {
-        needsApproval?: (input: unknown, context: unknown) => Promise<boolean> | boolean;
-      }
-    ).needsApproval;
-
-    expect(needsApproval).toBeTypeOf("function");
-    await expect(needsApproval?.({}, {})).resolves.toBe(false);
+    await expect(resolveApproval(result, "dangerous_tool", {})).resolves.toBeUndefined();
   });
 
   it("forwards toModelOutput to the SDK tool", () => {
@@ -317,8 +543,175 @@ describe("buildToolSet", () => {
     expect(projected).toEqual({ type: "text", value: "summary" });
   });
 
-  describe("tool-level needsApproval override", () => {
-    type NeedsApprovalFn = (input: unknown, context: unknown) => Promise<boolean> | boolean;
+  it("rejects non-JSON-serializable execute output at the tool boundary", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "timestamp",
+        {
+          description: "Return a timestamp.",
+          execute: async () => ({ now: new Date("2026-01-02T03:04:05.000Z") }),
+          inputSchema: jsonSchema({}),
+          name: "timestamp",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      executeSdkTool({
+        tool: result.timestamp,
+        toolCallId: "call_timestamp",
+      }),
+    ).rejects.toThrow(
+      'Tool "timestamp" call "call_timestamp" returned a non-JSON-serializable result. Expected a JSON-serializable value.',
+    );
+  });
+
+  it("preserves valid execute output identity", async () => {
+    const output = { summary: "ok" };
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "report",
+        {
+          description: "Return a report.",
+          execute: async () => output,
+          inputSchema: jsonSchema({}),
+          name: "report",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(executeSdkTool({ tool: result.report })).resolves.toBe(output);
+  });
+
+  it("normalizes top-level undefined execute output to null", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "maybe_empty",
+        {
+          description: "Return no value.",
+          execute: async () => undefined,
+          inputSchema: jsonSchema({}),
+          name: "maybe_empty",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(executeSdkTool({ tool: result.maybe_empty })).resolves.toBeNull();
+  });
+
+  it("rejects non-JSON-serializable toModelOutput JSON values", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "timestamp",
+        {
+          description: "Return a timestamp.",
+          execute: async () => ({ ok: true }),
+          inputSchema: jsonSchema({}),
+          name: "timestamp",
+          toModelOutput: () => ({
+            type: "json" as const,
+            value: { now: new Date("2026-01-02T03:04:05.000Z") },
+          }),
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      projectSdkToolOutput({
+        output: { ok: true },
+        tool: result.timestamp,
+        toolCallId: "call_timestamp",
+      }),
+    ).rejects.toThrow(
+      'Tool "timestamp" call "call_timestamp" returned a non-JSON-serializable model output. Expected a JSON-serializable value.',
+    );
+  });
+
+  it("passes valid text toModelOutput values through", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "report",
+        {
+          description: "Return a report.",
+          execute: async () => ({ ok: true }),
+          inputSchema: jsonSchema({}),
+          name: "report",
+          toModelOutput: () => ({ type: "text" as const, value: "visible" }),
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      projectSdkToolOutput({
+        output: { ok: true },
+        tool: result.report,
+      }),
+    ).resolves.toEqual({
+      type: "text",
+      value: "visible",
+    });
+  });
+
+  describe("tool-level approval override", () => {
+    it("normalizes boolean approval results", async () => {
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "dangerous",
+          {
+            approval: () => true,
+            description: "Perform a dangerous action.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "dangerous",
+          },
+        ],
+        [
+          "safe",
+          {
+            approval: async () => false,
+            description: "Perform a safe action.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "safe",
+          },
+        ],
+      ]);
+
+      const result = buildToolSet({ tools });
+      await expect(resolveApproval(result, "dangerous", {})).resolves.toBe("user-approval");
+      await expect(resolveApproval(result, "safe", {})).resolves.toBe("not-applicable");
+    });
+
+    it("preserves async AI SDK 7 approval statuses", async () => {
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "delete_account",
+          {
+            approval: async () => ({ type: "denied", reason: "Account is protected." }),
+            description: "Delete an account.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "delete_account",
+          },
+        ],
+      ]);
+
+      const result = buildToolSet({ tools });
+      await expect(resolveApproval(result, "delete_account", {})).resolves.toEqual({
+        type: "denied",
+        reason: "Account is protected.",
+      });
+    });
 
     it("always() requires approval", async () => {
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
@@ -329,7 +722,7 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "bash",
-            needsApproval: always(),
+            approval: always(),
           },
         ],
       ]);
@@ -337,8 +730,7 @@ describe("buildToolSet", () => {
       const result = buildToolSet({
         tools,
       });
-      const needsApproval = (result.bash as { needsApproval?: NeedsApprovalFn }).needsApproval;
-      await expect(needsApproval?.({}, {})).resolves.toBe(true);
+      await expect(resolveApproval(result, "bash", {})).resolves.toBe("user-approval");
     });
 
     it("never() skips approval", async () => {
@@ -350,7 +742,7 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "bash",
-            needsApproval: never(),
+            approval: never(),
           },
         ],
       ]);
@@ -358,8 +750,7 @@ describe("buildToolSet", () => {
       const result = buildToolSet({
         tools,
       });
-      const needsApproval = (result.bash as { needsApproval?: NeedsApprovalFn }).needsApproval;
-      await expect(needsApproval?.({}, {})).resolves.toBe(false);
+      await expect(resolveApproval(result, "bash", {})).resolves.toBe("not-applicable");
     });
 
     it("once() requires approval when tool not yet approved", async () => {
@@ -371,7 +762,7 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "bash",
-            needsApproval: once(),
+            approval: once(),
           },
         ],
       ]);
@@ -379,8 +770,7 @@ describe("buildToolSet", () => {
       const result = buildToolSet({
         tools,
       });
-      const needsApproval = (result.bash as { needsApproval?: NeedsApprovalFn }).needsApproval;
-      await expect(needsApproval?.({}, {})).resolves.toBe(true);
+      await expect(resolveApproval(result, "bash", {})).resolves.toBe("user-approval");
     });
 
     it("once() skips approval when tool already approved", async () => {
@@ -392,7 +782,7 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "bash",
-            needsApproval: once(),
+            approval: once(),
           },
         ],
       ]);
@@ -401,11 +791,10 @@ describe("buildToolSet", () => {
         approvedTools: new Set(["bash"]),
         tools,
       });
-      const needsApproval = (result.bash as { needsApproval?: NeedsApprovalFn }).needsApproval;
-      await expect(needsApproval?.({}, {})).resolves.toBe(false);
+      await expect(resolveApproval(result, "bash", {})).resolves.toBe("not-applicable");
     });
 
-    it("tool without needsApproval defaults to false when another tool has an override", async () => {
+    it("tool without approval defaults to false when another tool has an override", async () => {
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
         [
           "bash",
@@ -414,7 +803,7 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "bash",
-            needsApproval: always(),
+            approval: always(),
           },
         ],
         [
@@ -431,14 +820,11 @@ describe("buildToolSet", () => {
       const result = buildToolSet({
         tools,
       });
-      const bashNeedsApproval = (result.bash as { needsApproval?: NeedsApprovalFn }).needsApproval;
-      const writeNeedsApproval = (result.write_file as { needsApproval?: NeedsApprovalFn })
-        .needsApproval;
-      await expect(bashNeedsApproval?.({}, {})).resolves.toBe(true);
-      await expect(writeNeedsApproval?.({}, {})).resolves.toBe(false);
+      await expect(resolveApproval(result, "bash", {})).resolves.toBe("user-approval");
+      await expect(resolveApproval(result, "write_file", {})).resolves.toBeUndefined();
     });
 
-    it("passes toolInput from the AI SDK into needsApproval", async () => {
+    it("passes toolInput from the AI SDK into approval", async () => {
       let capturedInput: unknown;
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
         [
@@ -448,22 +834,149 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "vercel__list_projects",
-            needsApproval: (ctx) => {
+            approval: (ctx) => {
               capturedInput = ctx.toolInput;
-              return true;
+              return "user-approval";
             },
           },
         ],
       ]);
 
       const result = buildToolSet({ tools });
-      const needsApproval = (result.vercel__list_projects as { needsApproval?: NeedsApprovalFn })
-        .needsApproval;
-
       const toolInput = { teamId: "team_abc", limit: 20 };
-      await needsApproval?.(toolInput, {});
+      await resolveApproval(result, "vercel__list_projects", toolInput);
 
       expect(capturedInput).toEqual(toolInput);
+    });
+
+    it("passes the callId from the AI SDK into approval", async () => {
+      let capturedCallId: string | undefined;
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "vercel__list_projects",
+          {
+            description: "List projects in the team.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "vercel__list_projects",
+            approval: (ctx) => {
+              capturedCallId = ctx.callId;
+              return "user-approval";
+            },
+          },
+        ],
+      ]);
+
+      const result = buildToolSet({ tools });
+      await resolveApproval(result, "vercel__list_projects", {});
+
+      expect(capturedCallId).toBe("call_1");
+    });
+
+    it("passes the active caller and session context into approval", async () => {
+      let capturedCtx: Parameters<NonNullable<HarnessToolDefinition["approval"]>>[0] | undefined;
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "delete_project",
+          {
+            approval: (ctx) => {
+              capturedCtx = ctx;
+              return ctx.session.auth.current?.attributes.tenant === "tenant_abc"
+                ? "user-approval"
+                : "denied";
+            },
+            description: "Delete a project.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "delete_project",
+          },
+        ],
+      ]);
+      const session: Session = {
+        auth: {
+          current: {
+            attributes: { tenant: "tenant_abc" },
+            authenticator: "jwt",
+            principalId: "user_current",
+            principalType: "user",
+          },
+          initiator: {
+            attributes: { tenant: "tenant_abc" },
+            authenticator: "jwt",
+            principalId: "user_initiator",
+            principalType: "user",
+          },
+        },
+        parent: {
+          callId: "call_parent",
+          rootSessionId: "session_root",
+          sessionId: "session_parent",
+          turn: { id: "turn_parent", sequence: 1 },
+        },
+        sessionId: "session_current",
+        turn: { id: "turn_current", sequence: 2 },
+      };
+
+      const result = buildToolSet({ tools });
+      await expect(resolveApproval(result, "delete_project", {}, session)).resolves.toBe(
+        "user-approval",
+      );
+
+      expect(capturedCtx?.session).toEqual({
+        auth: session.auth,
+        id: "session_current",
+        parent: session.parent,
+        turn: session.turn,
+      });
+      expect(capturedCtx?.session.auth.current?.principalId).toBe("user_current");
+      expect(capturedCtx?.getSandbox).toBeTypeOf("function");
+      expect(capturedCtx?.getSkill).toBeTypeOf("function");
+    });
+
+    it("uses the active principal for schedule approval", async () => {
+      const human: NonNullable<Session["auth"]["current"]> = {
+        attributes: {},
+        authenticator: "test",
+        principalId: "eve:app",
+        principalType: "user",
+      };
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "refund",
+          {
+            approval: ({ session }) => {
+              const auth = session.auth.current;
+              return auth?.authenticator === SCHEDULE_APP_AUTH.authenticator &&
+                auth.principalId === SCHEDULE_APP_AUTH.principalId &&
+                auth.principalType === SCHEDULE_APP_AUTH.principalType
+                ? "not-applicable"
+                : "user-approval";
+            },
+            description: "Refund a charge.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "refund",
+          },
+        ],
+      ]);
+      const scheduleSession: Session = {
+        auth: { current: SCHEDULE_APP_AUTH, initiator: SCHEDULE_APP_AUTH },
+        sessionId: "schedule-session",
+        turn: { id: "schedule-turn", sequence: 0 },
+      };
+      const humanResumedSession: Session = {
+        auth: { current: human, initiator: SCHEDULE_APP_AUTH },
+        sessionId: "schedule-session",
+        turn: { id: "human-turn", sequence: 1 },
+      };
+      const result = buildToolSet({ tools });
+
+      await expect(resolveApproval(result, "refund", {}, scheduleSession)).resolves.toBe(
+        "not-applicable",
+      );
+      await expect(resolveApproval(result, "refund", {}, humanResumedSession)).resolves.toBe(
+        "user-approval",
+      );
     });
 
     it("input-aware approval skips when compound key is in approvedTools", async () => {
@@ -475,11 +988,11 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "vercel__list_projects",
-            needsApproval: ({ approvedTools, toolName, toolInput }) => {
-              if (approvedTools.has(toolName)) return false;
+            approval: ({ approvedTools, toolName, toolInput }) => {
+              if (approvedTools.has(toolName)) return "not-applicable";
               const team = (toolInput as { teamId?: string } | undefined)?.teamId;
-              if (team === undefined) return true;
-              return !approvedTools.has(`${toolName}:${team}`);
+              if (team === undefined) return "user-approval";
+              return approvedTools.has(`${toolName}:${team}`) ? "not-applicable" : "user-approval";
             },
           },
         ],
@@ -489,13 +1002,19 @@ describe("buildToolSet", () => {
         approvedTools: new Set(["vercel__list_projects:team_abc"]),
         tools,
       });
-      const needsApproval = (
-        withCompoundKey.vercel__list_projects as { needsApproval?: NeedsApprovalFn }
-      ).needsApproval;
+      await expect(
+        resolveApproval(withCompoundKey, "vercel__list_projects", {
+          teamId: "team_abc",
+          limit: 10,
+        }),
+      ).resolves.toBe("not-applicable");
 
-      await expect(needsApproval?.({ teamId: "team_abc", limit: 10 }, {})).resolves.toBe(false);
-
-      await expect(needsApproval?.({ teamId: "team_xyz", limit: 10 }, {})).resolves.toBe(true);
+      await expect(
+        resolveApproval(withCompoundKey, "vercel__list_projects", {
+          teamId: "team_xyz",
+          limit: 10,
+        }),
+      ).resolves.toBe("user-approval");
     });
   });
 });

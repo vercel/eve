@@ -9,7 +9,8 @@ type VercelSandboxInternalCreateOptions = {
 };
 
 type VercelSandboxAuthorCreateOptions<T> = T extends unknown
-  ? Omit<T, "name" | "onResume" | "persistent" | "signal"> & VercelSandboxInternalCreateOptions
+  ? Omit<T, "name" | "onResume" | "persistent" | "runtime" | "signal"> &
+      VercelSandboxInternalCreateOptions
   : never;
 
 /**
@@ -27,6 +28,9 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * Framework-injected fields (`name`, `onResume`, `persistent`, `signal`)
  * are excluded: the framework owns those and overrides any
  * author-supplied values.
+ *
+ * `runtime` is excluded as well: eve always boots its sandboxes from the
+ * published eve image, which is mutually exclusive with a stock runtime.
  *
  * `source` is honored only on the template create at prewarm time, so
  * an author-supplied snapshot, git revision, or tarball becomes the

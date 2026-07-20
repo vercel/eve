@@ -1,0 +1,202 @@
+---
+title: "OpenAPI Connections"
+description: "Turn an OpenAPI 3.x or Swagger 2.0 document into eve connection tools, authorize calls, and control which operations the model can discover."
+---
+
+OpenAPI connections turn an OpenAPI 3.x or Swagger 2.0 document into connection tools, one per operation. Use OpenAPI when a service publishes an HTTP API contract and you want eve to derive model-facing tools from that contract.
+
+Use an [MCP connection](./mcp) instead when the service already exposes an MCP server, when the server should own tool schemas dynamically, or when the remote service has richer MCP semantics than its raw HTTP API.
+
+## Define an OpenAPI connection
+
+Create one file under `agent/connections/`. The filename becomes the runtime connection name, so `agent/connections/petstore.ts` registers as `petstore`, and generated operation tools are called as `petstore__<operation>`.
+
+```ts title="agent/connections/petstore.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://petstore3.swagger.io/api/v3/openapi.json",
+  description: "Pet store inventory and orders.",
+  auth: { getToken: async () => ({ token: process.env.PETSTORE_TOKEN! }) },
+});
+```
+
+Each operation becomes `<connection>__<operationId>`, for example `petstore__getInventory`. When an operation has no `operationId`, eve derives a deterministic `<method>_<sanitized-path>` name instead.
+
+`spec` can be a URL that eve fetches at runtime, or an inline parsed OpenAPI object. A spec URL must use `https` (plain `http` is allowed only for loopback hosts such as `localhost` during local development), and eve re-checks the transport after any redirects. Prefer a URL when the provider owns the contract and updates it; prefer an inline object for private APIs, generated specs you pin in source control, or small hand-authored contracts.
+
+## Base URL and servers
+
+eve resolves operation paths against `baseUrl` when you provide one. Otherwise, it derives the base URL from the spec:
+
+- OpenAPI 3.x: the first usable `servers` entry
+- Swagger 2.0: `schemes`, `host`, and `basePath`
+
+Use `baseUrl` when the spec is missing server data, points at the wrong environment, uses a relative server URL you do not want, or needs to be pinned for this agent.
+
+The resolved base URL must use `https` too (loopback hosts may use `http` for local development), since operation calls carry the connection's credentials.
+
+```ts title="agent/connections/crm.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://api.example.com/openapi.json",
+  baseUrl: "https://api.example.com",
+  description: "CRM accounts, contacts, and opportunities.",
+});
+```
+
+## Use Vercel Connect for OAuth
+
+For OAuth-backed APIs, prefer [Vercel Connect](https://vercel.com/docs/connect). Connect owns browser consent, encrypted token storage, refresh, and project access. The `connect()` helper from `@vercel/connect/eve` plugs that lifecycle into eve's connection auth, so tokens never reach model context or conversation history.
+
+Create or attach a connector for the API provider from the Vercel project or agent app that will run the connection:
+
+```bash
+npm install @vercel/connect
+vercel link
+vercel connect create github --name github
+vercel connect attach <connector-uid> --yes
+vercel env pull
+```
+
+Then use the connector UID returned by the CLI:
+
+```ts title="agent/connections/github.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json",
+  baseUrl: "https://api.github.com",
+  description: "GitHub repositories, issues, pull requests, and users.",
+  auth: connect("github/github"),
+});
+```
+
+By default, `connect("...")` is user-scoped. The active eve session must have a user principal from route auth or from a platform channel before the first operation call. If the API should act as the agent itself, make the connector app-scoped:
+
+```ts
+auth: connect({ connector: "github/github", principalType: "app" });
+```
+
+Use `tokenParams` on `connect(...)` when the provider requires explicit OAuth scopes, audiences, resource indicators, or authorization details.
+
+## Static tokens and headers
+
+Use `auth.getToken` when you already have a bearer token, API key, service account token, or out-of-band OAuth flow. eve sends the returned token as `Authorization: Bearer <token>`.
+
+```ts title="agent/connections/crm.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://api.example.com/openapi.json",
+  baseUrl: "https://api.example.com",
+  description: "CRM accounts, contacts, and opportunities.",
+  auth: {
+    getToken: async () => ({ token: process.env.CRM_TOKEN! }),
+  },
+});
+```
+
+Use `headers` for non-Bearer auth schemes, version headers, or tenant routing:
+
+```ts title="agent/connections/notion.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://developers.notion.com/openapi.json",
+  baseUrl: "https://api.notion.com",
+  description: "Notion pages, databases, comments, and users.",
+  headers: {
+    Authorization: `Bearer ${process.env.NOTION_API_KEY!}`,
+    "Notion-Version": "2022-06-28",
+  },
+});
+```
+
+`auth` and `headers` can also be functions that receive the active session context. Use that when credentials, tenants, or routing depend on the caller.
+
+## Operation filters
+
+Most OpenAPI specs describe far more than the model should use. Narrow generated tools with exactly one of `operations.allow` or `operations.block`:
+
+```ts title="agent/connections/petstore.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://petstore3.swagger.io/api/v3/openapi.json",
+  description: "Pet store inventory and orders.",
+  auth: { getToken: async () => ({ token: process.env.PETSTORE_TOKEN! }) },
+  operations: { allow: ["getInventory", "placeOrder"] },
+});
+```
+
+Filters match `operationId`. If an operation does not declare one, use the deterministic name eve derives from the method and path.
+
+## Path parameters
+
+When an operation path contains dynamic segments, the spec must declare matching OpenAPI path parameters. eve exposes path, query, header, and cookie parameters as top-level tool inputs, then substitutes `in: "path"` values into the matching `{name}` placeholder before making the request.
+
+```ts title="agent/connections/cart.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  baseUrl: "https://api.example.com",
+  description: "Cart and checkout API.",
+  spec: {
+    openapi: "3.0.3",
+    info: { title: "Cart API", version: "1.0.0" },
+    paths: {
+      "/api/{cartId}/items/{itemId}": {
+        get: {
+          operationId: "getCartItem",
+          parameters: [
+            {
+              name: "cartId",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "itemId",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+      },
+    },
+  },
+});
+```
+
+The parameter `name` must exactly match the placeholder inside the path. If the spec omits an `in: "path"` parameter, the generated tool has no input for that segment and eve cannot fill it in from query parameters.
+
+## Approval gates
+
+Generated operation tools can mutate state just like authored tools. Add an approval gate when operations can create, modify, delete, message, transmit, purchase, or access sensitive data:
+
+```ts title="agent/connections/crm.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+import { once } from "eve/tools/approval";
+
+export default defineOpenAPIConnection({
+  spec: "https://api.example.com/openapi.json",
+  baseUrl: "https://api.example.com",
+  description: "CRM accounts, contacts, and opportunities.",
+  auth: { getToken: async () => ({ token: process.env.CRM_TOKEN! }) },
+  approval: once(),
+});
+```
+
+Combine `approval` with `operations.allow` for the smallest practical surface.
+
+## What to read next
+
+- [Connections](../connections): shared auth, headers, approval, and per-caller patterns.
+- [MCP connections](./mcp): connect to remote MCP servers.
+- [Auth & route protection](../guides/auth-and-route-protection): route auth and the full interactive OAuth lifecycle.
+- [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.

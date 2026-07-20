@@ -45,7 +45,7 @@ function renderJUnit(summary: EveEvalRunSummary, input: { readonly suiteName?: s
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<testsuite name="${escapeXml(input.suiteName ?? "eve evals")}" tests="${summary.results.length}" failures="${failures}" skipped="0" time="${formatSeconds(durationSeconds(summary))}">`,
+    `<testsuite name="${escapeXml(input.suiteName ?? "eve evals")}" tests="${summary.results.length}" failures="${failures}" skipped="${summary.skipped}" time="${formatSeconds(durationSeconds(summary))}">`,
     ...cases,
     "</testsuite>",
     "",
@@ -57,6 +57,13 @@ function renderTestCase(result: EveEvalResult): string {
 
   if (result.verdict === "passed") {
     return `  <testcase ${attrs}/>`;
+  }
+  if (result.verdict === "skipped") {
+    return [
+      `  <testcase ${attrs}>`,
+      `    <skipped message="${escapeXml(result.skipReason ?? "skipped")}"/>`,
+      "  </testcase>",
+    ].join("\n");
   }
 
   const message = failureMessage(result);

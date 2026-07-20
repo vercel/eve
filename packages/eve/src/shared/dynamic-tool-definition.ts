@@ -6,11 +6,16 @@ import type {
   ToolModelOutput,
 } from "#shared/tool-definition.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
-type ToolContext = SessionContext;
+type ToolContext = SessionContext & {
+  /** Aborts when the active turn is cancelled. */
+  readonly abortSignal: AbortSignal;
+  /** Final runtime name of the current tool. */
+  readonly toolName: string;
+};
 
 /**
  * Stream event types allowed for dynamic tool resolvers. Dispatch
@@ -88,13 +93,13 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
   /**
    * Optional per-call approval gate, mirroring the authored-tool
-   * `needsApproval` contract: return `true` to require user approval
+   * `approval` contract: return `"user-approval"` to require user approval
    * before the call executes. Only honored for step-scoped dynamic
    * tools, whose live `execute` closures survive into the harness;
    * session/turn-scoped tools replay from durable metadata and cannot
    * carry a function across replay.
    */
-  readonly needsApproval?: (ctx: NeedsApprovalContext) => boolean;
+  readonly approval?: Approval;
 }
 
 /**
@@ -137,11 +142,18 @@ export type DynamicToolEvents = {
  * the slot directory (tools/ vs skills/) determines the required return,
  * validated at runtime by the respective resolver.
  */
-export type DynamicEvents = {
+export type DynamicEvents<TResult = unknown> = {
   readonly [K in DynamicToolEventName]?: (
     event: unknown,
     ctx: DynamicResolveContext,
-  ) => unknown | Promise<unknown>;
+  ) => TResult | Promise<TResult>;
+};
+
+export type DynamicEventsWithFallback<TResult = unknown> = {
+  readonly [K in DynamicToolEventName]?: (
+    event: unknown,
+    ctx: DynamicResolveContext,
+  ) => Exclude<TResult, undefined> | Promise<Exclude<TResult, undefined>>;
 };
 
 /**
@@ -150,13 +162,26 @@ export type DynamicEvents = {
 export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
 
 /**
- * Return value of `defineDynamic`: the runtime shape of a
- * `defineDynamic({ events })` export, stamped with a sentinel kind the
- * compiler/normalizer detects.
+ * Return value of `defineDynamic`: the runtime shape of a dynamic export,
+ * stamped with a sentinel kind the compiler/normalizer detects. `TFallback`
+ * is `never` except for dynamic agent models, the only slot with a fallback.
  */
-export interface DynamicSentinel {
+export type DynamicSentinel<TResult = unknown, TFallback = never> = {
   readonly kind: typeof DYNAMIC_SENTINEL_KIND;
-  readonly events: DynamicEvents;
+  readonly events: DynamicEvents<TResult>;
+} & ([TFallback] extends [never] ? object : { readonly fallback: TFallback });
+
+/**
+ * Throws when a dynamic sentinel outside the agent `model` slot carries a
+ * `fallback` — anywhere else it would be silently dead configuration.
+ */
+export function rejectDynamicSentinelFallback(sentinel: DynamicSentinel, message: string): void {
+  if (!("fallback" in sentinel)) {
+    return;
+  }
+  throw new Error(
+    `${message} "fallback" is only supported on a dynamic agent model (the "model" field in agent.ts). For dynamic tools, skills, and instructions, author a static entry as the default or return null.`,
+  );
 }
 
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {

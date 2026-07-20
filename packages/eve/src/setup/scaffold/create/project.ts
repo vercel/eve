@@ -65,7 +65,7 @@ interface TemplateContext {
 
 /**
  * Provider slug a gateway model id routes through: the segment before the
- * first "/" (e.g. `anthropic/claude-sonnet-4.6` → `anthropic`). The slug is
+ * first "/" (e.g. `anthropic/claude-sonnet-5` → `anthropic`). The slug is
  * injected into generated source, so characters outside the catalog's slug
  * alphabet are dropped; an id without a usable prefix falls back to
  * `anthropic`.
@@ -153,11 +153,37 @@ export default defineAgent({
 `;
 
 // `@vercel/connect`'s optional `ai` peer (`^6 || ^7`) excludes prereleases, so
-// npm and yarn refuse to fill it from the prerelease `ai` the eve runtime pins
-// and abort the install (ERESOLVE). Forcing `ai` through `overrides` (npm/bun)
-// and `resolutions` (yarn) keeps the whole tree on that exact version; pnpm
-// already tolerates the unmet optional peer and ignores both fields.
-function packageJsonTemplate(includeRootOnlyFields: boolean): string {
+// npm, Bun, and Yarn need a manager-specific pin for the runtime's prerelease
+// `ai` version. pnpm tolerates the unmet optional peer without either field.
+function packageManagerAiPinTemplateSuffix(packageManager: PackageManagerKind): string {
+  switch (packageManager) {
+    case "bun":
+    case "npm":
+      return `,
+  "overrides": {
+    "ai": "__EVE_INIT_AI_SDK_VERSION__"
+  }`;
+    case "yarn":
+      return `,
+  "resolutions": {
+    "ai": "__EVE_INIT_AI_SDK_VERSION__"
+  }`;
+    case "pnpm":
+      return "";
+    default: {
+      const exhaustive: never = packageManager;
+      return exhaustive;
+    }
+  }
+}
+
+function packageJsonTemplate(input: {
+  includeRootOnlyFields: boolean;
+  packageManager: PackageManagerKind;
+}): string {
+  const rootOnlyFields = input.includeRootOnlyFields
+    ? `${packageManagerAiPinTemplateSuffix(input.packageManager)}${ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX}`
+    : "";
   return `{
   "name": "__EVE_INIT_APP_NAME__",
   "version": "0.0.0",
@@ -181,18 +207,13 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
   "devDependencies": {
     "@types/node": "__EVE_INIT_TYPES_NODE_VERSION__",
     "typescript": "__EVE_INIT_TYPESCRIPT_VERSION__"
-  }${includeRootOnlyFields ? ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX : ""}
+  }${rootOnlyFields}
 }
 `;
 }
 
-const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
-  "overrides": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  },
-  "resolutions": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  },
+/** Trailing fields only written when the scaffold is not a workspace member. */
+export const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
   "engines": {
     "node": "__EVE_INIT_NODE_ENGINE__"
   }
@@ -209,22 +230,21 @@ const SHARED_TEMPLATE_FILES: Record<string, string> = {
   "tsconfig.json": `{
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "types": ["node"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["agent/**/*.ts", "evals/**/*.ts", ".eve/**/*.d.ts"]
+  "include": ["agent/**/*.ts", "evals/**/*.ts"]
 }
 `,
   ".gitignore": `node_modules
 .env*
 .eve
 .vercel
-.workflow-data
 .next
 .output
 .nitro
@@ -237,7 +257,6 @@ dist
   ".vercelignore": `node_modules
 .env*
 .eve
-.workflow-data
 .next
 .output
 .nitro
@@ -245,20 +264,28 @@ dist
 `,
   "AGENTS.md": `# eve Agent App
 
-This project uses the eve framework. Before writing code, always read the relevant guide in \`node_modules/eve/docs/\`.
+This project uses the eve framework. Before writing code, read the relevant guide
+from the installed eve package docs. In most installs, those docs are at
+\`node_modules/eve/docs/\`. In workspaces or local package installs, resolve the
+installed \`eve\` package location first and read its \`docs/\` directory. If
+package docs are unavailable, use https://eve.dev/docs as a fallback.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,
 };
 
-function templateFiles(
-  byokProvider: boolean,
-  includeRootOnlyPackageJsonFields: boolean,
-): Record<string, string> {
+function templateFiles(input: {
+  byokProvider: boolean;
+  includeRootOnlyPackageJsonFields: boolean;
+  packageManager: PackageManagerKind;
+}): Record<string, string> {
   return {
-    "agent/agent.ts": byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
+    "agent/agent.ts": input.byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
     ...SHARED_TEMPLATE_FILES,
-    "package.json": packageJsonTemplate(includeRootOnlyPackageJsonFields),
+    "package.json": packageJsonTemplate({
+      includeRootOnlyFields: input.includeRootOnlyPackageJsonFields,
+      packageManager: input.packageManager,
+    }),
   };
 }
 
@@ -359,7 +386,13 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
 
   await mkdir(targetRoot, { recursive: true });
 
-  for (const [relPath, content] of Object.entries(templateFiles(byokProvider, !workspaceMember))) {
+  for (const [relPath, content] of Object.entries(
+    templateFiles({
+      byokProvider,
+      includeRootOnlyPackageJsonFields: !workspaceMember,
+      packageManager,
+    }),
+  )) {
     const filePath = `${targetRoot}/${relPath}`;
     const existed = await pathExists(filePath);
     await writeTextFile(filePath, renderTemplate(content, ctx), {

@@ -11,33 +11,35 @@ allowBuilds:
   cbor-extract: true
   esbuild: true
   node-liblzma: false
+  phase: false
   protobufjs: true
   sharp: true
   simple-git-hooks: true
   unrs-resolver: true
   vue-demi: false
+  webgpu: true
 
 catalog:
-  "@ai-sdk/anthropic": "4.0.0-beta.67"
-  "@ai-sdk/google": "4.0.0-beta.82"
-  "@ai-sdk/mcp": "2.0.0-beta.66"
-  "@ai-sdk/openai": "4.0.0-beta.74"
-  "@ai-sdk/otel": "1.0.0-beta.124"
-  "@ai-sdk/provider": "4.0.0-beta.19"
-  "@ai-sdk/provider-utils": "5.0.0-beta.49"
-  "@ai-sdk/react": "4.0.0-beta.182"
+  "@ai-sdk/anthropic": "^4.0.14"
+  "@ai-sdk/google": "^4.0.14"
+  "@ai-sdk/mcp": "^2.0.12"
+  "@ai-sdk/openai": "^4.0.13"
+  "@ai-sdk/otel": "^1.0.26"
+  "@ai-sdk/provider": "^4.0.3"
+  "@ai-sdk/provider-utils": "^5.0.9"
   "@types/node": "25.9.1"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
-  "@vercel/connect": "0.2.2"
-  "@vercel/sandbox": "2.2.1"
-  ai: "7.0.0-beta.178"
-  next: "16.2.6"
+  "@vercel/connect": "0.4.0"
+  "@vercel/sandbox": "2.3.0"
+  ai: "^7.0.26"
+  next: "16.3.0-preview.6"
+  phase: "0.0.1"
   picocolors: "1.1.1"
   react: "19.2.6"
   react-dom: "19.2.6"
   streamdown: "2.5.0"
-  typescript: "7.0.1-rc"
+  typescript: "7.0.2"
   vitest: "4.1.7"
   zod: "4.4.3"
 
@@ -45,15 +47,20 @@ minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
   - "@ai-sdk/*"
+  - "@rolldown/*"
   - "@typescript/typescript-*"
   - "@turbo/*"
   - "@workflow/*"
   - "@vercel/*"
+  - "@vgpu/*"
   - ai
   - crossws
   - experimental-ai-sdk-code-mode
   - eve
   - nitro
+  - rolldown
   - turbo
   - typescript
   - vercel
+  - workflow
+  - phase@0.0.1

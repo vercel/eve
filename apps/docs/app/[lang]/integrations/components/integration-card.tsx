@@ -24,6 +24,11 @@ export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
           <Logo aria-hidden className="size-5" height={20} width={20} />
         </span>
         <div className="flex items-center gap-1.5">
+          {integration.badge ? (
+            <span className="rounded-full bg-teal-100 px-2 py-0.5 font-medium text-teal-900 text-xs">
+              {integration.badge}
+            </span>
+          ) : null}
           {integration.protocols?.map((protocol) => (
             <span
               className={`rounded-full px-2 py-0.5 font-medium text-xs ${protocolBadgeClassName[protocol]}`}

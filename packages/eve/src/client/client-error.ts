@@ -14,7 +14,12 @@ export class ClientError extends Error {
    */
   readonly body: string;
 
-  constructor(status: number, body: string) {
+  /**
+   * Response headers, normalized to lowercase names.
+   */
+  readonly headers: Readonly<Record<string, string>>;
+
+  constructor(status: number, body: string, headers?: ConstructorParameters<typeof Headers>[0]) {
     let message = body || `Server returned ${status}.`;
     try {
       const parsed: unknown = JSON.parse(body);
@@ -27,5 +32,6 @@ export class ClientError extends Error {
     this.name = "ClientError";
     this.status = status;
     this.body = body;
+    this.headers = Object.freeze(Object.fromEntries(new Headers(headers).entries()));
   }
 }

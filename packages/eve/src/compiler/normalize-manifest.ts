@@ -1,13 +1,16 @@
 import type { AgentSourceManifest } from "#discover/manifest.js";
+import { mountRefNamespace, packageStateNamespace } from "#discover/extensions.js";
 import {
   type CompiledAgentManifest,
   type CompiledAgentNodeManifest,
   type CompiledDynamicInstructionsDefinition,
+  type CompiledExtensionMount,
   type CompiledDynamicSkillDefinition,
   type CompiledDynamicToolDefinition,
-  type CompiledInstructions,
+  type CompiledInstructionsDefinition,
   type CompiledSkillDefinition,
   type CompiledToolDefinition,
+  type CompiledWorkflowToolDefinition,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
@@ -16,6 +19,7 @@ import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
+import { compileExtensionContributions } from "#compiler/normalize-extension.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
@@ -44,8 +48,23 @@ export async function compileAgentManifest(
     subagents: manifest.subagents,
   });
 
+  const extensionMounts: CompiledExtensionMount[] = manifest.resolvedExtensions.map((mount) => {
+    const mountRef = manifest.extensions.find(
+      (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
+    );
+    return {
+      namespace: mount.namespace,
+      packageName: mount.packageName,
+      packageNamespace: packageStateNamespace(mount.packageName),
+      sourceRoot: mount.sourceRoot,
+      mountSourceId: mountRef?.sourceId ?? `extensions/${mount.namespace}`,
+      mountLogicalPath: mountRef?.logicalPath ?? `extensions/${mount.namespace}`,
+    };
+  });
+
   return createCompiledAgentManifest({
     ...compiledNode,
+    extensionMounts,
     remoteAgents: subagentGraph.remoteAgents,
     subagentEdges: subagentGraph.edges,
     subagents: subagentGraph.nodes,
@@ -88,15 +107,15 @@ async function compileAgentNodeManifest(
   const tools: CompiledToolDefinition[] = [];
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
   const disabledFrameworkTools: string[] = [];
-  let workflowEnabled = false;
+  let workflowTool: CompiledWorkflowToolDefinition | undefined;
 
   for (const entry of compiledToolEntries) {
     if (entry.kind === "tool") {
       tools.push(entry.definition);
     } else if (entry.kind === "dynamic-tool") {
       dynamicTools.push(entry.definition);
-    } else if (entry.kind === "enable-workflow") {
-      workflowEnabled = true;
+    } else if (entry.kind === "workflow-tool") {
+      workflowTool = { maxSubagents: entry.maxSubagents };
     } else {
       disabledFrameworkTools.push(entry.name);
     }
@@ -134,7 +153,7 @@ async function compileAgentNodeManifest(
       compileInstructionsEntry(manifest.agentRoot, source, { externalDependencies }),
     ),
   );
-  const staticInstructions: CompiledInstructions[] = [];
+  const staticInstructions: CompiledInstructionsDefinition[] = [];
   const dynamicInstructions: CompiledDynamicInstructionsDefinition[] = [];
 
   for (const entry of compiledInstructionsEntries) {
@@ -145,16 +164,78 @@ async function compileAgentNodeManifest(
     }
   }
 
-  const composedInstructions: CompiledInstructions | undefined =
-    staticInstructions.length === 0
+  const connections = await Promise.all(
+    manifest.connections.map((connectionSource) =>
+      compileConnectionDefinition(manifest.agentRoot, connectionSource, { externalDependencies }),
+    ),
+  );
+  const hooks = manifest.hooks.map((hookSource) => compileHookEntry(hookSource));
+  const schedules = await Promise.all(
+    manifest.schedules.map((scheduleSource) =>
+      compileScheduleDefinition(manifest.agentRoot, scheduleSource, { externalDependencies }),
+    ),
+  );
+
+  // Sorted by namespace so first-registration-wins dedup is deterministic when
+  // two extensions contribute the same composed name.
+  const toolNames = new Set(tools.map((tool) => tool.name));
+  const dynamicToolSlugs = new Set(dynamicTools.map((tool) => tool.slug));
+  const connectionNames = new Set(connections.map((connection) => connection.connectionName));
+  const skillNames = new Set(skills.map((skill) => skill.name));
+  const extensionInstructionFragments: string[] = [];
+  for (const mount of [...manifest.resolvedExtensions].sort((left, right) =>
+    left.namespace.localeCompare(right.namespace),
+  )) {
+    const contributions = await compileExtensionContributions({
+      mount,
+      context,
+      consumerAgentRoot: manifest.agentRoot,
+      externalDependencies,
+    });
+    for (const tool of contributions.tools) {
+      if (!toolNames.has(tool.name)) {
+        toolNames.add(tool.name);
+        tools.push(tool);
+      }
+    }
+    for (const tool of contributions.dynamicTools) {
+      if (!dynamicToolSlugs.has(tool.slug)) {
+        dynamicToolSlugs.add(tool.slug);
+        dynamicTools.push(tool);
+      }
+    }
+    for (const connection of contributions.connections) {
+      if (!connectionNames.has(connection.connectionName)) {
+        connectionNames.add(connection.connectionName);
+        connections.push(connection);
+      }
+    }
+    for (const skill of contributions.skills) {
+      if (!skillNames.has(skill.name)) {
+        skillNames.add(skill.name);
+        skills.push(skill);
+      }
+    }
+    hooks.push(...contributions.hooks);
+    dynamicSkills.push(...contributions.dynamicSkills);
+    dynamicInstructions.push(...contributions.dynamicInstructions);
+    extensionInstructionFragments.push(...contributions.instructionFragments);
+  }
+
+  const composedMarkdown = [
+    ...staticInstructions.map((entry) => entry.markdown),
+    ...extensionInstructionFragments,
+  ];
+  const composedInstructions: CompiledInstructionsDefinition | undefined =
+    composedMarkdown.length === 0
       ? undefined
-      : staticInstructions.length === 1
+      : staticInstructions.length === 1 && extensionInstructionFragments.length === 0
         ? staticInstructions[0]
         : {
             name: "instructions",
             logicalPath: "instructions",
-            markdown: staticInstructions.map((i) => i.markdown).join("\n\n"),
-            sourceId: staticInstructions[0]!.sourceId,
+            markdown: composedMarkdown.join("\n\n"),
+            sourceId: staticInstructions[0]?.sourceId ?? "instructions",
             sourceKind: "module",
           };
 
@@ -163,17 +244,13 @@ async function compileAgentNodeManifest(
     appRoot: manifest.appRoot,
     channels: compiledChannels,
     config,
-    connections: await Promise.all(
-      manifest.connections.map((connectionSource) =>
-        compileConnectionDefinition(manifest.agentRoot, connectionSource, { externalDependencies }),
-      ),
-    ),
+    connections,
     diagnosticsSummary: manifest.diagnosticsSummary,
     disabledFrameworkTools,
-    workflowEnabled,
+    workflowTool,
     dynamicSkills,
     dynamicTools,
-    hooks: manifest.hooks.map((hookSource) => compileHookEntry(hookSource)),
+    hooks,
     sandbox:
       manifest.sandbox === null
         ? null
@@ -186,11 +263,7 @@ async function compileAgentNodeManifest(
       sourceId: workspace.sourceId,
       sourcePath: workspace.sourcePath,
     })),
-    schedules: await Promise.all(
-      manifest.schedules.map((scheduleSource) =>
-        compileScheduleDefinition(manifest.agentRoot, scheduleSource, { externalDependencies }),
-      ),
-    ),
+    schedules,
     dynamicInstructions,
     skills,
     instructions: composedInstructions,

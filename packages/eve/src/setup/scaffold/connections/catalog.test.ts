@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  canonicalConnectorNameForEntry,
   catalogSlugs,
   CONNECTION_CATALOG,
   connectorServiceForEntry,
@@ -11,6 +12,7 @@ import {
   mcpServiceHost,
   SUPPORTED_PROTOCOLS,
 } from "./catalog.js";
+import { connectionEntries } from "@vercel/eve-catalog";
 
 describe("catalog integrity", () => {
   test("every entry declares the endpoint for each protocol it lists", () => {
@@ -38,15 +40,24 @@ describe("catalog integrity", () => {
     }
   });
 
+  test("gallery-only connections stay out of the scaffolder catalog", () => {
+    const scaffoldable = connectionEntries().filter((entry) => entry.surfaces.scaffoldable);
+    expect(CONNECTION_CATALOG.map((entry) => entry.slug)).toEqual(
+      scaffoldable.map((entry) => entry.slug),
+    );
+    expect(connectionEntries().length).toBeGreaterThan(scaffoldable.length);
+  });
+
   test("every Connect entry resolves a `vercel connect create` service", () => {
     for (const entry of CONNECTION_CATALOG) {
       expect(connectorServiceForEntry(entry)).toBeTruthy();
+      expect(canonicalConnectorNameForEntry(entry)).toBeTruthy();
     }
   });
 });
 
 describe("connectorServiceForEntry", () => {
-  test("prefers the explicit service over the MCP host", () => {
+  test("prefers the explicit service over the MCP endpoint", () => {
     expect(
       connectorServiceForEntry({
         mcp: { url: "https://mcp.example.com/sse" },
@@ -71,9 +82,29 @@ describe("connectorServiceForEntry", () => {
   });
 });
 
+describe("canonicalConnectorNameForEntry", () => {
+  test("uses the configured connector name without inferring a UID namespace", () => {
+    expect(canonicalConnectorNameForEntry(getCatalogEntry("notion")!)).toBe("notion");
+    expect(
+      canonicalConnectorNameForEntry({
+        auth: { kind: "connect", connector: "custom", service: "mcp.example.com/mcp" },
+      }),
+    ).toBe("custom");
+  });
+});
+
+describe("curated Connect services", () => {
+  test("uses the provider's managed service identifier", () => {
+    expect(connectorServiceForEntry(getCatalogEntry("linear")!)).toBe("mcp.linear.app");
+    expect(connectorServiceForEntry(getCatalogEntry("notion")!)).toBe("mcp.notion.com");
+    expect(connectorServiceForEntry(getCatalogEntry("datadog")!)).toBe("mcp.datadoghq.com");
+    expect(connectorServiceForEntry(getCatalogEntry("honeycomb")!)).toBe("mcp.honeycomb.io");
+  });
+});
+
 describe("mcpServiceHost", () => {
   test("extracts the host from a URL", () => {
-    expect(mcpServiceHost("https://mcp.linear.app/sse")).toBe("mcp.linear.app");
+    expect(mcpServiceHost("https://mcp.linear.app/mcp")).toBe("mcp.linear.app");
   });
 
   test("returns undefined for missing or unparseable input", () => {

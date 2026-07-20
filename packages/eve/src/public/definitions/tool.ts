@@ -3,6 +3,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import type { PublicToolDefinition, ToolModelOutput } from "#shared/tool-definition.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { Approval } from "#public/definitions/approval.js";
 import type { JsonObject } from "#shared/json.js";
 import type {
   AuthorizationDefinition,
@@ -14,25 +15,18 @@ import {
   DYNAMIC_SENTINEL_KIND,
   TOOL_BRAND,
   type DynamicEvents,
+  type DynamicEventsWithFallback,
   type DynamicSentinel,
 } from "#shared/dynamic-tool-definition.js";
 
-type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInput;
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
-
-/**
- * Context passed to a tool's {@link ToolDefinition.needsApproval} function.
- *
- * `approvedTools` is the set of tool names (or compound approval keys)
- * already approved at least once in the current session. `toolName` is the
- * runtime name of the tool being evaluated. `toolInput` is the raw input the
- * model passed, available for input-aware decisions (e.g. per-connection scoping).
- */
-export interface NeedsApprovalContext<TInput = Record<string, unknown>> {
-  readonly approvedTools: ReadonlySet<string>;
-  readonly toolInput?: ApprovalToolInput<TInput>;
-  readonly toolName: string;
-}
+type DynamicEventMapHandler<TEvents extends DynamicEvents> = Extract<
+  NonNullable<TEvents[keyof TEvents]>,
+  (...args: never[]) => unknown
+>;
+type DynamicEventMapResult<TEvents extends DynamicEvents> = Awaited<
+  ReturnType<DynamicEventMapHandler<TEvents>>
+>;
 
 export type { ToolModelOutput } from "#shared/tool-definition.js";
 
@@ -86,6 +80,19 @@ export interface ToolAuthOptions {
  * resolves that provider inline, which lets one tool use multiple credentials.
  */
 export type ToolContext = SessionContext & {
+  /** Aborts when the active turn is cancelled. */
+  readonly abortSignal: AbortSignal;
+  /**
+   * Id of the current tool call — the same `callId` carried by the call's
+   * stream events and its {@link ApprovalContext}.
+   */
+  readonly callId: string;
+  /**
+   * Final runtime name of the current tool, including any namespace
+   * qualification. This is the same `toolName` carried by stream events and
+   * the tool's {@link ApprovalContext}.
+   */
+  readonly toolName: string;
   /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
@@ -107,10 +114,10 @@ export type ToolContext = SessionContext & {
  * the extension (`agent/tools/get_weather.ts` registers as `get_weather`).
  * Authored definitions have no `name` field; identity is path-derived.
  */
-export type ToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefinition<
+export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends PublicToolDefinition<
   TInput,
   TOutput
-> & {
+> {
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput;
   /**
    * Optional per-tool approval gate. The return value determines whether
@@ -121,7 +128,7 @@ export type ToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefi
    * - {@link never}: never require approval
    * - {@link once}: require approval only the first time per session
    */
-  needsApproval?: (ctx: NeedsApprovalContext<ApprovalContextInput<TInput>>) => boolean;
+  approval?: Approval<ApprovalContextInput<TInput>>;
   /**
    * Optional projection controlling what the model sees as the tool result.
    * Receives the full `TOutput` from {@link execute} and returns the
@@ -132,7 +139,7 @@ export type ToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefi
    * (`action.result`) always receive the full output regardless.
    */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
-};
+}
 
 /**
  * Defines a tool configuration, used both for static tools (default export
@@ -155,10 +162,7 @@ export function defineTool<
   ):
     | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
     | StandardJSONSchemaV1.InferOutput<TOutputSchema>;
-  needsApproval?: ToolDefinition<
-    StandardJSONSchemaV1.InferOutput<TInputSchema>,
-    unknown
-  >["needsApproval"];
+  approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -178,10 +182,7 @@ export function defineTool<
     input: StandardJSONSchemaV1.InferOutput<TSchema>,
     ctx: ToolContext,
   ): Promise<TOutput> | TOutput;
-  needsApproval?: ToolDefinition<
-    StandardJSONSchemaV1.InferOutput<TSchema>,
-    unknown
-  >["needsApproval"];
+  approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
 }): ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, TOutput>;
 export function defineTool<
@@ -196,7 +197,7 @@ export function defineTool<
   ):
     | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
     | StandardJSONSchemaV1.InferOutput<TOutputSchema>;
-  needsApproval?: ToolDefinition<Record<string, unknown>, unknown>["needsApproval"];
+  approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -207,7 +208,7 @@ export function defineTool<TOutput>(definition: {
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
   execute(input: Record<string, unknown>, ctx: ToolContext): Promise<TOutput> | TOutput;
-  needsApproval?: ToolDefinition<Record<string, unknown>, unknown>["needsApproval"];
+  approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
 }): ToolDefinition<Record<string, unknown>, TOutput>;
 export function defineTool<TInput = unknown, TOutput = unknown>(
@@ -275,11 +276,25 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
  * whose name matches an authored one overrides it; two dynamic resolvers
  * emitting the same name is an error.
  */
-export function defineDynamic(definition: { readonly events: DynamicEvents }): DynamicSentinel {
-  const sentinel: DynamicSentinel = {
+export function defineDynamic<const TEvents extends DynamicEvents>(definition: {
+  readonly events: TEvents;
+}): DynamicSentinel<DynamicEventMapResult<TEvents>>;
+export function defineDynamic<
+  const TEvents extends DynamicEventsWithFallback,
+  TFallback = unknown,
+>(definition: {
+  readonly fallback: TFallback;
+  readonly events: TEvents;
+}): DynamicSentinel<Exclude<DynamicEventMapResult<TEvents>, undefined>, TFallback>;
+export function defineDynamic<TResult = unknown, TFallback = unknown>(definition: {
+  readonly fallback?: TFallback;
+  readonly events: DynamicEvents<TResult>;
+}): DynamicSentinel<TResult, TFallback> {
+  const sentinel = {
     kind: DYNAMIC_SENTINEL_KIND,
     events: definition.events,
-  };
+    ...(Object.hasOwn(definition, "fallback") ? { fallback: definition.fallback } : {}),
+  } as DynamicSentinel<TResult, TFallback>;
   stampDefinitionKey(sentinel, `dynamic:${Object.keys(definition.events).join(",")}`);
   return sentinel;
 }
@@ -321,46 +336,74 @@ export function isDisabledToolSentinel(value: unknown): value is DisabledToolSen
 }
 
 /**
- * Marker discriminator written into the {@link ExperimentalWorkflow} opt-in
- * sentinel.
+ * Discriminator written into definitions returned by
+ * {@link experimental_workflow}.
  */
-const ENABLE_WORKFLOW_TOOL_SENTINEL_KIND = "eve:enable-workflow-tool";
+const EXPERIMENTAL_WORKFLOW_TOOL_KIND = "eve:enable-workflow-tool";
 
 /**
- * Marker value re-exported as the default export of a file in `agent/tools/`
- * (conventionally `agent/tools/workflow.ts`) to enable the framework `Workflow`
- * orchestration tool. The tool is off unless this marker is present,
- * mirroring the {@link disableTool} opt-out in reverse.
+ * Configuration accepted by {@link experimental_workflow}.
  */
-export interface EnableWorkflowToolSentinel {
-  readonly kind: typeof ENABLE_WORKFLOW_TOOL_SENTINEL_KIND;
+export interface ExperimentalWorkflowToolInput {
+  /**
+   * Maximum number of subagent or remote-agent calls one `Workflow` program
+   * may dispatch, counted across sequential and parallel calls alike.
+   *
+   * Calls beyond the limit fail with a `WORKFLOW_SUBAGENT_LIMIT_REACHED`
+   * result instead of starting a child session.
+   *
+   * @default 100
+   */
+  readonly maxSubagents?: number;
 }
 
 /**
- * Opt-in marker for the framework `Workflow` tool, a code-mode sandbox whose
- * only callable operations are this agent's subagents and remote agents, for
- * orchestrating them from model-authored JavaScript. Re-export it as the
- * default export of `agent/tools/workflow.ts`:
- *
- * ```ts
- * export { ExperimentalWorkflow as default } from "eve/tools";
- * ```
- *
- * The capability is experimental. The resulting model-facing tool is still
- * called `Workflow`.
+ * Framework `Workflow` tool definition returned by
+ * {@link experimental_workflow}.
  */
-export const ExperimentalWorkflow: EnableWorkflowToolSentinel = Object.freeze({
-  kind: ENABLE_WORKFLOW_TOOL_SENTINEL_KIND,
-});
+export interface ExperimentalWorkflowToolDefinition extends ExperimentalWorkflowToolInput {
+  readonly kind: typeof EXPERIMENTAL_WORKFLOW_TOOL_KIND;
+}
 
 /**
- * Type guard: returns whether `value` is the {@link ExperimentalWorkflow}
- * opt-in sentinel.
+ * Enables and configures the experimental framework `Workflow` tool, an
+ * isolated JavaScript sandbox whose only callable operations are this agent's
+ * subagents and remote agents. Export the result from
+ * `agent/tools/workflow.ts`:
+ *
+ * ```ts
+ * import { experimental_workflow } from "eve/tools";
+ *
+ * export default experimental_workflow({ maxSubagents: 25 });
+ * ```
+ *
+ * Only the root session sees the tool. The resulting model-facing tool is
+ * still called `Workflow`.
  */
-export function isEnableWorkflowToolSentinel(value: unknown): value is EnableWorkflowToolSentinel {
+export function experimental_workflow(
+  input: ExperimentalWorkflowToolInput = {},
+): ExperimentalWorkflowToolDefinition {
+  const definition: {
+    kind: typeof EXPERIMENTAL_WORKFLOW_TOOL_KIND;
+    maxSubagents?: number;
+  } = {
+    kind: EXPERIMENTAL_WORKFLOW_TOOL_KIND,
+  };
+  if (input.maxSubagents !== undefined) {
+    definition.maxSubagents = input.maxSubagents;
+  }
+  return definition;
+}
+
+/**
+ * Type guard for a definition returned by {@link experimental_workflow}.
+ */
+export function isExperimentalWorkflowToolDefinition(
+  value: unknown,
+): value is ExperimentalWorkflowToolDefinition {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { kind?: unknown }).kind === ENABLE_WORKFLOW_TOOL_SENTINEL_KIND
+    (value as { kind?: unknown }).kind === EXPERIMENTAL_WORKFLOW_TOOL_KIND
   );
 }

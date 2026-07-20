@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { contextStorage, ContextContainer } from "#context/container.js";
+import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
 
@@ -268,6 +271,47 @@ describe("OpenApiConnectionClient", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret");
   });
 
+  it("resolves auth and headers from the active caller", async () => {
+    const fetchMock = vi.fn(
+      async (_url: URL, _init: RequestInit) => new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const current: SessionAuthContext = {
+      attributes: { tenant: "acme" },
+      authenticator: "oidc",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, current);
+    ctx.set(SessionKey, {
+      auth: { current, initiator: current },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        authorization: (callbackContext: SessionContext) => ({
+          getToken: async () => ({
+            token: `token-for-${callbackContext.session.auth.current?.principalId}`,
+          }),
+          principalType: "user",
+        }),
+        headers: (callbackContext: SessionContext) => ({
+          "X-Tenant": String(callbackContext.session.auth.current?.attributes.tenant),
+        }),
+      }),
+    );
+
+    await contextStorage.run(ctx, () => client.executeTool("getProject", { id: "prj_1" }));
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer token-for-alice",
+      "X-Tenant": "acme",
+    });
+  });
+
   it("serializes the request body on execute", async () => {
     const fetchMock = vi.fn(
       async (_url: URL, _init: RequestInit) => new Response(null, { status: 201 }),
@@ -478,6 +522,73 @@ describe("OpenApiConnectionClient", () => {
     expect(String(calledUrl)).toBe("https://api.example.com/v1/projects/prj_1");
   });
 
+  it("refuses to fetch a spec over http", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(
+      makeConnection({ spec: "http://specs.example.com/openapi.json", url: "" }),
+    );
+
+    await expect(client.getToolMetadata()).rejects.toThrow(/must use https for its spec/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows http specs from loopback hosts for local development", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify(SPEC), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        spec: "http://localhost:3000/openapi.json",
+        url: "https://api.example.com",
+      }),
+    );
+
+    await expect(client.getToolMetadata()).resolves.toBeDefined();
+  });
+
+  it("refuses a spec redirected onto an insecure transport", async () => {
+    const fetchMock = vi.fn(async () => {
+      const response = new Response(JSON.stringify(SPEC), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+      Object.defineProperty(response, "redirected", { value: true });
+      Object.defineProperty(response, "url", { value: "http://attacker.example.com/spec" });
+      return response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(
+      makeConnection({ spec: "https://specs.example.com/openapi.json", url: "" }),
+    );
+
+    await expect(client.getToolMetadata()).rejects.toThrow(/must use https for its spec/);
+  });
+
+  it("refuses an http base URL so operation calls never carry auth over cleartext", async () => {
+    const client = new OpenApiConnectionClient(
+      makeConnection({ spec: SPEC, url: "http://api.example.com" }),
+    );
+
+    await expect(client.getToolMetadata()).rejects.toThrow(/must use https for its base/);
+  });
+
+  it("allows a loopback http base URL for local development", async () => {
+    const client = new OpenApiConnectionClient(
+      makeConnection({ spec: SPEC, url: "http://localhost:3000" }),
+    );
+
+    await expect(client.getToolMetadata()).resolves.toBeDefined();
+  });
+
   it("resolves a relative server URL against the spec URL", async () => {
     const doc: Record<string, unknown> = {
       openapi: "3.0.3",
@@ -554,6 +665,40 @@ describe("OpenApiConnectionClient", () => {
 
     expect(props.start).not.toHaveProperty("type");
     expect(props.mix?.type).toEqual(["string", "null"]);
+  });
+
+  it("keeps operations whose input schemas cannot be locally validated", async () => {
+    const spec: Record<string, unknown> = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1" },
+      servers: [{ url: "https://api.example.com" }],
+      paths: {
+        "/valid": {
+          get: {
+            operationId: "getValid",
+            parameters: [{ name: "id", in: "query", schema: { type: "string" } }],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+        "/invalid": {
+          get: {
+            operationId: "getInvalid",
+            parameters: [{ name: "state", in: "query", schema: { enum: "not-an-array" } }],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const client = new OpenApiConnectionClient(makeConnection({ spec }));
+
+    // Schemas outside the local validation subset degrade to passthrough
+    // validation instead of dropping the operation — the API validates.
+    await expect(client.getToolMetadata()).resolves.toMatchObject([
+      { name: "getValid" },
+      { name: "getInvalid" },
+    ]);
+    await expect(client.getTools()).resolves.toHaveProperty("getValid");
+    await expect(client.getTools()).resolves.toHaveProperty("getInvalid");
   });
 
   it("parses a YAML spec fetched from a URL", async () => {

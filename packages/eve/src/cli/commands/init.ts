@@ -447,6 +447,8 @@ async function runInitSteps(input: {
  * A coding agent that omits the target entirely gets the setup guide printed and
  * nothing scaffolded, since a bare `eve init` means it has not yet chosen what to
  * build.
+ *
+ * For extension packages, use `eve extension init` instead.
  */
 export async function runInitCommand(
   logger: InitCliLogger,
@@ -534,8 +536,11 @@ export async function runInitCommand(
   // Strictly the eve binary, never the project's dev script, which in an
   // existing app may start unrelated processes. Exec-style runs do not echo
   // the command the way run-scripts do, so the handoff line is printed here.
-  const devArguments = eveDevArguments(result.packageManager);
-  logger.log(pc.dim("$ eve dev"));
+  const freshScaffold = result.kind === "created";
+  const devArguments = freshScaffold
+    ? [...eveDevArguments(result.packageManager), "--input", "/model"]
+    : eveDevArguments(result.packageManager);
+  logger.log(pc.dim(freshScaffold ? "$ eve dev --input /model" : "$ eve dev"));
   if (
     !(await dependencies.spawnPackageManager(
       result.packageManager,

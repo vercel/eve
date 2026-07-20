@@ -1,22 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
-import { defineChannel, POST } from "#public/definitions/defineChannel.js";
-import { defineHook } from "#public/definitions/hook.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
+import {
+  defineHook,
+  type HookDefinition,
+  type HookEventMap,
+  type StreamEventHook,
+} from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool } from "#public/definitions/tool.js";
+import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
     const agent = defineAgent({
       description: "type-test",
-      model: "anthropic/claude-sonnet-4.6",
+      limits: {
+        maxInputTokensPerSession: 200_000,
+        maxOutputTokensPerSession: 20_000,
+      },
+      model: "anthropic/claude-sonnet-5",
     });
 
     const schedule = defineSchedule({
@@ -25,13 +35,41 @@ describe("definition helper exact inputs", () => {
     });
 
     expect(agent.description).toBe("type-test");
+    expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
+    expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
+  });
+
+  it("keeps the public hook event map aligned with runtime stream events", () => {
+    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<HandleMessageStreamEvent["type"]>();
   });
 });
 
 function typeOnlyFixtures(): void {
+  defineAgent({
+    limits: {
+      // @ts-expect-error Recursive delegation is root-only; this limit was removed.
+      maxSubagentDepth: 4,
+    },
+    model: "anthropic/claude-sonnet-5",
+  });
+
+  defineAgent({
+    limits: {
+      // @ts-expect-error Workflow fan-out is configured by experimental_workflow.
+      maxSubagents: 6,
+    },
+    model: "anthropic/claude-sonnet-5",
+  });
+
+  experimental_workflow({
+    // @ts-expect-error Workflow maxSubagents must be a number.
+    maxSubagents: "6",
+  });
+
   const agentWithName = {
-    model: "anthropic/claude-sonnet-4.6",
+    model: "anthropic/claude-sonnet-5",
     name: "agent-name",
   };
   // @ts-expect-error Agent identity is path-derived.
@@ -105,6 +143,20 @@ function typeOnlyFixtures(): void {
     run() {},
   });
 
+  defineSchedule({
+    cron: "0 9 * * *",
+    markdown: "Send a digest.",
+    // @ts-expect-error Schedules do not support approval policies.
+    approval: () => "user-approval",
+  });
+
+  defineSchedule({
+    cron: "0 9 * * *",
+    markdown: "Send a digest.",
+    // @ts-expect-error Schedules do not support tool approval policies.
+    needsApproval: () => true,
+  });
+
   const skillWithName = {
     description: "Use source docs.",
     markdown: "Prefer primary sources.",
@@ -125,6 +177,37 @@ function typeOnlyFixtures(): void {
         void _data;
         void _channel;
       },
+    },
+  });
+
+  const unknownStreamEventHook: StreamEventHook<unknown> = (event, ctx) => {
+    const sessionId: string = ctx.session.id;
+    const value: unknown = event;
+    void sessionId;
+    void value;
+  };
+  defineHook({
+    events: {
+      "*": unknownStreamEventHook,
+    },
+  });
+
+  const actionResultHook = defineHook({
+    events: {
+      "action.result"(event) {
+        const eventType: "action.result" = event.type;
+        const result = event.data.result;
+        void eventType;
+        void result;
+      },
+    },
+  });
+  expectTypeOf(actionResultHook).toEqualTypeOf<HookDefinition<"action.result">>();
+
+  defineHook({
+    events: {
+      // @ts-expect-error Hook subscribers must use a public hook event key.
+      "internal.event"() {},
     },
   });
 
@@ -205,6 +288,16 @@ function typeOnlyFixtures(): void {
         return { token: "static" };
       },
     },
+    execute() {
+      return null;
+    },
+  });
+
+  defineTool({
+    description: "Removed tool approval key.",
+    inputSchema: { type: "object" },
+    // @ts-expect-error Authored tools use `approval`, not `needsApproval`.
+    needsApproval: () => true,
     execute() {
       return null;
     },

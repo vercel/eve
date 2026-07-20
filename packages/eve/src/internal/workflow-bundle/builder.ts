@@ -11,8 +11,9 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
+import { atomicWriteFile } from "#shared/atomic-write-file.js";
 import {
-  atomicWriteFile,
   bundleFinalWorkflowOutput,
   collectWorkflowInputFiles,
   convertClassesManifest,
@@ -26,14 +27,12 @@ import {
   createWorkflowVirtualEntryPlugin,
   WORKFLOW_VIRTUAL_ENTRY_ID,
   type WorkflowBundleBuilderConfig,
+  type WorkflowBundleBuilderOptions,
   type WorkflowBundleCreateWorkflowsBundleOptions,
   type WorkflowBundleCreateWorkflowsBundleResult,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { writeNitroStepEntrypoint } from "#internal/workflow-bundle/nitro-step-entry.js";
 import {
   copyNitroFunctionDirectory,
@@ -44,18 +43,16 @@ import {
 } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import {
   detectWorkflowPatterns,
-  WORKFLOW_QUEUE_TRIGGER,
+  createEveWorkflowQueueTrigger,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
-import { EVE_WORKFLOW_QUEUE_NAMESPACE } from "#internal/workflow/queue-namespace.js";
-
-// Serialize same-output builds so parallel Vercel surfaces never read
-// `workflows.mjs` between the workflow wrapper write and literal rewrite pass.
-const workflowBundleBuildLocks = new Map<string, Promise<void>>();
+import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
 export class WorkflowBundleBuilder {
+  readonly #agentName: string;
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
+  readonly #queueNamespace: string;
   protected readonly config: WorkflowBundleBuilderConfig;
   readonly #discoveredEntries = new WeakMap<readonly string[], WorkflowBundleDiscoveredEntries>();
 
@@ -74,20 +71,16 @@ export class WorkflowBundleBuilder {
       workingDir: options.rootDir,
     };
 
+    this.#agentName = options.agentName;
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
+    this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
   }
 
   async build(
     options: { nitroStepOutfile?: string; nitroWorkflowOutfile?: string } = {},
   ): Promise<void> {
-    const previous = workflowBundleBuildLocks.get(this.#outDir) ?? Promise.resolve();
-    const next = previous.then(() => this.#performBuild(options));
-    workflowBundleBuildLocks.set(
-      this.#outDir,
-      next.catch(() => {}),
-    );
-    await next;
+    await runQueuedWorkflowBuild(this.#outDir, async () => this.#performBuild(options));
   }
 
   async #performBuild(options: {
@@ -127,6 +120,7 @@ export class WorkflowBundleBuilder {
       outfile: stepsOutfile,
       preferAbsoluteFileImports: true,
       projectRoot: this.config.projectRoot ?? this.config.workingDir,
+      sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
       workingDir: this.config.workingDir,
     });
     const nitroStepOutfile = options.nitroStepOutfile;
@@ -138,13 +132,14 @@ export class WorkflowBundleBuilder {
         outfile: nitroStepOutfile,
         preferAbsoluteFileImports: true,
         projectRoot: this.config.projectRoot ?? this.config.workingDir,
+        sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
         workingDir: this.config.workingDir,
       });
     }
 
     await addStepRegistrationsImport(workflowsOutfile, stepsOutfile);
     await rewriteWorkflowRuntimeImports(workflowsOutfile);
-    await rewriteWorkflowCodeLiteral(workflowsOutfile);
+    await rewriteWorkflowCodeLiteral(workflowsOutfile, this.#queueNamespace);
 
     const nitroWorkflowOutfile = options.nitroWorkflowOutfile;
 
@@ -154,7 +149,7 @@ export class WorkflowBundleBuilder {
       if (nitroStepOutfile !== undefined) {
         await addStepRegistrationsImport(nitroWorkflowOutfile, nitroStepOutfile);
         await rewriteWorkflowRuntimeImports(nitroWorkflowOutfile);
-        await rewriteWorkflowCodeLiteral(nitroWorkflowOutfile);
+        await rewriteWorkflowCodeLiteral(nitroWorkflowOutfile, this.#queueNamespace);
       }
     }
 
@@ -275,42 +270,39 @@ export class WorkflowBundleBuilder {
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
       ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
     ].join("\n");
-    const output = await buildWithNitroRolldown({
-      cwd: this.config.workingDir,
-      input: WORKFLOW_VIRTUAL_ENTRY_ID,
-      platform: "neutral",
-      plugins: [
-        createWorkflowVirtualEntryPlugin(virtualEntrySource),
-        createWorkflowPseudoPackagePlugin(),
-        createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
-        createWorkflowTransformPlugin({
-          manifest: workflowManifest,
-          projectRoot: this.transformProjectRoot,
-          sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
-          workingDir: this.config.workingDir,
-        }),
-        // Must run after the transform so `"use step"` bodies are already
-        // stubbed and their node:* imports stripped from this graph.
-        createWorkflowNodeBuiltinGuardPlugin(),
-      ],
-      resolve: {
-        conditionNames: ["eve-source", "workflow", "node", "import", "default"],
-        extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
-        mainFields: ["module", "main"],
-      },
-      tsconfig: tsconfigPath ?? false,
-      write: false,
-      output: {
-        banner: "globalThis.__private_workflows = new Map();",
-        codeSplitting: false,
-        comments: false,
-        format: "cjs",
-        sourcemap: "inline",
-      },
-    });
-    const interimBundle = getSingleRolldownChunk(
-      output,
+    const interimBundle = await buildSingleRolldownChunk(
       `intermediate workflow bundle for "${outfile}"`,
+      {
+        cwd: this.config.workingDir,
+        input: WORKFLOW_VIRTUAL_ENTRY_ID,
+        platform: "neutral",
+        plugins: [
+          createWorkflowVirtualEntryPlugin(virtualEntrySource),
+          createWorkflowPseudoPackagePlugin(),
+          createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
+          createWorkflowTransformPlugin({
+            manifest: workflowManifest,
+            projectRoot: this.transformProjectRoot,
+            sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
+            workingDir: this.config.workingDir,
+          }),
+          // Must run after the transform so `"use step"` bodies are already
+          // stubbed and their node:* imports stripped from this graph.
+          createWorkflowNodeBuiltinGuardPlugin(),
+        ],
+        resolve: {
+          conditionNames: ["eve-source", "workflow", "node", "import", "default"],
+          extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+          mainFields: ["module", "main"],
+        },
+        tsconfig: tsconfigPath ?? false,
+        output: {
+          banner: "globalThis.__private_workflows = new Map();",
+          comments: false,
+          format: "cjs",
+          sourcemap: "inline",
+        },
+      },
     );
 
     await bundleFinalWorkflowOutput({
@@ -318,6 +310,7 @@ export class WorkflowBundleBuilder {
       code: interimBundle.code,
       format,
       outfile,
+      queueNamespace: this.#queueNamespace,
       workingDir: this.config.workingDir,
     });
 
@@ -329,6 +322,7 @@ export class WorkflowBundleBuilder {
             code: interimBundleResult,
             format,
             outfile,
+            queueNamespace: this.#queueNamespace,
             workingDir: this.config.workingDir,
           });
         },
@@ -409,7 +403,7 @@ export class WorkflowBundleBuilder {
 
     await Promise.all([
       this.#patchVercelFunctionConfig(stagedFlowFunctionDir, {
-        experimentalTriggers: Array.from([WORKFLOW_QUEUE_TRIGGER]),
+        experimentalTriggers: [createEveWorkflowQueueTrigger(this.#agentName)],
         maxDuration: "max",
         runtime: options.runtime ?? null,
         shouldAddHelpers: false,
@@ -446,8 +440,7 @@ export class WorkflowBundleBuilder {
   }
 
   async #getBuildInputFiles(): Promise<string[]> {
-    const inputFiles = await this.getInputFiles();
-    return [...inputFiles, this.#compiledArtifactsBootstrapPath];
+    return await this.getInputFiles();
   }
 
   async #patchVercelFunctionConfig(
@@ -561,7 +554,7 @@ async function rewriteWorkflowRuntimeImports(filePath: string): Promise<void> {
   }
 }
 
-async function rewriteWorkflowCodeLiteral(filePath: string): Promise<void> {
+async function rewriteWorkflowCodeLiteral(filePath: string, queueNamespace: string): Promise<void> {
   const source = await readTextFileIfPresent(filePath);
 
   if (source === null) {
@@ -569,7 +562,7 @@ async function rewriteWorkflowCodeLiteral(filePath: string): Promise<void> {
   }
 
   const declarationPrefix = "const workflowCode = ";
-  const declarationSuffix = `;\n\nexport const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(EVE_WORKFLOW_QUEUE_NAMESPACE)} });`;
+  const declarationSuffix = `;\n\nexport const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(queueNamespace)} });`;
   const expressionStart = source.indexOf(declarationPrefix);
   const expressionEnd = source.lastIndexOf(declarationSuffix);
 
@@ -686,14 +679,4 @@ async function mirrorFileBypassingUnlink(sourcePath: string, targetPath: string)
   }
 
   await atomicWriteFile(targetPath, sourceContents);
-}
-
-interface WorkflowBundleBuilderOptions {
-  appRoot: string;
-  compiledArtifactsBootstrapPath: string;
-  outDir: string;
-  rootDir: string;
-  watch: boolean;
-  /** Test-harness-only: also scans `src/internal/testing/`. */
-  includeTestFixtures?: boolean;
 }

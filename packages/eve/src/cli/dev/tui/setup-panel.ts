@@ -66,10 +66,9 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
  * A menu row that turns into an inline editor while the cursor rests on it.
  * `optionValue` names the row; the `editor` discriminant chooses the widget —
  * an in-place rename field, or a masked provider-key field with its own
- * validation phases. Hovering the row makes it editable directly (typing and
- * backspace edit in place), so the editor's text and a blinking caret render
- * only on that row. Layout and inline editing are orthogonal, so the editor
- * travels as a payload rather than as its own panel `kind`.
+ * validation phases. Rename defaults stay placeholders until typing begins;
+ * provider keys edit in place. Layout and inline editing are orthogonal, so
+ * the editor travels as a payload rather than as its own panel `kind`.
  */
 interface SetupInlineEditRow {
   optionValue: string;
@@ -95,7 +94,11 @@ interface SetupInlineEditRow {
  */
 type SetupOptionSelectPanelState =
   | (SetupSelectPanelBase & { kind: "single" })
-  | (SetupSelectPanelBase & { kind: "search"; placeholder?: string })
+  | (SetupSelectPanelBase & {
+      kind: "search";
+      layout?: "task-list";
+      placeholder?: string;
+    })
   | (SetupSelectPanelBase & { kind: "multi" })
   | (SetupSelectPanelBase & { kind: "searchable-multi"; placeholder?: string })
   | (SetupSelectPanelBase & { kind: "stacked" })
@@ -150,16 +153,26 @@ export interface FlowPanelIndicator {
   color: "green" | "yellow";
 }
 
+/** One live flow status after its animation frame and visual intent are resolved. */
+export type FlowPanelStatus =
+  | { kind: "progress"; text: string; indicator: FlowPanelIndicator }
+  | {
+      kind: "external-action";
+      text: string;
+      emphasis: string;
+      indicator: FlowPanelIndicator;
+    };
+
 export type FlowPanelContent =
   | {
       kind: "question";
       rows: readonly string[];
       /** The install wait keeps its indicator above the concurrent actions. */
-      status?: { text: string; indicator: FlowPanelIndicator };
+      status?: FlowPanelStatus;
     }
   | {
       kind: "status";
-      status: { text: string; indicator: FlowPanelIndicator };
+      status: FlowPanelStatus;
       /** Latest child-process output shown transiently beneath the status. */
       preview?: string;
     }
@@ -198,6 +211,12 @@ function dimWithEmphasis(text: string, theme: Theme): string {
   return theme.colors.dim(text.replaceAll(BOLD_OR_DIM_CLOSE, `${BOLD_OR_DIM_CLOSE}${DIM_OPEN}`));
 }
 
+/** Restores normal intensity for a span nested inside an otherwise dim hint. */
+function solidWithinDim(text: string, theme: Theme): string {
+  if (!theme.color) return text;
+  return `${BOLD_OR_DIM_CLOSE}${text}${DIM_OPEN}`;
+}
+
 /** A selected row must not inherit an authored hint color. */
 function foregroundWithEmphasis(text: string): string {
   return text.replaceAll(DIM_OPEN, "").replace(ANSI_FOREGROUND_COLOR, "");
@@ -221,6 +240,21 @@ function renderIndicator(indicator: FlowPanelIndicator, theme: Theme): string {
   return indicator.color === "green"
     ? theme.colors.green(indicator.glyph)
     : theme.colors.yellow(indicator.glyph);
+}
+
+function renderStatusText(status: FlowPanelStatus, theme: Theme): string {
+  if (status.kind === "progress") return theme.colors.dim(status.text);
+
+  const start = status.text.indexOf(status.emphasis);
+  if (start === -1) return theme.colors.dim(status.text);
+  const end = start + status.emphasis.length;
+  return `${theme.colors.dim(status.text.slice(0, start))}${theme.colors.yellow(
+    status.text.slice(start, end),
+  )}${theme.colors.dim(status.text.slice(end))}`;
+}
+
+function renderFlowPanelStatus(status: FlowPanelStatus, theme: Theme): string {
+  return `${renderIndicator(status.indicator, theme)} ${renderStatusText(status, theme)}`;
 }
 
 /**
@@ -250,17 +284,12 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     case "question":
       // The install wait's question rides beneath its live status indicator.
       if (state.content.status !== undefined) {
-        rows.push(
-          `  ${renderIndicator(state.content.status.indicator, theme)} ${c.dim(state.content.status.text)}`,
-          "",
-        );
+        rows.push(`  ${renderFlowPanelStatus(state.content.status, theme)}`, "");
       }
       rows.push(...state.content.rows);
       break;
     case "status":
-      rows.push(
-        `  ${renderIndicator(state.content.status.indicator, theme)} ${c.dim(state.content.status.text)}`,
-      );
+      rows.push(`  ${renderFlowPanelStatus(state.content.status, theme)}`);
       if (state.content.preview !== undefined) {
         rows.push(`    ${c.dim(state.content.preview)}`);
       }
@@ -301,6 +330,7 @@ function optionRow(input: {
       success: theme.glyph.success,
       placeholder: theme.glyph.option,
       dot: theme.glyph.dot,
+      warning: theme.glyph.warning,
     },
     label: option.label,
     hint: option.hint,
@@ -330,7 +360,7 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
       return {
         selection: "single",
         filter: { placeholder: state.placeholder },
-        layout: "plain",
+        layout: state.layout ?? "plain",
         edit: undefined,
       };
     case "multi":
@@ -407,9 +437,17 @@ function renameHint(
   theme: Theme,
 ): SetupPanelOption {
   const value = rename.editor.text || rename.defaultValue;
-  const caretAt = rename.editor.text.length === 0 ? value.length : rename.editor.cursor;
-  const caret = caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
-  const editableValue = `${value.slice(0, caretAt)}${caret}${value.slice(caretAt)}`;
+  const caretLine = { text: value, cursor: rename.editor.cursor };
+  // The placeholder caret overlays its first character. Entered text uses the
+  // editor's real cursor position, including the stable trailing cell at EOF.
+  let editableValue = renderInputWithBlockCursor({
+    ...visibleLine(caretLine, Number.POSITIVE_INFINITY),
+    visible: caretVisible,
+    inverse: theme.colors.inverse,
+  });
+  if (rename.editor.text.length > 0) {
+    editableValue = solidWithinDim(editableValue, theme);
+  }
   return { ...option, hint: rename.formatHint(editableValue) };
 }
 
@@ -481,13 +519,10 @@ function optionWithoutStackedHint(
 
 function optionUsesPlaceholder(
   presentation: SelectPresentation,
-  index: number,
-  optionCount: number,
+  isTrailingTaskAction: boolean,
 ): boolean {
   // A type-ahead list draws no placeholder dots — the filter row leads instead.
-  const isFiltered = presentation.filter !== undefined;
-  // The task list's trailing action (Done) reads as a button, not an option.
-  const isTrailingTaskAction = presentation.layout === "task-list" && index === optionCount - 1;
+  const isFiltered = presentation.filter !== undefined && presentation.layout !== "task-list";
   // Checklists and the explicit menu layouts (stacked, task-list) present every
   // row as a pickable option, so each carries the placeholder dot.
   const isMultiSelect = presentation.selection === "multiple";
@@ -507,7 +542,7 @@ function appendSelectOptionRows(input: {
   visibleLabelWidth: number;
   width: number;
   theme: Theme;
-}): void {
+}): boolean {
   const {
     rows,
     state,
@@ -521,11 +556,18 @@ function appendSelectOptionRows(input: {
     theme,
   } = input;
   const c = theme.colors;
+  let renderedTrailingTaskAction = false;
 
   for (let index = start; index < end; index += 1) {
     const option = visible[index]!;
     const isCursor = index === cursor;
-    if (presentation.layout === "task-list" && index === end - 1 && index > start) {
+    const isTrailingTaskAction =
+      presentation.layout === "task-list" && option.trailingAction === true;
+    if (isTrailingTaskAction) {
+      appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
+      renderedTrailingTaskAction = true;
+    }
+    if (isTrailingTaskAction && (index > start || (state.notices?.length ?? 0) > 0)) {
       rows.push("");
     }
 
@@ -543,7 +585,7 @@ function appendSelectOptionRows(input: {
         option: rowOption,
         isCursor,
         isChecked: presentation.selection === "multiple" && state.select.selected.has(option.value),
-        placeholder: optionUsesPlaceholder(presentation, index, visible.length),
+        placeholder: optionUsesPlaceholder(presentation, isTrailingTaskAction),
         hintPadding: Math.max(0, visibleLabelWidth - rowOption.label.length),
         theme,
       })}`,
@@ -578,6 +620,7 @@ function appendSelectOptionRows(input: {
     }
     if (presentation.layout === "stacked" && index < end - 1) rows.push("");
   }
+  return renderedTrailingTaskAction;
 }
 
 function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, theme: Theme): void {
@@ -726,7 +769,7 @@ export function renderSelectQuestion(
     rows.push(`  ${c.dim("(no matches)")}`);
   }
 
-  appendSelectOptionRows({
+  const renderedTrailingTaskAction = appendSelectOptionRows({
     rows,
     state,
     presentation,
@@ -744,7 +787,9 @@ export function renderSelectQuestion(
     rows.push(`  ${c.dim(`↑↓ ${visible.length} options, showing ${start + 1}–${end}`)}`);
   }
 
-  appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
+  if (!renderedTrailingTaskAction) {
+    appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
+  }
 
   if (state.error !== undefined) {
     rows.push("", `  ${c.red(state.error)}`);

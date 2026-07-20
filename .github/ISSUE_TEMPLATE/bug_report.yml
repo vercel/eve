@@ -5,25 +5,67 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to file a bug report. Please fill out the sections below so we can reproduce and fix the issue quickly.
+        Thanks for taking the time to file a bug report. Before opening a new issue:
+
+        - [Search existing issues](https://github.com/vercel/eve/issues) and upvote instead of duplicating — it gets bugs fixed faster.
+        - Verify the bug still reproduces on the **latest** eve release; it may already be fixed.
+        - For questions or help with your own project, use [Discussions](https://github.com/vercel/eve/discussions) instead.
+  - type: input
+    id: reproduction
+    attributes:
+      label: Link to a minimal reproduction
+      description: |
+        A link to a **public** GitHub repository that reproduces the issue. Create it with `npx eve@latest init` and include **only** the changes that contribute to the bug — no unrelated tools, connections, or app code.
+
+        A minimal reproduction is the single most useful thing you can give us. **Issues without a valid reproduction link may be closed as not actionable.**
+      placeholder: "https://github.com/user/my-eve-bug-reproduction"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A step-by-step description of how to trigger the bug using the linked reproduction.
+      placeholder: |
+        1. `pnpm install && eve dev`
+        2. Send a message to the agent via `curl ...`
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Current vs. expected behavior
+      description: What happens today (including exact error output), and what you expected to happen instead.
+      placeholder: "Following the steps above, I expected A, but observed B instead."
+    validations:
+      required: true
   - type: input
     id: eve-version
     attributes:
       label: eve version
-      description: Output of `npm ls eve` in your project (or the version from your lockfile).
-      placeholder: "eve@0.7.0"
+      description: The exact version from your lockfile (`npm ls eve`), not a semver range. If the bug is a regression, the last known-good version is also very helpful.
+      placeholder: "eve@0.7.0 (worked in 0.6.2)"
     validations:
       required: true
-  - type: input
-    id: node-version
+  - type: textarea
+    id: environment
     attributes:
-      label: Node.js version
-      description: Output of `node --version`.
-      placeholder: "v24.x.x"
+      label: Environment
+      description: |
+        Your OS, Node.js version (`node --version`), and package manager. If the project compiles, also paste the output of `eve info` from the app root.
+      render: shell
+      placeholder: |
+        OS: macOS 15.5 (arm64)
+        Node: v24.1.0
+        Package manager: pnpm@10.x
+
+        $ eve info
+        ...
     validations:
       required: true
   - type: dropdown
-    id: environment
+    id: stage
     attributes:
       label: Where does the bug occur?
       multiple: true
@@ -35,30 +77,30 @@ body:
         - Other
     validations:
       required: true
-  - type: textarea
-    id: description
+  - type: input
+    id: deployment
     attributes:
-      label: Describe the bug
-      description: A clear and concise description of what the bug is, including any error output.
+      label: Deployment
+      description: If the bug occurs in a deployed agent, link the deployment (e.g. a Vercel deployment URL or ID). This lets us correlate with platform-side logs.
+      placeholder: "https://my-agent-abc123.vercel.app"
     validations:
-      required: true
+      required: false
   - type: textarea
-    id: reproduction
+    id: logs
     attributes:
-      label: Steps to reproduce
+      label: Build and runtime logs
       description: |
-        A minimal reproduction helps us fix the issue much faster. Link a repository if possible, or list the exact steps (agent directory layout, commands run, etc.).
+        Paste the relevant build output and runtime logs. Run with `EVE_LOG_LEVEL=debug` to capture debug-level detail, and include the full output around the failure rather than a single line.
+      render: shell
       placeholder: |
-        1. `npx eve@latest init my-agent`
-        2. Add a tool at `agent/tools/...`
-        3. Run `eve dev`
-        4. See error
+        $ EVE_LOG_LEVEL=debug eve dev
+        ...
     validations:
       required: true
   - type: textarea
-    id: expected
+    id: context
     attributes:
-      label: Expected behavior
-      description: What you expected to happen instead.
+      label: Additional context
+      description: Anything else that might help — deployment platform, whether it reproduces locally vs. deployed only, the first version where you noticed the regression, etc.
     validations:
-      required: true
+      required: false

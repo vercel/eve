@@ -5,7 +5,7 @@ import {
   defineTool,
   defineDynamic,
   disableTool,
-  ExperimentalWorkflow,
+  experimental_workflow,
 } from "#public/definitions/tool.js";
 import { once } from "#public/tools/approval/approval-helpers.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -40,10 +40,22 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns an enable-workflow entry for the ExperimentalWorkflow marker", () => {
-    const entry = normalizeToolDefinition(ExperimentalWorkflow, FAILURE_MESSAGE);
+  it("returns a configured entry for the experimental Workflow tool", () => {
+    const entry = normalizeToolDefinition(
+      experimental_workflow({ maxSubagents: 6 }),
+      FAILURE_MESSAGE,
+    );
 
-    expect(entry).toEqual({ kind: "enable-workflow" });
+    expect(entry).toEqual({ kind: "workflow-tool", maxSubagents: 6 });
+  });
+
+  it.each([0, 1.5, -1, "6"])("rejects invalid workflow max subagents %j", (maxSubagents) => {
+    expect(() =>
+      normalizeToolDefinition(
+        experimental_workflow({ maxSubagents: maxSubagents as number }),
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("rejects authored tool exports that carry an authored `name` field", () => {
@@ -116,12 +128,16 @@ describe("normalizeToolDefinition", () => {
       execute(input) {
         return input.city;
       },
-      needsApproval(ctx) {
+      approval(ctx) {
         const city: string | undefined = ctx.toolInput?.city;
+        const callerId: string | undefined = ctx.session.auth.current?.principalId;
+        const turnId: string = ctx.session.turn.id;
         // @ts-expect-error approval input is schema-typed, not an open record.
         const missing = ctx.toolInput?.missing;
+        void callerId;
+        void turnId;
         void missing;
-        return city !== undefined;
+        return city !== undefined ? "user-approval" : "not-applicable";
       },
     });
 
@@ -135,10 +151,26 @@ describe("normalizeToolDefinition", () => {
       execute(input) {
         return input.city;
       },
-      needsApproval: once(),
+      approval: once(),
     });
 
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
+  it("rejects the removed needsApproval field", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          description: "Uses the removed approval key.",
+          execute() {
+            return null;
+          },
+          inputSchema: { type: "object" },
+          needsApproval: () => true,
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "needsApproval"');
   });
 
   it("rejects authored tools whose `toModelOutput` is not a function", () => {
@@ -191,6 +223,19 @@ describe("normalizeToolDefinition", () => {
     expect(entry.kind).toBe("dynamic-tool");
     if (entry.kind !== "dynamic-tool") throw new Error("expected dynamic-tool");
     expect(entry.eventNames).toEqual(["session.started"]);
+  });
+
+  it("rejects a defineDynamic tool export carrying a fallback", () => {
+    const dynamicTools = defineDynamic({
+      fallback: "not-supported-here",
+      events: {
+        "session.started": async () => ({}),
+      },
+    });
+
+    expect(() => normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE)).toThrow(
+      '"fallback" is only supported on a dynamic agent model',
+    );
   });
 
   it("handles defineDynamic with multiple events", () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMicrosandboxSandboxBackend } from "#execution/sandbox/bindings/microsandbox.js";
 import {
   createMicrosandboxNetworkPlan,
+  createTransformBrokerEnvironment,
   serializeMicrosandboxNetworkPolicyJson,
 } from "#execution/sandbox/bindings/microsandbox-network.js";
 import {
@@ -161,6 +162,26 @@ describe.skipIf(onWindows)("createMicrosandboxNetworkPlan", () => {
         },
       }),
     ]);
+  });
+
+  it("keeps brokered header values out of the guest environment", () => {
+    const plan = createMicrosandboxNetworkPlan({
+      allow: {
+        "github.com": [
+          {
+            transform: [{ headers: { Authorization: "Basic real-secret" } }],
+          },
+        ],
+      },
+    });
+
+    expect(createTransformBrokerEnvironment(plan)).toEqual({
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+      GIT_CONFIG_VALUE_0: expect.stringMatching(
+        /^Authorization: __EVE_MSB_SECRET_[A-Fa-f0-9]{24}__$/u,
+      ),
+    });
   });
 
   it("serializes policy JSON using microsandbox's native snake-case schema", () => {

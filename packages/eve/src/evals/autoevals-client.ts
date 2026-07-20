@@ -1,12 +1,13 @@
 import {
   generateText,
-  jsonSchema,
   type LanguageModel,
   type ModelMessage,
   type ToolChoice,
   type ToolSet,
 } from "ai";
 import { Factuality } from "autoevals";
+
+import { toInputSchema } from "#shared/tool-schema.js";
 
 /**
  * The OpenAI-shaped client surface autoevals expects. Extracted from the
@@ -130,7 +131,7 @@ function convertTools(tools: readonly ChatTool[] | undefined): ToolSet {
     if (item.type !== "function" || item.function?.name === undefined) continue;
     result[item.function.name] = {
       description: item.function.description,
-      inputSchema: jsonSchema(item.function.parameters ?? {}),
+      inputSchema: toInputSchema(item.function.parameters ?? {}),
     };
   }
   return result;

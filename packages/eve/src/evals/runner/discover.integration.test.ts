@@ -7,6 +7,7 @@ import {
   discoverAndImportEvals,
   discoverEvalConfig,
   discoverEvalFiles,
+  findMisplacedEvalDirs,
   matchesEvalFilter,
 } from "#evals/runner/discover.js";
 
@@ -230,6 +231,57 @@ describe("discoverEvalFiles", () => {
 
     const exact = await discoverAndImportEvals(tempDir, ["runtime/beta"]);
     expect(exact.map((evaluation) => evaluation.id)).toEqual(["runtime/beta"]);
+  });
+});
+
+describe("findMisplacedEvalDirs", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "eve-eval-misplaced-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns an empty array when agent/ does not exist", async () => {
+    expect(await findMisplacedEvalDirs(tempDir)).toEqual([]);
+  });
+
+  it("returns an empty array when agent/ has no eval files", async () => {
+    await mkdir(join(tempDir, "agent", "skills"), { recursive: true });
+    await writeFile(join(tempDir, "agent", "agent.ts"), "export default {}");
+
+    expect(await findMisplacedEvalDirs(tempDir)).toEqual([]);
+  });
+
+  it("detects an evals directory nested directly in agent/", async () => {
+    await mkdir(join(tempDir, "agent", "evals"), { recursive: true });
+    await writeFile(join(tempDir, "agent", "evals", "weather.eval.ts"), "export default {}");
+
+    expect(await findMisplacedEvalDirs(tempDir)).toEqual(["agent/evals"]);
+  });
+
+  it("detects eval files nested deeper in the agent tree", async () => {
+    await mkdir(join(tempDir, "agent", "skills", "weather"), { recursive: true });
+    await writeFile(
+      join(tempDir, "agent", "skills", "weather", "forecast.eval.ts"),
+      "export default {}",
+    );
+    await mkdir(join(tempDir, "agent", "evals"), { recursive: true });
+    await writeFile(join(tempDir, "agent", "evals", "alpha.eval.ts"), "export default {}");
+
+    expect(await findMisplacedEvalDirs(tempDir)).toEqual(["agent/evals", "agent/skills/weather"]);
+  });
+
+  it("does not flag the legitimate top-level evals/ directory", async () => {
+    await mkdir(join(tempDir, "agent"), { recursive: true });
+    await writeFile(join(tempDir, "agent", "agent.ts"), "export default {}");
+    await mkdir(join(tempDir, "evals"), { recursive: true });
+    await writeFile(join(tempDir, "evals", "weather.eval.ts"), "export default {}");
+
+    expect(await findMisplacedEvalDirs(tempDir)).toEqual([]);
   });
 });
 

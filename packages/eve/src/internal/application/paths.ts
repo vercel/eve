@@ -10,6 +10,10 @@ import {
   resolvePackageSourceDirectoryPath,
 } from "#internal/application/package.js";
 
+export const EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV = "EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY";
+export const EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV =
+  "EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY";
+
 export interface ApplicationInfo {
   appRoot: string;
   outputDir: string;
@@ -29,7 +33,12 @@ function getWorkflowBuildCacheKey(appRoot: string): string {
   return createHash("sha256").update(appRoot).digest("hex").slice(0, 12);
 }
 
-function isVercelBuildEnvironment(): boolean {
+/**
+ * Reports whether the current process is running inside a Vercel build or
+ * deployment. Vercel sets `VERCEL` in both build and runtime environments, so
+ * this is the canonical signal for "managed by Vercel" versus self-hosted.
+ */
+export function isVercelBuildEnvironment(): boolean {
   return Boolean(process.env.VERCEL);
 }
 
@@ -47,6 +56,10 @@ export function resolveNitroBuildDirectory(
   }
 
   return join(rootDirectory, surface);
+}
+
+export function resolveApplicationHostArtifactsDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "host");
 }
 
 /**

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildHomePageResponse } from "#internal/nitro/routes/index.js";
 
 function buildResponseForRequest(url: string, headers?: Record<string, string>): Response {
-  return buildHomePageResponse(new Request(url, { headers }));
+  return buildHomePageResponse({ agentName: "support-agent" }, new Request(url, { headers }));
 }
 
 describe("buildHomePageResponse", () => {
@@ -19,6 +19,43 @@ describe("buildHomePageResponse", () => {
     const body = await buildResponseForRequest("https://my-agent.example.com/").text();
 
     expect(body).toContain("https://eve.dev/docs");
+  });
+
+  it("renders the eve wordmark as an inline SVG", async () => {
+    const body = await buildResponseForRequest("https://my-agent.example.com/").text();
+
+    expect(body).toContain('<div class="brand" aria-label="eve">');
+    expect(body).toContain('viewBox="0 0 169 53"');
+    expect(body).not.toContain('<h1 class="mono">eve</h1>');
+  });
+
+  it("renders and escapes the baked-in agent name", async () => {
+    const response = buildHomePageResponse(
+      { agentName: 'support"><script>alert(1)</script>' },
+      new Request("https://my-agent.example.com/"),
+    );
+    const body = await response.text();
+
+    expect(body).toContain("support&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(body).not.toContain("<script>alert(1)</script>");
+  });
+
+  it("renders dollar-containing values literally", async () => {
+    const response = buildHomePageResponse(
+      { agentName: "support-$&-agent" },
+      new Request("https://my-agent.example.com/", {
+        headers: {
+          "x-forwarded-host": "agent-$&.example",
+          "x-forwarded-proto": "https",
+        },
+      }),
+    );
+    const body = await response.text();
+
+    expect(body).toContain("support-$&amp;-agent");
+    expect(body).toContain("eve dev https://agent-$&amp;.example");
+    expect(body).not.toContain("{{AGENT_NAME}}");
+    expect(body).not.toContain("{{DEPLOYMENT_URL}}");
   });
 
   it("echoes the deployment origin into the `eve dev` hint", async () => {
@@ -64,8 +101,8 @@ describe("buildHomePageResponse", () => {
     const body = await buildResponseForRequest("https://my-agent.example.com/").text();
 
     // The deployed URL is reachable by anonymous callers, so the response
-    // must not advertise anything that ties this deployment to its
-    // underlying agent (name, model, instructions text, API surface, etc.).
+    // must not advertise model/provider details, instructions text, or the
+    // authenticated eve API surface.
     expect(body).not.toMatch(/openai|anthropic|gpt|claude/i);
     expect(body).not.toMatch(/instructions/i);
     expect(body).not.toMatch(/\/eve\/v1\//);

@@ -37,6 +37,9 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 `execute` gets a `ctx` carrying the runtime accessors:
 
 - `ctx.session`: session metadata, turn, auth, parent lineage.
+- `ctx.callId`: the id of the current tool call, carried by the call's [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
+- `ctx.toolName`: the final runtime name the model called, including any namespace qualification.
+- `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 - `ctx.getSkill(id)`: read a packaged [skill](/docs/skills)'s metadata and files.
 
@@ -46,7 +49,7 @@ eve never runs authored tools during discovery. The model sees descriptors first
 
 ## Gate a tool on human approval
 
-A tool can require a person to sign off before it runs. Set `needsApproval` with the helpers from `eve/tools/approval`:
+A tool can require a person to sign off before it runs. Set `approval` with the helpers from `eve/tools/approval`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -56,14 +59,14 @@ import { z } from "zod";
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
-  needsApproval: always(), // or once() / never() / a predicate
+  approval: always(), // or once() / never() / a policy
   async execute(input) {
     return refund(input);
   },
 });
 ```
 
-Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent predicates, and how a gated call pauses and resumes durably.
+Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent policies, and how a gated call pauses and resumes durably.
 
 ## Shape what the model sees with `toModelOutput`
 
@@ -76,6 +79,8 @@ toModelOutput(output) {
 ```
 
 `toModelOutput` receives the full, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+
+Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 

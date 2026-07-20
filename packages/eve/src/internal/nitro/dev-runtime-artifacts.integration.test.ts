@@ -12,11 +12,13 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
+import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
+  activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   pruneDevelopmentRuntimeArtifactsSnapshots,
-  publishDevelopmentRuntimeArtifactsSnapshot,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   readDevelopmentRuntimeArtifactsRevision,
   resolveDevelopmentRuntimeArtifactsPointerPath,
@@ -112,7 +114,7 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
     }),
   );
 
-  await publishDevelopmentRuntimeArtifactsSnapshot({
+  await publishDevelopmentGeneration({
     paths: { compileDirectoryPath },
     project: { appRoot },
   } as CompileAgentResult);
@@ -147,12 +149,154 @@ describe("development runtime artifact snapshots", () => {
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: appRoot,
     });
+    expect(
+      JSON.parse(await readFile(join(snapshot.snapshotRoot, "generation.json"), "utf8")),
+    ).toEqual({ runtimeAppRoot: snapshot.runtimeAppRoot });
 
     await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
 
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: snapshot.runtimeAppRoot,
     });
+  });
+
+  it("restores the prior runtime pointer when activation is rolled back", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-activation-rollback-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+    const compileResult = {
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult;
+    const first = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
+    const second = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
+    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot: first });
+
+    const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
+      appRoot,
+      snapshot: second,
+    });
+    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(second.runtimeAppRoot);
+    await activation.rollback();
+
+    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(first.runtimeAppRoot);
+    expect(existsSync(join(second.snapshotRoot, "activated"))).toBe(false);
+  });
+
+  it("stages package-less flat markdown agents with generated runtime package metadata", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-flat-package-less-");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "instructions.md"), "You are a precise assistant.\n");
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot: appRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    await expect(readFile(join(snapshot.runtimeAppRoot, "instructions.md"), "utf8")).resolves.toBe(
+      "You are a precise assistant.\n",
+    );
+    await expect(
+      readFile(join(snapshot.runtimeAppRoot, "package.json"), "utf8").then(
+        (source) => JSON.parse(source) as Record<string, unknown>,
+      ),
+    ).resolves.toEqual({
+      private: true,
+      type: "module",
+    });
+  });
+
+  it("excludes generated output and dependency directories from source snapshots", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-generated-output-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(join(appRoot, "node_modules", "heavy-package"), { recursive: true });
+    await mkdir(join(appRoot, ".next", "cache"), { recursive: true });
+    await mkdir(join(appRoot, ".generated", "compiled"), { recursive: true });
+    await mkdir(join(appRoot, "build"), { recursive: true });
+    await mkdir(join(appRoot, "dist"), { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, ".env"), "SECRET=default\n");
+    await writeFile(join(appRoot, ".env.local"), "SECRET=local\n");
+    await writeFile(join(appRoot, ".env.example"), "SECRET=example\n");
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(join(appRoot, "node_modules", "heavy-package", "index.js"), "export {}\n");
+    await writeFile(join(appRoot, ".next", "cache", "webpack.bin"), "cache\n");
+    await writeFile(join(appRoot, ".generated", "compiled", "bundle.js"), "generated\n");
+    await writeFile(join(appRoot, "build", "server.js"), "build\n");
+    await writeFile(join(appRoot, "dist", "index.js"), "dist\n");
+    await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "agent.ts"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "node_modules"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".env"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".env.local"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".env.example"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".next"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".generated"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "build"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "dist"))).toBe(false);
+  });
+
+  it("stops copying at nested git repository boundaries", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-nested-git-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const worktreeRoot = join(appRoot, ".claude", "worktrees", "review");
+    const nestedRepositoryRoot = join(appRoot, "vendor", "nested-repository");
+    const regularDirectoryRoot = join(appRoot, "vendor", "regular-directory");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(worktreeRoot, { recursive: true });
+    await mkdir(join(nestedRepositoryRoot, ".git"), { recursive: true });
+    await mkdir(regularDirectoryRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(join(appRoot, ".claude", "notes.md"), "keep this file\n");
+    await writeFile(join(worktreeRoot, ".git"), "gitdir: ../../../../.git/worktrees/review\n");
+    await writeFile(join(worktreeRoot, "duplicate.ts"), "export const duplicate = true;\n");
+    await writeFile(join(nestedRepositoryRoot, "duplicate.ts"), "export const duplicate = true;\n");
+    await writeFile(join(regularDirectoryRoot, "source.ts"), "export const copied = true;\n");
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "agent.ts"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".claude", "notes.md"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".claude", "worktrees", "review"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "vendor", "nested-repository"))).toBe(false);
+    expect(
+      existsSync(join(snapshot.runtimeAppRoot, "vendor", "regular-directory", "source.ts")),
+    ).toBe(true);
   });
 
   it("prunes stale snapshots while preserving the active and recent snapshots", async () => {
@@ -185,13 +329,15 @@ describe("development runtime artifact snapshots", () => {
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
       },
     });
+    await utimes(activeSnapshotRoot, oldActiveTime, oldActiveTime);
 
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
+      gracePeriodMs: 5_000,
       now,
-      recentWindowMs: 5_000,
       retainCount: 2,
     });
 
@@ -201,117 +347,175 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
-  it("preserves snapshots referenced by active durable workflow data", async () => {
-    const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-durable-");
+  it("records when the active generation is superseded", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-activated-retention-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const firstSnapshotRoot = join(snapshotsRoot, "first");
+    const nextSnapshotRoot = join(snapshotsRoot, "next");
+
+    for (const snapshotRoot of [firstSnapshotRoot, nextSnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+    }
+    const createSnapshot = (snapshotRoot: string) => ({
+      runtimeAppRoot: join(snapshotRoot, "source"),
+      snapshotRoot,
+      snapshotSourceRoot: join(snapshotRoot, "source"),
+      sourceRoot: appRoot,
+    });
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: createSnapshot(firstSnapshotRoot),
+    });
+    const beforeRetirement = Date.now();
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: createSnapshot(nextSnapshotRoot),
+    });
+    const afterRetirement = Date.now();
+
+    const retirement = JSON.parse(
+      await readFile(join(firstSnapshotRoot, "retired.json"), "utf8"),
+    ) as { retiredAt: number };
+    expect(retirement.retiredAt).toBeGreaterThanOrEqual(beforeRetirement);
+    expect(retirement.retiredAt).toBeLessThanOrEqual(afterRetirement);
+    expect(existsSync(join(nextSnapshotRoot, "retired.json"))).toBe(false);
+  });
+
+  it("retains the active, five newest retired, and recently retired generations", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-retired-pruning-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const activeSnapshotRoot = join(snapshotsRoot, "active");
-    const posixParkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn-posix");
-    const windowsParkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn-windows");
-    const completedTurnSnapshotRoot = join(snapshotsRoot, "completed-turn");
-    const staleSnapshotRoot = join(snapshotsRoot, "stale");
-    const oldSnapshotTime = new Date(1_000);
-    const now = 1_000_000;
+    const withinGraceSnapshotRoot = join(snapshotsRoot, "within-grace");
+    const expiredSnapshotRoots = Array.from({ length: 6 }, (_, index) =>
+      join(snapshotsRoot, `expired-${String(index)}`),
+    );
+    const now = 10_000_000;
+    const gracePeriodMs = 30 * 60 * 1_000;
 
     for (const snapshotRoot of [
       activeSnapshotRoot,
-      posixParkedTurnSnapshotRoot,
-      windowsParkedTurnSnapshotRoot,
-      completedTurnSnapshotRoot,
-      staleSnapshotRoot,
+      withinGraceSnapshotRoot,
+      ...expiredSnapshotRoots,
     ]) {
       await mkdir(snapshotRoot, { recursive: true });
-      await writeFile(join(snapshotRoot, "marker.txt"), snapshotRoot);
-      await utimes(snapshotRoot, oldSnapshotTime, oldSnapshotTime);
+      await writeFile(join(snapshotRoot, "activated"), "");
     }
+    await writeFile(
+      join(withinGraceSnapshotRoot, "retired.json"),
+      `${JSON.stringify({ retiredAt: now - gracePeriodMs + 1 })}\n`,
+    );
+    for (const [index, snapshotRoot] of expiredSnapshotRoots.entries()) {
+      await writeFile(
+        join(snapshotRoot, "retired.json"),
+        `${JSON.stringify({ retiredAt: now - gracePeriodMs - index - 1 })}\n`,
+      );
+    }
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
+      },
+    });
 
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now,
+    });
+
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(withinGraceSnapshotRoot)).toBe(true);
+    for (const snapshotRoot of expiredSnapshotRoots.slice(0, 4)) {
+      expect(existsSync(snapshotRoot)).toBe(true);
+    }
+    for (const snapshotRoot of expiredSnapshotRoots.slice(4)) {
+      expect(existsSync(snapshotRoot)).toBe(false);
+    }
+  });
+
+  it("starts a full grace period for an activated generation from an older format", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-legacy-retirement-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const legacySnapshotRoot = join(snapshotsRoot, "legacy");
+    const now = 1_000_000;
+
+    for (const snapshotRoot of [activeSnapshotRoot, legacySnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "activated"), "");
+    }
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
       snapshot: {
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
       },
     });
-    await mkdir(join(appRoot, ".workflow-data", "default", "runs"), { recursive: true });
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "parked-turn.json"),
-      `${JSON.stringify(
-        {
-          status: "running",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(posixParkedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "parked-turn-windows.json"),
-      `${JSON.stringify(
-        {
-          status: "running",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(windowsParkedTurnSnapshotRoot, "source", "app").replaceAll(
-                    "/",
-                    "\\",
-                  ),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "completed-turn.json"),
-      `${JSON.stringify(
-        {
-          status: "completed",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(completedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
+      gracePeriodMs: 100,
       now,
-      recentWindowMs: 0,
       retainCount: 0,
     });
 
-    await expect(readdir(snapshotsRoot)).resolves.toEqual(
-      expect.arrayContaining(["active", "parked-turn-posix", "parked-turn-windows"]),
+    expect(existsSync(legacySnapshotRoot)).toBe(true);
+    await expect(readFile(join(legacySnapshotRoot, "retired.json"), "utf8")).resolves.toBe(
+      `${JSON.stringify({ retiredAt: now })}\n`,
     );
-    expect(existsSync(completedTurnSnapshotRoot)).toBe(false);
-    expect(existsSync(staleSnapshotRoot)).toBe(false);
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      gracePeriodMs: 100,
+      now: now + 101,
+      retainCount: 0,
+    });
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(legacySnapshotRoot)).toBe(false);
+  });
+
+  it("applies retirement policy without inspecting local Workflow storage", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-world-independent-pruning-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const retiredSnapshotRoot = join(snapshotsRoot, "retired");
+
+    for (const snapshotRoot of [activeSnapshotRoot, retiredSnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "activated"), "");
+    }
+    await writeFile(
+      join(retiredSnapshotRoot, "retired.json"),
+      `${JSON.stringify({ retiredAt: 1 })}\n`,
+    );
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
+      },
+    });
+    const runsDirectory = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "default", "runs");
+    await mkdir(runsDirectory, { recursive: true });
+    await writeFile(
+      join(runsDirectory, "active-turn.json"),
+      `${JSON.stringify({ snapshotRoot: retiredSnapshotRoot, status: "running" })}\n`,
+    );
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      gracePeriodMs: 0,
+      now: 2,
+      retainCount: 0,
+    });
+
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(retiredSnapshotRoot)).toBe(false);
   });
 
   it("removes a partially staged snapshot when staging fails", async () => {
@@ -369,10 +573,11 @@ describe("development runtime artifact snapshots", () => {
       )}\n`,
     );
 
-    const snapshot = await publishDevelopmentRuntimeArtifactsSnapshot({
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
+    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
 
     await writeFile(toolPath, "export const temperature = 73;\n");
 
@@ -395,8 +600,8 @@ describe("development runtime artifact snapshots", () => {
     expect(
       resolveNitroCompiledArtifactsSource({
         appRoot,
-        dev: true,
         devRuntimeArtifactsPointerPath: resolveDevelopmentRuntimeArtifactsPointerPath(appRoot),
+        kind: "development",
         moduleMapLoaderPath: "/package/src/internal/authored-module-map-loader.ts",
       }),
     ).toMatchObject({
@@ -420,7 +625,7 @@ describe("development runtime artifact snapshots", () => {
     await withRuntimeSession(createRuntimeSession("next-imports-regression"), async () => {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
-          createNitroArtifactsConfig({ appRoot, dev: true }),
+          createDevelopmentNitroArtifactsConfig({ appRoot }),
         ),
       });
       const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
@@ -527,6 +732,8 @@ describe("development runtime artifact snapshots", () => {
 
     await mkdir(agentRoot, { recursive: true });
     await mkdir(join(packageRoot, "src"), { recursive: true });
+    await mkdir(join(packageRoot, "build"), { recursive: true });
+    await mkdir(join(packageRoot, "dist"), { recursive: true });
     await mkdir(join(packageRoot, "node_modules"), { recursive: true });
     await mkdir(externalPackageRoot, { recursive: true });
     await mkdir(join(workspaceRoot, "packages", "unused"), { recursive: true });
@@ -562,7 +769,7 @@ describe("development runtime artifact snapshots", () => {
           dependencies: {
             "external-message": "1.0.0",
           },
-          exports: "./src/index.ts",
+          exports: "./dist/index.js",
           name: "@repo/message",
           type: "module",
         },
@@ -589,6 +796,11 @@ describe("development runtime artifact snapshots", () => {
     );
     await writeFile(
       join(packageRoot, "src", "index.ts"),
+      'export const sourceMessage = "snapshotted-source";\n',
+    );
+    await writeFile(join(packageRoot, "build", "artifact.js"), "build output\n");
+    await writeFile(
+      join(packageRoot, "dist", "index.js"),
       'import { externalMessage } from "external-message";\nexport const message = `snapshotted:${externalMessage}`;\n',
     );
     await writeFile(
@@ -612,9 +824,13 @@ describe("development runtime artifact snapshots", () => {
       project: { appRoot },
     } as CompileAgentResult);
 
-    await writeFile(join(packageRoot, "src", "index.ts"), 'export const message = "live";\n');
+    await writeFile(join(packageRoot, "dist", "index.js"), 'export const message = "live";\n');
 
     expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "message"))).toBe(true);
+    expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "message", "build"))).toBe(
+      true,
+    );
+    expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "message", "dist"))).toBe(true);
     expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "unused"))).toBe(false);
     await expect(
       lstat(

@@ -36,7 +36,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
             name: "search",
             input: { query: "test" },
             output: null,
-            isError: false,
+            status: "completed",
             turnIndex: 0,
             sessionId: "session-123",
           },
@@ -52,7 +52,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
       sessionId: "session-123",
     },
     assertions: [
-      { name: "completed", score: 1, severity: "gate", passed: true },
+      { name: "succeeded", score: 1, severity: "gate", passed: true },
       { name: "similarity", score: 1, severity: "soft", threshold: 0.6, passed: true },
     ],
     verdict: "passed",
@@ -94,6 +94,7 @@ describe("Braintrust", () => {
       passed: 0,
       failed: 0,
       scored: 0,
+      skipped: 0,
       errored: 0,
     });
   });

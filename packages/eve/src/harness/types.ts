@@ -1,6 +1,7 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
+import type { AlsContext } from "#context/container.js";
 import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
@@ -9,6 +10,7 @@ import type { InputResponse } from "#runtime/input/types.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 
 /**
@@ -42,7 +44,10 @@ export interface SessionAgent {
    * When omitted, the harness uses the active turn model for compaction.
    */
   readonly compactionModelReference?: RuntimeModelReference;
+  /** `defineDynamic.fallback` for dynamic-model agents; serves whenever no scoped selection is set. */
+  readonly dynamicModelDefaultReference?: RuntimeModelReference;
   readonly modelReference: RuntimeModelReference;
+  readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
   readonly tools: readonly SessionToolDefinition[];
 }
@@ -58,6 +63,7 @@ export interface HarnessSession {
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
   readonly history: ModelMessage[];
+  readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
    * Stable identifier of the top user-facing session in the dispatch
@@ -71,6 +77,36 @@ export interface HarnessSession {
   readonly sessionId: string;
   readonly sandboxState?: SandboxState;
   readonly state?: SessionStateMap;
+  /**
+   * Number of local delegated subagent hops from the root session to this
+   * session. Root sessions are depth 0.
+   */
+  readonly subagentDepth?: number;
+  /**
+   * Effective maximum subagent calls one `Workflow` invocation may dispatch
+   * for this session, configured by `experimental_workflow({ maxSubagents })`.
+   * When omitted, the dispatch step applies the framework default.
+   */
+  readonly workflowMaxSubagents?: number;
+}
+
+/**
+ * Token limits stored on one durable session.
+ */
+export interface SessionLimits {
+  /**
+   * Maximum provider-reported input tokens this durable session may spend
+   * before eve refuses to start another model call. Absent when the session
+   * is uncapped. Root sessions default to 40M unless authored otherwise;
+   * delegated subagent sessions receive the parent's remaining quota at
+   * dispatch time.
+   */
+  readonly maxInputTokensPerSession?: number;
+  /**
+   * Maximum provider-reported output tokens this durable session may spend before
+   * eve refuses to start another model call.
+   */
+  readonly maxOutputTokensPerSession?: number;
 }
 
 /**
@@ -180,6 +216,8 @@ export type HandleEventFn = (
  * Dependencies injected into the tool-loop harness at construction time.
  */
 export interface ToolLoopHarnessConfig {
+  /** Cancellation signal for the active turn. */
+  readonly abortSignal?: AbortSignal;
   /**
    * Session-level capabilities. The harness reads
    * {@link SessionCapabilities.requestInput} when assembling the
@@ -187,21 +225,20 @@ export interface ToolLoopHarnessConfig {
    */
   readonly capabilities?: SessionCapabilities;
   /**
-   * Routes executable tools through the sandboxed code-execution wrapper
-   * instead of exposing them directly to the model. Resolved by the
-   * runtime from the agent's `experimental.codeMode` flag (with the
-   * `EVE_EXPERIMENTAL_CODE_MODE` env backstop). Defaults to `false`.
-   */
-  readonly codeMode?: boolean;
-  /**
-   * Exposes the `Workflow` orchestration tool — a code-mode-style sandbox
+   * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
-   * agents. Resolved by the runtime from the agent's `workflowEnabled` flag
-   * (set when `agent/tools/workflow.ts` re-exports the `Workflow` marker).
-   * Independent of {@link ToolLoopHarnessConfig.codeMode} — both may be on at
-   * once. Defaults to `false`.
+   * agents. Resolved from the `experimental_workflow(...)` definition exported
+   * by `agent/tools/workflow.ts`. Only root sessions ever see the tool.
+   * Defaults to `false`.
    */
   readonly workflow?: boolean;
+  /**
+   * Maximum subagent calls one `Workflow` invocation may dispatch, from the
+   * authored Workflow tool definition. Advertised in the tool description;
+   * the dispatch step enforces it. Defaults to
+   * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
+   */
+  readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
   /**
    * Execution mode for the current harness.
@@ -218,6 +255,12 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
+  readonly dispatchDynamicModelEvent?: (input: {
+    readonly ctx: AlsContext;
+    readonly event: HandleMessageStreamEvent;
+    readonly fallback: RuntimeModelReference;
+    readonly messages: readonly ModelMessage[];
+  }) => Promise<void>;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.

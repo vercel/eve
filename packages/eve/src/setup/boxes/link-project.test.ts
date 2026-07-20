@@ -56,6 +56,24 @@ describe("linkVercelProject box", () => {
     expect(next.project).toEqual({ kind: "linked", projectId: "prj_my_agent" });
   });
 
+  it("passes headless mode into project linking", async () => {
+    const prompter = createPrompter();
+    const deps = fakeDeps();
+    const state = resolvedState();
+    state.vercelProject = { kind: "new", project: "my-agent", team: "team" };
+    const box = linkVercelProject({ prompter, headless: true, deps });
+
+    await runHeadless([box], state, silentSink);
+
+    expect(deps.linkProject).toHaveBeenCalledWith(
+      prompter,
+      "/tmp/project",
+      { kind: "new", project: "my-agent", team: "team" },
+      expect.anything(),
+      { signal: undefined, headless: true },
+    );
+  });
+
   it("does not run when no Vercel project is planned", async () => {
     const deps = fakeDeps();
     const box = linkVercelProject({ prompter: createPrompter(), deps });

@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BootstrapGenerateResult } from "#runtime/agent/bootstrap-model-utils.js";
-import { createMockAuthoredRuntimeModel } from "#runtime/agent/mock-model-adapter.js";
+import {
+  createMockAuthoredRuntimeModel,
+  shouldMockAuthoredRuntimeModels,
+} from "#runtime/agent/mock-model-adapter.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 async function generateWithPrompt(
   prompt: unknown,
@@ -23,13 +30,20 @@ async function generateWithPrompt(
 }
 
 describe("createMockAuthoredRuntimeModel", () => {
-  it("activates a matching skill when the available skill line includes a workspace path", async () => {
+  it("activates for the explicit spawned-server test seam", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "1");
+
+    expect(shouldMockAuthoredRuntimeModels()).toBe(true);
+  });
+
+  it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {
         content: [
           "Available skills\n",
           "Listed skills are available in this run.\n",
-          "- weather-skill: Use the weather tool before answering forecast or temperature questions. (path: /workspace/skills/weather-skill/SKILL.md)",
+          "- weather-skill: Use the weather tool before answering forecast or temperature questions. (path: /home/agent/.agents/skills/weather-skill/SKILL.md)",
         ].join(""),
         role: "system",
       },
@@ -56,7 +70,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         content: [
           "Available skills\n",
           "Listed skills are available in this run.\n",
-          "- research: Research unfamiliar topics before answering with confidence. (path: /workspace/skills/research/SKILL.md)",
+          "- research: Research unfamiliar topics before answering with confidence. (path: /home/agent/.agents/skills/research/SKILL.md)",
         ].join(""),
         role: "system",
       },
@@ -81,7 +95,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         content: [
           "Available skills\n",
           "Listed skills are available in this run.\n",
-          "- release: Use for release checklist requests. (path: /workspace/skills/release/SKILL.md)",
+          "- release: Use for release checklist requests. (path: /home/agent/.agents/skills/release/SKILL.md)",
         ].join(""),
         role: "system",
       },
@@ -89,7 +103,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         content: [
           "Available skills\n",
           "Listed skills are available in this run.\n",
-          "- tenant-weather: Use tenant weather policy before answering forecast questions. (path: /workspace/skills/tenant-weather/SKILL.md)",
+          "- tenant-weather: Use tenant weather policy before answering forecast questions. (path: /home/agent/.agents/skills/tenant-weather/SKILL.md)",
         ].join(""),
         role: "system",
       },
@@ -120,7 +134,7 @@ describe("createMockAuthoredRuntimeModel", () => {
           "",
           "Available skills",
           "Listed skills are available in this run.",
-          "- echo-marker: Use when the user asks for the echo marker. (path: /workspace/skills/echo-marker/SKILL.md)",
+          "- echo-marker: Use when the user asks for the echo marker. (path: /home/agent/.agents/skills/echo-marker/SKILL.md)",
           "",
           "Another section that must not be parsed as skills.",
         ].join("\n"),
@@ -149,7 +163,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         content: [
           "Available skills",
           "Listed skills are available in this run.",
-          "- echo-marker: Use when the user asks for the echo marker. (path: /workspace/skills/echo-marker/SKILL.md)",
+          "- echo-marker: Use when the user asks for the echo marker. (path: /home/agent/.agents/skills/echo-marker/SKILL.md)",
         ].join("\n"),
         role: "system",
       },
@@ -219,42 +233,6 @@ describe("createMockAuthoredRuntimeModel", () => {
       {
         text: 'Bootstrap reply: Call the load_skill tool with skill "echo-marker".',
         type: "text",
-      },
-    ]);
-  });
-
-  it("emits code-mode source for weather tools when code mode is the visible tool", async () => {
-    const result = await generateWithPrompt(
-      [
-        {
-          content: "What is the weather for Lisbon?",
-          role: "user",
-        },
-      ],
-      [
-        {
-          description: [
-            "Run sandboxed JavaScript with these host tools.",
-            "declare const tools: {",
-            "  /** Get the current weather for a city. */",
-            "  get_weather: (input: { city: string }) => Promise<unknown>;",
-            "};",
-          ].join("\n"),
-          name: "code_mode",
-          type: "function",
-        },
-      ],
-    );
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
-    expect(result.content).toEqual([
-      {
-        input: JSON.stringify({
-          js: 'return await tools.get_weather({ city: "Lisbon" });',
-        }),
-        toolCallId: "call_code_mode",
-        toolName: "code_mode",
-        type: "tool-call",
       },
     ]);
   });
@@ -431,6 +409,37 @@ describe("createMockAuthoredRuntimeModel", () => {
         input: JSON.stringify({ city: "Lisbon" }),
         toolCallId: "call_get_weather",
         toolName: "get_weather",
+        type: "tool-call",
+      },
+    ]);
+  });
+
+  it("builds empty input for an explicitly empty object schema", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: {},
+            type: "object",
+          },
+          name: "wait_for_cancel",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({}),
+        toolCallId: "call_wait_for_cancel",
+        toolName: "wait_for_cancel",
         type: "tool-call",
       },
     ]);
@@ -680,6 +689,39 @@ describe("createMockAuthoredRuntimeModel", () => {
         type: "text",
       },
     ]);
+  });
+
+  it("calls an explicit list of authored tools in parallel", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: [
+            "Call tools in parallel: local-sleeper, remote-sleeper",
+            'message: "Use wait-for-cancel."',
+          ].join("\n"),
+          role: "user",
+        },
+      ],
+      ["local-sleeper", "remote-sleeper"].map((name) => ({
+        inputSchema: {
+          properties: { message: { type: "string" } },
+          required: ["message"],
+          type: "object",
+        },
+        name,
+        type: "function",
+      })),
+    );
+
+    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
+    expect(result.content).toEqual(
+      ["local-sleeper", "remote-sleeper"].map((name) => ({
+        input: JSON.stringify({ message: "Use wait-for-cancel." }),
+        toolCallId: `call_${name.replaceAll("-", "_")}`,
+        toolName: name,
+        type: "tool-call",
+      })),
+    );
   });
 
   it("calls final_output with a schema-shaped sample when the tool is offered", async () => {

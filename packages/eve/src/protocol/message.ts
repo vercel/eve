@@ -1,8 +1,15 @@
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { UserContent } from "ai";
+import type { FileUIPart, ProviderMetadata, TextUIPart, UserContent } from "ai";
 
+import {
+  deserializeUrlFilePart,
+  hasInternalRefScheme,
+  isSerializedUrlFilePart,
+} from "#internal/attachments/url-refs.js";
+import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
 export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
@@ -10,7 +17,7 @@ export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "16";
+export const EVE_MESSAGE_STREAM_VERSION = "19";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -26,6 +33,15 @@ export type AssistantStepFinishReason =
   | "other"
   | "stop"
   | "tool-calls";
+
+type ProviderMetadataEntry = NonNullable<ProviderMetadata[string]>;
+type GatewayGenerationId = Extract<ProviderMetadataEntry["generationId"], string>;
+
+export interface StepCompletedProviderMetadata {
+  readonly gateway: {
+    readonly generationId: GatewayGenerationId;
+  };
+}
 
 /**
  * Durable metadata attached to one persisted session stream event.
@@ -85,6 +101,7 @@ export interface RuntimeIdentity {
     readonly gitBranch?: string;
     readonly gitSha?: string;
   };
+  /** Configured model id; dynamic-model agents report `dynamic:<fallback id>`. */
   readonly modelId: string;
 }
 
@@ -147,10 +164,15 @@ export interface TurnStartedStreamEvent {
 
 /**
  * Stream event emitted when the runtime receives one normalized user message.
+ *
+ * `message` is the existing flattened text summary. `parts` carries the
+ * structured projection current emitters provide for clients that render
+ * attachments.
  */
 export interface MessageReceivedStreamEvent {
   data: {
     message: string;
+    parts?: readonly MessageReceivedPart[];
     sequence: number;
     turnId: string;
   };
@@ -158,11 +180,27 @@ export interface MessageReceivedStreamEvent {
 }
 
 /**
- * Stream event emitted when the harness requests one stable runtime action
- * batch.
+ * One structured part of a received user message.
  *
- * `data.actions.length === 1` is the serial case. `data.actions.length > 1`
- * is the parallel case for that assistant batch.
+ * This mirrors the AI SDK UI text/file part surface, narrowed to renderable
+ * metadata only. Raw bytes and framework-internal sandbox paths are never
+ * projected; `url` is optional because it is present only for client-resolvable
+ * `http(s)` and `data:` URLs.
+ */
+export type MessageReceivedPart =
+  | Readonly<Pick<TextUIPart, "text" | "type">>
+  | (Readonly<Pick<FileUIPart, "filename" | "mediaType" | "type">> & {
+      readonly size?: number;
+      readonly url?: FileUIPart["url"];
+    });
+
+/**
+ * Stream event emitted when the model requests one or more actions.
+ *
+ * A `tool-call` is one action kind, alongside `load-skill` and subagent calls.
+ * Calls may arrive incrementally before execution, so consumers must correlate
+ * action lifecycles by call ID rather than assume one event contains every call
+ * from an assistant step.
  */
 export interface ActionsRequestedStreamEvent {
   data: {
@@ -356,10 +394,12 @@ export interface StepStartedStreamEvent {
 export interface StepCompletedStreamEvent {
   data: {
     finishReason: AssistantStepFinishReason;
+    providerMetadata?: StepCompletedProviderMetadata;
     sequence: number;
     stepIndex: number;
     turnId: string;
     usage?: {
+      readonly costUsd?: number;
       readonly inputTokens?: number;
       readonly outputTokens?: number;
       readonly cacheReadTokens?: number;
@@ -410,6 +450,20 @@ export interface TurnFailedStreamEvent {
 }
 
 /**
+ * Stream event emitted when one turn is cancelled before reaching a
+ * terminal outcome. Cancellation is not failure: the turn ends without
+ * `turn.failed`/`session.failed`, is followed by `session.waiting`, and
+ * the session accepts the next message normally.
+ */
+export interface TurnCancelledStreamEvent {
+  data: {
+    sequence: number;
+    turnId: string;
+  };
+  type: "turn.cancelled";
+}
+
+/**
  * Stream event emitted when the workflow decides to compact the current
  * visible session history before the next model fragment runs.
  */
@@ -439,8 +493,8 @@ export interface CompactionCompletedStreamEvent {
 }
 
 /**
- * Stream event emitted when a connection needs user authorization before
- * its tools can be used.
+ * Stream event emitted when a connection or tool needs user authorization
+ * before it can continue.
  */
 export interface AuthorizationRequiredStreamEvent {
   data: {
@@ -459,11 +513,16 @@ export interface AuthorizationRequiredStreamEvent {
  * Outcome of one completed authorization attempt, emitted on
  * {@link AuthorizationCompletedStreamEvent}.
  */
-export type ConnectionAuthorizationOutcome = "authorized" | "declined" | "failed" | "timed-out";
+export type AuthorizationOutcome = "authorized" | "declined" | "failed" | "timed-out";
+
+/**
+ * @deprecated Use {@link AuthorizationOutcome}.
+ */
+export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
 
 /**
  * Stream event emitted once `completeAuthorization` has resolved
- * (successfully or otherwise) for one pending connection. Carries a
+ * (successfully or otherwise) for one pending authorization. Carries a
  * stable `outcome` plus an optional human-readable `reason`.
  *
  * Emitted when the tool completes authorization on resume, before the
@@ -478,7 +537,7 @@ export interface AuthorizationCompletedStreamEvent {
      */
     authorization?: ConnectionAuthorizationChallenge;
     name: string;
-    outcome: ConnectionAuthorizationOutcome;
+    outcome: AuthorizationOutcome;
     reason?: string;
     sequence: number;
     stepIndex: number;
@@ -493,6 +552,8 @@ export interface AuthorizationCompletedStreamEvent {
  */
 export interface SessionWaitingStreamEvent {
   data: {
+    /** Channel-owned resume handle for the next user turn. */
+    continuationToken: string;
     wait: "next-user-message";
   };
   type: "session.waiting";
@@ -546,6 +607,7 @@ export type HandleMessageStreamEvent = (
   | StepCompletedStreamEvent
   | StepFailedStreamEvent
   | StepStartedStreamEvent
+  | TurnCancelledStreamEvent
   | TurnCompletedStreamEvent
   | TurnFailedStreamEvent
   | TurnStartedStreamEvent
@@ -652,6 +714,7 @@ export function createMessageReceivedEvent(input: {
   return {
     data: {
       message: summarizeUserContent(input.message),
+      parts: projectUserContentParts(input.message),
       sequence: input.sequence,
       turnId: input.turnId,
     },
@@ -678,8 +741,175 @@ function summarizeUserContent(message: string | UserContent): string {
   return pieces.join("\n");
 }
 
+const PROJECTED_PART_FALLBACK_MEDIA_TYPE = "application/octet-stream";
+
+function projectUserContentParts(message: string | UserContent): readonly MessageReceivedPart[] {
+  if (typeof message === "string") {
+    return [{ text: message, type: "text" }];
+  }
+
+  const parts: MessageReceivedPart[] = [];
+  for (const part of message) {
+    if (part.type === "text") {
+      parts.push({ text: part.text, type: "text" });
+    } else if (part.type === "file") {
+      parts.push(projectFileLikePart(part.data, part.mediaType, part.filename));
+    } else if (part.type === "image") {
+      parts.push(
+        projectFileLikePart(
+          part.image,
+          part.mediaType ?? PROJECTED_PART_FALLBACK_MEDIA_TYPE,
+          undefined,
+        ),
+      );
+    }
+  }
+  return parts;
+}
+
+function projectFileLikePart(
+  data: unknown,
+  mediaType: string,
+  filename: string | undefined,
+): MessageReceivedPart {
+  if (isSandboxRefUrl(data)) {
+    const ref = decodeSandboxRef(data);
+    return createProjectedFilePart({
+      filename: basenameOf(filename ?? ref.path),
+      mediaType: ref.mediaType,
+      size: ref.size,
+    });
+  }
+
+  const tagged = projectTaggedFileData(data, mediaType, filename);
+  if (tagged !== undefined) {
+    return tagged;
+  }
+
+  const size = byteLengthOf(data);
+  if (size !== undefined) {
+    return createProjectedFilePart({ filename, mediaType, size });
+  }
+
+  return createProjectedFilePart({ filename, mediaType, ...clientUrlFragment(data) });
+}
+
+function projectTaggedFileData(
+  data: unknown,
+  mediaType: string,
+  filename: string | undefined,
+): MessageReceivedPart | undefined {
+  if (!isTaggedFileData(data)) {
+    return undefined;
+  }
+
+  switch (data.type) {
+    case "data": {
+      const size = byteLengthOf(data.data);
+      return size === undefined
+        ? createProjectedFilePart({ filename, mediaType })
+        : createProjectedFilePart({ filename, mediaType, size });
+    }
+    case "reference":
+    case "text":
+      return createProjectedFilePart({ filename, mediaType });
+    case "url":
+      return createProjectedFilePart({ filename, mediaType, ...clientUrlFragment(data.url) });
+  }
+}
+
+function createProjectedFilePart(input: {
+  readonly filename?: string;
+  readonly mediaType: string;
+  readonly size?: number;
+  readonly url?: string;
+}): MessageReceivedPart {
+  const part: {
+    filename?: string;
+    mediaType: string;
+    size?: number;
+    type: "file";
+    url?: string;
+  } = {
+    mediaType: input.mediaType,
+    type: "file",
+  };
+  if (input.filename !== undefined) {
+    part.filename = input.filename;
+  }
+  if (input.size !== undefined) {
+    part.size = input.size;
+  }
+  if (input.url !== undefined) {
+    part.url = input.url;
+  }
+  return part;
+}
+
+function isTaggedFileData(
+  data: unknown,
+): data is
+  | { readonly type: "data"; readonly data: unknown }
+  | { readonly type: "reference"; readonly reference: unknown }
+  | { readonly type: "text"; readonly text: unknown }
+  | { readonly type: "url"; readonly url: unknown } {
+  if (data === null || typeof data !== "object") {
+    return false;
+  }
+  const type = (data as { readonly type?: unknown }).type;
+  return type === "data" || type === "reference" || type === "text" || type === "url";
+}
+
+function byteLengthOf(data: unknown): number | undefined {
+  if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
+    return data.byteLength;
+  }
+  return undefined;
+}
+
+function clientUrlFragment(data: unknown): { readonly url?: string } {
+  if (isSerializedUrlFilePart(data)) {
+    try {
+      const url = deserializeUrlFilePart(data);
+      return isClientResolvableUrl(url) ? { url: url.href } : {};
+    } catch {
+      return {};
+    }
+  }
+
+  if (data instanceof URL) {
+    return isClientResolvableUrl(data) ? { url: data.href } : {};
+  }
+
+  if (typeof data !== "string" || hasInternalRefScheme(data)) {
+    return {};
+  }
+
+  if (data.startsWith("data:")) {
+    return { url: data };
+  }
+
+  try {
+    const url = new URL(data);
+    return isClientResolvableUrl(url) ? { url: url.href } : {};
+  } catch {
+    return {};
+  }
+}
+
+function isClientResolvableUrl(url: URL): boolean {
+  return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:";
+}
+
+function basenameOf(path: string): string {
+  const normalized = path.replaceAll("\\", "/");
+  const segment = normalized.slice(normalized.lastIndexOf("/") + 1);
+  return segment.length > 0 ? segment : path;
+}
+
 /**
- * Creates the `actions.requested` event for one stable execution batch.
+ * Creates the `actions.requested` event for one observed group of model action
+ * requests.
  */
 export function createActionsRequestedEvent(input: {
   readonly actions: readonly RuntimeActionRequest[];
@@ -699,12 +929,12 @@ export function createActionsRequestedEvent(input: {
 }
 
 /**
- * Creates the `authorization.required` event for one connection
- * that needs user authorization before its tools can be used.
+ * Creates the `authorization.required` event for one authorization source
+ * that needs user authorization before it can continue.
  *
  * `authorization` and `webhookUrl` are present together when the runtime
  * has suspended the turn on a framework-owned webhook; both are absent
- * for `getToken`-only connections that authorize out of band.
+ * for `getToken`-only authorization sources that authorize out of band.
  */
 export function createAuthorizationRequiredEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
@@ -736,13 +966,13 @@ export function createAuthorizationRequiredEvent(input: {
 
 /**
  * Creates the `authorization.completed` event emitted once per
- * connection after `completeAuthorization` has resolved or the
+ * authorization source after `completeAuthorization` has resolved or the
  * authorization deadline has expired.
  */
 export function createAuthorizationCompletedEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly name: string;
-  readonly outcome: ConnectionAuthorizationOutcome;
+  readonly outcome: AuthorizationOutcome;
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -980,10 +1210,12 @@ export function createStepStartedEvent(input: {
  */
 export function createStepCompletedEvent(input: {
   readonly finishReason: AssistantStepFinishReason;
+  readonly providerMetadata?: StepCompletedProviderMetadata;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
   readonly usage?: {
+    readonly costUsd?: number;
     readonly inputTokens?: number;
     readonly outputTokens?: number;
     readonly cacheReadTokens?: number;
@@ -999,6 +1231,9 @@ export function createStepCompletedEvent(input: {
 
   if (input.usage !== undefined) {
     data.usage = input.usage;
+  }
+  if (input.providerMetadata !== undefined) {
+    data.providerMetadata = input.providerMetadata;
   }
 
   return {
@@ -1069,6 +1304,20 @@ export function createTurnFailedEvent(input: {
   };
 }
 
+/** Creates the `turn.cancelled` event for one cancelled turn. */
+export function createTurnCancelledEvent(input: {
+  readonly sequence: number;
+  readonly turnId: string;
+}): TurnCancelledStreamEvent {
+  return {
+    data: {
+      sequence: input.sequence,
+      turnId: input.turnId,
+    },
+    type: "turn.cancelled",
+  };
+}
+
 /**
  * Creates the `compaction.requested` event for one runtime compaction pass.
  */
@@ -1115,9 +1364,12 @@ export function createCompactionCompletedEvent(input: {
  * Creates the `session.waiting` event for the only supported between-turn
  * wait.
  */
-export function createSessionWaitingEvent(): SessionWaitingStreamEvent {
+export function createSessionWaitingEvent(
+  namespacedContinuationToken: string,
+): SessionWaitingStreamEvent {
   return {
     data: {
+      continuationToken: toChannelLocalContinuationToken(namespacedContinuationToken),
       wait: "next-user-message",
     },
     type: "session.waiting",

@@ -22,4 +22,14 @@ describe("ClientError", () => {
 
     expect(error.message).toBe("Internal Server Error");
   });
+
+  it("preserves normalized response headers", () => {
+    const source = new Headers({ Location: "https://vercel.com/sso-api?url=https://eve.test" });
+    const error = new ClientError(302, "Redirecting...", source);
+    source.set("location", "https://example.com");
+
+    expect(error.headers).toEqual({
+      location: "https://vercel.com/sso-api?url=https://eve.test",
+    });
+  });
 });

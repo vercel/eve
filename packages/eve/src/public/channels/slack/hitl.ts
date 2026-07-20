@@ -13,6 +13,8 @@
  */
 
 import {
+  truncateCardBodyText,
+  SLACK_SECTION_TEXT_MAX_LENGTH,
   truncateModalTitle,
   truncatePlainText,
   truncateSectionText,
@@ -59,6 +61,14 @@ export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
  */
 const RADIO_SELECT_OPTION_LIMIT = 6;
 const BUTTON_ACTION_ID_RE = /^(?<requestId>.+):button:\d+$/u;
+const TOOL_INPUT_PREFIX = "*Tool input*\n```\n";
+const TOOL_INPUT_CODE_PREFIX = "```\n";
+const TOOL_INPUT_SUFFIX = "\n```";
+const ANSWERED_TEXT_PREFIX = ":white_check_mark: *";
+const ANSWERED_TEXT_SUFFIX = "*";
+
+type InputRequestOption = NonNullable<InputRequest["options"]>[number];
+type CardButtonOption = Pick<InputRequestOption, "id" | "label" | "style">;
 
 /**
  * Subset of one Slack interactivity action the HITL decoder reads.
@@ -123,8 +133,9 @@ export function isHitlAction(actionId: string): boolean {
  *   visible.
  * - `display === "select"` with more options → `static_select`
  *   dropdown so the picker stays scrollable.
- * - Anything else with options → buttons. Best for visually distinct
- *   choices (approve / deny / cancel).
+ * - Anything else with options → Slack `card` blocks with action
+ *   buttons. Best for visually distinct choices (approve / deny /
+ *   cancel).
  * - No options (or `allowFreeform: true`) → a single "Type your answer"
  *   button that opens a Slack modal with a plain_text_input. The modal
  *   submission comes back as a `view_submission` webhook the channel
@@ -137,6 +148,7 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
     text: { text: truncateSectionText(request.prompt), type: "mrkdwn" },
     type: "section",
   };
+  const details = renderInputRequestDetailBlocks(request);
   const actionId = `${HITL_ACTION_PREFIX}${request.requestId}`;
 
   const options = request.options;
@@ -152,22 +164,19 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
             options: options.map(buildOption),
             placeholder: { type: "plain_text", text: "Choose an option" },
           };
-    return [prompt, { type: "actions", elements: [widget] }];
+    return [prompt, ...details, { type: "actions", elements: [widget] }];
   }
 
   if (options && options.length > 0) {
-    return [
-      prompt,
-      {
-        type: "actions",
-        elements: options.map((opt, index) => buildButton(opt, actionId, index)),
-      },
-    ];
+    const card = renderInputRequestCardBlock(request, actionId);
+    const details = renderToolInputContainerBlock(request);
+    return details === undefined ? [card] : [card, details];
   }
 
   if (acceptsFreeform) {
     return [
       prompt,
+      ...details,
       {
         type: "actions",
         elements: [
@@ -184,6 +193,16 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
   }
 
   return [prompt];
+}
+
+/**
+ * Creates the fallback text for one HITL request. Slack clients use this
+ * outside the rich Block Kit surface, so include the same approval details
+ * that appear in the blocks.
+ */
+export function formatInputRequestFallbackText(request: InputRequest): string {
+  const details = formatToolInputDetails(request);
+  return details === undefined ? request.prompt : `${request.prompt}\n${details}`;
 }
 
 /**
@@ -256,15 +275,15 @@ export function freeformRequestIdFromActionId(actionId: string): string | undefi
   return slice.length > 0 ? slice : undefined;
 }
 
-function buildButton(
-  opt: NonNullable<InputRequest["options"]>[number],
+function buildCardButton(
+  opt: CardButtonOption,
   actionId: string,
   index: number,
 ): Record<string, unknown> {
   const button: Record<string, unknown> = {
-    action_id: `${actionId}:button:${index}`,
-    text: { text: truncatePlainText(opt.label), type: "plain_text" },
     type: "button",
+    text: { type: "plain_text", text: truncatePlainText(opt.label), emoji: false },
+    action_id: `${actionId}:button:${index}`,
     value: opt.id,
   };
   if (opt.style === "primary" || opt.style === "danger") {
@@ -273,7 +292,7 @@ function buildButton(
   return button;
 }
 
-function buildOption(opt: NonNullable<InputRequest["options"]>[number]): Record<string, unknown> {
+function buildOption(opt: InputRequestOption): Record<string, unknown> {
   const option: Record<string, unknown> = {
     text: { text: truncatePlainText(opt.label), type: "plain_text" },
     value: opt.id,
@@ -285,28 +304,73 @@ function buildOption(opt: NonNullable<InputRequest["options"]>[number]): Record<
   return option;
 }
 
+function renderInputRequestCardBlock(
+  request: InputRequest,
+  actionId: string,
+): Record<string, unknown> {
+  return {
+    type: "card",
+    body: {
+      type: "mrkdwn",
+      text: truncateCardBodyText(`*${request.prompt}*`),
+      verbatim: false,
+    },
+    actions: cardButtonOptions(request).map((opt, index) => buildCardButton(opt, actionId, index)),
+  };
+}
+
+function cardButtonOptions(request: InputRequest): CardButtonOption[] {
+  const options = request.options ?? [];
+  if (!isApprovalRequest(request)) return options.map(toCardButtonOption);
+
+  const approve = options.find((option) => option.id === "approve");
+  const deny = options.find((option) => option.id === "deny");
+  if (!approve || !deny) return options.map(toCardButtonOption);
+
+  return [
+    { id: deny.id, label: "Deny" },
+    { id: approve.id, label: "Allow", style: "primary" },
+  ];
+}
+
+function toCardButtonOption(option: InputRequestOption): CardButtonOption {
+  const result: CardButtonOption = { id: option.id, label: option.label };
+  if (option.style === "primary" || option.style === "danger") {
+    return { ...result, style: option.style };
+  }
+  return result;
+}
+
 /**
  * Renders the "answered" replacement blocks for a previously-posted
- * HITL card. Preserves the original prompt block (so context stays
- * visible), appends a confirmation line naming the chosen answer, and
- * attributes the click to the user when their id is known.
+ * HITL card. Preserves the original prompt/detail blocks (so context
+ * stays visible), appends a confirmation line naming the chosen answer,
+ * and attributes the click to the user when their id is known.
  *
  * Slack's `chat.update` replaces every block in one shot, so the caller
  * passes the full list to `blocks` and the rendered fallback text to
  * `text`.
  */
 export function buildAnsweredBlocks(input: {
-  readonly promptBlock: unknown;
+  readonly promptBlocks: readonly unknown[];
   readonly answerLabel: string;
   readonly userId?: string;
 }): unknown[] {
   const blocks: unknown[] = [];
-  if (input.promptBlock !== undefined && input.promptBlock !== null) {
-    blocks.push(input.promptBlock);
+  for (const promptBlock of input.promptBlocks) {
+    if (promptBlock !== undefined && promptBlock !== null) {
+      blocks.push(promptBlock);
+    }
   }
+  // Freeform answers echo user-typed text, which can exceed the section
+  // limit on its own; cap the label so `chat.update` cannot fail.
+  const answerLabel = truncateWithEllipsis(
+    input.answerLabel,
+    SLACK_SECTION_TEXT_MAX_LENGTH - ANSWERED_TEXT_PREFIX.length - ANSWERED_TEXT_SUFFIX.length,
+  );
   blocks.push({
     type: "section",
-    text: { type: "mrkdwn", text: `:white_check_mark: *${input.answerLabel}*` },
+    text: { type: "mrkdwn", text: `${ANSWERED_TEXT_PREFIX}${answerLabel}${ANSWERED_TEXT_SUFFIX}` },
   });
   if (input.userId && input.userId.length > 0) {
     blocks.push({
@@ -315,4 +379,63 @@ export function buildAnsweredBlocks(input: {
     });
   }
   return blocks;
+}
+
+function renderInputRequestDetailBlocks(request: InputRequest): unknown[] {
+  const details = formatToolInputDetails(request);
+  return details === undefined
+    ? []
+    : [{ type: "section", text: { type: "mrkdwn", text: details } }];
+}
+
+function renderToolInputContainerBlock(request: InputRequest): Record<string, unknown> | undefined {
+  const details = formatToolInputContainerText(request);
+  if (details === undefined) return undefined;
+
+  return {
+    type: "container",
+    title: { type: "plain_text", text: "Tool input" },
+    is_collapsible: true,
+    default_collapsed: false,
+    child_blocks: [{ type: "section", text: { type: "mrkdwn", text: details } }],
+  };
+}
+
+function formatToolInputContainerText(request: InputRequest): string | undefined {
+  if (!isApprovalRequest(request)) return undefined;
+
+  const json = JSON.stringify(request.action.input, null, 2);
+  if (json === "{}") return undefined;
+
+  const bodyBudget =
+    SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_CODE_PREFIX.length - TOOL_INPUT_SUFFIX.length;
+  const body = truncateWithEllipsis(json, bodyBudget);
+  return `${TOOL_INPUT_CODE_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
+}
+
+function formatToolInputDetails(request: InputRequest): string | undefined {
+  if (!isApprovalRequest(request)) return undefined;
+
+  const json = JSON.stringify(request.action.input, null, 2);
+  if (json === "{}") return undefined;
+
+  const bodyBudget =
+    SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length - TOOL_INPUT_SUFFIX.length;
+  const body = truncateWithEllipsis(json, bodyBudget);
+  return `${TOOL_INPUT_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
+}
+
+function truncateWithEllipsis(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const sliceLength = Math.max(0, maxLength - 3);
+  return `${value.slice(0, sliceLength).trimEnd()}...`;
+}
+
+function isApprovalRequest(request: InputRequest): boolean {
+  return (
+    request.display === "confirmation" &&
+    request.options?.length === 2 &&
+    request.options[0]?.id === "approve" &&
+    request.options[1]?.id === "deny"
+  );
 }

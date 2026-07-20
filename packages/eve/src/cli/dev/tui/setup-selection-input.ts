@@ -25,8 +25,10 @@ export function setupSelectionIntent(key: TerminalKey): SetupSelectionIntent | u
     case "escape":
       return { kind: "cancel" };
     case "up":
+    case "ctrl-p":
       return { kind: "move", direction: "up" };
     case "down":
+    case "ctrl-n":
       return { kind: "move", direction: "down" };
     case "ctrl-r":
       return { kind: "repaint" };

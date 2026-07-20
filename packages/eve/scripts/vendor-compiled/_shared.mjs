@@ -27,6 +27,7 @@
  *   external?: string[] | (source: string) => boolean,
  *   plugins?: Plugin[],
  *   loader?: Record<string, string>,
+ *   platform?: "node" | "neutral",
  *   resolve?: ResolveOptions,
  *   bundling?: "shared" | "standalone",  // default "shared"
  *   chunkGroup?: string,                  // default "node"
@@ -95,14 +96,21 @@ export async function loadDeclaration(relativePath) {
  * `files` can override the default `dist/index.d.ts` copy. Use it for
  * packages whose entrypoint declaration imports sibling declaration files,
  * or for multi-entry packages that need their upstream declaration tree.
+ * `declarationRoot` changes the package-relative source directory when
+ * declarations live outside `dist`.
  *
  * `discoverExtraFiles` is consulted for chunk files the upstream `.d.ts`
  * references by relative path (e.g. chat's `./jsx-runtime-<hash>.d.ts`).
  * Each returned filename is co-copied verbatim into the destination.
  */
-export function createDeclarationCopier({ rewrites = {}, discoverExtraFiles, files } = {}) {
+export function createDeclarationCopier({
+  declarationRoot = "dist",
+  rewrites = {},
+  discoverExtraFiles,
+  files,
+} = {}) {
   return async ({ destinationRoot, packageInfo }) => {
-    const distDir = join(packageInfo.packageRoot, "dist");
+    const distDir = join(packageInfo.packageRoot, declarationRoot);
     const distEntries = await readdir(distDir);
     const declarationFiles =
       typeof files === "function"
@@ -606,9 +614,26 @@ function getModuleEntries(module, packageInfo) {
   ];
 }
 
+function getModulePlatform(module) {
+  return module.platform ?? "node";
+}
+
+function getDefaultResolve(platform) {
+  return platform === "neutral"
+    ? {
+        conditionNames: ["import", "default"],
+        mainFields: ["module", "main"],
+      }
+    : {
+        conditionNames: ["node", "import", "default"],
+        mainFields: ["module", "main"],
+      };
+}
+
 async function bundleStandaloneModule({ destinationRoot, module, packageInfo, packageRoot }) {
   const warningFilter = createVendoredDependencyWarningFilter();
   const entries = getModuleEntries(module, packageInfo);
+  const platform = getModulePlatform(module);
 
   if (entries.length !== 1 || entries[0]?.outputPath !== "index") {
     throw new Error(
@@ -621,12 +646,9 @@ async function bundleStandaloneModule({ destinationRoot, module, packageInfo, pa
     input: entries[0].input,
     external: module.external ?? [],
     moduleTypes: module.loader ?? {},
-    platform: "node",
+    platform,
     plugins: module.plugins ?? [],
-    resolve: module.resolve ?? {
-      conditionNames: ["node", "import", "default"],
-      mainFields: ["module", "main"],
-    },
+    resolve: module.resolve ?? getDefaultResolve(platform),
     treeshake: true,
     output: {
       banner: "/* oxlint-disable */",
@@ -641,7 +663,13 @@ async function bundleStandaloneModule({ destinationRoot, module, packageInfo, pa
   });
 }
 
-async function bundleModuleGroup({ chunkGroup, preparedModules, packageRoot, compiledRoot }) {
+async function bundleModuleGroup({
+  chunkGroup,
+  platform,
+  preparedModules,
+  packageRoot,
+  compiledRoot,
+}) {
   const warningFilter = createVendoredDependencyWarningFilter();
   const entrypoints = Object.fromEntries(
     preparedModules.flatMap(({ module, packageInfo }) =>
@@ -670,12 +698,9 @@ async function bundleModuleGroup({ chunkGroup, preparedModules, packageRoot, com
     input: entrypoints,
     external,
     moduleTypes,
-    platform: "node",
+    platform,
     plugins,
-    resolve: {
-      conditionNames: ["node", "import", "default"],
-      mainFields: ["module", "main"],
-    },
+    resolve: getDefaultResolve(platform),
     treeshake: true,
     output: {
       banner: "/* oxlint-disable */",
@@ -703,14 +728,24 @@ async function bundleModules({ modules, packageRoot, compiledRoot }) {
 
   const standalone = preparedModules.filter(({ module }) => module.bundling === "standalone");
   const shared = preparedModules.filter(({ module }) => module.bundling !== "standalone");
-  const groups = Map.groupBy(shared, ({ module }) => module.chunkGroup ?? "node");
+  const groups = Map.groupBy(
+    shared,
+    ({ module }) => `${module.chunkGroup ?? "node"}\0${getModulePlatform(module)}`,
+  );
 
   await Promise.all(standalone.map((entry) => bundleStandaloneModule({ ...entry, packageRoot })));
 
   await Promise.all(
-    [...groups].map(([chunkGroup, groupModules]) =>
-      bundleModuleGroup({ chunkGroup, preparedModules: groupModules, packageRoot, compiledRoot }),
-    ),
+    [...groups].map(([groupKey, groupModules]) => {
+      const [chunkGroup, platform] = groupKey.split("\0");
+      return bundleModuleGroup({
+        chunkGroup,
+        platform,
+        preparedModules: groupModules,
+        packageRoot,
+        compiledRoot,
+      });
+    }),
   );
 
   // Inline declaration strings go first so copyDeclarations callbacks can

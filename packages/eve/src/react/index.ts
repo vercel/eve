@@ -16,6 +16,9 @@ export {
 } from "#client/reducer.js";
 export {
   defaultMessageReducer,
+  type EveAuthorizationChallenge,
+  type EveAuthorizationOutcome,
+  type EveAuthorizationPart,
   type EveMessageData,
   type EveDynamicToolPart,
   type EveMessageInputRequest,

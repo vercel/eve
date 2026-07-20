@@ -1,5 +1,6 @@
-import { jsonSchema, tool, type ToolSet } from "ai";
+import { tool, type ToolSet } from "ai";
 
+import { createLogger } from "#internal/logging.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { passesToolFilter, resolveHeaders } from "#runtime/connections/mcp-client.js";
 import {
@@ -19,8 +20,16 @@ import {
 } from "#runtime/connections/openapi-schema.js";
 import { applySecurity, resolveSecurity } from "#runtime/connections/openapi-security.js";
 import { extractServerUrl, parseSpecDocument } from "#runtime/connections/openapi-spec.js";
-import type { ConnectionClient, ConnectionToolMetadata } from "#runtime/connections/types.js";
+import type {
+  ConnectionClient,
+  ConnectionToolExecuteOptions,
+  ConnectionToolMetadata,
+} from "#runtime/connections/types.js";
 import { isObject } from "#shared/guards.js";
+import { toInputSchema, type ToolSchema } from "#shared/tool-schema.js";
+import { isLoopbackHostname } from "#shared/network-address.js";
+
+const log = createLogger("runtime.connections.openapi-client");
 
 interface OpenApiToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];
@@ -95,7 +104,11 @@ export class OpenApiConnectionClient implements ConnectionClient {
     return cache.tools;
   }
 
-  async executeTool(toolName: string, args: unknown): Promise<OpenApiToolResult> {
+  async executeTool(
+    toolName: string,
+    args: unknown,
+    options?: ConnectionToolExecuteOptions,
+  ): Promise<OpenApiToolResult> {
     const cache = await this.#ensureTools();
     const operation = cache.operations.get(toolName);
     if (operation === undefined) {
@@ -103,7 +116,9 @@ export class OpenApiConnectionClient implements ConnectionClient {
         `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
       );
     }
-    return this.#request(operation, cache.baseUrl, isObject(args) ? args : {});
+    return this.#request(operation, cache.baseUrl, isObject(args) ? args : {}, {
+      abortSignal: options?.abortSignal,
+    });
   }
 
   async close(): Promise<void> {
@@ -144,6 +159,18 @@ export class OpenApiConnectionClient implements ConnectionClient {
     const tools: ToolSet = {};
 
     for (const operation of selected) {
+      let inputSchema: ToolSchema;
+      try {
+        inputSchema = toInputSchema(operation.inputSchema);
+      } catch (error) {
+        log.warn("omitting OpenAPI operation with an invalid input schema", {
+          connectionName: this.#connection.connectionName,
+          error,
+          toolName: operation.toolName,
+        });
+        continue;
+      }
+
       operationMap.set(operation.toolName, operation);
       metadata.push({
         description: operation.description,
@@ -152,9 +179,11 @@ export class OpenApiConnectionClient implements ConnectionClient {
       });
       tools[operation.toolName] = tool({
         description: operation.description,
-        inputSchema: jsonSchema(operation.inputSchema),
-        execute: async (input: unknown) =>
-          this.#request(operation, baseUrl, isObject(input) ? input : {}),
+        inputSchema,
+        execute: async (input: unknown, toolOptions) =>
+          this.#request(operation, baseUrl, isObject(input) ? input : {}, {
+            abortSignal: toolOptions?.abortSignal,
+          }),
       });
     }
 
@@ -172,16 +201,17 @@ export class OpenApiConnectionClient implements ConnectionClient {
    */
   #resolveBaseUrl(document: Record<string, unknown>): string {
     const explicit = this.#connection.url;
-    if (typeof explicit === "string" && explicit.trim().length > 0) {
-      return explicit;
+    const baseUrl =
+      typeof explicit === "string" && explicit.trim().length > 0
+        ? explicit
+        : extractServerUrl(document, this.#connection.spec);
+    if (baseUrl === undefined) {
+      throw new Error(
+        `OpenAPI connection "${this.#connection.connectionName}" has no base URL: set "baseUrl" or ensure the document declares an absolute "servers" entry or Swagger "host".`,
+      );
     }
-    const fromServers = extractServerUrl(document, this.#connection.spec);
-    if (fromServers !== undefined) {
-      return fromServers;
-    }
-    throw new Error(
-      `OpenAPI connection "${this.#connection.connectionName}" has no base URL: set "baseUrl" or ensure the document declares an absolute "servers" entry or Swagger "host".`,
-    );
+    assertSecureUrl(baseUrl, this.#connection.connectionName, "base");
+    return baseUrl;
   }
 
   async #loadDocument(): Promise<Record<string, unknown>> {
@@ -196,6 +226,8 @@ export class OpenApiConnectionClient implements ConnectionClient {
       return spec;
     }
 
+    assertSecureUrl(spec, this.#connection.connectionName, "spec");
+
     let response: Response;
     try {
       response = await fetch(spec, {
@@ -205,6 +237,9 @@ export class OpenApiConnectionClient implements ConnectionClient {
       throw new Error(
         `OpenAPI connection "${this.#connection.connectionName}" failed to fetch its spec from "${spec}": ${String(error)}`,
       );
+    }
+    if (response.redirected) {
+      assertSecureUrl(response.url, this.#connection.connectionName, "spec");
     }
     if (!response.ok) {
       throw new Error(
@@ -381,6 +416,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
     operation: OpenApiOperation,
     baseUrl: string,
     args: Record<string, unknown>,
+    options?: ConnectionToolExecuteOptions,
   ): Promise<OpenApiToolResult> {
     const headers = await resolveHeaders(this.#connection);
 
@@ -425,6 +461,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
       method: operation.method.toUpperCase(),
       headers,
       body,
+      signal: options?.abortSignal,
     });
 
     return {
@@ -449,6 +486,37 @@ function joinPath(baseUrl: string, path: string): string {
   const trimmedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
   const trimmedPath = path.startsWith("/") ? path : `/${path}`;
   return `${trimmedBase}${trimmedPath}`;
+}
+
+/**
+ * Requires a connection URL to be transport-secure. The spec body configures
+ * tool calls and every operation request carries the connection's resolved
+ * auth, so both are only trusted over `https`. Plain `http` is permitted for
+ * loopback hosts to keep local development ergonomic.
+ *
+ * The spec fetch is checked on the configured URL and again on the final URL
+ * after any redirects. Only those two endpoints are enforced — `fetch` follows
+ * intermediate redirect hops internally, so a chain through a cleartext hop is
+ * not observable here.
+ */
+function assertSecureUrl(rawUrl: string, connectionName: string, kind: string): void {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(
+      `OpenAPI connection "${connectionName}" has an invalid ${kind} URL "${rawUrl}".`,
+    );
+  }
+  if (url.protocol === "https:") {
+    return;
+  }
+  if (url.protocol === "http:" && isLoopbackHostname(url.hostname)) {
+    return;
+  }
+  throw new Error(
+    `OpenAPI connection "${connectionName}" must use https for its ${kind} (got "${url.protocol}//${url.host}").`,
+  );
 }
 
 async function readResponseBody(response: Response): Promise<unknown> {

@@ -17,7 +17,7 @@ import type {
 } from "#public/definitions/sandbox-backend.js";
 import type {
   MicrosandboxBootstrapUseOptions,
-  MicrosandboxCreateOptions,
+  MicrosandboxSandboxCreateOptions,
   MicrosandboxSessionUseOptions,
 } from "#public/sandbox/microsandbox-sandbox.js";
 
@@ -35,7 +35,7 @@ export const MICROSANDBOX_BACKEND_NAME = "microsandbox";
  * under `eve/sandbox`.
  */
 export interface CreateMicrosandboxSandboxBackendInput {
-  readonly createOptions?: MicrosandboxCreateOptions;
+  readonly createOptions?: MicrosandboxSandboxCreateOptions;
 }
 
 /**

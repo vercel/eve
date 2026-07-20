@@ -1,6 +1,11 @@
 import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
+import type {
+  GenericScheduleDefinition,
+  GenericScheduleRunHandler,
+  GenericScheduleDefinitionFields,
+} from "#shared/schedule-definition.js";
 
 export type { InferReceiveTarget, TypedReceiveTarget } from "#channel/receive-target.js";
 
@@ -34,14 +39,7 @@ export interface ScheduleHandlerArgs {
  * schedule's cron fires. It receives {@link ScheduleHandlerArgs} (`receive`,
  * `waitUntil`, `appAuth`) and may return synchronously or as a promise.
  */
-export type ScheduleRunHandler = (args: ScheduleHandlerArgs) => Promise<void> | void;
-
-/** Constraint shape that bounds the authored keys accepted by {@link defineSchedule}. */
-interface ScheduleDefinitionFields {
-  readonly cron: string;
-  readonly markdown?: string;
-  readonly run?: ScheduleRunHandler;
-}
+export type ScheduleRunHandler = GenericScheduleRunHandler<ScheduleHandlerArgs>;
 
 /**
  * Public definition for a schedule authored in TypeScript. Provide a required
@@ -56,17 +54,7 @@ interface ScheduleDefinitionFields {
  * Identity is derived from the file path under `agent/schedules/`; authored
  * definitions do not carry a `name` field.
  */
-export type ScheduleDefinition =
-  | {
-      readonly cron: string;
-      readonly markdown: string;
-      readonly run?: never;
-    }
-  | {
-      readonly cron: string;
-      readonly markdown?: never;
-      readonly run: ScheduleRunHandler;
-    };
+export type ScheduleDefinition = GenericScheduleDefinition<ScheduleHandlerArgs>;
 
 /**
  * Defines a schedule in TypeScript. Export as the default from
@@ -102,7 +90,7 @@ export type ScheduleDefinition =
  * ```
  */
 export function defineSchedule<TSchedule extends ScheduleDefinition>(
-  definition: ExactDefinition<TSchedule, ScheduleDefinitionFields>,
+  definition: ExactDefinition<TSchedule, GenericScheduleDefinitionFields<ScheduleHandlerArgs>>,
 ): TSchedule {
   return definition;
 }

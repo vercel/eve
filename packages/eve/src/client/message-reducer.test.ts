@@ -4,11 +4,16 @@ import { defaultMessageReducer } from "#client/message-reducer.js";
 import {
   createActionResultEvent,
   createActionsRequestedEvent,
+  createAuthorizationCompletedEvent,
+  createAuthorizationRequiredEvent,
   createInputRequestedEvent,
+  createMessageAppendedEvent,
   createMessageCompletedEvent,
+  createReasoningAppendedEvent,
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
+  createTurnCancelledEvent,
 } from "#protocol/message.js";
 
 describe("defaultMessageReducer", () => {
@@ -233,6 +238,120 @@ describe("defaultMessageReducer", () => {
           turnId: "turn_1",
         },
         parts: [],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("projects authorization prompts into assistant message parts", () => {
+    const reducer = defaultMessageReducer();
+    const data = reducer.reduce(
+      reducer.initial(),
+      createAuthorizationRequiredEvent({
+        authorization: {
+          expiresAt: "2026-06-26T12:00:00.000Z",
+          instructions: "Sign in to Notion to continue.",
+          url: "https://connect.example.com/authorize/sca_123",
+          userCode: "ABCD-EFGH",
+        },
+        description: "Authorization required for notion",
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+        webhookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/hook",
+      }),
+    );
+
+    expect(data.messages).toEqual([
+      {
+        id: "turn_1:assistant",
+        metadata: {
+          status: "streaming",
+          turnId: "turn_1",
+        },
+        parts: [
+          { type: "step-start" },
+          {
+            authorization: {
+              expiresAt: "2026-06-26T12:00:00.000Z",
+              instructions: "Sign in to Notion to continue.",
+              url: "https://connect.example.com/authorize/sca_123",
+              userCode: "ABCD-EFGH",
+            },
+            description: "Authorization required for Notion",
+            displayName: "Notion",
+            name: "notion",
+            state: "required",
+            stepIndex: 0,
+            turnId: "turn_1",
+            type: "authorization",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("updates the pending authorization part when authorization completes", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.reduce(
+      reducer.initial(),
+      createAuthorizationRequiredEvent({
+        authorization: {
+          displayName: "Notion",
+          instructions: "Sign in to Notion to continue.",
+          url: "https://connect.example.com/authorize/sca_123",
+        },
+        description: "Sign in to Notion to continue.",
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+        webhookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/hook",
+      }),
+    );
+
+    data = reducer.reduce(
+      data,
+      createAuthorizationCompletedEvent({
+        authorization: {
+          displayName: "Notion",
+          url: "https://connect.example.com/authorize/sca_123",
+        },
+        name: "notion",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+    );
+
+    expect(data.messages).toEqual([
+      {
+        id: "turn_1:assistant",
+        metadata: {
+          status: "streaming",
+          turnId: "turn_1",
+        },
+        parts: [
+          { type: "step-start" },
+          {
+            authorization: {
+              displayName: "Notion",
+              instructions: "Sign in to Notion to continue.",
+              url: "https://connect.example.com/authorize/sca_123",
+            },
+            description: "Sign in to Notion to continue.",
+            displayName: "Notion",
+            name: "notion",
+            outcome: "authorized",
+            state: "completed",
+            stepIndex: 0,
+            turnId: "turn_1",
+            type: "authorization",
+          },
+        ],
         role: "assistant",
       },
     ]);
@@ -530,5 +649,144 @@ describe("defaultMessageReducer", () => {
         role: "assistant",
       },
     ]);
+  });
+
+  it("finalizes partial streamed message and reasoning when the turn is cancelled", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.reduce(
+      reducer.initial(),
+      createReasoningAppendedEvent({
+        reasoningDelta: "Thinking",
+        reasoningSoFar: "Thinking",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageAppendedEvent({
+        messageDelta: "Partial",
+        messageSoFar: "Partial",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(data, createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }));
+
+    expect(data.messages).toEqual([
+      {
+        id: "turn_1:assistant",
+        metadata: {
+          status: "complete",
+          turnId: "turn_1",
+        },
+        parts: [
+          { type: "step-start" },
+          {
+            state: "done",
+            stepIndex: 0,
+            text: "Thinking",
+            type: "reasoning",
+          },
+          {
+            state: "done",
+            stepIndex: 0,
+            text: "Partial",
+            type: "text",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("removes streamed text for a null message completion", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.reduce(
+      reducer.initial(),
+      createMessageCompletedEvent({
+        message: "Earlier step.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageAppendedEvent({
+        messageDelta: "<eve-empty-delivery/>",
+        messageSoFar: "<eve-empty-delivery/>",
+        sequence: 1,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageCompletedEvent({
+        message: null,
+        sequence: 1,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+
+    expect(data.messages[0]?.parts).toEqual([
+      { type: "step-start" },
+      {
+        state: "done",
+        stepIndex: 0,
+        text: "Earlier step.",
+        type: "text",
+      },
+      { type: "step-start" },
+    ]);
+  });
+
+  it("projects structured file parts from message.received onto the user message", () => {
+    const reducer = defaultMessageReducer();
+    const data = reducer.reduce(reducer.initial(), {
+      data: {
+        message: "describe this\n[file: report.pdf (application/pdf)]",
+        parts: [
+          { text: "describe this", type: "text" },
+          {
+            filename: "report.pdf",
+            mediaType: "application/pdf",
+            size: 4,
+            type: "file",
+            url: "https://files.example.com/report.pdf",
+          },
+        ],
+        sequence: 1,
+        turnId: "turn_1",
+      },
+      type: "message.received",
+    });
+
+    const userMessage = data.messages.find((message) => message.role === "user");
+    expect(userMessage?.parts).toEqual([
+      { state: "done", text: "describe this", type: "text" },
+      {
+        filename: "report.pdf",
+        mediaType: "application/pdf",
+        size: 4,
+        type: "file",
+        url: "https://files.example.com/report.pdf",
+      },
+    ]);
+  });
+
+  it("falls back to a single text part when message.received omits parts", () => {
+    const reducer = defaultMessageReducer();
+    const data = reducer.reduce(reducer.initial(), {
+      data: { message: "hello there", sequence: 1, turnId: "turn_1" },
+      type: "message.received",
+    });
+
+    const userMessage = data.messages.find((message) => message.role === "user");
+    expect(userMessage?.parts).toEqual([{ state: "done", text: "hello there", type: "text" }]);
   });
 });

@@ -6,22 +6,15 @@ import {
 } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import type { GatewayCredentialPresence } from "#internal/resolve-model-endpoint-status.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
-import { localDev, routeAuth, vercelOidc } from "#public/channels/auth.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
 
-type AgentInfoRouteMode = "development" | "production";
-
-interface AgentInfoRouteInput extends NitroArtifactsConfig {
-  readonly mode?: AgentInfoRouteMode;
-}
-
-async function createAgentInfoPayload(input: AgentInfoRouteInput) {
+async function createAgentInfoPayload(input: NitroArtifactsConfig) {
   const data = await loadAgentInfoManifestData({
     compiledArtifactsSource: resolveAgentInfoCompiledArtifactsSource(input),
   });
 
   return buildAgentInfoResponseFromManifest(data, {
-    mode: input.mode ?? "development",
+    mode: input.kind,
     gatewayCredentials: await resolveGatewayCredentialPresence(data.manifest.config.model.routing),
   });
 }
@@ -54,18 +47,8 @@ async function resolveGatewayCredentialPresence(
 
 /**
  * Builds the package-owned JSON inspection response for the current agent.
- *
- * The route keeps the same default auth chain as the eve channel:
- * local development requests are accepted by hostname, while deployed
- * Vercel targets require a valid OIDC bearer.
  */
-export async function handleAgentInfoRequest(
-  input: AgentInfoRouteInput,
-  request: Request,
-): Promise<Response> {
-  const authResult = await routeAuth(request, [localDev(), vercelOidc()]);
-  if (authResult instanceof Response) return authResult;
-
+export async function handleAgentInfoRequest(input: NitroArtifactsConfig): Promise<Response> {
   return new Response(JSON.stringify(await createAgentInfoPayload(input)), {
     headers: {
       "cache-control": "no-store",

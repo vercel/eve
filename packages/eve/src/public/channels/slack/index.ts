@@ -40,6 +40,8 @@ export type {
 } from "#public/channels/slack/inbound.js";
 
 export {
+  callSlackApi,
+  resolveSlackBotToken,
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,
@@ -49,6 +51,11 @@ export {
 } from "#public/channels/slack/api.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+
+export {
+  describeActionRequest,
+  describeActionRequests,
+} from "#public/channels/slack/action-status.js";
 
 export {
   loadThreadContextMessages,

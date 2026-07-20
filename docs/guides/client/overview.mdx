@@ -19,7 +19,7 @@ const client = new Client({
 });
 ```
 
-`host` is the origin where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL.
+`host` is the URL where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL. Any query parameters on `host` are included on every request, including session POSTs and event streams. Request-specific parameters, such as a stream cursor, take precedence when names overlap.
 
 ## Check health
 

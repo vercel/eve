@@ -32,7 +32,10 @@ export function advanceSession(input: {
     (input.preserveCompletedSessions === true && boundaryEvent?.type === "session.completed")
   ) {
     return {
-      continuationToken: input.continuationToken ?? input.session.continuationToken,
+      continuationToken:
+        boundaryEvent?.type === "session.waiting"
+          ? boundaryEvent.data.continuationToken
+          : (input.continuationToken ?? input.session.continuationToken),
       sessionId: input.sessionId,
       streamIndex,
     };

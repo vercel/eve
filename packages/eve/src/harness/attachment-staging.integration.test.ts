@@ -611,12 +611,16 @@ describe("hydrateSandboxAttachments (integration)", () => {
     expect(hydrated).toBe(messages);
   });
 
-  it("throws a descriptive error when an inlinable sandbox ref points at a missing file", async () => {
+  it("degrades to a text reference when an inlinable sandbox ref points at a missing file", async () => {
+    // Resuming a durable session whose staging sandbox was torn down
+    // leaves historical attachment refs pointing at bytes that are gone.
+    // Hydration must not fail the whole turn over it — it degrades to a
+    // text part so the run survives (#276).
     const sandbox = mockSandbox({ id: "sbx_missing" });
     const runtime = createTestRuntime();
 
     // Ref pointing at a path that was never written. Use an
-    // inlinable media type so the error path (byte read) fires —
+    // inlinable media type so the byte-read path fires —
     // non-inlinable refs never touch the sandbox.
     const danglingRef = new URL(
       "eve-sandbox:?path=%2Fworkspace%2Fattachments%2Fdeadbeefdeadbeef%2Fghost.png&size=5&type=image%2Fpng",
@@ -624,6 +628,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     const messages = [
       {
         content: [
+          { type: "text", text: "what's in the image?" },
           {
             data: danglingRef,
             filename: "/workspace/attachments/deadbeefdeadbeef/ghost.png",
@@ -635,9 +640,53 @@ describe("hydrateSandboxAttachments (integration)", () => {
       },
     ];
 
-    await expect(
-      runtime.runAsSession({ sandbox }, async () => hydrateSandboxAttachments(messages)),
-    ).rejects.toThrow(/references missing file/);
+    const hydrated = await runtime.runAsSession({ sandbox }, async () =>
+      hydrateSandboxAttachments(messages),
+    );
+
+    const hydratedContent = hydrated[0]?.content as Exclude<UserContent, string>;
+    // The leading text survives and the dangling file ref is replaced by
+    // an unavailability notice — no file part reaches the model.
+    expect(hydratedContent[0]).toEqual({ type: "text", text: "what's in the image?" });
+    expect(hydratedContent[1]).toEqual({
+      text: "FileNotFound: Current snapshot may be newer and does not contain /workspace/attachments/deadbeefdeadbeef/ghost.png.",
+      type: "text",
+    });
+    const fileParts = hydratedContent.filter((p) => (p as FilePart).type === "file");
+    expect(fileParts).toHaveLength(0);
+  });
+
+  it("survives a resume after the staging sandbox was torn down (#276)", async () => {
+    // Stage an image into one sandbox, then hydrate the resulting
+    // ref-only message against a fresh sandbox — the same shape as
+    // resuming a durable session whose ephemeral sandbox is gone. The
+    // bytes are unreachable, but the turn must not fail.
+    const stagingSandbox = mockSandbox({ id: "sbx_resume_stage" });
+    const runtime = createTestRuntime();
+
+    const stagedContent = (await runtime.runAsSession({ sandbox: stagingSandbox }, async () =>
+      stageAttachmentsToSandbox([
+        { type: "text", text: "describe the image" },
+        { data: smallImageBytes, filename: "logo.png", mediaType: "image/png", type: "file" },
+      ] as UserContent),
+    )) as UserContent;
+
+    const refPart = (stagedContent as FilePart[]).find((p) => p.type === "file") as FilePart;
+    const stagedPath = refPart.filename as string;
+
+    const messages = [{ content: stagedContent, role: "user" as const }];
+    const freshSandbox = mockSandbox({ id: "sbx_resume_fresh" });
+    const hydrated = await runtime.runAsSession({ sandbox: freshSandbox }, async () =>
+      hydrateSandboxAttachments(messages),
+    );
+
+    const hydratedContent = hydrated[0]?.content as Exclude<UserContent, string>;
+    expect(hydratedContent[0]).toEqual({ type: "text", text: "describe the image" });
+    expect(hydratedContent[1]).toEqual({
+      text: `FileNotFound: Current snapshot may be newer and does not contain ${stagedPath}.`,
+      type: "text",
+    });
+    expect(hydratedContent.filter((p) => (p as FilePart).type === "file")).toHaveLength(0);
   });
 
   it("does not touch the sandbox when every ref is non-inlinable — text references carry all the info", async () => {

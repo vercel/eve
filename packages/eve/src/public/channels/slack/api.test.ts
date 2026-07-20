@@ -246,7 +246,43 @@ describe("SlackThread.post with files", () => {
     vi.unstubAllGlobals();
   });
 
-  it("{ markdown, files } produces a single Slack message via completeUploadExternal", async () => {
+  it("{ markdown, files } posts markdown before uploading files", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    const posted = await thread.post({
+      markdown: [
+        "**Report attached**",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        "| Net | +488 |",
+      ].join("\n"),
+      files: [{ data: Buffer.from([1, 2]), filename: "report.csv", mimeType: "text/csv" }],
+    });
+
+    expect(posted.id).toBe("1700000001.000001");
+
+    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
+    expect(post).toBeDefined();
+    expect((post!.body as { markdown_text: string; thread_ts: string }).markdown_text).toContain(
+      "| Metric | Value |",
+    );
+    expect((post!.body as { markdown_text: string; thread_ts: string }).thread_ts).toBe("1.0");
+
+    const complete = mock.calls.find(
+      (c) => c.url === "https://slack.com/api/files.completeUploadExternal",
+    )!;
+    expect((complete.body as { initial_comment?: string }).initial_comment).toBeUndefined();
+    expect((complete.body as { channel_id: string; thread_ts: string }).channel_id).toBe("C01");
+    expect((complete.body as { channel_id: string; thread_ts: string }).thread_ts).toBe("1.0");
+  });
+
+  it("{ text, files } keeps a single Slack upload comment", async () => {
     const { thread } = buildSlackBinding({
       botToken: "xoxb-test",
       channelId: "C01",
@@ -255,14 +291,12 @@ describe("SlackThread.post with files", () => {
     });
 
     await thread.post({
-      markdown: "**Report attached**",
+      text: "*Report attached*",
       files: [{ data: Buffer.from([1, 2]), filename: "report.csv", mimeType: "text/csv" }],
     });
 
-    const postMessageCall = mock.calls.find(
-      (c) => c.url === "https://slack.com/api/chat.postMessage",
-    );
-    expect(postMessageCall).toBeUndefined();
+    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
+    expect(post).toBeUndefined();
 
     const complete = mock.calls.find(
       (c) => c.url === "https://slack.com/api/files.completeUploadExternal",
@@ -296,6 +330,65 @@ describe("SlackThread.post with files", () => {
     expect((complete!.body as { initial_comment?: string }).initial_comment).toBeUndefined();
     expect((complete!.body as { channel_id: string; thread_ts: string }).channel_id).toBe("C01");
     expect((complete!.body as { channel_id: string; thread_ts: string }).thread_ts).toBe("1.0");
+  });
+});
+
+describe("Slack outbound text", () => {
+  let mock: ReturnType<typeof buildFetchMock>;
+
+  beforeEach(() => {
+    mock = buildFetchMock();
+    vi.stubGlobal("fetch", mock.fetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves literal at-prefixed tokens in markdown and text posts", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+    const mention = thread.mentionUser("U012ABC456");
+
+    expect(mention).toBe("<@U012ABC456>");
+    await thread.post({ markdown: `bump @scope/package and ping ${mention}` });
+    await thread.post({ text: "email @support or ping <@U012ABC456>" });
+
+    const posts = mock.calls.filter(
+      (call) => call.url === "https://slack.com/api/chat.postMessage",
+    );
+    expect(posts).toHaveLength(2);
+    expect(posts[0]!.body).toMatchObject({
+      markdown_text: "bump @scope/package and ping <@U012ABC456>",
+    });
+    expect(posts[1]!.body).toMatchObject({
+      text: "email @support or ping <@U012ABC456>",
+    });
+  });
+
+  it("preserves literal at-prefixed tokens in file upload comments", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.post({
+      text: "report for @scope/package and <@U012ABC456>",
+      files: [{ data: Buffer.from([1]), filename: "report.csv", mimeType: "text/csv" }],
+    });
+
+    const complete = mock.calls.find(
+      (call) => call.url === "https://slack.com/api/files.completeUploadExternal",
+    );
+    expect(complete?.body).toMatchObject({
+      initial_comment: "report for @scope/package and <@U012ABC456>",
+    });
   });
 });
 
@@ -516,7 +609,7 @@ describe("auto-anchor on first post", () => {
     expect(slack.threadTs).toBe("");
   });
 
-  it("does not anchor on a files-only post", async () => {
+  it("anchors before uploading files for a markdown post", async () => {
     const anchors: string[] = [];
     const { thread, slack } = buildSlackBinding({
       botToken: "xoxb-test",
@@ -530,6 +623,35 @@ describe("auto-anchor on first post", () => {
 
     await thread.post({
       markdown: "**Report attached**",
+      files: [{ data: Buffer.from([1]), filename: "report.csv", mimeType: "text/csv" }],
+    });
+
+    expect(anchors).toEqual(["1700000001.000001"]);
+    expect(slack.threadTs).toBe("1700000001.000001");
+
+    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage")!;
+    expect((post.body as { thread_ts?: string }).thread_ts).toBeUndefined();
+
+    const complete = mock.calls.find(
+      (c) => c.url === "https://slack.com/api/files.completeUploadExternal",
+    )!;
+    expect((complete.body as { thread_ts: string }).thread_ts).toBe("1700000001.000001");
+  });
+
+  it("does not anchor on an upload-only text/file post", async () => {
+    const anchors: string[] = [];
+    const { thread, slack } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "",
+      teamId: undefined,
+      onThreadTsChanged(ts) {
+        anchors.push(ts);
+      },
+    });
+
+    await thread.post({
+      text: "*Report attached*",
       files: [{ data: Buffer.from([1]), filename: "report.csv", mimeType: "text/csv" }],
     });
 
@@ -558,6 +680,25 @@ describe("auto-anchor on first post", () => {
     );
     expect(setStatus).toBeDefined();
     expect((setStatus!.body as { thread_ts: string }).thread_ts).toBe("1700000001.000001");
+  });
+
+  it("sends assistant status as plain text", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.startTyping("**Considering turbo tasks**");
+
+    const setStatus = mock.calls.find(
+      (c) => c.url === "https://slack.com/api/assistant.threads.setStatus",
+    );
+    expect(setStatus?.body).toMatchObject({
+      status: "Considering turbo tasks",
+      loading_messages: ["Considering turbo tasks"],
+    });
   });
 
   it("invokes onThreadTsChanged exactly once even on concurrent first-posts", async () => {

@@ -1,13 +1,13 @@
 ---
 title: "The Harness"
-description: "The out-of-the-box eve agent loop and the built-in tools every agent ships with, plus how to override or disable them."
+description: "How eve manages model context and built-in tools during an agent turn."
 ---
 
-The default harness is what every eve agent ships with. It includes the framework-owned agent loop plus a set of built-in tools the model can call without you writing a line. You extend it with capabilities specific to your agent. The loop itself, how a turn runs and checkpoints and resumes, lives in [Execution model and durability](./execution-model-and-durability).
+The default harness is eve's built-in agent loop. It manages model calls, compaction, and tool execution. You can extend it with capabilities specific to your agent. To see how turns checkpoint and resume, read [Execution model and durability](./execution-model-and-durability).
 
 ## Compaction
 
-The harness keeps a long session from overflowing the model's context window. Once the conversation crosses a fraction of the window (`thresholdPercent`, `0.9` by default), it summarizes the older turns into a compact form and keeps going. The summary uses the active turn model unless you override it. Tune when and how it kicks in under [`compaction`](../agent-config#compaction) in `agent.ts`:
+The harness keeps a long session from overflowing the model's context window. Before comparing the conversation with `thresholdPercent` (`0.9` by default), it adds the estimated fixed envelope of the checkpoint prompt used for compaction. It then summarizes the older turns and keeps going. The prompt asks the compaction model to distinguish completed progress and decisions from remaining work and to retain the constraints, preferences, data, and references needed to continue. When eve compacts again, it passes the previous checkpoint separately and without the transcript's per-message truncation, then replaces it with the updated checkpoint. The summary uses the active turn model unless you override it. Tune when and how it kicks in under [`compaction`](../agent-config#compaction) in `agent.ts`:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
@@ -22,7 +22,9 @@ Compaction also preserves the framework's own tool state automatically. It reset
 
 ## Built-in tools
 
-These ship with every agent, no imports. The harness shows the model the tool descriptors first, then executes only what the model actually calls; discovery never runs them. The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) live in the app runtime and proxy their work into the agent's single [sandbox](../sandbox); the rest run in the app runtime. The "Where it runs" column below names where each tool's effect lands.
+Built-in tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
+
+The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) run in the app and proxy their work into the agent's [sandbox](../sandbox). The table shows where each tool's effect lands.
 
 | Tool                | Does                                                                                                                                                                                                                | Where it runs |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
@@ -35,13 +37,13 @@ These ship with every agent, no imports. The harness shows the model the tool de
 | `web_search`        | Search the web (provider-managed; resolved from the model provider).                                                                                                                                                | Provider      |
 | `todo`              | Maintain a durable per-session todo list.                                                                                                                                                                           | App runtime   |
 | `ask_question`      | Ask the user a clarifying question or a choice mid-turn and park until they answer. No `execute`; the model calls it with `{ prompt, options?, allowFreeform? }`. See [Human-in-the-loop](/docs/human-in-the-loop). | App runtime   |
-| `agent`             | Delegate a subtask to a copy of itself (shares the parent sandbox + tools, fresh history/state).                                                                                                                    | App runtime   |
+| `agent`             | From the root session, delegate a subtask to a fresh copy of the root agent.                                                                                                                                        | App runtime   |
 | `load_skill`        | Pull an on-demand [skill](../skills)'s instructions into the current turn. Present only when the agent declares skills.                                                                                             | App runtime   |
 | `connection_search` | Discover tools across declared [connections](../connections); matched tools become directly callable. Present only when the agent declares connections.                                                             | App runtime   |
 
 Notes:
 
-- **`agent`** runs a copy of the current agent on a focused task. It inherits the same tools, connections, and instructions, but starts with fresh conversation history and fresh [state](../guides/state). The child shares the parent's sandbox filesystem, so anything it writes is visible to the parent. See [Subagents](../subagents).
+- **`agent`** is available only in the root session. Its child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](../guides/state). The child receives neither `agent` nor `Workflow`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
 - **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. To supply your own implementation, override it with `defineTool()`.
@@ -77,6 +79,8 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
+Use `agent/tools/agent.ts` to remove the root-only `agent` delegation tool. The root session then receives no tool for delegating to a fresh copy of itself, and the model never sees that tool.
+
 If the filename matches no known framework tool, resolution fails instead of silently doing nothing, so a typo surfaces at build time rather than removing the wrong tool.
 
 ## When to override, disable, or author a new tool
@@ -89,13 +93,15 @@ Three moves shape the harness. The right one depends on whether the model should
 
 ## The opt-in `Workflow` tool
 
-An experimental `Workflow` tool ships but stays off by default. To turn it on, re-export the opt-in marker from `agent/tools/workflow.ts`:
+An experimental `Workflow` tool ships but stays off by default. To turn it on, export its definition from `agent/tools/workflow.ts`:
 
 ```ts
-export { ExperimentalWorkflow as default } from "eve/tools";
+import { experimental_workflow } from "eve/tools";
+
+export default experimental_workflow({ maxSubagents: 100 });
 ```
 
-With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. See [Dynamic workflows](../guides/dynamic-workflows).
+With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most the configured `maxSubagents` calls (default 100). See [Dynamic workflows](../guides/dynamic-workflows).
 
 ## What to read next
 

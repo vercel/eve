@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandOutput, WHIMSY_POOLS } from "#setup/cli/index.js";
 import { captureVercel, runVercel, type VercelCaptureResult } from "#setup/primitives/index.js";
-import { hasVercelHostFramework } from "#setup/scaffold/index.js";
 
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import type { Prompter, PrompterValue, SingleSelectOptions } from "./prompter.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { readProjectLink } from "./project-resolution.js";
 import {
   assertNewProjectNameAvailable,
   getVercelAuthStatus,
@@ -29,17 +29,17 @@ vi.mock("#setup/primitives/index.js", async (importOriginal) => {
   };
 });
 
-vi.mock("#setup/scaffold/index.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("#setup/scaffold/index.js")>();
+vi.mock("./project-resolution.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./project-resolution.js")>();
   return {
     ...original,
-    hasVercelHostFramework: vi.fn(async () => false),
+    readProjectLink: vi.fn(),
   };
 });
 
-const mockedHasVercelHostFramework = vi.mocked(hasVercelHostFramework);
 const mockedCaptureVercel = vi.mocked(captureVercel);
 const mockedRunVercel = vi.mocked(runVercel);
+const mockedReadProjectLink = vi.mocked(readProjectLink);
 
 /** Wraps stdout as a successful capture result for the mocked `captureVercel`. */
 const captured = (value: unknown): VercelCaptureResult => ({
@@ -68,10 +68,9 @@ function createSpyPrompter(overrides: {
 
 beforeEach(() => {
   mockedCaptureVercel.mockReset();
-  mockedHasVercelHostFramework.mockReset();
-  mockedHasVercelHostFramework.mockResolvedValue(false);
   mockedRunVercel.mockReset();
   mockedRunVercel.mockResolvedValue(true);
+  mockedReadProjectLink.mockReset();
 });
 
 describe("vercelAuthBlockerReason", () => {
@@ -83,8 +82,8 @@ describe("vercelAuthBlockerReason", () => {
       vercelAuthBlockerReason("unavailable"),
     ]).toEqual([
       undefined,
-      "Vercel CLI not found, see /vc",
-      "Log in to Vercel first, see /login",
+      "Vercel CLI not found, see /vc:install",
+      "Log in to Vercel first, see /vc:login",
       "Couldn't reach Vercel, check your connection",
     ]);
   });
@@ -196,7 +195,7 @@ describe("pickProject", () => {
     expect(stop).toHaveBeenCalledTimes(1);
   });
 
-  it("searches the full team scope after a CLI picker search", async () => {
+  it("falls back to one ranked project-search page when no exact project exists", async () => {
     mockedCaptureVercel
       .mockResolvedValueOnce(
         captured({
@@ -205,6 +204,11 @@ describe("pickProject", () => {
             { id: "prj_new", name: "newer" },
           ],
         }),
+      )
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
       )
       .mockResolvedValueOnce(captured({ projects: [{ id: "prj_found", name: "found" }] }));
     const single = vi
@@ -221,9 +225,9 @@ describe("pickProject", () => {
       .mockImplementationOnce((options) => {
         expect(options.search).toBe(true);
         expect(options.options.map((option: { label: string }) => option.label)).toEqual([
+          "found",
           "older",
           "newer",
-          "found",
         ]);
         return "prj_found";
       });
@@ -236,32 +240,95 @@ describe("pickProject", () => {
     });
     expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
       2,
+      ["api", "/v9/projects/found", "--scope", "team-a", "--raw"],
+      { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
+    );
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      3,
       ["project", "ls", "--format", "json", "--scope", "team-a", "--filter", "found"],
       { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
     );
   });
 
-  it("loads full-team results into a repainting picker", async () => {
+  it("loads the next search page when the first ranked page is incomplete", async () => {
     mockedCaptureVercel
       .mockResolvedValueOnce(captured({ projects: [{ id: "prj_recent", name: "recent" }] }))
-      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_found", name: "found" }] }));
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        captured({
+          projects: [{ id: "prj_infix", name: "env" }],
+          pagination: { next: 7 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        captured({
+          projects: [{ id: "prj_prefix", name: "v-api" }],
+          pagination: { next: null },
+        }),
+      );
+    const single = vi
+      .fn()
+      .mockImplementationOnce(() => "\0search-project:v")
+      .mockImplementationOnce((options) => {
+        const more = options.options.find((option: { label: string }) =>
+          option.label.startsWith("Show more matches"),
+        );
+        if (more === undefined) throw new Error("Expected a project-search continuation option.");
+        return more.value;
+      })
+      .mockImplementationOnce((options) => {
+        expect(options.options.map((option: { label: string }) => option.label)).toEqual([
+          "v-api",
+          "env",
+          "recent",
+        ]);
+        return "prj_prefix";
+      });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(pickProject(prompter, "/repo", "team-a")).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_prefix", projectName: "v-api" },
+      team: "team-a",
+    });
+  });
+
+  it("promotes exact project matches in the repainting picker", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_versioned", name: "versioned" }] }))
+      .mockResolvedValueOnce(captured({ id: "prj_v", name: "v" }));
     const single = vi.fn(async (options) => {
-      const loaded = await options.searchAction.load("found");
-      expect(loaded.map((option: { label: string }) => option.label)).toEqual(["recent", "found"]);
-      return "prj_found";
+      const loaded = await options.searchAction.load("v");
+      expect(loaded.map((option: { label: string }) => option.label)).toEqual(["v", "versioned"]);
+      return "prj_v";
     });
     const { prompter } = createFakePrompter({ single });
 
     await expect(pickProject(prompter, "/repo", "team-a")).resolves.toEqual({
       kind: "existing",
-      project: { projectId: "prj_found", projectName: "found" },
+      project: { projectId: "prj_v", projectName: "v" },
       team: "team-a",
     });
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(2);
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      2,
+      ["api", "/v9/projects/v", "--scope", "team-a", "--raw"],
+      { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
+    );
   });
 
-  it("refreshes a recent project when a full-team search returns it", async () => {
+  it("refreshes a recent project when a search result returns it", async () => {
     mockedCaptureVercel
       .mockResolvedValueOnce(captured({ projects: [{ id: "prj_recent", name: "recent" }] }))
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
       .mockResolvedValueOnce(
         captured({
           projects: [
@@ -275,10 +342,10 @@ describe("pickProject", () => {
       .mockImplementationOnce(() => "\0search-project:found")
       .mockImplementationOnce((options) => {
         expect(options.options.map((option: { label: string }) => option.label)).toEqual([
-          "recent-updated",
           "found",
+          "recent-updated",
         ]);
-        expect(options.initialValue).toBe("prj_recent");
+        expect(options.initialValue).toBe("prj_found");
         return "prj_found";
       });
     const { prompter } = createFakePrompter({ single });
@@ -290,9 +357,14 @@ describe("pickProject", () => {
     });
   });
 
-  it("reports an empty full-team search and reopens the picker", async () => {
+  it("reports an empty project search and reopens the picker", async () => {
     mockedCaptureVercel
       .mockResolvedValueOnce(captured({ projects: [{ id: "prj_recent", name: "recent" }] }))
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
       .mockResolvedValueOnce(captured({ projects: [] }));
     const single = vi
       .fn()
@@ -366,7 +438,7 @@ describe("assertNewProjectNameAvailable", () => {
     );
     expect(mockedCaptureVercel).toHaveBeenCalledWith(
       ["api", "/v9/projects/my-agent", "--scope", "team-a", "--raw"],
-      { cwd: "/tmp/eve-agent" },
+      { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
     );
   });
 
@@ -399,6 +471,19 @@ describe("resolveProjectByNameOrId", () => {
 
     await expect(resolveProjectByNameOrId("/tmp/eve-agent", "team-a", "my-agent")).resolves.toEqual(
       { projectId: "prj_existing", projectName: "my-agent" },
+    );
+  });
+
+  it("bounds the direct lookup with the project request deadline", async () => {
+    mockedCaptureVercel.mockResolvedValue(
+      captured({ id: "prj_existing", name: "my-agent", accountId: "team_a" }),
+    );
+
+    await resolveProjectByNameOrId("/tmp/eve-agent", "team-a", "my-agent");
+
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["api", "/v9/projects/my-agent", "--scope", "team-a", "--raw"],
+      { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
     );
   });
 });
@@ -471,9 +556,12 @@ describe("linkProject", () => {
           JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
         ),
       )
-      .mockResolvedValueOnce(
-        captured(JSON.stringify({ id: "prj_new", name: "my-agent", accountId: "team-a" })),
-      );
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
     const { prompter } = createFakePrompter();
 
     await expect(
@@ -484,71 +572,374 @@ describe("linkProject", () => {
         createPromptCommandOutput(prompter.log),
       ),
     ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(2);
     expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
       1,
       ["api", "/v9/projects/my-agent", "--scope", "team-a", "--raw"],
-      { cwd: "/tmp/eve-agent" },
+      { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
     );
     expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
       2,
-      [
-        "api",
-        "/v10/projects",
-        "--scope",
-        "team-a",
-        "--method",
-        "POST",
-        "--raw-field",
-        "name=my-agent",
-        "--raw-field",
-        "framework=eve",
-        "--raw",
-      ],
-      { cwd: "/tmp/eve-agent", onOutput: expect.any(Function) },
+      ["api", "/v9/projects/prj_new", "--scope", "team-a", "--raw"],
+      { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
     );
     expect(mockedRunVercel).toHaveBeenCalledWith(
-      ["link", "--project", "prj_new", "--scope", "team-a", "--yes"],
+      ["link", "--project", "my-agent", "--scope", "team-a", "--yes"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", nonInteractive: true }),
     );
   });
 
-  it("leaves the framework preset unset for host framework projects", async () => {
-    mockedHasVercelHostFramework.mockResolvedValueOnce(true);
+  it("uses the requested project name when Vercel's link metadata omits the name", async () => {
     mockedCaptureVercel
       .mockResolvedValueOnce(
         failedCapture(
           JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
         ),
       )
-      .mockResolvedValueOnce(
-        captured(JSON.stringify({ id: "prj_new", name: "my-web-agent", accountId: "team-a" })),
-      );
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+    });
     const { prompter } = createFakePrompter();
 
     await expect(
       linkProject(
         prompter,
-        "/tmp/eve-web-agent",
-        { kind: "new", project: "my-web-agent", team: "team-a" },
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
         createPromptCommandOutput(prompter.log),
       ),
-    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-web-agent" });
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+  });
+
+  it("keeps a detected host framework when the framework-specific eve import is present", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: "nextjs" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const detectFrameworkIntegrationImport = vi.fn(async () => true);
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { detectFrameworkIntegrationImport },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(detectFrameworkIntegrationImport).toHaveBeenCalledWith("/tmp/eve-agent", "eve/next");
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { framework: "nuxtjs", importSpecifier: "eve/nuxt" },
+    { framework: "sveltekit", importSpecifier: "eve/sveltekit" },
+  ])("keeps a detected $framework project when $importSpecifier is present", async (testCase) => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: testCase.framework }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const detectFrameworkIntegrationImport = vi.fn(async () => true);
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { detectFrameworkIntegrationImport },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(detectFrameworkIntegrationImport).toHaveBeenCalledWith(
+      "/tmp/eve-agent",
+      testCase.importSpecifier,
+    );
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a detected host framework when the user confirms the framework-specific eve import", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: "nextjs" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const single = vi.fn(() => true);
+    const detectFrameworkIntegrationImport = vi.fn(async () => false);
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { detectFrameworkIntegrationImport },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(single).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Vercel detected Next.js. Is this project using eve/next?",
+      }),
+    );
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(2);
+  });
+
+  it("sets the project framework to eve when the user rejects a detected host framework", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: "nextjs" }))
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const detectFrameworkIntegrationImport = vi.fn(async () => false);
+    const { prompter } = createFakePrompter({ single: () => false });
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { detectFrameworkIntegrationImport },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
 
     expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
-      2,
+      3,
       [
         "api",
-        "/v10/projects",
+        "/v9/projects/prj_new",
         "--scope",
         "team-a",
         "--method",
-        "POST",
+        "PATCH",
         "--raw-field",
-        "name=my-web-agent",
+        "framework=eve",
         "--raw",
       ],
-      { cwd: "/tmp/eve-web-agent", onOutput: expect.any(Function) },
+      {
+        cwd: "/tmp/eve-agent",
+        onOutput: expect.any(Function),
+        signal: undefined,
+        timeoutMs: 15_000,
+      },
     );
+  });
+
+  it("sets the project framework to eve when Vercel returns no framework", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: null }))
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const single = vi.fn(() => {
+      throw new Error("Unexpected prompt for missing framework.");
+    });
+    const detectFrameworkIntegrationImport = vi.fn(async () => true);
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { detectFrameworkIntegrationImport },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(single).not.toHaveBeenCalled();
+    expect(detectFrameworkIntegrationImport).not.toHaveBeenCalled();
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      3,
+      [
+        "api",
+        "/v9/projects/prj_new",
+        "--scope",
+        "team-a",
+        "--method",
+        "PATCH",
+        "--raw-field",
+        "framework=eve",
+        "--raw",
+      ],
+      {
+        cwd: "/tmp/eve-agent",
+        onOutput: expect.any(Function),
+        signal: undefined,
+        timeoutMs: 15_000,
+      },
+    );
+  });
+
+  it("sets the project framework to eve in headless mode when a detected host framework is ambiguous", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: "nextjs" }))
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const single = vi.fn(() => {
+      throw new Error("Unexpected prompt in headless framework resolution.");
+    });
+    const detectFrameworkIntegrationImport = vi.fn(async () => false);
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { detectFrameworkIntegrationImport, headless: true },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(single).not.toHaveBeenCalled();
+    expect(detectFrameworkIntegrationImport).toHaveBeenCalledWith("/tmp/eve-agent", "eve/next");
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      3,
+      [
+        "api",
+        "/v9/projects/prj_new",
+        "--scope",
+        "team-a",
+        "--method",
+        "PATCH",
+        "--raw-field",
+        "framework=eve",
+        "--raw",
+      ],
+      {
+        cwd: "/tmp/eve-agent",
+        onOutput: expect.any(Function),
+        signal: undefined,
+        timeoutMs: 15_000,
+      },
+    );
+  });
+
+  it("sets the project framework to eve when the detected framework has no eve integration", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: "hugo" }))
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const single = vi.fn(() => {
+      throw new Error("Unexpected prompt for unsupported framework.");
+    });
+    const detectFrameworkIntegrationImport = vi.fn(async () => true);
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { detectFrameworkIntegrationImport },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(single).not.toHaveBeenCalled();
+    expect(detectFrameworkIntegrationImport).not.toHaveBeenCalled();
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      3,
+      [
+        "api",
+        "/v9/projects/prj_new",
+        "--scope",
+        "team-a",
+        "--method",
+        "PATCH",
+        "--raw-field",
+        "framework=eve",
+        "--raw",
+      ],
+      {
+        cwd: "/tmp/eve-agent",
+        onOutput: expect.any(Function),
+        signal: undefined,
+        timeoutMs: 15_000,
+      },
+    );
+  });
+
+  it("surfaces a missing Vercel link file after new project creation as an incomplete link", async () => {
+    mockedCaptureVercel.mockResolvedValueOnce(
+      failedCapture(JSON.stringify({ error: { code: "not_found", message: "Project not found" } })),
+    );
+    mockedReadProjectLink.mockResolvedValueOnce(undefined);
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+      ),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -619,6 +1010,24 @@ describe("pickTeam selection", () => {
 
     await expect(pickTeam(prompter, "/tmp/parent", undefined)).resolves.toBe("other");
     expect(selectMessages).toEqual(["Select your team"]);
+  });
+
+  it("uses a current-team-aware heading when the caller supplies one", async () => {
+    stubVercel({
+      teams: [
+        { name: "Current", slug: "current", current: true },
+        { name: "Other", slug: "other", current: false },
+      ],
+    });
+    const { prompter, selectMessages } = answeringPrompter({ selects: ["other"] });
+
+    await expect(
+      pickTeam(prompter, "/tmp/parent", undefined, {
+        selectMessage: (currentTeam) => `Host is unavailable from ${currentTeam}.`,
+      }),
+    ).resolves.toBe("other");
+
+    expect(selectMessages).toEqual(["Host is unavailable from Current."]);
   });
 
   it("uses the current scope without prompting when only one team exists", async () => {

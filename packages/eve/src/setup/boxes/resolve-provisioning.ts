@@ -77,6 +77,7 @@ export interface ResolveProvisioningOptions {
    * team selection to the existing-project picker.
    */
   projectSelection?: "create-or-link" | "existing-only";
+  teamSelectMessage?: (currentTeam: string) => string;
   deps?: ResolveProvisioningDeps;
 }
 
@@ -292,12 +293,13 @@ export function resolveProvisioning(
 
     if (deployVercel) {
       await deps.requireAuth(parent(), prompter, { signal });
-      const team = await deps.pickTeam(prompter, parent(), undefined, { signal });
+      const teamOptions = { signal, selectMessage: options.teamSelectMessage };
+      const team = await deps.pickTeam(prompter, parent(), undefined, teamOptions);
       const projectOptions = [
         {
           value: "new" as const,
           label: "Create a new project",
-          hint: `Named ${agentName}`,
+          hint: `Name: ${agentName}`,
         },
         { value: "link" as const, label: "Link an existing project" },
       ];
@@ -310,7 +312,7 @@ export function resolveProvisioning(
               editable: {
                 value: "new",
                 defaultValue: agentName,
-                formatHint: (value) => `Named ${value}`,
+                formatHint: (value) => `Name: ${value}`,
                 validate: (value) =>
                   value.trim().length === 0 ? "Project name cannot be empty." : undefined,
               },
@@ -329,7 +331,7 @@ export function resolveProvisioning(
                     id: "new",
                     value: "new",
                     label: "Create a new project",
-                    hint: `Named ${agentName}`,
+                    hint: `Name: ${agentName}`,
                   },
                   { id: "link", value: "link", label: "Link an existing project" },
                 ],

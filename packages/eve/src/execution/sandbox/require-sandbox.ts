@@ -1,6 +1,7 @@
 import { loadContext } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import type { SandboxSession } from "#public/definitions/sandbox.js";
+import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.js";
 
 /**
  * Resolves the active sandbox session from the runtime context.
@@ -9,8 +10,10 @@ import type { SandboxSession } from "#public/definitions/sandbox.js";
  * `read_file`, `write_file`, `glob`, `grep`). Centralizes the context
  * lookup, null checks, and error messages so each executor does not
  * duplicate them.
+ *
+ * Binds the returned session to `abortSignal` when provided.
  */
-export async function requireSandboxSession(): Promise<SandboxSession> {
+export async function requireSandboxSession(abortSignal?: AbortSignal): Promise<SandboxSession> {
   const sandboxAccess = loadContext().get(SandboxKey);
 
   if (sandboxAccess === undefined) {
@@ -26,7 +29,7 @@ export async function requireSandboxSession(): Promise<SandboxSession> {
     throw new Error("The sandbox is not available in the current runtime context.");
   }
 
-  return sandbox;
+  return abortSignal === undefined ? sandbox : bindSandboxAbortSignal(sandbox, abortSignal);
 }
 
 /**

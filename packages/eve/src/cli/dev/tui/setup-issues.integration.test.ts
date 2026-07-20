@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client, type AgentInfoResult } from "#client/index.js";
 
 import { EveTUIRunner, type AgentTUIRenderer } from "./runner.js";
-import { automaticSetupCommand, detectSetupIssues } from "./setup-issues.js";
+import { detectSetupIssues } from "./setup-issues.js";
 import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
 
 afterEach(() => {
@@ -76,7 +76,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     ]);
   });
 
-  it("authorizes model setup when the runtime confirms a linked project is disconnected", async () => {
+  it("diagnoses a linked project with disconnected model access", async () => {
     const appRoot = await linkedAppRoot();
     const issues = await detectSetupIssues({
       appRoot,
@@ -86,21 +86,17 @@ describe("BOOT_DETECTIONS against a real directory", () => {
 
     expect(issues).toEqual([
       {
-        kind: "model-provider-unconfigured",
+        kind: "attention",
         label: "AI Gateway credentials missing",
         command: "/model",
       },
     ]);
-    expect(automaticSetupCommand(issues)).toEqual({
-      prompt: "/model",
-      initialModelStep: "provider",
-    });
   });
 
-  it("opens model setup from the default detection before the first prompt", async () => {
+  it("opens model setup from the prefilled onboarding prompt when inspection is unavailable", async () => {
     const appRoot = await linkedAppRoot();
     const client = new Client({ host: "http://localhost:3000" });
-    vi.spyOn(client, "info").mockResolvedValue(DISCONNECTED_GATEWAY_INFO);
+    vi.spyOn(client, "info").mockRejectedValue(new Error("inspection unavailable"));
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => Response.json({ revision: "snapshot-a" })),
@@ -128,6 +124,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       renderer,
       serverUrl: "http://localhost:3000",
       session: client.session(),
+      initialInput: "/model",
     });
 
     await runner.run();

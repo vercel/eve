@@ -1,5 +1,5 @@
 import { stripLogicalPathExtension } from "../discover/filesystem.js";
-import type { ModuleSourceRef } from "../shared/source-ref.js";
+import type { HookSourceRef } from "#discover/manifest.js";
 import type { CompiledHookDefinition } from "./manifest.js";
 
 /**
@@ -11,7 +11,7 @@ import type { CompiledHookDefinition } from "./manifest.js";
  * path-relative slug used for diagnostics and ordering. Per-handler
  * validation lives in the runtime resolver.
  */
-export function compileHookEntry(source: ModuleSourceRef): CompiledHookDefinition {
+export function compileHookEntry(source: HookSourceRef): CompiledHookDefinition {
   return {
     exportName: source.exportName,
     logicalPath: source.logicalPath,

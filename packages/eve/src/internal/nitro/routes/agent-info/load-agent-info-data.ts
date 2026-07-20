@@ -1,11 +1,9 @@
 import type { CompiledAgentManifest, CompiledSubagentNode } from "#compiler/manifest.js";
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import {
-  createBundledRuntimeCompiledArtifactsSource,
-  createDiskRuntimeCompiledArtifactsSource,
-  type RuntimeCompiledArtifactsSource,
-} from "#runtime/compiled-artifacts-source.js";
-import { readDevelopmentRuntimeArtifactsSnapshotRoot } from "#internal/nitro/dev-runtime-artifacts.js";
-import { readBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
+  type NitroArtifactsConfig,
+  resolveNitroCompiledArtifactsSource,
+} from "#internal/nitro/routes/runtime-artifacts.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { loadCompiledModuleMap } from "#runtime/loaders/module-map.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
@@ -13,9 +11,9 @@ import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type {
   ResolvedAgent,
   ResolvedSandboxDefinition,
-  ResolvedSchedule,
+  ResolvedScheduleDefinition,
   ResolvedSkillDefinition,
-  ResolvedInstructions,
+  ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
 
 /**
@@ -25,12 +23,12 @@ import type {
 export interface AgentInfoData {
   readonly agent: ResolvedAgent;
   readonly manifest: CompiledAgentManifest;
-  readonly schedules: readonly ResolvedSchedule[];
+  readonly schedules: readonly ResolvedScheduleDefinition[];
 }
 
 export interface AgentInfoManifestData {
   readonly manifest: CompiledAgentManifest;
-  readonly schedules: readonly ResolvedSchedule[];
+  readonly schedules: readonly ResolvedScheduleDefinition[];
 }
 
 /**
@@ -67,28 +65,9 @@ export async function loadAgentInfoManifestData(input: {
  * `GET /eve/v1/info` handler.
  */
 export function resolveAgentInfoCompiledArtifactsSource(
-  input: {
-    readonly appRoot?: string;
-    readonly dev?: boolean;
-    readonly devRuntimeArtifactsPointerPath?: string;
-  } = {},
+  input: NitroArtifactsConfig,
 ): RuntimeCompiledArtifactsSource {
-  if (input.dev === true && input.appRoot !== undefined) {
-    return createDiskRuntimeCompiledArtifactsSource(
-      readDevelopmentRuntimeArtifactsSnapshotRoot(input.devRuntimeArtifactsPointerPath) ??
-        input.appRoot,
-    );
-  }
-
-  if (readBundledCompiledArtifacts() !== null) {
-    return createBundledRuntimeCompiledArtifactsSource();
-  }
-
-  if (input.appRoot !== undefined) {
-    return createDiskRuntimeCompiledArtifactsSource(input.appRoot);
-  }
-
-  throw new Error("eve agent info runtime data requires bundled artifacts or an app root.");
+  return resolveNitroCompiledArtifactsSource(input);
 }
 
 async function loadAgentInfoDataFromArtifacts(
@@ -120,7 +99,7 @@ export type {
   CompiledAgentManifest,
   CompiledSubagentNode,
   ResolvedSandboxDefinition,
-  ResolvedSchedule,
+  ResolvedScheduleDefinition,
   ResolvedSkillDefinition,
-  ResolvedInstructions,
+  ResolvedInstructionsDefinition,
 };

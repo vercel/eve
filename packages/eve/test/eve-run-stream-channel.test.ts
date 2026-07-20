@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { HandleMessageStreamEvent } from "../src/protocol/message.js";
 import type { RouteHandlerArgs, GetSessionFn } from "../src/channel/routes.js";
 import type { Session } from "../src/channel/session.js";
+import { EVE_MESSAGE_STREAM_ROUTE_PATTERN } from "../src/protocol/routes.js";
 import { none } from "../src/public/channels/auth.js";
 import { eveChannel } from "../src/public/channels/eve.js";
 
@@ -19,8 +20,10 @@ import { eveChannel } from "../src/public/channels/eve.js";
 
 function createGetHandler() {
   const channel = eveChannel({ auth: none() });
-  const getRoute = channel.routes.find((r) => r.method === "GET");
-  if (!getRoute) throw new Error("No GET route found");
+  const getRoute = channel.routes.find(
+    (r) => r.method === "GET" && r.path === EVE_MESSAGE_STREAM_ROUTE_PATTERN,
+  );
+  if (!getRoute) throw new Error("No stream GET route found");
   return getRoute;
 }
 
@@ -68,7 +71,7 @@ describe("eveChannel GET stream", () => {
     expect(getSession).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects malformed startIndex values with 400", async () => {
+  it("accepts negative tail-relative startIndex values", async () => {
     const getRoute = createGetHandler();
     const getSession = createMockGetSession(createEvents([]));
 
@@ -79,9 +82,8 @@ describe("eveChannel GET stream", () => {
       createArgs({ getSession, params: { sessionId: "session_xyz" } }),
     );
 
-    expect(response.status).toBe(400);
-    expect(getSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toMatchObject({ ok: false });
+    expect(response.status).toBe(200);
+    expect(getSession).toHaveBeenCalledTimes(1);
   });
 
   it("rejects non-integer startIndex values with 400", async () => {
@@ -127,7 +129,7 @@ describe("eveChannel GET stream", () => {
       },
       {
         type: "session.waiting",
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "eve:test", wait: "next-user-message" },
       },
     ];
     const getSession = createMockGetSession(createEvents(events));
@@ -168,6 +170,9 @@ function createMockGetSession(events: ReadableStream<HandleMessageStreamEvent>) 
   return vi.fn<GetSessionFn>().mockReturnValue({
     id: "session_xyz",
     continuationToken: "",
+    async cancel() {
+      return { status: "no_active_turn" };
+    },
     async getEventStream() {
       return events;
     },
@@ -180,6 +185,7 @@ function createArgs(input: {
 }): RouteHandlerArgs {
   return {
     send: vi.fn(),
+    cancel: vi.fn(),
     getSession: input.getSession,
     receive: vi.fn() as any,
     params: input.params,

@@ -75,9 +75,9 @@ describe("runCli dev URL support", () => {
         }),
       }),
     );
-    expect(logger.log.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
-      "connecting to https://example.com/",
-    );
+    const devOutput = logger.log.mock.calls.map(([message]) => String(message)).join("\n");
+    expect(devOutput).toContain("↗ remote mode targeting");
+    expect(devOutput).toContain("example.com");
   });
 
   it("rejects local server flags when using --url", async () => {

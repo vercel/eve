@@ -1,3 +1,5 @@
+import { z } from "#compiled/zod/index.js";
+
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
@@ -16,7 +18,11 @@ import type { JsonValue } from "#public/types/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
-import { stampChallengeDisplayName } from "#runtime/connections/scoped-authorization.js";
+import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
+import {
+  resolveAuthorizationCallbackUrl,
+  stampChallengeDisplayName,
+} from "#runtime/connections/scoped-authorization.js";
 import {
   type ConnectionRegistry,
   type ConnectionToolMetadata,
@@ -28,36 +34,41 @@ import { createLogger } from "#internal/logging.js";
 import type { DynamicToolEvents, DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { ModelMessage } from "ai";
 
-import { ConnectionRegistryKey } from "#context/providers/connection.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
 
-const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    connection: { type: "string" },
-    description: { type: "string" },
-    error: { type: "string" },
-    inputSchema: { type: "object" },
-    needsAuthorization: { type: "boolean" },
-    outputSchema: { type: "object" },
-    qualifiedName: { type: "string" },
-    tool: { type: "string" },
-  },
-  required: ["connection", "description"],
-  type: "object",
-};
+const CONNECTION_SEARCH_INPUT_SCHEMA = z.strictObject({
+  connection: z
+    .string()
+    .describe("Optional: limit search to a specific connection name.")
+    .optional(),
+  keywords: z
+    .string()
+    .describe(
+      "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
+    ),
+  limit: z.number().describe("Max results to return. Default 10.").optional(),
+});
 
-const CONNECTION_SEARCH_OUTPUT_SCHEMA: JsonObject = {
-  items: CONNECTION_SEARCH_RESULT_ITEM_SCHEMA,
-  type: "array",
-};
+const connectionSchema = z.looseObject({});
+const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA = z.strictObject({
+  connection: z.string(),
+  description: z.string(),
+  error: z.string().optional(),
+  inputSchema: connectionSchema.optional(),
+  needsAuthorization: z.boolean().optional(),
+  outputSchema: connectionSchema.optional(),
+  qualifiedName: z.string().optional(),
+  tool: z.string().optional(),
+});
+
+const CONNECTION_SEARCH_OUTPUT_SCHEMA = z.array(CONNECTION_SEARCH_RESULT_ITEM_SCHEMA);
 
 /**
  * Durable context key for connection search results. Written by
- * `executeConnectionSearch` so the resolver can find discovered tools
- * even in code-mode (where tool results are wrapped inside the
- * `code_mode` tool and not directly visible in messages).
+ * `executeConnectionSearch` so the resolver can find discovered tools without
+ * relying on model-facing tool result history.
  */
 const ConnectionSearchResultsKey = new ContextKey<readonly ConnectionSearchResultItem[]>(
   "eve.connectionSearchResults",
@@ -115,14 +126,15 @@ function scoreMatch(queryTokens: string[], tool: ConnectionToolMetadata): number
   return score;
 }
 
-function resolveInteractiveAuth(
+async function resolveInteractiveAuth(
   registry: ConnectionRegistry,
   connectionName: string,
-): InteractiveAuthorizationDefinition | undefined {
+): Promise<InteractiveAuthorizationDefinition | undefined> {
   const conn = registry.getConnections().find((c) => c.connectionName === connectionName);
-  if (!conn?.authorization) return undefined;
-  if (!supportsInteractiveAuthorization(conn.authorization)) return undefined;
-  return conn.authorization as unknown as InteractiveAuthorizationDefinition;
+  if (conn === undefined) return undefined;
+  const authorization = await resolveConnectionAuthorization(conn);
+  if (!supportsInteractiveAuthorization(authorization)) return undefined;
+  return authorization as InteractiveAuthorizationDefinition;
 }
 
 /**
@@ -140,7 +152,7 @@ async function completePendingAuthorizations(registry: ConnectionRegistry): Prom
   for (const conn of registry.getConnections()) {
     const result = getAuthorizationResult(conn.connectionName);
     if (!result) continue;
-    const auth = resolveInteractiveAuth(registry, conn.connectionName);
+    const auth = await resolveInteractiveAuth(registry, conn.connectionName);
     if (!auth) continue;
     const principal = resolveConnectionPrincipal(conn.connectionName, auth);
     const token = await (
@@ -204,21 +216,25 @@ async function executeConnectionSearch(
           continue;
         }
 
-        const auth = resolveInteractiveAuth(registry, conn.connectionName);
+        const auth = await resolveInteractiveAuth(registry, conn.connectionName);
         if (auth) {
           const hookUrl = getHookUrl(conn.connectionName);
           if (hookUrl) {
             const principal = resolveConnectionPrincipal(conn.connectionName, auth);
+            const callbackUrl = resolveAuthorizationCallbackUrl({
+              authorization: auth,
+              callbackUrl: hookUrl,
+            });
             try {
               const { challenge, resume } = await auth.startAuthorization({
-                callbackUrl: hookUrl,
+                callbackUrl,
                 connection: { url: conn.url ?? "" },
                 principal,
               });
               authChallenges.push({
                 name: conn.connectionName,
                 challenge: stampChallengeDisplayName(challenge, auth),
-                hookUrl,
+                hookUrl: callbackUrl,
                 resume,
               });
             } catch (startErr) {
@@ -387,26 +403,7 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           "Discovered tools become directly callable by their qualified name " +
           "(e.g. `linear__list_issues`) in your next response. " +
           `Available connections: ${connectionNames.join(", ")}.`,
-        inputSchema: {
-          type: "object" as const,
-          additionalProperties: false,
-          properties: {
-            keywords: {
-              description:
-                "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
-              type: "string",
-            },
-            connection: {
-              description: "Optional: limit search to a specific connection name.",
-              type: "string",
-            },
-            limit: {
-              description: "Max results to return. Default 10.",
-              type: "number",
-            },
-          },
-          required: ["keywords"],
-        },
+        inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
         async execute(input: ConnectionSearchInput) {
           return executeConnectionSearch(input);
         },
@@ -423,15 +420,14 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           inputSchema: (result.inputSchema ?? {
             type: "object",
           }) as JsonObject,
-          needsApproval: approval,
+          approval,
           outputSchema: result.outputSchema as JsonObject | undefined,
-          async execute(input: Record<string, unknown>) {
+          async execute(input: Record<string, unknown>, executeCtx) {
             const reg = loadContext().get(ConnectionRegistryKey)!;
             const conn = reg.getConnections().find((c) => c.connectionName === connectionName);
-            const interactiveAuth: InteractiveAuthorizationDefinition<JsonValue> | undefined =
-              conn?.authorization && supportsInteractiveAuthorization(conn.authorization)
-                ? (conn.authorization as InteractiveAuthorizationDefinition<JsonValue>)
-                : undefined;
+            const interactiveAuth = (await resolveInteractiveAuth(reg, connectionName)) as
+              | InteractiveAuthorizationDefinition<JsonValue>
+              | undefined;
 
             let justCompletedAuth = false;
             if (interactiveAuth) {
@@ -453,7 +449,9 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
 
             try {
               const client = reg.getClient(connectionName);
-              return await client.executeTool(toolName, input);
+              return await client.executeTool(toolName, input, {
+                abortSignal: executeCtx.abortSignal,
+              });
             } catch (err) {
               if (!isConnectionAuthorizationRequiredError(err) || !interactiveAuth) {
                 throw err;
@@ -474,8 +472,12 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
               if (!hookUrl) throw err;
 
               const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
-              const { challenge, resume } = await interactiveAuth.startAuthorization({
+              const callbackUrl = resolveAuthorizationCallbackUrl({
+                authorization: interactiveAuth,
                 callbackUrl: hookUrl,
+              });
+              const { challenge, resume } = await interactiveAuth.startAuthorization({
+                callbackUrl,
                 connection: { url: conn?.url ?? "" },
                 principal,
               });
@@ -484,7 +486,7 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
                 {
                   name: connectionName,
                   challenge: stampChallengeDisplayName(challenge, interactiveAuth),
-                  hookUrl,
+                  hookUrl: callbackUrl,
                   resume,
                 },
               ]);

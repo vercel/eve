@@ -1,5 +1,3 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 
@@ -8,9 +6,10 @@ import type { ToolDefinition } from "#public/definitions/tool.js";
  * {@link ResolvedToolDefinition} so it can be re-exported as a public
  * {@link ToolDefinition}.
  *
- * Framework tools have the internal `(input) => output` signature.
+ * Framework tools have the internal `(input, options) => output` signature.
  * The public {@link ToolDefinition.execute} expects `(input, ctx)`.
- * This wrapper bridges the gap — `ctx` is trailing and omitted.
+ * This wrapper bridges the gap — the public `ctx` is mapped back onto the
+ * internal execute options.
  */
 export function toPublicToolDefinition(definition: ResolvedToolDefinition): ToolDefinition {
   if (!definition.execute) {
@@ -18,16 +17,22 @@ export function toPublicToolDefinition(definition: ResolvedToolDefinition): Tool
   }
 
   const internalExecute = definition.execute;
-  const inputSchema = definition.inputSchema;
   const publicDefinition: ToolDefinition = {
     description: definition.description,
-    execute: (input) => internalExecute(input),
-    inputSchema: (inputSchema ?? {}) as unknown as StandardJSONSchemaV1<unknown>,
+    execute: (input, ctx) =>
+      internalExecute(input, {
+        abortSignal: ctx.abortSignal,
+        // The public context carries no model history, so the bridged
+        // options cannot reproduce the AI SDK's `messages`.
+        messages: [],
+        toolCallId: ctx.callId,
+      }),
+    inputSchema: definition.inputSchema ?? {},
     outputSchema: definition.outputSchema,
   };
 
-  if (definition.needsApproval !== undefined) {
-    publicDefinition.needsApproval = definition.needsApproval;
+  if (definition.approval !== undefined) {
+    publicDefinition.approval = definition.approval;
   }
 
   return publicDefinition;

@@ -27,7 +27,7 @@ import { eveChannel } from "eve/channels/eve";
 import { localDev, vercelOidc } from "eve/channels/auth";
 
 export default eveChannel({
-  auth: [localDev(), vercelOidc()],
+  auth: [vercelOidc(), localDev()],
 });
 ```
 
@@ -62,11 +62,11 @@ function appSession(): AuthFn<Request> {
 }
 
 export default eveChannel({
-  auth: [appSession(), localDev(), vercelOidc()],
+  auth: [appSession(), vercelOidc(), localDev()],
 });
 ```
 
-Put your own providers ahead of the catch-all helpers. Any entry that doesn't recognize the caller returns `null`, and the walk moves on. On non-Vercel hosts, omit `vercelOidc()` unless you specifically want to accept Vercel-issued tokens.
+Put your own providers ahead of the catch-all helpers. `localDev()` is the final fallback: put `vercelOidc()` before it so a local Vercel OIDC bearer can resolve a user instead of being shadowed by the synthetic local principal. Any entry that doesn't recognize the caller returns `null`, and the walk moves on. On non-Vercel hosts, omit `vercelOidc()` unless you specifically want to accept Vercel-issued tokens.
 
 To reject with a precise status instead of skipping, throw:
 
@@ -197,11 +197,11 @@ import { eveChannel } from "eve/channels/eve";
 import { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
 
 export default eveChannel({
-  auth: [localDev(), vercelOidc(), placeholderAuth()],
+  auth: [vercelOidc(), localDev(), placeholderAuth()],
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[localDev(), vercelOidc()]`, which also rejects production browser traffic.
+In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev()]`, which also rejects production browser traffic.
 
 You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 
@@ -224,6 +224,53 @@ Route auth does not enforce session ownership. If multiple users or tenants can 
 
 Tool and connection auth is how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Connections declare `auth` on the connection definition. Tools should resolve providers inline with `ctx.getToken(provider)` and call `ctx.requireAuth(provider)` only when a downstream service rejects a token; eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.
 
+The principal for user-scoped tool and connection auth comes from route auth. `connect("...")` from `@vercel/connect/eve` defaults to `principalType: "user"`, so the active session must have `ctx.session.auth.current.principalType === "user"` before the first token lookup can start OAuth. If the session is anonymous, local-dev-only, runtime-scoped, or service-scoped, eve fails fast with `reason: "principal_required"` because there is no end-user identity to bind the OAuth grant to.
+
+Use app-scoped auth when the external service should act as the agent itself:
+
+```ts
+auth: connect({ connector: "linear/myagent", principalType: "app" });
+```
+
+Use user-scoped auth when the external service should act as the signed-in person:
+
+```ts
+auth: connect("linear/myagent");
+```
+
+For user-scoped auth in a browser app, the route-auth entry for the eve channel should verify your app session and return a user principal:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, type AuthFn } from "eve/channels/auth";
+import { getSession } from "@/lib/auth";
+
+function appSession(): AuthFn<Request> {
+  return async (request) => {
+    const session = await getSession(request);
+    if (!session) return null;
+
+    return {
+      authenticator: "app",
+      principalId: session.userId,
+      principalType: "user",
+      attributes: {
+        email: session.email,
+        teamId: session.teamId,
+      },
+    };
+  };
+}
+
+export default eveChannel({
+  auth: [appSession(), localDev()],
+});
+```
+
+Keep `principalId` stable for the same person, and include an `issuer` when the same app may accept users from multiple identity providers. The connection token cache keys user credentials by issuer and principal id so two providers cannot accidentally share a grant.
+
+Built-in platform channels that identify a human sender, such as Slack, Discord, Teams, Telegram, Twilio, Linear, and GitHub, attach a user principal for that sender by default. A Slack mention, DM, or button click can therefore authorize a user-scoped connection for the Slack user who sent it without adding a separate browser-session auth function.
+
 ### On a connection
 
 Attach `connect()` from `@vercel/connect/eve` to the connection:
@@ -241,7 +288,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-The first call that needs the connection kicks off an OAuth sign-in, surfaced as an authorization challenge (a URL the caller visits). [Vercel Connect](https://vercel.com/docs/connect) brokers the flow and holds the credentials, which are resolved and cached per workflow step, never serialized into history, and never shown to the model. For non-interactive connections, pass a static token in place of `connect()`. [Connections](../connections) covers both shapes.
+The first call that needs a user-scoped connection kicks off an OAuth sign-in, surfaced as an authorization challenge (a URL the caller visits). [Vercel Connect](https://vercel.com/docs/connect) brokers the flow and holds the credentials, which are resolved and cached per workflow step, never serialized into history, and never shown to the model. For non-interactive connections, pass a static token or `connect({ connector, principalType: "app" })` in place of user-scoped `connect()`. [Connections](../connections) covers both shapes.
 
 ### On a single tool
 

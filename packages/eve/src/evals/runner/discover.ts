@@ -36,6 +36,31 @@ export async function discoverEvalFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
+ * Finds directories under `<appRoot>/agent/` that directly contain
+ * `*.eval.ts` files. Used to produce a clear error when eval files are placed
+ * inside the agent tree instead of the top-level `evals/` directory that
+ * {@link discoverEvalFiles} scans.
+ *
+ * Returns app-root-relative, POSIX-normalized directory paths, sorted and
+ * de-duplicated. Returns `[]` when `agent/` is absent.
+ */
+export async function findMisplacedEvalDirs(appRoot: string): Promise<string[]> {
+  const agentDir = join(appRoot, "agent");
+  const dirs = new Set<string>();
+
+  try {
+    await collectMisplacedEvalDirs(agentDir, appRoot, dirs);
+  } catch (error) {
+    if (isNoEntryError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  return [...dirs].sort((a, b) => a.localeCompare(b));
+}
+
+/**
  * Derives the canonical eval id from one absolute eval file path.
  *
  * `<appRoot>/evals/sub/weather.eval.ts` → `"sub/weather"`.
@@ -201,6 +226,22 @@ async function collectEvalFiles(dir: string, files: string[]): Promise<void> {
       await collectEvalFiles(entryPath, files);
     } else if (entry.isFile() && entry.name.endsWith(EVAL_FILE_SUFFIX)) {
       files.push(entryPath);
+    }
+  }
+}
+
+async function collectMisplacedEvalDirs(
+  dir: string,
+  appRoot: string,
+  dirs: Set<string>,
+): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      await collectMisplacedEvalDirs(join(dir, entry.name), appRoot, dirs);
+    } else if (entry.isFile() && entry.name.endsWith(EVAL_FILE_SUFFIX)) {
+      dirs.add(relative(appRoot, dir).split(/[\\/]/u).join("/"));
     }
   }
 }

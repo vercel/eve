@@ -1,24 +1,26 @@
-import { jsonSchema, type FlexibleSchema, type LanguageModel } from "ai";
+import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
+import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
+import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 import type { RunMode } from "#shared/run-mode.js";
-import { resolveCodeModeEnabled } from "#shared/code-mode.js";
 import {
   resolveRuntimeModelReference,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
-import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#runtime/subagents/registry.js";
+import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
@@ -40,6 +42,8 @@ export type CreateRuntime = (config: {
  * Input for building a harness step for one resolved runtime node.
  */
 export interface CreateExecutionNodeStepInput {
+  /** Cancellation signal forwarded to the tool-loop harness. */
+  readonly abortSignal?: AbortSignal;
   /**
    * Session-level capabilities propagated from the runtime. The
    * harness passes this through to `buildToolSet` so `ask_question`
@@ -56,6 +60,11 @@ export interface CreateExecutionNodeStepInput {
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  /**
+   * Effective `maxSubagents` cap configured by the experimental Workflow tool
+   * definition and materialized on the session at creation.
+   */
+  readonly workflowMaxSubagents?: number;
 }
 
 /**
@@ -64,14 +73,23 @@ export interface CreateExecutionNodeStepInput {
  */
 export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): StepFn {
   const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
+  const dispatchModelEvent =
+    input.node.turnAgent.dynamicModel === undefined
+      ? undefined
+      : createRuntimeDynamicModelEventDispatcher(
+          input.modelResolutionScope,
+          input.node.turnAgent.dynamicModel,
+        );
   const tools = createNodeHarnessTools({ node: input.node });
   return createToolLoopHarness({
+    abortSignal: input.abortSignal,
     capabilities: input.capabilities,
-    codeMode: resolveCodeModeEnabled(input.node.agent.config?.experimental?.codeMode),
-    workflow: input.node.agent.workflowEnabled === true,
+    workflow: input.node.agent.workflowTool !== undefined,
+    workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
+    dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
@@ -89,7 +107,10 @@ function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIdentity {
     agentId: node.turnAgent.id,
     agentName: node.agent.config?.name,
     eveVersion: packageInfo.version,
-    modelId: node.turnAgent.model.id,
+    modelId:
+      node.turnAgent.dynamicModel === undefined
+        ? node.turnAgent.model.id
+        : `dynamic:${node.turnAgent.model.id}`,
   };
 
   const gitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
@@ -116,6 +137,21 @@ function createRuntimeModelResolver(
   return (modelReference) => resolveRuntimeModelReference(modelReference, scope);
 }
 
+function createRuntimeDynamicModelEventDispatcher(
+  scope: RuntimeModelResolutionScope,
+  dynamicModel: NonNullable<ResolvedRuntimeAgentNode["turnAgent"]["dynamicModel"]>,
+): NonNullable<Parameters<typeof createToolLoopHarness>[0]["dispatchDynamicModelEvent"]> {
+  return (input) =>
+    dispatchDynamicModelEvent({
+      ctx: input.ctx,
+      dynamicModel,
+      event: input.event,
+      fallback: input.fallback,
+      messages: input.messages,
+      scope,
+    });
+}
+
 /**
  * Resolves unified {@link HarnessToolDefinition}s from the node's registries.
  *
@@ -140,15 +176,19 @@ export function createNodeHarnessTools(input: {
     }
   }
 
-  if (!tools.has("agent")) {
-    tools.set("agent", {
-      description: "Launch a new agent to handle a complex, multi-step subtask.",
-      inputSchema: jsonSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
-      name: "agent",
+  if (
+    input.node.nodeId === ROOT_RUNTIME_AGENT_NODE_ID &&
+    !input.node.agent.disabledFrameworkTools.includes(AGENT_TOOL_NAME) &&
+    !tools.has(AGENT_TOOL_NAME)
+  ) {
+    tools.set(AGENT_TOOL_NAME, {
+      description: AGENT_TOOL_DESCRIPTION,
+      inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
+      name: AGENT_TOOL_NAME,
       runtimeAction: {
         kind: "subagent-call",
         nodeId: input.node.nodeId,
-        subagentName: "agent",
+        subagentName: AGENT_TOOL_NAME,
       },
     });
   }
@@ -160,34 +200,26 @@ function resolveHarnessToolDefinition(input: {
   readonly node: ResolvedRuntimeAgentNode;
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
-  if (input.tool.kind === "subagent") {
+  if (input.tool.kind === "subagent" || input.tool.kind === "remote") {
+    const runtimeAction: HarnessToolDefinition["runtimeAction"] =
+      input.tool.kind === "remote"
+        ? {
+            kind: "remote-agent-call",
+            nodeId: input.tool.nodeId,
+            remoteAgentName: input.tool.name,
+            subagentName: input.tool.name,
+          }
+        : {
+            kind: "subagent-call",
+            nodeId: input.tool.nodeId,
+            subagentName: input.tool.name,
+          };
     return {
       description: input.tool.description ?? "",
-      inputSchema: jsonSchema(input.tool.inputSchema ?? {}),
+      inputSchema: toInputSchema(input.tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
       name: input.tool.name,
-      outputSchema:
-        input.tool.outputSchema === undefined ? undefined : jsonSchema(input.tool.outputSchema),
-      runtimeAction: {
-        kind: "subagent-call",
-        nodeId: input.tool.nodeId,
-        subagentName: input.tool.name,
-      },
-    };
-  }
-
-  if (input.tool.kind === "remote") {
-    return {
-      description: input.tool.description ?? "",
-      inputSchema: jsonSchema(input.tool.inputSchema ?? {}),
-      name: input.tool.name,
-      outputSchema:
-        input.tool.outputSchema === undefined ? undefined : jsonSchema(input.tool.outputSchema),
-      runtimeAction: {
-        kind: "remote-agent-call",
-        nodeId: input.tool.nodeId,
-        remoteAgentName: input.tool.name,
-        subagentName: input.tool.name,
-      },
+      outputSchema: toOutputSchema(input.tool.outputSchema),
+      runtimeAction,
     };
   }
 
@@ -214,10 +246,10 @@ function resolveHarnessToolDefinition(input: {
       rawExecute,
       scope: def.name,
     }),
-    inputSchema: def.inputStandardSchema ?? jsonSchema(def.inputSchema ?? {}),
+    inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
-    needsApproval: def.needsApproval,
-    outputSchema: def.outputStandardSchema ?? maybeJsonSchema(def.outputSchema),
+    approval: def.approval,
+    outputSchema: def.outputSchema,
     toModelOutput: def.toModelOutput,
   };
 }
@@ -247,10 +279,4 @@ function resolveAuthoredExecute(input: {
   }
   const authored = rawExecute as (toolInput: unknown, ctx: unknown) => unknown;
   return createToolExecuteWithAuth({ execute: authored, scope });
-}
-
-function maybeJsonSchema(
-  schema: ResolvedToolDefinition["outputSchema"],
-): FlexibleSchema | undefined {
-  return schema === undefined ? undefined : jsonSchema(schema);
 }

@@ -6,9 +6,11 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
+  normalizeModelStreamError,
   summarizeKnownModelCallConfigError,
   summarizeKnownModelCallRequestError,
 } from "#harness/model-call-error.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
 /**
  * Builds the shape `ai@7.0.0-canary.169+` rejects with when a model
@@ -78,6 +80,21 @@ function gatewayModelCallError(input: {
   return error;
 }
 
+function directApiCallError(input: {
+  readonly data?: Record<string, unknown>;
+  readonly message?: string;
+  readonly responseBody?: string;
+  readonly statusCode?: number;
+}): Error {
+  return Object.assign(new Error(input.message ?? "AI_APICallError"), {
+    data: input.data,
+    isRetryable: false,
+    name: "AI_APICallError",
+    responseBody: input.responseBody,
+    statusCode: input.statusCode,
+  });
+}
+
 describe("isNoOutputGeneratedError", () => {
   it("matches the AI SDK error by name", () => {
     expect(isNoOutputGeneratedError(noOutputGeneratedError())).toBe(true);
@@ -116,6 +133,24 @@ describe("EmptyModelResponseError", () => {
   });
 });
 
+describe("normalizeModelStreamError", () => {
+  it("retains a plain provider payload for classification", () => {
+    const raw = { message: "Overloaded", type: "overloaded_error" };
+    const error = normalizeModelStreamError(raw);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("Overloaded");
+    expect(error.cause).toBe(raw);
+    expect(classifyModelCallError(error)).toBe("retry");
+  });
+
+  it("returns Error instances unchanged", () => {
+    const raw = new Error("stream failed");
+
+    expect(normalizeModelStreamError(raw)).toBe(raw);
+  });
+});
+
 /**
  * Classification is the only behavior this module owns. Error
  * rendering (details payload, OTel span exceptions) is covered in
@@ -128,9 +163,29 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(new EmptyModelResponseError())).toBe("recoverable");
   });
 
+  it("returns terminal for a turn cancellation, even when marked retryable", () => {
+    expect(classifyModelCallError(new TurnCancelledError())).toBe("terminal");
+
+    const wrapped = Object.assign(new Error("socket hang up"), {
+      cause: new TurnCancelledError(),
+      isRetryable: true,
+    });
+    expect(classifyModelCallError(wrapped)).toBe("terminal");
+  });
+
   it("returns retry when the AI SDK marks the error as retryable", () => {
     const err = Object.assign(new Error("upstream flaky"), { isRetryable: true });
     expect(classifyModelCallError(err)).toBe("retry");
+  });
+
+  it("returns retry for Anthropic overloaded stream payloads", () => {
+    const overloaded = {
+      message: "Overloaded",
+      type: "overloaded_error",
+    };
+
+    expect(classifyModelCallError(overloaded)).toBe("retry");
+    expect(classifyModelCallError(new Error("stream failed", { cause: overloaded }))).toBe("retry");
   });
 
   it("returns retry for HTTP statuses the AI SDK treats as retryable", () => {
@@ -259,6 +314,100 @@ describe("summarizeKnownModelCallRequestError", () => {
       name: "AI Gateway model request rejected",
       message: "AI Gateway rejected the model request before the agent produced a response.",
     });
+  });
+
+  it("uses nested OpenAI error.code messages when the top-level API message is generic", () => {
+    const data = {
+      error: {
+        code: { message: "The requested model does not support this tool." },
+        message: "AI_APICallError",
+        type: "invalid_request_error",
+      },
+    };
+    const summary = summarizeKnownModelCallRequestError(
+      directApiCallError({
+        data,
+        responseBody: JSON.stringify(data),
+        statusCode: 400,
+      }),
+    );
+
+    expect(summary).toEqual({
+      name: "Model provider API error",
+      message: "The requested model does not support this tool.",
+    });
+  });
+
+  it("uses the direct API error message when there is no response body", () => {
+    const summary = summarizeKnownModelCallRequestError(
+      directApiCallError({
+        message: "No endpoints found for anthropic/claude-3.5-haiku",
+        statusCode: 404,
+      }),
+    );
+
+    expect(summary).toEqual({
+      name: "Model provider API error",
+      message: "No endpoints found for anthropic/claude-3.5-haiku",
+    });
+  });
+
+  it("falls back to HTTP status and response body for direct generic API call errors", () => {
+    const responseBody = JSON.stringify({
+      error: {
+        message: "AI_APICallError",
+        type: "invalid_request_error",
+      },
+    });
+    const summary = summarizeKnownModelCallRequestError(
+      directApiCallError({
+        responseBody,
+        statusCode: 400,
+      }),
+    );
+
+    expect(summary).toEqual({
+      name: "Model provider API error",
+      message: `Model provider API request failed (HTTP 400, invalid_request_error): ${responseBody}`,
+    });
+  });
+
+  it("does not promote bare parameter names from the error body to the summary", () => {
+    const data = {
+      error: {
+        message: "Bad Request",
+        type: "invalid_request_error",
+        param: "input",
+      },
+    };
+    const summary = summarizeKnownModelCallRequestError(
+      directApiCallError({
+        data,
+        responseBody: JSON.stringify(data),
+        statusCode: 400,
+      }),
+    );
+
+    expect(summary?.message).not.toBe("input");
+    expect(summary?.message).toContain("Model provider API request failed (HTTP 400");
+  });
+
+  it("keeps the generic framing for transient upstream failures", () => {
+    // A 503/429 that exhausts retries is an availability problem, not a
+    // request rejection; summarizing it as "rejected" sends users to debug
+    // their configuration.
+    const summary = summarizeKnownModelCallRequestError(
+      gatewayModelCallError({
+        gatewayName: "GatewayInternalServerError",
+        gatewayType: "overloaded_error",
+        statusCode: 503,
+        upstreamMessage: "Service temporarily unavailable",
+        upstreamStatusCode: 503,
+        upstreamType: "overloaded_error",
+      }),
+    );
+
+    expect(summary).toBeNull();
   });
 });
 
@@ -466,5 +615,25 @@ describe("extractModelCallErrorDetails", () => {
       upstreamType: "internal_server_error",
     });
     expect(JSON.stringify(details)).not.toContain("large schema");
+  });
+
+  it("keeps direct API response snippets when no parsed API message is useful", () => {
+    const responseBody = JSON.stringify({
+      error: { message: "AI_APICallError", type: "invalid_request_error" },
+    });
+    const details = extractModelCallErrorDetails(
+      directApiCallError({
+        responseBody,
+        statusCode: 400,
+      }),
+    );
+
+    expect(details).toMatchObject({
+      responseBodySnippet: responseBody,
+      statusCode: 400,
+      upstreamMessage: "AI_APICallError",
+      upstreamStatusCode: 400,
+      upstreamType: "invalid_request_error",
+    });
   });
 });

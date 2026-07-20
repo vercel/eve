@@ -1,7 +1,7 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
+import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -16,6 +16,8 @@ import { GITHUB_CHANNEL_DEFAULT_ROUTE } from "#public/channels/github/constants.
 import { createDefaultEvents, defaultOnComment } from "#public/channels/github/defaults.js";
 import {
   parseGitHubWebhookEvent,
+  type GitHubCheckRunEvent,
+  type GitHubCheckSuiteEvent,
   type GitHubComment,
   type GitHubConversationRef,
   type GitHubDelivery,
@@ -24,12 +26,16 @@ import {
   type GitHubPullRequestEvent,
   type GitHubRepositoryRef,
   type GitHubUser,
+  type GitHubWorkflowRunEvent,
 } from "#public/channels/github/inbound.js";
 import {
+  dispatchCheckRun,
+  dispatchCheckSuite,
   dispatchIssue,
   dispatchIssueComment,
   dispatchPullRequest,
   dispatchPullRequestReviewComment,
+  dispatchWorkflowRun,
 } from "#public/channels/github/dispatch.js";
 import {
   continuationTokenFromState,
@@ -40,7 +46,7 @@ import {
 } from "#public/channels/github/state.js";
 import type { GitHubPullRequestContextConfig } from "#public/channels/github/pr-context.js";
 import { verifyGitHubRequest } from "#public/channels/github/verify.js";
-import { defineChannel, POST, type Channel } from "#public/definitions/defineChannel.js";
+import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("github.channel");
 
@@ -101,8 +107,8 @@ export type GitHubInboundResult = {
 } | null;
 
 /**
- * Return type of the `onComment`/`onIssue`/`onPullRequest` hooks: a
- * {@link GitHubInboundResult} or a promise for one.
+ * Return type of GitHub inbound hooks: a {@link GitHubInboundResult} or a
+ * promise for one.
  */
 export type GitHubInboundResultOrPromise = GitHubInboundResult | Promise<GitHubInboundResult>;
 
@@ -136,6 +142,7 @@ export interface GitHubChannelEvents {
   readonly "session.failed"?: GitHubSessionFailedHandler;
   readonly "session.waiting"?: GitHubEventHandler<"session.waiting">;
   readonly "turn.completed"?: GitHubEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: GitHubEventHandler<"turn.cancelled">;
   readonly "turn.failed"?: GitHubEventHandler<"turn.failed">;
   readonly "turn.started"?: GitHubEventHandler<"turn.started">;
 }
@@ -159,6 +166,26 @@ export interface GitHubChannelConfig {
   onComment?(ctx: GitHubInboundContext, comment: GitHubComment): GitHubInboundResultOrPromise;
 
   /**
+   * Opt-in handler for `check_suite` webhook events. There is no default
+   * dispatch. A dispatched turn is anchored to the first associated pull
+   * request.
+   */
+  onCheckSuite?(
+    ctx: GitHubInboundContext,
+    checkSuite: GitHubCheckSuiteEvent,
+  ): GitHubInboundResultOrPromise;
+
+  /**
+   * Opt-in handler for `check_run` webhook events. There is no default
+   * dispatch. A dispatched turn is anchored to the first associated pull
+   * request.
+   */
+  onCheckRun?(
+    ctx: GitHubInboundContext,
+    checkRun: GitHubCheckRunEvent,
+  ): GitHubInboundResultOrPromise;
+
+  /**
    * Opt-in handler for `issues` webhook events. There is no default dispatch;
    * define this to act on issues (e.g. `issue.action === "opened"`).
    */
@@ -171,6 +198,16 @@ export interface GitHubChannelConfig {
   onPullRequest?(
     ctx: GitHubInboundContext,
     pullRequest: GitHubPullRequestEvent,
+  ): GitHubInboundResultOrPromise;
+
+  /**
+   * Opt-in handler for `workflow_run` webhook events. There is no default
+   * dispatch. A dispatched turn is anchored to the first associated pull
+   * request.
+   */
+  onWorkflowRun?(
+    ctx: GitHubInboundContext,
+    workflowRun: GitHubWorkflowRunEvent,
   ): GitHubInboundResultOrPromise;
 }
 
@@ -204,6 +241,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
         async (req, { send, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
+          const missingHeaders = missingGitHubWebhookHeaders(req.headers);
 
           let event: GitHubInboundEvent | null;
           try {
@@ -217,7 +255,22 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
             return jsonOk({ ignored: true, ok: true });
           }
 
-          if (event === null) return jsonOk({ ignored: true, ok: true });
+          if (event === null) {
+            if (missingHeaders.length > 0) {
+              log.warn("GitHub webhook ignored because standard headers were missing", {
+                missingHeaders,
+              });
+            }
+            return jsonOk({ ignored: true, ok: true });
+          }
+          if (missingHeaders.length > 0) {
+            log.warn("GitHub webhook missing standard headers; inferred metadata from payload", {
+              deliveryId: event.delivery.id,
+              event: event.delivery.event,
+              missingHeaders,
+              repository: event.repository.fullName,
+            });
+          }
           if (event.kind === "ping") return jsonOk({ ok: true });
 
           if (event.kind === "issue_comment" && event.action === "created") {
@@ -268,6 +321,42 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 config,
                 event,
                 handler: config.onPullRequest,
+                send,
+              }),
+            );
+            return jsonOk({ ok: true });
+          }
+
+          if (event.kind === "check_suite" && config.onCheckSuite !== undefined) {
+            waitUntil(
+              dispatchCheckSuite({
+                config,
+                event,
+                handler: config.onCheckSuite,
+                send,
+              }),
+            );
+            return jsonOk({ ok: true });
+          }
+
+          if (event.kind === "check_run" && config.onCheckRun !== undefined) {
+            waitUntil(
+              dispatchCheckRun({
+                config,
+                event,
+                handler: config.onCheckRun,
+                send,
+              }),
+            );
+            return jsonOk({ ok: true });
+          }
+
+          if (event.kind === "workflow_run" && config.onWorkflowRun !== undefined) {
+            waitUntil(
+              dispatchWorkflowRun({
+                config,
+                event,
+                handler: config.onWorkflowRun,
                 send,
               }),
             );
@@ -366,6 +455,13 @@ async function verifyInbound(
 
 function readNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function missingGitHubWebhookHeaders(headers: Headers): readonly string[] {
+  return ["x-github-event", "x-github-delivery"].filter((name) => {
+    const value = headers.get(name);
+    return value === null || value.trim().length === 0;
+  });
 }
 
 function jsonOk(body: Record<string, unknown>): Response {

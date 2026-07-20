@@ -3,14 +3,18 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
+import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { PublicAgentModelDefinition } from "#shared/agent-definition.js";
+import {
+  isDynamicModelDefinition,
+  type PublicAgentStaticModelDefinition,
+} from "#shared/agent-definition.js";
+import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
@@ -44,6 +48,9 @@ export async function compileAgentConfig(
       ? `Expected the default agent config to match the public eve shape.`
       : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
+  const authoredModel = isDynamicModelDefinition(definition.model)
+    ? definition.model.fallback
+    : definition.model;
   const model = await normalizeAuthoredModelReference({
     modelCatalog: context.modelCatalog,
     purpose: "the primary compaction trigger model",
@@ -51,7 +58,7 @@ export async function compileAgentConfig(
     providerOptions: definition.modelOptions?.providerOptions,
     source: configModule,
     sourcePath: configModulePath,
-    value: definition.model,
+    value: authoredModel,
   });
   const compaction: {
     model?: CompiledRuntimeModelReference;
@@ -65,11 +72,14 @@ export async function compileAgentConfig(
       thresholdPercent?: number;
     };
     description?: string;
+    dynamicModel?: CompiledAgentDefinition["dynamicModel"];
     experimental?: CompiledAgentDefinition["experimental"];
     model: CompiledRuntimeModelReference;
     name: string;
     outputSchema?: JsonObject;
+    reasoning?: CompiledAgentDefinition["reasoning"];
     source?: ModuleSourceRef;
+    limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
     model,
@@ -78,6 +88,19 @@ export async function compileAgentConfig(
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;
+  }
+
+  if (isDynamicModelDefinition(definition.model)) {
+    if (configModule === undefined) {
+      throw new Error("Expected dynamic model definitions to be authored in agent.ts.");
+    }
+    compiledConfig.dynamicModel = {
+      eventNames: Object.keys(definition.model.events) as DynamicToolEventName[],
+      exportName: configModule.exportName,
+      sourceKind: "module",
+      logicalPath: configModule.logicalPath,
+      sourceId: configModule.sourceId,
+    };
   }
 
   const experimental = normalizeExperimentalDefinition(definition.experimental);
@@ -95,7 +118,18 @@ export async function compileAgentConfig(
   }
 
   if (definition.outputSchema !== undefined) {
-    compiledConfig.outputSchema = normalizeJsonSchemaDefinition(definition.outputSchema, "output");
+    compiledConfig.outputSchema = serializeOutputSchema(definition.outputSchema);
+  }
+
+  if (definition.reasoning !== undefined) {
+    compiledConfig.reasoning = definition.reasoning;
+  }
+
+  if (definition.limits !== undefined) {
+    compiledConfig.limits = {
+      maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
+      maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
+    };
   }
 
   if (configModule !== undefined) {
@@ -135,10 +169,6 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
-  if (experimental.codeMode !== undefined) {
-    compiledExperimental.codeMode = experimental.codeMode;
-  }
-
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
       world: experimental.workflow.world,
@@ -155,7 +185,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly providerOptions?: Record<string, JsonObject>;
   readonly source?: ModuleSourceRef;
   readonly sourcePath?: string;
-  readonly value: PublicAgentModelDefinition;
+  readonly value: PublicAgentStaticModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
     return await withCompiledRuntimeModelLimits(

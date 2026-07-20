@@ -1,16 +1,35 @@
 import type { UserContent } from "ai";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
 
 import type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
+
+export type RunSessionLimits = Pick<
+  AgentLimitsDefinition,
+  "maxInputTokensPerSession" | "maxOutputTokensPerSession"
+>;
+
+/** Identifies the session turn to cancel. */
+export interface CancelTurnInput {
+  readonly sessionId: string;
+  /** Limits the request to the turn the caller observed. */
+  readonly turnId?: string;
+}
+
+/** Result of requesting turn cancellation. Both statuses are successful. */
+export interface CancelTurnResult {
+  readonly status: CancelTurnStatus;
+}
 
 // ---------------------------------------------------------------------------
 // Lineage
@@ -112,6 +131,8 @@ export interface DeliverPayload {
  */
 export interface DeliverHookPayload {
   readonly auth?: SessionAuthContext | null;
+  /** Inbound channel request id used only for workflow attributes. */
+  readonly requestId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
@@ -154,12 +175,33 @@ export interface SubagentInputRequestHookPayload {
   readonly subagentName: string;
 }
 
+/** Authorization lifecycle event forwarded from a delegated child. */
+export type SubagentAuthorizationEvent = Extract<
+  HandleMessageStreamEvent,
+  { type: "authorization.required" | "authorization.completed" }
+>;
+
+/**
+ * Proxy payload sent from a child subagent while it waits for authorization.
+ *
+ * Runtime-internal. The parent re-emits the unchanged event through its own
+ * channel; the authorization callback continues to target the child directly.
+ */
+export interface SubagentAuthorizationEventHookPayload {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly event: SubagentAuthorizationEvent;
+  readonly kind: "subagent-authorization-event";
+  readonly subagentName: string;
+}
+
 /**
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
+  | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
 /**
@@ -236,6 +278,13 @@ export interface RunInput {
    * leave this undefined.
    */
   readonly capabilities?: SessionCapabilities;
+  /** Inbound channel request id used to correlate workflow attributes. */
+  readonly requestId?: string;
+  /**
+   * Human-readable workflow title for top-level sessions. When omitted, the
+   * runtime derives `$eve.title` from {@link input.message}.
+   */
+  readonly title?: string;
   /**
    * Optional terminal callback. When present, the runtime posts a single
    * callback when the session completes or fails.
@@ -263,6 +312,19 @@ export interface RunInput {
   };
   readonly mode: RunMode;
   readonly parent?: SessionParent;
+  /**
+   * Runtime-supplied session limits. Delegated local subagents use this to
+   * carry the parent's remaining quota and delegation caps with the same limit
+   * fields authors configure on agents; `false` means no inherited token cap
+   * for that axis.
+   */
+  readonly limits?: RunSessionLimits;
+  /**
+   * Framework-owned depth of delegated local subagent sessions. Root sessions
+   * omit this and are treated as depth 0; each local child receives
+   * parent depth + 1.
+   */
+  readonly subagentDepth?: number;
 }
 
 export interface DeliverInput {
@@ -273,6 +335,8 @@ export interface DeliverInput {
    * this field before calling the adapter's hooks.
    */
   readonly auth?: SessionAuthContext | null;
+  /** Inbound channel request id used to correlate workflow attributes. */
+  readonly requestId?: string;
   readonly continuationToken: string;
   readonly payload: DeliverPayload;
 }
@@ -316,10 +380,20 @@ export interface Runtime {
    */
   run(input: RunInput): Promise<RunHandle>;
 
+  /** Requests cancellation of a session's in-flight turn. */
+  cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+
   /**
    * Delivers a follow-up message to a parked session.
    */
   deliver(input: DeliverInput): Promise<{ sessionId: string }>;
+
+  /**
+   * Resolves the session that currently owns a continuation token without
+   * delivering input or starting a run. Returns `undefined` when no session
+   * owns the token.
+   */
+  resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined>;
 
   /**
    * Returns a readable stream of lifecycle events for an existing session.
@@ -328,10 +402,10 @@ export interface Runtime {
    * event-streaming route. Backed by the workflow API's per-session durable
    * stream.
    *
-   * `options.startIndex` is the zero-based position of the first event to
-   * yield, dropping earlier events. The framework HTTP session-stream route
-   * forwards the `startIndex` query parameter so a reconnecting client resumes
-   * after the events it already consumed without replaying the prior turn.
+   * Nonnegative `options.startIndex` values are the zero-based position of the
+   * first event to yield. Negative values read relative to the current tail.
+   * The framework HTTP session-stream route forwards the `startIndex` query
+   * parameter unchanged.
    */
   getEventStream(
     sessionId: string,
@@ -344,8 +418,9 @@ export interface Runtime {
  */
 export interface GetEventStreamOptions {
   /**
-   * Zero-based index of the first event to emit. Events before this index
-   * are dropped. Defaults to `0` (replay the entire stream).
+   * Zero-based index of the first event to emit. Negative values read from
+   * the current tail (`-1` starts at the latest event). Defaults to `0`
+   * (replay the entire stream).
    */
   readonly startIndex?: number;
 }

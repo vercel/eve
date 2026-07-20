@@ -19,6 +19,7 @@ export function isStreamDisconnectError(error: unknown): boolean {
     error.name === "AbortError" ||
     error.message === "terminated" ||
     errorCode === "UND_ERR_SOCKET" ||
+    (error instanceof TypeError && /^(?:failed to fetch|fetch failed)$/i.test(error.message)) ||
     /abort|cancel|disconnect|premature close|socket|terminated/i.test(error.message)
   );
 }
@@ -38,12 +39,14 @@ export async function* readNdjsonStream(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let reachedEof = false;
 
   try {
     while (true) {
       const result = await reader.read();
 
       if (result.done) {
+        reachedEof = true;
         // Flush any remaining bytes in the decoder.
         buffer += decoder.decode();
         break;
@@ -73,6 +76,11 @@ export async function* readNdjsonStream(
       yield JSON.parse(trailing) as HandleMessageStreamEvent;
     }
   } finally {
+    if (!reachedEof) {
+      // Breaking an async iteration must close the response body; releasing
+      // its lock alone leaves the server-side stream open.
+      await reader.cancel().catch(() => {});
+    }
     reader.releaseLock();
   }
 }

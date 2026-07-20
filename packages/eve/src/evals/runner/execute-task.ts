@@ -14,6 +14,8 @@ import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
 import { scopeEvalTargetHandle } from "#evals/target.js";
+import { AssertionCollector } from "#evals/assertions/collector.js";
+import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 
 /**
  * Options for executing one eval's task.
@@ -36,6 +38,7 @@ export interface ExecuteTaskResult {
   readonly result: EveEvalTaskResult;
   readonly assertions: readonly AssertionResult[];
   readonly error?: string;
+  readonly skipReason?: string;
 }
 
 /**
@@ -46,13 +49,15 @@ export interface ExecuteTaskResult {
 export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteTaskResult> {
   const { client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
-  const manager = new EvalSessionManager({ client, signal });
+  const collector = new AssertionCollector();
+  const manager = new EvalSessionManager({ client, collector, signal });
   const targetForRun = scopeEvalTargetHandle(target, {
     sessions: manager,
   });
 
   const logs: string[] = [];
-  const { context, collector } = createEvalContext({
+  const { context } = createEvalContext({
+    collector,
     manager,
     target: targetForRun,
     signal,
@@ -64,10 +69,15 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   });
 
   let error: string | undefined;
+  let skipReason: string | undefined;
   try {
     await evaluation.test(context);
   } catch (err) {
-    error = toErrorMessage(err);
+    if (err instanceof EvalSkipped) {
+      skipReason = err.reason;
+    } else if (!(err instanceof EvalRequirementFailed)) {
+      error = toErrorMessage(err);
+    }
   }
 
   const result = buildTaskResult({
@@ -77,7 +87,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   });
   const assertions = await collector.finalize(result);
 
-  return { result, assertions, error };
+  return { result, assertions, error, skipReason };
 }
 
 function buildTaskResult(input: {
@@ -88,7 +98,7 @@ function buildTaskResult(input: {
   const events = input.sessions.flatMap((session) => session.events);
   const finalMessage = input.turn?.message ?? null;
   return {
-    output: finalMessage,
+    output: input.turn?.data === undefined ? finalMessage : input.turn.data,
     finalMessage,
     sessionId: selectPrimarySessionId(input.sessions),
     status: input.turn?.status ?? "completed",

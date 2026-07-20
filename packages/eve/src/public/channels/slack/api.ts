@@ -15,16 +15,25 @@
  * without depending on each other.
  */
 
+import {
+  callSlackApi as callSlackApiPrimitive,
+  fetchSlackThreadReplies,
+  postSlackEphemeral,
+  postSlackMessage,
+  resolveSlackBotToken as resolveSlackBotTokenPrimitive,
+  uploadSlackFiles,
+  type SlackApiOptions,
+  type SlackApiResponse as SlackPrimitiveApiResponse,
+  type SlackBotToken as SlackPrimitiveBotToken,
+  type SlackFileUpload,
+  type SlackMessageOptions,
+} from "#compiled/@chat-adapter/slack/api.js";
 import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat/index.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import { encodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
-import {
-  gfmToSlackMrkdwn,
-  rewriteBareMentions,
-  slackMrkdwnToGfm,
-} from "#public/channels/slack/mrkdwn.js";
+import { truncateTypingStatus } from "#public/channels/slack/limits.js";
+import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 const log = createLogger("slack.api");
 
@@ -33,7 +42,7 @@ const log = createLogger("slack.api");
  * as a (possibly async) function that returns one. The function form
  * supports secret-manager lookups and credential rotation.
  */
-export type SlackBotToken = string | (() => string | Promise<string>);
+export type SlackBotToken = SlackPrimitiveBotToken;
 
 /**
  * Builds the channel-local continuation token (`<channelId>:<threadTs>`).
@@ -53,7 +62,7 @@ export function slackContinuationToken(channelId: string, threadTs: string): str
 export async function resolveSlackBotToken(token?: SlackBotToken): Promise<string> {
   const source = token ?? process.env.SLACK_BOT_TOKEN;
   if (!source) throw new Error("SLACK_BOT_TOKEN is required.");
-  return typeof source === "function" ? await source() : source;
+  return resolveSlackBotTokenPrimitive(source);
 }
 
 /**
@@ -61,11 +70,7 @@ export async function resolveSlackBotToken(token?: SlackBotToken): Promise<strin
  * carries Slack's error code on failure, and method-specific fields pass
  * through verbatim. Callers inspect `ok` themselves.
  */
-export interface SlackApiResponse {
-  readonly ok: boolean;
-  readonly error?: string;
-  readonly [key: string]: unknown;
-}
+export type SlackApiResponse = SlackPrimitiveApiResponse;
 
 /**
  * Low-level POST to a Slack Web API method, signed with the bot token
@@ -78,17 +83,11 @@ export async function callSlackApi(input: {
   readonly operation: string;
   readonly body: unknown;
 }): Promise<SlackApiResponse> {
-  const token = await resolveSlackBotToken(input.botToken);
-  const encoded = encodeSlackApiBody(input.body);
-  const response = await fetch(`https://slack.com/api/${input.operation}`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": encoded.contentType,
-    },
-    body: encoded.body,
-  });
-  return response.json() as Promise<SlackApiResponse>;
+  return callSlackApiPrimitive(
+    input.operation,
+    normalizeSlackApiBody(input.body),
+    createSlackApiOptions(input.botToken),
+  );
 }
 
 /**
@@ -121,14 +120,15 @@ export interface SlackPostedMessage {
  * - The channel uploads each file via Slack's modern
  *   `files.getUploadURLExternal` → POST bytes → `files.completeUploadExternal`
  *   flow.
- * - For `{ markdown }` / `{ text }`: the text becomes the file post's
- *   `initial_comment`, producing a single Slack message with text and
- *   files.
- * - For `{ blocks }` / `{ card }`: the structured message lands first
- *   via `chat.postMessage`, then the files are uploaded as a
+ * - For `{ text }`: the text becomes the file post's `initial_comment`,
+ *   producing a single Slack message with text and files. Slack
+ *   interprets `initial_comment` as mrkdwn.
+ * - For `{ markdown }` / `{ blocks }` / `{ card }`: the message lands
+ *   first via `chat.postMessage`, then the files are uploaded as a
  *   follow-up message in the same thread. Slack has no native way to
- *   attach arbitrary files inside a Block Kit message, so the two
- *   land as separate posts in the same thread.
+ *   attach arbitrary files inside those message surfaces, and
+ *   `initial_comment` cannot render Slack's full Markdown table/header
+ *   support.
  */
 interface SlackPostWithFiles {
   readonly files?: readonly FileUpload[];
@@ -217,10 +217,10 @@ export interface SlackThread {
    * becomes `{ card }`. Otherwise pass a {@link SlackPostInput}
    * explicitly, any variant of which may carry `files`.
    *
-   * With `files`, the channel runs Slack's three-step upload flow and
-   * either attaches them to this message (markdown / text variants) or
-   * posts them as a follow-up in the same thread (blocks / card
-   * variants).
+   * With `files`, the channel runs Slack's three-step upload flow. The
+   * `{ text }` variant attaches files with the text as the upload
+   * comment; `{ markdown }`, `{ blocks }`, and `{ card }` post the
+   * message first and upload files as a follow-up in the same thread.
    */
   post(message: string | CardElement | SlackPostInput): Promise<SlackPostedMessage>;
 
@@ -323,7 +323,8 @@ interface SlackBinding {
  * Auto-anchor: when the binding starts without a `threadTs`, the first
  * `chat.postMessage` adopts its own `ts` as the thread root, updating the
  * live `threadTs` and firing `onThreadTsChanged` so the caller can
- * persist the anchor. Ephemerals and files-only posts do not anchor.
+ * persist the anchor. Ephemerals and upload-only file posts do not
+ * anchor.
  */
 export function buildSlackBinding(input: {
   readonly botToken: SlackBotToken | undefined;
@@ -346,67 +347,14 @@ export function buildSlackBinding(input: {
     files: readonly FileUpload[],
     options?: SlackUploadFilesOptions,
   ): Promise<SlackUploadFilesResult> {
-    if (files.length === 0) {
-      return { fileIds: [], raw: { ok: true } as SlackApiResponse };
-    }
     const channelId = options?.channelId ?? input.channelId;
     const threadTs = options?.threadTs ?? currentThreadTs;
-    const token = await resolveSlackBotToken(input.botToken);
-
-    const fileIds: string[] = [];
-    for (const file of files) {
-      const bytes = await readFileBytes(file.data);
-      const getUrl = await callSlackApi({
-        botToken: input.botToken,
-        operation: "files.getUploadURLExternal",
-        body: {
-          filename: file.filename,
-          length: bytes.byteLength,
-        },
-      });
-      if (
-        getUrl.ok !== true ||
-        typeof getUrl.upload_url !== "string" ||
-        typeof getUrl.file_id !== "string"
-      ) {
-        throw new Error(
-          `Slack files.getUploadURLExternal failed: ${getUrl.error ?? "unknown_error"}`,
-        );
-      }
-      const uploadResponse = await fetch(getUrl.upload_url, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/octet-stream",
-        },
-        body: bytes,
-      });
-      if (!uploadResponse.ok) {
-        throw new Error(
-          `Slack upload POST returned HTTP ${uploadResponse.status} for ${file.filename}.`,
-        );
-      }
-      fileIds.push(getUrl.file_id);
-    }
-
-    const completeBody: Record<string, unknown> = {
-      files: files.map((file, i) => ({ id: fileIds[i], title: file.filename })),
-    };
-    if (channelId) completeBody.channel_id = channelId;
-    if (threadTs) completeBody.thread_ts = threadTs;
-    if (options?.initialComment) completeBody.initial_comment = options.initialComment;
-
-    const complete = await callSlackApi({
-      botToken: input.botToken,
-      operation: "files.completeUploadExternal",
-      body: completeBody,
+    return uploadSlackFiles(files.map(toSlackFileUpload), {
+      ...createSlackApiOptions(input.botToken),
+      channelId: channelId || undefined,
+      initialComment: options?.initialComment,
+      threadTs: threadTs || undefined,
     });
-    if (complete.ok !== true) {
-      throw new Error(
-        `Slack files.completeUploadExternal failed: ${complete.error ?? "unknown_error"}`,
-      );
-    }
-    return { fileIds, raw: complete };
   }
 
   const thread: SlackThread = {
@@ -415,16 +363,12 @@ export function buildSlackBinding(input: {
       const message = normalizePostInput(rawMessage);
       const files = message.files ?? [];
       const hasStructured = "blocks" in message || "card" in message;
+      const shouldPostBeforeFiles = hasStructured || "markdown" in message;
 
-      // markdown / text + files: single Slack message with files attached
-      // via files.completeUploadExternal's initial_comment.
-      if (files.length > 0 && !hasStructured) {
-        const comment =
-          "markdown" in message
-            ? rewriteBareMentions(gfmToSlackMrkdwn(message.markdown))
-            : "text" in message
-              ? rewriteBareMentions(message.text)
-              : undefined;
+      // text + files: single Slack message with files attached via
+      // files.completeUploadExternal's mrkdwn-only initial_comment.
+      if (files.length > 0 && !shouldPostBeforeFiles) {
+        const comment = "text" in message ? message.text : undefined;
         const result = await uploadFiles(files, { initialComment: comment });
         const id =
           Array.isArray(result.raw.files) && result.raw.files.length > 0
@@ -433,35 +377,30 @@ export function buildSlackBinding(input: {
         return { id, raw: result.raw };
       }
 
-      const body = buildPostMessageBody(message, input.channelId, currentThreadTs);
-      const response = await request("chat.postMessage", body);
-      if (response.ok !== true) {
-        throw new Error(`Slack chat.postMessage failed: ${response.error ?? "unknown_error"}`);
-      }
-      const id = typeof response.ts === "string" ? response.ts : "";
+      const response = await postSlackMessage(
+        buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken),
+      );
+      const id = response.id;
       handleMessageTs(id);
 
-      // blocks / card + files: structured message lands first, then upload
-      // files as a follow-up post in the same thread.
-      if (files.length > 0 && hasStructured) {
+      // markdown / blocks / card + files: message lands first, then
+      // files upload as a follow-up post in the same thread.
+      if (files.length > 0 && shouldPostBeforeFiles) {
         try {
           await uploadFiles(files);
         } catch (error) {
-          log.warn("file upload after structured post failed", { error });
+          log.warn("file upload after message post failed", { error });
         }
       }
-      return { id, raw: response };
+      return { id, raw: response.raw };
     },
     async postEphemeral(userId, rawMessage) {
       const message = normalizePostInput(rawMessage);
-      const body = buildPostMessageBody(message, input.channelId, currentThreadTs);
-      body.user = userId;
-      const response = await request("chat.postEphemeral", body);
-      if (response.ok !== true) {
-        throw new Error(`Slack chat.postEphemeral failed: ${response.error ?? "unknown_error"}`);
-      }
-      const id = typeof response.message_ts === "string" ? response.message_ts : "";
-      return { id, raw: response };
+      const response = await postSlackEphemeral({
+        ...buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken),
+        user: userId,
+      });
+      return { id: response.id, raw: response.raw };
     },
     async postDirectMessage(userId, rawMessage) {
       const open = await request("conversations.open", { users: userId });
@@ -471,23 +410,22 @@ export function buildSlackBinding(input: {
         throw new Error(`Slack conversations.open failed: ${open.error ?? "unknown_error"}`);
       }
       const message = normalizePostInput(rawMessage);
-      const body = buildPostMessageBody(message, imChannelId, "");
-      const response = await request("chat.postMessage", body);
-      if (response.ok !== true) {
-        throw new Error(`Slack chat.postMessage failed: ${response.error ?? "unknown_error"}`);
-      }
-      return { id: typeof response.ts === "string" ? response.ts : "", raw: response };
+      const response = await postSlackMessage(
+        buildPostMessageOptions(message, imChannelId, "", input.botToken),
+      );
+      return { id: response.id, raw: response.raw };
     },
     async startTyping(status) {
       if (!input.channelId || !currentThreadTs) return;
       try {
+        const normalizedStatus = status === undefined ? "" : truncateTypingStatus(status);
         const body: Record<string, unknown> = {
           channel_id: input.channelId,
           thread_ts: currentThreadTs,
-          status: status ?? "",
+          status: normalizedStatus,
         };
-        if (status !== undefined && status.length > 0) {
-          body.loading_messages = [status];
+        if (normalizedStatus.length > 0) {
+          body.loading_messages = [normalizedStatus];
         }
         const response = await request("assistant.threads.setStatus", body);
         if (response.ok !== true) {
@@ -503,15 +441,12 @@ export function buildSlackBinding(input: {
       messages.length = 0;
       if (!input.channelId || !currentThreadTs) return;
       try {
-        const response = await request("conversations.replies", {
+        const response = await fetchSlackThreadReplies({
+          ...createSlackApiOptions(input.botToken),
           channel: input.channelId,
-          ts: currentThreadTs,
           limit: 50,
+          ts: currentThreadTs,
         });
-        if (response.ok !== true || !Array.isArray(response.messages)) {
-          log.warn("conversations.replies returned not-ok", { error: response.error });
-          return;
-        }
         for (const raw of response.messages as Record<string, unknown>[]) {
           messages.push(parseThreadMessage(raw, currentThreadTs));
         }
@@ -554,17 +489,19 @@ function normalizePostInput(message: string | CardElement | SlackPostInput): Sla
   return message;
 }
 
-function buildPostMessageBody(
+function buildPostMessageOptions(
   message: SlackPostInput,
   channelId: string,
   threadTs: string,
-): Record<string, unknown> {
-  const base: Record<string, unknown> = {
+  botToken: SlackBotToken | undefined,
+): SlackMessageOptions {
+  const base: SlackMessageOptions = {
+    ...createSlackApiOptions(botToken),
     channel: channelId,
-    unfurl_links: false,
-    unfurl_media: false,
+    threadTs: threadTs || undefined,
+    unfurlLinks: false,
+    unfurlMedia: false,
   };
-  if (threadTs) base.thread_ts = threadTs;
 
   if ("card" in message) {
     base.blocks = cardToBlocks(message.card);
@@ -572,16 +509,44 @@ function buildPostMessageBody(
     return base;
   }
   if ("blocks" in message) {
-    base.blocks = message.blocks;
+    base.blocks = [...message.blocks];
     if (message.text !== undefined) base.text = message.text;
     return base;
   }
   if ("markdown" in message) {
-    base.markdown_text = rewriteBareMentions(message.markdown);
+    base.markdownText = message.markdown;
     return base;
   }
-  base.text = rewriteBareMentions(message.text);
+  base.text = message.text;
   return base;
+}
+
+function createSlackApiOptions(botToken: SlackBotToken | undefined): SlackApiOptions {
+  return { token: () => resolveSlackBotToken(botToken) };
+}
+
+function normalizeSlackApiBody(body: unknown): Record<string, unknown> {
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    return body as Record<string, unknown>;
+  }
+  return {};
+}
+
+function toSlackFileUpload(file: FileUpload): SlackFileUpload {
+  return {
+    data: normalizeFileData(file.data),
+    filename: file.filename,
+  };
+}
+
+function normalizeFileData(data: FileUpload["data"]): SlackFileUpload["data"] {
+  if (data instanceof ArrayBuffer) return data;
+  if (typeof Blob !== "undefined" && data instanceof Blob) return data;
+  if (ArrayBuffer.isView(data)) {
+    const view = data as ArrayBufferView;
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  }
+  return data;
 }
 
 function parseThreadMessage(
@@ -603,21 +568,4 @@ function parseThreadMessage(
     isMe: botId !== undefined,
     raw,
   };
-}
-
-/**
- * Normalize a {@link FileUpload.data} value (`Buffer | Blob | ArrayBuffer`) to
- * a contiguous `Buffer` we can both POST and length-prefix without
- * holding two copies of the payload in memory.
- */
-async function readFileBytes(data: FileUpload["data"]): Promise<Buffer> {
-  if (data instanceof ArrayBuffer) return Buffer.from(data);
-  if (typeof Blob !== "undefined" && data instanceof Blob) {
-    return Buffer.from(await data.arrayBuffer());
-  }
-  if (ArrayBuffer.isView(data)) {
-    const view = data as ArrayBufferView;
-    return Buffer.from(view.buffer, view.byteOffset, view.byteLength);
-  }
-  throw new Error("FileUpload.data must be a Buffer, ArrayBuffer, or Blob.");
 }

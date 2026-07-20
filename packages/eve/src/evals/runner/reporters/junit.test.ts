@@ -37,6 +37,28 @@ describe("JUnit", () => {
     const [, xml] = fsMocks.writeFile.mock.calls[0]!;
     expect(xml).toContain('<testsuite name="eve evals" tests="2" failures="1" skipped="0"');
   });
+
+  it("renders skipped evals as skipped test cases", async () => {
+    const reporter = JUnit({ filePath: "/tmp/eve/junit.xml" });
+    const summary = makeSummary();
+    await reporter.onRunComplete({
+      ...summary,
+      failed: 0,
+      passed: 0,
+      results: [
+        makeEvalResult({
+          id: "runtime/skips",
+          skipReason: "dev routes unavailable",
+          verdict: "skipped",
+        }),
+      ],
+      skipped: 1,
+    });
+
+    const [, xml] = fsMocks.writeFile.mock.calls[0]!;
+    expect(xml).toContain('tests="1" failures="0" skipped="1"');
+    expect(xml).toContain('<skipped message="dev routes unavailable"/>');
+  });
 });
 
 function makeSummary(): EveEvalRunSummary {
@@ -62,6 +84,7 @@ function makeSummary(): EveEvalRunSummary {
     failed: 1,
     passed: 1,
     scored: 0,
+    skipped: 0,
     startedAt: "2026-01-01T00:00:00.000Z",
     target: makeTarget(),
   };

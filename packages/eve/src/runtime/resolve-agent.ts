@@ -1,4 +1,7 @@
-import type { CompiledAgentNodeManifest, CompiledInstructions } from "#compiler/manifest.js";
+import type {
+  CompiledAgentNodeManifest,
+  CompiledInstructionsDefinition,
+} from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
@@ -19,7 +22,7 @@ import type {
   ResolvedAgent,
   ResolvedChannelDefinition,
   ResolvedSkillDefinition,
-  ResolvedInstructions,
+  ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
 
 /**
@@ -96,7 +99,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     input.manifest.sandbox === null
       ? null
       : await resolveSandboxDefinition(input.manifest.sandbox, input.moduleMap, input.nodeId);
-  const instructions = createResolvedInstructions(input.manifest.instructions);
+  const instructions = createResolvedInstructionsDefinition(input.manifest.instructions);
   const workspaceResourceRoot = input.manifest.workspaceResourceRoot;
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
@@ -104,7 +107,10 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     connections: resolvedConnections,
     disabledFrameworkChannels,
     disabledFrameworkTools: [...input.manifest.disabledFrameworkTools],
-    workflowEnabled: input.manifest.workflowEnabled,
+    workflowTool:
+      input.manifest.workflowTool === undefined
+        ? undefined
+        : { maxSubagents: input.manifest.workflowTool.maxSubagents },
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
@@ -128,9 +134,9 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   return resolvedAgent;
 }
 
-function createResolvedInstructions(
-  instructions: CompiledInstructions | undefined,
-): ResolvedInstructions | undefined {
+function createResolvedInstructionsDefinition(
+  instructions: CompiledInstructionsDefinition | undefined,
+): ResolvedInstructionsDefinition | undefined {
   if (instructions === undefined) {
     return undefined;
   }
@@ -147,11 +153,14 @@ function createResolvedInstructions(
 function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): ResolvedAgent["config"] {
   const config: {
     compaction?: ResolvedAgent["config"]["compaction"];
+    dynamicModel?: ResolvedAgent["config"]["dynamicModel"];
     experimental?: ResolvedAgent["config"]["experimental"];
     model: ResolvedAgent["config"]["model"];
     name: string;
     outputSchema?: ResolvedAgent["config"]["outputSchema"];
+    reasoning?: ResolvedAgent["config"]["reasoning"];
     source?: ResolvedAgent["config"]["source"];
+    limits?: ResolvedAgent["config"]["limits"];
   } = {
     model:
       manifest.config.model.source === undefined
@@ -208,16 +217,39 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     config.compaction = compaction;
   }
 
+  if (manifest.config.dynamicModel !== undefined) {
+    config.dynamicModel = {
+      ...createResolvedModuleSourceRef(manifest.config.dynamicModel),
+      eventNames: [...manifest.config.dynamicModel.eventNames],
+    };
+  }
+
   if (manifest.config.experimental !== undefined) {
-    config.experimental = { codeMode: manifest.config.experimental.codeMode };
+    config.experimental = {
+      workflow:
+        manifest.config.experimental.workflow === undefined
+          ? undefined
+          : { world: manifest.config.experimental.workflow.world },
+    };
   }
 
   if (manifest.config.outputSchema !== undefined) {
     config.outputSchema = manifest.config.outputSchema;
   }
 
+  if (manifest.config.reasoning !== undefined) {
+    config.reasoning = manifest.config.reasoning;
+  }
+
   if (manifest.config.source !== undefined) {
     config.source = createResolvedModuleSourceRef(manifest.config.source);
+  }
+
+  if (manifest.config.limits !== undefined) {
+    config.limits = {
+      maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
+      maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
+    };
   }
 
   return config;

@@ -5,6 +5,11 @@ import { getRuntimeActionRequestKey, getRuntimeActionResultKey } from "#runtime/
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
+import {
+  accumulateSessionUsage,
+  getTurnUsageState,
+  setTurnUsageState,
+} from "#harness/turn-tag-state.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -32,14 +37,14 @@ interface PendingRuntimeActionEventMetadata {
 /**
  * Serializable pending runtime-action batch stored on `session.state`.
  *
- * `childContinuationTokens` maps each `subagent-call` action's
- * `callId` to the deterministic child token minted by dispatch, so
- * the harness can clear proxy-input entries on result resolution
- * without re-deriving the token (keeps `harness/` runtime-agnostic).
+ * `childContinuationTokens` lets the harness clear local proxy-input entries
+ * on result resolution. `childSessionIds` lets the turn workflow cancel every
+ * successfully adopted local or remote child before dropping the batch.
  */
-interface PendingRuntimeActionBatch {
+export interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
   readonly childContinuationTokens?: Readonly<Record<string, string>>;
+  readonly childSessionIds?: Readonly<Record<string, string>>;
   readonly event: PendingRuntimeActionEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
 }
@@ -112,14 +117,21 @@ export function setPendingRuntimeActionBatch(input: {
   return { ...input.session, state };
 }
 
-/**
- * Records the child continuation token for a dispatched subagent-call
- * so {@link resolvePendingRuntimeActions} can clear proxy-input
- * entries when the child finishes.
- */
-export function recordPendingSubagentChildToken(input: {
+type PendingSubagentChildIdentity =
+  | {
+      readonly continuationToken: string;
+      readonly kind: "local";
+      readonly sessionId: string;
+    }
+  | {
+      readonly kind: "remote";
+      readonly sessionId: string;
+    };
+
+/** Records one successfully dispatched child's durable identities. */
+export function recordPendingSubagentChild(input: {
   readonly callId: string;
-  readonly childContinuationToken: string;
+  readonly child: PendingSubagentChildIdentity;
   readonly session: HarnessSession;
 }): HarnessSession {
   const batch = getPendingRuntimeActionBatch(input.session.state);
@@ -131,78 +143,21 @@ export function recordPendingSubagentChildToken(input: {
   const state = { ...input.session.state };
   state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
     ...batch,
-    childContinuationTokens: {
-      ...batch.childContinuationTokens,
-      [input.callId]: input.childContinuationToken,
+    ...(input.child.kind === "local"
+      ? {
+          childContinuationTokens: {
+            ...batch.childContinuationTokens,
+            [input.callId]: input.child.continuationToken,
+          },
+        }
+      : {}),
+    childSessionIds: {
+      ...batch.childSessionIds,
+      [input.callId]: input.child.sessionId,
     },
   } satisfies PendingRuntimeActionBatch;
 
   return { ...input.session, state };
-}
-
-/**
- * Discriminated item consumed by {@link accumulateRuntimeActionResults}
- * so the loop can process interleaved deliveries and results without
- * coupling to a concrete `HookPayload` shape.
- */
-type RuntimeActionAccumulatorItem<TDeliver> =
-  | { readonly kind: "deliver"; readonly value: TDeliver }
-  | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] };
-
-/**
- * Accumulates runtime-action results until every pending key has a
- * matching result. The caller passes the ordered key list so the
- * workflow runtime can drive the loop without hydrating a session.
- */
-export async function accumulateRuntimeActionResults<TDeliver>(input: {
-  readonly bufferedDeliveries: TDeliver[];
-  readonly getNext: () => Promise<RuntimeActionAccumulatorItem<TDeliver> | null>;
-  readonly initialResults?: readonly RuntimeActionResult[];
-  readonly pendingActionKeys: readonly string[] | undefined;
-}): Promise<RuntimeActionResult[] | null> {
-  const pendingKeys = input.pendingActionKeys;
-  const buffered: RuntimeActionResult[] = [...(input.initialResults ?? [])];
-
-  if (pendingKeys !== undefined && buffered.length > 0) {
-    const ready = resolveRuntimeActionResultsForKeys({
-      pendingKeys,
-      results: buffered,
-    });
-
-    if (ready !== undefined) {
-      return ready;
-    }
-  }
-
-  while (true) {
-    const item = await input.getNext();
-
-    if (item === null) {
-      return null;
-    }
-
-    if (item.kind === "deliver") {
-      input.bufferedDeliveries.push(item.value);
-      continue;
-    }
-
-    buffered.push(...item.results);
-
-    if (pendingKeys === undefined) {
-      // No pending batch; nothing to resolve. Keep draining so the
-      // stream state stays consistent.
-      continue;
-    }
-
-    const ready = resolveRuntimeActionResultsForKeys({
-      pendingKeys,
-      results: buffered,
-    });
-
-    if (ready !== undefined) {
-      return ready;
-    }
-  }
 }
 
 /**
@@ -233,7 +188,8 @@ function resolveRuntimeActionResultsForBatch(input: {
   });
 }
 
-function resolveRuntimeActionResultsForKeys(input: {
+/** Returns results in pending-key order once every requested action has completed. */
+export function resolveRuntimeActionResultsForKeys(input: {
   readonly pendingKeys: readonly string[];
   readonly results: readonly RuntimeActionResult[];
 }): RuntimeActionResult[] | undefined {
@@ -348,6 +304,22 @@ export async function resolvePendingRuntimeActions(input: {
         nextSession = clearProxyInputRequestsForChild(nextSession, childToken);
       }
     }
+  }
+
+  // Draw completed child spend down against the parent's session totals so
+  // the session token limits and the remaining-quota budget granted to later
+  // delegations account for what the tree has already spent.
+  for (const result of readyResults) {
+    if (result.kind !== "subagent-result" || result.usage === undefined) {
+      continue;
+    }
+    nextSession = setTurnUsageState(
+      nextSession,
+      accumulateSessionUsage({
+        previous: getTurnUsageState(nextSession.state),
+        usage: result.usage,
+      }),
+    );
   }
 
   const toolResults = readyResults.map((result) => {

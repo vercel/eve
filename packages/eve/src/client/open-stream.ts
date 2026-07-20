@@ -32,7 +32,9 @@ export async function* openStreamIterable(
   input: OpenStreamInput,
 ): AsyncGenerator<HandleMessageStreamEvent> {
   let startIndex = input.startIndex;
-  let remainingReconnectAttempts = input.maxReconnectAttempts;
+  // A relative tail cursor cannot be advanced safely after a disconnect
+  // without first resolving it to an absolute stream index.
+  let remainingReconnectAttempts = input.startIndex < 0 ? 0 : input.maxReconnectAttempts;
 
   while (true) {
     const body = await openStreamBody({ ...input, startIndex });
@@ -62,41 +64,57 @@ export async function* openStreamIterable(
 }
 
 /**
- * Opens one stream response body, retrying the short propagation window where
- * a just-acknowledged session may not yet be readable from the stream route.
+ * Opens one stream response body, retrying transient network errors and the
+ * short propagation window where a just-acknowledged session may not yet be
+ * readable from the stream route.
  */
 export async function openStreamBody(
   input: OpenStreamBodyInput,
 ): Promise<ReadableStream<Uint8Array>> {
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
+  let lastHeaders: Headers | undefined;
 
   for (let attempt = 0; attempt < STREAM_OPEN_RETRY_ATTEMPTS; attempt += 1) {
     const url = createClientUrl(
       input.host,
       createEveMessageStreamRoutePath(input.sessionId),
-      input.startIndex > 0 ? { startIndex: String(input.startIndex) } : undefined,
+      input.startIndex !== 0 ? { startIndex: String(input.startIndex) } : undefined,
     );
 
     const headers = await input.resolveHeaders();
-    const response = await fetch(url, {
-      headers,
-      redirect: input.redirect,
-      signal: input.signal ?? null,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers,
+        redirect: input.redirect,
+        signal: input.signal ?? null,
+      });
+    } catch (error) {
+      if (
+        input.signal?.aborted ||
+        !isStreamDisconnectError(error) ||
+        attempt === STREAM_OPEN_RETRY_ATTEMPTS - 1
+      ) {
+        throw error;
+      }
+      await sleep(STREAM_OPEN_RETRY_DELAY_MS);
+      continue;
+    }
 
     if (response.ok) {
       if (!response.body) {
-        throw new ClientError(response.status, "Response body is null.");
+        throw new ClientError(response.status, "Response body is null.", response.headers);
       }
       return response.body;
     }
 
     lastStatus = response.status;
     lastBody = await response.text();
+    lastHeaders = response.headers;
 
     if (!STREAM_OPEN_RETRYABLE_STATUS.has(response.status)) {
-      throw new ClientError(response.status, lastBody);
+      throw new ClientError(response.status, lastBody, response.headers);
     }
 
     if (attempt < STREAM_OPEN_RETRY_ATTEMPTS - 1) {
@@ -104,7 +122,7 @@ export async function openStreamBody(
     }
   }
 
-  throw new ClientError(lastStatus ?? 0, lastBody ?? "Failed to open message stream.");
+  throw new ClientError(lastStatus ?? 0, lastBody ?? "Failed to open message stream.", lastHeaders);
 }
 
 async function sleep(ms: number): Promise<void> {

@@ -4,7 +4,12 @@ import { existsSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { captureVercel, runVercel, runVercelCaptureStdout } from "./run-vercel.js";
+import {
+  captureVercel,
+  resolveVercelInvocation,
+  runVercel,
+  runVercelCaptureStdout,
+} from "./run-vercel.js";
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
@@ -35,8 +40,49 @@ function mockSpawnReturn(child: ChildProcessDouble): void {
   mockedSpawn.mockReturnValue(child as ReturnType<typeof spawn>);
 }
 
+function expectSpawnedVercel(args: string[], spawnOptions: Record<string, unknown>): void {
+  const call = mockedSpawn.mock.calls.at(-1);
+  expect(call).toBeDefined();
+  const [command, commandArgs, options] = call!;
+  expect(options).toEqual(expect.objectContaining(spawnOptions));
+  if (process.platform === "win32") {
+    expect(options).toEqual(expect.objectContaining({ shell: true }));
+    expect(command).toMatch(/(?:^vercel$|vercel\.(?:cmd|exe)$)/i);
+    expect(commandArgs).toEqual(args);
+    return;
+  }
+  expect(command).toBe("vercel");
+  expect(commandArgs).toEqual(args);
+  expect(options).toEqual(expect.objectContaining({ shell: undefined }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("resolveVercelInvocation", () => {
+  test("uses shell fallback for PATH Vercel CLI shims on Windows", () => {
+    const invocation = resolveVercelInvocation("/tmp/eve-agent", ["whoami"], "win32");
+
+    expect(invocation).toEqual({ command: "vercel", commandArgs: ["whoami"], shell: true });
+  });
+
+  test.skipIf(process.platform !== "win32")(
+    "picks up a local Windows Vercel CLI shim when present",
+    () => {
+      const invocation = resolveVercelInvocation(process.cwd(), ["whoami"], "win32");
+
+      expect(invocation.command.toLowerCase()).toMatch(/vercel\.cmd$/);
+      expect(invocation.commandArgs).toEqual(["whoami"]);
+      expect(invocation.shell).toBe(true);
+    },
+  );
+
+  test("keeps Unix invocation shell-free", () => {
+    const invocation = resolveVercelInvocation("/tmp/eve-agent", ["whoami"], "linux");
+
+    expect(invocation).toEqual({ command: "vercel", commandArgs: ["whoami"] });
+  });
 });
 
 describe("runVercel", () => {
@@ -55,11 +101,7 @@ describe("runVercel", () => {
     child.emit("close", 0);
 
     await expect(result).resolves.toBe(true);
-    expect(mockedSpawn).toHaveBeenCalledWith(
-      "vercel",
-      ["deploy", "--prod"],
-      expect.objectContaining({ stdio: ["inherit", "pipe", "pipe"] }),
-    );
+    expectSpawnedVercel(["deploy", "--prod"], { stdio: ["inherit", "pipe", "pipe"] });
     expect(onOutput.mock.calls.map(([line]) => line)).toEqual([
       { stream: "stdout", text: "Production deployment ready" },
       { stream: "stderr", text: "Inspect: https://vercel.example/deployment" },
@@ -97,11 +139,9 @@ describe("runVercel", () => {
     child.emit("close", 0);
 
     await expect(result).resolves.toBe(true);
-    expect(mockedSpawn).toHaveBeenCalledWith(
-      "vercel",
-      ["deploy", "--prod", "--yes", "--non-interactive"],
-      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
-    );
+    expectSpawnedVercel(["deploy", "--prod", "--yes", "--non-interactive"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   });
 
   test("passes cancellation to the child and settles without a stale failure line", async () => {
@@ -115,11 +155,7 @@ describe("runVercel", () => {
       onOutput,
       signal: controller.signal,
     });
-    expect(mockedSpawn).toHaveBeenCalledWith(
-      "vercel",
-      ["connect", "create", "slack"],
-      expect.objectContaining({ signal: controller.signal }),
-    );
+    expectSpawnedVercel(["connect", "create", "slack"], { signal: controller.signal });
 
     controller.abort();
     const error: NodeJS.ErrnoException = new Error("The operation was aborted");
@@ -276,11 +312,7 @@ describe("captureVercel", () => {
       },
     });
     // stderr is always piped so the reason survives without a live renderer.
-    expect(mockedSpawn).toHaveBeenCalledWith(
-      "vercel",
-      ["whoami"],
-      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
-    );
+    expectSpawnedVercel(["whoami"], { stdio: ["ignore", "pipe", "pipe"] });
   });
 
   test("reports a missing CLI as a spawn error", async () => {
@@ -324,11 +356,9 @@ describe("captureVercel", () => {
         message: "vercel connect list -F json exited with code 1.",
       },
     });
-    expect(mockedSpawn).toHaveBeenCalledWith(
-      "vercel",
-      ["connect", "list", "-F", "json"],
-      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
-    );
+    expectSpawnedVercel(["connect", "list", "-F", "json"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     expect(onOutput.mock.calls.map(([line]) => line)).toEqual([
       { stream: "stderr", text: "Connector lookup failed" },
       { stream: "stderr", text: "vercel connect list -F json exited with code 1." },

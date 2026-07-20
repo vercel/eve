@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extractCompletedResult, normalizeOutputSchemaForRequest } from "#client/output-schema.js";
+import { extractCompletedResult } from "#client/output-schema.js";
 import {
   createResultCompletedEvent,
   createTurnCompletedEvent,
@@ -8,18 +8,6 @@ import {
 } from "#protocol/message.js";
 
 describe("output schema client helpers", () => {
-  it("normalizes raw JSON Schema objects for request bodies", () => {
-    const schema = {
-      properties: {
-        title: { type: "string" },
-      },
-      required: ["title"],
-      type: "object",
-    } as const;
-
-    expect(normalizeOutputSchemaForRequest(schema)).toEqual(schema);
-  });
-
   it("extracts the most recent completed structured result", () => {
     const events: HandleMessageStreamEvent[] = [
       createResultCompletedEvent({

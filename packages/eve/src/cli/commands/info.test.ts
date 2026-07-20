@@ -44,7 +44,7 @@ function makeCompiledState(): CompileAgentResult {
     appRoot: APP_ROOT,
     config: {
       model: {
-        id: "anthropic/claude-sonnet-4.6",
+        id: "anthropic/claude-sonnet-5",
         routing: { kind: "gateway", target: "anthropic" },
       },
       name: "triage-bot",
@@ -80,7 +80,6 @@ function makeCompiledState(): CompileAgentResult {
     },
     paths: {
       appRoot: APP_ROOT,
-      channelInstrumentationTypesPath: `${APP_ROOT}/.eve/compile/channel-instrumentation.d.ts`,
       compiledManifestPath: `${APP_ROOT}/.eve/compile/compiled-agent-manifest.json`,
       compileDirectoryPath: `${APP_ROOT}/.eve/compile`,
       compileMetadataPath: `${APP_ROOT}/.eve/compile/compile-metadata.json`,
@@ -102,7 +101,7 @@ describe("buildApplicationInfoJson", () => {
     });
 
     expect(json.status).toBe("ready");
-    expect(json.model).toBe("anthropic/claude-sonnet-4.6");
+    expect(json.model).toBe("anthropic/claude-sonnet-5");
     expect(json.tools).toEqual(["create_ticket"]);
     expect(json.skills).toEqual([]);
     expect(json.diagnostics).toEqual({ errors: 0, warnings: 0 });

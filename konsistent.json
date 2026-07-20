@@ -1,0 +1,321 @@
+{
+  "$schema": "node_modules/konsistent/konsistent.schema.json",
+  "version": "v1",
+  "kebabToPascalMap": {
+    "github": "GitHub",
+    "junit": "JUnit",
+    "instruction": "Instructions"
+  },
+  "kebabToCamelMap": {
+    "github": "github",
+    "junit": "junit",
+    "instruction": "instructions"
+  },
+  "conventions": [
+    {
+      "name": "package-directories",
+      "description": "Workspace package folders keep their package metadata, changelog, TypeScript configs, and source entrypoint.",
+      "paths": "packages/{packageName}",
+      "must": {
+        "haveType": "directory",
+        "haveFiles": ["package.json", "CHANGELOG.md", "tsconfig.json", "src/index.ts"]
+      }
+    },
+    {
+      "name": "public-definitions",
+      "description": "Public definition requirements.",
+      "paths": [
+        "packages/eve/src/public/{conceptName:matches(^[a-z]+$)}s/index.ts",
+        "!packages/eve/src/public/connections",
+        "!packages/eve/src/public/definitions"
+      ],
+      "must": [
+        {
+          "name": "public-barrels-must-reexport-their-concept-definition-function-and-type",
+          "description": "Public barrels re-export their concept's definition function and type.",
+          "must": {
+            "export": [
+              {
+                "name": "define${conceptName.toPascalCase()}",
+                "from": "#public/definitions/${conceptName.toCamelCase()}.js"
+              }
+            ],
+            "exportTypes": [
+              {
+                "name": "${conceptName.toPascalCase()}Definition",
+                "from": "#public/definitions/${conceptName.toCamelCase()}.js"
+              }
+            ],
+            "haveFiles": [
+              "../definitions/${conceptName.toCamelCase()}.ts",
+              "../../shared/${conceptName.toCamelCase()}-definition.ts"
+            ]
+          }
+        },
+        {
+          "name": "public-definitions-must-import-from-matching-shared-definitions",
+          "description": "Public definitions must import from their matching shared definitions.",
+          "for": {
+            "files": ["../definitions/${conceptName.toCamelCase()}.ts"]
+          },
+          "must": {
+            "importFrom": "#shared/${conceptName.toCamelCase()}-definition.js"
+          }
+        },
+        {
+          "name": "compiler-manifest-must-export-matching-compiled-definitions",
+          "description": "Compiler manifest must export matching compiled definitions.",
+          "for": {
+            "files": ["../../compiler/manifest.ts"]
+          },
+          "must": {
+            "exportTypes": ["Compiled${conceptName.toPascalCase()}Definition"]
+          }
+        },
+        {
+          "name": "discover-manifest-must-export-matching-source-ref-types",
+          "description": "Discover manifest must export matching source ref types.",
+          "for": {
+            "files": ["../../discover/manifest.ts"]
+          },
+          "must": {
+            "exportTypes": ["${conceptName.toPascalCase()}SourceRef"]
+          }
+        },
+        {
+          "name": "runtime-types-file-must-export-matching-resolved-definitions",
+          "description": "Runtime types file must export matching compiled definitions.",
+          "for": {
+            "files": ["../../runtime/types.ts"]
+          },
+          "must": {
+            "exportTypes": ["Resolved${conceptName.toPascalCase()}Definition"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "public-channel-barrels",
+      "description": "Built-in public channel barrels re-export their channel factory and core channel types from the implementation module.",
+      "paths": "packages/eve/src/public/channels/{channelName}/index.ts",
+      "must": {
+        "export": [
+          {
+            "name": "${channelName.toCamelCase()}Channel",
+            "from": "#public/channels/${channelName}/${channelName.toCamelCase()}Channel.js"
+          }
+        ],
+        "exportTypes": [
+          {
+            "name": "${channelName.toPascalCase()}Channel",
+            "from": "#public/channels/${channelName}/${channelName.toCamelCase()}Channel.js"
+          },
+          {
+            "name": "${channelName.toPascalCase()}ChannelConfig",
+            "from": "#public/channels/${channelName}/${channelName.toCamelCase()}Channel.js"
+          },
+          {
+            "name": "${channelName.toPascalCase()}ReceiveTarget",
+            "from": "#public/channels/${channelName}/${channelName.toCamelCase()}Channel.js"
+          }
+        ]
+      }
+    },
+    {
+      "name": "public-sandbox-backends",
+      "description": "Public sandbox implementation barrels have matching backend implementation files.",
+      "paths": [
+        "packages/eve/src/public/sandbox/{sandboxName}.ts",
+        "!packages/eve/src/public/sandbox/index.ts",
+        "!packages/eve/src/public/sandbox/*-sandbox.ts"
+      ],
+      "must": [
+        {
+          "name": "public-sandbox-barrels-must-reexport-their-backend",
+          "description": "Public sandbox barrels re-export their backend factory and create options from matching implementation files.",
+          "must": {
+            "haveFiles": ["backends/${sandboxName}.ts", "${sandboxName}-sandbox.ts"],
+            "export": [
+              {
+                "name": "${sandboxName.toFlatCase()}",
+                "from": "#public/sandbox/backends/${sandboxName}.js"
+              }
+            ],
+            "exportTypes": [
+              {
+                "name": "${sandboxName.toPascalCase()}SandboxCreateOptions",
+                "from": "#public/sandbox/${sandboxName}-sandbox.js"
+              }
+            ]
+          }
+        },
+        {
+          "name": "public-sandbox-options-must-export-create-options",
+          "description": "Public sandbox option files export the matching create options type.",
+          "for": {
+            "files": ["${sandboxName}-sandbox.ts"]
+          },
+          "must": {
+            "exportTypes": ["${sandboxName.toPascalCase()}SandboxCreateOptions"]
+          }
+        },
+        {
+          "name": "public-sandbox-backends-must-export-their-factory",
+          "description": "Public sandbox backend implementation files export the matching backend factory using the public create options type.",
+          "for": {
+            "files": ["backends/${sandboxName}.ts"]
+          },
+          "must": {
+            "importTypes": [
+              {
+                "name": "${sandboxName.toPascalCase()}SandboxCreateOptions",
+                "from": "#public/sandbox/${sandboxName}-sandbox.js"
+              }
+            ],
+            "exportFunctions": [
+              {
+                "name": "${sandboxName.toFlatCase()}",
+                "receiveParamsOfTypes": ["${sandboxName.toPascalCase()}SandboxCreateOptions"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "eval-loaders",
+      "description": "Eval loaders must export their required symbols.",
+      "paths": [
+        "packages/eve/src/evals/loaders/{loaderName}.ts",
+        "!packages/eve/src/evals/loaders/index.ts"
+      ],
+      "must": {
+        "exportFunctions": [
+          {
+            "name": "load${loaderName.toPascalCase()}",
+            "receiveParamsOfTypes": ["string"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "eval-reporters",
+      "description": "Eval reporters must export their required symbols.",
+      "paths": [
+        "packages/eve/src/evals/runner/reporters/{reporterName}.ts",
+        "!packages/eve/src/evals/runner/reporters/types.ts"
+      ],
+      "must": [
+        {
+          "must": {
+            "importTypes": [
+              {
+                "name": "EvalReporter",
+                "from": "#evals/runner/reporters/types.js"
+              }
+            ],
+            "declareClasses": [
+              {
+                "name": "${reporterName.toPascalCase()}Reporter",
+                "implement": ["EvalReporter"]
+              }
+            ],
+            "exportTypes": ["${reporterName.toPascalCase()}ReporterConfig"],
+            "exportFunctions": [
+              {
+                "name": "${reporterName.toPascalCase()}",
+                "receiveParamsOfTypes": ["${reporterName.toPascalCase()}ReporterConfig"],
+                "returnValueOfType": "EvalReporter"
+              }
+            ]
+          }
+        },
+        {
+          "for": {
+            "files": ["../../reporters/index.ts"]
+          },
+          "must": {
+            "export": [
+              {
+                "name": "${reporterName.toPascalCase()}",
+                "from": "#evals/runner/reporters/${reporterName}.js"
+              }
+            ],
+            "exportTypes": [
+              {
+                "name": "${reporterName.toPascalCase()}ReporterConfig",
+                "from": "#evals/runner/reporters/${reporterName}.js"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "agent-app-directories",
+      "description": "Workspace agent apps keep their authored agent entry and instructions in agent/.",
+      "paths": [
+        "apps/frameworks/{appName}",
+        "!apps/frameworks/README.md",
+        "apps/fixtures/{appName}",
+        "!apps/fixtures/README.md",
+        "apps/templates/{appName}",
+        "!apps/templates/README.md"
+      ],
+      "must": {
+        "haveType": "directory",
+        "haveFiles": ["package.json", "tsconfig.json", "agent/agent.ts", "agent/instructions.md"]
+      }
+    },
+    {
+      "name": "e2e-fixture-directories",
+      "description": "Fixture-owned e2e apps share the same package, agent, and eval entry points.",
+      "paths": "e2e/fixtures/{fixtureName}",
+      "must": [
+        {
+          "must": {
+            "haveType": "directory",
+            "haveFiles": [
+              "package.json",
+              "tsconfig.json",
+              ".vercelignore",
+              "agent/agent.ts",
+              "agent/instructions.md",
+              "evals/evals.config.ts"
+            ]
+          }
+        },
+        {
+          "name": "e2e-eval-config-imports",
+          "description": "E2E eval config files use the public eve/evals config helper.",
+          "for": {
+            "files": "evals/evals.config.ts"
+          },
+          "must": {
+            "import": [
+              {
+                "name": "defineEvalConfig",
+                "from": "eve/evals"
+              }
+            ]
+          }
+        },
+        {
+          "name": "e2e-eval-imports",
+          "description": "E2E eval files use the public eve/evals authoring helper.",
+          "for": {
+            "files": "evals/**/*.eval.ts"
+          },
+          "must": {
+            "import": [
+              {
+                "name": "defineEval",
+                "from": "eve/evals"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

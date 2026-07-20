@@ -47,7 +47,7 @@ export async function runReadOnlySql(sql: string) {
 ```ts title="agent/tools/run_sql.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { runReadOnlySql } from "../lib/sample-db.js";
+import { runReadOnlySql } from "../lib/sample-db";
 
 export default defineTool({
   description:

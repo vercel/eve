@@ -68,6 +68,23 @@ describe("Twilio REST API wrapper", () => {
     });
   });
 
+  it("returns non-ok responses instead of throwing on Twilio HTTP errors", async () => {
+    const mockFetch: typeof fetch = async () =>
+      new Response(JSON.stringify({ code: 20_001, message: "bad request" }), { status: 400 });
+
+    const result = await callTwilioApi({
+      body: { Body: "hello" },
+      fetch: mockFetch,
+      path: "/2010-04-01/Accounts/AC123/Messages.json",
+    });
+
+    expect(result).toEqual({
+      body: { code: 20_001, message: "bad request" },
+      ok: false,
+      status: 400,
+    });
+  });
+
   it("sendTwilioMessage posts to the Messages resource with normal defaults", async () => {
     const mock = buildFetchMock();
 

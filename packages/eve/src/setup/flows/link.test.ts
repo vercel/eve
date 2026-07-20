@@ -129,6 +129,8 @@ describe("runLinkFlow", () => {
   });
 
   it("offers create when the caller passes create-or-link (the /model branch)", async () => {
+    const teamSelectMessage = () =>
+      "You need to link to a project to use Vercel Connect.\n\nSelect your team";
     const { prompter } = createFakePrompter({
       single: (opts) => {
         if (stripVTControlCharacters(opts.message) === "Vercel project") return "new";
@@ -142,6 +144,7 @@ describe("runLinkFlow", () => {
       prompter,
       deps,
       projectSelection: "create-or-link",
+      teamSelectMessage,
     });
 
     expect(result).toEqual({ kind: "done", credential: "VERCEL_OIDC_TOKEN" });
@@ -149,6 +152,13 @@ describe("runLinkFlow", () => {
     // existing-project picker — the opposite of the existing-only default.
     expect(deps.resolveProvisioning?.pickNewProjectName).toHaveBeenCalled();
     expect(deps.resolveProvisioning?.pickProject).not.toHaveBeenCalled();
+    expect(deps.resolveProvisioning?.pickTeam).toHaveBeenCalledWith(
+      expect.anything(),
+      APP_ROOT,
+      undefined,
+      expect.objectContaining({ selectMessage: teamSelectMessage }),
+    );
+    expect(prompter.log.message).not.toHaveBeenCalled();
   });
 
   it("runs the pickers on re-link even when the on-disk link is adoptable", async () => {

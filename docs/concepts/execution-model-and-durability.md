@@ -15,7 +15,7 @@ Work nests in three levels:
 
 Every turn runs as a durable workflow, built on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). eve checkpoints progress and serializes durable state at each step boundary. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session underneath them is durable.
 
-The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk, normally under `.workflow-data`, and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds platform features such as latest production deployment routing and dashboard run metadata.
+The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds platform features such as latest production deployment routing and dashboard run metadata.
 
 When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current instructions, model, and tools. The durable session keeps its conversation history and authored state, so identity-based channels such as Telegram private chats and Twilio phone-number conversations adopt agent updates without requiring a new session.
 
@@ -36,7 +36,7 @@ export default defineAgent({
 });
 ```
 
-The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. See [agent.ts](../agent-config#workflow-world) and [Workflow Worlds](https://workflow-sdk.dev/worlds).
+The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.0.0-beta` line); the Workflow SDK rejects incompatible protocol versions during initialization. See the [deployment guide](../guides/deployment#8-deploy-without-vercel) for the install command, plus [agent.ts](../agent-config#workflow-world) and [Workflow Worlds](https://workflow-sdk.dev/worlds).
 
 ## Resuming after a crash
 
@@ -53,6 +53,8 @@ Some work has to wait, including a human approving a [tool](../tools), an intera
 ## Message delivery and queueing
 
 eve does not maintain a durable FIFO queue of user messages for a session. The `continuationToken` is a resume handle for the session's current workflow hook, not a general message-queue address.
+
+Only one active session can own a continuation token. When a session starts with a token, eve commits the park hook before processing its first turn and fails a competing session if another run already owns that token. A tokenless session claims its token after the first turn establishes one. Competing input is not forwarded to the owner.
 
 When a session is waiting, a delivery to the current continuation token wakes the session and starts the next turn. When a turn is already active, the hook may accept additional deliveries, but the runtime only drains them at specific workflow boundaries. If more than one delivery is ready when the driver checks, eve may fold them into the next turn; that drain is best-effort and depends on workflow and transport timing.
 

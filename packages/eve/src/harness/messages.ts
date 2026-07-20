@@ -71,12 +71,12 @@ export function resolveAssistantStepText(
     }
 
     const text = extractMessageText(message);
-    if (text.length > 0) {
+    if (text.trim().length > 0) {
       return text;
     }
   }
 
-  if (fallback !== undefined && fallback.length > 0) {
+  if (fallback !== undefined && fallback.trim().length > 0) {
     return fallback;
   }
 
@@ -153,11 +153,24 @@ function coalesceMessage(input: {
     return input.a;
   }
 
-  if (typeof input.a === "string" && typeof input.b === "string") {
-    return `${input.a}\n\n${input.b}`;
+  return appendUserContent({ appended: input.b, existing: input.a });
+}
+
+/**
+ * Appends user content while preserving structured attachment parts.
+ */
+export function appendUserContent(input: {
+  readonly appended: string | UserContent;
+  readonly existing: string | UserContent;
+}): string | UserContent {
+  if (typeof input.existing === "string" && typeof input.appended === "string") {
+    return `${input.existing}\n\n${input.appended}`;
   }
 
-  const merged: UserContentArray = [...toUserContentArray(input.a), ...toUserContentArray(input.b)];
+  const merged: UserContentArray = [
+    ...toUserContentArray(input.existing),
+    ...toUserContentArray(input.appended),
+  ];
   return merged;
 }
 

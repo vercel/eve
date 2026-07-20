@@ -13,13 +13,10 @@ const mocks = vi.hoisted(() => ({
     },
     schedules: [],
   })),
-  localDev: vi.fn(() => "local-dev-auth"),
   resolveAgentInfoCompiledArtifactsSource: vi.fn(() => ({
     appRoot: "/tmp/app/.eve/dev-runtime/snapshots/current/app",
     kind: "disk" as const,
   })),
-  routeAuth: vi.fn(async () => ({ principal: "local-dev" })),
-  vercelOidc: vi.fn(() => "vercel-oidc-auth"),
 }));
 
 vi.mock("#compiled/@vercel/oidc/index.js", () => ({
@@ -35,17 +32,10 @@ vi.mock("#internal/nitro/routes/agent-info/load-agent-info-data.js", () => ({
   resolveAgentInfoCompiledArtifactsSource: mocks.resolveAgentInfoCompiledArtifactsSource,
 }));
 
-vi.mock("#public/channels/auth.js", () => ({
-  localDev: mocks.localDev,
-  routeAuth: mocks.routeAuth,
-  vercelOidc: mocks.vercelOidc,
-}));
-
 const ROUTE_INPUT = {
   appRoot: "/tmp/app",
-  dev: true,
   devRuntimeArtifactsPointerPath: "/tmp/app/.eve/dev-runtime/current.json",
-  mode: "development",
+  kind: "development",
   moduleMapLoaderPath: "/tmp/eve/src/internal/authored-module-map-loader.ts",
 } as const;
 
@@ -63,7 +53,7 @@ const GATEWAY_MANIFEST_DATA = {
 async function requestAgentInfo(): Promise<Response> {
   const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
 
-  return await handleAgentInfoRequest(ROUTE_INPUT, new Request("http://127.0.0.1/eve/v1/info"));
+  return await handleAgentInfoRequest(ROUTE_INPUT);
 }
 
 describe("handleAgentInfoRequest", () => {

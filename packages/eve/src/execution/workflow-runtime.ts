@@ -1,9 +1,13 @@
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { getHookByToken, getRun, resumeHook, start } from "#compiled/@workflow/core/runtime.js";
-import type { Run } from "#compiled/@workflow/core/runtime.js";
-import type { WorkflowFunction, WorkflowMetadata } from "#compiled/@workflow/core/runtime/start.js";
+import {
+  EntityConflictError,
+  HookNotFoundError,
+  RunExpiredError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 
 import type {
+  CancelTurnInput,
+  CancelTurnResult,
   DeliverInput,
   GetEventStreamOptions,
   HookPayload,
@@ -12,18 +16,41 @@ import type {
   Runtime,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
+import {
+  buildSessionAttributes,
+  buildSubagentRootAttributes,
+  readParentLineage,
+} from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { applyEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
+import {
+  getHookByToken,
+  getRun,
+  resumeHook,
+  start,
+  type Run,
+  type StartOptionsWithoutDeploymentId,
+  type WorkflowFunction,
+  type WorkflowMetadata,
+} from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import {
+  sessionCancelHookToken,
+  type TurnCancelPayload,
+} from "#execution/turn-cancellation-token.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
+
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
 
@@ -87,15 +114,38 @@ export function createWorkflowRuntime(config: {
       });
       const ctx = buildRunContext({ bundle, run: input });
       const serializedContext = serializeContext(ctx);
+      const parentLineage = readParentLineage(serializedContext);
+      const attributes =
+        parentLineage.sessionId === undefined
+          ? buildSessionAttributes({
+              inputMessage: input.title ?? input.input.message,
+              serializedContext,
+            })
+          : buildSubagentRootAttributes({
+              identity: { nodeId: bundle.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID },
+              parentCallId: parentLineage.callId,
+              parentSessionId: parentLineage.sessionId,
+              parentTurnId: parentLineage.turnId,
+              rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
+              serializedContext,
+            });
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
-        run = await startWorkflowPreferLatest(workflowEntryReference, [
+        run = await startWorkflowPreferLatest(
+          workflowEntryReference,
+          [
+            {
+              input: input.input,
+              limits: input.limits,
+              serializedContext,
+            },
+          ],
           {
-            input: input.input,
-            serializedContext,
+            allowReservedAttributes: true,
+            attributes: normalizeEveAttributes(attributes),
           },
-        ]);
+        );
       } catch (error) {
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
@@ -105,7 +155,9 @@ export function createWorkflowRuntime(config: {
 
       let events: ReadableStream<HandleMessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= parseNdjsonStream(() => getRun(run.runId).getReadable());
+        events ??= parseNdjsonStream<HandleMessageStreamEvent>(() =>
+          getRun(run.runId).getReadable(),
+        );
         return events;
       };
 
@@ -118,16 +170,19 @@ export function createWorkflowRuntime(config: {
       };
     },
 
+    async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
+      return await requestWorkflowTurnCancellation(input);
+    },
+
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
-      applyEveWorkflowQueueNamespace();
-      const hookPayload: HookPayload = {
+      const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
         kind: "deliver",
         payloads: [input.payload],
+        requestId: input.requestId,
       };
       try {
-        const hook = normalizeWorkflowHook(await getHookByToken(input.continuationToken));
-        await resumeHook(input.continuationToken, hookPayload);
+        const hook = normalizeWorkflowHook(await resumeHook(input.continuationToken, hookPayload));
         return { sessionId: hook.runId };
       } catch (error) {
         // "No hook" is the expected resume-or-start signal: normalize it to
@@ -146,11 +201,52 @@ export function createWorkflowRuntime(config: {
       sessionId: string,
       options?: GetEventStreamOptions,
     ): Promise<ReadableStream<HandleMessageStreamEvent>> {
-      return parseNdjsonStream(() =>
+      return parseNdjsonStream<HandleMessageStreamEvent>(() =>
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
     },
+
+    async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
+      try {
+        const hook = await getHookByToken(continuationToken);
+        return { sessionId: hook.runId };
+      } catch (error) {
+        if (HookNotFoundError.is(error)) {
+          return undefined;
+        }
+        logError(log, "failed to resolve session by continuation token", error, {
+          continuationToken,
+        });
+        throw error;
+      }
+    },
   };
+}
+
+/** Requests cancellation through a session's stable workflow hook. */
+export async function requestWorkflowTurnCancellation(
+  input: CancelTurnInput,
+): Promise<CancelTurnResult> {
+  const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
+
+  try {
+    await resumeHook(sessionCancelHookToken(input.sessionId), payload);
+    return { status: "accepted" };
+  } catch (error) {
+    if (isInactiveCancelTarget(error)) {
+      return { status: "no_active_turn" };
+    }
+    throw error;
+  }
+}
+
+function isInactiveCancelTarget(error: unknown): boolean {
+  return (
+    HookNotFoundError.is(error) ||
+    WorkflowRunNotFoundError.is(error) ||
+    RunExpiredError.is(error) ||
+    EntityConflictError.is(error)
+  );
 }
 
 /**
@@ -160,33 +256,34 @@ export function createWorkflowRuntime(config: {
 export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
+  options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  applyEveWorkflowQueueNamespace();
   if (!shouldRouteToLatestDeployment()) {
-    return await start(workflow, args);
+    return options === undefined
+      ? await start(workflow, args)
+      : await start(workflow, args, options);
   }
 
   try {
-    return await start(workflow, args, { deploymentId: "latest" });
+    return await start(workflow, args, { ...options, deploymentId: "latest" });
   } catch (error) {
     if (!isLatestDeploymentUnsupportedError(error)) {
       throw error;
     }
 
-    return await start(workflow, args);
+    return options === undefined
+      ? await start(workflow, args)
+      : await start(workflow, args, options);
   }
 }
 
 /**
- * Latest-deployment routing only applies on Vercel production: the platform
- * resolves "latest" through the deployment's git branch reference, which
- * only production deployments carry. Preview and CLI deployments have no
- * branch and fail with HTTP 400 ("Source deployment has no git branch"), so
- * they pin workflow runs to their own immutable deployment — which is also
- * the correct isolation semantic for previews.
+ * Local development resolves "latest" to the active promoted generation.
+ * Vercel resolves it only for production deployments; previews and CLI
+ * deployments have no branch reference and remain pinned to themselves.
  */
 function shouldRouteToLatestDeployment(): boolean {
-  return process.env.VERCEL_ENV === "production";
+  return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
 }
 
 function isLatestDeploymentUnsupportedError(error: unknown): boolean {
@@ -206,50 +303,4 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
   return {
     runId,
   };
-}
-
-function parseNdjsonStream(
-  createByteStream: () => ReadableStream<Uint8Array>,
-): ReadableStream<HandleMessageStreamEvent> {
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  return new ReadableStream<HandleMessageStreamEvent>({
-    async start(controller) {
-      const reader = createByteStream().getReader();
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          for (
-            let newlineIndex = buffer.indexOf("\n");
-            newlineIndex !== -1;
-            newlineIndex = buffer.indexOf("\n")
-          ) {
-            const line = buffer.slice(0, newlineIndex).trim();
-            buffer = buffer.slice(newlineIndex + 1);
-
-            if (line.length > 0) {
-              controller.enqueue(JSON.parse(line) as HandleMessageStreamEvent);
-            }
-          }
-        }
-
-        buffer += decoder.decode();
-        const trailing = buffer.trim();
-        if (trailing.length > 0) {
-          controller.enqueue(JSON.parse(trailing) as HandleMessageStreamEvent);
-        }
-        controller.close();
-      } catch (error) {
-        controller.error(error);
-      } finally {
-        reader.releaseLock();
-      }
-    },
-  });
 }

@@ -127,7 +127,7 @@ describe("extractToolApprovalInputRequests", () => {
     ]);
   });
 
-  it("extracts a code-mode approval request from a sibling tool call", () => {
+  it("extracts an approval request from a sibling tool call", () => {
     const result = extractToolApprovalInputRequests({
       content: [
         {
@@ -164,6 +164,26 @@ describe("extractToolApprovalInputRequests", () => {
     ]);
   });
 
+  it("skips automatic approval decisions", () => {
+    const result = extractToolApprovalInputRequests({
+      content: [
+        {
+          approvalId: "approval-1",
+          isAutomatic: true,
+          toolCall: {
+            input: { command: "rm -rf /tmp" },
+            toolCallId: "call-1",
+            toolName: "bash",
+            type: "tool-call",
+          },
+          type: "tool-approval-request",
+        },
+      ],
+    });
+
+    expect(result).toEqual([]);
+  });
+
   it("skips approval requests without matching tool-call data", () => {
     const result = extractToolApprovalInputRequests({
       content: [
@@ -173,6 +193,27 @@ describe("extractToolApprovalInputRequests", () => {
           type: "tool-approval-request",
         } as never,
       ],
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("skips approval requests for excluded tool calls before parsing input", () => {
+    const result = extractToolApprovalInputRequests({
+      content: [
+        {
+          input: [],
+          toolCallId: "call-1",
+          toolName: "bash",
+          type: "tool-call",
+        } as never,
+        {
+          approvalId: "approval-1",
+          toolCallId: "call-1",
+          type: "tool-approval-request",
+        } as never,
+      ],
+      excludedCallIds: new Set(["call-1"]),
     });
 
     expect(result).toEqual([]);

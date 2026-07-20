@@ -57,6 +57,7 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
     passed: summary.passed,
     failed: summary.failed,
     scored: summary.scored,
+    skipped: summary.skipped,
     errored: summary.errored,
     totalEvals: summary.results.length,
     evals: summary.results.map((result) => ({
@@ -70,6 +71,7 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
         passed: a.passed,
       })),
       error: result.error,
+      skipReason: result.skipReason,
     })),
   };
 }
@@ -82,6 +84,7 @@ function buildResultLine(result: EveEvalResult): Record<string, unknown> {
     output: result.result.output,
     assertions: result.assertions,
     error: result.error,
+    skipReason: result.skipReason,
   };
 }
 
@@ -100,6 +103,7 @@ function buildEvalArtifact(result: EveEvalResult): Record<string, unknown> {
     verdict: result.verdict,
     assertions: result.assertions,
     error: result.error,
+    skipReason: result.skipReason,
   };
 }
 

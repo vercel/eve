@@ -11,10 +11,8 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
 
 /**
  * Stable framework-owned route exposing the JSON inspection payload for
- * the current agent. Nitro registers this route with the application
- * surface, and the handler uses the same default auth chain as the eve
- * channel: local development accepts loopback requests, while deployed
- * Vercel targets require OIDC.
+ * the current agent. The eve channel registers and authenticates this route
+ * with the same `auth` input as its session routes.
  */
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 
@@ -33,6 +31,13 @@ export const EVE_CONTINUE_SESSION_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:
  * Stable framework-owned message stream route pattern.
  */
 export const EVE_MESSAGE_STREAM_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/stream`;
+
+/**
+ * Stable framework-owned route pattern for cancelling a session's
+ * in-flight turn. Accepts an optional `{ turnId }` body guard scoping
+ * the cancel to the turn the caller observed.
+ */
+export const EVE_CANCEL_TURN_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/cancel`;
 
 /**
  * Framework-owned route pattern for dispatching one authored schedule
@@ -110,6 +115,13 @@ export function createEveMessageStreamRoutePath(sessionId: string): string {
  */
 export function createEveContinueSessionRoutePath(sessionId: string): string {
   return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}`;
+}
+
+/**
+ * Creates the stable framework-owned cancel-turn route path for one session.
+ */
+export function createEveCancelTurnRoutePath(sessionId: string): string {
+  return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}/cancel`;
 }
 
 /**

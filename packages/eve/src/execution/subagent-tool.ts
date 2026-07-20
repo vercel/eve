@@ -1,15 +1,18 @@
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
-import { formatSubagentInvocation } from "#execution/subagent-invocation.js";
+import { formatSubagentInput } from "#execution/subagent-invocation.js";
 import type {
   ChannelInstrumentationProjection,
   RunInput,
+  RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { JsonObject } from "#shared/json.js";
+import { isJsonObjectValue } from "#shared/json.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
+import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
 
 /**
  * Pending runtime-action batch event metadata needed for child run lineage.
@@ -18,6 +21,15 @@ interface BatchEventMetadata {
   readonly sequence: number;
   readonly turnId: string;
 }
+
+export type SubagentInputSource =
+  | {
+      readonly description: string;
+      readonly type: "local";
+    }
+  | {
+      readonly type: "runtime";
+    };
 
 /**
  * Result of {@link buildSubagentRunInput}.
@@ -45,10 +57,29 @@ export function buildSubagentRunInput(input: {
    */
   readonly capabilities?: SessionCapabilities;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /**
+   * Number of local subagent calls dispatched in this batch. The parent's
+   * remaining token quota is split evenly across them so parallel children
+   * are collectively, not individually, bounded by it. Remote agents run
+   * under their own deployment's limits and are not counted.
+   */
+  readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
+  /** Hook token owned by the workflow currently waiting for this child. */
+  readonly parentContinuationToken?: string;
   readonly session: HarnessSession;
+  readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
-  const { action, auth, batchEvent, capabilities, channelMetadata, initiatorAuth, session } = input;
+  const {
+    action,
+    auth,
+    batchEvent,
+    capabilities,
+    channelMetadata,
+    initiatorAuth,
+    session,
+    source,
+  } = input;
 
   const childContinuationToken = mintSubagentContinuationToken(
     `${session.sessionId}:${action.callId}`,
@@ -62,13 +93,24 @@ export function buildSubagentRunInput(input: {
   // explicit root, so its own `sessionId` becomes the root for its
   // children.
   const rootSessionId = session.rootSessionId ?? session.sessionId;
+  const subagentDepth = resolveSubagentDepth(session);
+  const inheritedLimits: {
+    -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
+  } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
+  const outputSchema = action.input.outputSchema;
+  const requestedOutputSchema =
+    isJsonObjectValue(outputSchema) && Object.keys(outputSchema).length > 0
+      ? outputSchema
+      : undefined;
 
-  const runInput: RunInput = {
+  const runInput: {
+    -readonly [K in keyof RunInput]: RunInput[K];
+  } = {
     adapter: {
       kind: SUBAGENT_ADAPTER_KIND,
       state: {
         callId: action.callId,
-        parentContinuationToken: session.continuationToken,
+        parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
         parentSessionId: session.sessionId,
         subagentName: action.subagentName,
         ...(action.subagentName === "agent" && session.sandboxState
@@ -82,9 +124,10 @@ export function buildSubagentRunInput(input: {
     continuationToken: childContinuationToken,
     initiatorAuth,
     input: {
-      message: formatSubagentCallInputMessage(action),
-      outputSchema: action.input.outputSchema as JsonObject | undefined,
+      message: formatSubagentCallInputMessage({ action, source }),
+      outputSchema: requestedOutputSchema,
     },
+    limits: inheritedLimits,
     mode: "task",
     parent: {
       callId: action.callId,
@@ -95,6 +138,7 @@ export function buildSubagentRunInput(input: {
         sequence: batchEvent.sequence,
       },
     },
+    subagentDepth: subagentDepth.nextChildDepth,
   };
 
   return { childContinuationToken, runInput };
@@ -103,14 +147,29 @@ export function buildSubagentRunInput(input: {
 /**
  * Formats the synthesized child input message for one delegated subagent call.
  */
-function formatSubagentCallInputMessage(
-  action: Pick<RuntimeSubagentCallActionRequest, "description" | "input" | "subagentName">,
-): string {
-  const { message } = action.input as { message: string };
+function formatSubagentCallInputMessage(input: {
+  readonly action: Pick<RuntimeSubagentCallActionRequest, "input" | "subagentName">;
+  readonly source: SubagentInputSource;
+}): string {
+  const { message } = input.action.input as { message: string };
 
-  return formatSubagentInvocation({
-    description: action.description,
-    message,
-    name: action.subagentName,
-  }).message;
+  switch (input.source.type) {
+    case "local":
+      return formatSubagentInput({
+        description: input.source.description,
+        message,
+        name: input.action.subagentName,
+        type: "local",
+      }).message;
+    case "runtime":
+      return formatSubagentInput({
+        message,
+        name: input.action.subagentName,
+        type: "runtime",
+      }).message;
+    default: {
+      const _exhaustive: never = input.source;
+      return _exhaustive;
+    }
+  }
 }

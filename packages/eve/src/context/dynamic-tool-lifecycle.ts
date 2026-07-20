@@ -1,6 +1,7 @@
-import { jsonSchema, zodSchema, type FlexibleSchema, type ModelMessage } from "ai";
+import type { ModelMessage } from "ai";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ApprovalContext } from "#public/definitions/approval.js";
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -9,9 +10,14 @@ import {
 } from "#shared/dynamic-tool-definition.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
-import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
+import {
+  serializeInputSchema,
+  serializeOutputSchema,
+  toInputSchema,
+  toOutputSchema,
+} from "#shared/tool-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { buildCallbackContext } from "#context/build-callback-context.js";
+import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
@@ -31,35 +37,23 @@ const log = createLogger("dynamic-tools");
 function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): HarnessToolDefinition {
   return {
     description: entry.description,
-    execute: (input: unknown) =>
-      entry.execute(input as Record<string, unknown>, buildCallbackContext()),
-    inputSchema: convertInputSchema(entry.inputSchema),
+    execute: (input: unknown, options) =>
+      entry.execute(
+        input as Record<string, unknown>,
+        buildBaseToolContext({ options, toolName: name }),
+      ),
+    inputSchema: toInputSchema(entry.inputSchema),
     name,
-    needsApproval: entry.needsApproval,
-    outputSchema: convertOptionalOutputSchema(entry.outputSchema),
+    approval: entry.approval,
+    outputSchema: toOutputSchema(entry.outputSchema),
     ...(entry.toModelOutput !== undefined
       ? { toModelOutput: entry.toModelOutput as (output: unknown) => unknown }
       : {}),
   };
 }
 
-function convertInputSchema(schema: unknown): FlexibleSchema {
-  if (typeof schema === "object" && schema !== null && "~standard" in schema) {
-    return zodSchema(schema as Parameters<typeof zodSchema>[0]);
-  }
-  return jsonSchema(schema as Parameters<typeof jsonSchema>[0]);
-}
-
-function convertOptionalOutputSchema(schema: unknown): FlexibleSchema | undefined {
-  if (schema === undefined) return undefined;
-  if (typeof schema === "object" && schema !== null && "~standard" in schema) {
-    return zodSchema(schema as Parameters<typeof zodSchema>[0]);
-  }
-  return jsonSchema(schema as Parameters<typeof jsonSchema>[0]);
-}
-
 function qualifyDynamicToolNames(
-  slug: string,
+  resolver: ResolvedDynamicToolResolver,
   isSingle: boolean,
   entries: Readonly<Record<string, DynamicToolEntry>>,
 ): Array<{ name: string; entryKey: string; entry: DynamicToolEntry }> {
@@ -71,12 +65,17 @@ function qualifyDynamicToolNames(
   // A single returned defineTool is named after the file slug; a map names each
   // entry by its bare key (authors namespace keys themselves if needed).
   if (isSingle) {
-    result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
+    result.push({ name: resolver.slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
+  // Map entries from an extension resolver are prefixed with the mount
+  // namespace so extension-produced tools are namespaced like the extension's
+  // static tools. The single-tool case above already uses the namespaced slug.
+  const prefix =
+    resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
   for (const key of keys) {
-    result.push({ name: key, entryKey: key, entry: entries[key]! });
+    result.push({ name: `${prefix}${key}`, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -117,10 +116,11 @@ export function replayDynamicSessionTools(
 
     tools.push({
       description: m.description,
-      execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
-      inputSchema: jsonSchema(m.inputSchema),
+      execute: (input: unknown, options) =>
+        stepFn(m.closureVars, input, buildBaseToolContext({ options, toolName: m.name })),
+      inputSchema: toInputSchema(m.inputSchema),
       name: m.name,
-      outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),
+      outputSchema: toOutputSchema(m.outputSchema),
     });
   }
 
@@ -245,7 +245,7 @@ async function resolveToolsFromEvent(
     if (outcome.value === null) continue;
 
     const { resolver, entries, isSingle } = outcome.value;
-    const named = qualifyDynamicToolNames(resolver.slug, isSingle, entries);
+    const named = qualifyDynamicToolNames(resolver, isSingle, entries);
     for (const { name, entryKey, entry } of named) {
       const previousOwner = dynamicToolOwners.get(name);
       if (previousOwner !== undefined && previousOwner !== resolver.slug) {
@@ -256,6 +256,9 @@ async function resolveToolsFromEvent(
       dynamicToolOwners.set(name, resolver.slug);
 
       liveTools.push(toHarnessToolDefinition(name, entry));
+      if (event.type === "step.started") {
+        continue;
+      }
 
       const stepFn =
         "__executeStepFn" in entry
@@ -287,17 +290,24 @@ async function resolveToolsFromEvent(
         serializedClosureVars = {};
       }
 
+      let approvalStepFnName: string | undefined;
+      if (entry.approval !== undefined) {
+        approvalStepFnName = `eve:dynamic-tool-approval:${resolver.slug}:${entryKey}`;
+        const originalApproval = entry.approval.bind(entry);
+        registerStepFunction(approvalStepFnName, (_closureVars: unknown, approvalCtx: unknown) =>
+          originalApproval(approvalCtx as ApprovalContext),
+        );
+      }
+
       metadata.push({
         name,
         description: entry.description,
-        inputSchema: normalizeJsonSchemaDefinition(entry.inputSchema),
-        outputSchema:
-          entry.outputSchema === undefined
-            ? undefined
-            : normalizeJsonSchemaDefinition(entry.outputSchema, "output"),
+        inputSchema: serializeInputSchema(entry.inputSchema),
+        outputSchema: serializeOutputSchema(entry.outputSchema),
         resolverSlug: resolver.slug,
         entryKey,
         executeStepFnName,
+        approvalStepFnName,
         closureVars: serializedClosureVars,
       });
     }

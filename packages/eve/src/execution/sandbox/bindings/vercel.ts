@@ -42,6 +42,7 @@ import {
 } from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
+import { writeSandboxSeedFiles } from "#execution/sandbox/bindings/local-backend-utils.js";
 import type {
   VercelCreateOptions,
   VercelModule,
@@ -334,13 +335,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
     });
   }
 
-  for (const file of input.seedFiles) {
-    if (typeof file.content === "string") {
-      await templateSession.writeTextFile({ content: file.content, path: file.path });
-    } else {
-      await templateSession.writeBinaryFile({ content: file.content, path: file.path });
-    }
-  }
+  await writeSandboxSeedFiles(templateSession, input.seedFiles);
 
   const snapshot = await sandbox.snapshot();
   return {
@@ -408,15 +403,18 @@ function createSessionCreateParams(
   }
 
   /*
-   * Strip both `source` and `runtime` from author-supplied create options for the
-   * template-backed session path. The framework owns the source there, and the SDK
-   * rejects `runtime` for a snapshot because its runtime is already baked into it.
+   * Strip `source`, `runtime`, and `image` from author-supplied create options
+   * for the template-backed session path. The framework owns the source there,
+   * and a snapshot source is mutually exclusive with both `runtime` and `image`
+   * (the template snapshot already has the eve image baked in).
    */
   const {
+    image: _image,
     runtime: _runtime,
     source: _source,
     ...sessionCreateOptions
-  } = input.createOptions as VercelCreateOptions & Partial<Record<"runtime" | "source", unknown>>;
+  } = input.createOptions as VercelCreateOptions &
+    Partial<Record<"image" | "runtime" | "source", unknown>>;
 
   return {
     ...sessionCreateOptions,
@@ -457,8 +455,24 @@ function createHandle(
         sessionKey,
       };
     },
-    async dispose() {},
+    // Session sandboxes are persistent, so the SDK resumes a stopped
+    // sandbox on the next command after reattach.
+    async shutdown() {
+      await stopVercelSandbox(sandbox);
+    },
   };
+}
+
+async function stopVercelSandbox(sandbox: VercelSandbox): Promise<void> {
+  if (sandbox.status !== "running" && sandbox.status !== "pending") {
+    return;
+  }
+  try {
+    await sandbox.stop();
+  } catch {
+    // Best-effort: an unreachable or already-stopped sandbox must not
+    // block server shutdown; the provider-side timeout is the backstop.
+  }
 }
 
 function createVercelNetworkPolicySetter(

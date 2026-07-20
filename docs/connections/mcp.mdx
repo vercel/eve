@@ -1,0 +1,203 @@
+---
+title: "MCP Connections"
+description: "Connect an eve agent to a remote MCP server, authorize it with Vercel Connect or static credentials, and control which tools the model can discover."
+---
+
+MCP connections point eve at a remote MCP server you do not author. The server publishes its tools and schemas, and eve exposes matching tools to the model through `connection_search`.
+
+Use MCP when the service already has an MCP server, when the server owns tool schemas dynamically, or when one connection should expose a family of related remote tools. Use an [OpenAPI connection](./openapi) instead when the service publishes an HTTP API contract and you want eve to generate one tool per operation.
+
+## Define an MCP connection
+
+Create one file under `agent/connections/`. The filename becomes the runtime connection name, so `agent/connections/linear.ts` registers as `linear`, and discovered tools are called as `linear__<tool>`.
+
+```ts title="agent/connections/linear.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/mcp",
+  description: "Linear workspace: issues, projects, cycles, and comments.",
+  auth: connect("mcp.linear.app/linear"),
+});
+```
+
+The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself: it is the main signal `connection_search` uses when deciding which connection to query.
+
+## Use Vercel Connect for OAuth
+
+For OAuth-backed MCP servers, prefer [Vercel Connect](https://vercel.com/docs/connect). Connect owns the browser consent flow, encrypted token storage, refresh, and project access. The `connect()` helper from `@vercel/connect/eve` plugs that lifecycle into eve's connection auth, so credentials never land in model context or conversation history.
+
+From the Vercel project or agent app that will run the connection:
+
+```bash
+npm install @vercel/connect
+vercel link
+vercel connect create mcp.linear.app --name linear
+vercel connect attach <connector-uid> --yes
+vercel env pull
+```
+
+Use the connector UID returned by the CLI in `connect("<connector-uid>")`. For Linear, the MCP runtime endpoint is `https://mcp.linear.app/mcp`, while the managed Connect service identifier is `mcp.linear.app`; those are related but not interchangeable.
+
+By default, `connect("...")` is user-scoped. The first tool call for a new user emits an `authorization.required` event with a URL to visit, parks the turn, and resumes after the callback completes. The active eve session must already have a user principal from route auth or from a platform channel. If there is no authenticated user, the connection fails with `reason: "principal_required"`.
+
+If the MCP server should act as the agent itself instead of the signed-in user, make the connector app-scoped:
+
+```ts title="agent/connections/linear.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/mcp",
+  description: "Linear workspace: issues, projects, cycles, and comments.",
+  auth: connect({ connector: "mcp.linear.app/linear", principalType: "app" }),
+});
+```
+
+App-scoped Connect auth is non-interactive. eve asks Connect for one shared app token; if the connector is missing or cannot issue an app token, the tool call fails terminally so an operator can fix setup.
+
+## Static tokens and headers
+
+Use `auth.getToken` when you already have a bearer token, API key, service account token, or out-of-band OAuth flow. eve sends the returned token as `Authorization: Bearer <token>`.
+
+```ts title="agent/connections/linear.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/mcp",
+  description: "Linear workspace: issues, projects, cycles, and comments.",
+  auth: {
+    getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }),
+  },
+});
+```
+
+Use `headers` for non-Bearer auth schemes or extra server configuration:
+
+```ts title="agent/connections/private-docs.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://docs.example.com/mcp",
+  description: "Internal docs: search pages, owners, and recent changes.",
+  headers: {
+    "X-Api-Key": process.env.DOCS_API_KEY!,
+  },
+});
+```
+
+`auth` and `headers` can also be functions that receive the active session context. Use that when credentials, tenants, or routing depend on the caller.
+
+## No auth
+
+Omit `auth` and `headers` only for intentionally public or local-only servers:
+
+```ts title="agent/connections/local.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "http://localhost:3001/mcp",
+  description: "Local dev MCP server.",
+});
+```
+
+Do not use a no-auth connection for sensitive third-party services unless another layer protects the endpoint.
+
+## Tool filters
+
+MCP servers can expose broad read and write surfaces. Narrow what the model can discover with exactly one of `tools.allow` or `tools.block`:
+
+```ts title="agent/connections/linear.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/mcp",
+  description: "Linear: read issue and project data.",
+  auth: connect("mcp.linear.app/linear"),
+  tools: { allow: ["search_issues", "get_issue"] },
+});
+```
+
+Prefer `allow` for the smallest safe surface, especially when the server exposes write tools. Use `block` when the server has a broad stable surface and only a few tools should be hidden.
+
+## Approval gates
+
+For MCP tools that can create, modify, delete, message, transmit, purchase, or access sensitive data, add a human approval gate:
+
+```ts title="agent/connections/linear.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+import { once } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/mcp",
+  description: "Linear workspace.",
+  auth: connect("mcp.linear.app/linear"),
+  approval: once(),
+});
+```
+
+`once()` asks the first time in a session, `always()` asks on every tool call, and `never()` allows calls without approval. Authorization and approval work together: eve records approval before an OAuth park, then resumes without asking again for the same approved call.
+
+The `once()`, `always()`, and `never()` helpers from `eve/tools/approval` gate every tool the connection serves the same way. See [Connections](/docs/connections#per-connection-approval) for those, and [Human-in-the-loop](/docs/human-in-the-loop) for the full pause-and-resume contract.
+
+### Gate specific tools by name or input
+
+A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, approvedTools }` and returns an approval status, synchronously or as a promise.
+
+This connection always gates deletes, gates a publish only when the call actually schedules a post, and lets everything else through:
+
+```ts title="agent/connections/social.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+// Bare tool names whose effects are irreversible — always gate these.
+const DELETE_TOOLS = ["delete_draft", "delete_thread"];
+// Tools that can publish — gate only when the call schedules a post.
+const PUBLISH_TOOLS = ["create_draft", "edit_draft"];
+
+// Read `requestBody.publish_at` without trusting the input's shape.
+const publishesNow = (input: unknown): boolean => {
+  const body = (input as { requestBody?: { publish_at?: unknown } })?.requestBody;
+  return typeof body?.publish_at === "string" && body.publish_at.length > 0;
+};
+
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/mcp",
+  description: "Social publishing: draft, schedule, and manage posts.",
+  auth: { getToken: async () => ({ token: process.env.SOCIAL_API_KEY! }) },
+  approval: ({ toolName, toolInput }) => {
+    if (DELETE_TOOLS.some((t) => toolName.includes(t))) return "user-approval";
+    if (PUBLISH_TOOLS.some((t) => toolName.includes(t))) {
+      return publishesNow(toolInput) ? "user-approval" : "not-applicable";
+    }
+    return "not-applicable";
+  },
+});
+```
+
+Two details are specific to connection tools:
+
+- **`toolName` arrives qualified**, not as the bare remote name. An MCP tool surfaces to the policy as `<connection>__<tool>` (e.g. `social__delete_draft`), so match the bare tool name with `.includes()` or `.endsWith()` rather than `===`.
+- **`toolInput` is the raw input the model produced**, typed as `Record<string, unknown> | undefined`. With an authored tool you define the `inputSchema`, so its approval policy gets input typed and checked against your schema; a connection tool's schema is published by the remote MCP server, not you, so the shape is one you neither own nor can rely on. It is also `undefined` whenever the model's input isn't an object. Read nested fields defensively — as `publishesNow` does — instead of trusting the shape.
+
+Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"` (or `false`) to run without a prompt; return `"approved"` or `"denied"` to decide automatically without involving anyone.
+
+[Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, how `approvedTools` and `session.auth` factor in, and how a gated call pauses and resumes durably.
+
+## Troubleshooting
+
+| Symptom                                    | Check                                                                                                                                     |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `principal_required`                       | A user-scoped `connect("...")` ran without an authenticated user. Return `principalType: "user"` from route auth, or use app-scoped auth. |
+| The model does not find the remote tool    | Improve the connection `description`, then check `tools.allow` / `tools.block`.                                                           |
+| OAuth works locally but fails after deploy | Attach the Connect connector to the deployed Vercel project and verify the UID in `connect("...")`.                                       |
+| The server rejects requests                | Confirm the MCP URL, transport support, auth scheme, and any required headers.                                                            |
+
+## What to read next
+
+- [Connections](../connections): shared auth, headers, approval, and per-caller patterns.
+- [OpenAPI connections](./openapi): generate tools from OpenAPI operations.
+- [Auth & route protection](../guides/auth-and-route-protection): route auth and the full interactive OAuth lifecycle.
+- [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.

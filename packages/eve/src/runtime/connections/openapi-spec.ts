@@ -1,4 +1,4 @@
-import matter from "#compiled/gray-matter/index.js";
+import { parseFrontmatter } from "#internal/helpers/gray-matter.js";
 import { isArray } from "#runtime/connections/openapi-schema.js";
 import { isObject } from "#shared/guards.js";
 
@@ -19,8 +19,7 @@ export function parseSpecDocument(text: string): unknown {
   }
   const body = text.replace(/^\uFEFF/, "");
   const wrapped = body.trimStart().startsWith("---") ? body : `---\n${body}\n---`;
-  const parsed = matter(wrapped);
-  return parsed.data ?? {};
+  return parseFrontmatter(wrapped).data;
 }
 
 /**

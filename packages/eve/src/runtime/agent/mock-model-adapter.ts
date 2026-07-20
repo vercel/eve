@@ -14,7 +14,6 @@ import {
   resolveMockFixtureToken,
   resolveWeatherCity,
 } from "#runtime/agent/mock-model-fixtures.js";
-import { CODE_MODE_TOOL_NAME } from "#shared/code-mode.js";
 import {
   type BootstrapGenerateResult,
   type BootstrapPrompt,
@@ -36,6 +35,7 @@ import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
 const LOAD_SKILL_TOOL_CALL_ID = "call_load_skill";
+const MOCK_AUTHORED_MODELS_ENV = "EVE_MOCK_AUTHORED_MODELS";
 type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 
 interface BootstrapToolResult {
@@ -58,11 +58,12 @@ const bootstrapWeatherPayloadSchema = z
 /**
  * Returns true when authored runtime models should resolve through the
  * dedicated deterministic mock adapter. The adapter is internal to the test
- * tiers: it activates only under `NODE_ENV=test`, keeping the unit,
- * integration, and scenario suites deterministic and credential-free.
+ * tiers: unit, integration, and scenario tests activate it through
+ * `NODE_ENV=test`; spawned smoke servers use the explicit opt-in environment
+ * variable so their package-manager build keeps its normal environment.
  */
 export function shouldMockAuthoredRuntimeModels(): boolean {
-  return process.env.NODE_ENV === "test";
+  return process.env.NODE_ENV === "test" || process.env[MOCK_AUTHORED_MODELS_ENV] === "1";
 }
 
 /**
@@ -105,6 +106,8 @@ function createMockModelResult(
     }
   } else {
     const toolCallResult =
+      createParallelAuthoredToolCallsResult(options, modelId) ??
+      createSubagentDelegationResult(options, modelId) ??
       createSkillLoadResult(options.prompt, modelId) ??
       createAuthoredToolCallResult(options, modelId);
     if (toolCallResult !== null) {
@@ -202,6 +205,95 @@ function createSkillLoadResult(
   });
 }
 
+const SUBAGENT_TOOL_NAME = "agent";
+const SUBAGENT_DELEGATION_DIRECTIVE = /\bdelegate\s+to\s+a\s+subagent\s*:\s*(.+)$/iu;
+const PARALLEL_AUTHORED_TOOLS_DIRECTIVE = /^call tools in parallel:\s*(.+)$/imu;
+
+function createParallelAuthoredToolCallsResult(
+  options: BootstrapGenerateOptions,
+  modelId: string,
+): BootstrapGenerateResult | null {
+  const lastUserMessage = getLastUserPromptText(options.prompt);
+  if (lastUserMessage === null) {
+    return null;
+  }
+
+  const directive = PARALLEL_AUTHORED_TOOLS_DIRECTIVE.exec(lastUserMessage);
+  const requestedNames = directive?.[1]
+    ?.split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+
+  if (requestedNames === undefined || requestedNames.length < 2) {
+    return null;
+  }
+  if (new Set(requestedNames).size !== requestedNames.length) {
+    return null;
+  }
+
+  const availableTools = new Map(getAvailableTools(options).map((tool) => [tool.name, tool]));
+  const requestedTools: AvailableBootstrapTool[] = [];
+  for (const name of requestedNames) {
+    const tool = availableTools.get(name);
+    if (tool === undefined) {
+      return null;
+    }
+    requestedTools.push(tool);
+  }
+
+  const city = resolveWeatherCity(lastUserMessage);
+  return createToolCallsGenerateResult({
+    calls: requestedTools.map((tool) => ({
+      input: createMockAuthoredToolInput(tool, lastUserMessage, city),
+      toolCallId: createToolCallId(tool.name),
+      toolName: tool.name,
+    })),
+    inputTokens: estimateTokenCount(getPromptText(options.prompt)),
+    modelId,
+    outputTokens: estimateTokenCount(lastUserMessage),
+  });
+}
+
+/**
+ * Emits one built-in `agent` tool call when the current user message uses
+ * the explicit directive `Delegate to a subagent: <message>`, letting
+ * tests exercise a real runtime-action wait. Fires only before the
+ * delegated call resolves; then the reply path takes over.
+ */
+function createSubagentDelegationResult(
+  options: BootstrapGenerateOptions,
+  modelId: string,
+): BootstrapGenerateResult | null {
+  const lastUserMessage = getLastUserPromptText(options.prompt);
+
+  if (lastUserMessage === null) {
+    return null;
+  }
+
+  const directive = SUBAGENT_DELEGATION_DIRECTIVE.exec(lastUserMessage);
+
+  if (directive?.[1] === undefined) {
+    return null;
+  }
+
+  const tool = getAvailableTools(options).find((entry) => entry.name === SUBAGENT_TOOL_NAME);
+
+  if (tool === undefined) {
+    return null;
+  }
+
+  const toolInput = { message: directive[1].trim() };
+
+  return createToolCallGenerateResult({
+    input: toolInput,
+    inputTokens: estimateTokenCount(getPromptText(options.prompt)),
+    modelId,
+    outputTokens: estimateTokenCount(toolInput.message),
+    toolCallId: createToolCallId(SUBAGENT_TOOL_NAME),
+    toolName: SUBAGENT_TOOL_NAME,
+  });
+}
+
 function createAuthoredToolCallResult(
   options: BootstrapGenerateOptions,
   modelId: string,
@@ -220,29 +312,6 @@ function createAuthoredToolCallResult(
 
   const city = resolveWeatherCity(lastUserMessage);
   const toolInput = createMockAuthoredToolInput(tool, lastUserMessage, city);
-
-  if (tool.name === CODE_MODE_TOOL_NAME) {
-    const nestedToolName = findRelevantCodeModeHostTool(tool.description, lastUserMessage);
-
-    if (nestedToolName === null) {
-      return null;
-    }
-
-    const js = `return await tools${formatCodeModeToolAccess(nestedToolName)}({ city: ${JSON.stringify(
-      city,
-    )} });`;
-
-    return createToolCallGenerateResult({
-      input: {
-        js,
-      },
-      inputTokens: estimateTokenCount(getPromptText(options.prompt)),
-      modelId,
-      outputTokens: estimateTokenCount(js),
-      toolCallId: createToolCallId(tool.name),
-      toolName: tool.name,
-    });
-  }
 
   return createToolCallGenerateResult({
     input: toolInput,
@@ -340,15 +409,37 @@ function createToolCallGenerateResult(input: {
   readonly toolCallId: string;
   readonly toolName: string;
 }): BootstrapGenerateResult {
-  return {
-    content: [
+  return createToolCallsGenerateResult({
+    calls: [
       {
-        input: JSON.stringify(input.input),
+        input: input.input,
         toolCallId: input.toolCallId,
         toolName: input.toolName,
-        type: "tool-call",
       },
     ],
+    inputTokens: input.inputTokens,
+    modelId: input.modelId,
+    outputTokens: input.outputTokens,
+  });
+}
+
+function createToolCallsGenerateResult(input: {
+  readonly calls: readonly {
+    readonly input: unknown;
+    readonly toolCallId: string;
+    readonly toolName: string;
+  }[];
+  readonly inputTokens: number;
+  readonly modelId: string;
+  readonly outputTokens: number;
+}): BootstrapGenerateResult {
+  return {
+    content: input.calls.map((call) => ({
+      input: JSON.stringify(call.input),
+      toolCallId: call.toolCallId,
+      toolName: call.toolName,
+      type: "tool-call",
+    })),
     finishReason: { raw: undefined, unified: "tool-calls" },
     response: {
       id: "bootstrap-response",
@@ -552,50 +643,6 @@ function findRelevantTool(
       ),
     ) ?? null
   );
-}
-
-function findRelevantCodeModeHostTool(
-  description: string | undefined,
-  message: string,
-): string | null {
-  if (description === undefined) {
-    return null;
-  }
-
-  return findRelevantTool(parseCodeModeHostTools(description), message)?.name ?? null;
-}
-
-function parseCodeModeHostTools(description: string): AvailableBootstrapTool[] {
-  const tools: AvailableBootstrapTool[] = [];
-  let pendingDescription: string | undefined;
-
-  for (const line of description.split("\n")) {
-    const comment = /^\s*\/\*\*\s*(.*?)\s*\*\/\s*$/u.exec(line);
-
-    if (comment?.[1] !== undefined) {
-      pendingDescription = comment[1];
-      continue;
-    }
-
-    const declaration = /^\s*(?:([$A-Z_a-z][$\w]*)|(["'])(.*?)\2)\s*:\s*\(input:/u.exec(line);
-    const name = declaration?.[1] ?? declaration?.[3];
-
-    if (name === undefined) {
-      continue;
-    }
-
-    tools.push({
-      description: pendingDescription,
-      name,
-    });
-    pendingDescription = undefined;
-  }
-
-  return tools;
-}
-
-function formatCodeModeToolAccess(toolName: string): string {
-  return /^[$A-Z_a-z][$\w]*$/u.test(toolName) ? `.${toolName}` : `[${JSON.stringify(toolName)}]`;
 }
 
 function normalizeText(value: string): string {

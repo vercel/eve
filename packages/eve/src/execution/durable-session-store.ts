@@ -24,6 +24,7 @@ import { migrateDurableSessionSnapshot } from "#execution/durable-session-migrat
 import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
+import { getRun } from "#internal/workflow/runtime.js";
 
 const EVE_SESSION_STREAM_NAMESPACE = "eve.session";
 
@@ -80,9 +81,12 @@ export interface DurableSession {
   readonly rootSessionId?: string;
   readonly continuationToken: string;
   readonly history: ModelMessage[];
+  readonly limits?: HarnessSession["limits"];
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
+  readonly subagentDepth?: number;
+  readonly workflowMaxSubagents?: number;
   readonly agent: {
     readonly system: string;
   };
@@ -131,10 +135,6 @@ export async function readDurableSession(state: DurableSessionState): Promise<Du
     return migrateDurableSessionSnapshot(state.snapshot).session;
   }
 
-  // Dynamic import: the workflow runtime is only available inside a
-  // `"use step"` body, and a static import would pull it into the
-  // workflow-body bundle.
-  const { getRun } = await import("#compiled/@workflow/core/runtime.js");
   const stream = getRun<unknown>(state.sessionId).getReadable<unknown>({
     namespace: EVE_SESSION_STREAM_NAMESPACE,
     startIndex: -1,

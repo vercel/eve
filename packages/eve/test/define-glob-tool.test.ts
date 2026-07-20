@@ -6,6 +6,7 @@ import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import { defineGlobTool } from "../src/public/tools/define-glob-tool.js";
+import { serializeInputSchema } from "../src/shared/tool-schema.js";
 
 function createFakeAccess(
   handler: (command: string) => { exitCode: number; stderr: string; stdout: string } | null,
@@ -14,7 +15,6 @@ function createFakeAccess(
     async captureState() {
       return { initialized: false, session: null };
     },
-    async dispose() {},
 
     async get() {
       const callHandler = handler;
@@ -61,7 +61,7 @@ describe("defineGlobTool", () => {
     expect(tool.description).toBe("Search for files by glob pattern in the workspace sandbox.");
     expect(typeof tool.execute).toBe("function");
 
-    const schema = tool.inputSchema as unknown as Record<string, unknown>;
+    const schema = serializeInputSchema(tool.inputSchema);
     expect(schema).toMatchObject({
       properties: { pattern: { type: "string" } },
       required: ["pattern"],
@@ -103,7 +103,6 @@ describe("defineGlobTool", () => {
       async captureState() {
         return { initialized: false, session: null };
       },
-      async dispose() {},
 
       async get() {
         return null;

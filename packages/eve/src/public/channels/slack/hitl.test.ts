@@ -5,6 +5,7 @@ import {
   buildAnsweredBlocks,
   buildFreeformModalView,
   deriveHitlResponse,
+  formatInputRequestFallbackText,
   freeformRequestIdFromActionId,
   HITL_ACTION_PREFIX,
   HITL_FREEFORM_ACTION_PREFIX,
@@ -15,7 +16,10 @@ import {
   isHitlAction,
   renderInputRequestBlocks,
 } from "#public/channels/slack/hitl.js";
-import { SLACK_SECTION_TEXT_MAX_LENGTH } from "#public/channels/slack/limits.js";
+import {
+  SLACK_CARD_BODY_TEXT_MAX_LENGTH,
+  SLACK_SECTION_TEXT_MAX_LENGTH,
+} from "#public/channels/slack/limits.js";
 
 function makeRequest(overrides: Partial<InputRequest>): InputRequest {
   return {
@@ -80,7 +84,7 @@ describe("isHitlAction", () => {
 });
 
 describe("renderInputRequestBlocks", () => {
-  it("emits a section + buttons block for an option list with no display hint", () => {
+  it("emits a card block for an option list with no display hint", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({
         options: [
@@ -90,29 +94,117 @@ describe("renderInputRequestBlocks", () => {
       }),
     );
 
-    expect(blocks).toHaveLength(2);
-    expect((blocks[0] as { type: string }).type).toBe("section");
-
-    const actions = blocks[1] as {
+    expect(blocks).toHaveLength(1);
+    const card = blocks[0] as {
+      body: { text: string; type: string; verbatim: boolean };
+      actions: Array<Record<string, unknown>>;
       type: string;
-      elements: Array<Record<string, unknown>>;
     };
-    expect(actions.type).toBe("actions");
-    expect(actions.elements).toHaveLength(2);
-    const actionIds = actions.elements.map((element) => element.action_id);
+    expect(card).toMatchObject({
+      type: "card",
+      body: { type: "mrkdwn", text: "*Pick one*", verbatim: false },
+    });
+    expect(card.actions).toHaveLength(2);
+    const actionIds = card.actions.map((element) => element.action_id);
     expect(new Set(actionIds).size).toBe(actionIds.length);
-    expect(actions.elements[0]).toMatchObject({
+    expect(card.actions[0]).toMatchObject({
       type: "button",
       action_id: `${HITL_ACTION_PREFIX}call_abc123:button:0`,
       value: "approve",
       style: "primary",
+      text: { type: "plain_text", text: "Approve", emoji: false },
     });
-    expect(actions.elements[1]).toMatchObject({
+    expect(card.actions[1]).toMatchObject({
       type: "button",
       action_id: `${HITL_ACTION_PREFIX}call_abc123:button:1`,
       value: "deny",
       style: "danger",
+      text: { type: "plain_text", text: "Deny", emoji: false },
     });
+  });
+
+  it("shows tool input for confirmation approval requests in a collapsible container", () => {
+    const request = makeRequest({
+      action: {
+        kind: "tool-call",
+        callId: "call_mongo",
+        toolName: "mongodb-mutate",
+        input: {
+          operation: "deleteOne",
+          collection: "org_members",
+          filter: { _id: "qudw7ekkzulpgw3j" },
+        },
+      },
+      display: "confirmation",
+      prompt: "Approve tool call: mongodb-mutate",
+      requestId: "approval_1",
+      options: [
+        { id: "approve", label: "Yes" },
+        { id: "deny", label: "No" },
+      ],
+    });
+
+    const blocks = renderInputRequestBlocks(request);
+
+    expect(blocks).toHaveLength(2);
+    const card = blocks[0] as {
+      actions: Array<Record<string, unknown>>;
+      body: { text: string; type: string };
+      type: string;
+    };
+    expect(card).toMatchObject({
+      type: "card",
+      body: { type: "mrkdwn", text: "*Approve tool call: mongodb-mutate*" },
+    });
+    expect(card.actions).toMatchObject([
+      { text: { text: "Deny" }, value: "deny" },
+      { style: "primary", text: { text: "Allow" }, value: "approve" },
+    ]);
+
+    const details = blocks[1] as {
+      child_blocks: Array<{ text?: { text?: string }; type: string }>;
+      default_collapsed: boolean;
+      is_collapsible: boolean;
+      title: { text: string; type: string };
+      type: string;
+    };
+    expect(details).toMatchObject({
+      type: "container",
+      title: { type: "plain_text", text: "Tool input" },
+      is_collapsible: true,
+      default_collapsed: false,
+    });
+    expect(details.child_blocks).toHaveLength(1);
+    expect(details.child_blocks[0]).toMatchObject({ type: "section", text: { type: "mrkdwn" } });
+    expect(details.child_blocks[0]?.text?.text).toContain('"collection": "org_members"');
+    expect(details.child_blocks[0]?.text?.text).toContain('"_id": "qudw7ekkzulpgw3j"');
+  });
+
+  it("keeps long approval input details within the collapsible container section limit", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({
+        action: {
+          kind: "tool-call",
+          callId: "call_long",
+          toolName: "dangerous_tool",
+          input: { value: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500) },
+        },
+        display: "confirmation",
+        options: [
+          { id: "approve", label: "Yes" },
+          { id: "deny", label: "No" },
+        ],
+      }),
+    );
+
+    const card = blocks[0] as { body: { text: string } };
+    expect(card.body.text.length).toBeLessThanOrEqual(SLACK_CARD_BODY_TEXT_MAX_LENGTH);
+    expect(card.body.text).toBe("*Pick one*");
+
+    const details = blocks[1] as { child_blocks: Array<{ text?: { text?: string } }> };
+    const text = details.child_blocks[0]?.text?.text;
+    expect(text?.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
+    expect(text?.endsWith("...\n```")).toBe(true);
   });
 
   it("renders a radio_buttons widget for select-display requests with ≤6 options", () => {
@@ -188,7 +280,7 @@ describe("renderInputRequestBlocks", () => {
     expect(button.style).toBe("primary");
   });
 
-  it("emits the freeform button alongside options when allowFreeform is set", () => {
+  it("uses option buttons when allowFreeform is set alongside options", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({
         allowFreeform: true,
@@ -198,9 +290,9 @@ describe("renderInputRequestBlocks", () => {
     // current behavior: options take precedence; freeform button is the
     // fallback when no options are supplied. This documents the
     // option-only path; freeform-with-options is left as future work.
-    expect(blocks).toHaveLength(2);
-    const actions = blocks[1] as { elements: Array<{ action_id: string }> };
-    const ids = actions.elements.map((e) => e.action_id);
+    expect(blocks).toHaveLength(1);
+    const card = blocks[0] as { actions: Array<{ action_id: string }> };
+    const ids = card.actions.map((e) => e.action_id);
     for (const id of ids) {
       expect(id.startsWith(HITL_ACTION_PREFIX)).toBe(true);
     }
@@ -213,8 +305,8 @@ describe("renderInputRequestBlocks", () => {
     });
 
     const blocks = renderInputRequestBlocks(request);
-    const button = (blocks[1] as { elements: Array<{ action_id: string; value: string }> })
-      .elements[0]!;
+    const button = (blocks[0] as { actions: Array<{ action_id: string; value: string }> })
+      .actions[0]!;
 
     const response = deriveHitlResponse({ actionId: button.action_id, value: button.value });
     expect(response).toEqual({
@@ -264,6 +356,39 @@ describe("renderInputRequestBlocks", () => {
       requestId: "call_with_many_underscores_99",
       optionId: "weekly_report",
     });
+  });
+});
+
+describe("formatInputRequestFallbackText", () => {
+  it("includes approval tool input in Slack fallback text", () => {
+    const text = formatInputRequestFallbackText(
+      makeRequest({
+        action: {
+          kind: "tool-call",
+          callId: "call_mongo",
+          toolName: "mongodb-mutate",
+          input: {
+            operation: "deleteOne",
+            collection: "orgs",
+            filter: { _id: "48gtnni64rxqtaoh" },
+          },
+        },
+        display: "confirmation",
+        prompt: "Approve tool call: mongodb-mutate",
+        options: [
+          { id: "approve", label: "Yes" },
+          { id: "deny", label: "No" },
+        ],
+      }),
+    );
+
+    expect(text).toContain("Approve tool call: mongodb-mutate");
+    expect(text).toContain('"collection": "orgs"');
+    expect(text).toContain('"_id": "48gtnni64rxqtaoh"');
+  });
+
+  it("leaves non-approval fallback text unchanged", () => {
+    expect(formatInputRequestFallbackText(makeRequest({ prompt: "Pick one" }))).toBe("Pick one");
   });
 });
 
@@ -334,7 +459,7 @@ describe("buildAnsweredBlocks", () => {
       text: { type: "mrkdwn", text: "Approve deploy?" },
     };
     const blocks = buildAnsweredBlocks({
-      promptBlock,
+      promptBlocks: [promptBlock],
       answerLabel: "Approve",
       userId: "U01",
     });
@@ -350,11 +475,46 @@ describe("buildAnsweredBlocks", () => {
     });
   });
 
+  it("preserves multiple prompt/detail blocks", () => {
+    const promptBlock = {
+      type: "section",
+      text: { type: "mrkdwn", text: "Approve tool call: mongodb-mutate" },
+    };
+    const detailBlock = {
+      type: "section",
+      text: { type: "mrkdwn", text: '*Tool input*\n```\n{ "_id": "org_1" }\n```' },
+    };
+
+    const blocks = buildAnsweredBlocks({
+      promptBlocks: [promptBlock, detailBlock],
+      answerLabel: "Yes",
+      userId: "U01",
+    });
+
+    expect(blocks[0]).toBe(promptBlock);
+    expect(blocks[1]).toBe(detailBlock);
+    expect(blocks[2]).toMatchObject({
+      type: "section",
+      text: { text: ":white_check_mark: *Yes*" },
+    });
+  });
+
   it("omits the attribution block when no userId is supplied", () => {
-    const blocks = buildAnsweredBlocks({ promptBlock: undefined, answerLabel: "Deny" });
+    const blocks = buildAnsweredBlocks({ promptBlocks: [], answerLabel: "Deny" });
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({
       text: { text: ":white_check_mark: *Deny*" },
     });
+  });
+
+  it("caps long freeform answer labels at the section limit", () => {
+    const blocks = buildAnsweredBlocks({
+      promptBlocks: [],
+      answerLabel: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500),
+    });
+
+    const answer = blocks[0] as { text: { text: string } };
+    expect(answer.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
+    expect(answer.text.text).toMatch(/^:white_check_mark: \*x+\.\.\.\*$/u);
   });
 });

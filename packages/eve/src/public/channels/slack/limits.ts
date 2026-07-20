@@ -30,9 +30,25 @@ export const SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH = 75;
 export const SLACK_SECTION_TEXT_MAX_LENGTH = 3000;
 
 /**
+ * Block Kit `card` blocks cap `body.text` at 200 chars.
+ */
+export const SLACK_CARD_BODY_TEXT_MAX_LENGTH = 200;
+
+/**
+ * Block Kit `card` blocks cap `subtext.text` at 200 chars.
+ */
+export const SLACK_CARD_SUBTEXT_MAX_LENGTH = 200;
+
+/**
  * Top-level `text` field on `chat.postMessage` is capped at 40000 chars.
  */
 export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
+
+/**
+ * `chat.postMessage` rejects payloads with more than 50 blocks
+ * (`invalid_blocks`).
+ */
+export const SLACK_MAX_BLOCKS_PER_MESSAGE = 50;
 
 /**
  * `views.open` modal title is capped at 24 characters.
@@ -40,12 +56,14 @@ export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
 export const SLACK_MODAL_TITLE_MAX_LENGTH = 24;
 
 /**
- * Normalizes a typing status: trims, collapses runs of whitespace into a
- * single space, then truncates to {@link SLACK_TYPING_STATUS_MAX_LENGTH}
- * with a trailing ellipsis when needed.
+ * Normalizes a typing status: strips lightweight Markdown that Slack
+ * assistant-thread status does not render, trims, collapses runs of
+ * whitespace into a single space, then truncates to
+ * {@link SLACK_TYPING_STATUS_MAX_LENGTH} with a trailing ellipsis when
+ * needed.
  */
 export function truncateTypingStatus(status: string): string {
-  const normalized = status.trim().replace(/\s+/gu, " ");
+  const normalized = stripTypingStatusMarkdown(status).trim().replace(/\s+/gu, " ");
   return truncateWithEllipsis(normalized, SLACK_TYPING_STATUS_MAX_LENGTH);
 }
 
@@ -70,6 +88,22 @@ export function truncateSectionText(value: string): string {
 }
 
 /**
+ * Caps a card block's `body.text` at the Slack limit with a trailing
+ * ellipsis.
+ */
+export function truncateCardBodyText(value: string): string {
+  return truncateWithEllipsis(value, SLACK_CARD_BODY_TEXT_MAX_LENGTH);
+}
+
+/**
+ * Caps a card block's `subtext.text` at the Slack limit with a trailing
+ * ellipsis.
+ */
+export function truncateCardSubtext(value: string): string {
+  return truncateWithEllipsis(value, SLACK_CARD_SUBTEXT_MAX_LENGTH);
+}
+
+/**
  * Caps a `chat.postMessage` `text` field at the Slack limit with a
  * trailing ellipsis.
  */
@@ -88,4 +122,13 @@ function truncateWithEllipsis(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   const sliceLength = Math.max(0, maxLength - 3);
   return `${value.slice(0, sliceLength).trimEnd()}...`;
+}
+
+function stripTypingStatusMarkdown(status: string): string {
+  return status
+    .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
+    .replace(/`([^`]+)`/gu, "$1")
+    .replace(/~~([^~]+)~~/gu, "$1")
+    .replace(/(\*\*|__)([^*_]+)\1/gu, "$2")
+    .replace(/(^|[^\p{L}\p{N}])([*_])([^*_]+)\2(?=$|[^\p{L}\p{N}])/gu, "$1$3");
 }

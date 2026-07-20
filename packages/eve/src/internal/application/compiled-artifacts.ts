@@ -1,13 +1,21 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
+import { getWorldImport } from "@workflow/utils";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
-import { resolvePackageSourceFilePath } from "#internal/application/package.js";
+import {
+  resolvePackageCompiledFilePath,
+  resolvePackageSourceFilePath,
+} from "#internal/application/package.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
+import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
+import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
+
+export type BuiltInWorkflowWorldTarget = "local" | "vercel";
 
 /**
  * Paths to the generated compiled-artifacts files shared by Nitro and the
@@ -19,6 +27,8 @@ export interface GeneratedCompiledArtifactsFiles {
    * workflow handlers.
    */
   bootstrapPath: string;
+  /** Nitro plugin that installs the selected vendored Workflow world. */
+  workflowWorldPluginPath: string;
   /**
    * Optional Nitro plugin that imports the authored instrumentation module
    * from the application when present.
@@ -40,10 +50,12 @@ export interface GeneratedCompiledArtifactsFiles {
  */
 export async function writeCompiledArtifactsFiles(input: {
   compileResult: CompileAgentResult;
+  defaultWorkflowWorld: BuiltInWorkflowWorldTarget;
   outDir: string;
 }): Promise<GeneratedCompiledArtifactsFiles> {
   const bootstrapPath = join(input.outDir, "compiled-artifacts-bootstrap.mjs");
   const instrumentationPluginPath = join(input.outDir, "compiled-artifacts-instrumentation.mjs");
+  const workflowWorldPluginPath = join(input.outDir, "compiled-artifacts-workflow-world.mjs");
   const instrumentationPath = resolveInstrumentationModule(input.compileResult.manifest.agentRoot);
 
   await mkdir(input.outDir, { recursive: true });
@@ -54,6 +66,14 @@ export async function writeCompiledArtifactsFiles(input: {
       installModulePath: resolvePackageSourceFilePath("src/runtime/loaders/bundled-artifacts.ts"),
       moduleMapPath: bootstrapPath,
       metadata: input.compileResult.metadata,
+    }),
+  );
+  await writeFile(
+    workflowWorldPluginPath,
+    createWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: bootstrapPath,
+      configuredWorld: input.compileResult.manifest.config.experimental?.workflow?.world,
+      defaultWorld: input.defaultWorkflowWorld,
     }),
   );
 
@@ -70,6 +90,7 @@ export async function writeCompiledArtifactsFiles(input: {
 
   const generatedArtifacts: GeneratedCompiledArtifactsFiles = {
     bootstrapPath,
+    workflowWorldPluginPath,
   };
 
   if (instrumentationPath !== undefined) {
@@ -78,6 +99,78 @@ export async function writeCompiledArtifactsFiles(input: {
   }
 
   return generatedArtifacts;
+}
+
+// The dev host's Nitro inputs outlive any single generation, so nothing
+// written here may point into authored source or a prunable snapshot: the
+// bootstrap references no authored module, and the instrumentation bundle is
+// copied out of the generation into the stable host directory.
+export async function writeDevelopmentCompiledArtifactsFiles(input: {
+  readonly compileResult: CompileAgentResult;
+  readonly outDir: string;
+  readonly runtimeAppRoot: string;
+}): Promise<GeneratedCompiledArtifactsFiles> {
+  const bootstrapPath = join(input.outDir, "compiled-artifacts-bootstrap.mjs");
+  const instrumentationPluginPath = join(input.outDir, "compiled-artifacts-instrumentation.mjs");
+  const instrumentationSourcePath = join(
+    input.outDir,
+    "compiled-artifacts-instrumentation-source.mjs",
+  );
+  const workflowWorldPluginPath = join(input.outDir, "compiled-artifacts-workflow-world.mjs");
+  const materializedIndex = await readMaterializedAuthoredModuleIndex(input.runtimeAppRoot);
+
+  if (materializedIndex === undefined) {
+    throw new Error(`Development generation at "${input.runtimeAppRoot}" is not materialized.`);
+  }
+
+  await mkdir(input.outDir, { recursive: true });
+  await writeFile(
+    bootstrapPath,
+    createDevelopmentCompiledArtifactsBootstrapSource(input.compileResult.manifest.config.name),
+  );
+  await writeFile(
+    workflowWorldPluginPath,
+    createDevelopmentWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: bootstrapPath,
+      configuredWorld: input.compileResult.manifest.config.experimental?.workflow?.world,
+    }),
+  );
+
+  const generatedArtifacts: GeneratedCompiledArtifactsFiles = {
+    bootstrapPath,
+    workflowWorldPluginPath,
+  };
+
+  if (materializedIndex.instrumentation !== undefined) {
+    await copyFile(
+      join(input.runtimeAppRoot, ".eve", "compile", materializedIndex.instrumentation),
+      instrumentationSourcePath,
+    );
+    await writeFile(
+      instrumentationPluginPath,
+      createInstrumentationPluginSource({
+        agentName: input.compileResult.manifest.config.name,
+        instrumentationPath: instrumentationSourcePath,
+        registerConfigPath: resolvePackageSourceFilePath("src/harness/instrumentation-config.ts"),
+      }),
+    );
+    generatedArtifacts.instrumentationPluginPath = instrumentationPluginPath;
+    generatedArtifacts.instrumentationSourcePath = instrumentationSourcePath;
+  }
+
+  return generatedArtifacts;
+}
+
+function createDevelopmentCompiledArtifactsBootstrapSource(agentName: string): string {
+  return [
+    "// Generated by eve. Do not edit by hand.",
+    `import { installEveWorkflowQueueNamespace } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/workflow/queue-namespace.ts"))};`,
+    "",
+    `installEveWorkflowQueueNamespace(${JSON.stringify(agentName)});`,
+    "",
+    "export default function installDevelopmentCompiledArtifactsPlugin() {}",
+    "",
+  ].join("\n");
 }
 
 const INSTRUMENTATION_EXTENSIONS = [".ts", ".mts", ".js", ".mjs"];
@@ -109,7 +202,7 @@ export async function createCompiledArtifactsBootstrapSource(input: {
   metadata: CompileMetadata;
   moduleMapPath: string;
 }): Promise<string> {
-  const workflowWorld = input.compileResult.manifest.config.experimental?.workflow?.world;
+  const agentName = input.compileResult.manifest.config.name;
   const moduleMapSource = stripCompiledModuleMapExports(
     createCompiledModuleMapSource({
       importSpecifierStyle: "absolute",
@@ -121,7 +214,9 @@ export async function createCompiledArtifactsBootstrapSource(input: {
   return [
     "// Generated by eve. Do not edit by hand.",
     `import { installBundledCompiledArtifacts } from ${stringifyEsmImportSpecifier(input.installModulePath)};`,
-    ...createWorkflowWorldBootstrapImports(workflowWorld),
+    `import { installEveWorkflowQueueNamespace } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/workflow/queue-namespace.ts"))};`,
+    "",
+    `installEveWorkflowQueueNamespace(${JSON.stringify(agentName)});`,
     "",
     moduleMapSource,
     "",
@@ -138,7 +233,6 @@ export async function createCompiledArtifactsBootstrapSource(input: {
     "}",
     "",
     "installCompiledArtifactsBootstrap();",
-    ...createWorkflowWorldBootstrapBody(workflowWorld),
     "",
     "// Default export satisfies the Nitro plugin contract so this file",
     "// can be used directly as a Nitro plugin without a separate wrapper.",
@@ -146,35 +240,103 @@ export async function createCompiledArtifactsBootstrapSource(input: {
     "  // Already installed on import above.",
     "}",
     "",
-    "export async function __eveInstallCompiledArtifactsStep() {",
-    '  "use step";',
-    "  return null;",
-    "}",
+  ].join("\n");
+}
+
+export function createWorkflowWorldPluginSource(input: {
+  compiledArtifactsBootstrapPath: string;
+  configuredWorld: AgentWorkflowWorldDefinition | undefined;
+  defaultWorld: BuiltInWorkflowWorldTarget;
+}): string {
+  const targetWorld = input.configuredWorld ?? input.defaultWorld;
+  const packageName = getWorldImport({ WORKFLOW_TARGET_WORLD: targetWorld });
+  const importSpecifier =
+    packageName === "@workflow/world-local" || packageName === "@workflow/world-vercel"
+      ? resolvePackageCompiledFilePath(`src/compiled/${packageName}/index.js`)
+      : packageName;
+  const workflowRuntimeImportSpecifier = resolvePackageCompiledFilePath(
+    "src/compiled/@workflow/core/runtime.js",
+  );
+  const workflowWorldValidationImportSpecifier = resolvePackageSourceFilePath(
+    "src/internal/workflow/validate-world.ts",
+  );
+  const localWorldDataDirectoryResolverImportSpecifier =
+    packageName === "@workflow/world-local"
+      ? resolvePackageSourceFilePath("src/internal/workflow/local-world-data-directory.ts")
+      : undefined;
+  const createWorkflowWorldSource =
+    localWorldDataDirectoryResolverImportSpecifier === undefined
+      ? "const workflowWorld = await createWorldFromModule(workflowWorldModule);"
+      : [
+          "const workflowWorld = await workflowWorldModule.createWorld({",
+          "  dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),",
+          "});",
+        ].join("\n");
+  const workflowRuntimeImports =
+    localWorldDataDirectoryResolverImportSpecifier === undefined
+      ? "createWorldFromModule, getWorld, setWorld"
+      : "getWorld, setWorld";
+
+  return [
+    "// Generated by eve. Do not edit by hand.",
+    `import ${stringifyEsmImportSpecifier(input.compiledArtifactsBootstrapPath)};`,
+    `import * as workflowWorldModule from ${stringifyEsmImportSpecifier(importSpecifier)};`,
+    ...(localWorldDataDirectoryResolverImportSpecifier === undefined
+      ? []
+      : [
+          `import { resolveLocalWorkflowWorldDataDirectory } from ${stringifyEsmImportSpecifier(localWorldDataDirectoryResolverImportSpecifier)};`,
+        ]),
+    `import { ${workflowRuntimeImports} } from ${stringifyEsmImportSpecifier(workflowRuntimeImportSpecifier)};`,
+    `import { validateWorkflowWorld } from ${stringifyEsmImportSpecifier(workflowWorldValidationImportSpecifier)};`,
+    "",
+    createWorkflowWorldSource,
+    `validateWorkflowWorld({ packageName: ${JSON.stringify(input.configuredWorld)}, world: workflowWorld });`,
+    "setWorld(workflowWorld);",
+    "await getWorld();",
+    "await workflowWorld.start?.();",
+    "",
+    "export default function installWorkflowWorldPlugin() {}",
     "",
   ].join("\n");
 }
 
-function createWorkflowWorldBootstrapImports(
-  world: AgentWorkflowWorldDefinition | undefined,
-): string[] {
-  if (world === undefined) {
-    return [];
+/**
+ * Generates the dev worker's Workflow World wiring. Configs that resolve to
+ * the vendored local World get the parent RPC client so run state survives
+ * worker replacement; any other World is instantiated inside the worker
+ * unchanged, because eve does not own its lifetime. The selection predicate
+ * is shared with the parent's world creation — a worker wired for the RPC
+ * client fails every World call unless the parent created a World to serve
+ * it.
+ */
+export function createDevelopmentWorkflowWorldPluginSource(input: {
+  compiledArtifactsBootstrapPath: string;
+  configuredWorld: AgentWorkflowWorldDefinition | undefined;
+}): string {
+  if (!usesParentDevelopmentWorkflowWorld(input.configuredWorld)) {
+    return createWorkflowWorldPluginSource({
+      ...input,
+      defaultWorld: "local",
+    });
   }
-
+  const workflowRuntimeImportSpecifier = resolvePackageCompiledFilePath(
+    "src/compiled/@workflow/core/runtime.js",
+  );
+  const developmentWorldImportSpecifier = resolvePackageSourceFilePath(
+    "src/internal/workflow/development-world-client.ts",
+  );
   return [
-    `import * as workflowWorldModule from ${stringifyEsmImportSpecifier(world)};`,
-    `import { installConfiguredWorkflowWorld } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/workflow/configure-world.ts"))};`,
-  ];
-}
-
-function createWorkflowWorldBootstrapBody(
-  world: AgentWorkflowWorldDefinition | undefined,
-): string[] {
-  if (world === undefined) {
-    return [];
-  }
-
-  return ["", "await installConfiguredWorkflowWorld({ module: workflowWorldModule });"];
+    "// Generated by eve. Do not edit by hand.",
+    `import ${stringifyEsmImportSpecifier(input.compiledArtifactsBootstrapPath)};`,
+    `import { getWorld, setWorld } from ${stringifyEsmImportSpecifier(workflowRuntimeImportSpecifier)};`,
+    `import { createDevelopmentWorkflowWorld } from ${stringifyEsmImportSpecifier(developmentWorldImportSpecifier)};`,
+    "",
+    "setWorld(createDevelopmentWorkflowWorld());",
+    "await getWorld();",
+    "",
+    "export default function installDevelopmentWorkflowWorldPlugin() {}",
+    "",
+  ].join("\n");
 }
 
 function createInstrumentationPluginSource(input: {

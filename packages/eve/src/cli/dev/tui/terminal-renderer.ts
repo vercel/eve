@@ -27,7 +27,12 @@ import {
   typeaheadFor,
   type CommandTypeaheadState,
 } from "./command-typeahead.js";
-import { isPromptControlCommand, parsePromptCommand, PROMPT_COMMANDS } from "./prompt-commands.js";
+import {
+  isPromptControlCommand,
+  parsePromptCommand,
+  PROMPT_COMMANDS,
+  type PromptCommandSpec,
+} from "./prompt-commands.js";
 import {
   renderFlowPanel,
   renderAcknowledgeQuestion,
@@ -36,6 +41,7 @@ import {
   type FlowPanelContent,
   type FlowPanelIndicator,
   type FlowPanelLine,
+  type FlowPanelStatus,
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
@@ -43,6 +49,7 @@ import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
   SetupFlowRenderer,
+  SetupFlowStatus,
   SetupSelectRequest,
 } from "./setup-flow.js";
 import type { SelectNotice } from "#setup/prompter.js";
@@ -103,6 +110,7 @@ import {
   stripTerminalControls,
 } from "./terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
+import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
@@ -171,6 +179,10 @@ function completedTurnStatus(interrupted: boolean, continueSession: boolean): st
 
 type SetupFlowIndicatorState = { kind: "spinner" } | { kind: "pulse"; startedAtMs: number };
 
+type SetupFlowStatusState =
+  | { kind: "progress"; text: string }
+  | { kind: "external-action"; text: string; emphasis: string };
+
 type TurnIndicatorState =
   | { kind: "idle" }
   | { kind: "waiting"; startedAtMs: number }
@@ -180,7 +192,7 @@ type SetupFlowState = {
   title: string;
   indicator: SetupFlowIndicatorState;
   lines: FlowPanelLine[];
-  status?: string;
+  status?: SetupFlowStatusState;
   /** Latest subprocess output line; replaced per write, never persisted. */
   preview?: string;
   /** Recent subprocess output, flushed as context when a warning settles it. */
@@ -199,6 +211,7 @@ type SetupFlowState = {
  * a `vercel deploy` build error) survives the settle.
  */
 const FLOW_OUTPUT_BUFFER_CAP = 40;
+const STATUS_LINE_LEFT_PADDING = "  ";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 
@@ -215,6 +228,8 @@ export type TerminalRendererOptions = {
   logs?: LogDisplayMode;
   color?: boolean;
   unicode?: boolean;
+  /** Slash commands available in this local or remote session. */
+  availablePromptCommands?: readonly PromptCommandSpec[];
 };
 
 export type AgentHeaderOptions = {
@@ -282,6 +297,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #defaultContextSize?: number;
   readonly #captureForeignOutput: boolean;
+  readonly #availablePromptCommands: readonly PromptCommandSpec[];
   /** Which captured log sources render. Mutable via {@link setLogDisplayMode}. */
   #logs: LogDisplayMode;
 
@@ -324,6 +340,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #connectionAuthPendingCount = 0;
   /** Vercel segment of the bottom status line; pushed by the runner. */
   #vercelStatus?: VercelStatusSnapshot;
+  /** Remote target and connection/authentication state; pushed by the runner. */
+  #remoteConnection?: RemoteConnectionSnapshot;
   #inputText = "";
   #inputCursor = 0;
   readonly #promptHistory = new PromptHistory();
@@ -383,7 +401,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pendingEchoedPrompt?: string;
   /** The active setup flow's bordered panel: progress, question, status. */
   #setupFlow?: SetupFlowState;
-  /** The clearable setup attention line (`⚠ … · /login`), rendered in the live footer. */
+  /** The clearable setup attention line (`⚠ … · /vc:login`), rendered in the live footer. */
   #setupAttention?: string;
   /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
   #flowInterrupt?: () => void;
@@ -425,6 +443,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#logs = options?.logs ?? "none";
+    this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
 
   /**
@@ -466,7 +485,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     let editor: LineState = lineOf(stripPromptControlCharacters(options?.initialDraft ?? ""));
     this.#promptHistory.begin(editor.text);
     this.#syncInput(editor);
-    this.#typeahead = typeaheadFor(PROMPT_COMMANDS, editor.text);
+    this.#typeahead = typeaheadFor(this.#availablePromptCommands, editor.text);
     this.#startCaretBlink();
     this.#paint();
 
@@ -475,7 +494,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         editor = next;
         this.#showCaret();
         this.#syncInput(editor);
-        this.#typeahead = typeaheadFor(PROMPT_COMMANDS, next.text, this.#typeahead);
+        this.#typeahead = typeaheadFor(this.#availablePromptCommands, next.text, this.#typeahead);
         this.#paint();
       };
       const recall = (entry: string | undefined) => {
@@ -505,7 +524,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
           return;
         }
         switch (key.type) {
-          case "up": {
+          case "up":
+          case "ctrl-p": {
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, -1);
@@ -519,7 +539,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
             else recall(this.#promptHistory.previous(editor.text));
             break;
           }
-          case "down": {
+          case "down":
+          case "ctrl-n": {
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, 1);
@@ -628,7 +649,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#turnIndicator.kind !== "waiting") {
       this.#turnIndicator = { kind: "waiting", startedAtMs: Date.now() };
     }
-    this.#status = STATUS.processing;
+    this.#status = this.#connectionAuthPendingCount > 0 ? STATUS.connectionAuth : STATUS.processing;
     this.#addSubmittedPrompt(options?.submittedPrompt);
     this.#interrupted = false;
     this.#totalTokens = undefined;
@@ -834,6 +855,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         if (mode === "select") {
           switch (key.type) {
             case "up":
+            case "ctrl-p":
               if (totalRows > 0) {
                 cursorIndex = (cursorIndex - 1 + totalRows) % totalRows;
                 renderSection();
@@ -841,6 +863,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
               }
               break;
             case "down":
+            case "ctrl-n":
               if (totalRows > 0) {
                 cursorIndex = (cursorIndex + 1) % totalRows;
                 renderSection();
@@ -994,18 +1017,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   upsertConnectionAuth(update: ConnectionAuthUpdate): void {
     if (this.#connectionAuth === "hidden") return;
-    const isTerminal =
-      update.state === "authorized" ||
-      update.state === "declined" ||
-      update.state === "failed" ||
-      update.state === "timed-out";
+    const terminalMessage = connectionAuthTerminalMessage(update.state);
     this.#upsertBlock({
       id: connectionAuthSectionId(update.name),
       kind: "connection-auth",
       title: `${stripTerminalControls(update.name)} · authorization · ${update.state}`,
-      body: formatConnectionAuthContent(update),
+      body: formatConnectionAuthContent(update, terminalMessage),
       preformatted: true,
-      live: !isTerminal,
+      live: terminalMessage === undefined,
     });
     this.#paint();
   }
@@ -1028,6 +1047,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#vercelStatus = status;
     // #paint self-guards on #isInteractive, so a probe resolving after
     // shutdown is inert.
+    this.#paint();
+  }
+
+  setRemoteConnectionStatus(status: RemoteConnectionSnapshot): void {
+    this.#remoteConnection = status;
     this.#paint();
   }
 
@@ -1087,7 +1111,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Sets the setup attention line (yellow `⚠`, commands blue) as a live footer
    * element above the prompt. Unlike committed scrollback, it can be cleared:
-   * once the underlying issue is fixed (e.g. `/login` succeeds) the runner calls
+   * once the underlying issue is fixed (e.g. `/vc:login` succeeds) the runner calls
    * {@link clearSetupWarning} and the line disappears rather than lingering
    * stale in the transcript.
    */
@@ -1110,6 +1134,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #clearSetupAttention(): void {
     if (this.#setupAttention === undefined) return;
     this.#setupAttention = undefined;
+    this.#paint();
+  }
+
+  /** Commits a slash-command invocation that was started without prompt input. */
+  renderCommandInvocation(text: string, status?: "failed"): void {
+    const content = stripTerminalControls(text);
+    if (content.trim().length === 0) return;
+    this.#start();
+    const block: Block = {
+      kind: "command",
+      body: content,
+      live: false,
+    };
+    if (status === "failed") block.status = "error";
+    this.#pushBlock(block);
     this.#paint();
   }
 
@@ -1264,7 +1303,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     };
 
     let notices = opts.notices;
-    if (opts.kind === "task-list") {
+    if (opts.kind === "task-list" || (opts.kind === "search" && opts.layout === "task-list")) {
       const start = flow.taskListLineStart ?? flow.lines.length;
       const outcomes: SelectNotice[] = flow.lines
         .slice(start)
@@ -1348,7 +1387,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   ): ReturnType<SetupFlowRenderer["readChoice"]> {
     this.#start();
     const flow = this.#requireSetupFlow();
-    flow.status = opts.status;
+    flow.status = { kind: "progress", text: stripTerminalControls(opts.status) };
     // No action is pre-selected: the user must move into the action group before
     // Enter can act, rather than firing "Try again" by reflex.
     let cursor: number | undefined;
@@ -1434,11 +1473,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (error !== undefined) state.error = error;
       return renderSelectQuestion(state, this.#theme, width);
     };
+    // Hovering the editable row makes it a live field. The editor stays empty
+    // until typing starts, leaving the default as a placeholder with the caret
+    // at its start. Moving off the row clears the field and stops the blink.
     const onEditableRow = () =>
       selectValueAtCursor([...opts.options], select.cursor) === opts.editable.value;
     const syncEditableRow = () => {
       if (onEditableRow()) {
-        if (editor.text.length === 0) editor = lineOf(opts.editable.defaultValue);
         this.#startCaretBlink();
       } else {
         editor = lineOf("");
@@ -1866,8 +1907,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * status into the working indicator; `undefined` clears it. Nothing is ever
    * committed to the transcript.
    */
-  #setFlowStatus(text: string | undefined): void {
-    const content = text === undefined ? undefined : stripTerminalControls(text);
+  #setFlowStatus(status: SetupFlowStatus | undefined): void {
+    const content: SetupFlowStatusState | undefined =
+      status === undefined
+        ? undefined
+        : typeof status === "string"
+          ? { kind: "progress", text: stripTerminalControls(status) }
+          : {
+              kind: "external-action",
+              text: stripTerminalControls(status.text),
+              emphasis: stripTerminalControls(status.emphasis),
+            };
     if (this.#setupFlow !== undefined) {
       this.#setupFlow.status = content;
       if (content === undefined) this.#setupFlow.preview = undefined;
@@ -1883,7 +1933,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     this.#start();
     this.#startWorking();
-    this.#status = content;
+    this.#status = content.text;
     this.#paint();
   }
 
@@ -2227,10 +2277,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #finalizeAllBlocks() {
     for (const block of this.#blocks) {
-      // Blocks awaiting an approval decision or action.result stay live past
-      // the end of the stream. Committing them here would freeze the pending
-      // glyph into scrollback before the later decision/result can settle it.
-      if (block.status === "approval" || block.status === "running") continue;
+      // Blocks awaiting an approval decision, action.result, or OAuth callback
+      // stay live past this stream boundary so their later terminal update can
+      // replace the same transcript block.
+      if (
+        block.status === "approval" ||
+        block.status === "running" ||
+        (block.kind === "connection-auth" && block.live)
+      ) {
+        continue;
+      }
       block.live = false;
     }
   }
@@ -2640,7 +2696,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return isProgressPulseVisible(Date.now() - startedAtMs) ? glyph : " ";
   }
 
-  #setupFlowIndicator(flow: SetupFlowState): FlowPanelIndicator {
+  #setupFlowIndicator(flow: SetupFlowState, status?: SetupFlowStatusState): FlowPanelIndicator {
     if (flow.indicator.kind === "spinner") {
       return { glyph: this.#spinnerFrame(), color: "yellow" };
     }
@@ -2649,7 +2705,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         flow.indicator.startedAtMs,
         this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
       ),
-      color: "green",
+      color: status?.kind === "external-action" ? "yellow" : "green",
     };
   }
 
@@ -2663,7 +2719,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // very state the line shows (link, pending deploy, model), so mid-flow
       // values are guaranteed stale; it reappears, refreshed, when the
       // panel closes.
-      const indicator = this.#setupFlowIndicator(flow);
+      const indicator = this.#setupFlowIndicator(flow, flow.status);
+      const status: FlowPanelStatus | undefined =
+        flow.status === undefined ? undefined : { ...flow.status, indicator };
       let content: FlowPanelContent;
       // A live status indicator rides alongside an open question only when one is
       // explicitly set (the install wait); ordinary questions leave it cleared,
@@ -2671,15 +2729,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (flow.question !== undefined) {
         const rows = flow.question(width);
         content = { kind: "question", rows };
-        if (flow.status !== undefined) {
-          content = { kind: "question", rows, status: { text: flow.status, indicator } };
+        if (status !== undefined) {
+          content = { kind: "question", rows, status };
         }
-      } else if (flow.status !== undefined) {
-        content = { kind: "status", status: { text: flow.status, indicator } };
+      } else if (status !== undefined) {
+        content = { kind: "status", status };
         if (flow.preview !== undefined) {
           content = {
             kind: "status",
-            status: { text: flow.status, indicator },
+            status,
             preview: flow.preview,
           };
         }
@@ -2694,6 +2752,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         content,
       };
       rows.push(...renderFlowPanel(state, this.#theme, width));
+      this.#pushRemoteStatusLine(rows, width);
       return rows;
     }
 
@@ -2773,13 +2832,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return rows;
   }
 
-  /**
-   * Appends the persistent bottom status line (model · tokens · Vercel link ·
-   * pending deploy) when any segment has content.
-   */
+  /** Appends the persistent bottom status line below the prompt when it has content. */
   #pushStatusLine(rows: string[], width: number): void {
-    const input: Parameters<typeof buildStatusLine>[0] = { theme: this.#theme, width };
+    const padding = this.#remoteConnection === undefined ? "" : STATUS_LINE_LEFT_PADDING;
+    const contentWidth = Math.max(1, width - padding.length);
+    const input: Parameters<typeof buildStatusLine>[0] = {
+      theme: this.#theme,
+      width: contentWidth,
+    };
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
+    const serverUrl = this.#agentHeader?.serverUrl;
+    if (serverUrl !== undefined && this.#remoteConnection === undefined) {
+      const serverPort = new URL(serverUrl).port;
+      if (serverPort.length > 0) input.serverPort = serverPort;
+    }
     const model = this.#agentHeader?.info?.agent.model.id;
     if (model !== undefined) input.model = model;
     // The runner resolves model-provider state with `/info` before caching this
@@ -2796,8 +2862,22 @@ export class TerminalRenderer implements AgentTUIRenderer {
       input.tokens = formatTokenFlow(flow, this.#theme.glyph);
     }
     if (this.#vercelStatus !== undefined) input.vercel = this.#vercelStatus;
+    if (this.#remoteConnection !== undefined) input.remote = this.#remoteConnection;
     const line = buildStatusLine(input);
-    if (line !== undefined) rows.push(line);
+    if (line !== undefined) rows.push(clip(`${padding}${line}`, width));
+  }
+
+  #pushRemoteStatusLine(rows: string[], width: number): void {
+    if (this.#remoteConnection === undefined) return;
+    const contentWidth = Math.max(1, width - STATUS_LINE_LEFT_PADDING.length);
+    const line = buildStatusLine({
+      remote: this.#remoteConnection,
+      theme: this.#theme,
+      width: contentWidth,
+    });
+    if (line !== undefined) {
+      rows.push("", clip(`${STATUS_LINE_LEFT_PADDING}${line}`, width));
+    }
   }
 
   #statusMeta(): string {
@@ -3346,15 +3426,38 @@ function connectionAuthSectionId(connectionName: string): string {
   return `connection-auth:${connectionName}`;
 }
 
-function formatConnectionAuthContent(update: ConnectionAuthUpdate): string {
+function connectionAuthTerminalMessage(state: ConnectionAuthUpdate["state"]): string | undefined {
+  switch (state) {
+    case "authorized":
+      return "Authorization complete";
+    case "declined":
+      return "Authorization declined";
+    case "failed":
+      return "Authorization failed";
+    case "timed-out":
+      return "Authorization timed out";
+    case "required":
+    case "pending":
+      return undefined;
+  }
+}
+
+function formatConnectionAuthContent(
+  update: ConnectionAuthUpdate,
+  terminalMessage: string | undefined,
+): string {
   const lines: string[] = [];
-  const description = stripTerminalControls(update.description);
-  if (description.length > 0) lines.push(description);
-  const challenge = update.challenge;
-  if (challenge?.url) lines.push(`URL: ${stripTerminalControls(challenge.url)}`);
-  if (challenge?.userCode) lines.push(`Code: ${stripTerminalControls(challenge.userCode)}`);
-  if (challenge?.expiresAt) lines.push(`Expires: ${stripTerminalControls(challenge.expiresAt)}`);
-  if (challenge?.instructions) lines.push(stripTerminalControls(challenge.instructions));
+  if (terminalMessage !== undefined) {
+    lines.push(terminalMessage);
+  } else {
+    const description = stripTerminalControls(update.description);
+    if (description.length > 0) lines.push(description);
+    const challenge = update.challenge;
+    if (challenge?.url) lines.push(`URL: ${stripTerminalControls(challenge.url)}`);
+    if (challenge?.userCode) lines.push(`Code: ${stripTerminalControls(challenge.userCode)}`);
+    if (challenge?.expiresAt) lines.push(`Expires: ${stripTerminalControls(challenge.expiresAt)}`);
+    if (challenge?.instructions) lines.push(stripTerminalControls(challenge.instructions));
+  }
   if (update.reason !== undefined) {
     const reason = stripTerminalControls(update.reason);
     if (reason.length > 0) lines.push(`Reason: ${reason}`);

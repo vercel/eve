@@ -20,6 +20,8 @@ import { turnWorkflowInputV0ToV1 } from "./turn-workflow-v0-to-v1.js";
 export const TURN_WORKFLOW_INPUT_VERSION = 1;
 
 export interface TurnStepInput {
+  /** Cancellation signal forwarded into the turn step. */
+  readonly abortSignal?: AbortSignal;
   readonly input: HookPayload | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -30,6 +32,14 @@ export interface TurnWorkflowInput {
   readonly version: typeof TURN_WORKFLOW_INPUT_VERSION;
   readonly capabilities: SessionCapabilities | undefined;
   readonly completionToken: string;
+  /**
+   * Additive driver feature negotiation. Older pinned drivers omit this,
+   * which keeps runtime-action orchestration on the legacy entry-owned path.
+   */
+  readonly driverCapabilities?: {
+    readonly turnInbox?: true;
+    readonly cancelledTurnSettle?: true;
+  };
   readonly mode: RunMode;
   readonly stepInput: TurnStepInput;
 }
@@ -50,6 +60,7 @@ export function createTurnWorkflowInput(input: TurnWorkflowDispatchInput): TurnW
   return {
     capabilities: input.capabilities,
     completionToken: input.completionToken,
+    driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
     mode: input.mode,
     stepInput: {
       input: input.delivery,

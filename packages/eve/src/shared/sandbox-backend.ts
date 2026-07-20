@@ -12,7 +12,13 @@ export interface SandboxBackendHandle<SO = Record<string, never>> {
   readonly session: SandboxSession;
   readonly useSessionFn: SandboxSessionUseFn<SO>;
   captureState(): Promise<SandboxBackendSessionState>;
-  dispose(): Promise<void>;
+  /**
+   * Stops the underlying compute because the eve server is shutting
+   * down; nothing may be left running afterwards. The session must
+   * remain reattachable from persisted state on the next server start
+   * when the backend supports durable sessions.
+   */
+  shutdown(): Promise<void>;
 }
 
 /**

@@ -43,13 +43,13 @@ bun-error.log*
 Thumbs.db
 
 # IDE/editor
+.codex/
 .vscode/
 .idea/
 
 # Vercel/Temp build output
 .output/
 .eve/
-.workflow-data/
 
 # Geist
 .source

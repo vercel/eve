@@ -3,6 +3,7 @@ import type {
   LanguageModelUsage,
   ModelMessage,
   PrepareStepFunction,
+  ProviderMetadata,
   StepResult,
   ToolSet,
   ToolResultPart,
@@ -13,8 +14,10 @@ import {
   createActionResultEvent,
   createActionsRequestedEvent,
   createStepCompletedEvent,
+  type StepCompletedProviderMetadata,
 } from "#protocol/message.js";
 import {
+  createRuntimeToolResultFromToolError,
   createRuntimeToolResultFromMessagePart,
   createRuntimeToolResultFromStepResult,
 } from "#harness/action-result-helpers.js";
@@ -27,8 +30,8 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
-import { mergeGatewayProviderPin } from "#harness/provider-tools.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
+import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
@@ -47,8 +50,17 @@ import { readToolInterrupt } from "#harness/tool-interrupts.js";
  */
 export type HarnessStepResult = Pick<
   StepResult<ToolSet>,
-  "content" | "finishReason" | "response" | "text" | "toolCalls" | "toolResults" | "usage"
->;
+  | "content"
+  | "finishReason"
+  | "providerMetadata"
+  | "response"
+  | "text"
+  | "toolCalls"
+  | "toolResults"
+  | "usage"
+> & {
+  readonly invalidInputToolCallIds?: ReadonlySet<string>;
+};
 
 // ---------------------------------------------------------------------------
 // Hook builder input / output
@@ -69,19 +81,6 @@ interface StepHooksInput {
    * Defaults to `true`.
    */
   readonly emitStepStarted?: boolean;
-  /**
-   * When set on the `gateway-auto` cache path, merges
-   * `providerOptions.gateway.only = [gatewayPinProvider]` so the AI
-   * Gateway only routes to the given provider. Used to keep
-   * provider-specific tools (e.g. Anthropic's `web_search_20250305`)
-   * on a provider that can serve them, converting a transient outage
-   * into a clean retryable 503 rather than a fallback-to-incompatible
-   * provider 400.
-   *
-   * Ignored when the author already set `gateway.only` or
-   * `gateway.order` on the model reference's provider options.
-   */
-  readonly gatewayPinProvider?: string;
   readonly marker: AnthropicCacheMarker | undefined;
   readonly session: HarnessSession;
 }
@@ -171,13 +170,9 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     };
 
     if (input.cachePath.kind === "gateway-auto") {
-      let providerOptions = mergeGatewayAutoCaching(session.agent.modelReference.providerOptions);
-      if (input.gatewayPinProvider !== undefined) {
-        providerOptions = mergeGatewayProviderPin(providerOptions, input.gatewayPinProvider);
-      }
-      stepResult.providerOptions = providerOptions as NonNullable<
-        typeof stepResult.providerOptions
-      >;
+      stepResult.providerOptions = mergeGatewayAutoCaching(
+        session.agent.modelReference.providerOptions,
+      ) as NonNullable<typeof stepResult.providerOptions>;
     }
 
     return stepResult;
@@ -208,15 +203,16 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
  * arguments — the runtime event stream only sees successfully parsed
  * tool calls.
  *
- * `handledInlineToolResultCallIds` lists approval-resume tool-result
- * call ids the stream already handled inline (see `emitStreamContent`).
- * This skips them to avoid double-emission.
+ * `handledInlineToolResultCallIds` contains results emitted by
+ * `emitStreamContent` or sent to authorization. Skip them here.
  */
 export async function emitStepActions(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   step: HarnessStepResult,
   options: {
+    readonly emittedActionCallIds?: ReadonlySet<string>;
+    readonly excludedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionToolNames: ReadonlySet<string>;
     readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
     readonly tools: ToolLoopHarnessConfig["tools"];
@@ -228,9 +224,11 @@ export async function emitStepActions(
       .map((toolCall) => toolCall.toolCallId),
   );
   const excludedCallIds = new Set<string>([
+    ...(options.excludedActionCallIds ?? []),
     ...providerExecutedCallIds,
     ...extractToolApprovalInputRequests({
       content: (step.content ?? []) as ContentPart<ToolSet>[],
+      excludedCallIds: options.excludedActionCallIds,
     }).map((request) => request.action.callId),
     ...(step.toolCalls as TypedToolCall<ToolSet>[])
       .filter(isInvalidToolCall)
@@ -240,9 +238,14 @@ export async function emitStepActions(
   const isExcluded = (toolCallId: string, toolName: string): boolean =>
     excludedCallIds.has(toolCallId) || options.excludedActionToolNames.has(toolName);
 
-  // actions.requested
+  // Streamed calls already emitted their request. The loop below emits their
+  // result.
   const actions = (step.toolCalls as TypedToolCall<ToolSet>[])
-    .filter((tc) => !isExcluded(tc.toolCallId, tc.toolName))
+    .filter(
+      (toolCall) =>
+        !isExcluded(toolCall.toolCallId, toolCall.toolName) &&
+        !options.emittedActionCallIds?.has(toolCall.toolCallId),
+    )
     .map((toolCall) =>
       createRuntimeActionRequestFromToolCall({
         toolCall,
@@ -297,10 +300,14 @@ export async function emitStepActions(
   await emitFn(
     createStepCompletedEvent({
       finishReason: normalizeAssistantStepFinishReason(step.finishReason),
+      providerMetadata: extractStepProviderMetadata(step.providerMetadata),
       sequence: state.sequence,
       stepIndex: state.stepIndex,
       turnId: state.turnId,
-      usage: extractStepUsage(step.usage),
+      usage: extractStepUsage({
+        costUsd: extractGatewayCostUsd(step.providerMetadata),
+        usage: step.usage,
+      }),
     }),
   );
 }
@@ -308,20 +315,6 @@ export async function emitStepActions(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Returns true when the AI SDK marked the tool call `invalid` (typically
- * because the model emitted unparsable JSON or targeted an unknown tool).
- *
- * Invalid calls have a raw-string or partial `input` payload that cannot
- * satisfy the runtime-action contract. The AI SDK synthesizes a tool-error
- * result for the next model step automatically; callers must skip invalid
- * calls when projecting to `RuntimeActionRequest` values or the harness
- * will throw on the JSON-object invariant.
- */
-export function isInvalidToolCall(toolCall: TypedToolCall<ToolSet>): boolean {
-  return toolCall.invalid === true;
-}
 
 function isProviderExecutedToolCall(toolCall: TypedToolCall<ToolSet>): boolean {
   return toolCall.providerExecuted === true;
@@ -336,6 +329,18 @@ function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResu
     }
 
     resultsByCallId.set(toolResult.toolCallId, createRuntimeToolResultFromStepResult(toolResult));
+  }
+
+  for (const part of step.content ?? []) {
+    if (part.type !== "tool-error" || part.providerExecuted === true) {
+      continue;
+    }
+
+    if (resultsByCallId.has(part.toolCallId)) {
+      continue;
+    }
+
+    resultsByCallId.set(part.toolCallId, createRuntimeToolResultFromToolError(part));
   }
 
   for (const part of extractToolResultParts(step.response.messages)) {
@@ -387,24 +392,32 @@ function extractToolResultParts(messages: readonly ModelMessage[]): ToolResultPa
  * Projects the AI SDK's `LanguageModelUsage` into the flat `step.completed`
  * event usage shape. Returns `undefined` when the SDK reports no usage.
  */
-function extractStepUsage(usage: LanguageModelUsage | undefined):
+function extractStepUsage(input: {
+  readonly costUsd: number | undefined;
+  readonly usage: LanguageModelUsage | undefined;
+}):
   | {
+      costUsd?: number;
       inputTokens?: number;
       outputTokens?: number;
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
     }
   | undefined {
-  if (usage === undefined) {
-    return undefined;
-  }
-
   const result: {
+    costUsd?: number;
     inputTokens?: number;
     outputTokens?: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
   } = {};
+
+  if (input.costUsd !== undefined) result.costUsd = input.costUsd;
+
+  const usage = input.usage;
+  if (usage === undefined) {
+    return Object.keys(result).length > 0 ? result : undefined;
+  }
 
   if (usage.inputTokens !== undefined) result.inputTokens = usage.inputTokens;
   if (usage.outputTokens !== undefined) result.outputTokens = usage.outputTokens;
@@ -416,4 +429,38 @@ function extractStepUsage(usage: LanguageModelUsage | undefined):
   }
 
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function extractStepProviderMetadata(
+  providerMetadata: ProviderMetadata | undefined,
+): StepCompletedProviderMetadata | undefined {
+  const generationId = readGatewayGenerationId(providerMetadata);
+  return generationId === undefined ? undefined : { gateway: { generationId } };
+}
+
+function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): number | undefined {
+  const gateway = readGatewayMetadata(providerMetadata);
+  const cost = gateway?.cost;
+  if (typeof cost === "number" && Number.isFinite(cost)) {
+    return cost;
+  }
+  if (typeof cost === "string") {
+    const parsed = Number(cost);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function readGatewayGenerationId(
+  providerMetadata: ProviderMetadata | undefined,
+): string | undefined {
+  const generationId = readGatewayMetadata(providerMetadata)?.generationId;
+  return typeof generationId === "string" && generationId.length > 0 ? generationId : undefined;
+}
+
+function readGatewayMetadata(
+  providerMetadata: ProviderMetadata | undefined,
+): ProviderMetadata[string] | undefined {
+  const gateway = providerMetadata?.gateway;
+  return gateway && typeof gateway === "object" && !Array.isArray(gateway) ? gateway : undefined;
 }

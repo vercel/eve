@@ -1,15 +1,15 @@
+import { z } from "#compiled/zod/index.js";
+
 import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import type { JsonObject } from "#shared/json.js";
 
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
  */
-interface LoadSkillInput {
-  readonly skill: string;
-}
+type LoadSkillInput = z.infer<typeof SKILL_INPUT_SCHEMA>;
 
 /**
  * Executes the `load_skill` tool.
@@ -29,7 +29,23 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   }
 
   const { skill } = args;
-  return await loadSkillFromSandbox(sandbox, skill, availableSkillNames(ctx));
+  const availableSkills = availableSkillNames(ctx);
+  try {
+    return await loadSkillFromSandbox(sandbox, skill, availableSkills);
+  } catch (error) {
+    const connectionName = ctx
+      .get(ConnectionRegistryKey)
+      ?.getConnectionNames()
+      .find((name) => name.toLowerCase() === skill.toLowerCase());
+    if (connectionName === undefined || availableSkills.includes(skill)) throw error;
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${message} "${connectionName}" is an installed connection, not a skill. ` +
+        `Use connection_search with connection "${connectionName}" to find its tools.`,
+      { cause: error },
+    );
+  }
 }
 
 // Dynamic skill names for load_skill's not-found hint. Dynamic-only on purpose:
@@ -46,27 +62,21 @@ function availableSkillNames(ctx: ReturnType<typeof loadContext>): string[] {
 // Tool definition
 // ---------------------------------------------------------------------------
 
-export const SKILL_OUTPUT_SCHEMA: JsonObject = { type: "string" };
+export const SKILL_INPUT_SCHEMA = z.strictObject({
+  skill: z.string().describe("Available skill name or id."),
+});
+export const SKILL_OUTPUT_SCHEMA = z.string();
 
 export const SKILL_TOOL_DEFINITION: ResolvedToolDefinition = {
   description: [
     "Load the full instructions for one available skill by name or id.",
     "Use this tool when the request clearly matches a listed skill description or when the user explicitly asks for that skill.",
+    "This is not for MCP connections; use connection_search to access an installed connection.",
     "Loading adds the skill instructions to the current turn.",
     'Choose the "skill" value from the Available skills block.',
   ].join(" "),
   execute: (input) => executeLoadSkillTool(input as LoadSkillInput),
-  inputSchema: {
-    additionalProperties: false,
-    properties: {
-      skill: {
-        description: "Available skill name or id.",
-        type: "string",
-      },
-    },
-    required: ["skill"],
-    type: "object",
-  },
+  inputSchema: SKILL_INPUT_SCHEMA,
   logicalPath: "eve:framework/load-skill",
   name: "load_skill",
   outputSchema: SKILL_OUTPUT_SCHEMA,

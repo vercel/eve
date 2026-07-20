@@ -9,7 +9,8 @@
 import type { ToolSet } from "ai";
 
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
@@ -39,19 +40,26 @@ export interface TokenResult {
  */
 export type ConnectionProtocol = "mcp" | "openapi";
 
-/** A single header value, supporting static strings and dynamic resolution. */
-export type HeaderValue = string | Promise<string> | (() => string | Promise<string>);
+/** A single header value, supporting static strings and per-caller resolution. */
+export type HeaderValue =
+  | string
+  | Promise<string>
+  | ((ctx: SessionContext) => string | Promise<string>);
 
 /**
  * Arbitrary HTTP headers sent with every request to a connection server.
  *
  * Static form: key-value pairs where each value may be a string, Promise,
- * or function. Function form: a callback returning the full headers map,
- * useful when multiple headers must be resolved together.
+ * or callback. Function form: a callback returning the full headers map,
+ * useful when multiple headers must be resolved together. Header callbacks
+ * receive the active {@link SessionContext}, so credentials and routing
+ * metadata can be selected from the current caller.
  */
 export type HeadersDefinition =
   | Readonly<Record<string, HeaderValue>>
-  | (() => Record<string, string> | Promise<Record<string, string>>);
+  | ((
+      ctx: SessionContext,
+    ) => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>);
 
 /**
  * Client-side tool filter applied after `listTools()`.
@@ -75,13 +83,16 @@ export type ToolFilterDefinition =
  * - `{ type: "user", id, issuer }`: per end-user identity; the token
  *   cache keys on `issuer + id` so the same `id` across different
  *   IdPs (Slack `U123` vs Google `U123`) never collides.
+ * - `{ type: "user", id }`: Vercel Connect's native user subject, used for a
+ *   verified Vercel development user. The Vercel OIDC issuer is not forwarded
+ *   because Connect rejects it.
  */
 export type ConnectionPrincipal =
   | { readonly type: "app" }
   | {
       readonly type: "user";
       readonly id: string;
-      readonly issuer: string;
+      readonly issuer?: string;
       readonly attributes?: Readonly<Record<string, string | readonly string[]>>;
     };
 
@@ -154,20 +165,37 @@ export type AuthorizationDefinition<Resume extends JsonValue = JsonValue> =
   | InteractiveAuthorizationDefinition<Resume>;
 
 /**
- * Protocol-agnostic `auth` shape accepted by every connection
- * `define*` factory (`defineMcpClientConnection`,
- * `defineOpenAPIConnection`, and so on).
+ * Auth provider returned directly from or resolved by a connection's `auth`
+ * field.
  *
  * Identical to {@link AuthorizationDefinition} except the
  * non-interactive form may omit `principalType`; normalization
  * defaults it to `"app"`. The resolved token is sent as
  * `Authorization: Bearer <token>`.
  */
-export type ConnectionAuthDefinition =
+export type ConnectionAuthProvider =
   | (Omit<NonInteractiveAuthorizationDefinition, "principalType"> & {
       readonly principalType?: NonInteractiveAuthorizationDefinition["principalType"];
     })
   | AuthorizationDefinition;
+
+/**
+ * Resolves a connection auth provider from the active turn.
+ *
+ * Use this when the provider, connector, or credential source depends on
+ * `ctx.session`, such as selecting a tenant-specific Vercel Connect client.
+ * The returned provider is validated and normalized before use.
+ */
+export type ConnectionAuthResolver = (
+  ctx: SessionContext,
+) => ConnectionAuthProvider | Promise<ConnectionAuthProvider>;
+
+/**
+ * Protocol-agnostic `auth` shape accepted by every connection `define*`
+ * factory. Pass a provider directly for static configuration, or a resolver
+ * to select the provider from the current caller's session context.
+ */
+export type ConnectionAuthDefinition = ConnectionAuthProvider | ConnectionAuthResolver;
 
 /**
  * Fields shared by every {@link AuthorizationDefinition} shape.
@@ -199,10 +227,10 @@ interface AuthorizationDefinitionBase {
    * that surfaces connector identifiers in build output, or the Vercel
    * dashboard rendering deep links to a connector's settings page.
    *
-   * The runtime token-fetch path ignores this field; it is purely
-   * provider attribution. Authors writing their own `getToken`
-   * callbacks (raw bearer tokens, custom callbacks) should leave it
-   * unset.
+   * The runtime uses this marker for Connect-specific authorization behavior,
+   * including its local callback URL contract. Authors writing their own
+   * `getToken` callbacks (raw bearer tokens, custom callbacks) should leave
+   * it unset.
    *
    * `connector` carries whatever value the author passed to
    * `connect()`: a UID like `"oauth/mcp-linear-app"` or opaque
@@ -403,11 +431,21 @@ export interface ConnectionToolMetadata {
   readonly outputSchema?: Record<string, unknown>;
 }
 
+/** Per-call options for {@link ConnectionClient.executeTool}. */
+export interface ConnectionToolExecuteOptions {
+  /** Signal forwarded into the underlying transport. */
+  readonly abortSignal?: AbortSignal;
+}
+
 /** A live client for a single connection. */
 export interface ConnectionClient {
   close(): Promise<void>;
   connect(): Promise<unknown>;
-  executeTool(toolName: string, args: unknown): Promise<unknown>;
+  executeTool(
+    toolName: string,
+    args: unknown,
+    options?: ConnectionToolExecuteOptions,
+  ): Promise<unknown>;
   getToolMetadata(): Promise<readonly ConnectionToolMetadata[]>;
   getTools(): Promise<ToolSet>;
 }
@@ -416,9 +454,7 @@ export interface ConnectionClient {
 export interface ConnectionRegistry {
   dispose(): Promise<void>;
   getClient(connectionName: string): ConnectionClient;
-  getConnectionApproval(
-    connectionName: string,
-  ): ((ctx: NeedsApprovalContext) => boolean) | undefined;
+  getConnectionApproval(connectionName: string): Approval | undefined;
   getConnectionNames(): readonly string[];
   getConnections(): readonly ResolvedConnectionDefinition[];
 }

@@ -2,16 +2,21 @@ import type { LanguageModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
-import type { SendTurnInput, SessionState } from "#client/types.js";
+import type { CancelSessionResult, SendTurnInput, SessionState } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import type {
+  EveEvalEventMatch,
+  EveEvalInputRequestMatchOptions,
   EveEvalSkillLoadMatchOptions,
   EveEvalSubagentCallMatchOptions,
   EveEvalToolCallMatchOptions,
 } from "#evals/match.js";
+
+/** Lifecycle outcome of an eval-observed tool or subagent action. */
+export type EveEvalActionStatus = "pending" | "completed" | "failed" | "rejected";
 
 /**
  * One tool call extracted from the captured stream, pairing the
@@ -23,9 +28,9 @@ export interface EveEvalToolCall {
   /** Tool input as requested by the model. */
   readonly input: JsonObject;
   /** Tool output from the matching `action.result`; `undefined` when the call never resolved. */
-  readonly output: unknown;
-  /** True when the matching `action.result` reported a failure. */
-  readonly isError: boolean;
+  readonly output: JsonValue | undefined;
+  /** Whether the request is unresolved, completed, failed, or user-rejected. */
+  readonly status: EveEvalActionStatus;
   /** Zero-based index of the turn the call happened in. */
   readonly turnIndex: number;
   /** Owning session id, when the runner knows it. */
@@ -37,14 +42,18 @@ export interface EveEvalToolCall {
  * (`subagent.called` / `subagent.started`, joined with `subagent.completed`).
  */
 export interface EveEvalSubagentCall {
+  /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
+  readonly callId?: string;
+  /** Durable child session id for local and remote workflow delegations. */
+  readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
   /** Remote agent URL for remote delegations (`subagent.called` remote metadata). */
   readonly remoteUrl?: string;
   /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
-  readonly output?: unknown;
-  /** True when the matching subagent action result reported a failure. */
-  readonly isError: boolean;
+  readonly output?: JsonValue;
+  /** Whether the delegation is unresolved, completed, failed, or rejected. */
+  readonly status: EveEvalActionStatus;
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
   /** Owning session id, when the runner knows it. */
@@ -84,9 +93,8 @@ export interface EveEvalSessionResult {
  */
 export interface EveEvalTaskResult {
   /**
-   * The agent's last assistant message (same as {@link finalMessage}), retained
-   * for reporters and artifacts that log a single "output" value. Mutable
-   * because the runner assigns it after the run completes.
+   * The final turn's structured data when present, otherwise its last assistant
+   * message. Retained for reporters and artifacts that log one output value.
    */
   output: unknown;
   /** The agent's last assistant message, or null when none was produced. */
@@ -148,10 +156,10 @@ export interface Assertion {
 /**
  * Handle to a recorded assertion, returned by every `t` assertion method.
  * Chain `gate`/`soft`/`atLeast` to override the recorded severity or
- * threshold, and `await` it to surface model-backed (judge) errors and ensure
- * the assertion has resolved before the run continues.
+ * threshold. Recorded assertions are finalized by the runner; use `t.require`
+ * or a `require*` lookup when later control flow depends on a passing result.
  */
-export interface AssertionHandle extends PromiseLike<void> {
+export interface AssertionHandle {
   gate(threshold?: number): this;
   soft(threshold?: number): this;
   atLeast(threshold: number): this;
@@ -172,10 +180,79 @@ export interface AssertionResult {
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
+/** Recorded assertions shared by aggregate, session, and turn scopes. */
+export interface EveEvalAssertions {
+  succeeded(): AssertionHandle;
+  parked(): AssertionHandle;
+  messageIncludes(token: string | RegExp): AssertionHandle;
+  calledTool(name: string, options?: EveEvalToolCallMatchOptions): AssertionHandle;
+  /** Sugar for `calledTool("load_skill", { input: { skill }, ... })`. */
+  loadedSkill(skill: string, options?: EveEvalSkillLoadMatchOptions): AssertionHandle;
+  notCalledTool(name: string): AssertionHandle;
+  /** Asserts that tool requests appeared in order, allowing unrelated requests between them. */
+  toolOrder(names: readonly string[]): AssertionHandle;
+  usedNoTools(): AssertionHandle;
+  maxToolCalls(max: number): AssertionHandle;
+  calledSubagent(name: string, options?: EveEvalSubagentCallMatchOptions): AssertionHandle;
+  noFailedActions(): AssertionHandle;
+  event<TType extends HandleMessageStreamEvent["type"]>(
+    type: TType,
+    options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type">,
+  ): AssertionHandle;
+  notEvent<TType extends HandleMessageStreamEvent["type"]>(
+    type: TType,
+    options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type" | "count">,
+  ): AssertionHandle;
+  eventOrder(matchers: readonly EveEvalEventMatch[]): AssertionHandle;
+  eventsSatisfy(
+    label: string,
+    predicate: (events: readonly HandleMessageStreamEvent[]) => boolean,
+  ): AssertionHandle;
+}
+
+/** Assertions over the final output captured by one session or immutable turn. */
+export interface EveEvalOutputAssertions {
+  outputEquals(value: unknown): AssertionHandle;
+  outputMatches(schema: StandardSchemaV1): AssertionHandle;
+}
+
+/** Typed stream event returned by {@link EveEvalLiveTurn.waitForEvent}. */
+export type EveEvalStreamEvent<
+  TType extends HandleMessageStreamEvent["type"] = HandleMessageStreamEvent["type"],
+> = Extract<HandleMessageStreamEvent, { type: TType }>;
+
+/** Matcher options for waiting until one live turn emits a specific event. */
+export type EveEvalWaitForEventOptions<TType extends HandleMessageStreamEvent["type"]> = Omit<
+  Extract<EveEvalEventMatch, { type: TType }>,
+  "count" | "type"
+>;
+
 /**
- * Driver for one session, exposed on the eval context and by `t.newSession()`.
+ * One accepted turn whose event stream is still in progress.
+ *
+ * The handle owns the stream consumer: event waiters observe its buffer and
+ * {@link result} settles and records that same stream exactly once.
  */
-export interface EveEvalSession {
+export interface EveEvalLiveTurn {
+  /** Events observed on this turn so far. */
+  readonly events: readonly HandleMessageStreamEvent[];
+  /** Session driver that started or owns this turn. */
+  readonly session: EveEvalSession;
+  /** Durable session id available as soon as the turn is accepted or attached. */
+  readonly sessionId: string;
+  /** Request cooperative cancellation of this turn's session. */
+  cancel(): Promise<CancelSessionResult>;
+  /** Wait for the turn boundary and return the recorded immutable result. */
+  result(): Promise<EveEvalTurn>;
+  /** Wait until the live stream emits one typed event matching `options`. */
+  waitForEvent<TType extends HandleMessageStreamEvent["type"]>(
+    type: TType,
+    options?: EveEvalWaitForEventOptions<TType>,
+  ): Promise<EveEvalStreamEvent<TType>>;
+}
+
+/** Operations and state shared by the primary eval context and independent sessions. */
+export interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
   readonly events: readonly HandleMessageStreamEvent[];
   /** Input requests left pending by the last parked turn. */
@@ -184,31 +261,42 @@ export interface EveEvalSession {
   readonly state: SessionState;
   /** eve session id after the first successful send. */
   readonly sessionId: string | undefined;
-  /** Assert the last turn parked on HITL input and return matching requests. */
-  expectInputRequests(filter?: {
-    readonly display?: InputRequest["display"];
-    readonly toolName?: string;
-  }): readonly InputRequest[];
+  /** Request cooperative cancellation of this session's active turn. */
+  cancel(): Promise<CancelSessionResult>;
+  /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
+  requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */
   respond(...responses: InputResponse[]): Promise<EveEvalTurn>;
   /** Resolve every pending request with the same option id. */
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */
   send(input: SendTurnInput): Promise<EveEvalTurn>;
+  /** Start one turn and return as soon as its session is accepted. */
+  start(input: SendTurnInput): Promise<EveEvalLiveTurn>;
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
 }
 
+/** Driver for one independent session, exposed by `t.newSession()` and target attachment helpers. */
+export interface EveEvalSession
+  extends EveEvalSessionDriver, EveEvalAssertions, EveEvalOutputAssertions {}
+
 /**
  * One completed eval-driver turn.
  */
-export interface EveEvalTurn {
+export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {
   readonly data: unknown;
   readonly events: readonly HandleMessageStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
+  readonly sessionId: string;
   readonly status: "completed" | "failed" | "waiting";
   readonly toolCalls: readonly EveEvalToolCall[];
+  /** Require exactly one matching tool call, record a gate, and return it for dependent checks. */
+  requireToolCall(
+    name: string,
+    options?: Omit<EveEvalToolCallMatchOptions, "count">,
+  ): EveEvalToolCall;
   expectOk(): this;
 }
 
@@ -261,15 +349,13 @@ export interface JudgeContext {
 
 /**
  * The single context passed to an eval's `test(t)` function. It drives the
- * primary session (it extends {@link EveEvalSession}), carries the run-level
+ * primary session, carries the run-level
  * and value-level assertion vocabulary, and exposes `judge` for LLM-as-judge.
  *
- * Run-level assertions (`completed`, `calledTool`, …) record an entry
- * evaluated against the final run and never throw; `check` and `judge`
- * evaluate the supplied value immediately. Use plain `throw` /
- * `turn.expectOk()` for bespoke preconditions that should abort the run.
+ * Scoped assertions (`succeeded`, `calledTool`, …) record an entry evaluated
+ * after the test body; `check`, `require`, and `judge` evaluate explicit values.
  */
-export interface EveEvalContext extends EveEvalSession {
+export interface EveEvalContext extends EveEvalSessionDriver, EveEvalAssertions {
   /** Eval timeout signal. */
   readonly signal: AbortSignal;
   /** Current target under test. */
@@ -283,29 +369,12 @@ export interface EveEvalContext extends EveEvalSession {
   /** Create an additional independent session against the same target. */
   newSession(): EveEvalSession;
 
-  // Run-level assertions (lazy: evaluated against the final run; default gate).
-  completed(): AssertionHandle;
-  didNotFail(): AssertionHandle;
-  waiting(): AssertionHandle;
-  messageIncludes(token: string | RegExp): AssertionHandle;
-  calledTool(name: string, options?: EveEvalToolCallMatchOptions): AssertionHandle;
-  /** Sugar for `calledTool("load_skill", { input: { skill }, ... })`. */
-  loadedSkill(skill: string, options?: EveEvalSkillLoadMatchOptions): AssertionHandle;
-  notCalledTool(name: string): AssertionHandle;
-  toolOrder(names: readonly string[]): AssertionHandle;
-  usedNoTools(): AssertionHandle;
-  maxToolCalls(max: number): AssertionHandle;
-  calledSubagent(name: string, options?: EveEvalSubagentCallMatchOptions): AssertionHandle;
-  noFailedActions(): AssertionHandle;
-  event(
-    predicate: (events: readonly HandleMessageStreamEvent[]) => boolean,
-    label: string,
-  ): AssertionHandle;
-  outputEquals(value: unknown): AssertionHandle;
-  outputMatches(schema: StandardSchemaV1): AssertionHandle;
-
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;
+  /** Record an immediate gate and abort dependent control flow when it fails. */
+  require<T>(value: T, assertion: Assertion): Promise<T>;
+  /** Mark this eval as intentionally skipped and stop executing its test body. */
+  skip(reason: string): never;
 
   /** LLM-as-judge assertions, bound to the resolved judge model. */
   readonly judge: JudgeContext;
@@ -343,11 +412,23 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
   dispatchSchedule(scheduleId: string): Promise<EveEvalScheduleDispatchResult>;
   /** Authenticated fetch against the target base URL. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
-  /** Attach to a pre-existing session and consume one turn boundary. */
+  /**
+   * Attach to a pre-existing session and consume one turn boundary.
+   *
+   * When that boundary is `session.waiting`, the attached session recovers
+   * the current continuation token from the stream, so `session.send(...)`
+   * and `session.respond(...)` continue the same durable session.
+   */
   attachSession(
     sessionId: string,
     opts?: { readonly startIndex?: number },
   ): Promise<EveEvalSession>;
+  /**
+   * Observe one in-progress turn from a session created outside the eval.
+   * The returned live-turn handle starts consuming immediately and owns the
+   * stream through its next turn boundary.
+   */
+  watchTurn(sessionId: string, opts?: { readonly startIndex?: number }): EveEvalLiveTurn;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,8 +504,9 @@ export type EveEval = EveEvalDefinition & {
  * - `"passed"`  — no execution error, every gate held, every soft threshold met
  * - `"failed"`  — a gate assertion failed or execution errored (timeout, transport, thrown task)
  * - `"scored"`  — every gate held but a soft assertion fell below its threshold
+ * - `"skipped"` — the test body intentionally called `t.skip(reason)`
  */
-export type EveEvalVerdict = "passed" | "failed" | "scored";
+export type EveEvalVerdict = "passed" | "failed" | "scored" | "skipped";
 
 /**
  * Result of executing and asserting one eval.
@@ -440,6 +522,8 @@ export interface EveEvalResult {
   /** Per-eval verdict; see {@link EveEvalVerdict}. */
   readonly verdict: EveEvalVerdict;
   readonly error?: string;
+  /** Why the eval intentionally skipped, present only for a `"skipped"` verdict. */
+  readonly skipReason?: string;
   readonly startedAt: string;
   readonly completedAt: string;
 }
@@ -458,6 +542,8 @@ export interface EveEvalRunSummary {
   readonly failed: number;
   /** Evals with verdict `"scored"` (below-threshold soft assertions only). */
   readonly scored: number;
+  /** Evals intentionally skipped by their test body. */
+  readonly skipped: number;
   /** The execution-error subset of `failed` (timeouts, connection failures, exceptions). */
   readonly errored: number;
 }

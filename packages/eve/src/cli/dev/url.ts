@@ -34,7 +34,6 @@ export function parseDevelopmentServerUrl(value: string): string {
     assertDevelopmentServerProtocol(url, value);
     assertSecureRemoteProtocol(url, value);
     url.hash = "";
-    url.search = "";
 
     return url.toString();
   } catch (error) {
