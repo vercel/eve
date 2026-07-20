@@ -136,7 +136,7 @@ export default defineEval({
       // advertised and usable.
       const adopted = t.newSession();
       const skill = await adopted.send(
-        "Please use the deploy note skill and follow its instructions exactly.",
+        `Load the \`${SKILL_NAME}\` skill and follow its instructions exactly.`,
       );
       skill.expectOk();
       skill.loadedSkill(SKILL_NAME);

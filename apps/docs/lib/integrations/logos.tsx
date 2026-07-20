@@ -7,8 +7,10 @@ import {
   SiCoda,
   SiDatadog,
   SiEgnyte,
+  SiGooglechat,
   SiHuggingface,
   SiMake,
+  SiMessenger,
   SiMiro,
   SiMixpanel,
   SiNetlify,
@@ -25,7 +27,9 @@ import {
   SiTicktick,
   SiTodoist,
   SiWebflow,
+  SiWhatsapp,
   SiWix,
+  SiX,
   SiZapier,
   SiZomato,
 } from "@icons-pack/react-simple-icons";
@@ -287,6 +291,14 @@ export const ticketTailorLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
+
+export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
+
+export const messengerLogo = (props: LogoProps) => <SiMessenger color="default" {...props} />;
+
+export const xLogo = (props: LogoProps) => <SiX {...props} />;
+
 export const logos = {
   eve: eveLogo,
   web: webLogo,
@@ -333,6 +345,11 @@ export const logos = {
   wix: wixLogo,
   zapier: zapierLogo,
   zomato: zomatoLogo,
+
+  googlechat: googlechatLogo,
+  whatsapp: whatsappLogo,
+  messenger: messengerLogo,
+  x: xLogo,
 } as const;
 
 export type LogoKey = keyof typeof logos;

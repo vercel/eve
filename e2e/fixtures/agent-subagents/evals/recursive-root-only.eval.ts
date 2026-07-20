@@ -10,8 +10,8 @@ export default defineEval({
       [
         "Use the built-in agent subagent exactly once.",
         "Give the child this task:",
-        "If a built-in agent tool is visible, call it once and return RECURSIVE_AGENT_WAS_VISIBLE.",
-        `If no built-in agent tool is visible, return exactly ${CHILD_TOKEN}.`,
+        "If a built-in tool named `agent` is visible, call it once and return RECURSIVE_AGENT_WAS_VISIBLE.",
+        `If no built-in tool named \`agent\` is visible, return exactly ${CHILD_TOKEN}.`,
         `After the child returns, reply with its exact output and no other token.`,
       ].join(" "),
     );
