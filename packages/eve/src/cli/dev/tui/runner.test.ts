@@ -204,6 +204,7 @@ function idleSetupFlow(): SetupFlowRenderer {
     readSelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
+    readModelEditor: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -664,6 +665,71 @@ describe("EveTUIRunner terminal-failure recovery", () => {
     expect(recoveredSession.send).not.toHaveBeenCalled();
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("new session");
+  });
+
+  it("preserves the session and posts a notice when the stream ends without a boundary", async () => {
+    const notices: string[] = [];
+    const prompts: Array<string | undefined> = ["run something long", undefined];
+
+    const strandedSession = sessionYielding([{ type: "turn.started", data: {} }]);
+    const client = stubClient();
+    const sessionFactory = vi.spyOn(client, "session");
+
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderNotice: (text) => notices.push(text),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+          }
+        }),
+      },
+      session: strandedSession,
+    });
+
+    await runner.run();
+
+    expect(sessionFactory).not.toHaveBeenCalled();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("Lost");
+    expect(notices[0]).not.toContain("new session");
+  });
+
+  it("starts a fresh session when the user interrupts a turn mid-stream", async () => {
+    const notices: string[] = [];
+    const prompts: Array<string | undefined> = ["run something long", undefined];
+
+    const interruptedSession = sessionYielding([{ type: "turn.started", data: {} }]);
+    const replacementSession = sessionYielding([]);
+    const client = stubClient();
+    const sessionFactory = vi.spyOn(client, "session").mockReturnValue(replacementSession);
+
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderNotice: (text) => notices.push(text),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+            result.abort?.();
+            break;
+          }
+        }),
+      },
+      session: interruptedSession,
+    });
+
+    await runner.run();
+
+    expect(sessionFactory).toHaveBeenCalledTimes(1);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("new session");
+    expect(notices[0]).toContain("may still be running");
   });
 });
 
@@ -2005,15 +2071,18 @@ describe("EveTUIRunner Vercel status line", () => {
 describe("EveTUIRunner gateway-auth failure rendering", () => {
   const gatewayFailure = {
     code: "MODEL_CALL_FAILED",
-    message: "AI Gateway received no credentials. Run `eve link` to populate…",
+    message: "AI Gateway received no credentials.",
     details: {
       errorId: "err-1",
       name: "AI Gateway authentication failed",
-      gatewayName: "GatewayAuthenticationError",
+      semanticErrorId: "gateway-auth-missing-credentials",
+      hint: "Run `eve link` to populate `VERCEL_OIDC_TOKEN`, or set `AI_GATEWAY_API_KEY`…",
     },
   };
 
-  async function errorTextsFor(appRoot?: string): Promise<string[]> {
+  async function errorEventsFor(
+    appRoot?: string,
+  ): Promise<Array<{ errorText: string; hint?: string }>> {
     const prompts: Array<string | undefined> = ["hello", undefined];
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
@@ -2042,22 +2111,24 @@ describe("EveTUIRunner gateway-auth failure rendering", () => {
 
     return emitted
       .filter((event) => event.type === "error")
-      .map((event) => (event as { errorText: string }).errorText);
+      .map((event) => event as { errorText: string; hint?: string });
   }
 
-  it("collapses the failure to the minimal /model line when setup commands are available", async () => {
-    const errors = await errorTextsFor("/tmp/weather-agent");
+  it("swaps the hint for the local /model fix when setup commands are available", async () => {
+    const errors = await errorEventsFor("/tmp/weather-agent");
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toBe(
-      "There is no AI_GATEWAY_API_KEY set. Run /model to connect this to a project and refresh AI Gateway credentials, or set it manually in .env.local.",
+    expect(errors[0]!.errorText).toContain("MODEL_CALL_FAILED");
+    expect(errors[0]!.hint).toBe(
+      "Run /model to connect this to a project and refresh AI Gateway credentials, or set AI_GATEWAY_API_KEY manually in .env.local.",
     );
   });
 
-  it("keeps the full failure message when the TUI has no local project to link", async () => {
-    const errors = await errorTextsFor(undefined);
+  it("keeps the harness hint when the TUI has no local project to link", async () => {
+    const errors = await errorEventsFor(undefined);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("MODEL_CALL_FAILED");
-    expect(errors[0]).not.toContain("/model");
+    expect(errors[0]!.errorText).toContain("MODEL_CALL_FAILED");
+    expect(errors[0]!.hint).toContain("eve link");
+    expect(errors[0]!.hint).not.toContain("/model");
   });
 });
 
@@ -2158,7 +2229,7 @@ describe("EveTUIRunner boot setup detection", () => {
     ];
     const handle = vi.fn(async (command: { name: string }) => {
       order.push(command.name);
-      return { message: "/model cancelled." };
+      return { message: "/model dismissed." };
     });
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
@@ -2236,7 +2307,7 @@ describe("EveTUIRunner boot setup detection", () => {
       promptCommandHandler: {
         handle: async (command) => {
           order.push(command.name);
-          return { message: "/vc:install cancelled." };
+          return { message: "/vc:install dismissed." };
         },
       },
     });
@@ -2248,7 +2319,7 @@ describe("EveTUIRunner boot setup detection", () => {
   });
 
   it("does not auto-open /model outside the prefilled onboarding launch", async () => {
-    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const handle = vi.fn(async () => ({ message: "/model dismissed." }));
     const runner = new EveTUIRunner({
       session: sessionYielding([]),
       renderer: fakeRenderer({ setupFlow: createFakeSetupFlowRenderer() }),
@@ -2275,7 +2346,7 @@ describe("EveTUIRunner boot setup detection", () => {
   });
 
   it("keeps a prefilled /model editable without a local app root", async () => {
-    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const handle = vi.fn(async () => ({ message: "/model dismissed." }));
     const readPrompt = vi.fn(async (options?: AgentTUISessionOptions) => {
       expect(options?.initialDraft).toBe("/model");
       return undefined;

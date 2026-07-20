@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
+import type { LogRecord } from "#internal/logging.js";
+import type { DevDiagnostics } from "../diagnostics.js";
 import { searchActionValue } from "#setup/cli/select-state.js";
 import {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
@@ -36,9 +38,49 @@ function makeRenderer(columns = 80, rows = 30) {
   return { screen, input, renderer };
 }
 
+function stubDiagnostics() {
+  const append = vi.fn();
+  const recordPrompt = vi.fn();
+  const recordStepUsage = vi.fn();
+  const recordToolCall = vi.fn();
+  const recordSubagentDispatch = vi.fn();
+  const reportStats = vi.fn();
+  let subscriber: ((record: LogRecord) => void) | undefined;
+  const diagnostics: DevDiagnostics = {
+    displayPath: ".eve/logs/dev.log",
+    append,
+    recordPrompt,
+    recordStepUsage,
+    recordToolCall,
+    recordSubagentDispatch,
+    reportStats,
+    subscribeLogRecords: (onRecord) => {
+      subscriber = onRecord;
+    },
+    unsubscribeLogRecords: () => {
+      subscriber = undefined;
+    },
+    close: async () => {},
+  };
+  return {
+    diagnostics,
+    append,
+    recordPrompt,
+    recordStepUsage,
+    recordToolCall,
+    recordSubagentDispatch,
+    reportStats,
+    emitLogRecord: (record: LogRecord) => subscriber?.(record),
+    get subscribed() {
+      return subscriber !== undefined;
+    },
+  };
+}
+
 function agentInfoWithModel(
   modelId: string,
   endpoint?: AgentInfoResult["agent"]["model"]["endpoint"],
+  extras?: Partial<AgentInfoResult["agent"]["model"]>,
 ): AgentInfoResult {
   return {
     agent: {
@@ -47,6 +89,7 @@ function agentInfoWithModel(
       model: {
         id: modelId,
         endpoint,
+        ...extras,
       },
       name: "Weather Agent",
     },
@@ -817,10 +860,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("hangs a command outcome under its invocation with the elbow connector", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("/model cancelled.");
+    renderer.renderCommandResult("/model dismissed.");
     renderer.shutdown();
 
-    expect(screen.snapshot()).toContain("\u23bf  /model cancelled.");
+    expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
   });
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
@@ -1207,6 +1250,223 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(restored.indexOf("turn boundary")).toBeLessThan(
       restored.indexOf("after-boundary stderr"),
     );
+  });
+
+  it("stores long stderr diagnostics and shows concise copy by default", () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const stub = stubDiagnostics();
+    const append = stub.append;
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      logs: "stderr",
+      unicode: true,
+      diagnostics: stub.diagnostics,
+    });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    const detail = [
+      "Error: request returned 403",
+      "  at first",
+      "  at second",
+      "  at third",
+      "  at fourth",
+    ].join("\n");
+
+    process.stderr.write(`${detail}\n`);
+
+    expect(append).toHaveBeenCalledWith({ source: "stderr", detail });
+    expect(screen.snapshot()).toContain("Error: request returned 403");
+    expect(screen.snapshot()).toContain("details: .eve/logs/dev.log");
+    expect(screen.snapshot()).not.toContain("at fourth");
+
+    renderer.setLogDisplayMode("all");
+    expect(screen.snapshot()).toContain("at fourth");
+    expect(screen.snapshot()).not.toContain("details: .eve/logs/dev.log");
+
+    process.stdout.write("server listening on 3000\n");
+    expect(append).toHaveBeenCalledWith({ source: "stdout", detail: "server listening on 3000" });
+    renderer.shutdown();
+  });
+
+  it("subscribes the recorder to log records, displays them, and releases on shutdown", () => {
+    const screen = new MockScreen({ columns: 120, rows: 30 });
+    const input = new MockUserInput();
+    const stub = stubDiagnostics();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      logs: "stderr",
+      unicode: true,
+      diagnostics: stub.diagnostics,
+    });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+    expect(stub.subscribed).toBe(true);
+    stub.emitLogRecord({
+      level: "error",
+      namespace: "harness.tool-loop",
+      message: "tool execution failed",
+      fields: { toolName: "always_fail" },
+    });
+    expect(screen.snapshot()).toContain("[eve:harness.tool-loop] tool execution failed");
+
+    renderer.shutdown();
+    expect(stub.subscribed).toBe(false);
+  });
+
+  it("records tool failures in the diagnostic log even when tools are hidden", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const stub = stubDiagnostics();
+    const append = stub.append;
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      tools: "hidden",
+      unicode: true,
+      diagnostics: stub.diagnostics,
+    });
+
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "c1",
+          toolName: "bash",
+          input: { command: "curl https://example.com" },
+        },
+        { type: "tool-error", toolCallId: "c1", errorText: "exit code 7: connection refused" },
+        { type: "error", errorText: "Turn failed." },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "fetch it", continueSession: false },
+    );
+
+    expect(append).toHaveBeenCalledWith({
+      source: "tool",
+      summary: expect.stringContaining("failed"),
+      detail: "exit code 7: connection refused",
+    });
+    expect(append).toHaveBeenCalledWith({
+      source: "workflow",
+      summary: "Error: Turn failed.",
+      detail: "Turn failed.",
+    });
+    renderer.shutdown();
+  });
+
+  it("renders a cataloged summary for a recognized stream error and logs the raw dump", async () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const stub = stubDiagnostics();
+    const append = stub.append;
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      diagnostics: stub.diagnostics,
+    });
+
+    const failure = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3000"), {
+        code: "ECONNREFUSED",
+      }),
+    });
+    await renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            controller.error(failure);
+          },
+        }),
+      },
+      { submittedPrompt: "hello", continueSession: false },
+    );
+
+    // Transcript: curated headline, the structured hint, and the log
+    // pointer — no stack dump.
+    expect(screen.snapshot()).toContain("Network request failed");
+    expect(screen.snapshot()).toContain("Check your internet connection");
+    expect(screen.snapshot()).toContain("details: .eve/logs/dev.log");
+    expect(screen.snapshot()).not.toContain("    at ");
+    // Log: the raw inspection, cause chain included, hint structured.
+    expect(append).toHaveBeenCalledWith({
+      source: "workflow",
+      summary: expect.stringContaining("Network request failed"),
+      detail: expect.stringContaining("ECONNREFUSED"),
+      hint: expect.stringContaining("Check your internet connection"),
+    });
+    renderer.shutdown();
+  });
+
+  it("records session stats past display guards and reports at the turn boundary", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const stub = stubDiagnostics();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      tools: "hidden",
+      subagents: "hidden",
+      unicode: true,
+      diagnostics: stub.diagnostics,
+    });
+
+    renderer.upsertSubagentTool({
+      callId: "sub-1",
+      subagentName: "echo-marker",
+      childCallId: "child-1",
+      toolName: "echo",
+      input: {},
+      status: "executing",
+    });
+    await renderer.renderStream(
+      streamOf([
+        { type: "tool-call", toolCallId: "c1", toolName: "bash", input: {} },
+        { type: "tool-call", toolCallId: "c2", toolName: "bash", input: {} },
+        { type: "tool-call", toolCallId: "c3", toolName: "weather", input: {} },
+        { type: "step-finish", usage: { inputTokens: 100, outputTokens: 20 } },
+        { type: "step-finish", usage: { inputTokens: 40, outputTokens: 5 } },
+        // `finish` replays the last step's usage; only step-finish records.
+        { type: "finish", usage: { inputTokens: 40, outputTokens: 5 } },
+      ]),
+      { submittedPrompt: "run it", continueSession: false },
+    );
+
+    expect(stub.recordPrompt).toHaveBeenCalledTimes(1);
+    expect(stub.recordSubagentDispatch).toHaveBeenCalledWith("sub-1");
+    expect(stub.recordToolCall.mock.calls.map(([name]) => name)).toEqual([
+      "bash",
+      "bash",
+      "weather",
+    ]);
+    expect(stub.recordStepUsage).toHaveBeenCalledTimes(2);
+    expect(stub.reportStats).toHaveBeenCalled();
+    renderer.shutdown();
+  });
+
+  it("records sandbox log lines in the diagnostic log", () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const stub = stubDiagnostics();
+    const append = stub.append;
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      diagnostics: stub.diagnostics,
+    });
+
+    renderer.renderSandboxLog('eve: sandbox template "root" (microsandbox): apt-get update');
+    expect(append).toHaveBeenCalledWith({ source: "sandbox", detail: expect.any(String) });
+    renderer.shutdown();
   });
 
   it("hides logs by default, then reveals buffered lines at their original positions", () => {
@@ -1958,14 +2218,14 @@ describe("TerminalRenderer setup panel", () => {
     expect(screen.snapshot()).toContain("Provider");
     expect(screen.snapshot()).toContain("•••••••");
     expect(screen.snapshot()).not.toContain("bad-key");
-    expect(screen.snapshot()).toContain("Validating…");
+    expect(screen.snapshot()).toContain("▪ validating");
 
     resolveValidation?.({ kind: "invalid", message: "Rejected." });
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Invalid key");
+      expect(screen.snapshot()).toContain("API key is not valid");
     });
     input.type("x");
-    expect(screen.snapshot()).not.toContain("Invalid key");
+    expect(screen.snapshot()).not.toContain("API key is not valid");
 
     input.enter();
     resolveValidation?.({ kind: "valid" });
@@ -2045,6 +2305,110 @@ describe("TerminalRenderer setup panel", () => {
       key: "sk-second",
       validation: { kind: "valid" },
     });
+    renderer.shutdown();
+  });
+
+  it("walks the model editor from pick to slider to toggle to Done", async () => {
+    const { screen, input, renderer } = makeRenderer(100, 40);
+    renderer.setupFlow.begin("Configure the agent model");
+    const answer = renderer.setupFlow.readModelEditor({
+      model: {
+        kind: "pick",
+        options: [
+          {
+            value: "anthropic/claude-sonnet-5",
+            label: "anthropic/claude-sonnet-5",
+            featured: true,
+          },
+          { value: "xai/grok-4.5", label: "xai/grok-4.5" },
+        ],
+        current: "anthropic/claude-sonnet-5",
+      },
+      reasoning: null,
+      serviceTier: { kind: "standard" },
+      settingsEditable: true,
+      externalRouting: false,
+      capabilitiesFor: () => ({
+        reasoning: true,
+        reasoningLevels: ["low", "high"],
+        fastMode: true,
+      }),
+    });
+
+    // The value menu opens on the Model row.
+    expect(screen.snapshot()).toContain("▶ Model");
+    input.enter();
+    expect(screen.snapshot()).toContain("Select the model");
+    input.type("grok");
+    expect(screen.snapshot()).toContain("xai/grok-4.5");
+    input.enter();
+    // Back on the menu, the model hint carries the pick.
+    expect(screen.snapshot()).toContain("xai/grok-4.5");
+
+    // Reasoning adjusts inline on its row: right enters the scale at the
+    // lowest level, another right (via Tab, which mimics it) walks up.
+    input.down();
+    expect(screen.snapshot()).toContain("▶ Reasoning effort");
+    input.right();
+    expect(screen.snapshot()).toContain("◉─○ low");
+    input.send("\t");
+    expect(screen.snapshot()).toContain("●─◉ high");
+
+    input.down();
+    expect(screen.snapshot()).toContain("▶ Service tier");
+    expect(screen.snapshot()).toContain("normal");
+    input.right();
+    expect(screen.snapshot()).toContain("fast ↯");
+
+    input.down();
+    input.enter();
+
+    await expect(answer).resolves.toEqual({
+      model: "xai/grok-4.5",
+      reasoning: "high",
+      serviceTier: "priority",
+    });
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
+  it("unwinds Esc through filter, sub-screen, and menu before cancelling", async () => {
+    const { screen, input, renderer } = makeRenderer(100, 40);
+    renderer.setupFlow.begin("Configure the agent model");
+    const answer = renderer.setupFlow.readModelEditor({
+      model: {
+        kind: "pick",
+        options: [{ value: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5" }],
+        current: "anthropic/claude-sonnet-5",
+      },
+      reasoning: null,
+      serviceTier: { kind: "standard" },
+      settingsEditable: true,
+      externalRouting: false,
+      capabilitiesFor: () => undefined,
+    });
+    let settled = false;
+    void answer.finally(() => {
+      settled = true;
+    });
+
+    input.enter();
+    input.type("sonnet");
+    input.send("\x1b");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    // The first Esc only cleared the filter; the list is still open.
+    expect(screen.snapshot()).toContain("▏ type to search");
+
+    input.send("\x1b");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    // Back on the menu.
+    expect(screen.snapshot()).toContain("▶ Model");
+
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });
 
@@ -2890,7 +3254,7 @@ describe("TerminalRenderer status line", () => {
       "",
       "   Select your team",
     ]);
-    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools · Authenticating via OIDC…");
+    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools  Authenticating via OIDC…");
     expect(status).toBeGreaterThan(title);
     expect(lines[status - 1]).toBe("");
 
@@ -2900,7 +3264,7 @@ describe("TerminalRenderer status line", () => {
     renderer.shutdown();
   });
 
-  it("keeps the running token total after the turn indicator disappears", async () => {
+  it("keeps the token flow off the status line after a turn reports usage", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
       streamOf([
@@ -2912,15 +3276,61 @@ describe("TerminalRenderer status line", () => {
       { submittedPrompt: "hello", continueSession: true },
     );
 
-    const lines = screen.snapshot().split("\n");
-    const readyRow = lines.find((line) => line.includes("Ready"));
-    const statusRow = lines.find((line) => line.includes("↑ 500 ↓ 300"));
-    expect(readyRow).toBeUndefined();
-    expect(statusRow).toBeDefined();
+    const snapshot = screen.snapshot();
+    expect(snapshot).not.toContain("Ready");
+    expect(snapshot).not.toContain("↑ 500");
+    expect(snapshot).not.toContain("↓ 300");
     renderer.shutdown();
   });
 
-  it("keeps the model and Vercel segments across reset while tokens clear", async () => {
+  it("renders the reasoning level and fast marker on the model segment", () => {
+    const { screen, renderer } = makeRenderer(100);
+    renderer.renderNotice("anchor");
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel(
+        "xai/grok-4.5",
+        { kind: "gateway", connected: true, credential: "oidc" },
+        {
+          reasoning: "xhigh",
+          providerOptions: { gateway: { serviceTier: "priority" } },
+        },
+      ),
+    });
+    // The first header commits with no footer; a Vercel status probe is the
+    // paint that reveals the persistent status line beneath it.
+    renderer.setVercelStatus(vercelStatus);
+
+    expect(screen.snapshot()).toContain("xai/grok-4.5@xhigh ↯");
+    renderer.shutdown();
+  });
+
+  it("hides the provider-default reasoning sentinel and non-priority tiers", () => {
+    const { screen, renderer } = makeRenderer(100);
+    renderer.renderNotice("anchor");
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel(
+        "xai/grok-4.5",
+        { kind: "gateway", connected: true, credential: "oidc" },
+        {
+          reasoning: "provider-default",
+          providerOptions: { gateway: { serviceTier: "flex" } },
+        },
+      ),
+    });
+    renderer.setVercelStatus(vercelStatus);
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("xai/grok-4.5");
+    expect(snapshot).not.toContain("@provider-default");
+    expect(snapshot).not.toContain("↯");
+    renderer.shutdown();
+  });
+
+  it("keeps the model and Vercel segments across reset while tokens stay clear", async () => {
     // 100 columns: all four segments fit at full fidelity, no drop order.
     const { screen, renderer } = makeRenderer(100);
     renderer.renderAgentHeader({
@@ -2942,7 +3352,7 @@ describe("TerminalRenderer status line", () => {
       ]),
       { submittedPrompt: "hello", continueSession: true },
     );
-    expect(screen.snapshot()).toContain("↑ 500 ↓ 300");
+    expect(screen.snapshot()).not.toContain("↑ 500 ↓ 300");
 
     renderer.reset();
 

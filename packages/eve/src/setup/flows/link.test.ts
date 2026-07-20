@@ -110,11 +110,12 @@ describe("runLinkFlow", () => {
       "This directory is already linked to\nweather-app in Acme",
     );
     expect(deps.resolveProvisioning?.pickTeam).toHaveBeenCalled();
+    // Linking suggests the project a create would have named after the agent.
     expect(deps.resolveProvisioning?.pickProject).toHaveBeenCalledWith(
       expect.anything(),
       APP_ROOT,
       "acme",
-      { allowCreateWhenEmpty: false },
+      { allowCreateWhenEmpty: false, suggestedName: "my-agent" },
     );
     expect(deps.resolveProvisioning?.pickNewProjectName).not.toHaveBeenCalled();
     expect(deps.linkProject?.linkProject).toHaveBeenCalled();

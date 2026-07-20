@@ -1,6 +1,7 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { deserializeContext } from "#context/serialize.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import {
   createSessionFailedEvent,
@@ -19,7 +20,21 @@ export async function emitTerminalSessionFailureStep(input: {
 }): Promise<void> {
   "use step";
 
-  const details = formatError(input.error);
+  // Cataloged failures replace the raw identity with the curated one; the
+  // `detail` dump stays attached so the local diagnostic log keeps the
+  // raw evidence while the transcript shows the actionable summary.
+  const formatted = formatError(input.error);
+  const summary = summarizeKnownError(input.error);
+  let details = formatted;
+  if (summary !== null) {
+    const curated = {
+      ...formatted,
+      message: summary.message,
+      name: summary.name,
+      semanticErrorId: summary.id,
+    };
+    details = summary.hint === undefined ? curated : { ...curated, hint: summary.hint };
+  }
   const code = typeof details.name === "string" ? details.name : "WORKFLOW_EXECUTION_FAILED";
   const message = typeof details.message === "string" ? details.message : String(input.error);
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
@@ -29,6 +44,7 @@ export async function emitTerminalSessionFailureStep(input: {
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
     code,
     message,
+    hint: summary?.hint,
     detail: typeof details.detail === "string" ? details.detail : undefined,
   });
 

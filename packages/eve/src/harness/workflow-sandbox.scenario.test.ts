@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { getWorkflowRuntimeActionInterrupts } from "#harness/workflow-runtime-action-state.js";
-import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
+import {
+  applyWorkflowTool,
+  resolveWorkflowSandboxBridgeRequestLimit,
+} from "#harness/workflow-sandbox.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import {
@@ -39,12 +42,70 @@ const concurrentProgram = `return await Promise.all([
   tools["echo-marker"]({ message: "alpha" }),
   tools["echo-marker"]({ message: "beta" }),
 ]);`;
+const highFanOutCount = 50;
+const highFanOutProgram = `return await Promise.all(Array.from(
+  { length: ${String(highFanOutCount)} },
+  (_, index) => tools["echo-marker"]({ message: "marker-" + String(index) }),
+));`;
+const overBudgetFanOutCount = 257;
+const overBudgetFanOutProgram = `return await Promise.all(Array.from(
+  { length: ${String(overBudgetFanOutCount)} },
+  (_, index) => tools["echo-marker"]({ message: "over-budget-" + String(index) }),
+));`;
 const continuationSecurity = {
   maxAgeMs: 365 * 24 * 60 * 60 * 1000,
   signingKey: "workflow-sandbox-scenario-test-key",
 };
 
 describe("Workflow concurrent continuation", () => {
+  it("collects fan-out above code mode's default in-flight bridge limit", async () => {
+    const tools = orchestrationTools();
+    const lifecycle: WorkflowSandboxLifecycle = {
+      async onNestedToolCall() {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      },
+    };
+    const { modelTools } = await applyWorkflowTool({
+      continuationSecurity,
+      harnessTools: tools,
+      lifecycle,
+      maxSubagents: 100,
+      tools: buildToolSet({ tools }),
+    });
+    const execute = modelTools.Workflow?.execute as
+      | ((input: { js: string }, options: { messages: []; toolCallId: string }) => Promise<unknown>)
+      | undefined;
+
+    const initialOutput = await execute!(
+      { js: highFanOutProgram },
+      { messages: [], toolCallId: "workflow-high-fan-out" },
+    );
+    const interrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
+
+    expect(getWorkflowRuntimeActionInterrupts(interrupt!)).toHaveLength(highFanOutCount);
+  });
+
+  it("collects an over-budget call above the default bridge-request floor", async () => {
+    const tools = orchestrationTools();
+    const { modelTools } = await applyWorkflowTool({
+      continuationSecurity,
+      harnessTools: tools,
+      maxSubagents: 256,
+      tools: buildToolSet({ tools }),
+    });
+    const execute = modelTools.Workflow?.execute as
+      | ((input: { js: string }, options: { messages: []; toolCallId: string }) => Promise<unknown>)
+      | undefined;
+
+    const initialOutput = await execute!(
+      { js: overBudgetFanOutProgram },
+      { messages: [], toolCallId: "workflow-over-budget-fan-out" },
+    );
+    const interrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
+
+    expect(getWorkflowRuntimeActionInterrupts(interrupt!)).toHaveLength(overBudgetFanOutCount);
+  });
+
   it("collects promptly interrupted Promise.all siblings in one ledger", async () => {
     const tools = orchestrationTools();
     const { modelTools } = await applyWorkflowTool({
@@ -105,6 +166,7 @@ describe("Workflow concurrent continuation", () => {
     ]);
 
     const firstContinuation = await continueWorkflowSandboxInterrupt({
+      bridgeRequestLimit: resolveWorkflowSandboxBridgeRequestLimit(),
       continuationSecurity,
       interrupt: pending[0]!,
       lifecycle,
@@ -122,6 +184,7 @@ describe("Workflow concurrent continuation", () => {
     if (firstUnwrapped.status !== "interrupted") throw new Error("Expected second interrupt.");
 
     const finalContinuation = await continueWorkflowSandboxInterrupt({
+      bridgeRequestLimit: resolveWorkflowSandboxBridgeRequestLimit(),
       continuationSecurity,
       interrupt: firstUnwrapped.interrupt,
       lifecycle,

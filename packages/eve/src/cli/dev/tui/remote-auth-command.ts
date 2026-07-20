@@ -113,8 +113,8 @@ export async function runRemoteAuthCommand(input: RemoteAuthCommandInput): Promi
             : `/vc:login interrupted. Completed before interruption: ${completed.join(", ")}.`;
         }
         return outcome.completedMutations.some((mutation) => mutation.kind === "vercel-login")
-          ? "/vc:login cancelled after logging in to Vercel."
-          : "/vc:login cancelled.";
+          ? "/vc:login dismissed after logging in to Vercel."
+          : "/vc:login dismissed.";
       }
       case "failed":
         return outcome.message;

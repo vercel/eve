@@ -103,6 +103,20 @@ export interface ThemeGlyphs {
   arrowUp: string;
   /** `↓` — output (response) tokens in the token-flow segment. */
   arrowDown: string;
+  /** `↯` — Fast mode (Gateway priority tier) marker beside a model id. */
+  fast: string;
+  /** `●` — a track notch below the current position (already covered). */
+  trackFilled: string;
+  /** `◉` — the track notch at the current position. */
+  trackCurrent: string;
+  /** `○` — a track notch above the current position. */
+  trackEmpty: string;
+  /** `─` — the connector segment between track notches. */
+  trackLine: string;
+  /** `↵` — the Enter affordance inside a selection badge. */
+  enter: string;
+  /** `▪` — the marker beside an in-flight validation badge. */
+  validating: string;
 }
 
 const UNICODE_GLYPHS: ThemeGlyphs = {
@@ -128,6 +142,13 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   ellipsis: "…",
   arrowUp: "↑",
   arrowDown: "↓",
+  fast: "↯",
+  trackFilled: "●",
+  trackCurrent: "◉",
+  trackEmpty: "○",
+  trackLine: "─",
+  enter: "↵",
+  validating: "▪",
 };
 
 const ASCII_GLYPHS: ThemeGlyphs = {
@@ -153,6 +174,13 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   ellipsis: "...",
   arrowUp: "^",
   arrowDown: "v",
+  fast: ">>",
+  trackFilled: "*",
+  trackCurrent: "O",
+  trackEmpty: ".",
+  trackLine: "-",
+  enter: "<-'",
+  validating: "o",
 };
 
 const UNICODE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

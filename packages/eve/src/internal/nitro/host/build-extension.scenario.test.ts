@@ -226,7 +226,7 @@ describe("extension build output", () => {
     expect(manifest.requires).toEqual({
       extension: 1,
       tool: 1,
-      dynamicTool: 1,
+      dynamicTool: 2,
       skill: 1,
       config: 1,
       state: 1,

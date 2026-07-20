@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+import type { DevDiagnostics } from "../diagnostics.js";
 
 import type {
   AgentTUIInputOption,
@@ -34,8 +35,10 @@ import {
   type PromptCommandSpec,
 } from "./prompt-commands.js";
 import {
+  enterBadge,
   renderFlowPanel,
   renderAcknowledgeQuestion,
+  renderModelEditorQuestion,
   renderSelectQuestion,
   renderTextQuestion,
   type FlowPanelContent,
@@ -45,6 +48,11 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
+import {
+  initialModelEditorState,
+  transitionModelEditor,
+  type ModelEditorEvent,
+} from "./model-editor.js";
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
@@ -53,6 +61,7 @@ import type {
   SetupSelectRequest,
 } from "./setup-flow.js";
 import type { SelectNotice } from "#setup/prompter.js";
+import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
@@ -68,6 +77,8 @@ import type {
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { inspectError, type LogRecord } from "#internal/logging.js";
 import {
   parseDevRebuildLogLine,
   type DevRebuildLogUpdate,
@@ -98,7 +109,7 @@ import {
   visibleLine,
   type LineState,
 } from "./line-editor.js";
-import { LiveRegion } from "./live-region.js";
+import { LiveRegion } from "#cli/ui/live-region.js";
 import { buildStatusLine } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
@@ -108,19 +119,20 @@ import {
   renderInputWithBlockCursor,
   stripAnsi,
   stripTerminalControls,
-} from "./terminal-text.js";
+} from "#cli/ui/terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
+import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
   isProgressPulseVisible,
   PROGRESS_PULSE_ASCII_GLYPH,
   PROGRESS_PULSE_GLYPH,
 } from "#cli/ui/progress-pulse.js";
+import { readGatewayServiceTier } from "#shared/gateway-service-tier.js";
 import {
   formatAssistantResponseStats,
-  formatTokenFlow,
   isIncompletePaste,
   nextKey,
   sanitizePastedText,
@@ -228,6 +240,8 @@ export type TerminalRendererOptions = {
   logs?: LogDisplayMode;
   color?: boolean;
   unicode?: boolean;
+  /** The process's diagnostics recorder (log, dump, stats); local sessions only. */
+  diagnostics?: DevDiagnostics;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
 };
@@ -295,8 +309,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #subagents: TerminalPartDisplayMode;
   readonly #connectionAuth: TerminalPartDisplayMode;
   readonly #assistantResponseStats: AssistantResponseStatsMode;
-  readonly #defaultContextSize?: number;
   readonly #captureForeignOutput: boolean;
+  readonly #diagnostics?: DevDiagnostics;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   /** Which captured log sources render. Mutable via {@link setLogDisplayMode}. */
   #logs: LogDisplayMode;
@@ -376,9 +390,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #paintAgain = false;
 
   #totalTokens?: number;
-  /** Input (prompt) tokens from the latest usage report — the ↑ side. */
-  #promptTokens?: number;
-  #contextSize?: number;
   #assistantOutputTokens?: number;
   #assistantTokensPerSecond?: number;
   /** Wall-clock start of the current stream, for the tok/s status stat. */
@@ -413,6 +424,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
     readProviderPicker: (options) => this.#readProviderPicker(options),
+    readModelEditor: (options) => this.#readModelEditor(options),
     readText: (options) => this.#readSetupText(options),
     readAcknowledge: (options) => this.#readSetupAcknowledge(options),
     readChoice: (options) => this.#readSetupChoice(options),
@@ -439,9 +451,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#subagents = options?.subagents ?? "auto-collapsed";
     this.#connectionAuth = options?.connectionAuth ?? "full";
     this.#assistantResponseStats = options?.assistantResponseStats ?? defaultAssistantResponseStats;
-    this.#defaultContextSize = options?.contextSize;
-    this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
+    this.#diagnostics = options?.diagnostics;
     this.#logs = options?.logs ?? "none";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
@@ -651,9 +662,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     this.#status = this.#connectionAuthPendingCount > 0 ? STATUS.connectionAuth : STATUS.processing;
     this.#addSubmittedPrompt(options?.submittedPrompt);
+    if (options?.submittedPrompt !== undefined) this.#diagnostics?.recordPrompt();
     this.#interrupted = false;
     this.#totalTokens = undefined;
-    this.#promptTokens = undefined;
     this.#assistantOutputTokens = undefined;
     this.#assistantTokensPerSecond = undefined;
     this.#streamStartedAt = Date.now();
@@ -683,7 +694,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#applyStreamEvent(event, displayModes, turnState);
       }
     } catch (error) {
-      this.#addErrorBlock("Error", toErrorMessage(error));
+      // Cataloged failures render their curated headline; either way the
+      // raw inspection travels as detail so the diagnostic log keeps the
+      // evidence and the transcript shows only the pointer.
+      const summary = summarizeKnownError(error);
+      if (summary === null) {
+        this.#addErrorBlock("Error", toErrorMessage(error), { detail: inspectError(error) });
+      } else {
+        this.#addErrorBlock(summary.name, summary.message, {
+          detail: inspectError(error),
+          hint: summary.hint,
+        });
+      }
     } finally {
       this.#resolveStreamInterrupt = undefined;
       if (this.#interrupted) result.abort?.();
@@ -694,6 +716,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       this.#status = completedTurnStatus(this.#interrupted, options?.continueSession === true);
       this.#finalizeAllBlocks();
+      this.#diagnostics?.reportStats();
       this.#paint();
 
       if (!options?.continueSession) {
@@ -942,6 +965,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   upsertSubagentStep(update: SubagentStepUpdate): void {
+    this.#diagnostics?.recordSubagentDispatch(update.callId);
     if (this.#subagents === "hidden") return;
     const reasoningText = stripTerminalControls(update.reasoning ?? "").trim();
     const messageText = stripTerminalControls(update.message ?? "").trim();
@@ -965,6 +989,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   upsertSubagentTool(update: SubagentToolUpdate): void {
+    this.#diagnostics?.recordSubagentDispatch(update.callId);
+    if (update.status === "failed" && update.errorText !== undefined) {
+      // Captured before the display guards: hidden or collapsed subagent
+      // views must not keep tool failures out of the diagnostic log.
+      this.#diagnostics?.append({
+        source: "tool",
+        summary: `${update.toolName} failed (subagent ${update.subagentName})`,
+        detail: update.errorText,
+      });
+    }
     if (this.#subagents === "hidden") return;
     this.#ensureSubagentHeader(update.callId, update.subagentName);
     if (this.#subagents === "collapsed") {
@@ -1076,7 +1110,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#devRebuild = undefined;
     this.#connectionAuthPendingCount = 0;
     this.#totalTokens = undefined;
-    this.#promptTokens = undefined;
     this.#assistantOutputTokens = undefined;
     this.#assistantTokensPerSecond = undefined;
     this.#streamStartedAt = undefined;
@@ -1103,6 +1136,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const content = stripTerminalControls(text);
     const sandboxMessage = parseSandboxLogLine(content);
     if (sandboxMessage === undefined) return;
+    this.#diagnostics?.append({ source: "sandbox", detail: sandboxMessage });
     this.#start();
     this.#pushBlock({ kind: "sandbox", body: sandboxMessage, live: false });
     this.#paint();
@@ -1558,23 +1592,34 @@ export class TerminalRenderer implements AgentTUIRenderer {
     let interaction = initialProviderPickerState(opts.options, opts.initialValue);
     let validation: AbortController | undefined;
 
-    flow.question = (width) =>
-      renderSelectQuestion(
-        {
-          kind: "inline-edit",
-          layout: "stacked",
-          message: opts.message,
-          options: opts.options,
-          select: interaction.select,
-          edit: {
-            optionValue: "own-key",
-            caretVisible: this.#caretVisible,
-            editor: { kind: "key", phase: interaction.phase },
-          },
+    // The cursor row's Enter affordance: `↵ change` on the currently-active
+    // provider, a bare `↵` elsewhere. The key row's own phases (editing,
+    // validating, invalid) carry their badge on the input line instead.
+    const cursorBadge = (): string | undefined => {
+      if (interaction.phase.kind !== "inactive") return undefined;
+      const value = selectValueAtCursor([...opts.options], interaction.select.cursor);
+      const row = opts.options.find((option) => option.value === value);
+      if (row === undefined) return undefined;
+      return enterBadge(this.#theme, row.checked === true ? "change" : undefined);
+    };
+
+    flow.question = (width) => {
+      const badge = cursorBadge();
+      const panel: SetupSelectPanelState = {
+        kind: "inline-edit",
+        layout: "stacked",
+        message: opts.message,
+        options: opts.options,
+        select: interaction.select,
+        edit: {
+          optionValue: "own-key",
+          caretVisible: this.#caretVisible,
+          editor: { kind: "key", phase: interaction.phase },
         },
-        this.#theme,
-        width,
-      );
+      };
+      if (badge !== undefined) panel.cursorBadge = badge;
+      return renderSelectQuestion(panel, this.#theme, width);
+    };
 
     const syncCaret = () => {
       if (interaction.phase.kind === "editing" || interaction.phase.kind === "invalid") {
@@ -1672,6 +1717,82 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#stopCaretBlink();
       },
     );
+    return await question.promise;
+  }
+
+  /**
+   * The composite Change-model screen: the searchable catalog, the reasoning
+   * slider, and the service-tier toggle on one panel, driven by the pure
+   * model-editor reducer. Resolves the drafted changes on Done, or `undefined`
+   * on Esc/Ctrl-C.
+   */
+  async #readModelEditor(opts: ModelSettingsRequest): Promise<ModelSettingsResult | undefined> {
+    const flow = this.#beginSetupQuestion();
+    let interaction = initialModelEditorState(opts);
+
+    flow.question = (width) =>
+      renderModelEditorQuestion({ request: opts, state: interaction }, this.#theme, width);
+    this.#paint();
+
+    const question = this.#captureSetupQuestion<ModelSettingsResult | undefined>((key, settle) => {
+      const dispatch = (event: ModelEditorEvent): void => {
+        const transition = transitionModelEditor(interaction, event, opts);
+        switch (transition.kind) {
+          case "ignore":
+            return;
+          case "render":
+            interaction = transition.state;
+            this.#paint();
+            return;
+          case "cancel":
+            settle(undefined);
+            return;
+          case "settle":
+            settle(transition.result);
+            return;
+        }
+      };
+
+      const intent = setupSelectionIntent(key);
+      switch (intent?.kind) {
+        case "cancel":
+          dispatch({ type: "cancel" });
+          return;
+        case "move":
+          dispatch({ type: "move", direction: intent.direction });
+          return;
+        case "submit":
+          dispatch({ type: "submit" });
+          return;
+        case "repaint":
+          this.#paint();
+          return;
+        case undefined:
+          break;
+      }
+
+      // Left/right adjust the inline value under the menu cursor, and Tab
+      // mimics right. The shared intent grammar deliberately drops the
+      // horizontal arrows (line editors own them elsewhere), so this surface
+      // consumes them locally.
+      if (key.type === "left" || key.type === "right") {
+        dispatch({ type: "adjust", direction: key.type });
+        return;
+      }
+      if (key.type === "tab") {
+        dispatch({ type: "adjust", direction: "right" });
+        return;
+      }
+      if (key.type === "backspace") {
+        dispatch({ type: "backspace" });
+        return;
+      }
+      if (key.type === "text") {
+        for (const char of key.value.replaceAll("\n", " ")) {
+          if (char >= " " && char !== "\u007f") dispatch({ type: "char", char });
+        }
+      }
+    });
     return await question.promise;
   }
 
@@ -1995,7 +2116,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #start(options?: AgentTUISessionOptions) {
     this.#title = options?.title ?? this.#title;
-    this.#contextSize = options?.contextSize ?? this.#defaultContextSize;
 
     if (this.#isInteractive) return;
 
@@ -2235,14 +2355,36 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#pushBlock({ kind: "user", body: stripTerminalControls(prompt), live: false });
   }
 
-  #addErrorBlock(title: string, content: string, detail?: string) {
+  #addErrorBlock(
+    title: string,
+    content: string,
+    extras: { detail?: string | undefined; hint?: string | undefined } = {},
+  ) {
+    const cleanTitle = stripTerminalControls(title);
+    const cleanBody = stripTerminalControls(content);
+    const cleanDetail =
+      extras.detail === undefined ? undefined : stripTerminalControls(extras.detail);
+    const cleanHint = extras.hint === undefined ? undefined : stripTerminalControls(extras.hint);
+    // Every error block lands in the log, detail or not, so the file is a
+    // complete failure record for the session. The hint stays a structured
+    // field of the record, mirroring the failure event's shape.
+    const entry = {
+      source: "workflow" as const,
+      summary: `${cleanTitle}: ${cleanBody}`,
+      detail: cleanDetail ?? cleanBody,
+    };
+    this.#diagnostics?.append(cleanHint === undefined ? entry : { ...entry, hint: cleanHint });
     const block: Block = {
       kind: "error",
-      title: stripTerminalControls(title),
-      body: stripTerminalControls(content),
+      title: cleanTitle,
+      body: cleanBody,
       live: false,
     };
-    if (detail !== undefined) block.detail = stripTerminalControls(detail);
+    if (cleanHint !== undefined) block.hint = cleanHint;
+    if (cleanDetail !== undefined) {
+      block.detail =
+        this.#diagnostics === undefined ? cleanDetail : `details: ${this.#diagnostics.displayPath}`;
+    }
     this.#pushBlock(block);
     this.#paint();
   }
@@ -2305,6 +2447,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
 
       case "step-finish":
+        // Step usage reports are per-step deltas (extractStepUsage in the
+        // harness), so summing them yields true session totals. The
+        // `finish` event replays the last step's usage — don't sum there.
+        this.#diagnostics?.recordStepUsage(event.usage);
         this.#applyUsage(event.usage);
         this.#paint();
         break;
@@ -2349,6 +2495,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
 
       case "tool-call":
+        this.#diagnostics?.recordToolCall(event.toolName);
         if (displayModes.tools === "hidden") break;
         this.#setStreamStatus(STATUS.executingTools);
         this.#upsertNativeTool(
@@ -2386,8 +2533,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
 
       case "tool-error": {
-        if (displayModes.tools === "hidden") break;
         const existing = this.#resolveNativeToolState(event.toolCallId, turnState);
+        // Tool failures reach the log even when tool display is hidden.
+        this.#diagnostics?.append({
+          source: "tool",
+          summary: `${existing?.toolName ?? event.toolCallId} failed`,
+          detail: event.errorText,
+        });
+        if (displayModes.tools === "hidden") break;
         if (existing === undefined) break;
         turnState.hasPendingToolResults = true;
         this.#setStreamStatus(STATUS.toolResults);
@@ -2400,7 +2553,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
 
       case "error":
-        this.#addErrorBlock("Error", event.errorText, event.detail);
+        this.#addErrorBlock("Error", event.errorText, { detail: event.detail, hint: event.hint });
         break;
 
       case "finish":
@@ -2487,7 +2640,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (inputTokens != null || outputTokens != null) {
       this.#totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0);
     }
-    this.#promptTokens = inputTokens ?? this.#promptTokens;
     this.#assistantOutputTokens = outputTokens ?? this.#assistantOutputTokens;
 
     if (this.#assistantOutputTokens != null && this.#streamStartedAt !== undefined) {
@@ -2846,21 +2998,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const serverPort = new URL(serverUrl).port;
       if (serverPort.length > 0) input.serverPort = serverPort;
     }
-    const model = this.#agentHeader?.info?.agent.model.id;
-    if (model !== undefined) input.model = model;
+    const agentModel = this.#agentHeader?.info?.agent.model;
+    if (agentModel?.id !== undefined) input.model = agentModel.id;
+    // "provider-default" is the absent-setting sentinel, not a level worth showing.
+    if (agentModel?.reasoning !== undefined && agentModel.reasoning !== "provider-default") {
+      input.reasoning = agentModel.reasoning;
+    }
+    if (readGatewayServiceTier(agentModel?.providerOptions).kind === "priority") {
+      input.fastMode = true;
+    }
     // The runner resolves model-provider state with `/info` before caching this
     // header, so the status bar consumes that shared snapshot.
-    const endpoint = this.#agentHeader?.info?.agent.model.endpoint;
+    const endpoint = agentModel?.endpoint;
     if (endpoint !== undefined) input.endpoint = endpoint;
-    // Skip the token segment entirely until a turn moves a token — a `↑ 0 ↓ 0`
-    // row is noise before the first prompt.
-    const inputTokens = this.#promptTokens ?? 0;
-    const outputTokens = this.#assistantOutputTokens ?? 0;
-    if (inputTokens > 0 || outputTokens > 0) {
-      const flow: Parameters<typeof formatTokenFlow>[0] = { inputTokens, outputTokens };
-      if (this.#contextSize !== undefined) flow.contextSize = this.#contextSize;
-      input.tokens = formatTokenFlow(flow, this.#theme.glyph);
-    }
     if (this.#vercelStatus !== undefined) input.vercel = this.#vercelStatus;
     if (this.#remoteConnection !== undefined) input.remote = this.#remoteConnection;
     const line = buildStatusLine(input);
@@ -2937,7 +3087,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const restoreStdout = capture(process.stdout, "stdout");
     const restoreStderr = capture(process.stderr, "stderr");
+    // The recorder takes ownership of eve's own structured log records for
+    // the same window the stream capture is installed: it persists each one
+    // structured, then hands it here for display. Records never reach the
+    // console, so the stderr scrape below only carries genuinely foreign
+    // output.
+    this.#diagnostics?.subscribeLogRecords((record) => this.#displayLogRecord(record));
     this.#restoreLogCapture = () => {
+      this.#diagnostics?.unsubscribeLogRecords();
       restoreStdout();
       restoreStderr();
     };
@@ -2950,13 +3107,27 @@ export class TerminalRenderer implements AgentTUIRenderer {
     restore();
 
     if (this.#stdoutLogBuffer.length > 0) {
+      this.#diagnostics?.append({ source: "stdout", detail: this.#stdoutLogBuffer });
       if (this.#shouldRenderLog("stdout")) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
       this.#stdoutLogBuffer = "";
     }
     if (this.#stderrLogBuffer.length > 0) {
+      this.#diagnostics?.append({ source: "stderr", detail: this.#stderrLogBuffer });
       if (this.#shouldRenderLog("stderr")) process.stderr.write(`${this.#stderrLogBuffer}\n`);
       this.#stderrLogBuffer = "";
     }
+  }
+
+  /**
+   * Displays one structured record from eve's own logger (the diagnostics
+   * recorder already persisted it). Routed through the stderr path so
+   * `/loglevel` semantics and long-output collapsing match what the same
+   * record looked like when it arrived as scraped console output.
+   */
+  #displayLogRecord(record: LogRecord): void {
+    const fieldsText = record.fields === undefined ? "" : ` ${JSON.stringify(record.fields)}`;
+    this.#handleCapturedStderr(`[eve:${record.namespace}] ${record.message}${fieldsText}`);
+    this.#paint();
   }
 
   #handleForeignOutput(source: "stdout" | "stderr", text: string): void {
@@ -2984,6 +3155,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // applied at render time, so `/loglevel` can reveal them later. The dev
     // server's rebuild lifecycle lines are the one exception — they cycle
     // through a single in-place status block instead of stacking.
+    // Capture at the dispatch point so every captured line — including
+    // sandbox and rebuild lines riding stdout — reaches the diagnostic log.
+    this.#diagnostics?.append({ source, detail: content });
     if (source === "stdout") this.#handleCapturedStdout(content);
     else this.#handleCapturedStderr(content);
     this.#paint();
@@ -3030,7 +3204,29 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return parseDevRebuildLogLine(line.trimEnd())?.kind === "failed";
     });
     if (failedIndex === -1) {
-      this.#pushBlock({ kind: "log", title: "stderr", body: content, live: false });
+      if (this.#diagnostics === undefined) {
+        this.#pushBlock({ kind: "log", title: "stderr", body: content, live: false });
+        return;
+      }
+      const presentation = presentDiagnostic(content, this.#diagnostics.displayPath);
+      if (presentation.kind === "inline") {
+        this.#pushBlock({ kind: "log", title: "stderr", body: presentation.text, live: false });
+        return;
+      }
+      this.#pushBlock({
+        kind: "log",
+        title: "stderr",
+        body: formatStoredDiagnostic(presentation),
+        logVisibility: "stderr-only",
+        live: false,
+      });
+      this.#pushBlock({
+        kind: "log",
+        title: "stderr",
+        body: content,
+        logVisibility: "all-only",
+        live: false,
+      });
       return;
     }
 
@@ -3135,6 +3331,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #isHiddenLog(block: Block): boolean {
     if (block.kind === "sandbox") return !this.#shouldRenderLog("sandbox");
     if (block.kind !== "log") return false;
+    if (block.logVisibility === "stderr-only") return this.#logs !== "stderr";
+    if (block.logVisibility === "all-only") return this.#logs !== "all";
     return !this.#shouldRenderLog(block.title === "stderr" ? "stderr" : "stdout");
   }
 }

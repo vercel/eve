@@ -142,7 +142,7 @@ void (async () => {
       input.send("\x1b");
       await screen.waitForText("Change model", 5_000);
       input.send("\x1b");
-      await screen.waitForText("/model cancelled.", 5_000);
+      await screen.waitForText("/model dismissed.", 5_000);
       await screen.waitForText("❯", 5_000);
 
       input.type("/exit");

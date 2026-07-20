@@ -10,7 +10,7 @@ import {
   stripTerminalControls,
   visibleLength,
   wrapVisibleLine,
-} from "./terminal-text.js";
+} from "#cli/ui/terminal-text.js";
 
 describe("stripTerminalControls", () => {
   it("removes C0 and C1 controls while preserving tabs and newlines", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { LiveRegion } from "./live-region.js";
-import { MockScreen } from "./test/mock-terminal.js";
+import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 
 function setup() {
   const screen = new MockScreen({ columns: 40, rows: 10 });

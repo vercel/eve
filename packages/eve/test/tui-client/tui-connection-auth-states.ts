@@ -42,7 +42,6 @@ class FakeSession extends ClientSession {
     super(
       {
         host: "http://fake.invalid",
-        maxReconnectAttempts: 0,
         preserveCompletedSessions: false,
         resolveHeaders: async () => new Headers(),
       },

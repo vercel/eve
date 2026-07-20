@@ -373,4 +373,4 @@ Inline providers derive a stable tool-qualified auth key from Vercel Connect met
 
 - [Security model](../concepts/security-model): trust boundaries and the pre-production checklist
 - [Connections](../connections): connection auth shapes (`connect()` vs static token)
-- [Deployment](./deployment): where route-auth secrets live in production
+- [Deployment](./deployment/overview): where route-auth secrets live in production

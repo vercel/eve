@@ -1,3 +1,4 @@
+import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
@@ -59,6 +60,67 @@ describe("runProviderFlow", () => {
       prompter: fake.prompter,
       projectSelection: "create-or-link",
     });
+  });
+
+  it("checks and describes the active provider, opening the cursor on it", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    const linked: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("project");
+      expect(request.options[0]).toMatchObject({
+        value: "project",
+        checked: true,
+        hint: `Linked to ${pc.bold("my-agent")} in team ${pc.bold("my-team")}`,
+      });
+      expect(request.options[1]?.checked).toBeUndefined();
+      return undefined;
+    };
+    await runProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: linked,
+      currentProvider: {
+        kind: "gateway-project",
+        projectName: "my-agent",
+        teamName: "my-team",
+      },
+      deps,
+    });
+
+    const keyed: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("own-key");
+      expect(request.options[1]).toMatchObject({
+        value: "own-key",
+        checked: true,
+        hint: "AI_GATEWAY_API_KEY set in .env.local",
+      });
+      return undefined;
+    };
+    await runProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: keyed,
+      currentProvider: {
+        kind: "gateway-key",
+        envKey: "AI_GATEWAY_API_KEY",
+        envFile: ".env.local",
+      },
+      deps,
+    });
+  });
+
+  it("reports a committed key as one set line", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+
+    await runProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: async () => ({ kind: "inline-key", key: "sk-inline", validation: { kind: "valid" } }),
+      deps,
+    });
+
+    expect(fake.prompter.log.success).toHaveBeenCalledExactlyOnceWith("AI_GATEWAY_API_KEY set.");
   });
 
   it("persists the accepted inline key and does not revalidate it after submission", async () => {
