@@ -1710,7 +1710,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await expect(answer).resolves.toBeUndefined();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain(" ? Choose access");
+    expect(snapshot).toContain("? Choose access");
     expect(snapshot).toContain("⎿  Dismissed.");
     // The option list does not survive the dismissal.
     expect(snapshot).not.toContain("Managed access");

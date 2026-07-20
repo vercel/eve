@@ -251,8 +251,8 @@ describe("renderBlockLines", () => {
       "Please provide them in the format owner/repo.";
     const lines = render({ kind: "question", title: prompt, body: "  (type your answer)" }, 40);
     expect(lines.length).toBeGreaterThan(2);
-    expect(lines[0]).toBe(" ? Which repository or repositories");
-    expect(lines[1]).toBe("   should the tool check? Please provide");
+    expect(lines[0]).toBe("? Which repository or repositories");
+    expect(lines[1]).toBe("  should the tool check? Please provide");
     for (const line of lines) {
       expect(visibleLength(line)).toBeLessThanOrEqual(40);
     }
@@ -264,7 +264,7 @@ describe("renderBlockLines", () => {
       title: "Choose access",
       body: "⎿  AI Gateway",
     });
-    expect(lines).toEqual([" ? Choose access", "   ⎿  AI Gateway"]);
+    expect(lines).toEqual(["? Choose access", "   ⎿  AI Gateway"]);
   });
 
   it("renders a dim notice line", () => {

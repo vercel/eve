@@ -431,25 +431,23 @@ function renderPreformatted(block: Block, width: number, theme: Theme): string[]
     block.kind === "connection-auth"
       ? theme.colors.yellow(theme.glyph.connection)
       : theme.colors.yellow(theme.colors.bold(theme.glyph.question));
-  // Questions share the tool grammar's one-cell indent so `?` sits in the
-  // same column as `▪`.
-  const lead = block.kind === "question" ? " " : "";
+  // A question's `⎿` answer row hangs one cell past the prompt text so the
+  // elbow reads as nested under it.
+  const bodyIndent = block.kind === "question" ? "   " : "  ";
   // The title is agent-authored prose (a question prompt, a connection name)
   // and can exceed the width; an overflowing row soft-wraps in the terminal
   // and breaks the live region's one-row-one-line accounting, leaking a
   // duplicate of the row into scrollback on every repaint.
-  const title = wrap(block.title ?? "", width - 2 - lead.length);
+  const title = wrap(block.title ?? "", width - 2);
   const rows =
     title.length === 0
-      ? [`${lead}${glyph} `]
+      ? [`${glyph} `]
       : title.map((line, index) =>
-          index === 0
-            ? `${lead}${glyph} ${theme.colors.bold(line)}`
-            : `${lead}  ${theme.colors.bold(line)}`,
+          index === 0 ? `${glyph} ${theme.colors.bold(line)}` : `  ${theme.colors.bold(line)}`,
         );
   for (const raw of (block.body ?? "").split("\n")) {
-    for (const line of wrapVisibleLine(raw, width - 2 - lead.length)) {
-      rows.push(`${lead}  ${line}`);
+    for (const line of wrapVisibleLine(raw, Math.max(1, width - bodyIndent.length))) {
+      rows.push(`${bodyIndent}${line}`);
     }
   }
   return rows;
