@@ -552,9 +552,8 @@ function renderSubagentHeader(block: Block, width: number, theme: Theme): string
   const isSelf = block.title === undefined || block.title === "agent";
   const rawName = isSelf ? "self" : block.title!;
   const name = truncatePlain(rawName, Math.max(8, width - 16));
-  // The `└ ` lead hangs the persistent section off the flow above it,
-  // making the nesting of its railed children evident.
-  const lead = `${theme.colors.dim(theme.glyph.corner)} `;
+  // Two cells in, so the mark shares the tool column above its rail.
+  const lead = "  ";
   // The ordinal rides inside the parens (`subagent(self:4)`) in every
   // state; a completed call reports Done on the header itself — the
   // collapsed section has no corner to carry it.
