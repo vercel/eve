@@ -160,9 +160,8 @@ agent-shaped source tree into \`dist/extension/\`, emits type declarations and a
 compatibility manifest, and fills the package \`exports\` map. Ship \`dist/\` only.
 Keep \`eve\` as a required wildcard peer so the consumer's eve is the one that runs;
 eve validates extension compatibility from the generated manifest. Keep the eve
-development dependency pinned exactly. Build published artifacts with the oldest
-eve release the extension intends to support, then test that same dist with old and new
-consumers.
+development dependency pinned exactly so builds remain reproducible. Upgrade it
+when the extension intentionally adopts a newer eve authoring API.
 `;
 
 const CLAUDE_MD_TEMPLATE = `@AGENTS.md

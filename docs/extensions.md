@@ -120,9 +120,7 @@ During local development, `eve dev` automatically rebuilds mounted workspace ext
 
 `eve` is a required wildcard **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. The extension's concrete eve version belongs in `devDependencies` for authoring types and build tooling. npm peer semver does not decide extension compatibility; eve validates the generated per-capability requirements. Do not mark the eve peer optional and do not add eve to regular `dependencies`.
 
-#### Choosing the eve development version
-
-Keep `devDependencies.eve` pinned to an exact version. `eve extension init` starts with the exact eve release that created the scaffold:
+`eve extension init` pins `devDependencies.eve` to the exact eve release that created the scaffold:
 
 ```jsonc title="package.json"
 {
@@ -131,9 +129,9 @@ Keep `devDependencies.eve` pinned to an exact version. `eve extension init` star
 }
 ```
 
-The installed development version supplies both the authoring API and the capability epochs written by `eve extension build`. A range such as `^0.25.0` can resolve a newer builder and silently stamp a newer epoch for a capability the extension uses.
+The exact pin makes builds reproducible. Keep it until the extension intentionally upgrades its eve authoring API. `eve extension build` records the capability contracts required by the build, and each consuming eve validates those requirements before it runs the extension.
 
-Before publishing, set the exact version to the oldest eve release the extension intends to support. Build the distribution once with that version, then test the same dist against both the oldest and latest supported consumer versions. Do not rebuild for each consumer: that would test different artifacts with potentially different capability requirements. Raise the pin when the extension intentionally adopts an API from a newer capability contract.
+If the extension must support an older eve release, replace the development pin with that exact version, then typecheck and build with it. Test the same dist against both the oldest and latest supported consumers; rebuilding with each consumer would produce and test different artifacts.
 
 Everything else the extension imports at execution time (SDKs, `zod`, …) goes in `dependencies`; each extension resolves its own versions. Build-only and test-only packages go in `devDependencies`.
 
