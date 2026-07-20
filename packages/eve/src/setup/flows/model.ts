@@ -310,11 +310,12 @@ export async function detectModelProviderStatus(
     return status;
   }
   const shellKey = env[AI_GATEWAY_API_KEY_ENV_VAR];
-  const resolution = resolveGatewayCredential({
+  const evidence: { apiKeyInEnv: boolean; apiKeyFile?: string; oidcFile?: string } = {
     apiKeyInEnv: shellKey !== undefined && shellKey.trim().length > 0,
-    ...(gatewayKeyFile !== undefined ? { apiKeyFile: gatewayKeyFile } : {}),
-    ...(oidcFile !== undefined ? { oidcFile } : {}),
-  });
+  };
+  if (gatewayKeyFile !== undefined) evidence.apiKeyFile = gatewayKeyFile;
+  if (oidcFile !== undefined) evidence.oidcFile = oidcFile;
+  const resolution = resolveGatewayCredential(evidence);
   if (resolution === undefined) return { kind: "unset" };
   if (resolution.credential === "api-key") {
     return { kind: "gateway-key", envKey: AI_GATEWAY_API_KEY_ENV_VAR, source: resolution.source };

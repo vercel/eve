@@ -10,7 +10,7 @@ import {
   formatChangeDetectedLogLine,
 } from "#internal/nitro/host/dev-watcher-log.js";
 
-import type { AgentTUIStreamEvent, AgentTUIStreamResult } from "./runner.js";
+import type { AgentTUIStreamEvent, AgentTUIStreamResult, SubagentToolUpdate } from "./runner.js";
 import { promptCommandsFor } from "./prompt-commands.js";
 import { PROMPT_PLACEHOLDER_MESSAGES } from "./prompt-placeholder.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
@@ -1114,16 +1114,18 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     // A parallel batch: every call announced up front…
     const names = ["web_fetch", "web_search", "bash", "read_file"];
-    const upsert = (i: number, status: "executing" | "done") =>
-      renderer.upsertSubagentTool({
+    const upsert = (i: number, status: "executing" | "done") => {
+      const update: SubagentToolUpdate = {
         callId: "s1",
         subagentName: "agent",
         childCallId: `c${i}`,
         toolName: names[i % names.length]!,
         input: { url: `u${i}`, query: `q${i}`, command: `cmd${i}`, filePath: `f${i}` },
         status,
-        ...(status === "done" ? { output: { ok: true } } : {}),
-      });
+      };
+      if (status === "done") update.output = { ok: true };
+      renderer.upsertSubagentTool(update);
+    };
     for (let i = 1; i <= 8; i += 1) upsert(i, "executing");
     // …then the FIRST two settle: they are the most recent activity and
     // must enter the window, displacing later-announced idle calls.

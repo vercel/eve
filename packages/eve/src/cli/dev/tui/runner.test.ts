@@ -1850,16 +1850,17 @@ describe("EveTUIRunner renderer teardown", () => {
         yield {
           type: "message.completed",
           data: {
-            message: { id: "m1", role: "assistant", content: "final answer" },
+            finishReason: "stop",
+            message: "final answer",
             sequence: 0,
             stepIndex: 0,
             turnId: "turn-child",
           },
-        } as unknown as HandleMessageStreamEvent;
+        } as HandleMessageStreamEvent;
         yield {
           type: "session.waiting",
           data: { wait: "next-user-message" },
-        } as unknown as HandleMessageStreamEvent;
+        } as HandleMessageStreamEvent;
       },
     }));
 

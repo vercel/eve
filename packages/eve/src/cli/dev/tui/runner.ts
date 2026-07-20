@@ -27,7 +27,7 @@ import {
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { SubagentPump, type SubagentView } from "./subagent-pump.js";
+import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
   SubagentRun,
   SubagentStepUpdate,
@@ -502,11 +502,10 @@ export class EveTUIRunner {
     this.#session = options.session;
     if (options.client !== undefined) this.#client = options.client;
     this.#renderer = createRenderer(options);
-    this.#subagentPump = new SubagentPump({
-      ...(this.#client !== undefined ? { client: this.#client } : {}),
-      ...(this.#renderer.subagents !== undefined ? { view: this.#renderer.subagents } : {}),
-      formatActionResultError,
-    });
+    const pumpOptions: SubagentPumpOptions = { formatActionResultError };
+    if (this.#client !== undefined) pumpOptions.client = this.#client;
+    if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
+    this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";

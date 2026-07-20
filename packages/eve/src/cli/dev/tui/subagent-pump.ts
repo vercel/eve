@@ -111,9 +111,9 @@ export type SubagentToolUpdate = {
 };
 
 export interface SubagentPumpOptions {
-  readonly client?: Client;
-  readonly view?: SubagentView;
-  readonly formatActionResultError: (event: ActionResultStreamEvent) => string;
+  client?: Client;
+  view?: SubagentView;
+  formatActionResultError: (event: ActionResultStreamEvent) => string;
 }
 
 export class SubagentPump {

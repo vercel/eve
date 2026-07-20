@@ -2,7 +2,6 @@ import { interactiveAsker, withAnswers } from "../ask.js";
 import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import {
   resolveGatewayCredential,
-  type GatewayCredentialEvidence,
   type GatewayCredentialResolution,
 } from "#internal/resolve-model-endpoint-status.js";
 import {
@@ -188,11 +187,13 @@ export async function runLinkFlow(input: {
   // would claim a credential that never authenticates a call — the one
   // precedence authority decides what actually won.
   const shellKey = deps.env[AI_GATEWAY_API_KEY_ENV_VAR];
-  const evidence: GatewayCredentialEvidence = {
-    apiKeyInEnv: shellKey !== undefined && shellKey.trim().length > 0,
-    ...(gatewayKeyFile !== undefined ? { apiKeyFile: gatewayKeyFile } : {}),
-    ...(oidcFile !== undefined ? { oidcFile } : {}),
-  };
+  const evidence: {
+    apiKeyInEnv: boolean;
+    apiKeyFile?: string;
+    oidcFile?: string;
+  } = { apiKeyInEnv: shellKey !== undefined && shellKey.trim().length > 0 };
+  if (gatewayKeyFile !== undefined) evidence.apiKeyFile = gatewayKeyFile;
+  if (oidcFile !== undefined) evidence.oidcFile = oidcFile;
   const resolution = resolveGatewayCredential(evidence);
   if (resolution !== undefined) done.resolution = resolution;
   return done;
