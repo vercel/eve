@@ -69,7 +69,7 @@ export async function readDevSessionEvents(
 
   const lines: DevSessionEventLine[] = [];
   for (const run of await listRunsOverlappingWindow(world, window)) {
-    const text = await drainRunStream(runtime, run.runId);
+    const text = await drainRunStream(runtime, world, run.runId);
     lines.push(...parseSessionEventLines(text, run, window));
   }
   return lines.sort((a, b) => a.at.localeCompare(b.at));
@@ -111,12 +111,20 @@ async function listRunsOverlappingWindow(
 /**
  * Reads a run's decoded session stream until it closes or sits idle for
  * {@link STREAM_IDLE_TIMEOUT_MS}. Runs without a session stream (non-turn
- * workflows) contribute nothing.
+ * workflows — roughly half of a typical store) are skipped via a cheap
+ * `listStreams` lookup instead of each paying the full idle-timeout
+ * budget waiting on a stream that does not exist.
  */
-async function drainRunStream(runtime: WorkflowRuntime, runId: string): Promise<string> {
+async function drainRunStream(
+  runtime: WorkflowRuntime,
+  world: LocalWorld,
+  runId: string,
+): Promise<string> {
   let text = "";
   const decoder = new TextDecoder();
   try {
+    const streams = await runtime.listStreams(world, runId);
+    if (!streams.some((name) => name === "user" || name.endsWith("_user"))) return "";
     const reader = runtime
       .getRun(runId)
       .getReadable<string | Uint8Array>({ startIndex: 0 })

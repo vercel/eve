@@ -1,11 +1,10 @@
-import { spawn } from "node:child_process";
 import { access, readdir, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, join, relative } from "node:path";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH } from "#internal/workflow/local-world-data-directory.js";
-import { resolveVercelInvocation } from "#setup/primitives/run-vercel.js";
+import { captureVercel, resolveVercelInvocation } from "#setup/primitives/run-vercel.js";
 
 const VERCEL_VERSION_TIMEOUT_MS = 5_000;
 
@@ -163,55 +162,24 @@ export async function collectDevEnvironmentInfo(appRoot: string): Promise<DevEnv
 async function detectVercelCli(
   appRoot: string,
 ): Promise<{ vercelCliVersion?: string; vercelCliPath?: string }> {
-  const invocation = resolveVercelInvocation(appRoot, ["--version"]);
-  const [version, path] = await Promise.all([
-    readVercelVersion(invocation),
+  // `captureVercel` owns the invocation resolution, capture, and hard
+  // deadline; the invocation is re-resolved only to report which binary
+  // answered (a workspace-local install beats the PATH lookup).
+  const invocation = resolveVercelInvocation(appRoot);
+  const [result, path] = await Promise.all([
+    captureVercel(["--version"], {
+      cwd: appRoot,
+      nonInteractive: true,
+      timeoutMs: VERCEL_VERSION_TIMEOUT_MS,
+    }),
     invocation.command === "vercel" ? findOnPath("vercel") : Promise.resolve(invocation.command),
   ]);
+  const output = result.ok ? result.stdout : `${result.failure.stdout}\n${result.failure.stderr}`;
+  const version = /(\d+\.\d+\.\d+\S*)/.exec(output)?.[1];
   const detected: { vercelCliVersion?: string; vercelCliPath?: string } = {};
   if (version !== undefined) detected.vercelCliVersion = version;
   if (path !== undefined) detected.vercelCliPath = path;
   return detected;
-}
-
-function readVercelVersion(invocation: {
-  command: string;
-  commandArgs: string[];
-  shell?: boolean;
-}): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    let output = "";
-    let settled = false;
-    const settle = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(deadline);
-      resolve(/(\d+\.\d+\.\d+\S*)/.exec(output)?.[1]);
-    };
-
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(invocation.command, invocation.commandArgs, {
-        shell: invocation.shell ?? false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch {
-      resolve(undefined);
-      return;
-    }
-    const deadline = setTimeout(() => {
-      child.kill("SIGKILL");
-      settle();
-    }, VERCEL_VERSION_TIMEOUT_MS);
-    child.stdout?.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-    });
-    child.on("error", settle);
-    child.on("close", settle);
-  });
 }
 
 async function findOnPath(executable: string): Promise<string | undefined> {
