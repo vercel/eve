@@ -25,6 +25,8 @@ their `defineDynamic` export is a build error.
 
 Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. The wrapper stamps them so their `execute` functions survive workflow step boundaries.
 
+Dynamic tool executors receive the same `ToolContext` as static authored tools, including inline provider auth through `ctx.getToken(provider)` and `ctx.requireAuth(provider)`.
+
 The example below builds one tool per warehouse table. A map return names each tool by its bare key, so the model sees `orders`, `users`, and so on.
 
 ```ts title="agent/tools/query.ts"
