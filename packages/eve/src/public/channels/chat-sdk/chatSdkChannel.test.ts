@@ -100,6 +100,9 @@ async function firePost(
   const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
     continuationToken: "chat-sdk:test",
     id: "session-1",
+    async cancel() {
+      return { status: "no_active_turn" as const };
+    },
     async getEventStream() {
       return new ReadableStream();
     },
@@ -114,6 +117,7 @@ async function firePost(
     }),
     {
       getSession: vi.fn() as any,
+      cancel: vi.fn(),
       params: {},
       receive: vi.fn() as any,
       requestIp: null,
@@ -168,6 +172,7 @@ describe("chatSdkChannel", () => {
       new Request("https://example.com/eve/v1/test?crc_token=abc123", { method: "GET" }),
       {
         getSession: vi.fn() as any,
+        cancel: vi.fn(),
         params: {},
         receive: vi.fn() as any,
         requestIp: null,
@@ -240,6 +245,9 @@ describe("chatSdkChannel", () => {
     const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
       continuationToken: "chat-sdk:test",
       id: "session-1",
+      async cancel() {
+        return { status: "no_active_turn" as const };
+      },
       async getEventStream() {
         return new ReadableStream();
       },

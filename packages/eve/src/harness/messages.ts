@@ -153,11 +153,24 @@ function coalesceMessage(input: {
     return input.a;
   }
 
-  if (typeof input.a === "string" && typeof input.b === "string") {
-    return `${input.a}\n\n${input.b}`;
+  return appendUserContent({ appended: input.b, existing: input.a });
+}
+
+/**
+ * Appends user content while preserving structured attachment parts.
+ */
+export function appendUserContent(input: {
+  readonly appended: string | UserContent;
+  readonly existing: string | UserContent;
+}): string | UserContent {
+  if (typeof input.existing === "string" && typeof input.appended === "string") {
+    return `${input.existing}\n\n${input.appended}`;
   }
 
-  const merged: UserContentArray = [...toUserContentArray(input.a), ...toUserContentArray(input.b)];
+  const merged: UserContentArray = [
+    ...toUserContentArray(input.existing),
+    ...toUserContentArray(input.appended),
+  ];
   return merged;
 }
 

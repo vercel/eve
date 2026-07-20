@@ -5,6 +5,7 @@ import {
   getAllFrameworkToolNames,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
+import { isToolSchema } from "#shared/tool-schema.js";
 
 describe("framework-tools/index", () => {
   it("returns every known framework tool name regardless of config", () => {
@@ -36,6 +37,16 @@ describe("framework-tools/index", () => {
 
     expect(names).toContain("agent");
     expect(getFrameworkToolDefinitions().map((tool) => tool.name)).not.toContain("agent");
+  });
+
+  it("uses one validated runtime schema for every framework-defined input", () => {
+    for (const tool of getAllFrameworkToolDefinitions()) {
+      if (tool.inputSchema !== null) {
+        expect(isToolSchema(tool.inputSchema), `${tool.name} has a validated input schema`).toBe(
+          true,
+        );
+      }
+    }
   });
 
   it("declares an output schema for every statically shaped registered tool", () => {

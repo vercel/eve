@@ -15,6 +15,7 @@ import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
+import { toInputSchema } from "#shared/tool-schema.js";
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
@@ -217,6 +218,7 @@ function createNoopRuntime(): Runtime {
   return {
     cancelTurn: vi.fn(),
     deliver: vi.fn(),
+    resolveSession: vi.fn(),
     run: vi.fn().mockRejectedValue(new Error("runtime.run should not be called in this test")),
     getEventStream: vi
       .fn()
@@ -274,7 +276,7 @@ describe("createExecutionNodeStep", () => {
         {
           description: "A regular tool.",
           execute: async () => "tool-output",
-          inputSchema: { type: "object" },
+          inputSchema: toInputSchema({ type: "object" }),
           logicalPath: "tools/regular-tool.ts",
           name: "regular-tool",
           sourceId: "tools/regular-tool.ts",

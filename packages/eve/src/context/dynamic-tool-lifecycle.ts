@@ -1,4 +1,4 @@
-import { jsonSchema, zodSchema, type FlexibleSchema, type ModelMessage } from "ai";
+import type { ModelMessage } from "ai";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalContext } from "#public/definitions/approval.js";
@@ -10,7 +10,12 @@ import {
 } from "#shared/dynamic-tool-definition.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
-import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
+import {
+  serializeInputSchema,
+  serializeOutputSchema,
+  toInputSchema,
+  toOutputSchema,
+} from "#shared/tool-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import type { ContextContainer } from "#context/container.js";
@@ -37,29 +42,14 @@ function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): Harness
         input as Record<string, unknown>,
         buildBaseToolContext({ options, toolName: name }),
       ),
-    inputSchema: convertInputSchema(entry.inputSchema),
+    inputSchema: toInputSchema(entry.inputSchema),
     name,
     approval: entry.approval,
-    outputSchema: convertOptionalOutputSchema(entry.outputSchema),
+    outputSchema: toOutputSchema(entry.outputSchema),
     ...(entry.toModelOutput !== undefined
       ? { toModelOutput: entry.toModelOutput as (output: unknown) => unknown }
       : {}),
   };
-}
-
-function convertInputSchema(schema: unknown): FlexibleSchema {
-  if (typeof schema === "object" && schema !== null && "~standard" in schema) {
-    return zodSchema(schema as Parameters<typeof zodSchema>[0]);
-  }
-  return jsonSchema(schema as Parameters<typeof jsonSchema>[0]);
-}
-
-function convertOptionalOutputSchema(schema: unknown): FlexibleSchema | undefined {
-  if (schema === undefined) return undefined;
-  if (typeof schema === "object" && schema !== null && "~standard" in schema) {
-    return zodSchema(schema as Parameters<typeof zodSchema>[0]);
-  }
-  return jsonSchema(schema as Parameters<typeof jsonSchema>[0]);
 }
 
 function qualifyDynamicToolNames(
@@ -128,9 +118,9 @@ export function replayDynamicSessionTools(
       description: m.description,
       execute: (input: unknown, options) =>
         stepFn(m.closureVars, input, buildBaseToolContext({ options, toolName: m.name })),
-      inputSchema: jsonSchema(m.inputSchema),
+      inputSchema: toInputSchema(m.inputSchema),
       name: m.name,
-      outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),
+      outputSchema: toOutputSchema(m.outputSchema),
     });
   }
 
@@ -312,11 +302,8 @@ async function resolveToolsFromEvent(
       metadata.push({
         name,
         description: entry.description,
-        inputSchema: normalizeJsonSchemaDefinition(entry.inputSchema),
-        outputSchema:
-          entry.outputSchema === undefined
-            ? undefined
-            : normalizeJsonSchemaDefinition(entry.outputSchema, "output"),
+        inputSchema: serializeInputSchema(entry.inputSchema),
+        outputSchema: serializeOutputSchema(entry.outputSchema),
         resolverSlug: resolver.slug,
         entryKey,
         executeStepFnName,

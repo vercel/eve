@@ -31,6 +31,7 @@ import {
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
+import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
@@ -314,20 +315,6 @@ export async function emitStepActions(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Returns true when the AI SDK marked the tool call `invalid` (typically
- * because the model emitted unparsable JSON or targeted an unknown tool).
- *
- * Invalid calls have a raw-string or partial `input` payload that cannot
- * satisfy the runtime-action contract. The AI SDK synthesizes a tool-error
- * result for the next model step automatically; callers must skip invalid
- * calls when projecting to `RuntimeActionRequest` values or the harness
- * will throw on the JSON-object invariant.
- */
-export function isInvalidToolCall(toolCall: TypedToolCall<ToolSet>): boolean {
-  return toolCall.invalid === true;
-}
 
 function isProviderExecutedToolCall(toolCall: TypedToolCall<ToolSet>): boolean {
   return toolCall.providerExecuted === true;

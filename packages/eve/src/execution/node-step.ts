@@ -1,4 +1,4 @@
-import { jsonSchema, type FlexibleSchema, type LanguageModel } from "ai";
+import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
@@ -8,6 +8,7 @@ import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
+import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 import type { RunMode } from "#shared/run-mode.js";
 import {
   resolveRuntimeModelReference,
@@ -182,7 +183,7 @@ export function createNodeHarnessTools(input: {
   ) {
     tools.set(AGENT_TOOL_NAME, {
       description: AGENT_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
+      inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
       name: AGENT_TOOL_NAME,
       runtimeAction: {
         kind: "subagent-call",
@@ -199,34 +200,26 @@ function resolveHarnessToolDefinition(input: {
   readonly node: ResolvedRuntimeAgentNode;
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
-  if (input.tool.kind === "subagent") {
+  if (input.tool.kind === "subagent" || input.tool.kind === "remote") {
+    const runtimeAction: HarnessToolDefinition["runtimeAction"] =
+      input.tool.kind === "remote"
+        ? {
+            kind: "remote-agent-call",
+            nodeId: input.tool.nodeId,
+            remoteAgentName: input.tool.name,
+            subagentName: input.tool.name,
+          }
+        : {
+            kind: "subagent-call",
+            nodeId: input.tool.nodeId,
+            subagentName: input.tool.name,
+          };
     return {
       description: input.tool.description ?? "",
-      inputSchema: jsonSchema(input.tool.inputSchema ?? {}),
+      inputSchema: toInputSchema(input.tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
       name: input.tool.name,
-      outputSchema:
-        input.tool.outputSchema === undefined ? undefined : jsonSchema(input.tool.outputSchema),
-      runtimeAction: {
-        kind: "subagent-call",
-        nodeId: input.tool.nodeId,
-        subagentName: input.tool.name,
-      },
-    };
-  }
-
-  if (input.tool.kind === "remote") {
-    return {
-      description: input.tool.description ?? "",
-      inputSchema: jsonSchema(input.tool.inputSchema ?? {}),
-      name: input.tool.name,
-      outputSchema:
-        input.tool.outputSchema === undefined ? undefined : jsonSchema(input.tool.outputSchema),
-      runtimeAction: {
-        kind: "remote-agent-call",
-        nodeId: input.tool.nodeId,
-        remoteAgentName: input.tool.name,
-        subagentName: input.tool.name,
-      },
+      outputSchema: toOutputSchema(input.tool.outputSchema),
+      runtimeAction,
     };
   }
 
@@ -253,10 +246,10 @@ function resolveHarnessToolDefinition(input: {
       rawExecute,
       scope: def.name,
     }),
-    inputSchema: def.inputStandardSchema ?? jsonSchema(def.inputSchema ?? {}),
+    inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,
-    outputSchema: def.outputStandardSchema ?? maybeJsonSchema(def.outputSchema),
+    outputSchema: def.outputSchema,
     toModelOutput: def.toModelOutput,
   };
 }
@@ -286,10 +279,4 @@ function resolveAuthoredExecute(input: {
   }
   const authored = rawExecute as (toolInput: unknown, ctx: unknown) => unknown;
   return createToolExecuteWithAuth({ execute: authored, scope });
-}
-
-function maybeJsonSchema(
-  schema: ResolvedToolDefinition["outputSchema"],
-): FlexibleSchema | undefined {
-  return schema === undefined ? undefined : jsonSchema(schema);
 }

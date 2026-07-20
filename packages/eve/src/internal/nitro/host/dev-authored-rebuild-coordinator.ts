@@ -113,7 +113,10 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     let nextHost: PreparedDevelopmentApplicationHost | undefined;
 
     try {
-      nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot);
+      nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot, {
+        changedPaths: input.changedPaths,
+        previousExtensions: previousHost.workspaceExtensions,
+      });
       if (
         usesParentDevelopmentWorkflowWorld(
           nextHost.compileResult.manifest.config.experimental?.workflow?.world,
@@ -127,10 +130,19 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       const hasRuntimeChange = nextRuntimeFingerprint !== this.#currentRuntimeFingerprint;
 
       if (!hasStructuralChange && !hasRuntimeChange) {
+        const committedHost = {
+          ...previousHost,
+          workspaceExtensions: nextHost.workspaceExtensions,
+        };
         await discardPreparedHost(nextHost);
         nextHost = undefined;
+        this.#commitState(
+          committedHost,
+          this.#currentHostFingerprint,
+          this.#currentRuntimeFingerprint,
+        );
         environmentReload.commit();
-        return { host: previousHost, kind: "unchanged" };
+        return { host: committedHost, kind: "unchanged" };
       }
 
       if (!hasStructuralChange) {

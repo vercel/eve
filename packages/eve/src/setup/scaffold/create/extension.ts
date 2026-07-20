@@ -15,7 +15,6 @@ import {
   CURRENT_DIRECTORY_PROJECT_NAME,
   DEFAULT_EVE_PACKAGE_CONTRACT,
   DEFAULT_ZOD_PACKAGE_VERSION,
-  formatEveDependencySpecifier,
   resolveEvePackageContract,
   ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX,
   type EvePackageContract,
@@ -36,7 +35,7 @@ interface ExtensionTemplateContext {
 function renderTemplate(content: string, ctx: ExtensionTemplateContext): string {
   return content
     .replaceAll("__EVE_INIT_APP_NAME__", ctx.appName)
-    .replaceAll("__EVE_INIT_PACKAGE_VERSION__", formatEveDependencySpecifier(ctx.eveVersion))
+    .replaceAll("__EVE_INIT_PACKAGE_VERSION__", ctx.eveVersion)
     .replaceAll("__EVE_INIT_ZOD_VERSION__", ctx.zodPackageVersion)
     .replaceAll("__EVE_INIT_TYPESCRIPT_VERSION__", ctx.typescriptPackageVersion)
     .replaceAll("__EVE_INIT_TYPES_NODE_VERSION__", ctx.nodeTypesVersion)
@@ -53,11 +52,21 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
     version: "0.0.0",
     type: "module",
     eve: {
-      extension: "./extension",
+      extension: {
+        source: "./extension",
+        dist: "./dist/extension",
+      },
     },
-    files: ["extension", "dist"],
+    files: ["dist"],
     exports: {
-      ".": "./extension/extension.ts",
+      ".": {
+        types: "./dist/index.d.ts",
+        default: "./dist/index.mjs",
+      },
+      "./tools": {
+        types: "./dist/tools/index.d.ts",
+        default: "./dist/tools/index.mjs",
+      },
     },
     scripts: {
       build: "eve extension build",
@@ -73,7 +82,7 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
       typescript: "__EVE_INIT_TYPESCRIPT_VERSION__",
     },
     peerDependencies: {
-      eve: "__EVE_INIT_PACKAGE_VERSION__",
+      eve: "*",
     },
   };
 
@@ -146,10 +155,13 @@ unavailable, use https://eve.dev/docs/extensions as a fallback.
 
 ## Build and publish
 
-\`eve extension build\` (wired to \`build\`/\`prepare\`) compiles the mount factory
-and tool re-exports into \`dist/\` and fills the package \`exports\` map. Ship both
-\`extension/\` (source the consumer recompiles) and \`dist/\`. Keep \`eve\` as a peer
-dependency so the consumer's eve is the one that runs.
+\`eve extension build\` (wired to \`build\`/\`prepare\`) transforms the complete
+agent-shaped source tree into \`dist/extension/\`, emits type declarations and a
+compatibility manifest, and fills the package \`exports\` map. Ship \`dist/\` only.
+Keep \`eve\` as a required wildcard peer so the consumer's eve is the one that runs;
+eve validates extension compatibility from the generated manifest. Keep the eve
+development dependency pinned exactly so builds remain reproducible. Upgrade it
+when the extension intentionally adopts a newer eve authoring API.
 `;
 
 const CLAUDE_MD_TEMPLATE = `@AGENTS.md

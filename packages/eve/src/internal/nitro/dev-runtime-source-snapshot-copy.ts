@@ -55,7 +55,7 @@ export async function copyDevelopmentSourceSnapshot(
   }
 
   await rewriteSnapshotTsConfigAbsoluteExtends(plan);
-  await createSnapshotSymlinks(plan);
+  await createSnapshotDependencyMounts(plan);
   await ensureRuntimePackageJson(plan);
   await validateDevelopmentSourceSnapshot(plan);
 }
@@ -292,20 +292,20 @@ function rewriteTsConfigExtendsSpecifier(input: {
   });
 }
 
-async function createSnapshotSymlinks(plan: DevelopmentSourceSnapshotPlan): Promise<void> {
-  for (const symlinkEntry of plan.symlinks) {
-    const snapshotLinkPath = toSnapshotPathForPlan(plan, symlinkEntry.linkPath);
-    const targetPath =
-      symlinkEntry.targetKind === "local"
-        ? toSnapshotPathForPlan(plan, symlinkEntry.targetPath)
-        : symlinkEntry.targetPath;
-    const relativeTarget =
-      symlinkEntry.targetKind === "local"
-        ? relative(dirname(snapshotLinkPath), targetPath) || "."
-        : targetPath;
+async function createSnapshotDependencyMounts(plan: DevelopmentSourceSnapshotPlan): Promise<void> {
+  for (const dependencyMount of plan.dependencyMounts) {
+    const snapshotMountPath = toSnapshotPathForPlan(plan, dependencyMount.mountPath);
+    const sourcePath =
+      dependencyMount.sourceKind === "workspace"
+        ? toSnapshotPathForPlan(plan, dependencyMount.sourcePath)
+        : dependencyMount.sourcePath;
+    const mountTarget =
+      dependencyMount.sourceKind === "workspace"
+        ? relative(dirname(snapshotMountPath), sourcePath) || "."
+        : sourcePath;
 
-    await mkdir(dirname(snapshotLinkPath), { recursive: true });
-    await symlink(relativeTarget, snapshotLinkPath, "junction");
+    await mkdir(dirname(snapshotMountPath), { recursive: true });
+    await symlink(mountTarget, snapshotMountPath, "junction");
   }
 }
 

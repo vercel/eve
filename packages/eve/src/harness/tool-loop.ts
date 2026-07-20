@@ -101,11 +101,13 @@ import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-c
 import {
   consumeDeferredStepInput,
   getApprovedTools,
+  getPendingInputRequestIds,
   hasDeferredStepInput,
   hasStepInput,
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
+import { convertStaleResponsesToUserMessage } from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
@@ -148,13 +150,11 @@ import {
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
-import { getInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
 import {
-  buildStepHooks,
-  emitStepActions,
-  type HarnessStepResult,
+  getInvalidToolCallInputError,
   isInvalidToolCall,
-} from "#harness/step-hooks.js";
+} from "#harness/tool-call-input-errors.js";
+import { buildStepHooks, emitStepActions, type HarnessStepResult } from "#harness/step-hooks.js";
 import {
   buildToolApproval,
   buildToolSetFromDefinitions,
@@ -540,17 +540,28 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = resolvedRuntimeActions.session;
 
+    const staleConversion = convertStaleResponsesToUserMessage({
+      history: resolvedRuntimeActions.messages,
+      pendingRequestIds: getPendingInputRequestIds(session.state),
+      stepInput: stepInput.input,
+    });
+    const effectiveStepInput = staleConversion.stepInput;
+    const preambleStepInput =
+      staleConversion.kind === "converted"
+        ? { ...effectiveStepInput, message: staleConversion.displayMessage }
+        : effectiveStepInput;
+
     const pending = resolvePendingInput({
       history: resolvedRuntimeActions.messages,
       resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
       session,
-      stepInput: stepInput.input,
+      stepInput: effectiveStepInput,
     });
     if (pending.outcome === "unresolved") {
       if (emit && pending.deferredMessage === true && hasStepInput(input)) {
         emissionState = await emitTurnPreamble(
           emit,
-          input ?? {},
+          preambleStepInput ?? {},
           emissionState,
           config.runtimeIdentity,
         );
@@ -592,7 +603,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (emit && hasStepInput(input)) {
       emissionState = await emitTurnPreamble(
         emit,
-        input ?? {},
+        preambleStepInput ?? {},
         emissionState,
         config.runtimeIdentity,
       );
@@ -620,14 +631,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    if (stepInput.input?.context !== undefined && pending.deferredContext !== true) {
-      for (const entry of stepInput.input.context) {
+    if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
+      for (const entry of effectiveStepInput.context) {
         messages.push({ content: entry, role: "user" });
       }
     }
 
     if (
-      stepInput.input?.message !== undefined &&
+      effectiveStepInput?.message !== undefined &&
       !pending.deferredMessage &&
       !pending.consumedMessage
     ) {
@@ -636,7 +647,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // `messages` array — and everything that flows into
       // `session.history` from it — therefore never carries raw
       // attachment bytes across step boundaries.
-      const content = await stageAttachmentsToSandbox(stepInput.input.message);
+      const content = await stageAttachmentsToSandbox(effectiveStepInput.message);
       messages.push({ content, role: "user" });
     }
 
@@ -1008,7 +1019,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Workflow continuations replay the sandbox after step.started so nested
     // action lifecycle events keep the active turn's emission coordinates.
     const pendingWorkflowInterrupt = await continuePendingWorkflowInterrupt({
-      childResults: stepInput.input?.runtimeActionResults,
+      childResults: effectiveStepInput?.runtimeActionResults,
       config,
       emit,
       emissionState,
@@ -1779,8 +1790,12 @@ async function handleStepResult(input: {
   const invalidInputToolErrors = getInvalidToolCallInputErrors({
     toolCalls: result.toolCalls as TypedToolCall<ToolSet>[],
   });
+  // Unions every invalid-input signal: SDK-marked invalid calls (which get
+  // SDK-synthesized tool errors), non-object inputs caught by
+  // getInvalidToolCallInputErrors, and ids the stream consumer observed.
   const invalidInputToolCallIds = new Set([
     ...(result.invalidInputToolCallIds ?? []),
+    ...result.toolCalls.filter(isInvalidToolCall).map((toolCall) => toolCall.toolCallId),
     ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
   ]);
   const rawResponseMessages = emptyDelivery
@@ -1850,7 +1865,6 @@ async function handleStepResult(input: {
     tools: config.tools,
   });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
-    .filter((toolCall) => !isInvalidToolCall(toolCall))
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => config.tools.get(toolCall.toolName)?.runtimeAction !== undefined)
     .filter((toolCall) => {
@@ -2035,8 +2049,9 @@ const OUTPUT_SCHEMA_NOT_FULFILLED = {
  * `final_output` tool, or `undefined` when the terminal turn ended in prose.
  */
 function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
-  return (result.toolCalls ?? []).find((call) => call.toolName === FINAL_OUTPUT_TOOL_NAME)
-    ?.input as JsonValue | undefined;
+  return (result.toolCalls ?? []).find(
+    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && !isInvalidToolCall(call),
+  )?.input as JsonValue | undefined;
 }
 
 /**

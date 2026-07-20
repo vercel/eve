@@ -10,8 +10,8 @@ import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { openStreamBody, openStreamIterable } from "#client/open-stream.js";
-import { normalizeOutputSchemaForRequest } from "#client/output-schema.js";
 import { advanceSession } from "#client/session-utils.js";
+import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
 import type {
   CancelSessionResult,
@@ -94,12 +94,14 @@ export class ClientSession {
    *
    * Both `accepted` and `no_active_turn` are successful outcomes. The latter
    * means the active turn settled before the request arrived or the session is
-   * already parked. Credentials are resolved immediately before the request.
+   * already parked. `turnId` limits the request to the turn the caller
+   * observed; a stale guard is consumed as a benign no-op. Credentials are
+   * resolved immediately before the request.
    *
    * @throws {Error} If this handle has not started or attached to a session.
    * @throws {ClientError} If the cancel route returns a non-successful status.
    */
-  async cancel(): Promise<CancelSessionResult> {
+  async cancel(options?: { turnId?: string }): Promise<CancelSessionResult> {
     const sessionId = this.#state.sessionId;
     if (!sessionId) {
       throw new Error("Session has no session ID. Send a message first.");
@@ -107,9 +109,18 @@ export class ClientSession {
 
     const url = createClientUrl(this.#context.host, createEveCancelTurnRoutePath(sessionId));
     const headers = await this.#context.resolveHeaders();
+    headers.set("content-type", "application/json");
+
     const response = await fetch(
       url,
-      withRedirectPolicy({ headers, method: "POST" }, this.#context.redirect),
+      withRedirectPolicy(
+        {
+          headers,
+          method: "POST",
+          body: options ? JSON.stringify(options) : undefined,
+        },
+        this.#context.redirect,
+      ),
     );
     const body = await response.text();
 
@@ -171,7 +182,7 @@ export class ClientSession {
 
     const body = createHandleMessageBody({
       input,
-      outputSchema: normalizeOutputSchemaForRequest(input.outputSchema),
+      outputSchema: serializeOutputSchema(input.outputSchema),
       session,
     });
 

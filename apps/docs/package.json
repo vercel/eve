@@ -21,7 +21,7 @@
     "@vercel/agent-readability": "0.4.0",
     "@vercel/analytics": "2.0.1",
     "@vercel/eve-catalog": "workspace:*",
-    "@vercel/geistdocs": "1.12.0",
+    "@vercel/geistdocs": "1.13.0",
     "@vercel/speed-insights": "2.0.0",
     "@vgpu/core": "0.0.7",
     "@vgpu/render": "0.0.7",

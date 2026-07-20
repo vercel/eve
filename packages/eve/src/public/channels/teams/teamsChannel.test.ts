@@ -27,6 +27,7 @@ async function firePost(
 
   const send = vi.fn(async (_input: unknown, _options: unknown) => ({
     continuationToken: "TOKEN",
+    cancel: async () => ({ status: "no_active_turn" as const }),
     getEventStream: async () => new ReadableStream(),
     id: "SESSION",
   }));
@@ -39,6 +40,7 @@ async function firePost(
     }),
     {
       getSession: vi.fn(),
+      cancel: vi.fn(),
       params: {},
       receive: vi.fn(),
       requestIp: null,
@@ -248,6 +250,7 @@ describe("teamsChannel", () => {
     });
     const send = vi.fn(async (_input: unknown, _options: unknown) => ({
       continuationToken: "TOKEN",
+      cancel: async () => ({ status: "no_active_turn" as const }),
       getEventStream: async () => new ReadableStream(),
       id: "SESSION",
     }));

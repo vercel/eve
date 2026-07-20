@@ -1,9 +1,8 @@
-import type { FlexibleSchema } from "ai";
-
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { isToolSchema, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
@@ -12,11 +11,10 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
  * Resolves one compiled authored tool into a runtime-owned definition
  * with live callbacks reattached from the authored module.
  *
- * Optional hooks (`approval`, plus an optional Standard Schema
- * `inputSchema`) are extracted when
- * declared and validated to have the expected shape; any type mismatch
- * raises a {@link ResolveAgentError} so typos surface at resolve time
- * instead of at first tool call.
+ * Schema-bearing module exports are retained when they implement the validated
+ * runtime contract; serialized schemas from the compiled manifest are
+ * otherwise rehydrated into live validators. Optional hooks are reattached
+ * from the live module export.
  */
 export async function resolveToolDefinition(
   definition: CompiledToolDefinition,
@@ -50,15 +48,21 @@ export async function resolveToolDefinition(
       resolvedRecord.execute,
       describe(definition, "to provide an execute function"),
     ) as ResolvedToolDefinition["execute"];
+    const inputSchema = isToolSchema(resolvedRecord.inputSchema)
+      ? resolvedRecord.inputSchema
+      : toInputSchema(definition.inputSchema);
+    const outputSchema = isToolSchema(resolvedRecord.outputSchema)
+      ? resolvedRecord.outputSchema
+      : toOutputSchema(definition.outputSchema);
 
     return {
       description: definition.description,
       execute,
       exportName: definition.exportName,
-      inputSchema: definition.inputSchema,
+      inputSchema,
       logicalPath: definition.logicalPath,
       name: definition.name,
-      outputSchema: definition.outputSchema,
+      outputSchema,
       sourceId: definition.sourceId,
       sourceKind: "module",
       ...extractOptionalHooks(resolvedRecord, definition),
@@ -84,11 +88,7 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in
-    | "approval"
-    | "toModelOutput"
-    | "inputStandardSchema"
-    | "outputStandardSchema"]?: ResolvedToolDefinition[K];
+  -readonly [K in "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -116,14 +116,6 @@ function extractOptionalHooks(
     ) as ResolvedToolDefinition["toModelOutput"];
   }
 
-  if (record.inputSchema !== undefined && isFlexibleSchema(record.inputSchema)) {
-    optional.inputStandardSchema = record.inputSchema;
-  }
-
-  if (record.outputSchema !== undefined && isFlexibleSchema(record.outputSchema)) {
-    optional.outputStandardSchema = record.outputSchema;
-  }
-
   return optional;
 }
 
@@ -133,13 +125,4 @@ function extractOptionalHooks(
  */
 function describe(definition: CompiledToolDefinition, predicate: string): string {
   return `Expected the tool export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" ${predicate}.`;
-}
-
-function isFlexibleSchema(value: unknown): value is FlexibleSchema {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "~standard" in value &&
-    typeof (value as Record<string, unknown>)["~standard"] === "object"
-  );
 }

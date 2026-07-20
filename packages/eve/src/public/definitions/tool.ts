@@ -114,10 +114,10 @@ export type ToolContext = SessionContext & {
  * the extension (`agent/tools/get_weather.ts` registers as `get_weather`).
  * Authored definitions have no `name` field; identity is path-derived.
  */
-export type ToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefinition<
+export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends PublicToolDefinition<
   TInput,
   TOutput
-> & {
+> {
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput;
   /**
    * Optional per-tool approval gate. The return value determines whether
@@ -139,7 +139,7 @@ export type ToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefi
    * (`action.result`) always receive the full output regardless.
    */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
-};
+}
 
 /**
  * Defines a tool configuration, used both for static tools (default export

@@ -27,6 +27,8 @@ export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
+  CancelFn,
+  CancelOptions,
   HttpRouteDefinition,
   RouteDefinition,
   RouteHandlerArgs,

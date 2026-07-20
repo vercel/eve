@@ -61,6 +61,9 @@ function createEveCreateHandler(input: EveChannelInput) {
   const mockSend = vi.fn<SendFn>().mockResolvedValue({
     id: "test-session-id",
     continuationToken: "eve:test",
+    async cancel() {
+      return { status: "no_active_turn" };
+    },
     async getEventStream() {
       return new ReadableStream();
     },
@@ -71,6 +74,7 @@ function createEveCreateHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
         send: mockSend,
+        cancel: vi.fn(),
         getSession: vi.fn(),
         receive: vi.fn() as any,
         params: {},
@@ -96,6 +100,9 @@ function createEveContinueHandler(input: EveChannelInput) {
   const mockSession: ChannelSession = {
     id: "test-session-id",
     continuationToken: "eve:test",
+    async cancel() {
+      return { status: "no_active_turn" };
+    },
     async getEventStream() {
       return new ReadableStream();
     },
@@ -109,6 +116,7 @@ function createEveContinueHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
         send: mockSend,
+        cancel: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
         params: { sessionId: "test-session-id" },
@@ -140,6 +148,7 @@ function createEveCancelHandler(input: EveChannelInput) {
       const args = attachRouteAgent(
         {
           send: vi.fn(),
+          cancel: vi.fn(),
           getSession: vi.fn(),
           receive: vi.fn() as any,
           params: { sessionId: "test-session-id" },
@@ -175,6 +184,7 @@ function createEveStreamHandler(input: EveChannelInput) {
 
   const getEventStream = vi.fn().mockResolvedValue(new ReadableStream());
   const mockGetSession = vi.fn().mockReturnValue({
+    cancel: vi.fn(),
     continuationToken: "eve:test",
     getEventStream,
     id: "test-session-id",
@@ -185,6 +195,7 @@ function createEveStreamHandler(input: EveChannelInput) {
     async fetch(url: string) {
       const args: RouteHandlerArgs = {
         send: vi.fn(),
+        cancel: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
         params: { sessionId: "test-session-id" },

@@ -154,6 +154,7 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
       sourceRoot: appRoot,
     },
     workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
+    workspaceExtensions: [],
     workspace: {
       artifactsDir: `${appRoot}/.eve/dev-hosts/test/artifacts`,
       compilerArtifactsDir: `${appRoot}/.eve/dev-hosts/test/compiler`,

@@ -87,6 +87,12 @@ The follow-up reuses the same durable session: same history, same state.
 
 If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `deny` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
 
+If the session is waiting on `ask_question`, a follow-up message clears that pending request before the model continues. An exact option match or permitted freeform response answers the question; any other message marks the question unanswered and starts the follow-up turn.
+
+A response is stale when its request is no longer pending: the question or approval was already answered, cleared by a follow-up message, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
+
+Responses match pending requests by request ID, so a response to an older request stays a plain user message even while a different question or approval is pending. Like any follow-up message, a stale response clears a pending question and is held while an approval is pending.
+
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
 ## Cancel the in-flight turn
@@ -99,6 +105,8 @@ curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel
 ```
 
 `"accepted"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+
+Custom channel routes request the same cancellation without knowing the session id: the `cancel` route helper is addressed by the channel-local continuation token, and `Session.cancel()` by session id. See [custom channels](../channels/custom#cancel-a-turn).
 
 ## Reconnect and rewind
 

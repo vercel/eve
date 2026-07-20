@@ -27,10 +27,8 @@ import {
 } from "#execution/sandbox/bindings/local.js";
 import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
 import {
-  clearInitializedDevelopmentSandboxBackendNames,
   createDevelopmentSandboxRunId,
   EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV,
-  getInitializedDevelopmentSandboxBackendNames,
 } from "#execution/sandbox/development-run.js";
 import type {
   DevelopmentServer,
@@ -225,6 +223,7 @@ function addDevelopmentControlHandler(input: {
 }
 
 async function closeDevelopmentServerResources(input: {
+  readonly appRoot: string;
   readonly authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
   readonly devServer: NitroDevelopmentServer | undefined;
   readonly developmentSandboxRunId: string;
@@ -258,7 +257,7 @@ async function closeDevelopmentServerResources(input: {
   }
   await attempt(() =>
     stopDevelopmentSandboxResources({
-      backendNames: getInitializedDevelopmentSandboxBackendNames(input.developmentSandboxRunId),
+      appRoot: input.appRoot,
       devRunId: input.developmentSandboxRunId,
       log: (message) => console.warn(`[eve:dev] ${message}`),
     }),
@@ -513,6 +512,7 @@ async function startNitroDevelopmentServer(
     const close = (): Promise<void> => {
       closePromise ??= (async () => {
         const cleanup = await closeDevelopmentServerResources({
+          appRoot: project.appRoot,
           authoredSourceWatcher: authoredSourceWatcherOnClose,
           devServer: devServerOnClose,
           developmentSandboxRunId,
@@ -529,7 +529,6 @@ async function startNitroDevelopmentServer(
             throw cleanupError;
           }
         } finally {
-          clearInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId);
           restoreWorkflowLocalQueueEnvironmentOnClose();
           restoreWorkflowTransportEnvironmentOnClose?.();
           restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
@@ -543,6 +542,7 @@ async function startNitroDevelopmentServer(
     };
   } catch (error) {
     const cleanup = await closeDevelopmentServerResources({
+      appRoot: project.appRoot,
       authoredSourceWatcher,
       devServer,
       developmentSandboxRunId,
@@ -566,7 +566,6 @@ async function startNitroDevelopmentServer(
     }
     restoreWorkflowLocalQueueEnvironment?.();
     restoreWorkflowTransportEnvironment?.();
-    clearInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId);
     if (cleanup.listenerClosed) {
       await state.remove().catch(() => {});
     }
