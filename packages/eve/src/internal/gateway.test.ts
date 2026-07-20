@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AI_GATEWAY_MODELS_CATALOG_URL,
   AI_GATEWAY_MODELS_URL,
-  getVercelGatewayFetch,
+  vercelGatewayFetch,
   resolveProviderHeaders,
 } from "#internal/gateway.js";
 
@@ -15,12 +15,12 @@ describe("Gateway endpoints", () => {
   });
 });
 
-describe("getVercelGatewayFetch", () => {
+describe("vercelGatewayFetch", () => {
   it("sends the eve product token as the user-agent", async () => {
     const inner = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response());
     vi.stubGlobal("fetch", inner);
     try {
-      await getVercelGatewayFetch()(AI_GATEWAY_MODELS_URL);
+      await vercelGatewayFetch(AI_GATEWAY_MODELS_URL);
     } finally {
       vi.unstubAllGlobals();
     }

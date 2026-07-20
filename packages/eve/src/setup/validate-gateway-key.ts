@@ -1,6 +1,6 @@
 import { createGateway } from "ai";
 
-import { getVercelGatewayFetch } from "#internal/gateway.js";
+import { vercelGatewayFetch } from "#internal/gateway.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 /**
@@ -53,11 +53,10 @@ export async function validateGatewayApiKey(
   const timeout = AbortSignal.timeout(VALIDATION_TIMEOUT_MS);
   const effectiveSignal = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
   try {
-    const gatewayFetch = getVercelGatewayFetch();
     const provider = createGateway({
       apiKey,
       fetch: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
-        gatewayFetch(url, { ...init, signal: effectiveSignal }),
+        vercelGatewayFetch(url, { ...init, signal: effectiveSignal }),
     });
     await provider.getCredits();
     return { kind: "valid" };

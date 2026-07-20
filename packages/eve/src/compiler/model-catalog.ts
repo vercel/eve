@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { z } from "#compiled/zod/index.js";
-import { AI_GATEWAY_MODELS_CATALOG_URL, getVercelGatewayFetch } from "#internal/gateway.js";
+import { AI_GATEWAY_MODELS_CATALOG_URL, vercelGatewayFetch } from "#internal/gateway.js";
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION = 2;
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -212,7 +212,7 @@ type CompiledRuntimeModelCatalogCache = z.infer<typeof compiledRuntimeModelCatal
 async function fetchAndPersistModelCatalog(
   appRoot: string,
 ): Promise<CompiledRuntimeModelCatalogCache> {
-  const response = await getVercelGatewayFetch()(AI_GATEWAY_MODELS_CATALOG_URL);
+  const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL);
 
   if (!response.ok) {
     throw new Error(

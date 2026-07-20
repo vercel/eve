@@ -1,4 +1,4 @@
-import { AI_GATEWAY_MODELS_URL, getVercelGatewayFetch } from "#internal/gateway.js";
+import { AI_GATEWAY_MODELS_URL, vercelGatewayFetch } from "#internal/gateway.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 import { select, type Asker, type SelectOption } from "../ask.js";
@@ -63,7 +63,7 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
   try {
     const requestSignal =
       signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
-    const res = await getVercelGatewayFetch()(AI_GATEWAY_MODELS_URL, { signal: requestSignal });
+    const res = await vercelGatewayFetch(AI_GATEWAY_MODELS_URL, { signal: requestSignal });
     const json = (await res.json()) as { data: GatewayCatalogModel[] };
     return json.data;
   } finally {

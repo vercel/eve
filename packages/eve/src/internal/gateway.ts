@@ -12,13 +12,11 @@ export const AI_GATEWAY_MODELS_CATALOG_URL = `${GATEWAY_BASE_URL}/v1/models/cata
 
 /**
  * A `fetch` for direct AI Gateway requests that identifies eve via its
- * User-Agent product token. Mirrors the Sandbox binding's
- * `getVercelSandboxFetch` — call sites get a decorated transport, not header
- * plumbing.
+ * User-Agent product token — call sites get a decorated transport, not header
+ * plumbing. Unlike the Sandbox binding's `getVercelSandboxFetch`, nothing is
+ * constructed per call site, so this is a value rather than a factory.
  */
-export function getVercelGatewayFetch(): typeof globalThis.fetch {
-  return withPackageUserAgent();
-}
+export const vercelGatewayFetch: typeof globalThis.fetch = withPackageUserAgent();
 
 /**
  * Request headers eve attaches for a model's provider, or `undefined` when
