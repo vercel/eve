@@ -1,5 +1,14 @@
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -258,6 +267,50 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(join(snapshot.runtimeAppRoot, ".generated"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, "build"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, "dist"))).toBe(false);
+  });
+
+  it("mounts declared physical dependency directories into source snapshots", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-physical-dependency-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const installedPackageRoot = join(appRoot, "node_modules", "@acme", "extension");
+    const undeclaredPackageRoot = join(appRoot, "node_modules", "undeclared-package");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(installedPackageRoot, { recursive: true });
+    await mkdir(undeclaredPackageRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(
+      join(appRoot, "package.json"),
+      `${JSON.stringify({
+        dependencies: { "@acme/extension": "1.0.0" },
+        type: "module",
+      })}\n`,
+    );
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(
+      join(installedPackageRoot, "package.json"),
+      '{"name":"@acme/extension","version":"1.0.0"}\n',
+    );
+    await writeFile(join(undeclaredPackageRoot, "package.json"), '{"name":"undeclared-package"}\n');
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+    const snapshotPackageRoot = join(snapshot.runtimeAppRoot, "node_modules", "@acme", "extension");
+
+    await expect(lstat(snapshotPackageRoot).then((stats) => stats.isSymbolicLink())).resolves.toBe(
+      true,
+    );
+    await expect(realpath(snapshotPackageRoot)).resolves.toBe(await realpath(installedPackageRoot));
+    expect(existsSync(join(snapshot.runtimeAppRoot, "node_modules", "undeclared-package"))).toBe(
+      false,
+    );
   });
 
   it("stops copying at nested git repository boundaries", async () => {

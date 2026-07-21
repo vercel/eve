@@ -1,6 +1,7 @@
 import pc from "picocolors";
 
-import { sliceVisible, visibleLength } from "#cli/dev/tui/terminal-text.js";
+import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
+import { LiveRegion } from "#cli/ui/live-region.js";
 import { sanitizeForTerminal } from "#cli/ui/output.js";
 import {
   PROGRESS_PULSE_DURATION_MS,
@@ -28,8 +29,6 @@ interface CliLiveRowOptions {
   readonly output?: CliLiveRowOutput;
   readonly pulseSequence?: string;
 }
-
-const REDRAW_PROGRESS_ROW = "\r\u001B[K";
 
 function validatePulseSequence(sequence: string): void {
   if (sequence.length !== 8 && sequence.length !== 16) {
@@ -87,6 +86,16 @@ export function startCliLiveRow(
   validatePulseSequence(pulseSequence);
   const animate = output.isTTY === true && !isLogLevelEnabled("debug");
 
+  // Single-row live region; only the animating path repaints, non-TTY logs once.
+  const live = animate
+    ? new LiveRegion({
+        write: (chunk) => {
+          output.write(chunk);
+          return true;
+        },
+      })
+    : undefined;
+
   let pulseStepIndex = 0;
   let pulseVisible = pulseSequence[0] === "1";
   let current: { detail: string; message: string } | undefined;
@@ -96,14 +105,14 @@ export function startCliLiveRow(
   let pulseTimer: ReturnType<typeof setTimeout> | undefined;
 
   const paint = (): void => {
-    if (current === undefined) return;
+    if (current === undefined || live === undefined) return;
     const row = renderProgressRow(
       pulseVisible ? PROGRESS_PULSE_GLYPH : " ",
       current.message,
       current.detail,
       output.columns,
     );
-    output.write(`${painted ? REDRAW_PROGRESS_ROW : ""}${row}`);
+    live.update([row]);
     painted = true;
   };
 
@@ -146,7 +155,7 @@ export function startCliLiveRow(
       if (stopped) return;
       stopped = true;
       if (pulseTimer !== undefined) clearTimeout(pulseTimer);
-      if (animate && painted) output.write(REDRAW_PROGRESS_ROW);
+      if (live !== undefined && painted) live.clear();
     },
   };
 }

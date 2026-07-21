@@ -13,3 +13,12 @@ export function eveCliBanner(): string {
   const { version } = resolveInstalledPackageInfo();
   return `${pc.bgBlack(pc.white(`☰${EVE_WORDMARK} `))} ${pc.dim(`v${version}`)}`;
 }
+
+/**
+ * The unstyled wordmark-and-version tag (`☰eve  v0.24.5`) — the boot banner's
+ * plain-text form. The dev TUI dims it as its parting line on teardown.
+ */
+export function eveVersionTag(): string {
+  const { version } = resolveInstalledPackageInfo();
+  return `☰${EVE_WORDMARK}  v${version}`;
+}

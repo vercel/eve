@@ -391,6 +391,7 @@ describe("WorkflowBundleBuilder", () => {
             {
               environment: {
                 EVE_EXISTING_FLAG: "kept",
+                WORKFLOW_PRECONDITION_GUARD: "0",
               },
               handler: "index.js",
               launcherType: "Nodejs",
@@ -436,6 +437,7 @@ describe("WorkflowBundleBuilder", () => {
       expect(flowConfig.environment).toEqual({
         EVE_EXISTING_FLAG: "kept",
         NODE_OPTIONS: "--experimental-require-module",
+        WORKFLOW_PRECONDITION_GUARD: "1",
       });
       const generatedFlowFunctionSource = await readFile(
         join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func", "index.js"),

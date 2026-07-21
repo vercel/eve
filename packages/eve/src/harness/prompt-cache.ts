@@ -11,15 +11,24 @@ export type PromptCachePath =
 /**
  * Cache marker injected on the Anthropic-direct path.
  *
- * The AI SDK Anthropic provider reads `providerOptions.anthropic.cacheControl`
- * from message, message-part, system-message, and tool objects. The same
- * namespace is used by `@ai-sdk/amazon-bedrock/anthropic` and
- * `@ai-sdk/google-vertex/anthropic`, which both implement the native
- * Anthropic Messages API.
+ * The marker carries two provider namespaces because Anthropic models are
+ * reachable through providers that read different provider-options keys:
+ *
+ * - `anthropic.cacheControl` — read by the AI SDK Anthropic provider and by
+ *   `@ai-sdk/amazon-bedrock/anthropic` and `@ai-sdk/google-vertex/anthropic`,
+ *   which implement the native Anthropic Messages API.
+ * - `bedrock.cachePoint` — read by the standard `@ai-sdk/amazon-bedrock`
+ *   Converse provider, which does not understand `anthropic.cacheControl`.
+ *
+ * A provider ignores namespaces it does not own, so carrying both is safe on
+ * every Anthropic-direct request regardless of which provider serves it.
  */
 export interface AnthropicCacheMarker {
   readonly anthropic: {
     readonly cacheControl: { readonly type: "ephemeral" };
+  };
+  readonly bedrock: {
+    readonly cachePoint: { readonly type: "default" };
   };
 }
 
@@ -30,6 +39,9 @@ export interface AnthropicCacheMarker {
 const ANTHROPIC_CACHE_MARKER: AnthropicCacheMarker = Object.freeze({
   anthropic: Object.freeze({
     cacheControl: Object.freeze({ type: "ephemeral" as const }),
+  }),
+  bedrock: Object.freeze({
+    cachePoint: Object.freeze({ type: "default" as const }),
   }),
 });
 
@@ -45,6 +57,15 @@ export function detectPromptCachePath(model: LanguageModel): PromptCachePath {
 
   const providerName = typeof model.provider === "string" ? model.provider.toLowerCase() : "";
   if (providerName.includes("anthropic")) {
+    return { kind: "anthropic-direct" };
+  }
+
+  // The standard `@ai-sdk/amazon-bedrock` Converse provider reports its
+  // provider as `amazon-bedrock` and carries the Anthropic identity in the
+  // model id (e.g. `anthropic.claude-3-5-sonnet-20241022-v2:0`), so it must be
+  // matched on the model id rather than the provider name.
+  const modelId = typeof model.modelId === "string" ? model.modelId.toLowerCase() : "";
+  if (providerName.includes("bedrock") && modelId.includes("anthropic")) {
     return { kind: "anthropic-direct" };
   }
 

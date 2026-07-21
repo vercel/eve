@@ -13,7 +13,9 @@ export default defineEval({
   description: "Map-produced dynamic skill from an extension is namespaced (toolkit__incident).",
   async test(t) {
     await t.send(
-      "Please use the toolkit incident playbook skill and follow its instructions exactly.",
+      "Call `load_skill` exactly once with the skill `toolkit__incident`. " +
+        "After it succeeds, reply with the verification token from the loaded skill. " +
+        "Do not ask any follow-up questions or call any other tools.",
     );
 
     t.succeeded();

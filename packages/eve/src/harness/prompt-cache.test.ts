@@ -9,10 +9,10 @@ import {
   mergeGatewayAutoCaching,
 } from "#harness/prompt-cache.js";
 
-function makeObjectModel(provider: string): LanguageModel {
+function makeObjectModel(provider: string, modelId = "test-model"): LanguageModel {
   return {
     provider,
-    modelId: "test-model",
+    modelId,
     specificationVersion: "v3",
   } as unknown as LanguageModel;
 }
@@ -68,20 +68,45 @@ describe("detectPromptCachePath", () => {
   it("returns none for generic Bedrock Converse (no anthropic subpath)", () => {
     expect(detectPromptCachePath(makeObjectModel("bedrock"))).toEqual({ kind: "none" });
   });
+
+  it("returns anthropic-direct for a Bedrock Converse model whose id is Anthropic", () => {
+    // `@ai-sdk/amazon-bedrock` reports provider `amazon-bedrock` and carries
+    // the Anthropic identity in the model id.
+    expect(
+      detectPromptCachePath(
+        makeObjectModel("amazon-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+      ),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
+
+  it("matches the Bedrock Anthropic model id regardless of case", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "ANTHROPIC.CLAUDE-3-5-SONNET")),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
+
+  it("returns none for a non-Anthropic Bedrock Converse model id", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "amazon.nova-pro-v1:0")),
+    ).toEqual({ kind: "none" });
+  });
 });
 
 describe("getAnthropicCacheMarker", () => {
   it("returns the Anthropic cache marker shape", () => {
     expect(getAnthropicCacheMarker()).toEqual({
       anthropic: { cacheControl: { type: "ephemeral" } },
+      bedrock: { cachePoint: { type: "default" } },
     });
   });
 
-  it("returns a frozen object", () => {
+  it("returns a deeply frozen object", () => {
     const marker = getAnthropicCacheMarker();
     expect(Object.isFrozen(marker)).toBe(true);
     expect(Object.isFrozen(marker.anthropic)).toBe(true);
     expect(Object.isFrozen(marker.anthropic.cacheControl)).toBe(true);
+    expect(Object.isFrozen(marker.bedrock)).toBe(true);
+    expect(Object.isFrozen(marker.bedrock.cachePoint)).toBe(true);
   });
 });
 
@@ -146,7 +171,7 @@ describe("applyLastToolCacheBreakpoint", () => {
     expect(result.beta).toEqual({ description: "second" });
     expect(result.gamma).toEqual({
       description: "third",
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      providerOptions: { ...marker },
     });
   });
 
@@ -163,9 +188,10 @@ describe("applyLastToolCacheBreakpoint", () => {
       { providerOptions: Record<string, unknown> } | undefined
     >;
 
-    // The marker's anthropic namespace overrides the existing one.
+    // The marker's namespaces override any existing ones; foreign namespaces
+    // are preserved.
     expect(result.only?.providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
+      ...marker,
       openai: { something: 2 },
     });
   });
@@ -197,7 +223,7 @@ describe("applyConversationCacheControl", () => {
     expect(out[0]).toEqual({
       role: "user",
       content: "hi",
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      providerOptions: { ...marker },
     });
   });
 
@@ -214,13 +240,13 @@ describe("applyConversationCacheControl", () => {
     expect(out[1]).toEqual({
       role: "assistant",
       content: "yo",
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      providerOptions: { ...marker },
     });
     expect(out[2]).toEqual({ role: "user", content: "hi2" });
     expect(out[3]).toEqual({
       role: "assistant",
       content: "yo2",
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      providerOptions: { ...marker },
     });
   });
 
@@ -246,14 +272,10 @@ describe("applyConversationCacheControl", () => {
     const out = applyConversationCacheControl(messages, marker);
 
     // The trailing tool-result message carries the final breakpoint.
-    expect((out[2] as { providerOptions?: unknown }).providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
-    });
+    expect((out[2] as { providerOptions?: unknown }).providerOptions).toEqual({ ...marker });
 
     // The most recent assistant (index 1) is the advancement anchor.
-    expect((out[1] as { providerOptions?: unknown }).providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
-    });
+    expect((out[1] as { providerOptions?: unknown }).providerOptions).toEqual({ ...marker });
 
     // The user message is untouched.
     expect(out[0]).toEqual(messages[0]);
@@ -270,7 +292,7 @@ describe("applyConversationCacheControl", () => {
     const out = applyConversationCacheControl(messages, marker);
     expect((out[0] as { providerOptions: Record<string, unknown> }).providerOptions).toEqual({
       openai: { someKey: "someValue" },
-      anthropic: { cacheControl: { type: "ephemeral" } },
+      ...marker,
     });
   });
 

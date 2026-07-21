@@ -84,9 +84,41 @@ describe("extension compatibility manifest", () => {
     ]);
   });
 
-  it("supports every capability version it stamps", () => {
+  it("publishes valid support history for every capability version it stamps", () => {
     for (const [capability, version] of Object.entries(EXTENSION_CAPABILITY_VERSIONS)) {
-      expect(EXTENSION_CAPABILITY_SUPPORT[capability as ExtensionCapability]).toContain(version);
+      const supportedVersions = EXTENSION_CAPABILITY_SUPPORT[capability as ExtensionCapability];
+      expect(supportedVersions).toContain(version);
+      expect(supportedVersions).toEqual(
+        [...new Set(supportedVersions)].sort((left, right) => left - right),
+      );
+      expect(supportedVersions.every((supported) => supported > 0 && supported <= version)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("accepts every advertised capability epoch and rejects the next epoch", () => {
+    for (const [capability, supportedVersions] of Object.entries(EXTENSION_CAPABILITY_SUPPORT)) {
+      for (const supportedVersion of supportedVersions) {
+        expect(
+          findUnsupportedExtensionCapabilities({
+            kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+            formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+            builtWithEve: "0.25.1",
+            requires: { [capability]: supportedVersion },
+          }),
+        ).toEqual([]);
+      }
+
+      const unsupportedVersion = Math.max(...supportedVersions) + 1;
+      expect(
+        findUnsupportedExtensionCapabilities({
+          kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+          formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+          builtWithEve: "0.25.1",
+          requires: { [capability]: unsupportedVersion },
+        }),
+      ).toEqual([{ capability, requiredVersion: unsupportedVersion, supportedVersions }]);
     }
   });
 });

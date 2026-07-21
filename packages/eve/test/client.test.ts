@@ -832,6 +832,11 @@ describe("Session.stream", () => {
     const collected: HandleMessageStreamEvent[] = [];
     for await (const event of session.stream()) {
       collected.push(event);
+      // stream() follows the durable log across transport ends; the boundary
+      // event is the caller's stop signal.
+      if (event.type === "session.waiting") {
+        break;
+      }
     }
 
     expect(collected).toEqual(events);

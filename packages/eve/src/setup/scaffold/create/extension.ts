@@ -15,7 +15,6 @@ import {
   CURRENT_DIRECTORY_PROJECT_NAME,
   DEFAULT_EVE_PACKAGE_CONTRACT,
   DEFAULT_ZOD_PACKAGE_VERSION,
-  formatEveDependencySpecifier,
   resolveEvePackageContract,
   ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX,
   type EvePackageContract,
@@ -36,7 +35,7 @@ interface ExtensionTemplateContext {
 function renderTemplate(content: string, ctx: ExtensionTemplateContext): string {
   return content
     .replaceAll("__EVE_INIT_APP_NAME__", ctx.appName)
-    .replaceAll("__EVE_INIT_PACKAGE_VERSION__", formatEveDependencySpecifier(ctx.eveVersion))
+    .replaceAll("__EVE_INIT_PACKAGE_VERSION__", ctx.eveVersion)
     .replaceAll("__EVE_INIT_ZOD_VERSION__", ctx.zodPackageVersion)
     .replaceAll("__EVE_INIT_TYPESCRIPT_VERSION__", ctx.typescriptPackageVersion)
     .replaceAll("__EVE_INIT_TYPES_NODE_VERSION__", ctx.nodeTypesVersion)
@@ -160,7 +159,9 @@ unavailable, use https://eve.dev/docs/extensions as a fallback.
 agent-shaped source tree into \`dist/extension/\`, emits type declarations and a
 compatibility manifest, and fills the package \`exports\` map. Ship \`dist/\` only.
 Keep \`eve\` as a required wildcard peer so the consumer's eve is the one that runs;
-eve validates extension compatibility from the generated manifest.
+eve validates extension compatibility from the generated manifest. Keep the eve
+development dependency pinned exactly so builds remain reproducible. Upgrade it
+when the extension intentionally adopts a newer eve authoring API.
 `;
 
 const CLAUDE_MD_TEMPLATE = `@AGENTS.md

@@ -23,7 +23,7 @@ import { theme } from "./lib/theme.ts";
  *   1. Start the apps/fixtures/agent-tui-client server.
  *   2. Boot an `EveTUIRunner` with a mock terminal.
  *   3. Type the same delegation prompt the non-TUI subagent smoke uses.
- *   4. Wait for the `◆ echo-marker subagent` region header to appear.
+ *   4. Wait for the `※ subagent(echo-marker…)` region header to appear.
  *   5. Wait for the nested region to contain the marker token.
  *   6. Verify the parent assistant message also contains the token. The
  *      rendering side-channel must not have broken the harness path.
@@ -52,14 +52,14 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     throw error;
   });
 
-  await screen.waitForText("❯", 5_000);
+  await screen.waitForIdlePrompt(5_000);
 
   input.type(
     "Use the echo marker subagent to process the input 'ping'. Once it returns, reply with the subagent's exact output included verbatim in your message.",
   );
   input.enter();
 
-  await screen.waitForText("echo-marker subagent", 90_000);
+  await screen.waitForText("※ subagent(echo-marker", 90_000);
   console.log(theme.muted("[tui-subagents] subagent region header appeared"));
 
   await waitForCondition(() => screen.snapshot().includes(SUBAGENT_TOKEN), {
@@ -68,23 +68,17 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   });
   console.log(theme.muted("[tui-subagents] subagent message text landed in body"));
 
-  // Wait for the token to appear twice, once inside the subagent step
-  // section, once in the parent's follow-up Assistant reply. This is the
-  // proof that (a) the child stream subscription rendered the subagent's
-  // output, and (b) the parent's verbatim echo flowed through after.
-  await waitForCondition(() => countOccurrences(screen.snapshot(), SUBAGENT_TOKEN) >= 2, {
-    timeoutMs: 120_000,
-    label: "token rendered in both subagent + parent",
-  });
-  console.log(theme.muted("[tui-subagents] token rendered in subagent step + parent assistant"));
-
-  // The parent's own reply must carry the token inside a top-level
-  // `▲`-prefixed assistant section — not just inside the nested `│`
-  // subagent region. Whether the model also emits a pre-delegation
-  // message is model-dependent, so the section count is not asserted.
+  // The child side is proven above (the token streamed into the live
+  // subagent body). Once the child settles, its section collapses to the
+  // `└ Done` footnote and the token leaves the screen — so the parent side
+  // is proven on its own: the verbatim echo must land in a top-level
+  // `▲`-prefixed assistant section, not just inside the nested `│` region.
+  // Whether the model also emits a pre-delegation message is
+  // model-dependent, so the section count is not asserted.
   await waitForCondition(() => assistantSectionContains(screen.snapshot(), SUBAGENT_TOKEN), {
-    timeoutMs: 30_000,
+    timeoutMs: 120_000,
     label: "parent assistant section containing the token",
+    onTimeout: () => screen.snapshot(),
   });
   console.log(theme.muted("[tui-subagents] parent assistant reply rendered with token"));
 
@@ -96,22 +90,10 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   // The turn is complete; wait until the runner is back at the prompt so
   // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
   // turn and returns to the prompt (Claude Code's two-step exit).
-  await screen.waitForText("❯", 30_000);
+  await screen.waitForIdlePrompt(30_000);
   input.ctrlC();
   await runPromise;
 });
-
-function countOccurrences(haystack: string, needle: string): number {
-  if (needle.length === 0) return 0;
-  let count = 0;
-  let index = 0;
-  while (true) {
-    const next = haystack.indexOf(needle, index);
-    if (next === -1) return count;
-    count += 1;
-    index = next + needle.length;
-  }
-}
 
 /**
  * True when a top-level assistant section (a `▲ `-prefixed line and its
@@ -135,7 +117,7 @@ function assistantSectionContains(snapshot: string, needle: string): boolean {
 
 async function waitForCondition(
   predicate: () => boolean,
-  options: { timeoutMs: number; label: string; intervalMs?: number },
+  options: { timeoutMs: number; label: string; intervalMs?: number; onTimeout?: () => string },
 ): Promise<void> {
   const intervalMs = options.intervalMs ?? 100;
   const deadline = Date.now() + options.timeoutMs;
@@ -143,5 +125,6 @@ async function waitForCondition(
     if (predicate()) return;
     await sleep(intervalMs);
   }
-  throw new Error(`Timed out waiting for: ${options.label}`);
+  const detail = options.onTimeout === undefined ? "" : `\n${options.onTimeout()}`;
+  throw new Error(`Timed out waiting for: ${options.label}${detail}`);
 }

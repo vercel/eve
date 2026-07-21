@@ -23,9 +23,10 @@ const sessionCtx = sessionContext();
 function buildChannelStub(state: Partial<SlackChannelState> = {}) {
   const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1" });
   const post = vi.fn().mockResolvedValue({ id: "ts1" });
+  const startTyping = vi.fn().mockResolvedValue(undefined);
   const request = vi.fn().mockResolvedValue({ ok: true });
   const channel = {
-    thread: { postEphemeral, post } as Partial<SlackEventContext["thread"]>,
+    thread: { postEphemeral, post, startTyping } as Partial<SlackEventContext["thread"]>,
     slack: { channelId: "C123", request } as Partial<SlackEventContext["slack"]>,
     state: {
       channelId: "C123",
@@ -34,7 +35,7 @@ function buildChannelStub(state: Partial<SlackChannelState> = {}) {
       ...state,
     },
   } as SlackEventContext;
-  return { channel, post, postEphemeral, request };
+  return { channel, post, postEphemeral, request, startTyping };
 }
 
 function authRequiredEvent(
@@ -150,6 +151,25 @@ describe("defaultEvents authorization.required", () => {
 });
 
 describe("defaultEvents authorization.completed", () => {
+  it("shows that the session is resuming after authorization succeeds", async () => {
+    const { channel, startTyping } = buildChannelStub({ triggeringUserId: "U777" });
+
+    await defaultEvents["authorization.completed"]!(
+      {
+        authorization: { displayName: "Notion Workspace" },
+        name: "notion",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_0",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(startTyping).toHaveBeenCalledWith("Connected to Notion Workspace. Resuming...");
+  });
+
   it("edits the public status in place when one was posted", async () => {
     const { channel, postEphemeral, request } = buildChannelStub({
       triggeringUserId: "U777",

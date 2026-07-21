@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { NextConfig } from "next";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
-import { resolveEveBinaryPath } from "./resolve-eve-binary.js";
+import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 import { resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 

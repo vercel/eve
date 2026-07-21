@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./resolve-eve-binary.js", async () => {
+vi.mock("#shared/resolve-eve-binary.js", async () => {
   const { join } = await import("node:path");
   return {
     // Pin resolution to the conventional app-local path so build-command

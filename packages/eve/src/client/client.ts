@@ -29,7 +29,6 @@ export class Client {
   readonly #auth: ClientAuth | undefined;
   readonly #headers: HeadersValue | undefined;
   readonly #host: string;
-  readonly #maxReconnectAttempts: number;
   readonly #preserveCompletedSessions: boolean;
   readonly #redirect: ClientRedirectPolicy | undefined;
 
@@ -37,7 +36,6 @@ export class Client {
     this.#host = options.host;
     this.#auth = options.auth;
     this.#headers = options.headers;
-    this.#maxReconnectAttempts = options.maxReconnectAttempts ?? 3;
     this.#preserveCompletedSessions = options.preserveCompletedSessions ?? false;
     this.#redirect = options.redirect;
   }
@@ -136,7 +134,6 @@ export class Client {
     return new ClientSession(
       {
         host: this.#host,
-        maxReconnectAttempts: this.#maxReconnectAttempts,
         preserveCompletedSessions: this.#preserveCompletedSessions,
         redirect: this.#redirect,
         resolveHeaders: (perRequest) => this.#resolveHeaders(perRequest),

@@ -7,7 +7,7 @@
  */
 
 import type { PromptCommandSpec } from "./prompt-commands.js";
-import { sliceVisible, visibleLength } from "./terminal-text.js";
+import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 import type { Theme } from "./theme.js";
 import { renderCursorRow } from "#setup/cli/option-row.js";
 

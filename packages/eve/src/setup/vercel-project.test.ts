@@ -195,6 +195,88 @@ describe("pickProject", () => {
     expect(stop).toHaveBeenCalledTimes(1);
   });
 
+  it("suggests a recent project matching the suggested name without a lookup", async () => {
+    mockedCaptureVercel.mockResolvedValueOnce(
+      captured({
+        projects: [
+          { id: "prj_other", name: "other" },
+          { id: "prj_mine", name: "my-agent" },
+        ],
+      }),
+    );
+    const single = vi.fn().mockImplementationOnce((options) => {
+      // The match floats to the top, carries the marker, and holds the cursor.
+      expect(options.options[0]).toEqual({
+        value: "prj_mine",
+        label: "my-agent",
+        hint: "suggested",
+      });
+      expect(options.initialValue).toBe("prj_mine");
+      return "prj_mine";
+    });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      pickProject(prompter, "/repo", "team-a", { suggestedName: "my-agent" }),
+    ).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_mine", projectName: "my-agent" },
+      team: "team-a",
+    });
+    // The recents already held the match: no extra lookup round trip.
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(1);
+  });
+
+  it("searches the team for the suggested name when the recents miss it", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_other", name: "other" }] }))
+      .mockResolvedValueOnce(captured(JSON.stringify({ id: "prj_mine", name: "my-agent" })));
+    const single = vi.fn().mockImplementationOnce((options) => {
+      expect(options.options.map((option: { label: string }) => option.label)).toEqual([
+        "my-agent",
+        "other",
+      ]);
+      expect(options.initialValue).toBe("prj_mine");
+      return "prj_mine";
+    });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      pickProject(prompter, "/repo", "team-a", { suggestedName: "my-agent" }),
+    ).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_mine", projectName: "my-agent" },
+      team: "team-a",
+    });
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      2,
+      ["api", "/v9/projects/my-agent", "--scope", "team-a", "--raw"],
+      { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
+    );
+  });
+
+  it("degrades to the plain recents list when the suggestion lookup fails", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_other", name: "other" }] }))
+      .mockResolvedValueOnce(
+        failedCapture(JSON.stringify({ error: { code: "internal", message: "boom" } })),
+      );
+    const single = vi.fn().mockImplementationOnce((options) => {
+      expect(options.options).toEqual([{ value: "prj_other", label: "other" }]);
+      expect(options.initialValue).toBe("prj_other");
+      return "prj_other";
+    });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      pickProject(prompter, "/repo", "team-a", { suggestedName: "my-agent" }),
+    ).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_other", projectName: "other" },
+      team: "team-a",
+    });
+  });
+
   it("falls back to one ranked project-search page when no exact project exists", async () => {
     mockedCaptureVercel
       .mockResolvedValueOnce(
