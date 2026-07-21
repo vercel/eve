@@ -106,6 +106,7 @@ import { createToolResultMessagePartFromToolError } from "#harness/action-result
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-context.js";
 import {
   consumeDeferredStepInput,
+  discardSettledInputResponseRetries,
   getApprovedTools,
   getPendingInputRequestIds,
   hasDeferredStepInput,
@@ -540,10 +541,25 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = resolvedRuntimeActions.session;
 
+    const settledResponseRetries = discardSettledInputResponseRetries({
+      session,
+      stepInput: stepInput.input,
+    });
+    const deliveredStepInput = settledResponseRetries.stepInput;
+    if (
+      settledResponseRetries.discarded > 0 &&
+      !hasStepInput(deliveredStepInput) &&
+      (deliveredStepInput?.context?.length ?? 0) === 0 &&
+      deliveredStepInput?.outputSchema === undefined &&
+      (deliveredStepInput?.runtimeActionResults?.length ?? 0) === 0
+    ) {
+      return { next: null, session };
+    }
+
     const staleConversion = convertStaleResponsesToUserMessage({
       history: resolvedRuntimeActions.messages,
       pendingRequestIds: getPendingInputRequestIds(session.state),
-      stepInput: stepInput.input,
+      stepInput: deliveredStepInput,
     });
     const effectiveStepInput = staleConversion.stepInput;
     const preambleStepInput =
@@ -558,7 +574,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInput: effectiveStepInput,
     });
     if (pending.outcome === "unresolved") {
-      if (emit && pending.deferredMessage === true && hasStepInput(input)) {
+      if (emit && pending.deferredMessage === true && hasStepInput(deliveredStepInput)) {
         emissionState = await emitTurnPreamble(
           emit,
           preambleStepInput ?? {},
@@ -647,7 +663,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Turn preamble ------------------------------------------------------
 
-    if (emit && hasStepInput(input)) {
+    if (emit && hasStepInput(deliveredStepInput)) {
       emissionState = await emitTurnPreamble(
         emit,
         preambleStepInput ?? {},

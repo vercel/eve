@@ -9,6 +9,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   consumeDeferredStepInput,
   createRuntimeToolCallActionFromToolCall,
+  discardSettledInputResponseRetries,
   getApprovedTools,
   hasDeferredStepInput,
   hasStepInput,
@@ -47,6 +48,57 @@ describe("hasStepInput", () => {
 
   it("returns true when input has a message", () => {
     expect(hasStepInput({ message: "hello" })).toBe(true);
+  });
+});
+
+describe("settled input response retries", () => {
+  it("discards an exact retry while retaining a changed stale answer", () => {
+    const request: InputRequest = {
+      action: {
+        callId: "question-call",
+        input: { allowFreeform: true, prompt: "What context?" },
+        kind: "tool-call",
+        toolName: "ask_question",
+      },
+      allowFreeform: true,
+      display: "text",
+      prompt: "What context?",
+      requestId: "question-call",
+    };
+    const response = { requestId: request.requestId, text: "Current history" };
+    const pending = setPendingInputBatch({
+      requests: [request],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+    const resolved = resolvePendingInput({
+      session: pending,
+      stepInput: { inputResponses: [response] },
+    });
+    expect(resolved.outcome).toBe("resolved");
+
+    expect(
+      discardSettledInputResponseRetries({
+        session: resolved.session,
+        stepInput: { inputResponses: [response] },
+      }),
+    ).toEqual({
+      discarded: 1,
+      stepInput: { inputResponses: [] },
+    });
+    expect(
+      discardSettledInputResponseRetries({
+        session: resolved.session,
+        stepInput: {
+          inputResponses: [{ requestId: request.requestId, text: "New context" }],
+        },
+      }),
+    ).toEqual({
+      discarded: 0,
+      stepInput: {
+        inputResponses: [{ requestId: request.requestId, text: "New context" }],
+      },
+    });
   });
 });
 

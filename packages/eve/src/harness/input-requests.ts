@@ -20,6 +20,8 @@ import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.
 
 const PENDING_INPUT_BATCH_KEY = "eve.runtime.pendingInputBatch";
 const DEFERRED_STEP_INPUT_KEY = "eve.runtime.deferredStepInput";
+const SETTLED_INPUT_RESPONSES_KEY = "eve.runtime.settledInputResponses";
+const MAX_SETTLED_INPUT_RESPONSES = 128;
 
 /**
  * Stream-emit coordinates carried so a parked batch's resolution can attribute
@@ -185,6 +187,8 @@ export function resolvePendingInput(input: {
     requests: pendingBatch.requests,
     responses,
   });
+
+  session = recordSettledInputResponses(session, responses);
 
   // Record approved tools before clearing the batch.
   session = recordApprovedTools({
@@ -369,6 +373,37 @@ export function getPendingInputRequestIds(state: SessionStateMap | undefined): R
   return new Set(getPendingInputBatch(state)?.requests.map((request) => request.requestId));
 }
 
+export function discardSettledInputResponseRetries(input: {
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+}): {
+  readonly discarded: number;
+  readonly stepInput?: StepInput;
+} {
+  const responses = input.stepInput?.inputResponses;
+  if (responses === undefined || responses.length === 0) {
+    return { discarded: 0, stepInput: input.stepInput };
+  }
+
+  const settledResponses = getSettledInputResponses(input.session.state);
+  const retainedResponses = responses.filter(
+    (response) =>
+      !settledResponses.some((settledResponse) => inputResponsesEqual(settledResponse, response)),
+  );
+  const discarded = responses.length - retainedResponses.length;
+  if (discarded === 0) {
+    return { discarded, stepInput: input.stepInput };
+  }
+
+  return {
+    discarded,
+    stepInput: {
+      ...input.stepInput,
+      inputResponses: retainedResponses,
+    },
+  };
+}
+
 function getPendingInputBatch(state: SessionStateMap | undefined): PendingInputBatch | undefined {
   const value = state?.[PENDING_INPUT_BATCH_KEY];
 
@@ -413,6 +448,36 @@ function clearPendingInputBatch(session: HarnessSession): HarnessSession {
   delete state[PENDING_INPUT_BATCH_KEY];
 
   return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
+}
+
+function recordSettledInputResponses(
+  session: HarnessSession,
+  responses: readonly InputResponse[],
+): HarnessSession {
+  if (responses.length === 0) return session;
+
+  const responseIds = new Set(responses.map((response) => response.requestId));
+  const retained = getSettledInputResponses(session.state).filter(
+    (response) => !responseIds.has(response.requestId),
+  );
+  const state = { ...session.state };
+  state[SETTLED_INPUT_RESPONSES_KEY] = [...retained, ...responses]
+    .slice(-MAX_SETTLED_INPUT_RESPONSES)
+    .map((response) => ({ ...response }));
+  return { ...session, state };
+}
+
+function getSettledInputResponses(state: SessionStateMap | undefined): readonly InputResponse[] {
+  const responses = state?.[SETTLED_INPUT_RESPONSES_KEY];
+  return Array.isArray(responses) ? (responses as readonly InputResponse[]) : [];
+}
+
+function inputResponsesEqual(left: InputResponse, right: InputResponse): boolean {
+  return (
+    left.requestId === right.requestId &&
+    left.optionId === right.optionId &&
+    left.text === right.text
+  );
 }
 
 // ---------------------------------------------------------------------------

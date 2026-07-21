@@ -7629,6 +7629,67 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("discards an exact retry of an already-settled input response", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Understood.", role: "assistant" }] },
+      text: "Understood.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const request = {
+      action: {
+        callId: "question-retry",
+        input: {
+          allowFreeform: false,
+          options: [{ id: "thorough", label: "Thorough" }],
+          prompt: "How detailed?",
+        },
+        kind: "tool-call" as const,
+        toolName: "ask_question",
+      },
+      allowFreeform: false,
+      display: "select" as const,
+      options: [{ id: "thorough", label: "Thorough" }],
+      prompt: "How detailed?",
+      requestId: "question-retry",
+    };
+    const response = { requestId: request.requestId, optionId: "thorough" };
+    const session = setPendingInputBatch({
+      event: { sequence: 3, stepIndex: 1, turnId: "question-turn" },
+      requests: [request],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: request.action.input,
+              toolCallId: request.action.callId,
+              toolName: request.action.toolName,
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: createTestSession({
+        history: [{ content: "Help me choose.", role: "user" }],
+      }),
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const settled = await runStep(session, { inputResponses: [response] });
+    const modelCalls = vi.mocked(ToolLoopAgent).mock.calls.length;
+    const eventCount = events.length;
+    const retried = await runStep(settled.session, { inputResponses: [response] });
+
+    expect(retried.next).toBeNull();
+    expect(retried.session).toEqual(settled.session);
+    expect(vi.mocked(ToolLoopAgent).mock.calls).toHaveLength(modelCalls);
+    expect(events).toHaveLength(eventCount);
+  });
+
   it("emits compaction.requested and compaction.completed when compaction triggers", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
     vi.mocked(compactMessages).mockResolvedValue([
