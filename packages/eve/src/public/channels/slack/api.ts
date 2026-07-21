@@ -308,6 +308,34 @@ export interface SlackHandle {
 }
 
 /**
+ * Workspace-scoped Slack API handle exposed to generic inbound event
+ * handlers. Events such as `team_join` and `reaction_added` are not always
+ * bound to one message thread, so this surface deliberately exposes only
+ * workspace identity and the raw Web API escape hatch.
+ */
+export interface SlackWorkspaceHandle {
+  /** Slack team id carried by the Events API envelope, when present. */
+  readonly teamId: string | undefined;
+
+  /**
+   * POST to a Slack Web API method. Returns Slack's raw JSON response.
+   * Callers must check `response.ok` themselves.
+   */
+  request(operation: string, body: unknown): Promise<SlackApiResponse>;
+}
+
+/** Builds the workspace-scoped API handle used by generic event callbacks. */
+export function buildSlackWorkspaceHandle(input: {
+  readonly botToken: SlackBotToken | undefined;
+  readonly teamId: string | undefined;
+}): SlackWorkspaceHandle {
+  return {
+    teamId: input.teamId,
+    request: createSlackRequester(input.botToken),
+  };
+}
+
+/**
  * The `{ thread, slack }` pair exposed through `ctx` to every mention
  * handler, interaction handler, and event handler. Returned by
  * {@link buildSlackBinding}.

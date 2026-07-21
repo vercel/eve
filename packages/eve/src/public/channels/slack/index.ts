@@ -19,9 +19,12 @@ export {
   type SlackChannelState,
   type SlackContext,
   type SlackEventContext,
+  type SlackEventReceiveFn,
+  type SlackEventReceiveOptions,
   type SlackHandle,
   type SlackInboundResult,
   type SlackInboundResultOrPromise,
+  type SlackInboundEventContext,
   type SlackInstrumentationMetadata,
   type SlackInitialMessage,
   type SlackInteractionAction,
@@ -30,11 +33,14 @@ export {
   type SlackReceiveTarget,
   type SlackThread,
   type SlackWebhookVerifier,
+  type SlackWorkspaceHandle,
 } from "#public/channels/slack/slackChannel.js";
 
 export type {
   SlackAttachment,
   SlackAuthor,
+  SlackEvent,
+  SlackEventEnvelope,
   SlackInboundContext,
   SlackMessage,
 } from "#public/channels/slack/inbound.js";
