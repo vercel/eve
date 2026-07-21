@@ -317,6 +317,30 @@ describe("discoverAndImportEvals partition isolation", () => {
     const evaluations = await discoverAndImportEvals(tempDir, ["nonexistent"]);
     expect(evaluations).toEqual([]);
   });
+
+  it("never imports a throwing root eval when selecting a same-named nested id", async () => {
+    await writeEval("tuning.eval.ts", THROWING_MODULE);
+    await writeEval("tuning/alpha.eval.ts", SINGLE_EVAL);
+
+    const evaluations = await discoverAndImportEvals(tempDir, ["tuning/alpha"]);
+    expect(evaluations.map((evaluation) => evaluation.id)).toEqual(["tuning/alpha"]);
+  });
+
+  it("still selects a root array export when its numeric index is filtered", async () => {
+    await writeEval(
+      "tuning.eval.ts",
+      [
+        "export default [",
+        '  { _tag: "EveEval", description: "a", test: async () => {} },',
+        '  { _tag: "EveEval", description: "b", test: async () => {} },',
+        "];\n",
+      ].join("\n"),
+    );
+    await writeEval("held-out/secret.eval.ts", THROWING_MODULE);
+
+    const evaluations = await discoverAndImportEvals(tempDir, ["tuning/0001"]);
+    expect(evaluations.map((evaluation) => evaluation.id)).toEqual(["tuning/0001"]);
+  });
 });
 
 describe("findMisplacedEvalDirs", () => {

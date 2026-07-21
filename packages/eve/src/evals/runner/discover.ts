@@ -88,6 +88,18 @@ export function matchesEvalFilter(evalId: string, filters: readonly string[]): b
 }
 
 /**
+ * Returns true when the suffix of a filter beyond `<fileId>/` could name a
+ * generated array-export index. A file `evals/dataset.eval.ts` can only emit
+ * `dataset` or the zero-padded numeric ids `dataset/0000`, `dataset/0001`, ...;
+ * it can never emit `dataset/alpha`. So `dataset/0001` denotes a candidate
+ * index while `dataset/alpha` cannot.
+ */
+function isArrayIndexSuffix(suffix: string): boolean {
+  if (!/^\d+$/u.test(suffix)) return false;
+  return String(Number(suffix)).padStart(ARRAY_INDEX_PAD, "0") === suffix;
+}
+
+/**
  * Returns true when a file whose path-derived id is `fileId` could produce at
  * least one eval id matching `filters`. Used to constrain candidate files
  * before dynamic import, so a filtered run never loads modules that cannot
@@ -97,15 +109,20 @@ export function matchesEvalFilter(evalId: string, filters: readonly string[]): b
  *
  * A file exports either a single definition (eval id === `fileId`) or an array
  * (eval ids `fileId/0000`, `fileId/0001`, ...). Which one is unknowable without
- * importing, so a file is a candidate when its id and any filter are equal or
- * nested in either direction. The precise per-eval {@link matchesEvalFilter}
+ * importing, so a file is a candidate when its id equals a filter, is nested
+ * under a directory-prefix filter, or a filter targets one of the numeric array
+ * indexes it may export. A filter nested under `fileId` with a non-index suffix
+ * (e.g. `dataset/alpha`) can only come from a sibling directory file and never
+ * selects `fileId`'s module. The precise per-eval {@link matchesEvalFilter}
  * check still runs after import, so this never widens the final selection.
  */
 export function fileMayContainMatchingEval(fileId: string, filters: readonly string[]): boolean {
   if (filters.length === 0) return true;
   return filters.some(
     (filter) =>
-      fileId === filter || fileId.startsWith(`${filter}/`) || filter.startsWith(`${fileId}/`),
+      fileId === filter ||
+      fileId.startsWith(`${filter}/`) ||
+      (filter.startsWith(`${fileId}/`) && isArrayIndexSuffix(filter.slice(fileId.length + 1))),
   );
 }
 

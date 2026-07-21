@@ -50,6 +50,53 @@ describe("eve eval partition isolation (real CLI)", () => {
     expect(getLogOutput(logger)).not.toContain("held-out");
   });
 
+  it("lists an exact nested id without importing a throwing same-named root eval", async () => {
+    const { appRoot } = await createAppRoot("eve-eval-partition-cli-", {
+      files: {
+        "evals/tuning.eval.ts": THROWING_MODULE,
+        "evals/tuning/alpha.eval.ts": TUNING_EVAL,
+      },
+    });
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const previousCwd = process.cwd();
+
+    process.chdir(appRoot);
+    try {
+      await runCli(["eval", "tuning/alpha", "--list"], logger);
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+    expect(getLogOutput(logger)).toContain("tuning/alpha");
+  });
+
+  it("lists a root array-export index without importing a throwing sibling partition", async () => {
+    const { appRoot } = await createAppRoot("eve-eval-partition-cli-", {
+      files: {
+        "evals/dataset.eval.ts":
+          'export default [{ _tag: "EveEval", description: "row a", test: async () => {} },' +
+          ' { _tag: "EveEval", description: "row b", test: async () => {} }];\n',
+        "evals/held-out/secret.eval.ts": THROWING_MODULE,
+      },
+    });
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const previousCwd = process.cwd();
+
+    process.chdir(appRoot);
+    try {
+      await runCli(["eval", "dataset/0001", "--list"], logger);
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+    expect(getLogOutput(logger)).toContain("dataset/0001");
+    expect(getLogOutput(logger)).not.toContain("held-out");
+  });
+
   it("lists only held-out evals without importing a throwing tuning module", async () => {
     const { appRoot } = await createAppRoot("eve-eval-partition-cli-", {
       files: {

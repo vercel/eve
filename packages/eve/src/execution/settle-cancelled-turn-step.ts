@@ -102,12 +102,16 @@ export async function settleCancelledTurnStep(input: {
           });
         }
 
-        return {
-          result: alreadyEpilogued
-            ? emissionState
-            : await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
-          session: enrichedSession,
-        };
+        let nextEmissionState = emissionState;
+        if (!alreadyEpilogued) {
+          nextEmissionState = await emitCancelledTurn(
+            emit,
+            emissionState,
+            enrichedSession.continuationToken,
+          );
+        }
+
+        return { result: nextEmissionState, session: enrichedSession };
       });
       emissionState = scoped.result;
       session = scoped.session;

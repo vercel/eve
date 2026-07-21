@@ -18,6 +18,16 @@ describe("fileMayContainMatchingEval", () => {
 
   it("selects a file when a filter targets an array index it may export", () => {
     expect(fileMayContainMatchingEval("tuning/dataset", ["tuning/dataset/0001"])).toBe(true);
+    expect(fileMayContainMatchingEval("tuning/dataset", ["tuning/dataset/0000"])).toBe(true);
+    expect(fileMayContainMatchingEval("tuning/dataset", ["tuning/dataset/12345"])).toBe(true);
+  });
+
+  it("rejects a file when a nested filter suffix cannot be an array index", () => {
+    expect(fileMayContainMatchingEval("tuning", ["tuning/alpha"])).toBe(false);
+    expect(fileMayContainMatchingEval("tuning/dataset", ["tuning/dataset/alpha"])).toBe(false);
+    expect(fileMayContainMatchingEval("tuning/dataset", ["tuning/dataset/0001/deep"])).toBe(false);
+    expect(fileMayContainMatchingEval("tuning/dataset", ["tuning/dataset/12"])).toBe(false);
+    expect(fileMayContainMatchingEval("tuning/dataset", ["tuning/dataset/00001"])).toBe(false);
   });
 
   it("rejects a file in a sibling partition", () => {
