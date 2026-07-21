@@ -159,6 +159,10 @@ export const defaultEvents: TeamsChannelEvents = {
   },
 
   async "authorization.completed"(event, channel, _ctx) {
+    if (event.outcome === "authorized") {
+      await channel.thread.startTyping();
+    }
+
     const activityId = channel.state.pendingAuthActivityId;
     if (!activityId) return;
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
