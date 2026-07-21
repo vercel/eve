@@ -165,6 +165,17 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     expect(limits).toEqual({ contextWindowTokens: 200_000, maxOutputTokens: 32_000 });
   });
 
+  it("identifies eve when fetching the AI Gateway model catalog", async () => {
+    mockCatalogFetch();
+    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+
+    await loader.getModelLimits("anthropic/claude-opus-4.7");
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    expect(url).toBe("https://ai-gateway.vercel.sh/v1/models/catalog");
+    expect(new Headers(init?.headers).get("user-agent")).toMatch(/^eve\/.+/);
+  });
+
   it("returns null for unknown slug", async () => {
     mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
