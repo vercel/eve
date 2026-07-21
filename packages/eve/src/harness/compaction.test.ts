@@ -254,13 +254,13 @@ describe("resolveCompactionModel", () => {
 
 // --- compactMessages ---------------------------------------------------
 //
-// compactMessages escalates through two rungs, and which rung a test hits is
-// pure threshold arithmetic:
+// compactMessages escalates through heuristics before summarizing, and which
+// strategy a test hits is pure threshold arithmetic:
 //
-// - Eviction (rung 1) is accepted only when the evicted history PLUS the
-//   fixed compaction prompt envelope fits the threshold. `EVICTION_FORBIDDEN`
-//   sits below the envelope estimate, so eviction can never be accepted and
-//   the summarization rung always runs.
+// - The tool-eviction heuristic is accepted only when the evicted history
+//   PLUS the fixed compaction prompt envelope fits the threshold.
+//   `EVICTION_FORBIDDEN` sits below the envelope estimate, so eviction can
+//   never be accepted and the summarization fallback always runs.
 // - `ROOMY` accepts eviction whenever the history's bulk is tool output.
 //
 // Every result is checked against `expectWellFormedCompaction`: no orphaned
@@ -365,7 +365,7 @@ async function compact(
   return { result, summarizer: summarizer as ReturnType<typeof vi.mocked<never>> };
 }
 
-describe("compactMessages: eviction rung", () => {
+describe("compactMessages: tool-eviction heuristic", () => {
   it("evicts older tool payloads into trail text without calling the summarizer", async () => {
     const [call, resultMsg] = toolExchange({
       callId: "call-0",
@@ -446,7 +446,7 @@ describe("compactMessages: eviction rung", () => {
   });
 });
 
-describe("compactMessages: summarization rung", () => {
+describe("compactMessages: summarization fallback", () => {
   it("summarizes when eviction cannot free enough space", async () => {
     // All bulk is conversational prose — eviction removes nothing — and the
     // threshold sits below the prompt envelope, so eviction can never be

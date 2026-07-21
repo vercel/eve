@@ -93,18 +93,88 @@ export async function resolveCompactionModel(input: {
   };
 }
 
+/** Conversation regions and config handed to each compaction heuristic. */
+interface CompactionHeuristicInput {
+  readonly config: CompactionConfig;
+  readonly conversation: readonly ModelMessage[];
+  readonly older: readonly ModelMessage[];
+  readonly previousCheckpoint: string | undefined;
+  readonly recent: readonly ModelMessage[];
+}
+
 /**
- * Compacts messages with an escalation ladder.
- *
- * Rung 1 (no model call): evict tool activity from the older region — tool
- * results are dropped and assistant tool calls become one-line trail text —
- * while every user/assistant message and the recent tail stay verbatim. Most
- * history bulk is tool output, so this usually suffices and preserves the
- * conversation byte-exact.
- *
- * Rung 2: summarize the older region with the compaction model, keeping the
- * recent tail verbatim when it fits, degrading it to text-only, then shrinking
- * the window.
+ * A heuristic either produces a complete replacement history that fits the
+ * threshold, or signals that the next strategy must run. Heuristics have no
+ * failure channel — anything exceptional throws.
+ */
+type CompactionHeuristicOutcome =
+  | { readonly messages: ModelMessage[]; readonly type: "within-limit" }
+  | { readonly type: "insufficient" };
+
+type CompactionHeuristic = (input: CompactionHeuristicInput) => CompactionHeuristicOutcome;
+
+/**
+ * Model-free heuristics tried in order before falling back to LLM
+ * summarization. Each is a pure transformation of the split conversation;
+ * composing a new strategy (pruning variants, protect-lists) means adding an
+ * entry here.
+ */
+const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolEvictionHeuristic];
+
+/**
+ * Evicts tool activity from the older region — tool results dropped,
+ * assistant tool calls rewritten to one-line trail text — while every
+ * user/assistant message and the recent tail stay verbatim. Most history bulk
+ * is tool output, so this usually suffices and preserves the conversation
+ * byte-exact, with no model call.
+ */
+function toolEvictionHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
+  const checkpointHead: ModelMessage[] =
+    input.previousCheckpoint === undefined
+      ? []
+      : [
+          { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
+          { content: input.previousCheckpoint, role: "assistant" },
+        ];
+  const evicted = withResumptionGuard(
+    [...checkpointHead, ...evictToolActivity(input.older), ...input.recent],
+    input.conversation,
+  );
+
+  // Evaluate on the same ruler shouldCompact uses (envelope included):
+  // eviction can be a near no-op when the older region holds little tool
+  // activity, and accepting one on a looser ruler would let shouldCompact
+  // re-fire every step without compaction ever making progress.
+  const evaluation = evaluateThreshold(evicted, input.config, "should-compact");
+  return evaluation.type === "within-limit"
+    ? { messages: evicted, type: "within-limit" }
+    : { type: "insufficient" };
+}
+
+/**
+ * Measures a candidate history against the compaction threshold.
+ * The "should-compact" ruler includes the fixed prompt-envelope overhead that
+ * {@link shouldCompact} adds, so a history accepted on it cannot immediately
+ * re-trigger compaction; "estimate" is the bare history size.
+ */
+function evaluateThreshold(
+  messages: readonly ModelMessage[],
+  config: CompactionConfig,
+  ruler: "estimate" | "should-compact",
+): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
+  const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
+  const estimatedTokens = estimateTokens(messages) + overhead;
+  return {
+    estimatedTokens,
+    type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
+  };
+}
+
+/**
+ * Compacts messages by escalation: try each {@link CompactionHeuristic} in
+ * order, then fall back to summarizing the older region with the compaction
+ * model — keeping the recent tail verbatim when it fits, degrading it to
+ * text-only, then shrinking the window.
  */
 export async function compactMessages(
   messages: ModelMessage[],
@@ -124,23 +194,11 @@ export async function compactMessages(
       return keepNonToolResultMessages(recent);
     }
 
-    const checkpointHead: ModelMessage[] =
-      previousCheckpoint === undefined
-        ? []
-        : [
-            { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
-            { content: previousCheckpoint, role: "assistant" },
-          ];
-    const evicted = withResumptionGuard(
-      [...checkpointHead, ...evictToolActivity(older), ...recent],
-      conversation,
-    );
-    // Accept on the same ruler shouldCompact uses (envelope included):
-    // eviction can be a near no-op when the older region holds little tool
-    // activity, and accepting one on a looser ruler would let shouldCompact
-    // re-fire every step without compaction ever making progress.
-    if (estimateTokens(evicted) + COMPACTION_PROMPT_OVERHEAD_TOKENS <= config.threshold) {
-      return evicted;
+    for (const heuristic of COMPACTION_HEURISTICS) {
+      const outcome = heuristic({ config, conversation, older, previousCheckpoint, recent });
+      if (outcome.type === "within-limit") {
+        return outcome.messages;
+      }
     }
   }
 
@@ -173,7 +231,7 @@ export async function compactMessages(
     // model's evidence that work already ran. Degrade to text-only, then to a
     // smaller window, only under threshold pressure.
     const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
-    if (estimateTokens(verbatim) <= config.threshold) {
+    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
       return verbatim;
     }
 
@@ -181,7 +239,7 @@ export async function compactMessages(
       [...summaryHead, ...keepNonToolResultMessages(recent)],
       conversation,
     );
-    if (estimateTokens(stripped) <= config.threshold || keep === 0) {
+    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
       return stripped;
     }
 
