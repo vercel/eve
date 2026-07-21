@@ -15,8 +15,8 @@ export const SANDBOX_CLI_TOKEN = "eve-greet-cli-ok-R7M";
 export const SESSION_MARKER_PATH = "/workspace/session-marker.txt";
 export const SESSION_MARKER_TOKEN = "sandbox-onsession-ok-X5T";
 
-/** Loopback endpoint that holds each curl request long enough to measure overlap. */
-export const FANOUT_DELAY_SERVER_URL = "http://127.0.0.1:43100/delay";
+/** Loopback endpoint that releases after ten curl requests arrive concurrently. */
+export const FANOUT_BARRIER_SERVER_URL = "http://127.0.0.1:43100/barrier";
 
 /** Mounted from `agent/sandbox/workspace/seed-data.txt` at session start. */
 export const WORKSPACE_SEED_PATH = "/workspace/seed-data.txt";
