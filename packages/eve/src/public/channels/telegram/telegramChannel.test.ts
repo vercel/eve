@@ -333,6 +333,35 @@ describe("telegramChannel() deliver hook", () => {
 });
 
 describe("telegramChannel() default event handlers", () => {
+  it("restarts the typing indicator after authorization succeeds", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, result: true }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+      { chatId: "42", chatType: "private" },
+    );
+    const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
+
+    await callEvent(
+      adapter,
+      makeEvent("authorization.completed", {
+        name: "notion",
+        outcome: "authorized",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body));
+    expect(body).toEqual({ action: "typing", chat_id: "42" });
+  });
+
   it("input.requested posts an inline keyboard and stores compact callback mappings", async () => {
     const fetchMock = vi
       .fn()
