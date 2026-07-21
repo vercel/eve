@@ -1,12 +1,17 @@
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest } from "eve/evals";
 
-import { SECOND_CHECKPOINT_MARKER } from "../constants";
+import {
+  COMPACTION_CHECKPOINT_TEXT,
+  SECOND_CHECKPOINT_MARKER,
+  TASK_PRESERVED_MARKER,
+  TASK_TAIL_SENTINEL,
+} from "../constants";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 const MAX_TOOL_CALLS = 10;
 
-type RegressionCase = "redundant-tool-calls" | "stale-todo-work";
+type RegressionCase = "redundant-tool-calls" | "stale-todo-work" | "task-survival";
 
 let activeCase: RegressionCase | undefined;
 const checkpointAdvanceCallCounts = new Map<RegressionCase, number>();
@@ -27,6 +32,37 @@ const taskModel = mockModel({
     }
 
     const regressionCase = activeCase;
+
+    if (regressionCase === "task-survival") {
+      const compacted = request.messages.some(
+        (message) => message.role === "user" && message.text === COMPACTION_CHECKPOINT_TEXT,
+      );
+      if (compacted) {
+        // The harness must hand the model its verbatim task back after
+        // compaction — via the kept tail or the resumption replay. Losing it
+        // is the trace failure this case pins.
+        return request.userMessages.some((text) => text.includes(TASK_TAIL_SENTINEL))
+          ? `Task text still visible: ${TASK_PRESERVED_MARKER}`
+          : "Task text lost after compaction: TASK_LOST";
+      }
+
+      const pressureCalls = toolCallCounts.get(regressionCase) ?? 0;
+      if (pressureCalls >= MAX_TOOL_CALLS) {
+        return "Hard stop without a compaction: TASK_SURVIVAL_NO_COMPACTION";
+      }
+
+      toolCallCounts.set(regressionCase, pressureCalls + 1);
+      return {
+        toolCalls: [
+          {
+            id: `inspect-repository-${pressureCalls + 1}`,
+            input: { scope: "repository" },
+            name: "inspect-repository",
+          },
+        ],
+      };
+    }
+
     const marker = completionMarker(regressionCase);
 
     // These are fixture markers, not compaction protocol fields. `marker` records the
@@ -113,10 +149,11 @@ function findInitialCase(request: MockModelRequest): RegressionCase | undefined 
 function regressionCaseFromText(text: string): RegressionCase | undefined {
   if (text.includes("[case: redundant-tool-calls]")) return "redundant-tool-calls";
   if (text.includes("[case: stale-todo-work]")) return "stale-todo-work";
+  if (text.includes("[case: task-survival]")) return "task-survival";
   return undefined;
 }
 
-function completionMarker(regressionCase: RegressionCase): string {
+function completionMarker(regressionCase: Exclude<RegressionCase, "task-survival">): string {
   return regressionCase === "redundant-tool-calls"
     ? "REPOSITORY_INSPECTION_COMPLETE"
     : "SOURCE_ANALYSIS_COMPLETE";
