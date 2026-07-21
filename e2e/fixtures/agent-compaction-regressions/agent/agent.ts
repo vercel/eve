@@ -17,9 +17,23 @@ let activeCase: RegressionCase | undefined;
 const checkpointAdvanceCallCounts = new Map<RegressionCase, number>();
 const toolCallCounts = new Map<RegressionCase, number>();
 
+let requestCount = 0;
+
 const taskModel = mockModel({
   modelId: "compaction-regression-task-model",
   respond(request) {
+    // EVE_E2E_DUMP_CONTEXT=1 prints every request's messages — the context
+    // exactly as the model sees it, so compaction, capping, and replay are
+    // observable per step while iterating on these evals.
+    if (process.env.EVE_E2E_DUMP_CONTEXT) {
+      requestCount += 1;
+      console.log(`\n=== model request #${requestCount} (${request.messages.length} messages) ===`);
+      for (const message of request.messages) {
+        const text = message.text.replace(/\s+/g, " ");
+        console.log(`  [${message.role}] ${text.length} chars | ${text.slice(0, 160)}`);
+      }
+    }
+
     const initialCase = findInitialCase(request);
     if (initialCase !== undefined && activeCase !== initialCase) {
       activeCase = initialCase;
