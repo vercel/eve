@@ -30,22 +30,68 @@ export const GET = async () => {
   }
 
   try {
+    const started = Date.now();
     const token = await getVercelOidcToken();
-    const response = await fetch("https://help-ash.vercel.sh/eve/v1/session", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-        "x-vercel-trusted-oidc-idp-token": token,
-      },
-      body: JSON.stringify({ message: "debug ping from eve-docs preview" }),
-    });
-    const body = (await response.text()).slice(0, 500);
-    const result = {
-      status: response.status,
-      body,
-      tokenPayload: JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString()),
+    const authHeaders = {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+      "x-vercel-trusted-oidc-idp-token": token,
     };
+    const createResponse = await fetch("https://help-ash.vercel.sh/eve/v1/session", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ message: "In two sentences, what is an eve channel?" }),
+    });
+
+    if (!createResponse.ok) {
+      return Response.json({
+        status: createResponse.status,
+        body: (await createResponse.text()).slice(0, 500),
+      });
+    }
+
+    const { sessionId } = (await createResponse.json()) as { sessionId: string };
+    // Time each NDJSON event to see whether eve streams incrementally or
+    // delivers events in a burst at the end.
+    const streamResponse = await fetch(
+      `https://help-ash.vercel.sh/eve/v1/session/${sessionId}/stream`,
+      { headers: authHeaders },
+    );
+    const reader = streamResponse.body?.getReader();
+    const decoder = new TextDecoder();
+    const timeline: { ms: number; type: string }[] = [];
+    let buffer = "";
+    let done = false;
+
+    while (reader && !done && Date.now() - started < 90_000) {
+      const { done: streamDone, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !streamDone });
+      let index = buffer.indexOf("\n");
+
+      while (index !== -1) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+
+        if (line) {
+          const type = (JSON.parse(line) as { type: string }).type;
+          timeline.push({ ms: Date.now() - started, type });
+
+          if (type === "session.waiting" || type === "session.failed") {
+            done = true;
+          }
+        }
+
+        index = buffer.indexOf("\n");
+      }
+
+      if (streamDone) {
+        done = true;
+      }
+    }
+
+    await reader?.cancel().catch(() => undefined);
+
+    const result = { sessionId, streamStatus: streamResponse.status, timeline };
     console.log("[help-eve debug]", JSON.stringify(result));
     return Response.json(result);
   } catch (error) {
