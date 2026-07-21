@@ -288,11 +288,15 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "authorization.completed"(event, channel, _ctx) {
+    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+    if (event.outcome === "authorized") {
+      await channel.thread.startTyping(`Connected to ${displayName}. Resuming...`);
+    }
+
     const pending = channel.state.pendingAuthMessageTs ?? {};
     const ts = pending[event.name];
     if (ts === undefined) return;
 
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
     const text = buildAuthCompletedText({
       displayName,
       outcome: event.outcome as ConnectionAuthorizationOutcome,
