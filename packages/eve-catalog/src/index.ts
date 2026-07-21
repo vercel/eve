@@ -1,7 +1,7 @@
 /**
  * Shared identity for eve integrations. This package is the single source of
- * truth for *which* integrations exist (channels and connections) and how a
- * connection is wired (transport + model-facing description).
+ * truth for *which* integrations exist (channels, connections, and extensions)
+ * and how a connection is wired (transport + model-facing description).
  *
  * Surface-specific concerns live with their consumer, keyed by {@link
  * IntegrationEntry.slug}: the scaffolder (eve) overlays the
@@ -18,7 +18,7 @@
  */
 
 /** Surface an integration targets. Extend as new kinds are catalogued. */
-export type IntegrationKind = "channel" | "connection";
+export type IntegrationKind = "channel" | "connection" | "extension";
 
 /** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
@@ -82,7 +82,7 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
  *
  * `surfaces.scaffoldable` reflects what the CLI can scaffold today: Slack and
- * eve Web Chat for channels, and every curated connection. The remaining
+ * Web Chat for channels, and every curated connection. The remaining
  * channels are runtime modules that are still configured by hand, so they
  * appear in the gallery but not the CLI picker.
  */
@@ -119,7 +119,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "twilio",
     name: "Twilio",
     kind: "channel",
-    tagline: "Reach users over SMS and WhatsApp through Twilio.",
+    tagline: "Put your agent on a phone number: SMS and speech-transcribed calls.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -138,10 +138,69 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   },
   {
     slug: "eve",
-    name: "eve Web Chat",
+    name: "Web Chat",
     kind: "channel",
     tagline: "Embed a first-party web chat UI backed by your agent.",
     surfaces: { scaffoldable: true, gallery: true },
+  },
+  {
+    slug: "chat-sdk-gchat",
+    name: "Google Chat",
+    kind: "channel",
+    tagline: "Google Chat spaces and DMs via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-whatsapp",
+    name: "WhatsApp",
+    kind: "channel",
+    tagline: "Customer messaging through WhatsApp Business Cloud via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-x",
+    name: "X",
+    kind: "channel",
+    tagline: "Public mentions and DMs on X via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-messenger",
+    name: "Messenger",
+    kind: "channel",
+    tagline: "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "agent-browser",
+    name: "agent-browser",
+    kind: "extension",
+    tagline: "Add browser automation tools backed by agent-browser to an eve agent.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "kernel",
+    name: "Kernel",
+    kind: "connection",
+    tagline: "Launch cloud browsers and automate web interactions through Kernel's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Kernel: launch and automate cloud browsers, run Playwright, and inspect replays.",
+      mcp: { url: "https://mcp.onkernel.com/mcp" },
+    },
+  },
+  {
+    slug: "browser-use",
+    name: "Browser Use",
+    kind: "connection",
+    tagline: "Run managed browser automation tasks through Browser Use's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.",
+      mcp: { url: "https://api.browser-use.com/v3/mcp" },
+    },
   },
   {
     slug: "linear",
@@ -577,4 +636,9 @@ export function connectionEntries(): IntegrationEntry[] {
 /** All channel entries, in catalog order. */
 export function channelEntries(): IntegrationEntry[] {
   return integrationsByKind("channel");
+}
+
+/** All extension entries, in catalog order. */
+export function extensionEntries(): IntegrationEntry[] {
+  return integrationsByKind("extension");
 }

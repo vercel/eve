@@ -10,6 +10,7 @@ import {
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
+  resolveVercelHostFrameworkPreset,
   scaffoldBaseProject,
   scaffoldExtensionProject,
   type WebPackageVersions,
@@ -210,23 +211,13 @@ describe("ensureChannel", () => {
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
+    // withEve() generates the eve service + /eve/v1/* routes into
+    // .vercel/output/config.json at build time, so the scaffold only writes a
+    // minimal vercel.json rather than a services block the platform rejects.
     await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toBe(
       `${JSON.stringify(
         {
           $schema: "https://openapi.vercel.sh/vercel.json",
-          experimentalServices: {
-            web: {
-              entrypoint: ".",
-              framework: "nextjs",
-              routePrefix: "/",
-            },
-            eve: {
-              buildCommand: "eve build",
-              entrypoint: ".",
-              framework: "eve",
-              routePrefix: "/_eve_internal/eve",
-            },
-          },
         },
         null,
         2,
@@ -345,18 +336,15 @@ describe("ensureChannel", () => {
     );
   });
 
-  test("preserves existing Vercel configuration when adding Web Chat services", async () => {
+  test("preserves existing Vercel configuration when adding Web Chat", async () => {
     const projectRoot = await createTempDir();
     await writeFile(
       join(projectRoot, "package.json"),
       `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
       "utf8",
     );
-    await writeFile(
-      join(projectRoot, "vercel.json"),
-      `${JSON.stringify({ regions: ["iad1"], experimentalServices: { worker: { entrypoint: "worker.ts" } } }, null, 2)}\n`,
-      "utf8",
-    );
+    const existingVercelJson = `${JSON.stringify({ regions: ["iad1"], rewrites: [] }, null, 2)}\n`;
+    await writeFile(join(projectRoot, "vercel.json"), existingVercelJson, "utf8");
 
     await ensureChannel({
       projectRoot,
@@ -364,16 +352,12 @@ describe("ensureChannel", () => {
       webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
     });
 
-    await expect(
-      readFile(join(projectRoot, "vercel.json"), "utf8").then((value) => JSON.parse(value)),
-    ).resolves.toMatchObject({
-      regions: ["iad1"],
-      experimentalServices: {
-        worker: { entrypoint: "worker.ts" },
-        web: { framework: "nextjs" },
-        eve: { framework: "eve" },
-      },
-    });
+    // withEve() owns eve service generation, so the scaffold leaves an existing
+    // vercel.json completely untouched — no injected services block, no $schema
+    // rewrite, no reformatting of a file the user manages.
+    await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toBe(
+      existingVercelJson,
+    );
   });
 
   test("scaffolds Web Chat without Vercel Services for preview-only targets", async () => {
@@ -699,6 +683,42 @@ describe("hasVercelHostFramework", () => {
   });
 });
 
+describe("resolveVercelHostFrameworkPreset", () => {
+  test("reads as no host framework when package.json is missing", async () => {
+    const projectRoot = await createTempDir();
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
+  });
+
+  test.each([
+    ["Next.js", { next: "16.2.6" }, "nextjs"],
+    ["Nuxt", { nuxt: "4.3.3" }, "nuxtjs"],
+    ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
+    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
+    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
+  ])("maps %s to its Vercel Framework Preset slug", async (_label, dependencies, preset) => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", devDependencies: dependencies }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
+  });
+
+  test("returns undefined for a standalone eve project", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
+      "utf8",
+    );
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBeUndefined();
+  });
+});
+
 describe("listAuthoredChannels", () => {
   test("recognizes flat channel modules and folder connection modules", async () => {
     const projectRoot = await createTempDir();
@@ -722,9 +742,10 @@ describe("scaffoldExtensionProject", () => {
 
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
       name: string;
-      eve?: { extension?: string };
+      eve?: { extension?: { source?: string; dist?: string } };
       files?: string[];
       peerDependencies?: { eve?: string };
+      peerDependenciesMeta?: Record<string, unknown>;
       devDependencies?: Record<string, string>;
       dependencies?: Record<string, string>;
       scripts?: Record<string, string>;
@@ -732,9 +753,9 @@ describe("scaffoldExtensionProject", () => {
     };
     expect(packageJson).toMatchObject({
       name: "demo-extension",
-      eve: { extension: "./extension" },
-      files: ["extension", "dist"],
-      peerDependencies: { eve: "^0.25.0" },
+      eve: { extension: { source: "./extension", dist: "./dist/extension" } },
+      files: ["dist"],
+      peerDependencies: { eve: "*" },
       dependencies: { zod: "4.4.3" },
       scripts: {
         build: "eve extension build",
@@ -743,7 +764,8 @@ describe("scaffoldExtensionProject", () => {
       },
       engines: { node: "24.x" },
     });
-    expect(packageJson.devDependencies?.eve).toBe("^0.25.0");
+    expect(packageJson.devDependencies?.eve).toBe("0.25.0");
+    expect(packageJson.peerDependenciesMeta).toBeUndefined();
     expect(packageJson.devDependencies?.typescript).toBe("7.0.2");
     expect(packageJson.dependencies?.ai).toBeUndefined();
     expect(packageJson.scripts?.dev).toBeUndefined();
@@ -766,6 +788,7 @@ describe("scaffoldExtensionProject", () => {
     const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
     expect(agentsMd).toContain("eve extension");
     expect(agentsMd).toContain("extensions.md");
+    expect(agentsMd).toContain("development dependency pinned exactly");
     expect(agentsMd).toContain("cannot declare");
   });
 });
@@ -821,7 +844,7 @@ describe("scaffoldBaseProject", () => {
     // artifacts and a bare .env must be excluded here or a source deploy
     // ships them (and `.eve` alone can blow the upload size limit).
     const vercelignore = await readFile(join(projectRoot, ".vercelignore"), "utf8");
-    for (const entry of [".env*", ".eve", ".workflow-data", ".output", ".nitro", "dist"]) {
+    for (const entry of [".env*", ".eve", ".output", ".nitro", "dist"]) {
       expect(vercelignore.split("\n")).toContain(entry);
     }
   });

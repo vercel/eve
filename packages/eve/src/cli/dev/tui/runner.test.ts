@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   Client,
@@ -145,6 +145,14 @@ const AGENT_INFO: AgentInfoResult = {
   },
 };
 
+beforeEach(() => {
+  // The runner normalizes header endpoints from the real process.env; a
+  // developer shell exporting gateway credentials must not leak into these
+  // boot-state assertions.
+  vi.stubEnv("AI_GATEWAY_API_KEY", "");
+  vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -204,6 +212,7 @@ function idleSetupFlow(): SetupFlowRenderer {
     readSelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
+    readModelEditor: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -511,6 +520,116 @@ function sessionYieldingTurns(turns: ReadonlyArray<readonly unknown[]>): ClientS
   return session;
 }
 
+describe("EveTUIRunner development session continuity", () => {
+  it("keeps the REPL session when HMR publishes a new runtime revision", async () => {
+    const requests: Array<{ readonly method: string; readonly url: URL }> = [];
+    const revisions = ["revision-a", "revision-a", "revision-b", "revision-b"];
+    const encoder = new TextEncoder();
+    let nextRevision = 0;
+    let nextSession = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input : input.url,
+        );
+        const method = init?.method ?? "GET";
+        requests.push({ method, url });
+
+        if (url.pathname.startsWith("/eve/v1/dev/runtime-artifacts")) {
+          const revision = revisions[Math.min(nextRevision, revisions.length - 1)] ?? "revision";
+          nextRevision += 1;
+          return Response.json({ revision });
+        }
+
+        if (method === "POST") {
+          const sessionId =
+            url.pathname === "/eve/v1/session"
+              ? `session-${String(++nextSession)}`
+              : (url.pathname.split("/").at(-1) ?? `session-${String(++nextSession)}`);
+          return Response.json({
+            continuationToken: `token-${sessionId}`,
+            sessionId,
+          });
+        }
+
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  '{"type":"session.waiting","data":{"continuationToken":"token-session-1","wait":"next-user-message"}}\n',
+                ),
+              );
+              controller.close();
+            },
+          }),
+        );
+      }),
+    );
+
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const session = client.session();
+    const createSession = vi.spyOn(client, "session");
+    const prompts: Array<string | undefined> = ["first", "second", undefined];
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+          }
+        }),
+      },
+      serverUrl: "http://localhost:3000",
+      session,
+    });
+
+    await runner.run();
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(session.state.sessionId).toBe("session-1");
+    expect(
+      requests
+        .filter(
+          (request) =>
+            request.method === "POST" && request.url.pathname.startsWith("/eve/v1/session"),
+        )
+        .map((request) => request.url.pathname),
+    ).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
+  });
+
+  it("starts a fresh session only after an explicit /new command", async () => {
+    const initialSession = sessionYielding([{ type: "session.waiting" }]);
+    const newSession = sessionYielding([{ type: "session.waiting" }]);
+    const client = stubClient();
+    const createSession = vi.spyOn(client, "session").mockReturnValue(newSession);
+    const prompts: Array<string | undefined> = ["first", "/new", "second", undefined];
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+          }
+        }),
+      },
+      session: initialSession,
+    });
+
+    await runner.run();
+
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(initialSession.send).toHaveBeenCalledOnce();
+    expect(newSession.send).toHaveBeenCalledOnce();
+  });
+});
+
 describe("EveTUIRunner terminal-failure recovery", () => {
   it("starts a fresh session and posts a notice after session.failed", async () => {
     const notices: string[] = [];
@@ -554,6 +673,71 @@ describe("EveTUIRunner terminal-failure recovery", () => {
     expect(recoveredSession.send).not.toHaveBeenCalled();
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("new session");
+  });
+
+  it("preserves the session and posts a notice when the stream ends without a boundary", async () => {
+    const notices: string[] = [];
+    const prompts: Array<string | undefined> = ["run something long", undefined];
+
+    const strandedSession = sessionYielding([{ type: "turn.started", data: {} }]);
+    const client = stubClient();
+    const sessionFactory = vi.spyOn(client, "session");
+
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderNotice: (text) => notices.push(text),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+          }
+        }),
+      },
+      session: strandedSession,
+    });
+
+    await runner.run();
+
+    expect(sessionFactory).not.toHaveBeenCalled();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("Lost");
+    expect(notices[0]).not.toContain("new session");
+  });
+
+  it("starts a fresh session when the user interrupts a turn mid-stream", async () => {
+    const notices: string[] = [];
+    const prompts: Array<string | undefined> = ["run something long", undefined];
+
+    const interruptedSession = sessionYielding([{ type: "turn.started", data: {} }]);
+    const replacementSession = sessionYielding([]);
+    const client = stubClient();
+    const sessionFactory = vi.spyOn(client, "session").mockReturnValue(replacementSession);
+
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderNotice: (text) => notices.push(text),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+            result.abort?.();
+            break;
+          }
+        }),
+      },
+      session: interruptedSession,
+    });
+
+    await runner.run();
+
+    expect(sessionFactory).toHaveBeenCalledTimes(1);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("new session");
+    expect(notices[0]).toContain("may still be running");
   });
 });
 
@@ -1216,6 +1400,64 @@ describe("EveTUIRunner replay guards", () => {
       },
     ]);
   });
+
+  it("preserves a rejected action result instead of rendering it as success", async () => {
+    const prompts: Array<string | undefined> = ["run the tool", undefined];
+    const emitted: AgentTUIStreamEvent[] = [];
+    const session = sessionYielding([
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "call-rejected",
+              input: { command: "rm something" },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          error: { code: "USER_REJECTED", message: "Denied by user." },
+          result: {
+            callId: "call-rejected",
+            kind: "tool-result",
+            output: null,
+          },
+          sequence: 0,
+          status: "rejected",
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ]);
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          emitted.push(event);
+        }
+      }),
+    };
+
+    await new EveTUIRunner({ session, renderer, name: "Weather Agent" }).run();
+
+    expect(emitted.filter((event) => event.type === "tool-result")).toEqual([]);
+    expect(emitted.filter((event) => event.type === "tool-rejected")).toEqual([
+      {
+        type: "tool-rejected",
+        toolCallId: "call-rejected",
+        reason: "Denied by user.",
+      },
+    ]);
+  });
 });
 
 describe("parsePromptCommand", () => {
@@ -1599,6 +1841,86 @@ describe("EveTUIRunner renderer teardown", () => {
     expect(shutdown).toHaveBeenCalledTimes(1);
   });
 
+  it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {
+    const client = stubClient();
+    const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
+    vi.spyOn(client, "session").mockReturnValue(childSession);
+    vi.spyOn(childSession, "stream").mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "message.completed",
+          data: {
+            finishReason: "stop",
+            message: "final answer",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn-child",
+          },
+        } as HandleMessageStreamEvent;
+        yield {
+          type: "session.waiting",
+          data: { wait: "next-user-message" },
+        } as HandleMessageStreamEvent;
+      },
+    }));
+
+    const completeSubagent = vi.fn();
+    const completed = createDeferred<void>();
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        // Hold the second prompt open until the child boundary finishes the
+        // section — exiting the run loop aborts the child pump.
+        readPrompt: vi
+          .fn()
+          .mockResolvedValueOnce("delegate")
+          .mockImplementationOnce(async () => {
+            await completed.promise;
+            return undefined;
+          }),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+        subagents: {
+          begin: vi.fn(),
+          upsertStep: vi.fn(),
+          upsertTool: vi.fn(),
+          removeTool: vi.fn(),
+          markChildToolCallId: vi.fn(),
+          complete: (update: { callId: string }) => {
+            completeSubagent(update);
+            completed.resolve();
+          },
+        },
+      }),
+      session: sessionYielding([
+        {
+          type: "subagent.called",
+          data: {
+            callId: "call-child",
+            childSessionId: "child-session",
+            name: "weather-child",
+            sequence: 0,
+            sessionId: "parent-session",
+            toolName: "delegate_weather",
+            turnId: "turn-parent",
+            workflowId: "workflow-parent",
+          },
+        },
+        // The parent stream never reports subagent.completed — the child's
+        // own boundary must finish the section.
+        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
+      ]),
+    });
+
+    await runner.run();
+    await completed.promise;
+
+    expect(completeSubagent).toHaveBeenCalledWith({ callId: "call-child" });
+  });
+
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
     const client = stubClient();
     const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
@@ -1895,15 +2217,18 @@ describe("EveTUIRunner Vercel status line", () => {
 describe("EveTUIRunner gateway-auth failure rendering", () => {
   const gatewayFailure = {
     code: "MODEL_CALL_FAILED",
-    message: "AI Gateway received no credentials. Run `eve link` to populate…",
+    message: "AI Gateway received no credentials.",
     details: {
       errorId: "err-1",
       name: "AI Gateway authentication failed",
-      gatewayName: "GatewayAuthenticationError",
+      semanticErrorId: "gateway-auth-missing-credentials",
+      hint: "Run `eve link` to populate `VERCEL_OIDC_TOKEN`, or set `AI_GATEWAY_API_KEY`…",
     },
   };
 
-  async function errorTextsFor(appRoot?: string): Promise<string[]> {
+  async function errorEventsFor(
+    appRoot?: string,
+  ): Promise<Array<{ errorText: string; hint?: string }>> {
     const prompts: Array<string | undefined> = ["hello", undefined];
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
@@ -1932,22 +2257,24 @@ describe("EveTUIRunner gateway-auth failure rendering", () => {
 
     return emitted
       .filter((event) => event.type === "error")
-      .map((event) => (event as { errorText: string }).errorText);
+      .map((event) => event as { errorText: string; hint?: string });
   }
 
-  it("collapses the failure to the minimal /model line when setup commands are available", async () => {
-    const errors = await errorTextsFor("/tmp/weather-agent");
+  it("swaps the hint for the local /model fix when setup commands are available", async () => {
+    const errors = await errorEventsFor("/tmp/weather-agent");
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toBe(
-      "There is no AI_GATEWAY_API_KEY set. Run /model to connect this to a project and refresh AI Gateway credentials, or set it manually in .env.local.",
+    expect(errors[0]!.errorText).toContain("MODEL_CALL_FAILED");
+    expect(errors[0]!.hint).toBe(
+      "Run /model to connect this to a project and refresh AI Gateway credentials, or set AI_GATEWAY_API_KEY manually in .env.local.",
     );
   });
 
-  it("keeps the full failure message when the TUI has no local project to link", async () => {
-    const errors = await errorTextsFor(undefined);
+  it("keeps the harness hint when the TUI has no local project to link", async () => {
+    const errors = await errorEventsFor(undefined);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("MODEL_CALL_FAILED");
-    expect(errors[0]).not.toContain("/model");
+    expect(errors[0]!.errorText).toContain("MODEL_CALL_FAILED");
+    expect(errors[0]!.hint).toContain("eve link");
+    expect(errors[0]!.hint).not.toContain("/model");
   });
 });
 
@@ -2048,7 +2375,7 @@ describe("EveTUIRunner boot setup detection", () => {
     ];
     const handle = vi.fn(async (command: { name: string }) => {
       order.push(command.name);
-      return { message: "/model cancelled." };
+      return { message: "/model dismissed." };
     });
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
@@ -2126,7 +2453,7 @@ describe("EveTUIRunner boot setup detection", () => {
       promptCommandHandler: {
         handle: async (command) => {
           order.push(command.name);
-          return { message: "/vc:install cancelled." };
+          return { message: "/vc:install dismissed." };
         },
       },
     });
@@ -2138,7 +2465,7 @@ describe("EveTUIRunner boot setup detection", () => {
   });
 
   it("does not auto-open /model outside the prefilled onboarding launch", async () => {
-    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const handle = vi.fn(async () => ({ message: "/model dismissed." }));
     const runner = new EveTUIRunner({
       session: sessionYielding([]),
       renderer: fakeRenderer({ setupFlow: createFakeSetupFlowRenderer() }),
@@ -2165,7 +2492,7 @@ describe("EveTUIRunner boot setup detection", () => {
   });
 
   it("keeps a prefilled /model editable without a local app root", async () => {
-    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const handle = vi.fn(async () => ({ message: "/model dismissed." }));
     const readPrompt = vi.fn(async (options?: AgentTUISessionOptions) => {
       expect(options?.initialDraft).toBe("/model");
       return undefined;

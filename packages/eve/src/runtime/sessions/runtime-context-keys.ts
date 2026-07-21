@@ -7,7 +7,11 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import { ContextKey } from "#context/key.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import {
+  type DurableCompiledArtifactsSource,
+  resolveDurableCompiledArtifactsSource,
+  serializeDurableCompiledArtifactsSource,
+} from "#runtime/durable-compiled-artifacts-source.js";
 import {
   type CompiledRuntimeAgentBundle,
   getCompiledRuntimeAgentBundle,
@@ -24,7 +28,7 @@ export type CompiledBundle = CompiledRuntimeAgentBundle;
 
 interface SerializedBundle {
   readonly nodeId?: string;
-  readonly source: RuntimeCompiledArtifactsSource;
+  readonly source: DurableCompiledArtifactsSource;
 }
 
 export const ChannelKey = new ContextKey<ChannelAdapter>("eve.channel", {
@@ -53,12 +57,12 @@ export const BundleKey = new ContextKey<CompiledBundle>("eve.bundle", {
   codec: {
     serialize: (bundle): SerializedBundle => ({
       nodeId: bundle.nodeId,
-      source: bundle.compiledArtifactsSource,
+      source: serializeDurableCompiledArtifactsSource(bundle.compiledArtifactsSource),
     }),
     deserialize: (data) => {
       const { source, nodeId } = data as SerializedBundle;
       return getCompiledRuntimeAgentBundle({
-        compiledArtifactsSource: source,
+        compiledArtifactsSource: resolveDurableCompiledArtifactsSource(source),
         nodeId,
       });
     },

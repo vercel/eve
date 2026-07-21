@@ -1,0 +1,25 @@
+{
+  "name": "agent-compaction-regressions-gpt-5-6",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "eve build && tsc",
+    "test:e2e": "eve eval --strict"
+  },
+  "dependencies": {
+    "@eve/e2e-compaction-regression-shared": "workspace:*",
+    "@opentelemetry/core": "2.6.1",
+    "@opentelemetry/sdk-trace-base": "2.6.1",
+    "@vercel/otel": "2.1.2",
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

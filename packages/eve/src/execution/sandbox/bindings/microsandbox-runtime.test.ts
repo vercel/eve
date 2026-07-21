@@ -373,9 +373,10 @@ describe.skipIf(process.platform === "win32")("createPreparedMicrosandbox", () =
       cause,
       message: expect.stringContaining(
         `Failed to create microsandbox VM from image "${MICROSANDBOX_DEFAULT_IMAGE}" ` +
-          "while resolving the image [imageNotFound]: manifest was not found. " +
-          "Check that the image exists and that the registry credentials can pull it.",
+          "while resolving the image [imageNotFound]: manifest was not found.",
       ),
+      // The per-code remediation travels as a structured hint, not prose.
+      hint: "Check that the image exists and that the registry credentials can pull it.",
     });
   });
 

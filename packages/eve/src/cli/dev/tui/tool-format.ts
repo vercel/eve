@@ -7,7 +7,7 @@
  * plain strings — color is applied by the block renderer.
  */
 
-import { stripTerminalControls } from "./terminal-text.js";
+import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 
 const ELLIPSIS = "…";
 

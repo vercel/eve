@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, info, build, start, dev, link, deploy, eval, channels, and extension."
+description: "Reference for every eve CLI command: init, info, build, start, dev, logs, link, deploy, eval, channels, and extension."
 ---
 
 The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
@@ -15,6 +15,8 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
 | `eve dev`                     | Start the local dev server and open the terminal UI                                                                                                   |
 | `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
+| `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                                           |
+| `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                                     |
 | `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
 | `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
 | `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
@@ -47,7 +49,7 @@ After scaffolding, a human terminal usually continues into `eve dev` (or a codin
 
 ## `eve extension`
 
-Commands for reusable [extension](/docs/extensions) packages. An extension is identified by `package.json#eve.extension` (for example `"eve": { "extension": "./extension" }`).
+Commands for reusable [extension](/docs/extensions) packages. An extension declares distinct authoring and distribution roots in `package.json#eve.extension` (for example `"eve": { "extension": { "source": "./extension", "dist": "./dist/extension" } }`).
 
 ### `eve extension init`
 
@@ -73,7 +75,7 @@ See [Extensions](/docs/extensions) for authoring and mount details.
 eve extension build
 ```
 
-Builds the current package as an extension: compiles the mount factory and tool re-exports into `dist/`, and fills the package `exports` map. Requires `package.json#eve.extension`.
+Builds the complete agent-shaped extension tree into its configured dist root, emits declarations and compatibility metadata, and fills the package `exports` map. The original TypeScript source is not required in the published package.
 
 ## `eve info`
 
@@ -90,10 +92,23 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 ## `eve build`
 
 ```bash
-eve build
+eve build [--profile <path>] [--skip-sandbox-prewarm]
 ```
 
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure.
+
+| Flag                     | Type   | Default | Description                                                                                   |
+| ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
+| `--profile <path>`       | string | off     | Best-effort versioned JSON report with build-phase timings and final output-size measurements |
+| `--skip-sandbox-prewarm` | flag   | off     | Skip sandbox template prewarm for a Vercel build; the output might not be deployable          |
+
+Use a profile file to establish a repeatable baseline before changing the build pipeline:
+
+```bash
+eve build --profile .eve/build-profiles/baseline.json
+```
+
+The report is attempted only after a successful build. It records total elapsed time, completed phase timings, and final regular-file totals for file count, raw bytes, and the sum of each file compressed with gzip. For Vercel output it also includes a subtotal for every real `.func` directory, so app and flow bundles can be compared separately. The profile path resolves from the app root and should be outside the published output directory; profile collection does not add a file to the deployment. If collection or writing fails, eve emits a warning but keeps the completed build successful.
 
 Production builds do not write through the stable compiler, host, Nitro, or Workflow files owned by `eve dev`, so builds can run while a local dev server is active. A failed build leaves the last successful `.output/` and agent summary untouched. Concurrent completed builds serialize only the final publication window.
 
@@ -132,7 +147,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | Flag                                | Type   | Default            | Description                                                                               |
 | ----------------------------------- | ------ | ------------------ | ----------------------------------------------------------------------------------------- |
 | `--host <host>`                     | string | all interfaces     | Host interface to bind                                                                    |
-| `--port <port>`                     | number | `$PORT`, then 3000 | Port to listen on                                                                         |
+| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                                                                         |
 | `-u, --url <url>`                   | string | none               | Connect to an existing server URL instead of starting one                                 |
 | `-H, --header <header>`             | string | none               | Request header for a URL target, in `Name: value` form; repeat for multiple headers       |
 | `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                                                |
@@ -158,7 +173,27 @@ For bearer tokens or custom schemes, pass explicit headers with `-H`.
 
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 
-Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight sessions hold a consistent code revision while new prompts pick up rebuilds. On startup, `eve dev` prunes stale runtime snapshots and old local sandbox templates in the background. For manual cleanup, stop `eve dev` and delete `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`.
+Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; use `/new` to start a fresh session. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
+
+## `eve logs`
+
+```bash
+eve logs            # print the most recent diagnostic log
+eve logs ls         # list logs, most recent first
+eve logs <logid>    # print a specific log
+eve logs --dump     # prepend the log's environment dump
+eve logs --events   # interleave session events from the local workflow store
+```
+
+Each interactive `eve dev` process writes a private diagnostic log under `.eve/logs/` capturing stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records — regardless of what the transcript shows. The file is JSON Lines — every line is one JSON record with `at` and `source` fields. `eve logs` reads those files back.
+
+A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.000Z-123`). `eve logs <logid>` also accepts the file name, the `.eve/logs/...` path printed in the dev transcript, or any unambiguous prefix of the id with or without the `dev-` lead — so `eve logs 2026-07-15` works when a single log matches. An ambiguous prefix fails and lists the candidates.
+
+`eve logs` prints nothing but records — no path banner on either stream — so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs ls`; `eve logs ls --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
+
+`eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
+
+Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
 
 ## `eve link`
 
@@ -166,7 +201,7 @@ Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snaps
 eve link
 ```
 
-Links the current directory to an existing Vercel project. You select a team and then one of its recent projects; type a project name and choose **Search for '<name>'** to search the rest of that team's projects. Vercel links the selected project, eve verifies its project ID, and then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes --non-interactive` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
+Links the current directory to a Vercel project. After selecting a team, you can create a project named for the agent or link an existing project. The existing-project picker shows recent projects; type a project name and choose **Search for '<name>'** to search the rest of that team's projects. Vercel links the resolved project, eve verifies its project ID, and then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes --non-interactive` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
 
 ## `eve deploy`
 
@@ -238,4 +273,4 @@ Related: [Project layout](./project-layout) · [instrumentation.ts](../guides/in
 
 - [Project layout](./project-layout): what `eve info` discovers
 - [instrumentation.ts](../guides/instrumentation): tracing and the error catalog
-- [Deployment](../guides/deployment): `eve build` and `eve start` in production
+- [Deployment](../guides/deployment/overview): `eve build` and `eve start` in production

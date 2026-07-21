@@ -14,6 +14,13 @@ import { readDevelopmentRuntimeArtifactsSnapshotRoot } from "#internal/nitro/dev
 export interface DevelopmentNitroArtifactsConfig {
   readonly appRoot: string;
   readonly devRuntimeArtifactsPointerPath: string;
+  /**
+   * Set when durable Workflow payloads may store a logical generation
+   * selector instead of this source's exact snapshot path. Only true when
+   * the parent-owned dev World delivers the queue, because only those
+   * deliveries install the context that resolves the selector.
+   */
+  readonly durableArtifactsReference?: "development-generation";
   readonly kind: "development";
   readonly moduleMapLoaderPath: string;
 }
@@ -37,6 +44,7 @@ export function resolveNitroCompiledArtifactsSource(
       config.appRoot;
 
     return createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot, {
+      durableReference: config.durableArtifactsReference,
       moduleMapLoaderPath: config.moduleMapLoaderPath,
       sandboxAppRoot: config.appRoot,
     });

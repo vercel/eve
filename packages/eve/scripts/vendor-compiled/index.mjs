@@ -32,10 +32,12 @@ import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
 import experimentalAiSdkCodeMode from "./experimental-ai-sdk-code-mode.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
+import envRunner from "./env-runner.mjs";
 import grayMatter from "./gray-matter.mjs";
 import jose from "./jose.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
 import jsonSchema from "./json-schema.mjs";
+import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
 import semver from "./semver.mjs";
 import turndown from "./turndown.mjs";
@@ -52,11 +54,13 @@ export const MODULES = [
   commander,
   experimentalAiSdkCodeMode,
   eventsourceParserStream,
+  envRunner,
   google,
   grayMatter,
   jose,
   jsoncParser,
   jsonSchema,
+  marked,
   mcp,
   openai,
   opentelemetryApi,

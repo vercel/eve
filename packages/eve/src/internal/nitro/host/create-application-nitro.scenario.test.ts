@@ -23,7 +23,11 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
-import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type {
+  NitroBuildSurface,
+  PreparedApplicationHost,
+  PreparedDevelopmentApplicationHost,
+} from "#internal/nitro/host/types.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 
 const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
@@ -84,7 +88,7 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
   };
 }
 
-function createPreparedHost(): PreparedApplicationHost {
+function createPreparedHost(): PreparedDevelopmentApplicationHost {
   const appRoot = "/tmp/weather-agent";
   const paths = resolveCompilerArtifactPaths(appRoot);
   const metadata: CompileMetadata = {
@@ -142,7 +146,23 @@ function createPreparedHost(): PreparedApplicationHost {
     } as PreparedApplicationHost["compiledArtifacts"],
     scheduleRegistrations: [],
     schedules: [],
-    workflowBuildDir: `${appRoot}/.eve/nitro/workflow`,
+    generation: {
+      fingerprint: "runtime-fingerprint",
+      runtimeAppRoot: `${appRoot}/.eve/dev-runtime/snapshots/test/source/app`,
+      snapshotRoot: `${appRoot}/.eve/dev-runtime/snapshots/test`,
+      snapshotSourceRoot: `${appRoot}/.eve/dev-runtime/snapshots/test/source`,
+      sourceRoot: appRoot,
+    },
+    workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
+    workspaceExtensions: [],
+    workspace: {
+      artifactsDir: `${appRoot}/.eve/dev-hosts/test/artifacts`,
+      compilerArtifactsDir: `${appRoot}/.eve/dev-hosts/test/compiler`,
+      nitroBuildDir: `${appRoot}/.eve/dev-hosts/test/nitro`,
+      nitroOutputDir: `${appRoot}/.eve/dev-hosts/test/output`,
+      rootDir: `${appRoot}/.eve/dev-hosts/test`,
+      workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
+    },
   };
 }
 
@@ -492,7 +512,7 @@ describe("application Nitro creation", () => {
     ).toBeNull();
   });
 
-  it("merges default server external packages with configured hosted dependencies", async () => {
+  it("merges framework and configured hosted dependencies", async () => {
     const allNitroStub = createNitroStub();
     const appNitroStub = createNitroStub();
     const flowNitroStub = createNitroStub();
@@ -527,7 +547,7 @@ describe("application Nitro creation", () => {
     for (const call of createNitroMock.mock.calls.slice(0, 3)) {
       const traceDeps = call[0].traceDeps;
       expect(traceDeps).toEqual(
-        expect.arrayContaining(["@napi-rs/keyring", "@prisma/client", "sharp", "fixture-external"]),
+        expect.arrayContaining(["@napi-rs/keyring", "sharp", "fixture-external"]),
       );
       expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
         1,
@@ -581,7 +601,7 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("traces framework and server defaults even when no externals are configured", async () => {
+  it("leaves Nitro to classify unconfigured hosted dependencies", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -594,17 +614,7 @@ describe("application Nitro creation", () => {
       createProductionOptions(preparedHost, "all"),
     );
 
-    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(
-      expect.arrayContaining([
-        "@aws-sdk/client-kms",
-        "@aws-sdk/client-sso",
-        "@datadog/flagging-core",
-        "@napi-rs/keyring",
-        "@prisma/client",
-        "@smithy/util-stream",
-        "dd-trace",
-      ]),
-    );
+    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(["@napi-rs/keyring"]);
   });
 
   it("includes the Workflow sandbox runtime plugin only when Workflow is enabled", async () => {

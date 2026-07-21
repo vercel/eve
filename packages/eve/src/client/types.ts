@@ -2,6 +2,7 @@ import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -95,13 +96,6 @@ export interface ClientOptions {
   readonly redirect?: ClientRedirectPolicy;
 
   /**
-   * Maximum number of stream reconnection attempts per message turn.
-   *
-   * @default 3
-   */
-  readonly maxReconnectAttempts?: number;
-
-  /**
    * Keep a session's continuation token after a normal `session.completed`
    * boundary.
    *
@@ -174,8 +168,9 @@ export interface SendTurnPayload<TOutput = unknown> {
  */
 export interface StreamOptions {
   /**
-   * Number of events already consumed. The server will skip events before
-   * this index.
+   * Absolute event index to start from. Negative values read relative to the
+   * current tail (`-1` starts at the latest event). Relative-tail streams do
+   * not reconnect automatically because their absolute cursor is unknown.
    */
   readonly startIndex?: number;
 
@@ -183,6 +178,14 @@ export interface StreamOptions {
    * Abort signal for cancelling the stream.
    */
   readonly signal?: AbortSignal;
+}
+
+/** Result of requesting cancellation for a client session's active turn. */
+export interface CancelSessionResult {
+  /** Session whose active turn was targeted. */
+  readonly sessionId: string;
+  /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
+  readonly status: CancelTurnStatus;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import type { AgentInfoResult } from "#client/index.js";
+import { hasEnvValue, resolveGatewayCredential } from "#internal/resolve-model-endpoint-status.js";
 import { pathExists } from "#setup/path-exists.js";
 
 /** One boot-time setup problem the TUI can point at a fixing command. */
@@ -44,11 +45,6 @@ type ModelProviderAccess =
         | { status: "unknown" };
     };
 
-function hasEnvValue(env: Record<string, string | undefined>, key: string): boolean {
-  const value = env[key];
-  return value !== undefined && value.trim().length > 0;
-}
-
 /**
  * Resolves the local TUI's current model-provider state into the agent-info
  * snapshot it caches. The local TUI and dev server share `process.env`, so a
@@ -91,9 +87,15 @@ function modelProviderAccess(
   if (model?.routing?.kind === "external") return { kind: "external" };
   if (model?.routing?.kind !== "gateway") return { kind: "unknown" };
 
-  // The compiled routing decides whether gateway credentials apply. A freshly
-  // loaded API key outranks a stale OIDC endpoint, matching gateway resolution.
-  if (hasEnvValue(context.env, "AI_GATEWAY_API_KEY")) {
+  // The compiled routing decides whether gateway credentials apply. Local
+  // ranking delegates to the one precedence authority; the server-reported
+  // endpoint snapshot slots between a freshly loaded key (which outranks a
+  // stale snapshot) and a local OIDC token (which the snapshot outranks).
+  const local = resolveGatewayCredential({
+    apiKeyInEnv: hasEnvValue(context.env["AI_GATEWAY_API_KEY"]),
+    oidcAvailable: hasEnvValue(context.env["VERCEL_OIDC_TOKEN"]),
+  });
+  if (local?.credential === "api-key") {
     return { kind: "gateway", runtime: { status: "connected", credential: "api-key" } };
   }
   const endpoint = model.endpoint;
@@ -103,8 +105,8 @@ function modelProviderAccess(
       runtime: { status: "connected", credential: endpoint.credential },
     };
   }
-  if (hasEnvValue(context.env, "VERCEL_OIDC_TOKEN")) {
-    return { kind: "gateway", runtime: { status: "connected", credential: "oidc" } };
+  if (local !== undefined) {
+    return { kind: "gateway", runtime: { status: "connected", credential: local.credential } };
   }
   if (endpoint?.kind === "gateway") return { kind: "gateway", runtime: { status: "disconnected" } };
   return { kind: "gateway", runtime: { status: "unknown" } };

@@ -12,7 +12,6 @@ import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 export type HarnessRuntimeActionDefinition = {
   readonly kind: "remote-agent-call" | "subagent-call";
   readonly nodeId: string;
-  readonly recursive?: true;
   readonly remoteAgentName?: string;
   readonly subagentName: string;
 };

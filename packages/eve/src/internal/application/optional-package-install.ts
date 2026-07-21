@@ -5,19 +5,9 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 
-/**
- * Environment flag set by `eve dev` so runtime code can distinguish the
- * interactive development server from production processes. Optional
- * engine packages are auto-installed only when this is set.
- */
-export const EVE_DEV_ENV_FLAG = "EVE_DEV";
+import { EVE_DEV_ENV_FLAG, isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
-/**
- * Reports whether this process belongs to an `eve dev` session.
- */
-export function isEveDevEnvironment(): boolean {
-  return process.env[EVE_DEV_ENV_FLAG] === "1";
-}
+export { EVE_DEV_ENV_FLAG, isEveDevEnvironment };
 
 export type ProjectPackageManager = "bun" | "npm" | "pnpm" | "yarn";
 
@@ -180,7 +170,8 @@ export async function loadOptionalEnginePackage<T>(input: {
   }
 }
 
-async function importInstalledEnginePackage<T>(input: {
+/** Imports an optional engine from the application without installing it. */
+export async function importInstalledEnginePackage<T>(input: {
   readonly appRoot: string;
   readonly packageName: string;
 }): Promise<T> {

@@ -1,9 +1,13 @@
+import { AGENT_TOOL_DEFINITION } from "#runtime/framework-tools/agent.js";
 import { ASK_QUESTION_TOOL_DEFINITION } from "#runtime/framework-tools/ask-question.js";
 import { BASH_TOOL_DEFINITION } from "#runtime/framework-tools/bash.js";
 import { GLOB_TOOL_DEFINITION } from "#runtime/framework-tools/glob.js";
 import { GREP_TOOL_DEFINITION } from "#runtime/framework-tools/grep.js";
 import { READ_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/read-file.js";
-import { SKILL_TOOL_DEFINITION } from "#runtime/framework-tools/skill.js";
+import {
+  createSkillToolDefinition,
+  SKILL_TOOL_DEFINITION,
+} from "#runtime/framework-tools/skill.js";
 import { TODO_TOOL_DEFINITION } from "#runtime/framework-tools/todo.js";
 import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
@@ -15,9 +19,9 @@ export { ReadFileStateKey } from "#runtime/framework-tools/file-state.js";
 export type { TodoItem, TodoState } from "#runtime/framework-tools/todo.js";
 export { TodoStateKey } from "#runtime/framework-tools/todo.js";
 
-import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { ResolvedSkillDefinition, ResolvedToolDefinition } from "#runtime/types.js";
 
-const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
+const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ASK_QUESTION_TOOL_DEFINITION,
   BASH_TOOL_DEFINITION,
   GLOB_TOOL_DEFINITION,
@@ -30,16 +34,37 @@ const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   SKILL_TOOL_DEFINITION,
 ];
 
+const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
+  ...REGISTERED_FRAMEWORK_TOOLS,
+  AGENT_TOOL_DEFINITION,
+];
+
 /**
  * Returns framework-owned tool definitions registered in the tool registry
  * alongside authored tools during graph resolution.
  *
- * `connection_search` is no longer in this list — it is registered as a
- * framework dynamic tool resolver in the graph resolution path.
+ * `connection_search` is no longer in this list. The graph resolution path
+ * registers it as a framework dynamic tool resolver.
  */
-export function getFrameworkToolDefinitions(_config?: {
+export function getFrameworkToolDefinitions(config?: {
+  readonly authoredSkills?: readonly ResolvedSkillDefinition[];
   readonly hasConnections?: boolean;
 }): readonly ResolvedToolDefinition[] {
+  const authoredSkills = config?.authoredSkills;
+  if (authoredSkills === undefined) return REGISTERED_FRAMEWORK_TOOLS;
+
+  return REGISTERED_FRAMEWORK_TOOLS.map((definition) =>
+    definition.name === SKILL_TOOL_DEFINITION.name
+      ? createSkillToolDefinition(authoredSkills)
+      : definition,
+  );
+}
+
+/**
+ * Returns every static framework-owned tool definition, including tools such
+ * as `agent` that the runtime does not register in the tool registry.
+ */
+export function getAllFrameworkToolDefinitions(): readonly ResolvedToolDefinition[] {
   return ALL_FRAMEWORK_TOOLS;
 }
 
@@ -53,5 +78,5 @@ export function getFrameworkToolDefinitions(_config?: {
  * as an authoring error rather than silently dropping the request.
  */
 export function getAllFrameworkToolNames(): ReadonlySet<string> {
-  return new Set(ALL_FRAMEWORK_TOOLS.map((def) => def.name));
+  return new Set(ALL_FRAMEWORK_TOOLS.map((definition) => definition.name));
 }

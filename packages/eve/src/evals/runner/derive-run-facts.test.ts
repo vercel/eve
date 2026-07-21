@@ -319,6 +319,8 @@ describe("deriveRunFacts", () => {
     const facts = deriveRunFacts(events, { sessionId: "s0" });
     expect(facts.subagentCalls).toEqual([
       {
+        callId: "c1",
+        childSessionId: "s1",
         name: "weather",
         remoteUrl: "http://127.0.0.1:4001",
         output: "Sunny, 72F",
@@ -343,6 +345,7 @@ describe("deriveRunFacts", () => {
 
     expect(facts.subagentCalls).toEqual([
       {
+        callId: "c1",
         name: "weather",
         output: { code: "REMOTE_AGENT_START_FAILED" },
         status: "failed",
@@ -405,7 +408,10 @@ describe("deriveRunFacts", () => {
       turnStarted("t1", 0),
       inputRequested(["r1"]),
       { type: "turn.completed", data: { sequence: 1, turnId: "t1" } },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "eve:test", wait: "next-user-message" },
+      },
     ] as HandleMessageStreamEvent[];
 
     const facts = deriveRunFacts(events);
@@ -421,7 +427,10 @@ describe("deriveRunFacts", () => {
         data: { finishReason: "stop", message: "done", stepIndex: 1, turnId: "t1", sequence: 2 },
       },
       { type: "turn.completed", data: { sequence: 3, turnId: "t1" } },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "eve:test", wait: "next-user-message" },
+      },
     ] as HandleMessageStreamEvent[];
 
     const facts = deriveRunFacts(events);

@@ -3,7 +3,6 @@ name: Bundle Analysis
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main]
     types:
       - opened
       - reopened
@@ -11,12 +10,14 @@ on:
       - labeled
     paths:
       - ".github/workflows/bundle-analysis.yml"
+      - "e2e/fixtures/agent-tools-sandbox/**"
       - "apps/fixtures/weather-agent/**"
       - "package.json"
       - "packages/eve/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "scripts/init-install-report.mjs"
+      - "scripts/build-profile-report.mjs"
       - "scripts/nitro-bundle-report-compare.mjs"
       - "scripts/nitro-bundle-report-budget.mjs"
       - "scripts/nitro-bundle-report.mjs"
@@ -36,6 +37,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BUNDLE_WARNING_ACK_LABEL: acknowledge-bundle-warning
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_USE_EXPERIMENTAL_FRAMEWORKS: "1"
 
     steps:
       - name: Resolve workflow mode
@@ -105,29 +110,30 @@ jobs:
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
         run: pnpm install --frozen-lockfile
 
-      - name: Prepare main baseline worktree
+      - name: Prepare pull request base worktree
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
         id: baseline
         env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          BASELINE_ROOT="$RUNNER_TEMP/eve-main-baseline"
+          BASELINE_ROOT="$RUNNER_TEMP/eve-pr-base"
           rm -rf "$BASELINE_ROOT"
           git worktree add --detach "$BASELINE_ROOT" "$BASE_SHA"
           echo "root=$BASELINE_ROOT" >> "$GITHUB_OUTPUT"
-          echo "label=main (${BASE_SHA:0:7})" >> "$GITHUB_OUTPUT"
+          echo "label=${BASE_REF} (${BASE_SHA:0:7})" >> "$GITHUB_OUTPUT"
 
-      - name: Install main baseline dependencies
+      - name: Install pull request base dependencies
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
         working-directory: ${{ steps.baseline.outputs.root }}
         run: pnpm install --frozen-lockfile
 
-      - name: Build eve package on main baseline
+      - name: Build eve package on pull request base
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
         working-directory: ${{ steps.baseline.outputs.root }}
         run: pnpm --filter eve build
 
-      - name: Resolve weather app on main baseline
+      - name: Resolve weather app on pull request base
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
         id: baseline_weather_app
         working-directory: ${{ steps.baseline.outputs.root }}
@@ -146,26 +152,26 @@ jobs:
             exit 1
           fi
 
-      - name: Build weather app on main baseline in Vercel mode
+      - name: Build weather app on pull request base for size analysis
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
         id: baseline_build
         continue-on-error: true
         working-directory: ${{ steps.baseline.outputs.root }}
-        run: >-
-          VERCEL=1 pnpm --filter "${STEPS_BASELINE_WEATHER_APP_OUTPUTS_FILTER}"
-          exec eve build --skip-sandbox-prewarm
         env:
           STEPS_BASELINE_WEATHER_APP_OUTPUTS_FILTER: ${{ steps.baseline_weather_app.outputs.filter }}
+        run: >-
+          VERCEL=1 pnpm --filter "${STEPS_BASELINE_WEATHER_APP_OUTPUTS_FILTER}" \
+            exec eve build --skip-sandbox-prewarm
 
-      - name: Note skipped main baseline
+      - name: Note skipped pull request base size analysis
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_build.outcome != 'success' }}
         run: |
-          echo "Main baseline build failed; bundle analysis will run without a baseline comparison." >> "$GITHUB_STEP_SUMMARY"
+          echo "Pull request base build failed; bundle analysis will run without a baseline comparison." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Generate main baseline bundle report
+      - name: Generate pull request base bundle report
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_build.outcome == 'success' }}
         env:
-          BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report-main.json
+          BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report-base.json
           STEPS_BASELINE_WEATHER_APP_OUTPUTS_PATH: ${{ steps.baseline_weather_app.outputs.path }}
         working-directory: ${{ steps.baseline.outputs.root }}
         run: |
@@ -176,20 +182,89 @@ jobs:
             --package-label packages/eve \
             --output-json "$BASELINE_REPORT_JSON"
 
+      - name: Build sandbox benchmark on pull request base in Vercel mode
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
+        id: baseline_sandbox_build
+        continue-on-error: true
+        working-directory: ${{ steps.baseline.outputs.root }}
+        env:
+          BASELINE_SANDBOX_BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile-base.json
+        run: |
+          token_args=()
+          if [ -n "${VERCEL_TOKEN:-}" ]; then
+            token_args=(--token "$VERCEL_TOKEN")
+          fi
+          team_args=()
+          if [ -n "${VERCEL_ORG_ID:-}" ]; then
+            team_args=(--team "$VERCEL_ORG_ID")
+          fi
+
+          pnpm --filter agent-tools-sandbox exec vc link --yes \
+            --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
+          pnpm --filter agent-tools-sandbox exec vc env pull --yes --environment=preview \
+            "${token_args[@]}"
+
+          profile_args=()
+          if pnpm --filter agent-tools-sandbox exec eve build --help | grep -Fq -- "--profile"; then
+            profile_args=(--profile "$BASELINE_SANDBOX_BUILD_PROFILE")
+          else
+            echo "Pull request base predates eve build --profile; build timing will report the current build only." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Sandbox templates key on VERCEL_PROJECT_ID at build and runtime.
+          # Do not add VERCEL_TEAM_ID: runtime does not receive it.
+          VERCEL=1 \
+            VERCEL_ENV=preview \
+            VERCEL_TARGET_ENV=preview \
+            VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
+            pnpm --filter agent-tools-sandbox exec eve build "${profile_args[@]}"
+
+      - name: Note skipped sandbox benchmark base
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_sandbox_build.outcome != 'success' }}
+        run: |
+          echo "Pull request base sandbox benchmark failed; build timing will run without a baseline comparison." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build eve package
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
         run: pnpm --filter eve build
 
-      - name: Build weather-agent in Vercel mode
+      - name: Build weather-agent for size analysis
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
         run: >-
           VERCEL=1 pnpm --filter weather-agent
           exec eve build --skip-sandbox-prewarm
 
+      - name: Build sandbox benchmark in Vercel mode
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        env:
+          SANDBOX_BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile.json
+        run: |
+          token_args=()
+          if [ -n "${VERCEL_TOKEN:-}" ]; then
+            token_args=(--token "$VERCEL_TOKEN")
+          fi
+          team_args=()
+          if [ -n "${VERCEL_ORG_ID:-}" ]; then
+            team_args=(--team "$VERCEL_ORG_ID")
+          fi
+
+          pnpm --filter agent-tools-sandbox exec vc link --yes \
+            --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
+          pnpm --filter agent-tools-sandbox exec vc env pull --yes --environment=preview \
+            "${token_args[@]}"
+
+          # Sandbox templates key on VERCEL_PROJECT_ID at build and runtime.
+          # Do not add VERCEL_TEAM_ID: runtime does not receive it.
+          VERCEL=1 \
+            VERCEL_ENV=preview \
+            VERCEL_TARGET_ENV=preview \
+            VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
+            pnpm --filter agent-tools-sandbox exec eve build --profile "$SANDBOX_BUILD_PROFILE"
+
       - name: Generate bundle report
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
         env:
-          BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report-main.json
+          BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report-base.json
           BASELINE_REPORT_LABEL: ${{ steps.baseline.outputs.label }}
           HAS_BASELINE_REPORT: ${{ github.event_name == 'pull_request' && steps.baseline_build.outcome == 'success' }}
           BUNDLE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report.json
@@ -216,11 +291,49 @@ jobs:
             --output-json "$BUNDLE_REPORT_JSON" \
             --output-markdown "$BUNDLE_REPORT_MARKDOWN"
 
+      - name: Generate build timing report
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        env:
+          BASELINE_BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile-base.json
+          BASELINE_BUILD_PROFILE_LABEL: ${{ steps.baseline.outputs.label }}
+          BUILD_PROFILE: ${{ runner.temp }}/sandbox-build-profile.json
+          BUILD_PROFILE_REPORT_JSON: ${{ runner.temp }}/sandbox-build-profile-report.json
+          BUILD_PROFILE_REPORT_MARKDOWN: ${{ runner.temp }}/sandbox-build-profile-report.md
+          HAS_BASELINE_BUILD_PROFILE: ${{ github.event_name == 'pull_request' && steps.baseline_sandbox_build.outcome == 'success' }}
+        run: |
+          report_args=()
+          if [ "$HAS_BASELINE_BUILD_PROFILE" = "true" ] && [ -f "$BASELINE_BUILD_PROFILE" ]; then
+            report_args=(
+              --baseline-profile "$BASELINE_BUILD_PROFILE"
+              --baseline-label "$BASELINE_BUILD_PROFILE_LABEL"
+            )
+          fi
+
+          node ./scripts/build-profile-report.mjs \
+            --profile "$BUILD_PROFILE" \
+            --app-label e2e/fixtures/agent-tools-sandbox \
+            --sandbox-prewarm included \
+            --require-phase sandbox.prewarm \
+            "${report_args[@]}" \
+            --output-json "$BUILD_PROFILE_REPORT_JSON" \
+            --output-markdown "$BUILD_PROFILE_REPORT_MARKDOWN"
+
+      - name: Combine bundle and timing reports
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        env:
+          ANALYSIS_REPORT_MARKDOWN: ${{ runner.temp }}/weather-agent-analysis-report.md
+          BUILD_PROFILE_REPORT_MARKDOWN: ${{ runner.temp }}/sandbox-build-profile-report.md
+          BUNDLE_REPORT_MARKDOWN: ${{ runner.temp }}/weather-agent-bundle-report.md
+        run: |
+          cat "$BUNDLE_REPORT_MARKDOWN" > "$ANALYSIS_REPORT_MARKDOWN"
+          printf '\n\n' >> "$ANALYSIS_REPORT_MARKDOWN"
+          cat "$BUILD_PROFILE_REPORT_MARKDOWN" >> "$ANALYSIS_REPORT_MARKDOWN"
+
       - name: Publish job summary
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
         env:
-          BUNDLE_REPORT_MARKDOWN: ${{ runner.temp }}/weather-agent-bundle-report.md
-        run: cat "$BUNDLE_REPORT_MARKDOWN" >> "$GITHUB_STEP_SUMMARY"
+          ANALYSIS_REPORT_MARKDOWN: ${{ runner.temp }}/weather-agent-analysis-report.md
+        run: cat "$ANALYSIS_REPORT_MARKDOWN" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload bundle report artifact
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
@@ -230,18 +343,21 @@ jobs:
           path: |
             ${{ runner.temp }}/weather-agent-bundle-report.json
             ${{ runner.temp }}/weather-agent-bundle-report.md
+            ${{ runner.temp }}/sandbox-build-profile*.json
+            ${{ runner.temp }}/sandbox-build-profile*.md
+            ${{ runner.temp }}/weather-agent-analysis-report.md
 
       - name: Update pull request comment
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          BUNDLE_REPORT_MARKDOWN: ${{ runner.temp }}/weather-agent-bundle-report.md
+          ANALYSIS_REPORT_MARKDOWN: ${{ runner.temp }}/weather-agent-analysis-report.md
         with:
           script: |
             const fs = require("node:fs");
 
             const marker = "<!-- eve-weather-agent-bundle-analysis -->";
-            const reportBody = fs.readFileSync(process.env.BUNDLE_REPORT_MARKDOWN, "utf8").trim();
+            const reportBody = fs.readFileSync(process.env.ANALYSIS_REPORT_MARKDOWN, "utf8").trim();
             const body = `${marker}\n${reportBody}`;
 
             const comments = await github.paginate(github.rest.issues.listComments, {

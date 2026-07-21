@@ -61,9 +61,9 @@ export const webFetch: ToolDefinition = toPublicToolDefinition(WEB_FETCH_TOOL_DE
 export const todo: ToolDefinition = toPublicToolDefinition(TODO_TOOL_DEFINITION);
 
 /**
- * Framework-provided skill loading tool (`load_skill`). Reads a named skill's
- * instructions from the sandbox and returns them as the tool result. It is
- * only useful when the agent declares skills: with no skills available the
+ * Framework-provided skill loading tool (`load_skill`). Returns a named
+ * authored skill's instructions directly; dynamic skills remain sandbox-backed.
+ * It is only useful when the agent declares skills: with no skills available the
  * framework does not surface skill descriptions to the model, so the model has
  * nothing to load.
  */

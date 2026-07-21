@@ -8,6 +8,12 @@ import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 
 const scenarioApp = useScenarioApp();
+const compatibilityManifest = JSON.stringify({
+  kind: "eve-extension",
+  formatVersion: 1,
+  builtWithEve: "0.0.0-test",
+  requires: { extension: 1, tool: 1, config: 1 },
+});
 
 /**
  * Runs the `eve eval` / `eve dev` path: the module map is hydrated from authored
@@ -30,9 +36,10 @@ describe("mounted extension via authored-source loader", () => {
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
           name: "@acme/crm",
           type: "module",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest,
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           // Minimal pass-through Standard Schema — this scenario tests binding, not validation.

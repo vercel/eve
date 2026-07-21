@@ -1,8 +1,35 @@
-import type { ContentPart, ToolApprovalRequestOutput, ToolSet, TypedToolCall } from "ai";
+import type { ContentPart, ModelMessage, ToolSet, TypedToolCall } from "ai";
+import { z } from "zod";
 
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/input-requests.js";
+
+// Persisted history parts lose AI SDK typing on the storage round trip. The
+// schemas are the single source for the runtime narrowing and the static
+// types, so the checks and the annotations cannot drift apart.
+const ToolCallDescriptorSchema = z.object({
+  input: z.unknown(),
+  toolCallId: z.string(),
+  toolName: z.string(),
+});
+
+type ToolCallDescriptor = z.infer<typeof ToolCallDescriptorSchema>;
+
+const PersistedToolCallSchema = ToolCallDescriptorSchema.extend({
+  type: z.literal("tool-call"),
+});
+
+// Malformed optional metadata degrades to `undefined` instead of dropping the
+// whole approval request: a broken `toolCall` falls back to the sibling
+// tool-call lookup and a broken `isAutomatic` counts as not automatic.
+const ToolApprovalRequestSchema = z.object({
+  approvalId: z.string(),
+  isAutomatic: z.boolean().optional().catch(undefined),
+  toolCall: ToolCallDescriptorSchema.optional().catch(undefined),
+  toolCallId: z.string().optional().catch(undefined),
+  type: z.literal("tool-approval-request"),
+});
 
 /**
  * Extracts question input requests from tool calls that target the
@@ -11,6 +38,13 @@ import { createRuntimeToolCallActionFromToolCall } from "#harness/input-requests
 export function extractQuestionInputRequests(input: {
   readonly excludedCallIds: ReadonlySet<string>;
   readonly toolCalls: readonly TypedToolCall<ToolSet>[];
+}): InputRequest[] {
+  return extractQuestionRequests(input);
+}
+
+function extractQuestionRequests(input: {
+  readonly excludedCallIds: ReadonlySet<string>;
+  readonly toolCalls: readonly ToolCallDescriptor[];
 }): InputRequest[] {
   const requests: InputRequest[] = [];
 
@@ -66,34 +100,50 @@ export function extractToolApprovalInputRequests(input: {
   readonly content: readonly ContentPart<ToolSet>[];
   readonly excludedCallIds?: ReadonlySet<string>;
 }): InputRequest[] {
+  return extractApprovalRequests(input);
+}
+
+// Persisted history parts lose AI SDK typing, so this core narrows each part
+// at runtime. The exported wrapper above keeps live call sites compile-checked
+// against the AI SDK shapes.
+function extractApprovalRequests(input: {
+  readonly content: readonly unknown[];
+  readonly excludedCallIds?: ReadonlySet<string>;
+  readonly includedRequestIds?: ReadonlySet<string>;
+}): InputRequest[] {
   const requests: InputRequest[] = [];
-  const toolCallsById = new Map<string, TypedToolCall<ToolSet>>();
+  const toolCallsById = new Map<string, ToolCallDescriptor>();
 
   for (const part of input.content) {
-    if (part.type === "tool-call") {
-      toolCallsById.set(part.toolCallId, part);
+    const toolCall = PersistedToolCallSchema.safeParse(part);
+    if (toolCall.success) {
+      toolCallsById.set(toolCall.data.toolCallId, toolCall.data);
     }
   }
 
   for (const part of input.content) {
-    if (part.type !== "tool-approval-request") {
+    const parsed = ToolApprovalRequestSchema.safeParse(part);
+    if (!parsed.success) {
+      continue;
+    }
+    const approval = parsed.data;
+
+    if (
+      input.includedRequestIds !== undefined &&
+      !input.includedRequestIds.has(approval.approvalId)
+    ) {
       continue;
     }
 
-    const approvalRequest = part as ToolApprovalRequestOutput<ToolSet> & {
-      readonly toolCall?: TypedToolCall<ToolSet>;
-      readonly toolCallId?: string;
-    };
     // AI SDK records automatic decisions as request/response pairs for history;
     // only unresolved requests should become eve input.
-    if (approvalRequest.isAutomatic === true) {
+    if (approval.isAutomatic === true) {
       continue;
     }
+
     const toolCall =
-      approvalRequest.toolCall ??
-      (approvalRequest.toolCallId === undefined
-        ? undefined
-        : toolCallsById.get(approvalRequest.toolCallId));
+      approval.toolCall ??
+      (approval.toolCallId === undefined ? undefined : toolCallsById.get(approval.toolCallId));
     if (toolCall === undefined) {
       continue;
     }
@@ -102,12 +152,8 @@ export function extractToolApprovalInputRequests(input: {
       continue;
     }
 
-    const action = createRuntimeToolCallActionFromToolCall({
-      toolCall,
-    });
-
     requests.push({
-      action,
+      action: createRuntimeToolCallActionFromToolCall({ toolCall }),
       allowFreeform: false,
       display: "confirmation",
       options: [
@@ -115,8 +161,55 @@ export function extractToolApprovalInputRequests(input: {
         { id: "deny", label: "No" },
       ],
       prompt: `Approve tool call: ${toolCall.toolName}`,
-      requestId: approvalRequest.approvalId,
+      requestId: approval.approvalId,
     });
+  }
+
+  return requests;
+}
+
+/**
+ * Recovers request metadata for submitted input response IDs from model
+ * history. The newest occurrence wins so compacted or repeated history does
+ * not replace the request that is closest to the current turn.
+ */
+export function extractHistoricalInputRequests(input: {
+  readonly history: readonly ModelMessage[];
+  readonly requestIds: ReadonlySet<string>;
+}): ReadonlyMap<string, InputRequest> {
+  const requests = new Map<string, InputRequest>();
+
+  for (let index = input.history.length - 1; index >= 0; index -= 1) {
+    const message = input.history[index];
+    if (message?.role !== "assistant" || !Array.isArray(message.content)) {
+      continue;
+    }
+
+    const toolCalls = message.content.flatMap((part: unknown) => {
+      const toolCall = PersistedToolCallSchema.safeParse(part);
+      return toolCall.success && input.requestIds.has(toolCall.data.toolCallId)
+        ? [toolCall.data]
+        : [];
+    });
+    const candidates = [
+      ...extractQuestionRequests({ excludedCallIds: new Set(), toolCalls }),
+      ...extractApprovalRequests({
+        content: message.content,
+        includedRequestIds: input.requestIds,
+      }),
+    ];
+
+    for (const request of candidates) {
+      if (!input.requestIds.has(request.requestId) || requests.has(request.requestId)) {
+        continue;
+      }
+
+      requests.set(request.requestId, request);
+    }
+
+    if (requests.size === input.requestIds.size) {
+      break;
+    }
   }
 
   return requests;

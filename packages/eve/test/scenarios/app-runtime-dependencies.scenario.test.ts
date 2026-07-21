@@ -722,9 +722,7 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).toContain(
       "This tool requires sandbox access on the runtime context.",
     );
-    expect(serverModuleSource).toContain(
-      "The load_skill tool requires sandbox access on the runtime context.",
-    );
+    expect(serverModuleSource).toContain("The dynamic skill");
     expect(serverModuleSource).toContain("URL must start with http:// or https://");
   }, 30_000);
 
@@ -767,8 +765,11 @@ describe("app runtime dependency tracing", () => {
     expect(vercelFunctionsSource).not.toContain("chokidar");
     expect(vercelFunctionsSource).not.toContain("[eve:dev]");
     expect(vercelFunctionsSource).not.toContain("rollup:reload");
+    // The world-local canary is its config env var, not its error-class
+    // names: the semantic-error catalog legitimately embeds names like
+    // `DataDirAccessError` as matcher strings without bundling any
+    // world-local code.
     expect(vercelFunctionsSource).not.toContain("WORKFLOW_LOCAL_DATA_DIR");
-    expect(vercelFunctionsSource).not.toContain("DataDirAccessError");
   }, 30_000);
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {

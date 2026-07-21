@@ -154,7 +154,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_1"),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -227,7 +227,9 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
+      .mockResolvedValueOnce(
+        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
+      );
 
     let randomWord = "jazz";
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
@@ -280,7 +282,9 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
+      .mockResolvedValueOnce(
+        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
+      );
 
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
 
@@ -356,7 +360,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_1"),
     ];
 
     vi.spyOn(globalThis, "fetch")
@@ -506,7 +510,7 @@ describe("useEveAgent", () => {
         sequence: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_1"),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -551,7 +555,9 @@ describe("useEveAgent", () => {
     const startResponse = createDeferred<Response>();
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
+      .mockResolvedValueOnce(
+        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
+      );
 
     let helpers: UseEveAgentHelpers<readonly string[]> | undefined;
 

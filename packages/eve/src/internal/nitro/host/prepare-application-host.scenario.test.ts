@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,10 +9,6 @@ import {
   createApplicationBuildWorkspace,
   removeApplicationBuildWorkspace,
 } from "#internal/application/build-workspace.js";
-import {
-  pruneDevelopmentRuntimeArtifactsSnapshots,
-  resolveDevelopmentRuntimeArtifactsPointerPath,
-} from "#internal/nitro/dev-runtime-artifacts.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 import {
   prepareDevelopmentApplicationHost,
@@ -20,17 +16,6 @@ import {
 } from "#internal/nitro/host/prepare-application-host.js";
 
 const createAppRoot = useTemporaryAppRoots();
-
-interface DevelopmentRuntimePointer {
-  readonly runtimeAppRoot: string;
-  readonly snapshotRoot: string;
-}
-
-async function readDevelopmentRuntimePointer(appRoot: string): Promise<DevelopmentRuntimePointer> {
-  return JSON.parse(
-    await readFile(resolveDevelopmentRuntimeArtifactsPointerPath(appRoot), "utf8"),
-  ) as DevelopmentRuntimePointer;
-}
 
 describe("application host preparation", () => {
   afterEach(() => {
@@ -105,25 +90,28 @@ describe("application host preparation", () => {
     await writeFile(instrumentationModulePath, "export default {};\n");
 
     const firstHost = await prepareDevelopmentApplicationHost(appRoot);
-    const firstPointer = await readDevelopmentRuntimePointer(appRoot);
-    const stableHostDirectory = join(appRoot, ".eve", "host");
-    const stableBootstrapPath = join(stableHostDirectory, "compiled-artifacts-bootstrap.mjs");
+    const firstHostDirectory = firstHost.workspace.artifactsDir;
+    const firstBootstrapPath = join(firstHostDirectory, "compiled-artifacts-bootstrap.mjs");
     const snapshotBootstrapPath = join(
-      firstPointer.runtimeAppRoot,
+      firstHost.generation.runtimeAppRoot,
       ".eve",
       "compile",
       "compiled-artifacts-bootstrap.mjs",
     );
 
-    expect(firstHost.compiledArtifacts.bootstrapPath).toBe(stableBootstrapPath);
+    expect(firstHost.compileResult.paths.compileDirectoryPath).toBe(
+      join(firstHost.workspace.compilerArtifactsDir, "compile"),
+    );
+    expect(existsSync(join(appRoot, ".eve", "compile"))).toBe(false);
+    expect(firstHost.compiledArtifacts.bootstrapPath).toBe(firstBootstrapPath);
     expect(firstHost.compiledArtifacts.workflowWorldPluginPath).toBe(
-      join(stableHostDirectory, "compiled-artifacts-workflow-world.mjs"),
+      join(firstHostDirectory, "compiled-artifacts-workflow-world.mjs"),
     );
     expect(firstHost.compiledArtifacts.bootstrapPath).not.toContain("/.eve/dev-runtime/snapshots/");
     expect(firstHost.compiledArtifacts.instrumentationSourcePath).toBe(
-      join(stableHostDirectory, "compiled-artifacts-instrumentation-source.mjs"),
+      join(firstHostDirectory, "compiled-artifacts-instrumentation-source.mjs"),
     );
-    expect(await readFile(stableBootstrapPath, "utf8")).not.toContain(
+    expect(await readFile(firstBootstrapPath, "utf8")).not.toContain(
       normalizeEsmImportSpecifier(agentModulePath),
     );
     await expect(
@@ -136,19 +124,13 @@ describe("application host preparation", () => {
       'export default { model: "openai/gpt-5.4" };\n// revision two\n',
     );
     const nextHost = await prepareDevelopmentApplicationHost(appRoot);
-    const nextPointer = await readDevelopmentRuntimePointer(appRoot);
 
-    expect(nextHost.compiledArtifacts.bootstrapPath).toBe(stableBootstrapPath);
-    expect(nextPointer.snapshotRoot).not.toBe(firstPointer.snapshotRoot);
+    expect(nextHost.workspace.rootDir).not.toBe(firstHost.workspace.rootDir);
+    expect(nextHost.generation.snapshotRoot).not.toBe(firstHost.generation.snapshotRoot);
 
-    await pruneDevelopmentRuntimeArtifactsSnapshots({
-      appRoot,
-      now: Date.now() + 1_000,
-      recentWindowMs: 0,
-      retainCount: 0,
-    });
+    await rm(firstHost.generation.snapshotRoot, { force: true, recursive: true });
 
-    expect(existsSync(firstPointer.snapshotRoot)).toBe(true);
-    expect(existsSync(stableBootstrapPath)).toBe(true);
+    expect(existsSync(firstHost.generation.snapshotRoot)).toBe(false);
+    expect(existsSync(firstBootstrapPath)).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
 import { buildAgentInfoResponseFromManifest } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
 import {
   loadAgentInfoManifestData,
@@ -17,10 +18,6 @@ async function createAgentInfoPayload(input: NitroArtifactsConfig) {
     mode: input.kind,
     gatewayCredentials: await resolveGatewayCredentialPresence(data.manifest.config.model.routing),
   });
-}
-
-function hasEnvValue(value: string | undefined): boolean {
-  return value !== undefined && value.trim() !== "";
 }
 
 /**

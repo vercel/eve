@@ -6,8 +6,8 @@ import {
 /**
  * Reads the dev server's runtime-artifacts revision — an opaque token that
  * changes whenever the authored-source watcher recompiles (HMR). Consumers
- * compare successive values to detect "the agent changed under me": the dev
- * client rotates an active session before the next turn or while idle.
+ * compare successive values to detect "the agent changed under me" and
+ * refresh the development UI before the next turn.
  *
  * Never throws: any transport failure, non-2xx response, or malformed body
  * resolves to `undefined`, so callers treat "unknown" and "unreachable" the

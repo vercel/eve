@@ -19,7 +19,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext } from "#context/serialize.js";
 import {
   getPendingRuntimeActionBatch,
-  recordPendingSubagentChildToken,
+  recordPendingSubagentChild,
 } from "#harness/runtime-actions.js";
 import {
   createSubagentCalledEvent,
@@ -141,14 +141,37 @@ export async function dispatchRuntimeActionsStep(input: {
             session,
             source,
           });
-          const handle = await childRuntime.run(runInput);
+          try {
+            const handle = await childRuntime.run(runInput);
+            childSessionId = handle.sessionId;
+          } catch (error) {
+            logError(log, "local subagent start failed", error, {
+              callId: action.callId,
+              nodeId: action.nodeId,
+              subagentName: action.subagentName,
+            });
+            results.push({
+              callId: action.callId,
+              isError: true,
+              kind: "subagent-result",
+              output: {
+                code: "SUBAGENT_START_FAILED",
+                message: toErrorMessage(error),
+              },
+              subagentName: action.subagentName,
+            });
+            continue;
+          }
 
-          nextSession = recordPendingSubagentChildToken({
+          nextSession = recordPendingSubagentChild({
             callId: action.callId,
-            childContinuationToken,
+            child: {
+              continuationToken: childContinuationToken,
+              kind: "local",
+              sessionId: childSessionId,
+            },
             session: nextSession,
           });
-          childSessionId = handle.sessionId;
           name = action.name;
           toolName = action.subagentName;
           break;
@@ -180,6 +203,11 @@ export async function dispatchRuntimeActionsStep(input: {
           name = action.name;
           remote = { url: resolvedRemote.url };
           toolName = action.remoteAgentName;
+          nextSession = recordPendingSubagentChild({
+            callId: action.callId,
+            child: { kind: "remote", sessionId: childSessionId },
+            session: nextSession,
+          });
           break;
         }
         default:

@@ -62,10 +62,12 @@ describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
       cause,
       message: expect.stringContaining(
         'Failed to prewarm microsandbox template "template-key" [database]: ' +
-          "Migration file of version 'm20260606_000001_named_volume_kinds' is missing. " +
-          "Check that the microsandbox npm package and installed VM runtime use the same version. " +
-          "If versions changed, use a clean MSB_HOME or migrate the existing database.",
+          "Migration file of version 'm20260606_000001_named_volume_kinds' is missing.",
       ),
+      // The per-code remediation travels as a structured hint, not prose.
+      hint:
+        "Check that the microsandbox npm package and installed VM runtime use the same version. " +
+        "If versions changed, use a clean MSB_HOME or migrate the existing database.",
     });
   });
 });
