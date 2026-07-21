@@ -20,3 +20,37 @@ const chatRoute = createChatRoute({
 });
 
 export const POST = chatRoute.POST;
+
+// TEMPORARY debug probe (preview only) — remove before merge. Open
+// /api/chat in the browser to see help-eve's exact response to an
+// authenticated session create from this deployment.
+export const GET = async () => {
+  if (process.env.VERCEL_ENV === "production") {
+    return new Response("Not found", { status: 404 });
+  }
+
+  try {
+    const token = await getVercelOidcToken();
+    const response = await fetch("https://help-ash.vercel.sh/eve/v1/session", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+        "x-vercel-trusted-oidc-idp-token": token,
+      },
+      body: JSON.stringify({ message: "debug ping from eve-docs preview" }),
+    });
+    const body = (await response.text()).slice(0, 500);
+    const result = {
+      status: response.status,
+      body,
+      tokenPayload: JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString()),
+    };
+    console.log("[help-eve debug]", JSON.stringify(result));
+    return Response.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log("[help-eve debug] error", message);
+    return Response.json({ error: message }, { status: 500 });
+  }
+};
