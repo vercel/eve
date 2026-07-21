@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
@@ -9,6 +9,7 @@ import { createDefaultSetupState } from "../state.js";
 import type { OutputSink } from "../step.js";
 import { runHeadless, runInteractive } from "../runner.js";
 import {
+  fetchGatewayCatalog,
   modelOptionsFromCatalog,
   parseGatewayCatalog,
   selectModel,
@@ -17,6 +18,24 @@ import {
 } from "./select-model.js";
 
 const silentSink: OutputSink = { write: () => {} };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+it("identifies eve when fetching the AI Gateway catalog", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify({ data: [] }), {
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await fetchGatewayCatalog();
+
+  const [, init] = fetchMock.mock.calls[0]!;
+  expect(new Headers(init?.headers).get("user-agent")).toMatch(/^eve\/.+/);
+});
 
 const CATALOG: GatewayCatalogModel[] = [
   {

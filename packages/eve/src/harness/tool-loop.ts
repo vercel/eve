@@ -19,6 +19,7 @@ import {
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { resolveProviderHeaders } from "#internal/gateway.js";
 import {
   createErrorId,
   createLogger,
@@ -296,27 +297,21 @@ function mergeSystemInstructions(
 /**
  * Builds AI Gateway app attribution headers when the model is gateway-routed.
  *
- * Gateway routing is detected by `typeof model === "string"` — the same
- * condition used for the `gateway-auto` cache path. Returns `undefined`
- * for non-gateway models or when no meaningful attribution is available.
+ * Bare model ids and `gateway.*` model instances route through AI Gateway.
+ * Direct-provider model instances receive no Gateway-specific headers.
  */
 function buildGatewayAttributionHeaders(
   model: LanguageModel,
   runtimeIdentity: ToolLoopHarnessConfig["runtimeIdentity"],
 ): Record<string, string> | undefined {
-  if (typeof model !== "string") {
-    return undefined;
-  }
+  const providerHeaders = resolveProviderHeaders(model);
+  if (providerHeaders === undefined) return undefined;
 
   const title = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
   const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
   const referer = deploymentHost ? `https://${deploymentHost}` : undefined;
 
-  if (!title && !referer) {
-    return undefined;
-  }
-
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...providerHeaders };
   if (title) headers["x-title"] = title;
   if (referer) headers["http-referer"] = referer;
   return headers;
@@ -687,11 +682,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       abortSignal: config.abortSignal,
       emit,
       emissionState,
-      headers: attributionHeaders,
       messages,
       model,
       onCompaction: config.onCompaction,
       resolveModel: config.resolveModel,
+      runtimeIdentity: config.runtimeIdentity,
       session,
       telemetry: enrichTelemetry(telemetryConfig, agentName) ?? undefined,
     }));
@@ -2403,11 +2398,11 @@ async function maybeCompact(input: {
   readonly abortSignal?: AbortSignal;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly headers?: Record<string, string>;
   readonly messages: ModelMessage[];
   readonly model: LanguageModel;
   readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
+  readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
 }): Promise<{ readonly messages: ModelMessage[]; readonly session: HarnessSession }> {
@@ -2444,7 +2439,7 @@ async function maybeCompact(input: {
     session.compaction,
     compaction.providerOptions,
     input.telemetry,
-    input.headers,
+    buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
     input.abortSignal,
   );
 
