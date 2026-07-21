@@ -37,11 +37,11 @@ catalogs:
       specifier: 19.2.3
       version: 19.2.3
     '@vercel/connect':
-      specifier: 0.4.0
-      version: 0.4.0
+      specifier: 0.4.2
+      version: 0.4.2
     '@vercel/sandbox':
-      specifier: 2.3.0
-      version: 2.3.0
+      specifier: 2.8.0
+      version: 2.8.0
     ai:
       specifier: ^7.0.34
       version: 7.0.34
@@ -310,8 +310,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -342,10 +342,10 @@ importers:
         version: 0.41.2
       '@vercel/connect':
         specifier: 'catalog:'
-        version: 0.4.0(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.34(zod@4.4.3))(eve@packages+eve)
+        version: 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.34(zod@4.4.3))(eve@packages+eve)
       '@vercel/oidc':
-        specifier: 3.4.1
-        version: 3.4.1
+        specifier: 3.8.0
+        version: 3.8.0
       ai:
         specifier: 'catalog:'
         version: 7.0.34(zod@4.4.3)
@@ -586,8 +586,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -611,8 +611,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -636,8 +636,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       ai:
         specifier: 'catalog:'
         version: 7.0.34(zod@4.4.3)
@@ -664,8 +664,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -702,8 +702,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -746,8 +746,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -771,8 +771,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -793,8 +793,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -818,8 +818,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -862,8 +862,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -887,8 +887,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -912,8 +912,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -937,8 +937,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -962,8 +962,8 @@ importers:
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
-        specifier: 2.1.2
-        version: 2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+        specifier: 2.1.3
+        version: 2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
       ai:
         specifier: 'catalog:'
         version: 7.0.34(zod@4.4.3)
@@ -1159,14 +1159,14 @@ importers:
         specifier: workspace:*
         version: link:../eve-catalog
       '@vercel/oidc':
-        specifier: 3.5.0
-        version: 3.5.0
+        specifier: 3.8.0
+        version: 3.8.0
       '@vercel/sandbox':
         specifier: 'catalog:'
-        version: 2.3.0
+        version: 2.8.0
       '@vercel/sdk':
-        specifier: 1.28.1
-        version: 1.28.1
+        specifier: 1.28.8
+        version: 1.28.8
       '@workflow/core':
         specifier: 5.0.0-beta.35
         version: 5.0.0-beta.35(@opentelemetry/api@1.9.1)(supports-color@10.2.2)(ws@8.21.1)
@@ -1207,11 +1207,11 @@ importers:
         specifier: 0.6.0
         version: 0.6.0
       env-runner:
-        specifier: 0.1.12
-        version: 0.1.12
+        specifier: 0.1.16
+        version: 0.1.16
       eventsource-parser:
-        specifier: 3.0.8
-        version: 3.0.8
+        specifier: 3.1.0
+        version: 3.1.0
       experimental-ai-sdk-code-mode:
         specifier: 1.0.16
         version: 1.0.16(ai@7.0.34(zod@4.4.3))
@@ -1225,8 +1225,8 @@ importers:
         specifier: 3.3.1
         version: 3.3.1
       just-bash:
-        specifier: 3.0.1
-        version: 3.0.1(supports-color@10.2.2)
+        specifier: 3.1.0
+        version: 3.1.0(supports-color@10.2.2)
       marked:
         specifier: 'catalog:'
         version: 17.0.6
@@ -6548,9 +6548,6 @@ packages:
     cpu: [arm64]
     os: [win32]
 
-  '@tybys/wasm-util@0.10.2':
-    resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
-
   '@tybys/wasm-util@0.10.3':
     resolution: {integrity: sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==}
 
@@ -7131,8 +7128,8 @@ packages:
     resolution: {integrity: sha512-kQF8LGie/Hbdq9/psJxLE7owRTcqMQMhgybU04gCeR7cbQAr5t8OrjefDNColJv1QSSucFt4pLwRiARVmlOnug==}
     engines: {node: '>= 18'}
 
-  '@vercel/connect@0.4.0':
-    resolution: {integrity: sha512-aOui8WoblHcG/1+IoHm46x5ApjJRK3UOK0zHlfj59EarFn7fdcYh8xO5LA6WtjCoAO4SasXzpvCT2ZtG5vW7Xw==}
+  '@vercel/connect@0.4.2':
+    resolution: {integrity: sha512-3Lr2yFI2Z2NPR+T3DWOqrygBpxZUK6H+wCesijT2pV7VmuG8l5ZYSxk4tdzZwF4SWYJOXQFzcELtFLCGvBw5mg==}
     peerDependencies:
       '@ai-sdk/mcp': ^1 || ^2
       '@auth/core': '>=0.37.0'
@@ -7248,20 +7245,12 @@ packages:
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
     engines: {node: '>= 20'}
 
-  '@vercel/oidc@3.4.1':
-    resolution: {integrity: sha512-H6B+/ig/GoahccL3WZjiHayHw1H5KhvTJNceqYulwfK9kkz5iul2hTmYzcJ7tTCQzyd0dutuL9xYFZCyLUqsog==}
-    engines: {node: '>= 20'}
-
-  '@vercel/oidc@3.5.0':
-    resolution: {integrity: sha512-jo7GgeJx2YMkjg9A28pFM5p88n5SnSHvDeNlf9898bRWiG9jPxwedj/gn/2XTw4UOTyQ50uHlrTGSlf/XU5tgw==}
-    engines: {node: '>= 20'}
-
   '@vercel/oidc@3.8.0':
     resolution: {integrity: sha512-r00laGW6Pv778RoR6M2NxX91ycSj+PBwVo+fOb9Bif+F0IyUKt25zrvBzfEzQpeAzbqOgPZyQibEWDdDFApd+A==}
     engines: {node: '>= 20'}
 
-  '@vercel/otel@2.1.2':
-    resolution: {integrity: sha512-PbGyq1lLwWbnftylNcQ6KFxc7DLc8LJdnaU3snM43bgXiWkWsHrgaU/LdUD8sHaSgG8UKuydX/aymNt3J+hzuA==}
+  '@vercel/otel@2.1.3':
+    resolution: {integrity: sha512-Ofvzs9qhftRD1YMLuPnhbXjQZG6IKrJ9AmEKmRHRGfoWlV89ed2gAOkvddkFiZDFZJm2rrFNdeZKRVxoCdnWiw==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': '>=1.9.0 <2.0.0'
@@ -7305,11 +7294,11 @@ packages:
   '@vercel/sandbox@2.1.1':
     resolution: {integrity: sha512-gKhW+YlvU15Qxya7jQKByB+sqA1dWat5zx/rvxT52E3Ryg9MAIXgqD5wd1d+CoJDbdHL26gIOcksTZY5sFpplA==}
 
-  '@vercel/sandbox@2.3.0':
-    resolution: {integrity: sha512-KLhc/sj2JuftgWEivPmmDq3iFLIoYU0XIv+44paTyhk5eGGaqNl6dQdxXSqOf+N31jh55m4UWY7i8oJy8oJRrQ==}
+  '@vercel/sandbox@2.8.0':
+    resolution: {integrity: sha512-1gmIXWgueeBBwBitVl1xqOsYmVv7xr7qX1qXeqwLGZTKGG1SkkpYkDzpWZ8LIDN0PmPGCqE6lvYao3zP8iz5uw==}
 
-  '@vercel/sdk@1.28.1':
-    resolution: {integrity: sha512-QYAX0QStBQak4c9PXunGVERL68cp8r1JcVuQd+SwXGThuZkEHRMpSStnvrO1Ny2nWg9wOeRnS0GEp+md42IVfg==}
+  '@vercel/sdk@1.28.8':
+    resolution: {integrity: sha512-uAl+pEZZnFYRFzE/43ihP3aYTJ+4v0+coiMYobYMqtaERWknYKuRZWEj9Dk9r87yWXfxclsQugXkN42kaOcySw==}
 
   '@vercel/speed-insights@2.0.0':
     resolution: {integrity: sha512-jwkNcrTeafWxjmWq4AHBaptSqZiJkYU5adLC9QBSqeim0GcqDMgN5Ievh8OG1rJ6W3A4l1oiP7qr9CWxGuzu3w==}
@@ -8767,19 +8756,22 @@ packages:
     resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
     engines: {node: '>=0.12'}
 
-  env-runner@0.1.12:
-    resolution: {integrity: sha512-pHBoUIdcYeDUDzLDcsTydFxCVn/rtyQqwcPktpD1VElFEZ58udPfk3NrVxF2MG/sxj8yxGbwbTI7Pqh73u/isA==}
+  env-runner@0.1.16:
+    resolution: {integrity: sha512-2LRJM4P2KLX6J83QZZrMqvgCDt/D5ea7wPcI3yYiy5cG/9rX5QwdwZFx0D7ktWnjdRyZxYjttGGorb5nFqb1CA==}
     hasBin: true
     peerDependencies:
       '@netlify/runtime': ^4.1.23
-      '@vercel/queue': ^0.2.0
+      '@vercel/queue': '>=0.2.0'
       miniflare: ^4.20260515.0
+      wrangler: ^4.0.0
     peerDependenciesMeta:
       '@netlify/runtime':
         optional: true
       '@vercel/queue':
         optional: true
       miniflare:
+        optional: true
+      wrangler:
         optional: true
 
   error-stack-parser-es@1.0.5:
@@ -9070,8 +9062,8 @@ packages:
     resolution: {integrity: sha512-v0eOBUbiaFojBu2s2NPBfYUoRR9GjcDNvCXVaqEf5vVfpIAh9f8RCo4vXTP8c63QRKCFwoLpMpTdPwwhEKVgzA==}
     engines: {node: '>=14.18'}
 
-  eventsource-parser@3.0.8:
-    resolution: {integrity: sha512-70QWGkr4snxr0OXLRWsFLeRBIRPuQOvt4s8QYjmUlmlkyTZkRqS7EDVRZtzU3TiyDbXSzaOeF0XUKy8PchzukQ==}
+  eventsource-parser@3.1.0:
+    resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
     engines: {node: '>=18.0.0'}
 
   execa@3.2.0:
@@ -10196,8 +10188,8 @@ packages:
     resolution: {integrity: sha512-ZZow9HBI5O6EPgSJLUb8n2NKgmVWTwCvHGwFuJlMjvLFqlGG6pjirPhtdsseaLZjSibD8eegzmYpUZwoIlj2cQ==}
     engines: {node: '>=4.0'}
 
-  just-bash@3.0.1:
-    resolution: {integrity: sha512-YVyzCN08fKarUnwqy7rKOAcX+2MLYLnYInuowmUXn3mqhrtd4ieZNBuzdQG+qYV9DqnIWuv9Whiph0WRIWsBtw==}
+  just-bash@3.1.0:
+    resolution: {integrity: sha512-/t28X8EH3+j/zvELGkNhlFV2g6hc3oHBzy6zPBnNq2nqUN0DGS9PsD889JfQ7F6ll08gqFoutiS+VJHK30wZpg==}
     hasBin: true
 
   katex@0.16.47:
@@ -13729,7 +13721,7 @@ snapshots:
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.0.8
+      eventsource-parser: 3.1.0
       zod: 4.4.3
 
   '@ai-sdk/provider-utils@5.0.12(zod@4.4.3)':
@@ -13737,7 +13729,7 @@ snapshots:
       '@ai-sdk/provider': 4.0.3
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
-      eventsource-parser: 3.0.8
+      eventsource-parser: 3.1.0
       zod: 4.4.3
 
   '@ai-sdk/provider@3.0.10':
@@ -15206,7 +15198,7 @@ snapshots:
     dependencies:
       '@emnapi/core': 1.11.1
       '@emnapi/runtime': 1.11.1
-      '@tybys/wasm-util': 0.10.2
+      '@tybys/wasm-util': 0.10.3
     optional: true
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
@@ -18640,11 +18632,6 @@ snapshots:
   '@turbo/windows-arm64@2.9.18':
     optional: true
 
-  '@tybys/wasm-util@0.10.2':
-    dependencies:
-      tslib: 2.8.1
-    optional: true
-
   '@tybys/wasm-util@0.10.3':
     dependencies:
       tslib: 2.8.1
@@ -19169,7 +19156,7 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@0.4.0(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.34(zod@4.4.3))(eve@packages+eve)':
+  '@vercel/connect@0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.34(zod@4.4.3))(eve@packages+eve)':
     dependencies:
       '@vercel/oidc': 3.8.0
     optionalDependencies:
@@ -19448,17 +19435,13 @@ snapshots:
 
   '@vercel/oidc@3.2.0': {}
 
-  '@vercel/oidc@3.4.1': {}
-
-  '@vercel/oidc@3.5.0': {}
-
   '@vercel/oidc@3.8.0':
     dependencies:
       '@vercel/cli-config': 0.2.0
       '@vercel/cli-exec': 1.0.0
       jose: 5.10.0
 
-  '@vercel/otel@2.1.2(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))':
+  '@vercel/otel@2.1.3(@opentelemetry/api-logs@0.214.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.6.1(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/api-logs': 0.214.0
@@ -19486,7 +19469,7 @@ snapshots:
 
   '@vercel/queue@0.4.0(@opentelemetry/api@1.9.1)':
     dependencies:
-      '@vercel/oidc': 3.5.0
+      '@vercel/oidc': 3.8.0
       minimatch: 10.2.5
       mixpart: 0.0.6
       picocolors: 1.1.1
@@ -19541,7 +19524,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/sandbox@2.3.0':
+  '@vercel/sandbox@2.8.0':
     dependencies:
       '@vercel/oidc': 3.2.0
       '@workflow/serde': 4.1.0-beta.2
@@ -19558,7 +19541,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/sdk@1.28.1':
+  '@vercel/sdk@1.28.8':
     dependencies:
       zod: 4.4.3
 
@@ -21213,7 +21196,7 @@ snapshots:
 
   entities@7.0.1: {}
 
-  env-runner@0.1.12:
+  env-runner@0.1.16:
     dependencies:
       crossws: 0.4.10(srvx@0.11.22)
       exsolve: 1.1.0
@@ -21778,7 +21761,7 @@ snapshots:
 
   eventsource-parser@1.1.2: {}
 
-  eventsource-parser@3.0.8: {}
+  eventsource-parser@3.1.0: {}
 
   execa@3.2.0:
     dependencies:
@@ -23095,7 +23078,7 @@ snapshots:
       object.assign: 4.1.7
       object.values: 1.2.1
 
-  just-bash@3.0.1(supports-color@10.2.2):
+  just-bash@3.1.0(supports-color@10.2.2):
     dependencies:
       diff: 8.0.4
       fast-xml-parser: 5.8.0
@@ -24114,7 +24097,7 @@ snapshots:
       consola: 3.4.2
       crossws: 0.4.6(srvx@0.11.16)
       db0: 0.3.4
-      env-runner: 0.1.12
+      env-runner: 0.1.16
       h3: 2.0.1-rc.22(crossws@0.4.6(srvx@0.11.16))
       hookable: 6.1.1
       nf3: 0.3.17
@@ -24161,6 +24144,7 @@ snapshots:
       - mysql2
       - sqlite3
       - uploadthing
+      - wrangler
 
   nitropack@2.13.4(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.1))(oxc-parser@0.131.0)(rolldown@1.1.5)(srvx@0.11.22)(supports-color@10.2.2)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)):
     dependencies:
