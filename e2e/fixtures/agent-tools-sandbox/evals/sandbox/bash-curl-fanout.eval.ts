@@ -1,7 +1,7 @@
 import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
-import { FANOUT_DELAY_SERVER_URL } from "./shared";
+import { FANOUT_BARRIER_SERVER_URL } from "./shared";
 
 const BASH_TOOL = "bash";
 const MINIMUM_CURL_CALLS = 10;
@@ -18,15 +18,14 @@ const REQUESTS = [
   { label: "curl-10", query: "Google Search Central documentation" },
 ] as const;
 
-interface CurlMeasurement {
+interface CurlBarrierResult {
+  readonly concurrentCallsAtRelease: number;
   readonly label: string;
   readonly query: string;
-  readonly serverCompletedAtMs: number;
-  readonly serverReceivedAtMs: number;
 }
 
 export default defineEval({
-  description: "Sandbox Bash: at least ten curls each start before the preceding curl finishes.",
+  description: "Sandbox Bash: at least ten curls reach a concurrency barrier.",
   async test(t) {
     const turn = await t.send(
       [
@@ -42,84 +41,62 @@ export default defineEval({
     t.log(formatCurlFanoutTrace(turn.events));
     turn.calledTool(BASH_TOOL);
     turn.noFailedActions();
-    turn.eventsSatisfy(
-      "at least ten Bash curls each start before the preceding curl finishes",
-      (events) =>
-        consecutiveCurlStartsOverlap({
-          events,
-          expectedRequests: REQUESTS,
-          minimumCalls: MINIMUM_CURL_CALLS,
-        }),
+    turn.eventsSatisfy("at least ten Bash curls reach the concurrency barrier", (events) =>
+      curlCallsReachBarrier({
+        barrierSize: MINIMUM_CURL_CALLS,
+        events,
+        expectedRequests: REQUESTS,
+        minimumCalls: MINIMUM_CURL_CALLS,
+      }),
     );
   },
 });
 
 function commandFor(request: (typeof REQUESTS)[number]): string {
-  const url = new URL(FANOUT_DELAY_SERVER_URL);
+  const url = new URL(FANOUT_BARRIER_SERVER_URL);
   url.searchParams.set("label", request.label);
   url.searchParams.set("q", request.query);
 
   return `curl -fsS --max-time 30 '${url.href}'`;
 }
 
-function consecutiveCurlStartsOverlap(input: {
+function curlCallsReachBarrier(input: {
+  readonly barrierSize: number;
   readonly events: readonly HandleMessageStreamEvent[];
   readonly expectedRequests: readonly { readonly label: string; readonly query: string }[];
   readonly minimumCalls: number;
 }): boolean {
-  const measurements = curlMeasurements(input.events);
+  const results = curlBarrierResults(input.events);
   const expectedQueryByLabel = new Map(
     input.expectedRequests.map((request) => [request.label, request.query]),
   );
 
   return (
-    measurements.length >= input.minimumCalls &&
+    results.length >= input.minimumCalls &&
     expectedQueryByLabel.size === input.expectedRequests.length &&
     input.expectedRequests.every((request) =>
-      measurements.some(
-        (measurement) => measurement.label === request.label && measurement.query === request.query,
-      ),
+      results.some((result) => result.label === request.label && result.query === request.query),
     ) &&
-    measurements.every(
-      (measurement) =>
-        expectedQueryByLabel.get(measurement.label) === measurement.query &&
-        measurement.serverReceivedAtMs < measurement.serverCompletedAtMs,
-    ) &&
-    consecutiveStartsOverlap(measurements)
+    results.every(
+      (result) =>
+        expectedQueryByLabel.get(result.label) === result.query &&
+        result.concurrentCallsAtRelease === input.barrierSize,
+    )
   );
 }
 
-function consecutiveStartsOverlap(measurements: readonly CurlMeasurement[]): boolean {
-  // The delay server provides one monotonic clock for every curl request.
-  const orderedByStart = [...measurements].sort(
-    (left, right) =>
-      left.serverReceivedAtMs - right.serverReceivedAtMs || left.label.localeCompare(right.label),
-  );
-
-  for (let index = 1; index < orderedByStart.length; index += 1) {
-    const previous = orderedByStart[index - 1];
-    const current = orderedByStart[index];
-    if (
-      previous === undefined ||
-      current === undefined ||
-      previous.serverCompletedAtMs <= current.serverReceivedAtMs
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function curlMeasurements(events: readonly HandleMessageStreamEvent[]): readonly CurlMeasurement[] {
+function curlBarrierResults(
+  events: readonly HandleMessageStreamEvent[],
+): readonly CurlBarrierResult[] {
   return events.flatMap((event) => {
     if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
     if (event.data.result.toolName !== BASH_TOOL) return [];
 
-    return parseCurlMeasurement(event.data.result.output);
+    return parseCurlBarrierResult(event.data.result.output);
   });
 }
 
-function parseCurlMeasurement(value: unknown): readonly CurlMeasurement[] {
+function parseCurlBarrierResult(value: unknown): readonly CurlBarrierResult[] {
   const stdout = readStringField(value, "stdout");
   if (stdout === undefined) return [];
 
@@ -127,21 +104,14 @@ function parseCurlMeasurement(value: unknown): readonly CurlMeasurement[] {
     const parsed = parseJson(line);
     const label = readStringField(parsed, "label");
     const query = readStringField(parsed, "query");
-    const serverReceivedAtMs = readFiniteNumberField(parsed, "receivedAtMs");
-    const serverCompletedAtMs = readFiniteNumberField(parsed, "completedAtMs");
+    const concurrentCallsAtRelease = readFiniteNumberField(parsed, "concurrentCallsAtRelease");
 
-    if (
-      label !== undefined &&
-      query !== undefined &&
-      serverReceivedAtMs !== undefined &&
-      serverCompletedAtMs !== undefined
-    ) {
+    if (label !== undefined && query !== undefined && concurrentCallsAtRelease !== undefined) {
       return [
         {
+          concurrentCallsAtRelease,
           label,
           query,
-          serverCompletedAtMs,
-          serverReceivedAtMs,
         },
       ];
     }
@@ -151,10 +121,7 @@ function parseCurlMeasurement(value: unknown): readonly CurlMeasurement[] {
 
 function formatCurlFanoutTrace(events: readonly HandleMessageStreamEvent[]): string {
   return JSON.stringify({
-    calls: curlMeasurements(events).map((measurement) => ({
-      ...measurement,
-      serverDurationMs: measurement.serverCompletedAtMs - measurement.serverReceivedAtMs,
-    })),
+    calls: curlBarrierResults(events),
   });
 }
 
