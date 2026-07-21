@@ -58,8 +58,9 @@ export interface HttpBasicCredentials {
  * Verifies an HTTP Basic credential against the supplied username and
  * password. Returns `{ ok: true, sessionAuth }` on success or `{ ok: false }`
  * on a missing or mismatched credential. The password is compared with
- * constant-time hash equality so a timing side channel cannot leak it; the
- * username is compared directly.
+ * constant-time hash equality so a timing side channel cannot leak it. Both
+ * values are normalized to Unicode NFC before comparison, matching the
+ * `charset="UTF-8"` challenge advertised by {@link httpBasic}.
  */
 export function verifyHttpBasic(
   authorizationHeader: string | null,
@@ -1026,8 +1027,8 @@ function isLocalDevelopmentVercelOidcRequest(request: Request): boolean {
 export interface HttpBasicAuthOptions {
   /**
    * Optional `realm` parameter advertised on the `WWW-Authenticate: Basic`
-   * challenge (e.g. browsers show it in the native login prompt). Omitted
-   * from the challenge when not set.
+   * challenge (e.g. browsers show it in the native login prompt). Defaults
+   * to `"eve"`.
    */
   readonly realm?: string;
 }
@@ -1043,11 +1044,10 @@ export function httpBasic(
   credentials: HttpBasicCredentials,
   options?: HttpBasicAuthOptions,
 ): AuthFn<Request> {
-  const realm = options?.realm;
-  // `realm` renders before `charset` so browsers show the label first.
-  const parameters: Record<string, string> = {};
-  if (realm) parameters.realm = realm;
-  parameters.charset = "UTF-8";
+  const parameters: Record<string, string> = {
+    realm: options?.realm ?? "eve",
+    charset: "UTF-8",
+  };
   return withAuthChallenges(
     (request) => {
       const result = verifyHttpBasic(request.headers.get("authorization"), credentials);

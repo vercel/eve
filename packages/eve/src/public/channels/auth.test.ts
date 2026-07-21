@@ -55,6 +55,15 @@ describe("verifyHttpBasic", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("normalizes credentials to NFC before comparison", () => {
+    const result = verifyHttpBasic(
+      `Basic ${Buffer.from("caf\u00e9:s\u00e9cret", "utf8").toString("base64")}`,
+      { username: "cafe\u0301", password: "se\u0301cret" },
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
   it("rejects requests with no authorization header", () => {
     const result = verifyHttpBasic(null, { username: "ops", password: "top-secret" });
     expect(result.ok).toBe(false);
@@ -554,7 +563,7 @@ describe("routeAuth", () => {
     expect(result).toBeInstanceOf(Response);
     if (result instanceof Response) {
       expect(result.status).toBe(401);
-      expect(result.headers.get("www-authenticate")).toBe('Basic charset="UTF-8"');
+      expect(result.headers.get("www-authenticate")).toBe('Basic realm="eve", charset="UTF-8"');
     }
   });
 
@@ -567,6 +576,17 @@ describe("routeAuth", () => {
     expect(result).toBeInstanceOf(Response);
     if (result instanceof Response) {
       expect(result.headers.get("www-authenticate")).toBe('Basic realm="agent", charset="UTF-8"');
+    }
+  });
+
+  it("preserves an explicitly empty Basic realm", async () => {
+    const result = await routeAuth(makeRequest(), [
+      httpBasic({ password: "top-secret", username: "ops" }, { realm: "" }),
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.headers.get("www-authenticate")).toBe('Basic realm="", charset="UTF-8"');
     }
   });
 
@@ -602,7 +622,7 @@ describe("routeAuth", () => {
     expect(result).toBeInstanceOf(Response);
     if (result instanceof Response) {
       const header = result.headers.get("www-authenticate");
-      expect(header).toContain('Basic charset="UTF-8"');
+      expect(header).toContain('Basic realm="eve", charset="UTF-8"');
       expect(header).toContain("Bearer");
     }
   });

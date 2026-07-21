@@ -96,7 +96,7 @@ Any other thrown error follows the normal channel failure path. When building a 
 | `jwtEcdsa(...)`  | You verify asymmetric JWTs minted by another system.                      |
 | `oidc(...)`      | You want eve to verify OIDC-issued tokens from an arbitrary issuer.       |
 
-`httpBasic(credentials, { realm })` accepts an optional `realm`, rendered on the `WWW-Authenticate: Basic` challenge (e.g. `Basic realm="agent", charset="UTF-8"`) so browsers label their native login prompt. Omit it and the challenge is just `Basic charset="UTF-8"`.
+`httpBasic(credentials, { realm })` accepts an optional `realm`, rendered on the `WWW-Authenticate: Basic` challenge (e.g. `Basic realm="agent", charset="UTF-8"`) so browsers label their native login prompt. It defaults to `"eve"`, ensuring every Basic challenge includes the required realm. Usernames and passwords are normalized to Unicode NFC before comparison, matching the advertised UTF-8 credential encoding.
 
 Exercise caution for agents that process non-public, sensitive, regulated, or production data unless you have implemented other access controls.
 
