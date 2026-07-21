@@ -5,14 +5,12 @@ import { z } from "zod";
 
 const completionMarker = "SOURCE_ANALYSIS_COMPLETE";
 const invocationCount = defineState("compaction-regression.perform-source-analysis", () => 0);
-const modelFamilySchema = z.enum(["gpt-5.6", "opus-4.8", "sonnet-5"]);
 
 export default defineTool({
   description:
     "Compaction regression tool. Complete source analysis exactly once when the user requests the stale-todo-work case.",
   inputSchema: z.object({
     approach: z.string().min(1),
-    modelFamily: modelFamilySchema,
   }),
   async execute(input, ctx) {
     const attempt = invocationCount.get() + 1;
@@ -25,7 +23,6 @@ export default defineTool({
     );
 
     return {
-      modelFamily: input.modelFamily,
       completed: true,
       completionMarker,
       workUnit: "source-analysis",

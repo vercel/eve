@@ -2,8 +2,7 @@ import { createCompactionRegressionAgent } from "@eve/e2e-compaction-regression-
 import type { AgentDefinition } from "eve";
 
 const agent: AgentDefinition = createCompactionRegressionAgent({
-  compactionModel: "openai/gpt-5.6-sol",
-  modelFamily: "gpt-5.6",
+  compactionModel: process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol",
 });
 
 export default agent;

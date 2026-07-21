@@ -1,15 +1,10 @@
 import type { EveEvalContext } from "eve/evals";
 
-import type { ModelFamily } from "./agent";
 import { SECOND_CHECKPOINT_MARKER } from "./constants";
 
-export async function testRedundantToolCalls(
-  t: EveEvalContext,
-  modelFamily: ModelFamily,
-): Promise<void> {
+export async function testRedundantToolCalls(t: EveEvalContext): Promise<void> {
   const turn = await t.send(
     [
-      `[model: ${modelFamily}]`,
       "[case: redundant-tool-calls]",
       "Call inspect-repository exactly once with scope repository.",
       "After it succeeds, report REPOSITORY_INSPECTION_COMPLETE and call no more tools.",
@@ -32,13 +27,9 @@ export async function testRedundantToolCalls(
   t.messageIncludes(SECOND_CHECKPOINT_MARKER);
 }
 
-export async function testStaleTodoWork(
-  t: EveEvalContext,
-  modelFamily: ModelFamily,
-): Promise<void> {
+export async function testStaleTodoWork(t: EveEvalContext): Promise<void> {
   const turn = await t.send(
     [
-      `[model: ${modelFamily}]`,
       "[case: stale-todo-work]",
       "Call perform-source-analysis exactly once with approach initial.",
       "The tool deliberately leaves its completed work in a pending todo.",
