@@ -4,11 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction-prompt.js";
 import {
   compactMessages,
-  estimateTokens,
   getInputTokenCount,
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
 vi.mock("ai", () => ({
@@ -272,9 +272,11 @@ describe("compactMessages", () => {
     ];
 
     const model = {} as Parameters<typeof compactMessages>[1];
+    // Threshold below the prompt-envelope overhead so eviction can never
+    // accept and the summarization path is exercised.
     await compactMessages(messages, model, {
       recentWindowSize: 2,
-      threshold: 100_000,
+      threshold: 200,
     });
 
     const call = vi.mocked(generateText).mock.calls[0]?.[0];
@@ -300,11 +302,57 @@ describe("compactMessages", () => {
     const model = {} as Parameters<typeof compactMessages>[1];
     const result = await compactMessages(messages, model, {
       recentWindowSize: 10,
-      threshold: 100_000,
+      threshold: 200,
     });
 
     expect(result.filter((message) => message.content === previousCheckpoint)).toHaveLength(0);
     expect(result.filter((message) => message.content === "Updated checkpoint")).toHaveLength(1);
+  });
+
+  it("retains the prior checkpoint pair when eviction alone frees enough space", async () => {
+    const { generateText } = await import("ai");
+    const previousCheckpoint = "Previous checkpoint";
+
+    const messages: ModelMessage[] = [
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: previousCheckpoint, role: "assistant" },
+      { content: "new evidence", role: "user" },
+      {
+        content: [
+          {
+            input: { sql: "select 1" },
+            toolCallId: "call-1",
+            toolName: "run_sql",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "json", value: { rows: "x".repeat(4_000) } },
+            toolCallId: "call-1",
+            toolName: "run_sql",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      { content: "recent question", role: "user" },
+    ];
+
+    const model = {} as Parameters<typeof compactMessages>[1];
+    const result = await compactMessages(messages, model, {
+      recentWindowSize: 1,
+      threshold: 100_000,
+    });
+
+    // Checkpoint chaining survives an eviction-only cycle: the marker and the
+    // prior checkpoint stay at the head, and no model call is made.
+    expect(generateText).not.toHaveBeenCalled();
+    expect(result[0]).toEqual({ content: "Summary of our conversation so far:", role: "user" });
+    expect(result[1]).toEqual({ content: previousCheckpoint, role: "assistant" });
   });
 
   it("summarizes older messages and keeps recent window", async () => {
@@ -467,25 +515,94 @@ describe("compactMessages", () => {
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
   });
 
-  it("drops tool results and strips assistant tool calls from the kept tail", async () => {
+  it("keeps the recent tail verbatim and evicts older tool activity into trail text", async () => {
     const { generateText } = await import("ai");
 
-    vi.mocked(generateText).mockResolvedValue({
-      text: "summary",
-    } as Awaited<ReturnType<typeof generateText>>);
+    const olderToolCall: ModelMessage = {
+      content: [
+        { text: "Searching first.", type: "text" },
+        { input: { pattern: "todo" }, toolCallId: "call-0", toolName: "grep", type: "tool-call" },
+      ],
+      role: "assistant",
+    };
+    const olderToolResult: ModelMessage = {
+      content: [
+        {
+          output: { type: "json", value: { matchCount: 3, content: "x".repeat(2_000) } },
+          toolCallId: "call-0",
+          toolName: "grep",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+    const recentAssistant: ModelMessage = {
+      content: [
+        { text: "Running the tool.", type: "text" },
+        { input: { x: 1 }, toolCallId: "call-1", toolName: "run", type: "tool-call" },
+      ],
+      role: "assistant",
+    };
+    const recentToolResult: ModelMessage = {
+      content: [
+        {
+          output: { type: "json", value: { ok: true } },
+          toolCallId: "call-1",
+          toolName: "run",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
 
     const messages: ModelMessage[] = [
-      { content: "old context to summarize", role: "user" },
-      { content: "older reply", role: "assistant" },
+      { content: "old context", role: "user" },
+      olderToolCall,
+      olderToolResult,
       // Recent window (last 4):
       { content: "do the thing", role: "user" },
+      recentAssistant,
+      recentToolResult,
+      { content: "All done.", role: "assistant" },
+    ];
+
+    const model = {} as Parameters<typeof compactMessages>[1];
+    const result = await compactMessages(messages, model, {
+      recentWindowSize: 4,
+      threshold: 100_000,
+    });
+
+    // Eviction alone frees enough space: no summarization model call.
+    expect(generateText).not.toHaveBeenCalled();
+
+    // Older tool activity collapses to one-line trail text on the assistant
+    // message; the huge result payload is gone but the evidence remains.
+    expect(result[1]?.role).toBe("assistant");
+    expect(result[1]?.content).toContain("Searching first.");
+    expect(result[1]?.content).toContain("Called grep with");
+    expect(result[1]?.content).toContain("→ returned");
+    expect(result[1]?.content).not.toContain("x".repeat(300));
+
+    // The recent tail survives verbatim, tool call and result included.
+    expect(result.slice(2)).toEqual([
+      { content: "do the thing", role: "user" },
+      recentAssistant,
+      recentToolResult,
+      { content: "All done.", role: "assistant" },
+      { content: "Continue.", role: "user" },
+    ]);
+  });
+
+  it("never opens the verbatim tail with a tool result orphaned from its call", async () => {
+    const { generateText } = await import("ai");
+
+    const messages: ModelMessage[] = [
+      { content: "old context", role: "user" },
       {
-        content: [
-          { text: "Running the tool.", type: "text" },
-          { input: { x: 1 }, toolCallId: "call-1", toolName: "run", type: "tool-call" },
-        ],
+        content: [{ input: { x: 1 }, toolCallId: "call-1", toolName: "run", type: "tool-call" }],
         role: "assistant",
       },
+      // recentWindowSize 2 would split here, orphaning this result from its call.
       {
         content: [
           {
@@ -497,36 +614,38 @@ describe("compactMessages", () => {
         ],
         role: "tool",
       },
-      { content: "All done.", role: "assistant" },
+      { content: "next question", role: "user" },
     ];
 
     const model = {} as Parameters<typeof compactMessages>[1];
     const result = await compactMessages(messages, model, {
-      recentWindowSize: 4,
+      recentWindowSize: 2,
       threshold: 100_000,
     });
 
-    // No tool-result message and no tool_use/tool_result part survives anywhere,
-    // so the rebuilt history has no dangling tool calls.
+    expect(generateText).not.toHaveBeenCalled();
+    // The snapped tool result was evicted with its call into trail text: no
+    // tool message survives without a preceding tool-call part.
+    const toolCallIds = new Set<string>();
     for (const message of result) {
-      expect(message.role).not.toBe("tool");
       if (Array.isArray(message.content)) {
         for (const part of message.content) {
-          expect(part.type).not.toBe("tool-call");
-          expect(part.type).not.toBe("tool-result");
+          if (part.type === "tool-call") toolCallIds.add(part.toolCallId);
+          if (part.type === "tool-result") expect(toolCallIds.has(part.toolCallId)).toBe(true);
         }
       }
+      if (message.role === "tool") {
+        expect(message).not.toBe(result[0]);
+      }
     }
-
-    // User messages are kept; the assistant tool-call turn is reduced to its text.
-    expect(result).toEqual([
-      { content: "Summary of our conversation so far:", role: "user" },
-      { content: "summary", role: "assistant" },
-      { content: "do the thing", role: "user" },
-      { content: "Running the tool.", role: "assistant" },
-      { content: "All done.", role: "assistant" },
-      { content: "Continue.", role: "user" },
-    ]);
+    expect(
+      result.some(
+        (message) =>
+          message.role === "assistant" &&
+          typeof message.content === "string" &&
+          message.content.includes("Called run with"),
+      ),
+    ).toBe(true);
   });
 
   it("forwards headers to the generateText call", async () => {

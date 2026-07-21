@@ -4,7 +4,9 @@ import {
   COMPACTION_CHECKPOINT_MARKER,
   COMPACTION_PROMPT_ENVELOPE,
   createCompactionPrompt,
+  renderEvictedToolActivity,
 } from "#harness/compaction-prompt.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
 
@@ -15,18 +17,9 @@ const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
  */
 type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 
-/**
- * Rough token estimate: serialized JSON length / 4. Good enough for
- * deciding whether compaction is needed; the real token count comes back
- * from the model each step via {@link CompactionConfig.lastKnownInputTokens}.
- *
- * Accepts any JSON-serializable value so callers can apply the same heuristic
- * to whole message arrays or individual content parts on one consistent ruler.
- */
-export function estimateTokens(value: unknown): number {
-  return JSON.stringify(value).length / 4;
-}
-
+// Static envelope estimate stays valid because createCompactionPrompt bounds
+// its transcript to the caller's threshold budget, so the summarization call
+// itself never grows past threshold + envelope + checkpoint.
 const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
@@ -99,8 +92,17 @@ export async function resolveCompactionModel(input: {
 }
 
 /**
- * Compacts messages by summarizing older history and keeping only the most
- * recent messages.
+ * Compacts messages with an escalation ladder.
+ *
+ * Rung 1 (no model call): evict tool activity from the older region — tool
+ * results are dropped and assistant tool calls become one-line trail text —
+ * while every user/assistant message and the recent tail stay verbatim. Most
+ * history bulk is tool output, so this usually suffices and preserves the
+ * conversation byte-exact.
+ *
+ * Rung 2: summarize the older region with the compaction model, keeping the
+ * recent tail verbatim when it fits, degrading it to text-only, then shrinking
+ * the window.
  */
 export async function compactMessages(
   messages: ModelMessage[],
@@ -114,13 +116,41 @@ export async function compactMessages(
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   let keep = selectRecentWindowSize(conversation, config);
 
-  while (true) {
+  {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
       return keepNonToolResultMessages(recent);
     }
 
-    const summaryPrompt = createCompactionPrompt({ messages: older, previousCheckpoint });
+    const checkpointHead: ModelMessage[] =
+      previousCheckpoint === undefined
+        ? []
+        : [
+            { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
+            { content: previousCheckpoint, role: "assistant" },
+          ];
+    const evicted = withTrailingAssistantGuard([
+      ...checkpointHead,
+      ...evictToolActivity(older),
+      ...recent,
+    ]);
+    // Accept on the same ruler shouldCompact uses (envelope included):
+    // eviction can be a near no-op when the older region holds little tool
+    // activity, and accepting one on a looser ruler would let shouldCompact
+    // re-fire every step without compaction ever making progress.
+    if (estimateTokens(evicted) + COMPACTION_PROMPT_OVERHEAD_TOKENS <= config.threshold) {
+      return evicted;
+    }
+  }
+
+  while (true) {
+    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+
+    const summaryPrompt = createCompactionPrompt({
+      messages: older,
+      previousCheckpoint,
+      transcriptBudgetTokens: config.threshold,
+    });
 
     const result = await generateText({
       abortSignal,
@@ -133,35 +163,88 @@ export async function compactMessages(
       temperature: 0,
     });
 
-    // Keep recent context as plain conversation: tool results are dropped (the
-    // summary above already captures the older ones) and assistant tool calls
-    // are stripped, so no tool_use survives without its result. The summarized
-    // older region is the durable record of tool activity.
-    const keptTail = keepNonToolResultMessages(recent);
-
-    // The kept tail may be empty or trail with an assistant message; the summary
-    // assistant message also precedes it. Providers that don't support assistant
-    // prefill reject a request that ends on assistant content, so append a
-    // synthetic user message to resume from a user turn.
-    const lastKeptRole = keptTail.at(-1)?.role;
-    const trailingAssistantGuard: ModelMessage[] =
-      lastKeptRole === undefined || lastKeptRole === "assistant"
-        ? [{ role: "user", content: "Continue." }]
-        : [];
-
-    const compacted: ModelMessage[] = [
+    const summaryHead: ModelMessage[] = [
       { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
       { content: result.text, role: "assistant" },
-      ...keptTail,
-      ...trailingAssistantGuard,
     ];
 
-    if (estimateTokens(compacted) <= config.threshold || keep === 0) {
-      return compacted;
+    // Prefer keeping the recent tail verbatim — surviving tool results are the
+    // model's evidence that work already ran. Degrade to text-only, then to a
+    // smaller window, only under threshold pressure.
+    const verbatim = withTrailingAssistantGuard([...summaryHead, ...recent]);
+    if (estimateTokens(verbatim) <= config.threshold) {
+      return verbatim;
+    }
+
+    const stripped = withTrailingAssistantGuard([
+      ...summaryHead,
+      ...keepNonToolResultMessages(recent),
+    ]);
+    if (estimateTokens(stripped) <= config.threshold || keep === 0) {
+      return stripped;
     }
 
     keep -= 1;
   }
+}
+
+/**
+ * Drops tool-result messages and rewrites assistant tool-call parts into
+ * one-line trail text merged with their paired results. User messages and
+ * assistant prose stay verbatim, and no tool_use survives without its result
+ * because both sides become text.
+ */
+function evictToolActivity(messages: readonly ModelMessage[]): ModelMessage[] {
+  const resultsByCallId = new Map<string, { output?: unknown; isError?: boolean }>();
+  for (const message of messages) {
+    if (message.role !== "tool" || typeof message.content === "string") {
+      continue;
+    }
+    for (const part of message.content) {
+      if (part.type === "tool-result") {
+        resultsByCallId.set(part.toolCallId, part as { output?: unknown; isError?: boolean });
+      }
+    }
+  }
+
+  const kept: ModelMessage[] = [];
+  for (const message of messages) {
+    if (message.role === "tool") {
+      continue;
+    }
+
+    if (message.role === "assistant" && typeof message.content !== "string") {
+      const lines: string[] = [];
+      for (const part of message.content) {
+        if (part.type === "text") {
+          lines.push(part.text);
+        } else if (part.type === "tool-call") {
+          lines.push(renderEvictedToolActivity(part, resultsByCallId.get(part.toolCallId)));
+        }
+      }
+      const text = lines.join("\n").trim();
+      if (text.length > 0) {
+        kept.push({ content: text, role: "assistant" });
+      }
+      continue;
+    }
+
+    kept.push(message);
+  }
+
+  return kept;
+}
+
+/**
+ * Providers that don't support assistant prefill reject a request that ends on
+ * assistant content, so append a synthetic user message to resume from a user
+ * turn. Also applies to an empty history for the same reason.
+ */
+function withTrailingAssistantGuard(messages: ModelMessage[]): ModelMessage[] {
+  const lastRole = messages.at(-1)?.role;
+  return lastRole === undefined || lastRole === "assistant"
+    ? [...messages, { content: "Continue.", role: "user" }]
+    : messages;
 }
 
 function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
@@ -280,8 +363,16 @@ function splitMessagesForCompaction(
     };
   }
 
+  // The recent tail survives verbatim, so it must not open with tool results
+  // whose tool calls fall in the older region — providers reject a tool_result
+  // without its preceding tool_use. Snap such messages into the older region.
+  let split = messages.length - keep;
+  while (split < messages.length && messages[split]?.role === "tool") {
+    split += 1;
+  }
+
   return {
-    older: messages.slice(0, -keep),
-    recent: messages.slice(-keep),
+    older: messages.slice(0, split),
+    recent: messages.slice(split),
   };
 }
