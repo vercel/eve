@@ -1,6 +1,6 @@
 import type { ContextAccessor } from "#context/key.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import type { CancelTurnResult, Runtime } from "#channel/types.js";
+import type { CancelTurnResult, GetEventStreamOptions, Runtime } from "#channel/types.js";
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 
@@ -27,9 +27,9 @@ export interface Session {
    * Opens the durable event stream. Negative start indexes read relative to
    * the current tail (`-1` starts at the latest event).
    */
-  getEventStream(options?: {
-    startIndex?: number;
-  }): Promise<ReadableStream<HandleMessageStreamEvent>>;
+  getEventStream(
+    options?: GetEventStreamOptions,
+  ): Promise<ReadableStream<HandleMessageStreamEvent>>;
 }
 
 /**
@@ -53,7 +53,7 @@ export function createSession(id: string, continuationToken: string, runtime: Ru
     async cancel(options?: { turnId?: string }) {
       return runtime.cancelTurn({ sessionId: id, turnId: options?.turnId });
     },
-    async getEventStream(options?: { startIndex?: number }) {
+    async getEventStream(options?: GetEventStreamOptions) {
       return runtime.getEventStream(id, options);
     },
   };

@@ -424,8 +424,8 @@ export interface Runtime {
    *
    * Nonnegative `options.startIndex` values are the zero-based position of the
    * first event to yield. Negative values read relative to the current tail.
-   * The framework HTTP session-stream route forwards the `startIndex` query
-   * parameter unchanged.
+   * The framework HTTP session-stream route forwards the `startIndex` and
+   * `throughCurrentTail` query parameters unchanged.
    */
   getEventStream(
     sessionId: string,
@@ -443,4 +443,11 @@ export interface GetEventStreamOptions {
    * (replay the entire stream).
    */
   readonly startIndex?: number;
+  /**
+   * Captures the current exclusive event cursor before consumption and closes
+   * at the first current-turn boundary at or beyond that cursor. A stream
+   * already at the captured cursor closes empty. Requires a nonnegative
+   * `startIndex`; omitted or `false` preserves the live-stream behavior.
+   */
+  readonly throughCurrentTail?: boolean;
 }

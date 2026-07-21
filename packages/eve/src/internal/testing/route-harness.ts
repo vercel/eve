@@ -12,8 +12,8 @@ import type { Agent, RouteContext } from "#public/definitions/channel.js";
  */
 
 /**
- * Observable mock {@link Agent}. The `run` / `deliver` / `cancelTurn` / `getEventStream`
- * methods are `vi.fn()` instances, so tests can assert on call counts,
+ * Observable mock {@link Agent}. The `run` / `deliver` / `resolveSession` /
+ * `cancelTurn` / `getEventStream` methods are `vi.fn()` instances, so tests can assert on call counts,
  * arguments, and reorder return values mid-test with `mockResolvedValueOnce`.
  */
 export interface MockAgent extends Agent {
@@ -21,6 +21,7 @@ export interface MockAgent extends Agent {
   readonly run: Mock;
   readonly deliver: Mock;
   readonly getEventStream: Mock;
+  readonly resolveSession: Mock;
 }
 
 /**
@@ -29,6 +30,7 @@ export interface MockAgent extends Agent {
  * - `run` resolves to a fake handle whose `result` is `{ status: "completed", output: "ok" }`.
  * - `deliver` resolves to `undefined`.
  * - `getEventStream` resolves to an empty `ReadableStream`.
+ * - `resolveSession` resolves to `undefined`.
  *
  * Override individual methods with `mockResolvedValueOnce` /
  * `mockRejectedValueOnce` etc. when you need a different per-test flow.
@@ -38,6 +40,7 @@ export function createMockAgent(): MockAgent {
     cancelTurn: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
     deliver: vi.fn().mockResolvedValue(undefined),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    resolveSession: vi.fn().mockResolvedValue(undefined),
     run: vi.fn().mockResolvedValue({
       continuationToken: "http:test",
       events: new ReadableStream(),

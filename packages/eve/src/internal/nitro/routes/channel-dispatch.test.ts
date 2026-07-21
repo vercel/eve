@@ -156,6 +156,44 @@ describe("dispatchChannelRequest", () => {
     await expect(response.text()).resolves.toBe("ok");
   });
 
+  it("namespaces session resolution with the owning channel", async () => {
+    const resolveSession = vi.fn().mockResolvedValue({ sessionId: "sess_authoring" });
+    const runtimeForTest: Runtime = {
+      cancelTurn: vi.fn(),
+      deliver: vi.fn(),
+      getEventStream: vi.fn(),
+      resolveSession,
+      run: vi.fn(),
+    };
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        {
+          fetch: async (_request: Request, ctx: RouteContext) => {
+            const resolution = await ctx.agent.resolveSession("authoring-session");
+            return Response.json(resolution);
+          },
+          logicalPath: "agent/channels/eve.ts",
+          method: "GET",
+          name: "eve",
+          sourceId: "channel-eve",
+          sourceKind: "module",
+          urlPath: "/eve/v1/session",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "GET /eve/v1/session",
+      {} as never,
+    );
+
+    expect(response.status).toBe(200);
+    expect(resolveSession).toHaveBeenCalledWith("eve:authoring-session");
+  });
+
   it("hands the route handler an args.receive() that hits another channel's receive", async () => {
     const targetReceive = vi.fn().mockResolvedValue({
       id: "sess_target",

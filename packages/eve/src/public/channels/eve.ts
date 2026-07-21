@@ -157,10 +157,12 @@ export interface EveChannel extends Channel {}
 
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
- * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session, POST
- * delivers a follow-up, POST cancels the in-flight turn, GET streams a session's
- * NDJSON event feed). Every route
- * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
+ * built-in `/eve/v1` routes (GET inspects the agent, GET resolves a continuation
+ * token, POST creates or resumes a session, POST delivers a follow-up, POST cancels
+ * the in-flight turn, and GET streams a session's NDJSON event feed). The stream
+ * route accepts `throughCurrentTail=true` with a nonnegative `startIndex` to close
+ * after the captured current-turn boundary; without it the stream remains live.
+ * Every route runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
  */
@@ -183,6 +185,46 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         return await respond();
+      }),
+
+      GET("/eve/v1/session", async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const continuationToken = parseContinuationTokenFromQuery(req);
+        if (continuationToken instanceof Response) return continuationToken;
+
+        let resolution: { sessionId: string } | undefined;
+        try {
+          const agent = readRouteAgent(args);
+          if (agent === undefined) {
+            throw new Error("Missing route agent.");
+          }
+          resolution = await agent.resolveSession(continuationToken);
+        } catch (error) {
+          const errorId = logError(log, "resolve-session request failed", error, {
+            continuationToken,
+          });
+          return Response.json(
+            { error: "Failed to resolve the session.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+
+        if (resolution === undefined) {
+          return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+        }
+
+        return Response.json(
+          { ok: true, sessionId: resolution.sessionId },
+          {
+            headers: {
+              "cache-control": "no-store",
+              [EVE_SESSION_ID_HEADER]: resolution.sessionId,
+            },
+            status: 200,
+          },
+        );
       }),
 
       POST("/eve/v1/session", async (req, { send }) => {
@@ -216,7 +258,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (messageResult instanceof Response) return messageResult;
         if (!messageResult.dispatch) return droppedMessageResponse();
 
-        const token = `eve:${crypto.randomUUID()}`;
+        const token = body.continuationToken ?? `eve:${crypto.randomUUID()}`;
         const context = mergeContext(body.context, messageResult.context);
 
         const session = await send(createSendPayload(body, context), {
@@ -369,10 +411,21 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const startIndex = parseStartIndex(req);
         if (startIndex instanceof Response) return startIndex;
+        const throughCurrentTail = parseThroughCurrentTail(req);
+        if (throughCurrentTail instanceof Response) return throughCurrentTail;
+        if (throughCurrentTail === true && (startIndex ?? 0) < 0) {
+          return Response.json(
+            {
+              error: "Expected startIndex to be nonnegative when throughCurrentTail is true.",
+              ok: false,
+            },
+            { status: 400 },
+          );
+        }
 
         try {
           const session = getSession(sessionId);
-          const events = await session.getEventStream({ startIndex });
+          const events = await session.getEventStream({ startIndex, throughCurrentTail });
           const ndjson = serializeAsNdjson(events);
           return new Response(ndjson, {
             headers: {
@@ -513,6 +566,7 @@ function droppedMessageResponse(): Response {
 
 interface ParsedCreateBody {
   callback?: SessionCallback;
+  continuationToken?: string;
   message: string | UserContent;
   mode?: RunMode;
   context?: readonly string[];
@@ -535,6 +589,9 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
+  const continuationToken = parseOptionalContinuationTokenField(payload.continuationToken);
+  if (continuationToken instanceof Response) return continuationToken;
+
   if (message === undefined) {
     return Response.json(
       { error: "Missing or empty 'message' field.", ok: false },
@@ -542,7 +599,25 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     );
   }
 
-  return { callback, message, mode, context, outputSchema };
+  return { callback, continuationToken, message, mode, context, outputSchema };
+}
+
+function parseOptionalContinuationTokenField(value: unknown): string | Response | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && value.length > 0) return value;
+  return Response.json(
+    { error: "Expected 'continuationToken' to be a non-empty string.", ok: false },
+    { status: 400 },
+  );
+}
+
+function parseContinuationTokenFromQuery(request: Request): string | Response {
+  const token = new URL(request.url).searchParams.get("continuationToken");
+  if (token !== null && token.length > 0) return token;
+  return Response.json(
+    { error: "Missing or empty 'continuationToken' query parameter.", ok: false },
+    { status: 400 },
+  );
 }
 
 interface ParsedContinueBody {
@@ -891,6 +966,17 @@ function parseStartIndex(request: Request): number | undefined | Response {
     );
   }
   return parsed;
+}
+
+function parseThroughCurrentTail(request: Request): boolean | undefined | Response {
+  const value = new URL(request.url).searchParams.get("throughCurrentTail");
+  if (value === null) return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return Response.json(
+    { error: "Expected throughCurrentTail to be 'true' or 'false'.", ok: false },
+    { status: 400 },
+  );
 }
 
 function serializeAsNdjson(events: ReadableStream<unknown>): ReadableStream<Uint8Array> {

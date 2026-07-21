@@ -174,6 +174,36 @@ function cancelRequest(body?: unknown): Request {
   });
 }
 
+/** Creates a GET handler test harness for continuation-token session resolution. */
+function createEveResolveHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const resolveRoute = channel.routes.find(
+    (route) => route.method === "GET" && route.path === "/eve/v1/session",
+  );
+  if (!resolveRoute) throw new Error("No session resolution GET route found");
+
+  const agent = createMockAgent();
+
+  return {
+    resolveSession: agent.resolveSession,
+    async fetch(url: string) {
+      const args = attachRouteAgent(
+        {
+          send: vi.fn(),
+          cancel: vi.fn(),
+          getSession: vi.fn(),
+          receive: vi.fn() as any,
+          params: {},
+          waitUntil: () => undefined,
+          requestIp: "127.0.0.1",
+        } satisfies RouteHandlerArgs,
+        agent,
+      );
+      return (resolveRoute as any).handler(new Request(url), args);
+    },
+  };
+}
+
 /** Creates a GET handler test harness for the durable session stream route. */
 function createEveStreamHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
@@ -369,6 +399,60 @@ describe("eveChannel — events", () => {
   });
 });
 
+describe("eveChannel — session resolution", () => {
+  it("resolves a channel-local continuation token without delivering input", async () => {
+    const handler = createEveResolveHandler({ auth: none() });
+    handler.resolveSession.mockResolvedValue({ sessionId: "resolved-session" });
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session?continuationToken=authoring-session",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-session-id")).toBe("resolved-session");
+    await expect(response.json()).resolves.toEqual({ ok: true, sessionId: "resolved-session" });
+    expect(handler.resolveSession).toHaveBeenCalledWith("authoring-session");
+  });
+
+  it("returns 404 when no session owns the token", async () => {
+    const handler = createEveResolveHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session?continuationToken=unknown",
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Session not found.", ok: false });
+  });
+
+  it.each([
+    "https://eve.test/eve/v1/session",
+    "https://eve.test/eve/v1/session?continuationToken=",
+  ])("rejects a missing continuation token in %s", async (url) => {
+    const handler = createEveResolveHandler({ auth: none() });
+
+    const response = await handler.fetch(url);
+
+    expect(response.status).toBe(400);
+    expect(handler.resolveSession).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when resolution fails", async () => {
+    const handler = createEveResolveHandler({ auth: none() });
+    handler.resolveSession.mockRejectedValue(new Error("workflow store unavailable"));
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session?continuationToken=authoring-session",
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Failed to resolve the session.",
+      ok: false,
+    });
+  });
+});
+
 describe("eveChannel — stream cursor", () => {
   it("forwards negative tail-relative start indices", async () => {
     const handler = createEveStreamHandler({ auth: none() });
@@ -378,8 +462,49 @@ describe("eveChannel — stream cursor", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(handler.getEventStream).toHaveBeenCalledWith({ startIndex: -1 });
+    expect(handler.getEventStream).toHaveBeenCalledWith({
+      startIndex: -1,
+      throughCurrentTail: undefined,
+    });
   });
+
+  it("forwards finite replay through the captured current tail", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?startIndex=3&throughCurrentTail=true",
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler.getEventStream).toHaveBeenCalledWith({
+      startIndex: 3,
+      throughCurrentTail: true,
+    });
+  });
+
+  it("rejects a tail-relative cursor for finite replay", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?startIndex=-1&throughCurrentTail=true",
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.getEventStream).not.toHaveBeenCalled();
+  });
+
+  it.each(["1", "TRUE", "yes", ""])(
+    "rejects an invalid throughCurrentTail value %j",
+    async (throughCurrentTail) => {
+      const handler = createEveStreamHandler({ auth: none() });
+      const response = await handler.fetch(
+        `https://eve.test/eve/v1/session/test-session-id/stream?throughCurrentTail=${encodeURIComponent(throughCurrentTail)}`,
+      );
+
+      expect(response.status).toBe(400);
+      expect(handler.getEventStream).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["1.5", "1junk", "0x10", "1e2", ""])(
     "rejects a non-decimal-integer start index %j",
@@ -571,6 +696,33 @@ describe("eveChannel — create session (text)", () => {
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     expect(handler.send.mock.calls[0]?.[0]).toBe("hi");
+  });
+
+  it("uses a caller-supplied continuation token when creating or resuming", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        continuationToken: "authoring-session",
+        message: "hi",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send.mock.calls[0]?.[1]).toMatchObject({
+      continuationToken: "authoring-session",
+    });
+  });
+
+  it.each(["", 42, null])("rejects an invalid create continuation token %j", async (token) => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ continuationToken: token, message: "hi" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
   });
 
   it("accepts task mode for callback-driven session creation", async () => {

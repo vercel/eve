@@ -10,6 +10,11 @@ import {
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import {
+  createSessionWaitingEvent,
+  createTurnStartedEvent,
+  type HandleMessageStreamEvent,
+} from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
@@ -180,6 +185,102 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     resumeHookMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).rejects.toBe(failure);
+  });
+});
+
+describe("createWorkflowRuntime#getEventStream", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  function createEncodedEventStream(
+    events: readonly HandleMessageStreamEvent[],
+    tailIndex = events.length - 1,
+  ) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        }
+        controller.close();
+      },
+    });
+
+    return Object.assign(stream, {
+      getTailIndex: vi.fn().mockResolvedValue(tailIndex),
+    });
+  }
+
+  async function collectEvents(
+    stream: ReadableStream<HandleMessageStreamEvent>,
+  ): Promise<HandleMessageStreamEvent[]> {
+    const events: HandleMessageStreamEvent[] = [];
+    for await (const event of stream) events.push(event);
+    return events;
+  }
+
+  it("preserves live stream behavior by default", async () => {
+    const events = [createTurnStartedEvent({ sequence: 1, turnId: "turn-1" })];
+    const encodedEvents = createEncodedEventStream(events);
+    getRunMock.mockReturnValue({ getReadable: vi.fn().mockReturnValue(encodedEvents) });
+
+    await expect(
+      buildRuntime().getEventStream("session-1", { startIndex: -1 }),
+    ).resolves.toBeDefined();
+
+    expect(getRunMock).toHaveBeenCalledWith("session-1");
+    expect(encodedEvents.getTailIndex).not.toHaveBeenCalled();
+  });
+
+  it("closes finite replay at the current-turn boundary at or beyond the captured tail", async () => {
+    const previousBoundary = createSessionWaitingEvent("eve:previous");
+    const currentTurn = createTurnStartedEvent({ sequence: 2, turnId: "turn-2" });
+    const currentBoundary = createSessionWaitingEvent("eve:current");
+    const laterTurn = createTurnStartedEvent({ sequence: 3, turnId: "turn-3" });
+    const encodedEvents = createEncodedEventStream(
+      [previousBoundary, currentTurn, currentBoundary, laterTurn],
+      1,
+    );
+    const getReadable = vi.fn().mockReturnValue(encodedEvents);
+    getRunMock.mockReturnValue({ getReadable });
+
+    const stream = await buildRuntime().getEventStream("session-1", {
+      startIndex: 0,
+      throughCurrentTail: true,
+    });
+
+    await expect(collectEvents(stream)).resolves.toEqual([
+      previousBoundary,
+      currentTurn,
+      currentBoundary,
+    ]);
+    expect(getReadable).toHaveBeenCalledWith({ startIndex: 0 });
+    expect(encodedEvents.getTailIndex).toHaveBeenCalledOnce();
+  });
+
+  it("closes empty when the start cursor is already at or beyond the captured tail", async () => {
+    const encodedEvents = createEncodedEventStream([], 4);
+    const cancel = vi.spyOn(encodedEvents, "cancel");
+    getRunMock.mockReturnValue({ getReadable: vi.fn().mockReturnValue(encodedEvents) });
+
+    const stream = await buildRuntime().getEventStream("session-1", {
+      startIndex: 5,
+      throughCurrentTail: true,
+    });
+
+    await expect(collectEvents(stream)).resolves.toEqual([]);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a negative cursor for finite replay", async () => {
+    await expect(
+      buildRuntime().getEventStream("session-1", {
+        startIndex: -1,
+        throughCurrentTail: true,
+      }),
+    ).rejects.toThrow("throughCurrentTail requires a nonnegative startIndex");
+    expect(getRunMock).not.toHaveBeenCalled();
   });
 });
 

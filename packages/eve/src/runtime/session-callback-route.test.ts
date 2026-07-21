@@ -186,6 +186,9 @@ function createRouteContext(params: Record<string, string>): RouteContext {
       async getEventStream() {
         throw new Error("unexpected getEventStream");
       },
+      async resolveSession() {
+        throw new Error("unexpected resolveSession");
+      },
       async run() {
         throw new Error("unexpected run");
       },

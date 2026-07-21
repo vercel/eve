@@ -72,7 +72,7 @@ export interface RouteContext {
   /**
    * Handle to the agent that this route sends inbound requests to.
    * Conceptually the runtime + harness combined: routes call `run`,
-   * `deliver`, `cancelTurn`, and `getEventStream` to drive sessions of
+   * `deliver`, `resolveSession`, `cancelTurn`, and `getEventStream` to drive sessions of
    * this agent without knowing about the workflow runtime, the harness,
    * or any other execution-layer detail.
    *
@@ -112,8 +112,9 @@ export interface RouteContext {
  *
  * `Agent` is conceptually the workflow runtime plus the tool-loop harness:
  * routes call `run` to start a new session of the agent, `deliver` to
- * send a follow-up to a parked session, `cancelTurn` to stop in-flight work,
- * and `getEventStream` to read events from a previously-started session.
+ * send a follow-up to a parked session, `resolveSession` to find a token owner,
+ * `cancelTurn` to stop in-flight work, and `getEventStream` to read events from
+ * a previously-started session.
  * The framework's internal `Runtime`
  * interface (in `channel/types.ts`) is the underlying primitive — `Agent`
  * is the *public* shape exposed on `RouteContext` so route authors
@@ -144,6 +145,12 @@ export interface Agent {
    */
   deliver(input: DeliverInput): Promise<{ sessionId: string }>;
   /**
+   * Resolves the session that currently owns a channel-local continuation
+   * token without delivering input. Returns `undefined` when no session owns
+   * the token.
+   */
+  resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined>;
+  /**
    * Returns a readable NDJSON-style stream of lifecycle events for an
    * existing session. Used by the framework's HTTP session-stream route and by
    * any user-authored route that exposes an event-streaming endpoint.
@@ -151,7 +158,7 @@ export interface Agent {
    * Nonnegative `options.startIndex` values skip events the caller has already
    * consumed. Negative values read relative to the current tail (`-1` starts
    * at the latest event). The framework HTTP session-stream route forwards
-   * the `startIndex` query parameter unchanged.
+   * the `startIndex` and `throughCurrentTail` query parameters unchanged.
    */
   getEventStream(
     sessionId: string,

@@ -231,6 +231,9 @@ function createCancelRouteCaller(): (
     async getEventStream() {
       throw new Error("cancel route must not read events");
     },
+    async resolveSession() {
+      throw new Error("cancel route must not resolve a session");
+    },
     async run() {
       throw new Error("cancel route must not start a session");
     },

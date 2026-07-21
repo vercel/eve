@@ -18,16 +18,17 @@ export default eveChannel({
 
 ## Routes
 
-The application exposes a health route plus eve channel routes that inspect the agent, create sessions, send follow-ups, cancel turns, and stream events:
+The application exposes a health route plus eve channel routes that inspect the agent, create or resolve sessions, send follow-ups, cancel turns, and stream events:
 
 - `GET /eve/v1/health`
 - `GET /eve/v1/info`
-- `POST /eve/v1/session` (start a session)
+- `GET /eve/v1/session?continuationToken=...` (resolve the session that owns a continuation token)
+- `POST /eve/v1/session` (start or resume a session)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
 - `GET /eve/v1/session/:sessionId/stream` (stream events, NDJSON)
 
-Start a session with a minimal body. The response returns `sessionId` and the `continuationToken` you reuse for follow-ups:
+Start a session with a minimal body. The response returns `sessionId` and the `continuationToken` you reuse for follow-ups. To bind the session to an application-owned identity, include that value as `continuationToken` in the create body; eve resumes its current owner when one exists and otherwise starts a session with that token.
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
@@ -36,7 +37,14 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"continuationToken":"eve:7f3c...","ok":true,"sessionId":"ses_01h..."}
 ```
 
-Stream that session's events as newline-delimited JSON (`application/x-ndjson; charset=utf-8`), one event object per line:
+Resolve an application-owned continuation token without delivering input:
+
+```bash
+curl "https://<deployment>/eve/v1/session?continuationToken=authoring-session-123"
+# {"ok":true,"sessionId":"ses_01h..."}
+```
+
+An unknown token returns `404`. Stream a resolved session's events as newline-delimited JSON (`application/x-ndjson; charset=utf-8`), one event object per line:
 
 ```bash
 curl -N https://<deployment>/eve/v1/session/ses_01h.../stream
@@ -44,6 +52,8 @@ curl -N https://<deployment>/eve/v1/session/ses_01h.../stream
 # {"type":"message.appended","data":{"messageDelta":"It is ",...}}
 # {"type":"message.completed",...}
 ```
+
+The stream stays live by default. For a finite recovery replay, pass a nonnegative `startIndex` and `throughCurrentTail=true`. The route snapshots the current tail, emits through the first current-turn boundary at or beyond that snapshot, then closes; if `startIndex` is already at the snapshot, it closes empty.
 
 Cancel a session's in-flight turn with an empty body, or scope the cancel to the turn you observed by passing the `turnId` stamped on that turn's stream events:
 

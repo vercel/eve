@@ -34,7 +34,7 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -201,9 +201,29 @@ export function createWorkflowRuntime(config: {
       sessionId: string,
       options?: GetEventStreamOptions,
     ): Promise<ReadableStream<HandleMessageStreamEvent>> {
-      return parseNdjsonStream<HandleMessageStreamEvent>(() =>
-        getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
-      );
+      if (options?.throughCurrentTail !== true) {
+        return parseNdjsonStream<HandleMessageStreamEvent>(() =>
+          getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
+        );
+      }
+
+      const startIndex = options.startIndex ?? 0;
+      if (startIndex < 0) {
+        throw new RangeError("throughCurrentTail requires a nonnegative startIndex.");
+      }
+
+      const encodedEvents = getRun(sessionId).getReadable({ startIndex });
+      const capturedEndIndex = (await encodedEvents.getTailIndex()) + 1;
+      if (startIndex >= capturedEndIndex) {
+        await encodedEvents.cancel();
+        return new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        });
+      }
+
+      return readEventStreamThroughCurrentTail(encodedEvents, startIndex, capturedEndIndex);
     },
 
     async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
@@ -221,6 +241,47 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+function readEventStreamThroughCurrentTail(
+  encodedEvents: ReadableStream<Uint8Array>,
+  startIndex: number,
+  capturedEndIndex: number,
+): ReadableStream<HandleMessageStreamEvent> {
+  const reader = parseNdjsonStream<HandleMessageStreamEvent>(() => encodedEvents).getReader();
+  let nextIndex = startIndex;
+  let closed = false;
+
+  return new ReadableStream({
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        if (closed) return;
+        if (done) {
+          closed = true;
+          controller.close();
+          return;
+        }
+
+        nextIndex += 1;
+        controller.enqueue(value);
+        if (nextIndex >= capturedEndIndex && isCurrentTurnBoundaryEvent(value)) {
+          closed = true;
+          controller.close();
+          await reader.cancel();
+        }
+      } catch (error) {
+        if (!closed) {
+          closed = true;
+          controller.error(error);
+        }
+      }
+    },
+    async cancel(reason) {
+      closed = true;
+      await reader.cancel(reason);
+    },
+  });
 }
 
 /** Requests cancellation through a session's stable workflow hook. */

@@ -186,7 +186,7 @@ function buildRouteArgs(
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
-  const agent = createRouteAgent(bundle.runtime, requestId);
+  const agent = createRouteAgent(bundle.runtime, requestId, channelName);
   const send = createSendFn(bundle.runtime, adapter, channelName, { requestId });
   const cancel = createCancelFn(bundle.runtime, channelName);
   const getSession = createGetSessionFn(bundle.runtime);
@@ -221,7 +221,11 @@ function buildRouteArgs(
   };
 }
 
-function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agent {
+function createRouteAgent(
+  runtime: Runtime,
+  requestId: string | undefined,
+  channelName: string,
+): Agent {
   return {
     async cancelTurn(input) {
       return await runtime.cancelTurn(input);
@@ -232,6 +236,9 @@ function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agen
     },
     async getEventStream(sessionId, options) {
       return await runtime.getEventStream(sessionId, options);
+    },
+    async resolveSession(continuationToken) {
+      return await runtime.resolveSession(`${channelName}:${continuationToken}`);
     },
     async run(input) {
       const runInput: RunInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
