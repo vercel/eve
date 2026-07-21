@@ -252,473 +252,356 @@ describe("resolveCompactionModel", () => {
   });
 });
 
-describe("compactMessages", () => {
-  it("carries a prior checkpoint into the next compaction without truncating it", async () => {
-    const { generateText } = await import("ai");
-    const markerAfterTextLimit = "CRITICAL_STATE_AFTER_280_CHARACTERS";
-    const previousCheckpoint = `${"completed work ".repeat(24)}${markerAfterTextLimit}`;
+// --- compactMessages ---------------------------------------------------
+//
+// compactMessages escalates through two rungs, and which rung a test hits is
+// pure threshold arithmetic:
+//
+// - Eviction (rung 1) is accepted only when the evicted history PLUS the
+//   fixed compaction prompt envelope fits the threshold. `EVICTION_FORBIDDEN`
+//   sits below the envelope estimate, so eviction can never be accepted and
+//   the summarization rung always runs.
+// - `ROOMY` accepts eviction whenever the history's bulk is tool output.
+//
+// Every result is checked against `expectWellFormedCompaction`: no orphaned
+// tool_result, never trailing on an assistant message, and — unless the
+// window was exhausted — within the threshold on shouldCompact's own ruler,
+// so the result cannot immediately re-trigger compaction.
 
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Updated checkpoint",
-    } as Awaited<ReturnType<typeof generateText>>);
+const ENVELOPE_TOKENS = estimateTokens([
+  { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
+  { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
+] satisfies ModelMessage[]);
+const EVICTION_FORBIDDEN = Math.floor(ENVELOPE_TOKENS);
+const ROOMY = 100_000;
 
-    const messages: ModelMessage[] = [
-      { content: "Summary of our conversation so far:", role: "user" },
-      { content: previousCheckpoint, role: "assistant" },
-      { content: "new older context", role: "user" },
-      { content: "new older response", role: "assistant" },
-      { content: "recent question", role: "user" },
-      { content: "recent answer", role: "assistant" },
-    ];
+const CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
-    const model = {} as Parameters<typeof compactMessages>[1];
-    // Threshold below the prompt-envelope overhead so eviction can never
-    // accept and the summarization path is exercised.
-    await compactMessages(messages, model, {
-      recentWindowSize: 2,
-      threshold: 200,
-    });
+function user(text: string): ModelMessage {
+  return { content: text, role: "user" };
+}
 
-    const call = vi.mocked(generateText).mock.calls[0]?.[0];
-    expect(call?.prompt).toContain(previousCheckpoint);
-    expect(call?.prompt).toContain(markerAfterTextLimit);
-  });
+function assistant(text: string): ModelMessage {
+  return { content: text, role: "assistant" };
+}
 
-  it("replaces a prior checkpoint instead of retaining it in the recent window", async () => {
-    const { generateText } = await import("ai");
-    const previousCheckpoint = "Previous checkpoint";
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Updated checkpoint",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "Summary of our conversation so far:", role: "user" },
-      { content: previousCheckpoint, role: "assistant" },
-      { content: "new evidence", role: "user" },
-      { content: "latest response", role: "assistant" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const result = await compactMessages(messages, model, {
-      recentWindowSize: 10,
-      threshold: 200,
-    });
-
-    expect(result.filter((message) => message.content === previousCheckpoint)).toHaveLength(0);
-    expect(result.filter((message) => message.content === "Updated checkpoint")).toHaveLength(1);
-  });
-
-  it("retains the prior checkpoint pair when eviction alone frees enough space", async () => {
-    const { generateText } = await import("ai");
-    const previousCheckpoint = "Previous checkpoint";
-
-    const messages: ModelMessage[] = [
-      { content: "Summary of our conversation so far:", role: "user" },
-      { content: previousCheckpoint, role: "assistant" },
-      { content: "new evidence", role: "user" },
-      {
-        content: [
-          {
-            input: { sql: "select 1" },
-            toolCallId: "call-1",
-            toolName: "run_sql",
-            type: "tool-call",
-          },
-        ],
-        role: "assistant",
-      },
-      {
-        content: [
-          {
-            output: { type: "json", value: { rows: "x".repeat(4_000) } },
-            toolCallId: "call-1",
-            toolName: "run_sql",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-      { content: "recent question", role: "user" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const result = await compactMessages(messages, model, {
-      recentWindowSize: 1,
-      threshold: 100_000,
-    });
-
-    // Checkpoint chaining survives an eviction-only cycle: the marker and the
-    // prior checkpoint stay at the head, and no model call is made.
-    expect(generateText).not.toHaveBeenCalled();
-    expect(result[0]).toEqual({ content: "Summary of our conversation so far:", role: "user" });
-    expect(result[1]).toEqual({ content: previousCheckpoint, role: "assistant" });
-  });
-
-  it("summarizes older messages and keeps recent window", async () => {
-    const { generateText } = await import("ai");
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Summary of prior context",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "old message 1", role: "user" },
-      { content: "old message 2", role: "assistant" },
-      { content: "recent 1", role: "user" },
-      { content: "recent 2", role: "assistant" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const result = await compactMessages(messages, model, config);
-
-    expect(result).toHaveLength(5);
-    expect(result[0]).toEqual({
-      content: "Summary of our conversation so far:",
-      role: "user",
-    });
-    expect(result[1]).toEqual({
-      content: "Summary of prior context",
-      role: "assistant",
-    });
-    expect(result[2]).toEqual({ content: "recent 1", role: "user" });
-    expect(result[3]).toEqual({ content: "recent 2", role: "assistant" });
-    expect(result[4]).toEqual({ content: "Continue.", role: "user" });
-  });
-
-  it("forwards provider options to the compaction model call", async () => {
-    const { generateText } = await import("ai");
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Summary of prior context",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "old message 1", role: "user" },
-      { content: "old message 2", role: "assistant" },
-      { content: "recent 1", role: "user" },
-      { content: "recent 2", role: "assistant" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const providerOptions = {
-      anthropic: {
-        thinking: {
-          budget_tokens: 128,
+/** An assistant tool-call message and its paired tool-result message. */
+function toolExchange(input: {
+  readonly callId: string;
+  readonly payloadChars: number;
+  readonly prose?: string;
+}): [ModelMessage, ModelMessage] {
+  return [
+    {
+      content: [
+        ...(input.prose === undefined ? [] : [{ text: input.prose, type: "text" as const }]),
+        {
+          input: { pattern: "todo" },
+          toolCallId: input.callId,
+          toolName: "grep",
+          type: "tool-call" as const,
         },
-      },
-    };
+      ],
+      role: "assistant",
+    },
+    {
+      content: [
+        {
+          output: { type: "json" as const, value: { content: "x".repeat(input.payloadChars) } },
+          toolCallId: input.callId,
+          toolName: "grep",
+          type: "tool-result" as const,
+        },
+      ],
+      role: "tool",
+    },
+  ];
+}
 
-    await compactMessages(messages, model, config, providerOptions);
+function checkpointHead(text: string): ModelMessage[] {
+  return [user(CHECKPOINT_MARKER), assistant(text)];
+}
 
-    expect(generateText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model,
-        providerOptions,
-      }),
-    );
+function expectWellFormedCompaction(result: ModelMessage[], threshold: number): void {
+  const seenCallIds = new Set<string>();
+  for (const message of result) {
+    if (typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-call") seenCallIds.add(part.toolCallId);
+      if (part.type === "tool-result") {
+        expect(seenCallIds.has(part.toolCallId), "orphaned tool_result").toBe(true);
+      }
+    }
+  }
+
+  expect(result.at(-1)?.role, "history must not trail on assistant content").not.toBe("assistant");
+
+  if (result.length > 2) {
+    expect(estimateTokens(result)).toBeLessThanOrEqual(threshold);
+  }
+}
+
+async function compact(
+  messages: ModelMessage[],
+  overrides: Partial<CompactionConfig> & { readonly summary?: string } = {},
+): Promise<{ result: ModelMessage[]; summarizer: ReturnType<typeof vi.mocked<never>> }> {
+  const { generateText } = await import("ai");
+  const summarizer = vi.mocked(generateText);
+  summarizer.mockResolvedValue({
+    text: overrides.summary ?? "checkpoint text",
+  } as Awaited<ReturnType<typeof generateText>>);
+
+  const compactionConfig: CompactionConfig = {
+    recentWindowSize: overrides.recentWindowSize ?? 4,
+    threshold: overrides.threshold ?? ROOMY,
+  };
+  const result = await compactMessages(
+    messages,
+    {} as Parameters<typeof compactMessages>[1],
+    compactionConfig,
+  );
+
+  expectWellFormedCompaction(result, compactionConfig.threshold);
+  return { result, summarizer: summarizer as ReturnType<typeof vi.mocked<never>> };
+}
+
+describe("compactMessages: eviction rung", () => {
+  it("evicts older tool payloads into trail text without calling the summarizer", async () => {
+    const [call, resultMsg] = toolExchange({
+      callId: "call-0",
+      payloadChars: 4_000,
+      prose: "Searching first.",
+    });
+    const messages = [user("investigate the bug"), call, resultMsg, user("what did you find?")];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    // Conversation text survives verbatim; the 4k payload is reduced to a
+    // one-line trail that still proves the call happened.
+    expect(result[0]).toEqual(user("investigate the bug"));
+    expect(result[1]?.content).toContain("Searching first.");
+    expect(result[1]?.content).toContain("Called grep with");
+    expect(result[1]?.content).toContain("→ returned");
+    // The trail keeps at most the 280-char tool-text cap of the 4k payload.
+    expect(result[1]?.content).not.toContain("x".repeat(300));
+    expect(String(result[1]?.content).length).toBeLessThan(600);
+    expect(result.at(-1)).toEqual(user("what did you find?"));
+    // The evicted result cannot immediately re-trigger compaction.
+    expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
-  it("forwards the turn abort signal to the compaction model call", async () => {
-    const { generateText } = await import("ai");
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Summary of prior context",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "old message 1", role: "user" },
-      { content: "old message 2", role: "assistant" },
-      { content: "recent 1", role: "user" },
-      { content: "recent 2", role: "assistant" },
+  it("keeps the recent tail verbatim, tool results included", async () => {
+    const [olderCall, olderResult] = toolExchange({ callId: "call-0", payloadChars: 4_000 });
+    const [recentCall, recentResult] = toolExchange({ callId: "call-1", payloadChars: 50 });
+    const messages = [
+      user("older question"),
+      olderCall,
+      olderResult,
+      user("do the thing"),
+      recentCall,
+      recentResult,
     ];
 
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 3 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    // A tool-ending tail gets no "Continue." guard, so the exchange is last.
+    expect(result.slice(-2)).toEqual([recentCall, recentResult]);
+  });
+
+  it("retains the prior checkpoint pair so chaining survives eviction-only cycles", async () => {
+    const [call, resultMsg] = toolExchange({ callId: "call-0", payloadChars: 4_000 });
+    const messages = [
+      ...checkpointHead("Previous checkpoint"),
+      user("new evidence"),
+      call,
+      resultMsg,
+      user("recent question"),
+    ];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    expect(result[0]).toEqual(user(CHECKPOINT_MARKER));
+    expect(result[1]).toEqual(assistant("Previous checkpoint"));
+  });
+
+  it("reunites a tool result with its call when the window would split them", async () => {
+    const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 40 });
+    // recentWindowSize 2 splits between call and result; the snap must pull
+    // the result into the older region with its call.
+    const messages = [user("old context"), call, resultMsg, user("next question")];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 2 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    const trail = result.find(
+      (message) =>
+        message.role === "assistant" &&
+        typeof message.content === "string" &&
+        message.content.includes("Called grep with"),
+    );
+    expect(trail).toBeDefined();
+  });
+});
+
+describe("compactMessages: summarization rung", () => {
+  it("summarizes when eviction cannot free enough space", async () => {
+    // All bulk is conversational prose — eviction removes nothing — and the
+    // threshold sits below the prompt envelope, so eviction can never be
+    // accepted regardless.
+    const messages = [user("old context to fold away"), assistant("old reply"), user("continue")];
+
+    const { result, summarizer } = await compact(messages, {
+      recentWindowSize: 1,
+      summary: "Distilled story",
+      threshold: EVICTION_FORBIDDEN,
+    });
+
+    expect(summarizer).toHaveBeenCalledTimes(1);
+    expect(summarizer.mock.calls[0]?.[0]?.prompt).toContain("old context to fold away");
+    expect(result[0]).toEqual(user(CHECKPOINT_MARKER));
+    expect(result[1]).toEqual(assistant("Distilled story"));
+    expect(result.some((m) => m.content === "old context to fold away")).toBe(false);
+  });
+
+  it("feeds the previous checkpoint to the summarizer untruncated and replaces it", async () => {
+    const markerPast280 = "CRITICAL_STATE_AFTER_280_CHARACTERS";
+    const previousCheckpoint = `${"completed work ".repeat(24)}${markerPast280}`;
+    const messages = [
+      ...checkpointHead(previousCheckpoint),
+      user("new evidence"),
+      assistant("latest response"),
+    ];
+
+    const { result, summarizer } = await compact(messages, {
+      summary: "Updated checkpoint",
+      threshold: EVICTION_FORBIDDEN,
+    });
+
+    expect(summarizer.mock.calls[0]?.[0]?.prompt).toContain(previousCheckpoint);
+    expect(summarizer.mock.calls[0]?.[0]?.prompt).toContain(markerPast280);
+    expect(result.filter((m) => m.content === previousCheckpoint)).toHaveLength(0);
+    expect(result.filter((m) => m.content === "Updated checkpoint")).toHaveLength(1);
+  });
+
+  it("keeps the recent window verbatim after summarizing when it fits", async () => {
+    // Prose bulk forces summarization; the threshold has room for the tail.
+    const oldProse = user("investigation notes ".repeat(2_000));
+    const [recentCall, recentResult] = toolExchange({ callId: "call-1", payloadChars: 100 });
+    const messages = [oldProse, assistant("done reading"), recentCall, recentResult];
+
+    const { result, summarizer } = await compact(messages, {
+      recentWindowSize: 2,
+      threshold: 5_000,
+    });
+
+    expect(summarizer).toHaveBeenCalledTimes(1);
+    expect(result.slice(2, 4)).toEqual([recentCall, recentResult]);
+  });
+
+  it("strips tool activity from the tail when verbatim does not fit but text does", async () => {
+    const oldProse = user("investigation notes ".repeat(2_000));
+    const [recentCall, recentResult] = toolExchange({
+      callId: "call-1",
+      payloadChars: 1_400,
+      prose: "Running the tool.",
+    });
+    const tail = [user("do the thing"), recentCall, recentResult];
+    const messages = [oldProse, ...tail];
+
+    // Derive a threshold between the stripped and verbatim tail sizes so the
+    // regime is explicit rather than encoded in magic numbers. The summary is
+    // sized to exceed the window-selection reserve, which is what makes the
+    // verbatim tail overshoot after the summary head is added.
+    const summary = "s".repeat(2_400);
+    const summaryHead = [user(CHECKPOINT_MARKER), assistant(summary)];
+    const verbatimSize = estimateTokens([...summaryHead, ...tail]);
+    const strippedSize = estimateTokens([
+      ...summaryHead,
+      user("do the thing"),
+      assistant("Running the tool."),
+    ]);
+    const threshold = Math.floor((verbatimSize + strippedSize) / 2);
+    expect(strippedSize).toBeLessThan(threshold);
+    expect(verbatimSize).toBeGreaterThan(threshold);
+
+    const { result, summarizer } = await compact(messages, {
+      recentWindowSize: 3,
+      summary,
+      threshold,
+    });
+
+    expect(summarizer).toHaveBeenCalledTimes(1);
+    expect(result).toContainEqual(user("do the thing"));
+    expect(result).toContainEqual(assistant("Running the tool."));
+    expect(result.some((m) => m.role === "tool")).toBe(false);
+  });
+
+  it("folds everything into the summary when even the stripped tail cannot fit", async () => {
+    const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 2_000 });
+    const messages = [user("Find the relevant rows."), call, resultMsg];
+
+    const { result } = await compact(messages, {
+      recentWindowSize: 10,
+      summary: "Summary of the large SQL result",
+      threshold: EVICTION_FORBIDDEN,
+    });
+
+    expect(result).toEqual([
+      user(CHECKPOINT_MARKER),
+      assistant("Summary of the large SQL result"),
+      user("Continue."),
+    ]);
+  });
+
+  it("appends a synthetic user message only when the tail would trail on assistant content", async () => {
+    const trailingAssistant = [user("old message"), assistant("old reply"), assistant("trailing")];
+    const trailingUser = [user("old"), assistant("old reply"), user("latest question")];
+
+    const first = await compact(trailingAssistant, {
+      recentWindowSize: 1,
+      threshold: EVICTION_FORBIDDEN,
+    });
+    expect(first.result.at(-1)).toEqual(user("Continue."));
+
+    const second = await compact(trailingUser, {
+      recentWindowSize: 1,
+      threshold: EVICTION_FORBIDDEN,
+    });
+    expect(second.result.at(-1)).toEqual(user("latest question"));
+  });
+
+  it("forwards model options to the summarization call", async () => {
+    const { generateText } = await import("ai");
+    vi.mocked(generateText).mockResolvedValue({
+      text: "summary",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const messages = [user("old message"), assistant("old reply"), user("continue")];
     const model = {} as Parameters<typeof compactMessages>[1];
+    const providerOptions = { anthropic: { thinking: { budget_tokens: 128 } } };
+    const headers = { "x-title": "My Agent" };
     const abortController = new AbortController();
 
     await compactMessages(
       messages,
       model,
-      config,
+      { recentWindowSize: 1, threshold: EVICTION_FORBIDDEN },
+      providerOptions,
       undefined,
-      undefined,
-      undefined,
+      headers,
       abortController.signal,
     );
 
     expect(generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         abortSignal: abortController.signal,
-        model,
-      }),
-    );
-  });
-
-  it("folds oversized recent tool results into the summary when the raw tail does not fit", async () => {
-    const { generateText } = await import("ai");
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Summary of the large SQL result",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "Find the relevant rows.", role: "user" },
-      {
-        content: [
-          {
-            input: { sql: "select * from events" },
-            toolCallId: "call-1",
-            toolName: "execute_sql",
-            type: "tool-call",
-          },
-        ],
-        role: "assistant",
-      },
-      {
-        content: [
-          {
-            output: {
-              type: "json",
-              value: {
-                rows: Array.from({ length: 50 }, (_, index) => ({
-                  id: index,
-                  payload: "x".repeat(200),
-                })),
-              },
-            },
-            toolCallId: "call-1",
-            toolName: "execute_sql",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const result = await compactMessages(messages, model, {
-      recentWindowSize: 10,
-      threshold: 150,
-    });
-
-    expect(result).toEqual([
-      {
-        content: "Summary of our conversation so far:",
-        role: "user",
-      },
-      {
-        content: "Summary of the large SQL result",
-        role: "assistant",
-      },
-      { content: "Continue.", role: "user" },
-    ]);
-    expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the recent tail verbatim and evicts older tool activity into trail text", async () => {
-    const { generateText } = await import("ai");
-
-    const olderToolCall: ModelMessage = {
-      content: [
-        { text: "Searching first.", type: "text" },
-        { input: { pattern: "todo" }, toolCallId: "call-0", toolName: "grep", type: "tool-call" },
-      ],
-      role: "assistant",
-    };
-    const olderToolResult: ModelMessage = {
-      content: [
-        {
-          output: { type: "json", value: { matchCount: 3, content: "x".repeat(2_000) } },
-          toolCallId: "call-0",
-          toolName: "grep",
-          type: "tool-result",
-        },
-      ],
-      role: "tool",
-    };
-    const recentAssistant: ModelMessage = {
-      content: [
-        { text: "Running the tool.", type: "text" },
-        { input: { x: 1 }, toolCallId: "call-1", toolName: "run", type: "tool-call" },
-      ],
-      role: "assistant",
-    };
-    const recentToolResult: ModelMessage = {
-      content: [
-        {
-          output: { type: "json", value: { ok: true } },
-          toolCallId: "call-1",
-          toolName: "run",
-          type: "tool-result",
-        },
-      ],
-      role: "tool",
-    };
-
-    const messages: ModelMessage[] = [
-      { content: "old context", role: "user" },
-      olderToolCall,
-      olderToolResult,
-      // Recent window (last 4):
-      { content: "do the thing", role: "user" },
-      recentAssistant,
-      recentToolResult,
-      { content: "All done.", role: "assistant" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const result = await compactMessages(messages, model, {
-      recentWindowSize: 4,
-      threshold: 100_000,
-    });
-
-    // Eviction alone frees enough space: no summarization model call.
-    expect(generateText).not.toHaveBeenCalled();
-
-    // Older tool activity collapses to one-line trail text on the assistant
-    // message; the huge result payload is gone but the evidence remains.
-    expect(result[1]?.role).toBe("assistant");
-    expect(result[1]?.content).toContain("Searching first.");
-    expect(result[1]?.content).toContain("Called grep with");
-    expect(result[1]?.content).toContain("→ returned");
-    expect(result[1]?.content).not.toContain("x".repeat(300));
-
-    // The recent tail survives verbatim, tool call and result included.
-    expect(result.slice(2)).toEqual([
-      { content: "do the thing", role: "user" },
-      recentAssistant,
-      recentToolResult,
-      { content: "All done.", role: "assistant" },
-      { content: "Continue.", role: "user" },
-    ]);
-  });
-
-  it("never opens the verbatim tail with a tool result orphaned from its call", async () => {
-    const { generateText } = await import("ai");
-
-    const messages: ModelMessage[] = [
-      { content: "old context", role: "user" },
-      {
-        content: [{ input: { x: 1 }, toolCallId: "call-1", toolName: "run", type: "tool-call" }],
-        role: "assistant",
-      },
-      // recentWindowSize 2 would split here, orphaning this result from its call.
-      {
-        content: [
-          {
-            output: { type: "json", value: { ok: true } },
-            toolCallId: "call-1",
-            toolName: "run",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-      { content: "next question", role: "user" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const result = await compactMessages(messages, model, {
-      recentWindowSize: 2,
-      threshold: 100_000,
-    });
-
-    expect(generateText).not.toHaveBeenCalled();
-    // The snapped tool result was evicted with its call into trail text: no
-    // tool message survives without a preceding tool-call part.
-    const toolCallIds = new Set<string>();
-    for (const message of result) {
-      if (Array.isArray(message.content)) {
-        for (const part of message.content) {
-          if (part.type === "tool-call") toolCallIds.add(part.toolCallId);
-          if (part.type === "tool-result") expect(toolCallIds.has(part.toolCallId)).toBe(true);
-        }
-      }
-      if (message.role === "tool") {
-        expect(message).not.toBe(result[0]);
-      }
-    }
-    expect(
-      result.some(
-        (message) =>
-          message.role === "assistant" &&
-          typeof message.content === "string" &&
-          message.content.includes("Called run with"),
-      ),
-    ).toBe(true);
-  });
-
-  it("forwards headers to the generateText call", async () => {
-    const { generateText } = await import("ai");
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Summary of prior context",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "old message 1", role: "user" },
-      { content: "old message 2", role: "assistant" },
-      { content: "recent 1", role: "user" },
-      { content: "recent 2", role: "assistant" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const headers = {
-      "x-title": "My Agent",
-      "http-referer": "https://my-agent.vercel.app",
-    };
-
-    await compactMessages(messages, model, config, undefined, undefined, headers);
-
-    expect(generateText).toHaveBeenCalledWith(
-      expect.objectContaining({
         headers,
         model,
+        providerOptions,
       }),
     );
-  });
-
-  it("appends synthetic user message when recent window trails with assistant", async () => {
-    const { generateText } = await import("ai");
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Summary of prior context",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "old message", role: "user" },
-      { content: "old reply", role: "assistant" },
-      { content: "assistant trailing", role: "assistant" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const result = await compactMessages(messages, model, {
-      recentWindowSize: 1,
-      threshold: 100,
-    });
-
-    expect(result.at(-1)).toEqual({ content: "Continue.", role: "user" });
-  });
-
-  it("does not append synthetic user message when recent window ends with user or tool", async () => {
-    const { generateText } = await import("ai");
-
-    vi.mocked(generateText).mockResolvedValue({
-      text: "Summary",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages: ModelMessage[] = [
-      { content: "old", role: "user" },
-      { content: "old reply", role: "assistant" },
-      { content: "latest question", role: "user" },
-    ];
-
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const result = await compactMessages(messages, model, {
-      recentWindowSize: 1,
-      threshold: 100,
-    });
-
-    expect(result.at(-1)).toEqual({ content: "latest question", role: "user" });
   });
 });
