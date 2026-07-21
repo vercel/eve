@@ -8211,6 +8211,7 @@ describe("createToolLoopHarness", () => {
       const lastTool = toolEntries[toolEntries.length - 1]?.[1];
       expect(lastTool?.providerOptions).toEqual({
         anthropic: { cacheControl: { type: "ephemeral" } },
+        bedrock: { cachePoint: { type: "default" } },
       });
     });
 
@@ -8265,9 +8266,11 @@ describe("createToolLoopHarness", () => {
       expect(result.messages?.[0]?.providerOptions).toBeUndefined();
       expect(result.messages?.[1]?.providerOptions).toEqual({
         anthropic: { cacheControl: { type: "ephemeral" } },
+        bedrock: { cachePoint: { type: "default" } },
       });
       expect(result.messages?.[2]?.providerOptions).toEqual({
         anthropic: { cacheControl: { type: "ephemeral" } },
+        bedrock: { cachePoint: { type: "default" } },
       });
     });
 
@@ -9398,6 +9401,7 @@ describe("createToolLoopHarness", () => {
         content: "You are a test assistant.\n\ndynamic-system-instruction",
         providerOptions: {
           anthropic: { cacheControl: { type: "ephemeral" } },
+          bedrock: { cachePoint: { type: "default" } },
         },
       });
     });
