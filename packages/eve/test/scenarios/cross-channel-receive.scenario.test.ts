@@ -171,6 +171,7 @@ describe("cross-channel receive end-to-end", () => {
         }),
         {
           receive,
+          resolveActiveSession: async () => undefined,
           send: async () => {
             throw new Error("webhook should delegate to args.receive()");
           },

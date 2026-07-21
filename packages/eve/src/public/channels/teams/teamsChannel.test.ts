@@ -40,6 +40,7 @@ async function firePost(
     }),
     {
       getSession: vi.fn(),
+      resolveActiveSession: async () => undefined,
       cancel: vi.fn(),
       params: {},
       receive: vi.fn(),

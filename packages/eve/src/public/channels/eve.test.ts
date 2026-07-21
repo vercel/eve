@@ -74,6 +74,7 @@ function createEveCreateHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
         send: mockSend,
+        resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
         getSession: vi.fn(),
         receive: vi.fn() as any,
@@ -116,6 +117,7 @@ function createEveContinueHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
         send: mockSend,
+        resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
@@ -148,6 +150,7 @@ function createEveCancelHandler(input: EveChannelInput) {
       const args = attachRouteAgent(
         {
           send: vi.fn(),
+          resolveActiveSession: async () => undefined,
           cancel: vi.fn(),
           getSession: vi.fn(),
           receive: vi.fn() as any,
@@ -195,6 +198,7 @@ function createEveStreamHandler(input: EveChannelInput) {
     async fetch(url: string) {
       const args: RouteHandlerArgs = {
         send: vi.fn(),
+        resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,

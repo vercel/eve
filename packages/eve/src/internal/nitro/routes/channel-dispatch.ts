@@ -8,6 +8,7 @@ import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createCancelFn } from "#channel/cancel.js";
 import { createSendFn } from "#channel/send.js";
+import { createResolveActiveSessionFn } from "#channel/resolve-active-session.js";
 import { createGetSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
@@ -188,6 +189,7 @@ function buildRouteArgs(
   const adapter = channel?.adapter ?? { kind: "channel" };
   const agent = createRouteAgent(bundle.runtime, requestId);
   const send = createSendFn(bundle.runtime, adapter, channelName, { requestId });
+  const resolveActiveSession = createResolveActiveSessionFn(bundle.runtime, channelName);
   const cancel = createCancelFn(bundle.runtime, channelName);
   const getSession = createGetSessionFn(bundle.runtime);
   const receive = createCrossChannelReceiveFn(
@@ -199,6 +201,7 @@ function buildRouteArgs(
     attachAgentInfoRouteResponse(
       {
         send,
+        resolveActiveSession,
         cancel,
         getSession,
         receive,

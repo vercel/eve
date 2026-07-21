@@ -4,6 +4,7 @@ import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js"
 import {
   parseAppMentionEvent,
   parseDirectMessageEvent,
+  parseMessageEvent,
   parseSlackEventEnvelope,
   slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
@@ -157,6 +158,35 @@ describe("parseAppMentionEvent", () => {
       mimeType: "image/png",
       size: 1024,
     });
+  });
+});
+
+describe("parseMessageEvent", () => {
+  it("preserves bot and subtype message events for onMessage", () => {
+    const bot = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        bot_id: "B01",
+        user: "U_BOT",
+        text: "automated",
+        channel: "C01",
+        ts: "2.0",
+      },
+    });
+    const subtype = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        subtype: "message_changed",
+        text: "edited",
+        channel: "C01",
+        ts: "3.0",
+      },
+    });
+
+    expect(bot?.author?.isBot).toBe(true);
+    expect(subtype?.raw.subtype).toBe("message_changed");
   });
 });
 
