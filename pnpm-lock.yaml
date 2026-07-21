@@ -623,9 +623,6 @@ importers:
 
   e2e/fixtures/agent-compaction-regressions:
     dependencies:
-      '@eve/e2e-compaction-regression-shared':
-        specifier: workspace:*
-        version: link:../compaction-regression-shared
       '@opentelemetry/core':
         specifier: 2.6.1
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -943,15 +940,6 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
-
-  e2e/fixtures/compaction-regression-shared:
-    dependencies:
-      eve:
-        specifier: workspace:*
-        version: link:../../../packages/eve
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
 
   e2e/fixtures/extensions:
     dependencies:

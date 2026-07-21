@@ -11,7 +11,6 @@
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
-    "@eve/e2e-compaction-regression-shared": "workspace:*",
     "@opentelemetry/core": "2.6.1",
     "@opentelemetry/sdk-trace-base": "2.6.1",
     "@vercel/otel": "2.1.2",
