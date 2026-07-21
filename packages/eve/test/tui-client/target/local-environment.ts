@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +14,23 @@ import type {
 } from "./types.ts";
 
 const DEFAULT_LOCAL_TARGET_PORT = Number(process.env.PORT ?? 3000);
+
+/**
+ * True when nothing on this machine already listens on the port. Default
+ * allocation must skip a developer's own `eve dev` (or anything else) parked
+ * on 3000 — the harness would otherwise probe the foreign server, see the
+ * wrong agent name, and fail the whole smoke run.
+ */
+function portIsFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.unref();
+    probe.once("error", () => resolve(false));
+    probe.listen({ host: "127.0.0.1", port }, () => {
+      probe.close(() => resolve(true));
+    });
+  });
+}
 
 interface LocalTargetRecord {
   readonly startEnvKey: string;
@@ -50,7 +68,7 @@ export function createLocalTestEnvironment(
       }
 
       const targetId = `${input.kind}:${input.app}`;
-      const port = input.port ?? resolveDefaultPort({ defaultPortByTarget, targetId });
+      const port = input.port ?? (await resolveDefaultPort({ defaultPortByTarget, targetId }));
       if (input.port === undefined && port === nextPort) {
         nextPort += 1;
       }
@@ -148,14 +166,14 @@ export function createLocalTestEnvironment(
     },
   };
 
-  function resolveDefaultPort(input: {
+  async function resolveDefaultPort(input: {
     readonly defaultPortByTarget: Map<string, number>;
     readonly targetId: string;
-  }): number {
+  }): Promise<number> {
     const existingPort = input.defaultPortByTarget.get(input.targetId);
     if (existingPort !== undefined) return existingPort;
 
-    while (portOwners.has(nextPort)) {
+    while (portOwners.has(nextPort) || !(await portIsFree(nextPort))) {
       nextPort += 1;
     }
 

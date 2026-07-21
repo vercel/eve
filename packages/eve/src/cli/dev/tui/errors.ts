@@ -9,11 +9,6 @@ import type {
   StepFailedStreamEvent,
   TurnFailedStreamEvent,
 } from "#client/index.js";
-import {
-  GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
-  GATEWAY_AUTHENTICATION_ERROR_NAME,
-} from "#harness/model-call-error.js";
-
 /**
  * One of the failure events a session stream can carry. All three share the
  * same `{ code, message, details? }` payload shape — the harness emits them
@@ -80,6 +75,39 @@ export function formatFailureMessage(event: FailureStreamEvent): string {
 }
 
 /**
+ * The structured fields the harness attaches to failure-event details:
+ * the semantic-error catalog's identity and remediation, plus the raw
+ * inspection dump for unrecognized failures. One projection so every
+ * consumer narrows the untyped `details` payload the same way.
+ */
+export interface FailureDetails {
+  readonly semanticErrorId?: string;
+  readonly hint?: string;
+  readonly detail?: string;
+}
+
+export function failureDetails(event: FailureStreamEvent): FailureDetails {
+  const details: unknown = event.data.details;
+  if (details === null || typeof details !== "object") return {};
+  const record = details as { semanticErrorId?: unknown; hint?: unknown; detail?: unknown };
+  const out: { -readonly [Key in keyof FailureDetails]: FailureDetails[Key] } = {};
+  if (typeof record.semanticErrorId === "string") out.semanticErrorId = record.semanticErrorId;
+  if (typeof record.hint === "string" && record.hint.trim().length > 0) {
+    out.hint = record.hint.trim();
+  }
+  if (typeof record.detail === "string") out.detail = record.detail;
+  return out;
+}
+
+/**
+ * Extracts the structured remediation hint attached to a failure event's
+ * details by the semantic-error catalog, if any.
+ */
+export function formatFailureHint(event: FailureStreamEvent): string | undefined {
+  return failureDetails(event).hint;
+}
+
+/**
  * Extracts the diagnostic dump attached to a failure event, if any.
  *
  * `details.detail` is the `util.inspect` rendering (stack trace and cause
@@ -89,48 +117,34 @@ export function formatFailureMessage(event: FailureStreamEvent): string {
  * `undefined` for them and the headline stands alone.
  */
 export function formatFailureDetail(event: FailureStreamEvent): string | undefined {
-  const details: unknown = event.data.details;
-  if (details === null || typeof details !== "object") return undefined;
-  const detail = (details as { detail?: unknown }).detail;
-  if (typeof detail !== "string") return undefined;
+  const detail = failureDetails(event).detail;
+  if (detail === undefined) return undefined;
   const trimmed = detail.trim();
   if (trimmed.length === 0 || trimmed === event.data.message.trim()) return undefined;
   return trimmed;
 }
 
 /**
- * Minimal TUI rendering for a gateway-auth failure when `/model` is available
- * locally. Replaces the harness's full summary — whose remediation names CLI
- * commands and dashboard URLs — with one actionable line; the caller drops
- * the diagnostic detail along with it. The variant is picked off the summary
- * message the harness wrote, so a stale key, an expired OIDC token, and
- * missing credentials each get the fix that actually applies.
+ * Local-TUI hints keyed by the semantic-error catalog id the harness
+ * writes into failure details. When the failing setup can be fixed from
+ * inside the session, the catalog's hint — which names CLI commands and
+ * dashboard URLs — is replaced with the in-session fix.
  */
-export function formatGatewayAuthFailureNotice(event: FailureStreamEvent): string {
-  const message = event.data.message;
-  if (/rejected the provided API key|Invalid API key/i.test(message)) {
-    return "AI Gateway rejected your AI_GATEWAY_API_KEY. Run /model to refresh credentials, or update it in .env.local (a stale shell export can shadow it).";
-  }
-  if (/rejected the OIDC token|Invalid OIDC token/i.test(message)) {
-    return "Your AI Gateway OIDC token is invalid or expired. Run /model to refresh it, or set AI_GATEWAY_API_KEY in .env.local.";
-  }
-  return "There is no AI_GATEWAY_API_KEY set. Run /model to connect this to a project and refresh AI Gateway credentials, or set it manually in .env.local.";
-}
+const LOCAL_HINT_OVERRIDES: Readonly<Record<string, string>> = {
+  "gateway-auth-invalid-api-key":
+    "Run /model to refresh credentials, or update AI_GATEWAY_API_KEY in .env.local (a stale shell export can shadow it).",
+  "gateway-auth-invalid-oidc-token":
+    "Run /model to refresh the OIDC token, or set AI_GATEWAY_API_KEY in .env.local.",
+  "gateway-auth-missing-credentials":
+    "Run /model to connect this to a project and refresh AI Gateway credentials, or set AI_GATEWAY_API_KEY manually in .env.local.",
+};
 
 /**
- * Recognizes a model-call failure caused by AI Gateway authentication. The
- * primary signal is the machine-readable `gatewayName` the harness merges
- * into every model-call failure's details (`extractModelCallErrorDetails`);
- * the summary name is the fallback for payloads whose gateway error was not
- * preserved on the cause chain. Both identifiers are imported from the
- * harness module that writes them, so the two sides cannot drift.
+ * The surface-local hint for a failure, when the TUI can offer a better
+ * fix than the catalog's (currently: gateway credential failures resolve
+ * in-session via `/model`). Returns `undefined` to keep the harness hint.
  */
-export function isGatewayAuthFailure(event: FailureStreamEvent): boolean {
-  const details: unknown = event.data.details;
-  if (details === null || typeof details !== "object") return false;
-  const record = details as { gatewayName?: unknown; name?: unknown };
-  return (
-    record.gatewayName === GATEWAY_AUTHENTICATION_ERROR_NAME ||
-    record.name === GATEWAY_AUTH_FAILURE_SUMMARY_NAME
-  );
+export function localFailureHint(event: FailureStreamEvent): string | undefined {
+  const id = failureDetails(event).semanticErrorId;
+  return id === undefined ? undefined : LOCAL_HINT_OVERRIDES[id];
 }

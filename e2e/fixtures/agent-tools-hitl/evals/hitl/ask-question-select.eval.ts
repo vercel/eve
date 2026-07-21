@@ -14,6 +14,7 @@ export default defineEval({
         "Set prompt to: 'Pick a color.'",
         'Provide exactly two options: - id "red", label "Red" - id "blue", label "Blue"',
         "Do not answer the question yourself, wait for my response.",
+        "After I respond, reply confirming the color I chose by name.",
       ].join("\n"),
     );
 

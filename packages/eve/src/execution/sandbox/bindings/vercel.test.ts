@@ -559,7 +559,11 @@ describe("createVercelSandbox", () => {
     });
 
     expect(get).toHaveBeenCalledTimes(1);
-    expect(get).toHaveBeenCalledWith({ name: "session-key", resume: false });
+    expect(get).toHaveBeenCalledWith({
+      fetch: expect.any(Function),
+      name: "session-key",
+      resume: false,
+    });
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       name: "session-key",
@@ -921,6 +925,7 @@ describe("createVercelSandbox", () => {
 
     expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
     expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith({
+      fetch: expect.any(Function),
       name: "persisted-sandbox-name",
       resume: false,
     });
@@ -1005,6 +1010,7 @@ describe("createVercelSandbox", () => {
     });
 
     expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith({
+      fetch: expect.any(Function),
       name: "deleted-sandbox",
       resume: false,
     });

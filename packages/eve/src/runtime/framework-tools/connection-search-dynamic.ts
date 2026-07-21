@@ -1,3 +1,5 @@
+import { z } from "#compiled/zod/index.js";
+
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
@@ -36,26 +38,32 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
 
-const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    connection: { type: "string" },
-    description: { type: "string" },
-    error: { type: "string" },
-    inputSchema: { type: "object" },
-    needsAuthorization: { type: "boolean" },
-    outputSchema: { type: "object" },
-    qualifiedName: { type: "string" },
-    tool: { type: "string" },
-  },
-  required: ["connection", "description"],
-  type: "object",
-};
+const CONNECTION_SEARCH_INPUT_SCHEMA = z.strictObject({
+  connection: z
+    .string()
+    .describe("Optional: limit search to a specific connection name.")
+    .optional(),
+  keywords: z
+    .string()
+    .describe(
+      "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
+    ),
+  limit: z.number().describe("Max results to return. Default 10.").optional(),
+});
 
-const CONNECTION_SEARCH_OUTPUT_SCHEMA: JsonObject = {
-  items: CONNECTION_SEARCH_RESULT_ITEM_SCHEMA,
-  type: "array",
-};
+const connectionSchema = z.looseObject({});
+const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA = z.strictObject({
+  connection: z.string(),
+  description: z.string(),
+  error: z.string().optional(),
+  inputSchema: connectionSchema.optional(),
+  needsAuthorization: z.boolean().optional(),
+  outputSchema: connectionSchema.optional(),
+  qualifiedName: z.string().optional(),
+  tool: z.string().optional(),
+});
+
+const CONNECTION_SEARCH_OUTPUT_SCHEMA = z.array(CONNECTION_SEARCH_RESULT_ITEM_SCHEMA);
 
 /**
  * Durable context key for connection search results. Written by
@@ -395,26 +403,7 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           "Discovered tools become directly callable by their qualified name " +
           "(e.g. `linear__list_issues`) in your next response. " +
           `Available connections: ${connectionNames.join(", ")}.`,
-        inputSchema: {
-          type: "object" as const,
-          additionalProperties: false,
-          properties: {
-            keywords: {
-              description:
-                "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
-              type: "string",
-            },
-            connection: {
-              description: "Optional: limit search to a specific connection name.",
-              type: "string",
-            },
-            limit: {
-              description: "Max results to return. Default 10.",
-              type: "number",
-            },
-          },
-          required: ["keywords"],
-        },
+        inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
         async execute(input: ConnectionSearchInput) {
           return executeConnectionSearch(input);
         },

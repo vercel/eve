@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
-  DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+  DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+  DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
@@ -28,6 +29,13 @@ import {
   DISCOVER_SCHEDULE_FILE_UNSUPPORTED,
   DISCOVER_SCHEDULES_DIRECTORY_INVALID,
 } from "#discover/schedules.js";
+
+const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
+  kind: "eve-extension",
+  formatVersion: 1,
+  builtWithEve: "0.0.0-test",
+  requires: { extension: 1, tool: 1 },
+});
 
 /**
  * Disk-fixture cases covered by the original `test/discover-agent.integration.test.ts`
@@ -417,6 +425,7 @@ describe("discoverAgent (memory)", () => {
   it("discovers module-only lib sources and reports unsupported lib entries", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
+        "lib/generated.d.ts": "export declare const generated: true;\n",
         "lib/notes.md": "unsupported",
         "lib/weather/client.ts": "export const client = {};\n",
         "instructions.md": "You are a precise assistant.",
@@ -622,13 +631,15 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
         "node_modules/@acme/gizmo/package.json": JSON.stringify({
           name: "@acme/gizmo",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/gizmo/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/gizmo/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
@@ -688,8 +699,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/tools/search.ts":
           'throw new Error("extension modules should not execute during discovery");\n',
         "node_modules/@acme/crm/extension/instructions/policy.md": "Use the CRM before guessing.",
@@ -721,13 +733,42 @@ describe("discoverAgent (memory)", () => {
     expect(mount.manifest.resolvedExtensions).toEqual([]);
   });
 
+  it("resolves a published dist-only extension package that omits eve.extension.source", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
+        "node_modules/@acme/crm/extension/tools/search.ts":
+          'throw new Error("extension modules should not execute during discovery");\n',
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.resolvedExtensions).toHaveLength(1);
+    expect(result.manifest.resolvedExtensions[0]!.packageName).toBe("@acme/crm");
+  });
+
   it("rejects an extension package that declares agent config", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/agent.ts":
           'export default { model: "anthropic/claude-sonnet-5" };\n',
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
@@ -774,8 +815,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/tools/search.ts":
           'throw new Error("extension modules should not execute during discovery");\n',
       },
@@ -818,8 +860,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/tools/search.ts":
           'throw new Error("extension modules should not execute during discovery");\n',
       },
@@ -859,8 +902,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
@@ -911,8 +955,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
@@ -937,13 +982,19 @@ describe("discoverAgent (memory)", () => {
     expect(collision?.message).toContain("extensions/crm/");
   });
 
-  it("rejects a mounted extension whose eve peer range the app does not satisfy", async () => {
+  it("rejects a mounted extension that requires an unsupported capability version", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
-          peerDependencies: { eve: "^2" },
+          eve: { extension: { source: "source", dist: "extension" } },
+          peerDependencies: { eve: "*" },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 1,
+          builtWithEve: "9.0.0",
+          requires: { extension: 1, tool: 2 },
         }),
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
@@ -958,26 +1009,26 @@ describe("discoverAgent (memory)", () => {
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
       source: project.source,
-      eveVersion: "1.4.0",
     });
 
     const incompatible = result.diagnostics.find(
-      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
     );
     expect(incompatible).toBeDefined();
-    expect(incompatible?.message).toContain("^2");
-    expect(incompatible?.message).toContain("1.4.0");
+    expect(incompatible?.message).toContain("tool contract v2");
+    expect(incompatible?.message).toContain("versions: v1");
     expect(result.manifest.resolvedExtensions).toEqual([]);
   });
 
-  it("mounts an extension when the app's eve satisfies its peer range", async () => {
+  it("does not use the npm peer range as the runtime compatibility authority", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
           peerDependencies: { eve: "^2" },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
@@ -991,12 +1042,11 @@ describe("discoverAgent (memory)", () => {
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
       source: project.source,
-      eveVersion: "2.3.0",
     });
 
     expect(
       result.diagnostics.some(
-        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
       ),
     ).toBe(false);
     expect(result.manifest.resolvedExtensions).toHaveLength(1);
@@ -1007,8 +1057,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         // Background scheduling is the consuming agent's to own, not an extension's.
         "node_modules/@acme/crm/extension/schedules/sweep.md":
@@ -1036,8 +1087,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
         // The mounted extension itself tries to mount another extension — not
@@ -1069,8 +1121,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
         }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
@@ -1092,5 +1145,32 @@ describe("discoverAgent (memory)", () => {
         (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
       ),
     ).toBe(false);
+  });
+
+  it("rejects an extension distribution without generated compatibility metadata", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { source: "source", dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
+    );
+    expect(result.manifest.resolvedExtensions).toEqual([]);
   });
 });

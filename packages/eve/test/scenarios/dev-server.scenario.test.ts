@@ -1,6 +1,7 @@
 import { Agent } from "node:http";
 import { existsSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -36,6 +37,8 @@ import {
 process.env.EVE_TUI_UNICODE = "1";
 
 const scenarioApp = useScenarioApp();
+const require = createRequire(import.meta.url);
+const TYPESCRIPT_VERSION = (require("typescript/package.json") as { version: string }).version;
 const DEV_SERVER_SCENARIO_TIMEOUT_MS = 360_000;
 const DEV_SERVER_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   ...WEATHER_AGENT_DESCRIPTOR,
@@ -157,6 +160,67 @@ const WORKFLOW_GENERATION_DESCRIPTOR: ScenarioAppDescriptor = {
     "agent/tools/get_marker.ts": createGenerationMarkerToolSource("generation-one", true),
   },
 };
+const WORKSPACE_EXTENSION_HMR_DESCRIPTOR: ScenarioAppDescriptor = {
+  dependencies: {
+    "@acme/workspace-extension": "workspace:*",
+  },
+  files: {
+    "agent/agent.mjs": 'export default { model: "openai/gpt-5.4-mini" };\n',
+    "agent/extensions/workspace.mjs": 'export { default } from "@acme/workspace-extension";\n',
+    "agent/instructions.md": "Test workspace extension development.\n",
+    "packages/workspace-extension/extension/extension.ts": [
+      'import { defineExtension } from "eve/extension";',
+      "export default defineExtension();",
+      "",
+    ].join("\n"),
+    "packages/workspace-extension/extension/tools/marker.ts": createWorkspaceExtensionToolSource(
+      "workspace extension marker one",
+    ),
+    "packages/workspace-extension/package.json": `${JSON.stringify(
+      {
+        name: "@acme/workspace-extension",
+        version: "0.0.0",
+        type: "module",
+        eve: { extension: { source: "extension", dist: "dist/extension" } },
+        devDependencies: { typescript: TYPESCRIPT_VERSION },
+        peerDependencies: { eve: "*" },
+      },
+      null,
+      2,
+    )}\n`,
+    "packages/workspace-extension/tsconfig.json": `${JSON.stringify(
+      {
+        compilerOptions: {
+          module: "esnext",
+          moduleResolution: "bundler",
+          noEmit: true,
+          skipLibCheck: true,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["extension/**/*"],
+      },
+      null,
+      2,
+    )}\n`,
+    "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+  },
+  installDependencies: true,
+  name: "workspace-extension-hmr",
+};
+
+function createWorkspaceExtensionToolSource(description: string): string {
+  return [
+    'import { defineTool } from "eve/tools";',
+    "",
+    "export default defineTool({",
+    `  description: ${JSON.stringify(description)},`,
+    '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+    "  async execute() { return { ok: true }; },",
+    "});",
+    "",
+  ].join("\n");
+}
 
 function createGenerationMarkerToolSource(marker: string, crashOnce: boolean): string {
   const lifecycle = crashOnce
@@ -334,7 +398,87 @@ async function waitForWebSocketEvent<T>(
   });
 }
 
+async function workspaceExtensionToolDescription(serverUrl: string): Promise<string | undefined> {
+  return (await fetchAgentInfo(serverUrl)).tools.authored.find(
+    (tool) => tool.name === "workspace__marker",
+  )?.description;
+}
+
+async function expectWorkspaceExtensionToolDescription(
+  serverUrl: string,
+  description: string,
+): Promise<void> {
+  await expect(workspaceExtensionToolDescription(serverUrl)).resolves.toBe(description);
+}
+
 describe("eve dev server", () => {
+  it(
+    "rebuilds mounted workspace extensions from source and preserves the active dist on failure",
+    async () => {
+      const app = await scenarioApp(WORKSPACE_EXTENSION_HMR_DESCRIPTOR);
+      const sourcePath = join(
+        app.appRoot,
+        "packages",
+        "workspace-extension",
+        "extension",
+        "tools",
+        "marker.ts",
+      );
+      const distPath = join(
+        app.appRoot,
+        "packages",
+        "workspace-extension",
+        "dist",
+        "extension",
+        "tools",
+        "marker.mjs",
+      );
+      expect(existsSync(distPath)).toBe(false);
+
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        expect(existsSync(distPath)).toBe(true);
+        await expectWorkspaceExtensionToolDescription(server.url, "workspace extension marker one");
+        const initialRevision = await readDevelopmentRevision(server.url);
+
+        await writeFile(
+          sourcePath,
+          `${createWorkspaceExtensionToolSource("rejected marker")}\nconst invalid: string = 1;\n`,
+        );
+        await waitForCondition(
+          () => `${server.stdout()}\n${server.stderr()}`.includes("rebuild failed"),
+          () =>
+            `Workspace extension build did not fail.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+        );
+
+        await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
+        await expectWorkspaceExtensionToolDescription(server.url, "workspace extension marker one");
+        await expect(readFile(distPath, "utf8")).resolves.toContain(
+          "workspace extension marker one",
+        );
+
+        await writeFile(
+          sourcePath,
+          createWorkspaceExtensionToolSource("workspace extension marker two"),
+        );
+        await waitForCondition(
+          async () =>
+            (await workspaceExtensionToolDescription(server.url)) ===
+            "workspace extension marker two",
+          () =>
+            `Workspace extension edit was not published.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+        );
+
+        await expect(readDevelopmentRevision(server.url)).resolves.not.toBe(initialRevision);
+        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
   it(
     "publishes authored tool removals without replacing the active host",
     async () => {

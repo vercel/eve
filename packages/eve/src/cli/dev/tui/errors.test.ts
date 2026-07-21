@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { StepFailedStreamEvent } from "#client/index.js";
 
-import { formatGatewayAuthFailureNotice, isGatewayAuthFailure } from "./errors.js";
+import { failureDetails, localFailureHint } from "./errors.js";
 
 function stepFailed(
   details?: Record<string, unknown>,
@@ -19,51 +19,45 @@ function stepFailed(
   return { type: "step.failed", data } as StepFailedStreamEvent;
 }
 
-describe("isGatewayAuthFailure", () => {
-  it("matches the machine-readable gatewayName the harness merges into details", () => {
-    expect(isGatewayAuthFailure(stepFailed({ gatewayName: "GatewayAuthenticationError" }))).toBe(
-      true,
+describe("failureDetails", () => {
+  it("projects the structured catalog fields and drops everything else", () => {
+    const details = failureDetails(
+      stepFailed({
+        semanticErrorId: "gateway-auth-invalid-api-key",
+        hint: "  Run `eve link`.  ",
+        detail: "TypeError: boom\n    at x",
+        gatewayName: "GatewayAuthenticationError",
+      }),
     );
+    expect(details).toEqual({
+      semanticErrorId: "gateway-auth-invalid-api-key",
+      hint: "Run `eve link`.",
+      detail: "TypeError: boom\n    at x",
+    });
   });
 
-  it("falls back to the config-summary name", () => {
-    expect(isGatewayAuthFailure(stepFailed({ name: "AI Gateway authentication failed" }))).toBe(
-      true,
-    );
-  });
-
-  it("rejects other gateway errors and missing details", () => {
-    expect(isGatewayAuthFailure(stepFailed({ gatewayName: "GatewayRateLimitError" }))).toBe(false);
-    expect(isGatewayAuthFailure(stepFailed({ name: "Model provider API key missing" }))).toBe(
-      false,
-    );
-    expect(isGatewayAuthFailure(stepFailed())).toBe(false);
+  it("returns an empty projection for missing or malformed details", () => {
+    expect(failureDetails(stepFailed())).toEqual({});
+    expect(failureDetails(stepFailed({ hint: "   " }))).toEqual({});
   });
 });
 
-describe("formatGatewayAuthFailureNotice", () => {
-  it("points a rejected API key at /model or the env file", () => {
-    const notice = formatGatewayAuthFailureNotice(
-      stepFailed({}, "AI Gateway rejected the provided API key. Update or unset…"),
-    );
-    expect(notice).toContain("rejected your AI_GATEWAY_API_KEY");
-    expect(notice).toContain("/model");
+describe("localFailureHint", () => {
+  it("swaps gateway-auth catalog ids for the in-session /model fix", () => {
+    for (const id of [
+      "gateway-auth-invalid-api-key",
+      "gateway-auth-invalid-oidc-token",
+      "gateway-auth-missing-credentials",
+    ]) {
+      const hint = localFailureHint(stepFailed({ semanticErrorId: id }));
+      expect(hint).toContain("/model");
+    }
   });
 
-  it("points a rejected OIDC token at /model", () => {
-    const notice = formatGatewayAuthFailureNotice(
-      stepFailed({}, "AI Gateway rejected the OIDC token. Run `eve link`…"),
-    );
-    expect(notice).toContain("OIDC token");
-    expect(notice).toContain("/model");
-  });
-
-  it("defaults to the missing-credentials line", () => {
-    const notice = formatGatewayAuthFailureNotice(
-      stepFailed({}, "AI Gateway received no credentials…"),
-    );
-    expect(notice).toBe(
-      "There is no AI_GATEWAY_API_KEY set. Run /model to connect this to a project and refresh AI Gateway credentials, or set it manually in .env.local.",
-    );
+  it("keeps the harness hint for every other failure", () => {
+    expect(
+      localFailureHint(stepFailed({ semanticErrorId: "network-request-failed" })),
+    ).toBeUndefined();
+    expect(localFailureHint(stepFailed())).toBeUndefined();
   });
 });

@@ -22,6 +22,8 @@ export interface ApplicationInfoJson {
   instructions: string | null;
   skills: string[];
   tools: string[];
+  subagents: string[];
+  schedules: string[];
   channels: { name: string; kind: string | null; method: string | null; urlPath: string | null }[];
   messaging: { create: string; continue: string; stream: string };
   artifacts: {
@@ -55,6 +57,8 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
     instructions: compiledState?.manifest.instructions?.logicalPath ?? null,
     skills: (compiledState?.manifest.skills ?? []).map((skill) => skill.name),
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),
+    subagents: (compiledState?.manifest.subagents ?? []).map((subagent) => subagent.name),
+    schedules: (compiledState?.manifest.schedules ?? []).map((schedule) => schedule.name),
     channels: (compiledState?.manifest.channels ?? []).map((channel) =>
       channel.kind === "channel"
         ? {
@@ -172,6 +176,14 @@ export async function printApplicationInfo(
       {
         label: "Skills",
         value: pluralize(compiledState.manifest.skills.length, "skill"),
+      },
+      {
+        label: "Subagents",
+        value: pluralize(compiledState.manifest.subagents.length, "subagent"),
+      },
+      {
+        label: "Schedules",
+        value: pluralize(compiledState.manifest.schedules.length, "schedule"),
       },
     );
     artifactRows.unshift(

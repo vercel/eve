@@ -93,6 +93,7 @@ export type SkillPackageEntryKind =
 export type SkillsDirectoryEntryKind =
   | "flat-skill-markdown"
   | "flat-skill-module"
+  | "ignored-declaration"
   | "skill-package-directory"
   | "unknown";
 
@@ -324,6 +325,10 @@ export function classifySkillsDirectoryEntry(
   }
 
   if (entryType === "file") {
+    if (isTypeScriptDeclarationFileName(name)) {
+      return "ignored-declaration";
+    }
+
     if (name.toLowerCase().endsWith(".md")) {
       return "flat-skill-markdown";
     }
@@ -348,6 +353,10 @@ export function normalizeLogicalPath(input: string): string {
  * extension.
  */
 export function getSupportedModuleBaseName(name: string): string | null {
+  if (isTypeScriptDeclarationFileName(name)) {
+    return null;
+  }
+
   for (const extension of SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS) {
     if (name.endsWith(extension) && name.length > extension.length) {
       return name.slice(0, -extension.length);
@@ -355,6 +364,11 @@ export function getSupportedModuleBaseName(name: string): string | null {
   }
 
   return null;
+}
+
+/** Returns whether a filename is a TypeScript declaration module. */
+export function isTypeScriptDeclarationFileName(name: string): boolean {
+  return /\.d\.(?:cts|mts|ts)$/.test(name);
 }
 
 /**

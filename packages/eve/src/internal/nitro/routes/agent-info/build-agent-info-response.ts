@@ -21,9 +21,10 @@ import type {
   ResolvedChannelDefinition,
   ResolvedToolDefinition,
 } from "#runtime/types.js";
+import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 export interface AgentInfoSource {
@@ -171,6 +172,8 @@ export interface AgentInfoResponse {
       readonly contextWindowTokens?: number;
       readonly id: string;
       readonly providerOptions?: unknown;
+      /** The agent's authored reasoning effort, forwarded to the model call. */
+      readonly reasoning?: AgentReasoningDefinition;
       readonly source?: AgentInfoSource;
       readonly routing?: ModelRouting;
       readonly endpoint?: ModelEndpointStatus;
@@ -229,6 +232,7 @@ export function buildAgentInfoResponse(
         contextWindowTokens: agent.config.model.contextWindowTokens,
         id: agent.config.model.id,
         providerOptions: agent.config.model.providerOptions,
+        reasoning: agent.config.reasoning,
         source: agent.config.model.source ? toSource(agent.config.model.source) : undefined,
       },
       name: agent.config.name,
@@ -458,17 +462,20 @@ export function renderTool(
     readonly replacesFrameworkTool: boolean;
   },
 ): AgentInfoToolEntry {
+  const inputSchema = serializeInputSchema(tool.inputSchema);
+  const outputSchema = serializeOutputSchema(tool.outputSchema);
+
   return {
     ...toSource(tool),
     description: tool.description,
     hasAuth: false,
     hasExecute: tool.execute !== undefined,
     hasModelOutputProjection: tool.toModelOutput !== undefined,
-    hasOutputSchema: tool.outputSchema !== undefined && tool.outputSchema !== null,
-    inputSchema: tool.inputSchema,
+    hasOutputSchema: outputSchema !== undefined,
+    inputSchema,
     name: tool.name,
     origin: input.origin,
-    outputSchema: tool.outputSchema,
+    outputSchema,
     replacesFrameworkTool: input.replacesFrameworkTool,
     requiresApproval: tool.approval !== undefined,
   };

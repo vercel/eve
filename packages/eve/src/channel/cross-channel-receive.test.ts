@@ -13,6 +13,7 @@ function makeRuntime(): Runtime {
     cancelTurn: vi.fn(),
     deliver: vi.fn(),
     getEventStream: vi.fn(),
+    resolveSession: vi.fn(),
     run: vi.fn(),
   };
 }
@@ -21,6 +22,9 @@ function makeSession(): Session {
   return {
     id: "sess_1",
     continuationToken: "tok",
+    async cancel() {
+      return { status: "no_active_turn" };
+    },
     async getEventStream() {
       return new ReadableStream();
     },

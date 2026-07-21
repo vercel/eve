@@ -19,7 +19,7 @@ React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overv
 ## Start a session
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session \
+curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -H 'content-type: application/json' \
   -d '{"message":"Summarize the latest forecast."}'
 ```
@@ -29,7 +29,7 @@ eve responds right away. The JSON body carries a `sessionId` and a `continuation
 ## Stream a session
 
 ```bash
-curl http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream
+curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 ```
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
@@ -78,7 +78,7 @@ A delegated subagent publishes progress on its own child-session stream. The par
 Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with `event.data.continuationToken`:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -H 'content-type: application/json' \
   -d '{"continuationToken":"<token>","message":"Now send the short version."}'
 ```
@@ -87,6 +87,12 @@ The follow-up reuses the same durable session: same history, same state.
 
 If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `deny` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
 
+If the session is waiting on `ask_question`, a follow-up message clears that pending request before the model continues. An exact option match or permitted freeform response answers the question; any other message marks the question unanswered and starts the follow-up turn.
+
+A response is stale when its request is no longer pending: the question or approval was already answered, cleared by a follow-up message, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
+
+Responses match pending requests by request ID, so a response to an older request stays a plain user message even while a different question or approval is pending. Like any follow-up message, a stale response clears a pending question and is held while an approval is pending.
+
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
 ## Cancel the in-flight turn
@@ -94,24 +100,26 @@ For deterministic ordering, send one follow-up at a time and wait for the next `
 POST to the session's cancel endpoint to stop the turn that is currently running. The body is optional; pass `turnId` (stamped on every turn-scoped stream event) to scope the cancel to the turn you observed:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
 `"accepted"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
+Custom channel routes request the same cancellation without knowing the session id: the `cancel` route helper is addressed by the channel-local continuation token, and `Session.cancel()` by session id. See [custom channels](../channels/custom#cancel-a-turn).
+
 ## Reconnect and rewind
 
-The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
+The stream is durable. Every event is recorded before a step completes, so consumers can reconnect from their cursor when an HTTP connection ends. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
 
 ```bash
-curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
+curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
 ```
 
 A negative `startIndex` reads relative to the stream's current tail. For example, `-1` reads the latest event, which is normally `session.waiting` for a resumable session:
 
 ```bash
-curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=-1"
+curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=-1"
 ```
 
 This gives a consumer that only persisted `sessionId` a lightweight way to recover the current `continuationToken`. Because a tail-relative position does not resolve to an absolute consumed-event count, client tail reads do not automatically reconnect or advance the stored cursor.
@@ -127,7 +135,7 @@ Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basi
 `GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. It uses the resolved `eveChannel()` route auth when `agent/channels/eve.ts` authors one; otherwise it falls back to the framework default of Vercel OIDC plus local development access.
 
 ```bash
-curl http://127.0.0.1:3000/eve/v1/info
+curl http://127.0.0.1:2000/eve/v1/info
 ```
 
 With the default auth chain (`[vercelOidc(), localDev()]`), a local Vercel OIDC bearer takes precedence and other local requests fall back to development access. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).

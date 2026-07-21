@@ -1,6 +1,11 @@
 import { interactiveAsker, withAnswers } from "../ask.js";
 import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import {
+  hasEnvValue,
+  resolveGatewayCredential,
+  type GatewayCredentialResolution,
+} from "#internal/resolve-model-endpoint-status.js";
+import {
   applyAiGatewayCredential,
   type ApplyAiGatewayCredentialDeps,
 } from "../boxes/apply-ai-gateway-credential.js";
@@ -24,6 +29,8 @@ import { inProjectSetupState, prompterSink } from "./in-project.js";
 export interface LinkFlowDeps {
   detectProjectIdentity: typeof detectProjectIdentity;
   findEnvFileWithKey: typeof findEnvFileWithKey;
+  /** Shell environment probed for a gateway key that would shadow OIDC. */
+  env: Record<string, string | undefined>;
   resolveProvisioning?: ResolveProvisioningDeps;
   linkProject?: LinkProjectDeps;
   applyAiGatewayCredential?: ApplyAiGatewayCredentialDeps;
@@ -32,8 +39,12 @@ export interface LinkFlowDeps {
 export type LinkFlowResult =
   | {
       kind: "done";
-      /** The model credential verified in an env file, when one landed. */
-      credential?: "VERCEL_OIDC_TOKEN" | typeof AI_GATEWAY_API_KEY_ENV_VAR;
+      /**
+       * The credential the runtime will actually resolve, from the one
+       * precedence authority ({@link resolveGatewayCredential}): a gateway
+       * API key — env file or shell — outranks the pulled OIDC token.
+       */
+      resolution?: GatewayCredentialResolution;
     }
   | { kind: "cancelled" };
 
@@ -53,6 +64,10 @@ export type LinkFlowResult =
  * Ends by verifying a model credential actually landed (`VERCEL_OIDC_TOKEN`
  * or `AI_GATEWAY_API_KEY` in an env file) — an env pull can succeed without
  * granting gateway access, and the difference is what the user acts on next.
+ * The reported credential mirrors runtime resolution — `AI_GATEWAY_API_KEY`
+ * (env file or shell) outranks the OIDC token, exactly as the AI SDK gateway
+ * provider resolves it — so the outcome message, the status bar, and the
+ * actual authentication can never disagree.
  */
 export async function runLinkFlow(input: {
   appRoot: string;
@@ -71,6 +86,7 @@ export async function runLinkFlow(input: {
   const deps: LinkFlowDeps = {
     detectProjectIdentity,
     findEnvFileWithKey,
+    env: process.env,
     ...input.deps,
   };
 
@@ -168,7 +184,17 @@ export async function runLinkFlow(input: {
     );
   }
   const done: LinkFlowResult = { kind: "done" };
-  if (oidcFile !== undefined) done.credential = "VERCEL_OIDC_TOKEN";
-  else if (gatewayKeyFile !== undefined) done.credential = AI_GATEWAY_API_KEY_ENV_VAR;
+  // The link provisioned OIDC, but reporting it while a key shadows it
+  // would claim a credential that never authenticates a call — the one
+  // precedence authority decides what actually won.
+  const evidence: {
+    apiKeyInEnv: boolean;
+    apiKeyFile?: string;
+    oidcFile?: string;
+  } = { apiKeyInEnv: hasEnvValue(deps.env[AI_GATEWAY_API_KEY_ENV_VAR]) };
+  if (gatewayKeyFile !== undefined) evidence.apiKeyFile = gatewayKeyFile;
+  if (oidcFile !== undefined) evidence.oidcFile = oidcFile;
+  const resolution = resolveGatewayCredential(evidence);
+  if (resolution !== undefined) done.resolution = resolution;
   return done;
 }

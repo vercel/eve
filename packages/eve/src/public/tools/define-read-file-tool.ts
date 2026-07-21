@@ -1,5 +1,3 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import { executeReadFileOnSandbox, type ReadFileInput } from "#execution/sandbox/read-file-tool.js";
 import {
   READ_FILE_INPUT_SCHEMA,
@@ -33,7 +31,7 @@ export function defineReadFileTool(input: DefineReadFileToolInput = {}): ToolDef
     async execute(args, ctx) {
       return executeReadFileOnSandbox(await ctx.getSandbox(), args as ReadFileInput);
     },
-    inputSchema: READ_FILE_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
+    inputSchema: READ_FILE_INPUT_SCHEMA,
     outputSchema: READ_FILE_OUTPUT_SCHEMA,
   };
 }

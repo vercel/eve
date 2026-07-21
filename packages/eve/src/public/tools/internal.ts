@@ -1,5 +1,3 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
 
@@ -19,7 +17,6 @@ export function toPublicToolDefinition(definition: ResolvedToolDefinition): Tool
   }
 
   const internalExecute = definition.execute;
-  const inputSchema = definition.inputSchema;
   const publicDefinition: ToolDefinition = {
     description: definition.description,
     execute: (input, ctx) =>
@@ -30,7 +27,7 @@ export function toPublicToolDefinition(definition: ResolvedToolDefinition): Tool
         messages: [],
         toolCallId: ctx.callId,
       }),
-    inputSchema: (inputSchema ?? {}) as unknown as StandardJSONSchemaV1<unknown>,
+    inputSchema: definition.inputSchema ?? {},
     outputSchema: definition.outputSchema,
   };
 

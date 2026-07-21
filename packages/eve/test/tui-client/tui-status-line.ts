@@ -18,7 +18,8 @@ import { theme } from "./lib/theme.ts";
  *   4. An unlinked directory renders no Vercel segment at all.
  *
  * The linked project identity is no longer a standalone status-line segment;
- * it folds into the model-endpoint segment (`AI Gateway (project)`), which only
+ * it folds into the model-endpoint segment (`via ai-gateway(oidc:project)`),
+ * which only
  * renders for a reachable server that reports a gateway-routed model on
  * `/eve/v1/info`. That path is covered by the unit tests in `status-line.test.ts`
  * and the server-backed evals — not here, where the host is unreachable.
@@ -62,7 +63,7 @@ async function runPendingDeployCycle(): Promise<void> {
   const runPromise = runner.run();
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     await screen.waitForText(` :${new URL(UNREACHABLE_HOST).port} `, 5_000);
     console.log(theme.muted("[tui-status-line] local loopback badge rendered"));
 
@@ -74,7 +75,7 @@ async function runPendingDeployCycle(): Promise<void> {
 
     input.type("/new");
     input.enter();
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     if (!screen.snapshot().includes("deploy pending")) {
       throw new Error(`/new dropped the pending-deploy flag:\n${screen.snapshot()}`);
     }
@@ -120,12 +121,12 @@ async function runUnlinkedShowsNoVercelSegment(): Promise<void> {
   const runPromise = runner.run();
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     // Allow the unlinked probe to land and repaint before judging the footer.
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     const lines = screen.snapshot().split("\n");
-    const promptRow = lines.findLastIndex((line) => line.includes("❯"));
+    const promptRow = lines.findLastIndex((line) => line.includes("›"));
     const footer = lines.slice(promptRow + 1).join("\n");
     if (footer.includes("▲")) {
       throw new Error(`unlinked footer rendered a Vercel segment:\n${screen.snapshot()}`);

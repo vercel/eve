@@ -25,6 +25,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  getHookByToken,
   getRun,
   resumeHook,
   start,
@@ -203,6 +204,21 @@ export function createWorkflowRuntime(config: {
       return parseNdjsonStream<HandleMessageStreamEvent>(() =>
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
+    },
+
+    async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
+      try {
+        const hook = await getHookByToken(continuationToken);
+        return { sessionId: hook.runId };
+      } catch (error) {
+        if (HookNotFoundError.is(error)) {
+          return undefined;
+        }
+        logError(log, "failed to resolve session by continuation token", error, {
+          continuationToken,
+        });
+        throw error;
+      }
     },
   };
 }

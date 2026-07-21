@@ -189,7 +189,7 @@ describe("cardToBlocks", () => {
     ]);
   });
 
-  it("renders the first Table as a native Slack table block", () => {
+  it("renders the first Table as a native Slack data table block", () => {
     const blocks = cardToBlocks(
       Card({
         children: [
@@ -204,7 +204,8 @@ describe("cardToBlocks", () => {
       }),
     );
     expect(blocks[0]).toEqual({
-      type: "table",
+      type: "data_table",
+      caption: "Table",
       rows: [
         [
           { type: "raw_text", text: "Name" },
@@ -231,7 +232,7 @@ describe("cardToBlocks", () => {
         ],
       }),
     );
-    expect(blocks[0]?.type).toBe("table");
+    expect(blocks[0]?.type).toBe("data_table");
     const section = blocks[1] as { type: string; text: { text: string } };
     expect(section.type).toBe("section");
     expect(section.text.text).toContain("```");

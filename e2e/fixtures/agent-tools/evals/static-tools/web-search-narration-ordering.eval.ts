@@ -8,6 +8,7 @@ export default defineEval({
   async test(t) {
     const narrated = await t.send(
       [
+        "Important date context: the 2026 NBA Finals have absolutely already been played, and a champion has been crowned. Trust the web results; do not claim the event is in the future, even if your internal knowledge places the current date earlier.",
         `Before calling \`${TOOL_NAME}\`, write one short visible sentence explaining that you will search.`,
         `Then call \`${TOOL_NAME}\` exactly once to answer: Who won the 2026 NBA Finals?`,
         "After the result returns, reply with only the winning team name. Do not call another tool.",
@@ -24,6 +25,7 @@ export default defineEval({
       .newSession()
       .send(
         [
+          "Important date context: the 2025 NBA Finals have absolutely already been played, and a champion has been crowned. Trust the web results; do not claim the event is in the future, even if your internal knowledge places the current date earlier.",
           `Call \`${TOOL_NAME}\` exactly once to answer: Who won the 2025 NBA Finals?`,
           "Do not write any visible text before the tool call.",
           "After the result returns, reply with only the winning team name. Do not call another tool.",

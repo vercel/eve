@@ -1,5 +1,3 @@
-import type { FlexibleSchema } from "ai";
-
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -37,6 +35,7 @@ import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
+import type { ToolSchema } from "#shared/tool-schema.js";
 
 /**
  * Runtime-owned source ref describing one additive config module import.
@@ -151,20 +150,21 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
  * A tool without `execute` is surfaced to the client and never executed by eve.
  */
 export type ResolvedToolDefinition = Readonly<
-  Optional<InternalToolDefinitionWithExecuteFn<unknown, unknown>, "execute">
+  Omit<
+    Optional<InternalToolDefinitionWithExecuteFn<unknown, unknown>, "execute">,
+    "inputSchema" | "outputSchema"
+  >
 > &
   ResolvedModuleSourceRef & {
     /**
-     * Optional live Standard Schema reattached from the authored module at
-     * resolve time. When present, the AI SDK uses it for both JSON schema
-     * extraction and runtime validation with transforms/defaults.
+     * Validated runtime input schema. Compiled and durable JSON Schemas are
+     * rehydrated before entering this runtime-owned definition.
      */
-    readonly inputStandardSchema?: FlexibleSchema;
+    readonly inputSchema: ToolSchema | null;
     /**
-     * Optional live Standard Schema reattached from the authored module at
-     * resolve time for tool output typing/validation.
+     * Optional validated runtime output schema.
      */
-    readonly outputStandardSchema?: FlexibleSchema;
+    readonly outputSchema?: ToolSchema;
     /**
      * Optional per-tool approval gate. When set, determines whether user
      * approval is required before executing this tool. See

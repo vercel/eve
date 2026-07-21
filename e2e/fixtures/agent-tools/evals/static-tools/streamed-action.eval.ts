@@ -4,7 +4,9 @@ import { defineEval } from "eve/evals";
 const TOOL_NAME = "streamed-action";
 const LABEL = "streaming-e2e";
 
-function streamedBeforeLocalExecution(events: readonly HandleMessageStreamEvent[]): boolean {
+function streamedBeforeLocalExecutionCompletes(
+  events: readonly HandleMessageStreamEvent[],
+): boolean {
   const matchingRequests = events.flatMap((event) => {
     if (event.type !== "actions.requested") return [];
 
@@ -32,9 +34,11 @@ function streamedBeforeLocalExecution(events: readonly HandleMessageStreamEvent[
   }
 
   const requestAt = parseTimestamp(request.event.meta?.at);
-  const executionStartedAt = readExecutionStartedAt(result.data.result.output);
+  const executionCompletedAt = readExecutionCompletedAt(result.data.result.output);
   return (
-    requestAt !== undefined && executionStartedAt !== undefined && requestAt <= executionStartedAt
+    requestAt !== undefined &&
+    executionCompletedAt !== undefined &&
+    requestAt < executionCompletedAt
   );
 }
 
@@ -45,27 +49,27 @@ function parseTimestamp(value: string | undefined): number | undefined {
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
-function readExecutionStartedAt(output: unknown): number | undefined {
+function readExecutionCompletedAt(output: unknown): number | undefined {
   if (
     typeof output !== "object" ||
     output === null ||
     Array.isArray(output) ||
-    !("executionStartedAt" in output)
+    !("executionCompletedAt" in output)
   ) {
     return undefined;
   }
 
-  const executionStartedAt = output.executionStartedAt;
-  return typeof executionStartedAt === "number" && Number.isFinite(executionStartedAt)
-    ? executionStartedAt
+  const executionCompletedAt = output.executionCompletedAt;
+  return typeof executionCompletedAt === "number" && Number.isFinite(executionCompletedAt)
+    ? executionCompletedAt
     : undefined;
 }
 
-// The runtime stamps meta.at immediately before persisting an event. The tool
-// records its start before waiting, so post-execution batch emission cannot
-// satisfy this relation.
+// The AI SDK can begin local execution just before its tool-call stream part is
+// consumed. The tool waits before completing, so post-execution batch emission
+// still cannot satisfy this relation.
 export default defineEval({
-  description: "Static tools smoke: a local action request streams before execution begins.",
+  description: "Static tools smoke: a local action request streams while execution is pending.",
   async test(t) {
     const turn = await t.send(
       `Call the \`${TOOL_NAME}\` tool exactly once with label "${LABEL}". ` +
@@ -78,6 +82,9 @@ export default defineEval({
       input: { label: LABEL },
       count: 1,
     });
-    turn.eventsSatisfy("local action request precedes execution", streamedBeforeLocalExecution);
+    turn.eventsSatisfy(
+      "local action request precedes execution completion",
+      streamedBeforeLocalExecutionCompletes,
+    );
   },
 });

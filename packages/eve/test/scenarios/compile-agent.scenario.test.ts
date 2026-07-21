@@ -548,9 +548,15 @@ describe("compileAgent", () => {
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
           name: "@acme/crm",
           type: "module",
-          eve: { extension: "extension" },
+          eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/index.mjs" },
         })}\n`,
+        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 1,
+          builtWithEve: "0.0.0-test",
+          requires: { extension: 1, tool: 1, instructions: 1 },
+        }),
         "node_modules/@acme/crm/extension/index.mjs": "export default {};\n",
         "node_modules/@acme/crm/extension/instructions/policy.mjs":
           'export default { markdown: "Prefer the CRM over guessing." };\n',

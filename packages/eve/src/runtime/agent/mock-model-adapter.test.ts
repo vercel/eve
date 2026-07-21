@@ -414,6 +414,37 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  it("builds empty input for an explicitly empty object schema", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: {},
+            type: "object",
+          },
+          name: "wait_for_cancel",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({}),
+        toolCallId: "call_wait_for_cancel",
+        toolName: "wait_for_cancel",
+        type: "tool-call",
+      },
+    ]);
+  });
+
   it("replies with exact fixture text from system context", async () => {
     const result = await generateWithPrompt([
       {

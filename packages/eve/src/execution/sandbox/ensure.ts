@@ -13,7 +13,6 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import { trackActiveSandboxHandle } from "#execution/sandbox/active-handles.js";
 import { waitForDevelopmentSandboxPrewarm } from "#execution/sandbox/development-prewarm.js";
-import { markDevelopmentSandboxBackendInitialized } from "#execution/sandbox/development-run.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { waitForSandboxTemplatePrewarmLock } from "#execution/sandbox/template-prewarm-lock.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -139,7 +138,6 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
           createInput,
         }),
     );
-    markDevelopmentSandboxBackendInitialized(backend.name);
     trackActiveSandboxHandle({
       backendName: backend.name,
       handle,

@@ -19,6 +19,7 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { AuthorizationDefinition, TokenResult } from "#runtime/connections/types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { toInputSchema } from "#shared/tool-schema.js";
 
 function buildSerializedContext(overrides: {
   auth?: Record<string, unknown>;
@@ -97,14 +98,14 @@ describe("workflowEntry integration", () => {
           };
         },
       }),
-      inputSchema: {
+      inputSchema: toInputSchema({
         additionalProperties: false,
         properties: {
           city: { type: "string" },
         },
         required: ["city"],
         type: "object",
-      },
+      }),
       logicalPath: "tools/get_weather.ts",
       name: "get_weather",
       sourceId: "tools/get_weather.ts",

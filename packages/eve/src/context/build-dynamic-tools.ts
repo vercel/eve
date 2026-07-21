@@ -1,5 +1,3 @@
-import { jsonSchema } from "ai";
-
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ContextKey } from "#context/key.js";
 import {
@@ -8,9 +6,10 @@ import {
   LiveStepToolsKey,
 } from "#context/keys.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
-import { buildBaseToolContext } from "#context/build-base-tool-context.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
 import type { ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
+import { toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -50,12 +49,14 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
 
     tools.push({
       description: m.description,
-      execute: (input: unknown, options) =>
-        stepFn(m.closureVars, input, buildBaseToolContext({ options, toolName: m.name })),
-      inputSchema: jsonSchema(m.inputSchema),
+      execute: createToolExecuteWithAuth({
+        scope: m.name,
+        execute: (input, ctx) => stepFn(m.closureVars, input, ctx),
+      }),
+      inputSchema: toInputSchema(m.inputSchema),
       name: m.name,
       approval: buildReplayedApproval(m),
-      outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),
+      outputSchema: toOutputSchema(m.outputSchema),
     });
   }
 

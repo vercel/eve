@@ -35,6 +35,7 @@ function setupFlowRenderer() {
     readSelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
+    readModelEditor: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -227,7 +228,7 @@ describe("createPromptCommandHandler", () => {
         },
       ),
     ).resolves.toEqual({
-      message: "/vc:login cancelled after logging in to Vercel.",
+      message: "/vc:login dismissed after logging in to Vercel.",
     });
     expect(runLoginFlow).not.toHaveBeenCalled();
     expect(setupFlow.begin).toHaveBeenCalledWith("Authenticate via Vercel OIDC", "pulse");
