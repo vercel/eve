@@ -20,6 +20,7 @@ import {
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { emitProxiedInputRequest } from "#execution/subagent-hitl-proxy.js";
+import { recordSettledInputResponses } from "#harness/input-requests.js";
 import {
   clearProxyInputRequest,
   type ProxyInputRequestEntry,
@@ -120,7 +121,9 @@ export async function emitProxiedSubagentEvent(input: {
           settlement === undefined
             ? enrichedSession
             : clearProxyInputRequest(
-                enrichedSession,
+                settlement.outcome === "responded"
+                  ? recordSettledInputResponses(enrichedSession, [settlement.response])
+                  : enrichedSession,
                 settlement.outcome === "responded"
                   ? settlement.response.requestId
                   : settlement.requestId,

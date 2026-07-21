@@ -450,7 +450,8 @@ function clearPendingInputBatch(session: HarnessSession): HarnessSession {
   return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
 }
 
-function recordSettledInputResponses(
+/** Records accepted responses in the bounded durable retry-deduplication ledger. */
+export function recordSettledInputResponses(
   session: HarnessSession,
   responses: readonly InputResponse[],
 ): HarnessSession {
