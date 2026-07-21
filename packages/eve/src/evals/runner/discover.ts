@@ -88,6 +88,28 @@ export function matchesEvalFilter(evalId: string, filters: readonly string[]): b
 }
 
 /**
+ * Returns true when a file whose path-derived id is `fileId` could produce at
+ * least one eval id matching `filters`. Used to constrain candidate files
+ * before dynamic import, so a filtered run never loads modules that cannot
+ * contribute to the selection — a held-out module is never imported during a
+ * tuning run, and vice versa, regardless of any side effects it performs at
+ * initialization.
+ *
+ * A file exports either a single definition (eval id === `fileId`) or an array
+ * (eval ids `fileId/0000`, `fileId/0001`, ...). Which one is unknowable without
+ * importing, so a file is a candidate when its id and any filter are equal or
+ * nested in either direction. The precise per-eval {@link matchesEvalFilter}
+ * check still runs after import, so this never widens the final selection.
+ */
+export function fileMayContainMatchingEval(fileId: string, filters: readonly string[]): boolean {
+  if (filters.length === 0) return true;
+  return filters.some(
+    (filter) =>
+      fileId === filter || fileId.startsWith(`${filter}/`) || filter.startsWith(`${fileId}/`),
+  );
+}
+
+/**
  * Imports a discovered eval file and stamps the path-derived id(s) onto
  * the eval definition(s).
  *
@@ -124,11 +146,18 @@ export async function importEvalFile(appRoot: string, filePath: string): Promise
 }
 
 /**
- * Discovers and imports all eval files, optionally filtering by eval id.
+ * Discovers and imports eval files, optionally filtering by eval id.
  * Filters match exactly or by directory prefix (see {@link matchesEvalFilter}).
  *
- * Throws when two files derive the same eval id (e.g. an array-exported
- * `evals/weather.eval.ts` colliding with `evals/weather/0000.eval.ts`).
+ * Files whose path-derived id cannot produce a matching eval are skipped
+ * before import (see {@link fileMayContainMatchingEval}), so a filtered run
+ * never loads modules outside the selected partition even if they perform
+ * side effects at initialization.
+ *
+ * Throws when two imported files derive the same eval id (e.g. an
+ * array-exported `evals/weather.eval.ts` colliding with
+ * `evals/weather/0000.eval.ts`). Because non-candidate files are not imported,
+ * duplicate detection is scoped to the files a filter selects.
  */
 export async function discoverAndImportEvals(
   appRoot: string,
@@ -145,6 +174,10 @@ export async function discoverAndImportEvals(
   const sources = new Map<string, string>();
 
   for (const file of files) {
+    if (!fileMayContainMatchingEval(deriveEvalId(appRoot, file), filters)) {
+      continue;
+    }
+
     for (const evaluation of await importEvalFile(appRoot, file)) {
       const existing = sources.get(evaluation.id);
       if (existing !== undefined) {

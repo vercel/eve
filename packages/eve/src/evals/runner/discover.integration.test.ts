@@ -234,6 +234,91 @@ describe("discoverEvalFiles", () => {
   });
 });
 
+describe("discoverAndImportEvals partition isolation", () => {
+  let tempDir: string;
+
+  const SINGLE_EVAL = 'export default { _tag: "EveEval", test: async () => {} };\n';
+  const THROWING_MODULE = 'throw new Error("OPPOSITE_PARTITION_IMPORTED");\n';
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "eve-eval-partition-"));
+    await writeFile(
+      join(tempDir, "package.json"),
+      JSON.stringify({ name: "eve-eval-partition-test", type: "module" }, null, 2),
+    );
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  async function writeEval(relativePath: string, contents: string): Promise<void> {
+    const filePath = join(tempDir, "evals", relativePath);
+    await mkdir(join(filePath, ".."), { recursive: true });
+    await writeFile(filePath, contents);
+  }
+
+  it("never imports a throwing held-out module when selecting tuning", async () => {
+    await writeEval("tuning/alpha.eval.ts", SINGLE_EVAL);
+    await writeEval("held-out/secret.eval.ts", THROWING_MODULE);
+
+    const evaluations = await discoverAndImportEvals(tempDir, ["tuning"]);
+    expect(evaluations.map((evaluation) => evaluation.id)).toEqual(["tuning/alpha"]);
+  });
+
+  it("never imports a throwing tuning module when selecting held-out", async () => {
+    await writeEval("tuning/loud.eval.ts", THROWING_MODULE);
+    await writeEval("held-out/secret.eval.ts", SINGLE_EVAL);
+
+    const evaluations = await discoverAndImportEvals(tempDir, ["held-out"]);
+    expect(evaluations.map((evaluation) => evaluation.id)).toEqual(["held-out/secret"]);
+  });
+
+  it("discovers nested files within the selected partition", async () => {
+    await writeEval("tuning/nested/deep.eval.ts", SINGLE_EVAL);
+    await writeEval("tuning/top.eval.ts", SINGLE_EVAL);
+    await writeEval("held-out/secret.eval.ts", THROWING_MODULE);
+
+    const evaluations = await discoverAndImportEvals(tempDir, ["tuning"]);
+    expect(evaluations.map((evaluation) => evaluation.id)).toEqual([
+      "tuning/nested/deep",
+      "tuning/top",
+    ]);
+  });
+
+  it("preserves ordinary exact-id filtering while a sibling module throws", async () => {
+    await writeEval("tuning/alpha.eval.ts", SINGLE_EVAL);
+    await writeEval("tuning/beta.eval.ts", THROWING_MODULE);
+
+    const evaluations = await discoverAndImportEvals(tempDir, ["tuning/alpha"]);
+    expect(evaluations.map((evaluation) => evaluation.id)).toEqual(["tuning/alpha"]);
+  });
+
+  it("selects a single array-export entry without importing other partitions", async () => {
+    await writeEval(
+      "tuning/dataset.eval.ts",
+      [
+        "export default [",
+        '  { _tag: "EveEval", description: "a", test: async () => {} },',
+        '  { _tag: "EveEval", description: "b", test: async () => {} },',
+        "];\n",
+      ].join("\n"),
+    );
+    await writeEval("held-out/secret.eval.ts", THROWING_MODULE);
+
+    const evaluations = await discoverAndImportEvals(tempDir, ["tuning/dataset/0001"]);
+    expect(evaluations.map((evaluation) => evaluation.id)).toEqual(["tuning/dataset/0001"]);
+  });
+
+  it("imports nothing when no partition matches, even with throwing modules present", async () => {
+    await writeEval("tuning/loud.eval.ts", THROWING_MODULE);
+    await writeEval("held-out/secret.eval.ts", THROWING_MODULE);
+
+    const evaluations = await discoverAndImportEvals(tempDir, ["nonexistent"]);
+    expect(evaluations).toEqual([]);
+  });
+});
+
 describe("findMisplacedEvalDirs", () => {
   let tempDir: string;
 

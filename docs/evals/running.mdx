@@ -20,7 +20,7 @@ eve eval --json                # machine-readable output
 eve eval --skip-report         # skip config and eval-defined reporters (e.g. Braintrust)
 ```
 
-Positional ids match exactly or by directory prefix: `eve eval weather` runs `evals/weather.eval.ts`, every eval under `evals/weather/`, and every entry of an array-exported `weather.eval.ts`.
+Positional ids match exactly or by directory prefix: `eve eval weather` runs `evals/weather.eval.ts`, every eval under `evals/weather/`, and every entry of an array-exported `weather.eval.ts`. Discovery imports only the files a filter can match, so eval modules outside the selection never load — running one partition (for example `eve eval tuning`) never executes another partition's module or its initialization side effects.
 
 ## Exit codes
 
