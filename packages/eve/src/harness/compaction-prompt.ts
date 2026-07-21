@@ -189,10 +189,10 @@ function renderCompactionContentPart(
 }
 
 // Raw tool payloads reach the summarizer clipped, not pre-summarized: the
-// checkpoint model decides what matters in a grep result or file read.
-// The transcript limit is opencode parity; the compact limit applies where a
-// one-line rendering is the point — budget-degraded
-// transcript entries.
+// checkpoint model decides what matters in a grep result or file read. The
+// transcript limit keeps enough content to judge a payload without letting
+// one result dominate the prompt; the compact limit applies where a one-line
+// rendering is the point — budget-degraded transcript entries.
 export const TRANSCRIPT_PAYLOAD_LIMIT = 2_000;
 const COMPACT_PAYLOAD_LIMIT = 280;
 
