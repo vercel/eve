@@ -30,7 +30,11 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
-import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
+import {
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission.js";
 import {
   getPendingAuthorization,
   modelFacingAuthorizationOutput,
@@ -41,7 +45,10 @@ import {
   hasPendingInputBatch,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
-import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import {
+  getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
+} from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -2847,6 +2854,83 @@ describe("createToolLoopHarness", () => {
     expect(emission.turnId).toBe("turn_0");
     expect(emission.sessionStarted).toBe(true);
     expect(isHarnessBetweenTurns(result.session)).toBe(false);
+  });
+
+  it("starts a new turn when a subagent resumes after proxied input", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Child finished.", role: "assistant" }] },
+      text: "Child finished.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const pendingSession = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-subagent",
+          description: "Delegate to a subagent.",
+          input: { task: "do it" },
+          kind: "subagent-call",
+          name: "worker",
+          nodeId: "workers",
+          subagentName: "worker",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [
+        {
+          content: [
+            {
+              input: { task: "do it" },
+              toolCallId: "call-subagent",
+              toolName: "delegate",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: createTestSession(),
+    });
+    const parkedSession = setHarnessEmissionState(pendingSession, {
+      sequence: 1,
+      sessionStarted: true,
+      stepIndex: 0,
+      turnId: "",
+    });
+
+    await runStep(parkedSession, {
+      runtimeActionResults: [
+        {
+          callId: "call-subagent",
+          kind: "subagent-result",
+          output: "CHILD-DONE",
+          subagentName: "worker",
+        },
+      ],
+    });
+
+    expect(events.find((event) => event.type === "turn.started")?.data).toEqual({
+      sequence: 1,
+      turnId: "turn_1",
+    });
+    expect(events.find((event) => event.type === "step.started")?.data).toMatchObject({
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "turn_1",
+    });
+    expect(events.find((event) => event.type === "message.completed")?.data).toMatchObject({
+      message: "Child finished.",
+      sequence: 1,
+      turnId: "turn_1",
+    });
+    expect(events.findLast((event) => event.type === "turn.completed")?.data).toEqual({
+      sequence: 1,
+      turnId: "turn_1",
+    });
   });
 
   it("emits failed action.result from tool response messages when the stream and toolResults omit it", async () => {

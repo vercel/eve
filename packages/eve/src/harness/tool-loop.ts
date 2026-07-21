@@ -96,6 +96,7 @@ import {
   emitTurnEpilogue,
   emitTurnPreamble,
   getHarnessEmissionState,
+  isHarnessBetweenTurns,
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import {
@@ -464,6 +465,13 @@ function resolveStepOtelContext(
   return undefined;
 }
 
+function startsHarnessTurn(session: HarnessSession, input?: StepInput): boolean {
+  return (
+    hasStepInput(input) ||
+    (isHarnessBetweenTurns(session) && (input?.runtimeActionResults?.length ?? 0) > 0)
+  );
+}
+
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   const emit = config.handleEvent;
   const telemetryConfig = getInstrumentationConfig();
@@ -482,7 +490,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // First step of a turn: open a new parent span. Continuation steps
     // restore the parent from session state via resolveStepOtelContext.
     let turnSpan: Span | undefined;
-    if (tracer && hasStepInput(input)) {
+    if (tracer && startsHarnessTurn(initialSession, input)) {
       const functionId = telemetryConfig?.functionId ?? agentName;
       const attributes: Record<string, string> = {
         "eve.version": eveVersion,
@@ -663,7 +671,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Turn preamble ------------------------------------------------------
 
-    if (emit && hasStepInput(deliveredStepInput)) {
+    if (emit && startsHarnessTurn(pending.session, deliveredStepInput)) {
       emissionState = await emitTurnPreamble(
         emit,
         preambleStepInput ?? {},
