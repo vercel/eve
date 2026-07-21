@@ -21,13 +21,6 @@ Make completed work explicit so the next model does not repeat it. Keep complete
 
 Large tool outputs are the main thing to compress: reduce each to the findings the next model needs — what was searched or read, what it established, and the exact identifiers involved — rather than reproducing the output. The next model cannot see the originals, so nothing it would need to act on may be lost.`;
 
-// Applies only to strings inside tool inputs/outputs. Conversational
-// user/assistant text reaches the summarizer verbatim: a delegated task
-// message truncated here is unrecoverable after the first compaction, while
-// tool payloads stay useful as a compact call trail.
-const COMPACTION_TOOL_TEXT_LIMIT = 280;
-const COMPACTION_COLLECTION_LIMIT = 3;
-
 // Fallback cap for conversational text, applied oldest-first only when the
 // rendered transcript exceeds the caller's token budget.
 const DEGRADED_TEXT_LIMIT = 2_000;
@@ -185,118 +178,61 @@ function renderCompactionContentPart(
 }
 
 // Raw tool payloads reach the summarizer clipped, not pre-summarized: the
-// checkpoint model decides what matters in a grep result or file read, and a
-// structural `object(…)` skeleton would spend the budget on envelope noise
-// instead of content. Degraded entries fall back to the tight structural
-// rendering.
-const COMPACTION_TOOL_PAYLOAD_LIMIT = 2_000;
+// checkpoint model decides what matters in a grep result or file read.
+// The transcript limit is opencode parity; the compact limit applies where a
+// one-line rendering is the point — eviction trail lines and budget-degraded
+// transcript entries.
+const TRANSCRIPT_PAYLOAD_LIMIT = 2_000;
+const COMPACT_PAYLOAD_LIMIT = 280;
 
 function renderTranscriptToolCall(
   part: { toolName: string; input?: unknown },
   conversationTextLimit?: number,
 ): string {
-  if (conversationTextLimit !== undefined) {
-    return summarizeToolCallPart(part);
-  }
-  const input =
-    part.input !== undefined
-      ? capText(JSON.stringify(part.input), COMPACTION_TOOL_PAYLOAD_LIMIT)
-      : "";
-  return input ? `Called ${part.toolName} with ${input}` : `Called ${part.toolName}`;
+  const limit =
+    conversationTextLimit === undefined ? TRANSCRIPT_PAYLOAD_LIMIT : COMPACT_PAYLOAD_LIMIT;
+  return renderToolCall(part, limit);
 }
 
 function renderTranscriptToolResult(
   part: { toolName: string; output?: unknown; isError?: boolean },
   conversationTextLimit?: number,
 ): string {
-  if (conversationTextLimit !== undefined) {
-    return summarizeToolResultPart(part);
-  }
-  const output =
-    part.output !== undefined
-      ? capText(JSON.stringify(part.output), COMPACTION_TOOL_PAYLOAD_LIMIT)
-      : "";
+  const limit =
+    conversationTextLimit === undefined ? TRANSCRIPT_PAYLOAD_LIMIT : COMPACT_PAYLOAD_LIMIT;
   const status = part.isError ? "errored" : "returned";
+  const output = renderPayload(part.output, limit);
   return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
 }
 
 /**
  * One-line trail rendering of an evicted tool call merged with its paired
- * result, e.g. `Called grep with object(pattern=…) → returned object(…)`.
- * Used when compaction evicts tool activity from older history without
+ * result, e.g. `Called grep with {"pattern":"todo"} → returned {…}`. Used
+ * when compaction evicts tool activity from older history without
  * summarizing: the trail keeps durable evidence of what already ran.
  */
 export function renderEvictedToolActivity(
   call: { toolName: string; input?: unknown },
   result?: { output?: unknown; isError?: boolean },
 ): string {
-  const called = summarizeToolCallPart(call);
+  const called = renderToolCall(call, COMPACT_PAYLOAD_LIMIT);
   if (result === undefined) {
     return `${called} → no recorded result`;
   }
 
   const status = result.isError ? "errored" : "returned";
-  const output = result.output !== undefined ? summarizeCompactValue(result.output) : "";
+  const output = renderPayload(result.output, COMPACT_PAYLOAD_LIMIT);
   return output ? `${called} → ${status} ${output}` : `${called} → ${status}`;
 }
 
-function summarizeToolCallPart(part: { toolName: string; input?: unknown }): string {
-  const input = part.input !== undefined ? summarizeCompactValue(part.input) : "";
+function renderToolCall(part: { toolName: string; input?: unknown }, limit: number): string {
+  const input = renderPayload(part.input, limit);
   return input ? `Called ${part.toolName} with ${input}` : `Called ${part.toolName}`;
 }
 
-function summarizeToolResultPart(part: {
-  toolName: string;
-  output?: unknown;
-  isError?: boolean;
-}): string {
-  const output = part.output !== undefined ? summarizeCompactValue(part.output) : "";
-  const status = part.isError ? "errored" : "returned";
-  return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
-}
-
-function summarizeCompactValue(value: unknown, depth = 0): string {
-  if (value === null) return "null";
+function renderPayload(value: unknown, limit: number): string {
   if (value === undefined) return "";
-  if (typeof value === "string") return capText(value, COMPACTION_TOOL_TEXT_LIMIT);
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return "array(0)";
-    }
-
-    if (depth >= 2) {
-      return `array(${value.length})`;
-    }
-
-    const entries = value
-      .slice(0, COMPACTION_COLLECTION_LIMIT)
-      .map((item) => summarizeCompactValue(item, depth + 1));
-    const suffix = value.length > COMPACTION_COLLECTION_LIMIT ? ", …" : "";
-    return `array(${value.length}: ${entries.join(", ")}${suffix})`;
-  }
-
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) {
-      return "object(0)";
-    }
-
-    if (depth >= 2) {
-      return `object(${entries.length} keys)`;
-    }
-
-    const rendered = entries
-      .slice(0, COMPACTION_COLLECTION_LIMIT)
-      .map(([key, nested]) => `${key}=${summarizeCompactValue(nested, depth + 1)}`);
-    const suffix = entries.length > COMPACTION_COLLECTION_LIMIT ? ", …" : "";
-    return `object(${rendered.join(", ")}${suffix})`;
-  }
-
-  return "";
+  return capText(JSON.stringify(value) ?? "", limit);
 }
 
 function renderConversationText(value: string, limit?: number): string {
