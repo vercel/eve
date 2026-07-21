@@ -1094,6 +1094,102 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
+  it("replays toModelOutput from session-scoped dynamic tools", async () => {
+    const ctx = createCtx();
+    const toModelOutputFn = vi.fn(() => ({
+      type: "text" as const,
+      value: "Profile loaded (secret redacted).",
+    }));
+    const entry: DynamicToolEntry = {
+      description: "returns data the model should see shaped",
+      inputSchema: { type: "object" },
+      toModelOutput: toModelOutputFn,
+      execute: async (): Promise<unknown> => ({ secret: "raw-value" }),
+    };
+    const resolver = createResolver("redactor", ["session.started"], () => ({
+      masked: entry,
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    const metadata = ctx.get(SessionDynamicToolMetadataKey);
+    expect(metadata?.[0]?.toModelOutputStepFnName).toBe(
+      "eve:dynamic-tool-tomodeloutput:redactor:masked",
+    );
+
+    ctx.clearVirtualContext();
+
+    const tools = buildDynamicTools(ctx);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.name).toBe("masked");
+    const rawOutput = { secret: "raw-value" };
+    expect(tools[0]!.toModelOutput!(rawOutput)).toEqual({
+      type: "text",
+      value: "Profile loaded (secret redacted).",
+    });
+    expect(toModelOutputFn).toHaveBeenCalledExactlyOnceWith(rawOutput);
+  });
+
+  it("withholds the raw output when a replayed toModelOutput function is not registered", async () => {
+    const ctx = createCtx();
+    const entry: DynamicToolEntry = {
+      description: "returns data the model should see shaped",
+      inputSchema: { type: "object" },
+      toModelOutput: () => ({ type: "text" as const, value: "shaped" }),
+      execute: async (): Promise<unknown> => ({ secret: "raw-value" }),
+    };
+    const resolver = createResolver("redactor", ["session.started"], () => ({
+      masked: entry,
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    // Simulate a replay environment where the registration is gone
+    // (e.g. a fresh process that never ran the resolver).
+    testRegistry.delete("eve:dynamic-tool-tomodeloutput:redactor:masked");
+
+    ctx.clearVirtualContext();
+
+    const tools = buildDynamicTools(ctx);
+    expect(tools).toHaveLength(1);
+    const replayed = tools[0]!.toModelOutput!({ secret: "raw-value" });
+    expect(JSON.stringify(replayed)).not.toContain("raw-value");
+    expect(replayed).toEqual({
+      type: "text",
+      value: "The masked tool completed, but its output view is unavailable on this step.",
+    });
+  });
+
+  it("leaves toModelOutput undefined when a session-scoped entry omits it", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver("plain", ["session.started"], () => ({
+      passthrough: createFrameworkTool("read-only op"),
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    ctx.clearVirtualContext();
+
+    const tools = buildDynamicTools(ctx);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.toModelOutput).toBeUndefined();
+  });
+
   it("propagates outputSchema from dynamic entries into harness tools and metadata", async () => {
     const ctx = createCtx();
     const outputSchema = {

@@ -87,10 +87,9 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   /**
    * Optional per-call approval gate, mirroring the authored-tool
    * `approval` contract: return `"user-approval"` to require user approval
-   * before the call executes. Only honored for step-scoped dynamic
-   * tools, whose live `execute` closures survive into the harness;
-   * session/turn-scoped tools replay from durable metadata and cannot
-   * carry a function across replay.
+   * before the call executes. Step-scoped tools carry the live closure;
+   * session/turn-scoped tools rebind it across replay through the step
+   * registry, the same way `execute` and `toModelOutput` survive.
    */
   readonly approval?: Approval;
 }

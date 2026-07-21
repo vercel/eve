@@ -301,6 +301,15 @@ async function resolveToolsFromEvent(
         );
       }
 
+      let toModelOutputStepFnName: string | undefined;
+      if (entry.toModelOutput !== undefined) {
+        toModelOutputStepFnName = `eve:dynamic-tool-tomodeloutput:${resolver.slug}:${entryKey}`;
+        const originalToModelOutput = entry.toModelOutput.bind(entry);
+        registerStepFunction(toModelOutputStepFnName, (_closureVars: unknown, output: unknown) =>
+          originalToModelOutput(output),
+        );
+      }
+
       metadata.push({
         name,
         description: entry.description,
@@ -310,6 +319,7 @@ async function resolveToolsFromEvent(
         entryKey,
         executeStepFnName,
         approvalStepFnName,
+        toModelOutputStepFnName,
         closureVars: serializedClosureVars,
       });
     }
