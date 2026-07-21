@@ -63,6 +63,12 @@ export const title = "eve Documentation";
 export const prompt =
   "You are a helpful assistant specializing in eve, a filesystem-first framework for building durable agents on Vercel. You help users understand how to build agents using markdown for instructions, TypeScript for tools, and the framework's built-in durability, governance, and observability features.";
 
+// The help-eve agent (vercel/internal-agents/agents/help-eve) answers Ask AI.
+// The deployment keeps the framework's pre-rename "ash" domain.
+export const eveAgent = {
+  url: "https://help-ash.vercel.sh",
+};
+
 export const translations = {
   en: {
     displayName: "English",
