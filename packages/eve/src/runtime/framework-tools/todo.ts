@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
+import { TODO_COMPACTION_PRESERVATION_LABEL } from "#harness/compaction-prompt.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -45,7 +46,7 @@ function formatTodoSummary(state: TodoState): string | undefined {
     return `- [${check}] [${item.priority}] ${item.content}`;
   });
 
-  return `[Your task list was preserved across context compaction]\n${lines.join("\n")}`;
+  return `${TODO_COMPACTION_PRESERVATION_LABEL}\n${lines.join("\n")}`;
 }
 
 /**

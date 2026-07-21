@@ -549,28 +549,54 @@ describe("compactMessages: summarization rung", () => {
       threshold: EVICTION_FORBIDDEN,
     });
 
+    // The folded-away user prompt is replayed as the live turn, so the model
+    // resumes against its actual instruction rather than a bare "Continue.".
     expect(result).toEqual([
       user(CHECKPOINT_MARKER),
       assistant("Summary of the large SQL result"),
-      user("Continue."),
+      user("Find the relevant rows."),
     ]);
   });
 
-  it("appends a synthetic user message only when the tail would trail on assistant content", async () => {
-    const trailingAssistant = [user("old message"), assistant("old reply"), assistant("trailing")];
-    const trailingUser = [user("old"), assistant("old reply"), user("latest question")];
+  it("replays the folded-away user prompt when the tail would trail on assistant content", async () => {
+    const messages = [
+      user("please fix the flaky test"),
+      assistant("working on it"),
+      assistant("still going"),
+    ];
 
-    const first = await compact(trailingAssistant, {
+    const { result } = await compact(messages, {
       recentWindowSize: 1,
       threshold: EVICTION_FORBIDDEN,
     });
-    expect(first.result.at(-1)).toEqual(user("Continue."));
 
-    const second = await compact(trailingUser, {
+    expect(result.at(-1)).toEqual(user("please fix the flaky test"));
+  });
+
+  it("falls back to a synthetic resumption when the real user prompt survives in the tail", async () => {
+    const messages = [user("old context"), user("latest question"), assistant("answering")];
+
+    const { result } = await compact(messages, {
+      recentWindowSize: 2,
+      threshold: EVICTION_FORBIDDEN,
+    });
+
+    // "latest question" is already in the kept tail — replaying it would ask
+    // the model to answer again instead of continuing.
+    expect(result.at(-1)).toEqual(user("Continue."));
+    expect(result.filter((m) => m.content === "latest question")).toHaveLength(1);
+  });
+
+  it("does not append any resumption when the tail already ends on a user turn", async () => {
+    const messages = [user("old"), assistant("old reply"), user("latest question")];
+
+    const { result } = await compact(messages, {
       recentWindowSize: 1,
       threshold: EVICTION_FORBIDDEN,
     });
-    expect(second.result.at(-1)).toEqual(user("latest question"));
+
+    expect(result.at(-1)).toEqual(user("latest question"));
+    expect(result.filter((m) => m.content === "Continue.")).toHaveLength(0);
   });
 
   it("forwards model options to the summarization call", async () => {

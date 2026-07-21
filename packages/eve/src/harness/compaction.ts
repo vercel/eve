@@ -3,8 +3,10 @@ import { generateText, type LanguageModel, type ModelMessage, type TelemetryOpti
 import {
   COMPACTION_CHECKPOINT_MARKER,
   COMPACTION_PROMPT_ENVELOPE,
+  COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
   renderEvictedToolActivity,
+  TODO_COMPACTION_PRESERVATION_LABEL,
 } from "#harness/compaction-prompt.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -129,11 +131,10 @@ export async function compactMessages(
             { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
             { content: previousCheckpoint, role: "assistant" },
           ];
-    const evicted = withTrailingAssistantGuard([
-      ...checkpointHead,
-      ...evictToolActivity(older),
-      ...recent,
-    ]);
+    const evicted = withResumptionGuard(
+      [...checkpointHead, ...evictToolActivity(older), ...recent],
+      conversation,
+    );
     // Accept on the same ruler shouldCompact uses (envelope included):
     // eviction can be a near no-op when the older region holds little tool
     // activity, and accepting one on a looser ruler would let shouldCompact
@@ -171,15 +172,15 @@ export async function compactMessages(
     // Prefer keeping the recent tail verbatim — surviving tool results are the
     // model's evidence that work already ran. Degrade to text-only, then to a
     // smaller window, only under threshold pressure.
-    const verbatim = withTrailingAssistantGuard([...summaryHead, ...recent]);
+    const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
     if (estimateTokens(verbatim) <= config.threshold) {
       return verbatim;
     }
 
-    const stripped = withTrailingAssistantGuard([
-      ...summaryHead,
-      ...keepNonToolResultMessages(recent),
-    ]);
+    const stripped = withResumptionGuard(
+      [...summaryHead, ...keepNonToolResultMessages(recent)],
+      conversation,
+    );
     if (estimateTokens(stripped) <= config.threshold || keep === 0) {
       return stripped;
     }
@@ -237,14 +238,57 @@ function evictToolActivity(messages: readonly ModelMessage[]): ModelMessage[] {
 
 /**
  * Providers that don't support assistant prefill reject a request that ends on
- * assistant content, so append a synthetic user message to resume from a user
- * turn. Also applies to an empty history for the same reason.
+ * assistant content, so compaction must resume from a user turn. Rather than
+ * a contentless synthetic prompt, replay the conversation's last real user
+ * message when compaction folded it away — the model resumes against its
+ * actual instruction, with the checkpoint as background. Falls back to
+ * "Continue." when the last real user message still survives in the kept
+ * messages (the model was mid-work on it) or none exists.
  */
-function withTrailingAssistantGuard(messages: ModelMessage[]): ModelMessage[] {
+function withResumptionGuard(
+  messages: ModelMessage[],
+  conversation: readonly ModelMessage[],
+): ModelMessage[] {
   const lastRole = messages.at(-1)?.role;
-  return lastRole === undefined || lastRole === "assistant"
-    ? [...messages, { content: "Continue.", role: "user" }]
-    : messages;
+  if (lastRole !== undefined && lastRole !== "assistant") {
+    return messages;
+  }
+
+  const replay = findLastRealUserMessage(conversation);
+  const alreadyKept =
+    replay !== undefined &&
+    messages.some((message) => message.role === "user" && message.content === replay.content);
+
+  return [
+    ...messages,
+    replay !== undefined && !alreadyKept
+      ? replay
+      : { content: COMPACTION_RESUMPTION_MESSAGE, role: "user" },
+  ];
+}
+
+/**
+ * Latest user message authored by the user rather than synthesized by the
+ * framework (resumption prompts, checkpoint markers, and todo preservation
+ * messages are all `role: "user"` but carry no user intent).
+ */
+function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
+  for (let index = conversation.length - 1; index >= 0; index -= 1) {
+    const message = conversation[index];
+    if (message?.role !== "user" || typeof message.content !== "string") {
+      continue;
+    }
+    if (
+      message.content === COMPACTION_RESUMPTION_MESSAGE ||
+      message.content === COMPACTION_CHECKPOINT_MARKER ||
+      message.content.startsWith(TODO_COMPACTION_PRESERVATION_LABEL)
+    ) {
+      continue;
+    }
+    return message;
+  }
+
+  return undefined;
 }
 
 function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
