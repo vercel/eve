@@ -191,9 +191,9 @@ function renderCompactionContentPart(
 // Raw tool payloads reach the summarizer clipped, not pre-summarized: the
 // checkpoint model decides what matters in a grep result or file read.
 // The transcript limit is opencode parity; the compact limit applies where a
-// one-line rendering is the point — eviction trail lines and budget-degraded
+// one-line rendering is the point — budget-degraded
 // transcript entries.
-const TRANSCRIPT_PAYLOAD_LIMIT = 2_000;
+export const TRANSCRIPT_PAYLOAD_LIMIT = 2_000;
 const COMPACT_PAYLOAD_LIMIT = 280;
 
 function renderTranscriptToolCall(
@@ -214,26 +214,6 @@ function renderTranscriptToolResult(
   const status = part.isError ? "errored" : "returned";
   const output = renderPayload(part.output, limit);
   return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
-}
-
-/**
- * One-line trail rendering of an evicted tool call merged with its paired
- * result, e.g. `Called grep with {"pattern":"todo"} → returned {…}`. Used
- * when compaction evicts tool activity from older history without
- * summarizing: the trail keeps durable evidence of what already ran.
- */
-export function renderEvictedToolActivity(
-  call: { toolName: string; input?: unknown },
-  result?: { output?: unknown; isError?: boolean },
-): string {
-  const called = renderToolCall(call, COMPACT_PAYLOAD_LIMIT);
-  if (result === undefined) {
-    return `${called} → no recorded result`;
-  }
-
-  const status = result.isError ? "errored" : "returned";
-  const output = renderPayload(result.output, COMPACT_PAYLOAD_LIMIT);
-  return output ? `${called} → ${status} ${output}` : `${called} → ${status}`;
 }
 
 function renderToolCall(part: { toolName: string; input?: unknown }, limit: number): string {

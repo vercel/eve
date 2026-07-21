@@ -5,8 +5,8 @@ import {
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
-  renderEvictedToolActivity,
   TODO_COMPACTION_PRESERVATION_LABEL,
+  TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction-prompt.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -119,16 +119,15 @@ type CompactionHeuristic = (input: CompactionHeuristicInput) => CompactionHeuris
  * composing a new strategy (pruning variants, protect-lists) means adding an
  * entry here.
  */
-const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolEvictionHeuristic];
+const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolResultCapHeuristic];
 
 /**
- * Evicts tool activity from the older region — tool results dropped,
- * assistant tool calls rewritten to one-line trail text — while every
- * user/assistant message and the recent tail stay verbatim. Most history bulk
- * is tool output, so this usually suffices and preserves the conversation
- * byte-exact, with no model call.
+ * Caps oversized tool-result outputs in the older region while every message
+ * — including its tool calls and the recent tail — stays structurally
+ * verbatim. Most history bulk is a handful of large tool outputs, so this
+ * usually suffices with no model call and no rewriting.
  */
-function toolEvictionHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
+function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
   const checkpointHead: ModelMessage[] =
     input.previousCheckpoint === undefined
       ? []
@@ -136,18 +135,18 @@ function toolEvictionHeuristic(input: CompactionHeuristicInput): CompactionHeuri
           { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
           { content: input.previousCheckpoint, role: "assistant" },
         ];
-  const evicted = withResumptionGuard(
-    [...checkpointHead, ...evictToolActivity(input.older), ...input.recent],
+  const capped = withResumptionGuard(
+    [...checkpointHead, ...capToolResults(input.older), ...input.recent],
     input.conversation,
   );
 
   // Evaluate on the same ruler shouldCompact uses (envelope included):
-  // eviction can be a near no-op when the older region holds little tool
-  // activity, and accepting one on a looser ruler would let shouldCompact
+  // capping can be a near no-op when the older region holds few large
+  // results, and accepting one on a looser ruler would let shouldCompact
   // re-fire every step without compaction ever making progress.
-  const evaluation = evaluateThreshold(evicted, input.config, "should-compact");
+  const evaluation = evaluateThreshold(capped, input.config, "should-compact");
   return evaluation.type === "within-limit"
-    ? { messages: evicted, type: "within-limit" }
+    ? { messages: capped, type: "within-limit" }
     : { type: "insufficient" };
 }
 
@@ -247,51 +246,45 @@ export async function compactMessages(
   }
 }
 
+const CAPPED_RESULT_ANNOTATION =
+  "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
+
 /**
- * Drops tool-result messages and rewrites assistant tool-call parts into
- * one-line trail text merged with their paired results. User messages and
- * assistant prose stay verbatim, and no tool_use survives without its result
- * because both sides become text.
+ * Caps oversized tool-result outputs in place, keeping message structure and
+ * tool_use/tool_result pairing untouched. The cap matches the transcript
+ * payload clip, so a later summarization sees the same content the model
+ * kept — capping never destroys material the summarizer would need, unlike
+ * dropping results outright. The annotation leads the value so it survives
+ * prefix-capped renderings.
  */
-function evictToolActivity(messages: readonly ModelMessage[]): ModelMessage[] {
-  const resultsByCallId = new Map<string, { output?: unknown; isError?: boolean }>();
-  for (const message of messages) {
+function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
+  return messages.map((message) => {
     if (message.role !== "tool" || typeof message.content === "string") {
-      continue;
+      return message;
     }
-    for (const part of message.content) {
-      if (part.type === "tool-result") {
-        resultsByCallId.set(part.toolCallId, part as { output?: unknown; isError?: boolean });
+
+    let changed = false;
+    const content = message.content.map((part) => {
+      if (part.type !== "tool-result") {
+        return part;
       }
-    }
-  }
-
-  const kept: ModelMessage[] = [];
-  for (const message of messages) {
-    if (message.role === "tool") {
-      continue;
-    }
-
-    if (message.role === "assistant" && typeof message.content !== "string") {
-      const lines: string[] = [];
-      for (const part of message.content) {
-        if (part.type === "text") {
-          lines.push(part.text);
-        } else if (part.type === "tool-call") {
-          lines.push(renderEvictedToolActivity(part, resultsByCallId.get(part.toolCallId)));
-        }
+      const serialized = JSON.stringify(part.output) ?? "";
+      if (serialized.length <= TRANSCRIPT_PAYLOAD_LIMIT) {
+        return part;
       }
-      const text = lines.join("\n").trim();
-      if (text.length > 0) {
-        kept.push({ content: text, role: "assistant" });
-      }
-      continue;
-    }
 
-    kept.push(message);
-  }
+      changed = true;
+      return {
+        ...part,
+        output: {
+          type: "text" as const,
+          value: `${CAPPED_RESULT_ANNOTATION}\n\n${serialized.slice(0, TRANSCRIPT_PAYLOAD_LIMIT)}`,
+        },
+      };
+    });
 
-  return kept;
+    return changed ? { ...message, content } : message;
+  });
 }
 
 /**

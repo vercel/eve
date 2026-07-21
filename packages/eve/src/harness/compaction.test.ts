@@ -257,11 +257,11 @@ describe("resolveCompactionModel", () => {
 // compactMessages escalates through heuristics before summarizing, and which
 // strategy a test hits is pure threshold arithmetic:
 //
-// - The tool-eviction heuristic is accepted only when the evicted history
+// - The tool-result cap heuristic is accepted only when the capped history
 //   PLUS the fixed compaction prompt envelope fits the threshold.
-//   `EVICTION_FORBIDDEN` sits below the envelope estimate, so eviction can
-//   never be accepted and the summarization fallback always runs.
-// - `ROOMY` accepts eviction whenever the history's bulk is tool output.
+//   `HEURISTICS_FORBIDDEN` sits below the envelope estimate, so no heuristic
+//   can be accepted and the summarization fallback always runs.
+// - `ROOMY` accepts capping whenever the history's bulk is tool output.
 //
 // Every result is checked against `expectWellFormedCompaction`: no orphaned
 // tool_result, never trailing on an assistant message, and — unless the
@@ -272,7 +272,7 @@ const ENVELOPE_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
 ] satisfies ModelMessage[]);
-const EVICTION_FORBIDDEN = Math.floor(ENVELOPE_TOKENS);
+const HEURISTICS_FORBIDDEN = Math.floor(ENVELOPE_TOKENS);
 const ROOMY = 100_000;
 
 const CHECKPOINT_MARKER = "Summary of our conversation so far:";
@@ -365,8 +365,8 @@ async function compact(
   return { result, summarizer: summarizer as ReturnType<typeof vi.mocked<never>> };
 }
 
-describe("compactMessages: tool-eviction heuristic", () => {
-  it("evicts older tool payloads into trail text without calling the summarizer", async () => {
+describe("compactMessages: tool-result cap heuristic", () => {
+  it("caps oversized older tool results in place without calling the summarizer", async () => {
     const [call, resultMsg] = toolExchange({
       callId: "call-0",
       payloadChars: 4_000,
@@ -377,17 +377,23 @@ describe("compactMessages: tool-eviction heuristic", () => {
     const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
 
     expect(summarizer).not.toHaveBeenCalled();
-    // Conversation text survives verbatim; the 4k payload is reduced to a
-    // one-line trail that still proves the call happened.
+    // Structure survives untouched: the assistant message keeps its prose and
+    // its tool-call part, and the result stays a tool message.
     expect(result[0]).toEqual(user("investigate the bug"));
-    expect(result[1]?.content).toContain("Searching first.");
-    expect(result[1]?.content).toContain("Called grep with");
-    expect(result[1]?.content).toContain("→ returned");
-    // The trail keeps at most the 280-char tool-text cap of the 4k payload.
-    expect(result[1]?.content).not.toContain("x".repeat(300));
-    expect(String(result[1]?.content).length).toBeLessThan(600);
+    expect(result[1]).toBe(call);
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    expect(cappedPart?.type).toBe("tool-result");
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    const value =
+      typeof output === "object" && output !== null && "value" in output
+        ? String(output.value)
+        : "";
+    // Annotation leads; a real content prefix follows; the 4k bulk is gone.
+    expect(value).toContain("Truncated by eve");
+    expect(value).toContain("xxx");
+    expect(value.length).toBeLessThan(2_400);
     expect(result.at(-1)).toEqual(user("what did you find?"));
-    // The evicted result cannot immediately re-trigger compaction.
+    // The capped result cannot immediately re-trigger compaction.
     expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
@@ -410,7 +416,7 @@ describe("compactMessages: tool-eviction heuristic", () => {
     expect(result.slice(-2)).toEqual([recentCall, recentResult]);
   });
 
-  it("retains the prior checkpoint pair so chaining survives eviction-only cycles", async () => {
+  it("retains the prior checkpoint pair so chaining survives cap-only cycles", async () => {
     const [call, resultMsg] = toolExchange({ callId: "call-0", payloadChars: 4_000 });
     const messages = [
       ...checkpointHead("Previous checkpoint"),
@@ -427,36 +433,32 @@ describe("compactMessages: tool-eviction heuristic", () => {
     expect(result[1]).toEqual(assistant("Previous checkpoint"));
   });
 
-  it("reunites a tool result with its call when the window would split them", async () => {
+  it("keeps a tool result paired with its call when the window would split them", async () => {
     const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 40 });
-    // recentWindowSize 2 splits between call and result; the snap must pull
-    // the result into the older region with its call.
+    // recentWindowSize 2 splits between call and result; the snap pulls the
+    // result into the older region, and capping leaves both untouched.
     const messages = [user("old context"), call, resultMsg, user("next question")];
 
     const { result, summarizer } = await compact(messages, { recentWindowSize: 2 });
 
     expect(summarizer).not.toHaveBeenCalled();
-    const trail = result.find(
-      (message) =>
-        message.role === "assistant" &&
-        typeof message.content === "string" &&
-        message.content.includes("Called grep with"),
-    );
-    expect(trail).toBeDefined();
+    expect(result).toContainEqual(call);
+    expect(result).toContainEqual(resultMsg);
+    expect(result.indexOf(call)).toBeLessThan(result.indexOf(resultMsg));
   });
 });
 
 describe("compactMessages: summarization fallback", () => {
-  it("summarizes when eviction cannot free enough space", async () => {
-    // All bulk is conversational prose — eviction removes nothing — and the
-    // threshold sits below the prompt envelope, so eviction can never be
+  it("summarizes when capping cannot free enough space", async () => {
+    // All bulk is conversational prose — capping removes nothing — and the
+    // threshold sits below the prompt envelope, so no heuristic can be
     // accepted regardless.
     const messages = [user("old context to fold away"), assistant("old reply"), user("continue")];
 
     const { result, summarizer } = await compact(messages, {
       recentWindowSize: 1,
       summary: "Distilled story",
-      threshold: EVICTION_FORBIDDEN,
+      threshold: HEURISTICS_FORBIDDEN,
     });
 
     expect(summarizer).toHaveBeenCalledTimes(1);
@@ -477,7 +479,7 @@ describe("compactMessages: summarization fallback", () => {
 
     const { result, summarizer } = await compact(messages, {
       summary: "Updated checkpoint",
-      threshold: EVICTION_FORBIDDEN,
+      threshold: HEURISTICS_FORBIDDEN,
     });
 
     expect(summarizer.mock.calls[0]?.[0]?.prompt).toContain(previousCheckpoint);
@@ -546,7 +548,7 @@ describe("compactMessages: summarization fallback", () => {
     const { result } = await compact(messages, {
       recentWindowSize: 10,
       summary: "Summary of the large SQL result",
-      threshold: EVICTION_FORBIDDEN,
+      threshold: HEURISTICS_FORBIDDEN,
     });
 
     // The folded-away user prompt is replayed as the live turn, so the model
@@ -567,7 +569,7 @@ describe("compactMessages: summarization fallback", () => {
 
     const { result } = await compact(messages, {
       recentWindowSize: 1,
-      threshold: EVICTION_FORBIDDEN,
+      threshold: HEURISTICS_FORBIDDEN,
     });
 
     expect(result.at(-1)).toEqual(user("please fix the flaky test"));
@@ -578,7 +580,7 @@ describe("compactMessages: summarization fallback", () => {
 
     const { result } = await compact(messages, {
       recentWindowSize: 2,
-      threshold: EVICTION_FORBIDDEN,
+      threshold: HEURISTICS_FORBIDDEN,
     });
 
     // "latest question" is already in the kept tail — replaying it would ask
@@ -592,7 +594,7 @@ describe("compactMessages: summarization fallback", () => {
 
     const { result } = await compact(messages, {
       recentWindowSize: 1,
-      threshold: EVICTION_FORBIDDEN,
+      threshold: HEURISTICS_FORBIDDEN,
     });
 
     expect(result.at(-1)).toEqual(user("latest question"));
@@ -614,7 +616,7 @@ describe("compactMessages: summarization fallback", () => {
     await compactMessages(
       messages,
       model,
-      { recentWindowSize: 1, threshold: EVICTION_FORBIDDEN },
+      { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN },
       providerOptions,
       undefined,
       headers,
