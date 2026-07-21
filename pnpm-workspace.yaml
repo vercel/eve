@@ -41,7 +41,7 @@ catalog:
   react-dom: "19.2.6"
   streamdown: "2.5.0"
   typescript: "7.0.2"
-  vitest: "4.1.7"
+  vitest: "4.1.10"
   zod: "4.4.3"
 
 minimumReleaseAge: 2880 # 2 days
