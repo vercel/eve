@@ -19261,7 +19261,7 @@ snapshots:
       '@streamdown/cjk': 1.0.3(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@10.2.2))(react@19.2.6)(unified@11.0.5)
       '@streamdown/code': 1.1.1(react@19.2.6)
       '@vercel/agent-readability': 0.2.1(next@16.3.0-preview.6(@babel/core@7.29.0(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))
-      '@vercel/oidc': 3.5.0
+      '@vercel/oidc': 3.8.0
       ai: 6.0.191(zod@4.4.3)
       class-variance-authority: 0.7.1
       clsx: 2.1.1
