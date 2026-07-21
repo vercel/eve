@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getIntegration, integrations } from "./data";
-import { integrationPaths, integrationSearchText } from "./discovery";
+import { integrationMarkdown, integrationPaths, integrationSearchText } from "./discovery";
 
 describe("integration discovery", () => {
   it("includes the landing page and every detail page in crawler paths", () => {
@@ -20,5 +20,25 @@ describe("integration discovery", () => {
     expect(integrationSearchText(slack!)).toContain("Slack");
     expect(integrationSearchText(slack!)).toContain("Channel");
     expect(integrationSearchText(slack!)).toContain("messaging");
+  });
+
+  it("renders hand-authored setup as agent-readable Markdown", () => {
+    const slack = getIntegration("slack");
+    expect(slack).toBeDefined();
+
+    const markdown = integrationMarkdown(slack!);
+    expect(markdown).toContain("## Install");
+    expect(markdown).toContain("## Quick start");
+    expect(markdown).toContain("eve channels add slack");
+  });
+
+  it("renders every connection setup variant", () => {
+    const notion = getIntegration("notion");
+    expect(notion).toBeDefined();
+
+    const markdown = integrationMarkdown(notion!);
+    expect(markdown).toContain("### MCP · User");
+    expect(markdown).toContain("### OpenAPI · User");
+    expect(markdown).toContain("agent/connections/notion.ts");
   });
 });
