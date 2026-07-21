@@ -9,10 +9,12 @@ export default defineEval({
       [
         "[case: task-survival]",
         "Call inspect-repository once to generate context pressure, then confirm the task.",
-        // Long enough that a summarizer input cap would destroy the tail
-        // sentinel; the mock only reports success when it sees the sentinel
-        // verbatim in a user message after a compaction.
-        `Requirements: ${"handle the edge case precisely as specified. ".repeat(30)}${TASK_TAIL_SENTINEL}`,
+        // Sized to a narrow window: long enough that a 280-char summarizer
+        // input cap would destroy the tail sentinel, but short enough that
+        // the task alone cannot cross the fixture's ~640-token threshold —
+        // otherwise compaction fires before the first model call and the
+        // mock never generates pressure.
+        `Requirements: ${"handle the edge case exactly. ".repeat(12)}${TASK_TAIL_SENTINEL}`,
       ].join("\n"),
     );
 
