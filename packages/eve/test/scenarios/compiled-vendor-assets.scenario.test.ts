@@ -239,6 +239,7 @@ describe("compiled vendor assets", () => {
         rewrites: {
           "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
           "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+          "zod/v4": "#compiled/zod/index.js",
         },
       },
       {
