@@ -17,7 +17,9 @@ Be concise, structured, and focused on helping the next LLM seamlessly continue 
 
 const COMPACTION_CHECKPOINT_PROMPT = `Update the previous checkpoint with the newer information in the conversation. If there is no previous checkpoint, create one from the conversation.
 
-Make completed work explicit so the next model does not repeat it. Keep completed work separate from current and remaining work, and do not describe completed work as pending unless later messages show it must be redone. Preserve exact file paths, function names, commands, error messages, identifiers, and measured values when they are needed to continue.`;
+Make completed work explicit so the next model does not repeat it. Keep completed work separate from current and remaining work, and do not describe completed work as pending unless later messages show it must be redone. Preserve exact file paths, function names, commands, error messages, identifiers, and measured values when they are needed to continue.
+
+Large tool outputs are the main thing to compress: reduce each to the findings the next model needs — what was searched or read, what it established, and the exact identifiers involved — rather than reproducing the output. The next model cannot see the originals, so nothing it would need to act on may be lost.`;
 
 // Applies only to strings inside tool inputs/outputs. Conversational
 // user/assistant text reaches the summarizer verbatim: a delegated task
@@ -174,12 +176,48 @@ function renderCompactionContentPart(
         ? `Attached file ${part.filename} (${part.mediaType})`
         : `Attached file attachment (${part.mediaType})`;
     case "tool-call":
-      return summarizeToolCallPart(part);
+      return renderTranscriptToolCall(part, conversationTextLimit);
     case "tool-result":
-      return summarizeToolResultPart(part);
+      return renderTranscriptToolResult(part, conversationTextLimit);
     default:
       return "";
   }
+}
+
+// Raw tool payloads reach the summarizer clipped, not pre-summarized: the
+// checkpoint model decides what matters in a grep result or file read, and a
+// structural `object(…)` skeleton would spend the budget on envelope noise
+// instead of content. Degraded entries fall back to the tight structural
+// rendering.
+const COMPACTION_TOOL_PAYLOAD_LIMIT = 2_000;
+
+function renderTranscriptToolCall(
+  part: { toolName: string; input?: unknown },
+  conversationTextLimit?: number,
+): string {
+  if (conversationTextLimit !== undefined) {
+    return summarizeToolCallPart(part);
+  }
+  const input =
+    part.input !== undefined
+      ? capText(JSON.stringify(part.input), COMPACTION_TOOL_PAYLOAD_LIMIT)
+      : "";
+  return input ? `Called ${part.toolName} with ${input}` : `Called ${part.toolName}`;
+}
+
+function renderTranscriptToolResult(
+  part: { toolName: string; output?: unknown; isError?: boolean },
+  conversationTextLimit?: number,
+): string {
+  if (conversationTextLimit !== undefined) {
+    return summarizeToolResultPart(part);
+  }
+  const output =
+    part.output !== undefined
+      ? capText(JSON.stringify(part.output), COMPACTION_TOOL_PAYLOAD_LIMIT)
+      : "";
+  const status = part.isError ? "errored" : "returned";
+  return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
 }
 
 /**

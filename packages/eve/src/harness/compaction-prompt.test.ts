@@ -18,7 +18,7 @@ describe("createCompactionPrompt", () => {
     expect(result.prompt).toContain(markerAfterTextLimit);
   });
 
-  it("summarizes structured tool messages without dumping raw JSON", () => {
+  it("passes tool payloads to the summarizer raw so it can judge what matters", () => {
     const messages: ModelMessage[] = [
       {
         content: [
@@ -51,12 +51,35 @@ describe("createCompactionPrompt", () => {
 
     expect(result.prompt).toContain("Conversation transcript:");
     expect(result.prompt).toContain("### assistant");
-    expect(result.prompt).toContain("Called search with object(query=debug)");
-    expect(result.prompt).toContain(
-      "Tool search returned object(type=json, value=array(4: alpha, beta, gamma, …))",
-    );
-    expect(result.prompt).not.toContain('{"query"');
-    expect(result.prompt).not.toContain('{"items"');
+    // Raw clipped JSON, not a pre-digested object(…) skeleton: the checkpoint
+    // model is the one deciding which parts of a payload matter.
+    expect(result.prompt).toContain('Called search with {"query":"debug"}');
+    expect(result.prompt).toContain('"alpha"');
+    expect(result.prompt).toContain('"delta"');
+  });
+
+  it("clips oversized tool payloads instead of reproducing them", () => {
+    const big = "match line ".repeat(1_000);
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            output: { type: "json", value: { content: big } },
+            toolCallId: "call-1",
+            toolName: "grep",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+
+    const result = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+
+    expect(result.prompt).toContain("Tool grep returned");
+    expect(result.prompt).toContain("match line");
+    expect(result.prompt).not.toContain(big);
+    expect(result.prompt).toContain("…");
   });
 
   it("renders conversational text verbatim regardless of length", () => {
@@ -75,30 +98,6 @@ describe("createCompactionPrompt", () => {
 
     expect(result.prompt).toContain(taskTail);
     expect(result.prompt.split(taskTail)).toHaveLength(3);
-  });
-
-  it("keeps strings inside tool payloads capped", () => {
-    const payload = "row ".repeat(200);
-
-    const result = createCompactionPrompt({
-      messages: [
-        {
-          content: [
-            {
-              output: { type: "json", value: { content: payload } },
-              toolCallId: "call-1",
-              toolName: "grep",
-              type: "tool-result",
-            },
-          ],
-          role: "tool",
-        },
-      ],
-      previousCheckpoint: undefined,
-    });
-
-    expect(result.prompt).not.toContain(payload);
-    expect(result.prompt).toContain("…");
   });
 
   it("degrades the oldest conversational text first under budget pressure", () => {
