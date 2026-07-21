@@ -1,6 +1,6 @@
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
-import type { UserContent } from "ai";
 
+import type { CrossChannelReceiveOptions } from "#channel/cross-channel-receive.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
@@ -261,14 +261,10 @@ export interface SlackInitialMessage {
 
 /**
  * One imperative turn start requested by a generic Slack event handler.
- * Matches the schedule API's `receive(slack, options)` payload with the Slack
+ * The schedule API's `receive(slack, options)` payload with the Slack
  * channel already bound by the inbound webhook.
  */
-export interface SlackEventReceiveOptions {
-  readonly message: string | UserContent;
-  readonly target: SlackReceiveTarget;
-  readonly auth: SessionAuthContext | null;
-}
+export type SlackEventReceiveOptions = CrossChannelReceiveOptions<SlackReceiveTarget>;
 
 /**
  * Starts a session on the current Slack channel from `onEvent`. Call it zero,
@@ -619,25 +615,17 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
             body,
             send,
             waitUntil,
-            onAppMention: config.onAppMention,
-            onDirectMessage: config.onDirectMessage,
-            onEvent: config.onEvent,
+            config,
             uploadPolicy,
-            threadContext: config.threadContext,
             handledEvents,
             headers: req.headers,
-            credentials: config.credentials,
           });
         },
       ),
     ],
 
-    async receive(input, { send }) {
-      return receiveOnSlack(input, {
-        credentials: config.credentials,
-        send,
-        teamId: undefined,
-      });
+    receive(input, { send }) {
+      return receiveOnSlack(input, { credentials: config.credentials, send });
     },
 
     events: mergedEvents,
@@ -653,7 +641,8 @@ async function receiveOnSlack(
   deps: {
     readonly credentials: SlackChannelCredentials | undefined;
     readonly send: SendFn<SlackChannelState>;
-    readonly teamId: string | undefined;
+    /** Slack team id seeded into session state, when the trigger carried one. */
+    readonly teamId?: string;
   },
 ): Promise<Session> {
   const receiveTarget = input.target as Partial<SlackReceiveTarget>;
@@ -742,14 +731,11 @@ async function handleEventPost(input: {
   readonly headers: Headers;
   readonly send: SendFn<SlackChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
-  readonly onAppMention: SlackChannelConfig["onAppMention"];
-  readonly onDirectMessage: SlackChannelConfig["onDirectMessage"];
-  readonly onEvent: SlackChannelConfig["onEvent"];
+  readonly config: SlackChannelConfig;
   readonly uploadPolicy: UploadPolicy;
-  readonly threadContext: LoadThreadContextMessagesOptions | undefined;
-  readonly credentials: SlackChannelCredentials | undefined;
   readonly handledEvents: Set<string>;
 }): Promise<Response> {
+  const { config } = input;
   let payload;
   let envelope: SlackEventEnvelope | null;
   try {
@@ -769,54 +755,46 @@ async function handleEventPost(input: {
 
   if (envelope === null) return new Response("ok");
 
-  type InboundMessageHandler =
-    | NonNullable<SlackChannelConfig["onAppMention"]>
-    | NonNullable<SlackChannelConfig["onDirectMessage"]>;
-  type SelectedHandler =
-    | {
-        readonly kind: "event";
-        readonly handler: NonNullable<SlackChannelConfig["onEvent"]>;
-      }
-    | {
-        readonly kind: "message";
-        readonly handler: InboundMessageHandler;
-        readonly message: SlackMessage;
-        readonly messageKind: "app_mention" | "direct_message";
-      };
-
-  let selected: SelectedHandler | null = null;
+  let dispatch: (() => Promise<void>) | null = null;
   if (payload.kind === "app_mention" || payload.kind === "direct_message") {
+    const kind = payload.kind;
     const message = slackMessageFromWebhookPayload(payload);
-    if (message !== null) {
-      const authoredHandler =
-        payload.kind === "app_mention" ? input.onAppMention : input.onDirectMessage;
-      if (authoredHandler !== undefined) {
-        selected = {
-          handler: authoredHandler,
-          kind: "message",
+    const authored = kind === "app_mention" ? config.onAppMention : config.onDirectMessage;
+    const handler =
+      authored ??
+      (config.onEvent === undefined
+        ? kind === "app_mention"
+          ? defaultOnAppMention
+          : defaultOnDirectMessage
+        : undefined);
+    if (message !== null && handler !== undefined) {
+      dispatch = () =>
+        dispatchInboundMessage({
+          credentials: config.credentials,
+          handler,
+          kind,
           message,
-          messageKind: payload.kind,
-        };
-      } else if (input.onEvent !== undefined) {
-        selected = { handler: input.onEvent, kind: "event" };
-      } else {
-        selected = {
-          handler: payload.kind === "app_mention" ? defaultOnAppMention : defaultOnDirectMessage,
-          kind: "message",
-          message,
-          messageKind: payload.kind,
-        };
-      }
+          send: input.send,
+          threadContext: config.threadContext,
+          uploadPolicy: input.uploadPolicy,
+        });
     }
   }
 
   // Specialized message handlers intentionally reject bot-authored/subtype
   // DMs and malformed message events. A generic handler still receives the
   // raw Events API payload because those events are within its broader scope.
-  if (selected === null && input.onEvent !== undefined) {
-    selected = { handler: input.onEvent, kind: "event" };
+  const onEvent = config.onEvent;
+  if (dispatch === null && onEvent !== undefined) {
+    dispatch = () =>
+      dispatchSlackEvent({
+        credentials: config.credentials,
+        envelope,
+        handler: onEvent,
+        send: input.send,
+      });
   }
-  if (selected === null) return new Response("ok");
+  if (dispatch === null) return new Response("ok");
 
   const eventId = envelope.event_id;
   if (eventId) {
@@ -832,29 +810,7 @@ async function handleEventPost(input: {
     markEventHandled(eventId, input.handledEvents);
   }
 
-  if (selected.kind === "event") {
-    input.waitUntil(
-      dispatchSlackEvent({
-        credentials: input.credentials,
-        envelope,
-        handler: selected.handler,
-        send: input.send,
-      }),
-    );
-    return new Response("ok");
-  }
-
-  input.waitUntil(
-    dispatchInboundMessage({
-      credentials: input.credentials,
-      handler: selected.handler,
-      kind: selected.messageKind,
-      message: selected.message,
-      send: input.send,
-      threadContext: input.threadContext,
-      uploadPolicy: input.uploadPolicy,
-    }),
-  );
+  input.waitUntil(dispatch());
   return new Response("ok");
 }
 
