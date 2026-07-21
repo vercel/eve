@@ -74,7 +74,7 @@ For a public demo, use `none()` (also from `eve/channels/auth`) to skip authenti
 ## Dev vs deploy topology
 
 - **Local dev.** `npm run dev` starts the eve dev server next to `nuxt dev` and proxies the eve routes through it. As far as the browser knows, everything is the Nuxt origin.
-- **Vercel.** A single Vercel project carries both the Nuxt app and the eve runtime. The web app stays public; the runtime sits behind it on the same origin. Set `eveBuildCommand` when the agent needs its own build step:
+- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds the module adds Build Output [`services`](https://vercel.com/docs/services) for eve and `routes` that send `/eve/v1/**` to that service before filesystem routing; the Nuxt app itself remains the default app. No `vercel.json` is required. By default the generated service runs the installed eve binary from the agent root, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
 
   ```ts
   export default defineNuxtConfig({
@@ -91,6 +91,27 @@ For a public demo, use `none()` (also from `eve/channels/auth`) to skip authenti
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
   EVE_NUXT_PRODUCTION_PORT=5000 npm run build && npm run preview
   ```
+
+## Managing vercel.json yourself
+
+When `vercel.json` declares [`services`](https://vercel.com/docs/services), the module generates nothing and your configuration owns routing. It must include the eve service (`framework: "eve"`) and a rewrite that exposes the eve transport, or the module fails the build:
+
+```json title="vercel.json"
+{
+  "services": {
+    "web": { "root": ".", "framework": "nuxtjs" },
+    "eve": { "root": "agent", "framework": "eve", "buildCommand": "eve build" }
+  },
+  "rewrites": [{ "source": "/eve/v1/(.*)", "destination": { "service": "eve" } }]
+}
+```
+
+### Migrating from experimentalServices
+
+Earlier versions of the module wrote the legacy `experimentalServices` field into `vercel.json`. Vercel no longer routes that model — deployments build both services but every `/eve/v1/*` request returns a platform NOT_FOUND — so the module now ignores the field and warns when it sees one. Migrate either way:
+
+- **Generated (default).** Delete `vercel.json` (or just its `experimentalServices` block) and set the project's Framework Preset back to Nuxt.js. The module generates the eve service and its routing on every Vercel build.
+- **Hand-maintained.** Replace `experimentalServices` with the stable `services` and `rewrites` shown above, and keep the "Services" Framework Preset.
 
 ## What to read next
 

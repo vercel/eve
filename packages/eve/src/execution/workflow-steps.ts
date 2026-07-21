@@ -60,7 +60,6 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
-import { resolveSessionSkillRoot } from "#execution/workflow-skill-root.js";
 import {
   createWorkflowRuntime,
   startWorkflowPreferLatest,
@@ -340,16 +339,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         lifecycleSession: HarnessSession,
         stepInput: StepInput | undefined,
       ): Promise<StepResult> => {
-        const skillRoot = await resolveSessionSkillRoot({
-          ctx,
-          turnAgent: bundle.turnAgent,
-        });
         const refreshedSession = refreshSessionFromTurnAgent({
           compactionOverrides: {
             thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
           },
           session: lifecycleSession,
-          skillRoot,
           turnAgent: bundle.turnAgent,
         });
 

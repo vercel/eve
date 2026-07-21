@@ -41,7 +41,7 @@ export default eveChannel({
 - returns `null` / `undefined`: skip to the next entry
 - **throws**: reject with a specific status
 
-If every entry skips, the request gets a `401`. An empty array `auth: []` rejects everything.
+If every entry skips, the request gets a `401` whose `WWW-Authenticate` header advertises the challenge scheme(s) the configured entries declare — `Basic` for `httpBasic()`, `Bearer` for the token-based helpers (`jwtHmac`, `jwtEcdsa`, `oidc`, `vercelOidc`), both when you mix them, and `Bearer` as a fallback for entries that don't declare a scheme (custom `AuthFn`s, or an empty array). See [`withAuthChallenges`](#custom-verifiers) to declare a scheme on a custom `AuthFn`.
 
 ```ts
 import { type AuthFn, localDev, vercelOidc } from "eve/channels/auth";
@@ -96,6 +96,8 @@ Any other thrown error follows the normal channel failure path. When building a 
 | `jwtEcdsa(...)`  | You verify asymmetric JWTs minted by another system.                      |
 | `oidc(...)`      | You want eve to verify OIDC-issued tokens from an arbitrary issuer.       |
 
+`httpBasic(credentials, { realm })` accepts an optional `realm`, rendered on the `WWW-Authenticate: Basic` challenge (e.g. `Basic realm="agent", charset="UTF-8"`) so browsers label their native login prompt. It defaults to `"eve"`, ensuring every Basic challenge includes the required realm. Usernames and passwords are normalized to Unicode NFC before comparison, matching the advertised UTF-8 credential encoding.
+
 Exercise caution for agents that process non-public, sensitive, regulated, or production data unless you have implemented other access controls.
 
 ### `localDev()`
@@ -130,6 +132,17 @@ vercelOidc({
 ### Custom verifiers
 
 When none of the shipped helpers fit, write your own `AuthFn` (the array example above) or call the low-level verifiers directly. Each verifier is the pure function sitting behind the matching strategy helper, and returns `{ ok: true, sessionAuth }` or `{ ok: false }`:
+
+A custom `AuthFn` doesn't declare a `WWW-Authenticate` scheme by default, so `routeAuth` falls back to `Bearer` for it. Wrap it with `withAuthChallenges(fn, challenges)` to declare the scheme(s) it actually satisfies, so a mixed `auth` array produces an accurate 401:
+
+```ts
+import { withAuthChallenges, type AuthFn } from "eve/channels/auth";
+
+const apiKeyAuth: AuthFn<Request> = withAuthChallenges(
+  (request) => (isValidApiKey(request) ? apiKeySessionAuth : null),
+  [{ scheme: "Bearer" }],
+);
+```
 
 | Verifier                               | Behind         | Input                            |
 | -------------------------------------- | -------------- | -------------------------------- |

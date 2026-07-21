@@ -1,11 +1,10 @@
 import { z } from "#compiled/zod/index.js";
+import { AI_GATEWAY_MODELS_URL, vercelGatewayFetch } from "#internal/gateway.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 import { select, type Asker, type SelectOption } from "../ask.js";
 import type { SetupState } from "../state.js";
 import type { SetupBox } from "../step.js";
-
-const AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/models";
 const FETCH_TIMEOUT_MS = 5000;
 const WEB_SEARCH_TAG = "web-search";
 const MODEL_PROMPT_MESSAGE = "Which model should your agent use?";
@@ -83,7 +82,7 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
   try {
     const requestSignal =
       signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
-    const res = await fetch(AI_GATEWAY_URL, { signal: requestSignal });
+    const res = await vercelGatewayFetch(AI_GATEWAY_MODELS_URL, { signal: requestSignal });
     if (!res.ok) throw new Error(`AI Gateway model catalog request failed (${res.status}).`);
     return parseGatewayCatalog(await res.json());
   } finally {

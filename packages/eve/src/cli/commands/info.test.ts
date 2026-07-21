@@ -2,7 +2,14 @@ import { describe, expect, test } from "vitest";
 
 import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { createCompiledAgentManifest, type CompiledChannelEntry } from "#compiler/manifest.js";
+import {
+  createCompiledAgentManifest,
+  createCompiledAgentNodeManifest,
+  type CompiledChannelEntry,
+  type CompiledScheduleDefinition,
+  type CompiledSubagentNode,
+  ROOT_COMPILED_AGENT_NODE_ID,
+} from "#compiler/manifest.js";
 import { getApplicationInfo } from "#internal/application/paths.js";
 
 import { buildApplicationInfoJson } from "./info.js";
@@ -16,7 +23,45 @@ const MESSAGING = {
 const APP_ROOT = "/virtual/app";
 const AGENT_ROOT = "/virtual/app/agent";
 
-function makeCompiledState(): CompileAgentResult {
+function makeSchedule(name: string): CompiledScheduleDefinition {
+  return {
+    cron: "0 9 * * *",
+    hasRun: false,
+    logicalPath: `schedules/${name}.md`,
+    markdown: `# ${name}`,
+    name,
+    sourceId: `schedules/${name}.md`,
+    sourceKind: "markdown",
+  };
+}
+
+function makeSubagent(name: string): CompiledSubagentNode {
+  return {
+    agent: createCompiledAgentNodeManifest({
+      agentRoot: `${AGENT_ROOT}/subagents/${name}`,
+      appRoot: APP_ROOT,
+      config: {
+        model: {
+          id: "anthropic/claude-sonnet-5",
+          routing: { kind: "gateway", target: "anthropic" },
+        },
+        name,
+      },
+    }),
+    description: `${name} subagent description`,
+    entryPath: `subagents/${name}/agent.ts`,
+    logicalPath: `subagents/${name}`,
+    name,
+    nodeId: name,
+    rootPath: `subagents/${name}`,
+    sourceId: `subagents/${name}/agent.ts`,
+    sourceKind: "module",
+  };
+}
+
+function makeCompiledState(
+  options: { subagents?: CompiledSubagentNode[]; schedules?: CompiledScheduleDefinition[] } = {},
+): CompileAgentResult {
   const channels: CompiledChannelEntry[] = [
     {
       kind: "channel",
@@ -60,6 +105,12 @@ function makeCompiledState(): CompileAgentResult {
         sourceKind: "module",
       },
     ],
+    schedules: options.schedules ?? [],
+    subagentEdges: (options.subagents ?? []).map((subagent) => ({
+      childNodeId: subagent.nodeId,
+      parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
+    })),
+    subagents: options.subagents ?? [],
   });
   const digest = { path: "x", sha256: "y" };
   return {
@@ -104,6 +155,8 @@ describe("buildApplicationInfoJson", () => {
     expect(json.model).toBe("anthropic/claude-sonnet-5");
     expect(json.tools).toEqual(["create_ticket"]);
     expect(json.skills).toEqual([]);
+    expect(json.subagents).toEqual([]);
+    expect(json.schedules).toEqual([]);
     expect(json.diagnostics).toEqual({ errors: 0, warnings: 0 });
     expect(json.channels).toEqual([
       { name: "slack", kind: "slack", method: "POST", urlPath: "/eve/v1/slack" },
@@ -111,6 +164,20 @@ describe("buildApplicationInfoJson", () => {
     ]);
     expect(json.messaging.create).toBe("/eve/v1/session");
     expect(json.artifacts?.compiledManifest).toContain("compiled-agent-manifest.json");
+  });
+
+  test("projects subagents and schedules into the JSON contract when present", () => {
+    const json = buildApplicationInfoJson({
+      application: getApplicationInfo(APP_ROOT),
+      compiledState: makeCompiledState({
+        schedules: [makeSchedule("morning-digest"), makeSchedule("weekly-report")],
+        subagents: [makeSubagent("research")],
+      }),
+      messaging: MESSAGING,
+    });
+
+    expect(json.subagents).toEqual(["research"]);
+    expect(json.schedules).toEqual(["morning-digest", "weekly-report"]);
   });
 
   test("reports an unavailable contract when the project is not compiled", () => {
@@ -128,6 +195,8 @@ describe("buildApplicationInfoJson", () => {
     expect(json.channels).toEqual([]);
     expect(json.tools).toEqual([]);
     expect(json.skills).toEqual([]);
+    expect(json.subagents).toEqual([]);
+    expect(json.schedules).toEqual([]);
     expect(json.appRoot).toBe(APP_ROOT);
     expect(json.messaging.stream).toBe("/eve/v1/session/:id/stream");
   });

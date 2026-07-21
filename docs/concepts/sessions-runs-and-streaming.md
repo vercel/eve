@@ -19,7 +19,7 @@ React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overv
 ## Start a session
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session \
+curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -H 'content-type: application/json' \
   -d '{"message":"Summarize the latest forecast."}'
 ```
@@ -29,7 +29,7 @@ eve responds right away. The JSON body carries a `sessionId` and a `continuation
 ## Stream a session
 
 ```bash
-curl http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream
+curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 ```
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
@@ -78,7 +78,7 @@ A delegated subagent publishes progress on its own child-session stream. The par
 Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with `event.data.continuationToken`:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -H 'content-type: application/json' \
   -d '{"continuationToken":"<token>","message":"Now send the short version."}'
 ```
@@ -100,7 +100,7 @@ For deterministic ordering, send one follow-up at a time and wait for the next `
 POST to the session's cancel endpoint to stop the turn that is currently running. The body is optional; pass `turnId` (stamped on every turn-scoped stream event) to scope the cancel to the turn you observed:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
@@ -113,13 +113,13 @@ Custom channel routes request the same cancellation without knowing the session 
 The stream is durable. Every event is recorded before a step completes, so consumers can reconnect from their cursor when an HTTP connection ends. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
 
 ```bash
-curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
+curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
 ```
 
 A negative `startIndex` reads relative to the stream's current tail. For example, `-1` reads the latest event, which is normally `session.waiting` for a resumable session:
 
 ```bash
-curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=-1"
+curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=-1"
 ```
 
 This gives a consumer that only persisted `sessionId` a lightweight way to recover the current `continuationToken`. Because a tail-relative position does not resolve to an absolute consumed-event count, client tail reads do not automatically reconnect or advance the stored cursor.
@@ -135,7 +135,7 @@ Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basi
 `GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. It uses the resolved `eveChannel()` route auth when `agent/channels/eve.ts` authors one; otherwise it falls back to the framework default of Vercel OIDC plus local development access.
 
 ```bash
-curl http://127.0.0.1:3000/eve/v1/info
+curl http://127.0.0.1:2000/eve/v1/info
 ```
 
 With the default auth chain (`[vercelOidc(), localDev()]`), a local Vercel OIDC bearer takes precedence and other local requests fall back to development access. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).

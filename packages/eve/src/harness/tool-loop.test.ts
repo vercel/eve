@@ -590,6 +590,36 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("omits user messages with no model-visible content", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
+    const blankMessages: Array<string | UserContent> = [
+      "",
+      " \n\t",
+      [{ text: "", type: "text" }],
+      [{ text: " \n\t", type: "text" }],
+    ];
+
+    for (const message of blankMessages) {
+      const result = await runStep(createTestSession(), {
+        context: ["channel context"],
+        message,
+      });
+
+      expect(result.session.history).toEqual([
+        { content: "channel context", role: "user" },
+        { content: "Hello!", role: "assistant" },
+      ]);
+    }
+  });
+
   it("parks without delivery when a terminal response contains the empty-delivery sentinel", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -8181,6 +8211,7 @@ describe("createToolLoopHarness", () => {
       const lastTool = toolEntries[toolEntries.length - 1]?.[1];
       expect(lastTool?.providerOptions).toEqual({
         anthropic: { cacheControl: { type: "ephemeral" } },
+        bedrock: { cachePoint: { type: "default" } },
       });
     });
 
@@ -8235,9 +8266,11 @@ describe("createToolLoopHarness", () => {
       expect(result.messages?.[0]?.providerOptions).toBeUndefined();
       expect(result.messages?.[1]?.providerOptions).toEqual({
         anthropic: { cacheControl: { type: "ephemeral" } },
+        bedrock: { cachePoint: { type: "default" } },
       });
       expect(result.messages?.[2]?.providerOptions).toEqual({
         anthropic: { cacheControl: { type: "ephemeral" } },
+        bedrock: { cachePoint: { type: "default" } },
       });
     });
 
@@ -8406,6 +8439,7 @@ describe("createToolLoopHarness", () => {
         expect(agentCall?.headers).toEqual({
           "x-title": "Weather Agent",
           "http-referer": "https://my-agent.vercel.app",
+          "user-agent": expect.stringMatching(/^eve\/.+/),
         });
       } finally {
         if (originalProductionUrl === undefined) {
@@ -8439,6 +8473,7 @@ describe("createToolLoopHarness", () => {
         const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
         expect(agentCall?.headers).toEqual({
           "x-title": "weather-agent",
+          "user-agent": expect.stringMatching(/^eve\/.+/),
         });
       } finally {
         if (originalProductionUrl !== undefined) {
@@ -8475,6 +8510,7 @@ describe("createToolLoopHarness", () => {
         expect(agentCall?.headers).toEqual({
           "x-title": "My Agent",
           "http-referer": "https://preview-123.vercel.app",
+          "user-agent": expect.stringMatching(/^eve\/.+/),
         });
       } finally {
         if (originalProductionUrl !== undefined) {
@@ -8512,7 +8548,28 @@ describe("createToolLoopHarness", () => {
       expect(agentCall?.headers).toBeUndefined();
     });
 
-    it("does not set headers when no runtimeIdentity and no deployment URL", async () => {
+    it("sets the eve user-agent for explicit Gateway model objects", async () => {
+      setupStopResultForAttribution();
+      const config: ToolLoopHarnessConfig = {
+        mode: "conversation",
+        resolveModel: vi.fn().mockResolvedValue(
+          new MockLanguageModelV3({
+            provider: "gateway.language-model",
+            modelId: "anthropic/claude-sonnet-4-5",
+          }),
+        ),
+        tools: new Map(),
+      };
+      const runStep = createToolLoopHarness(config);
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+      expect(agentCall?.headers).toEqual({
+        "user-agent": expect.stringMatching(/^eve\/.+/),
+      });
+    });
+
+    it("sets the eve user-agent when no app attribution is available", async () => {
       setupStopResultForAttribution();
       const originalProductionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
       const originalUrl = process.env.VERCEL_URL;
@@ -8528,7 +8585,9 @@ describe("createToolLoopHarness", () => {
         await runStep(createTestSession(), { message: "hi" });
 
         const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-        expect(agentCall?.headers).toBeUndefined();
+        expect(agentCall?.headers).toEqual({
+          "user-agent": expect.stringMatching(/^eve\/.+/),
+        });
       } finally {
         if (originalProductionUrl !== undefined) {
           process.env.VERCEL_PROJECT_PRODUCTION_URL = originalProductionUrl;
@@ -8539,7 +8598,7 @@ describe("createToolLoopHarness", () => {
       }
     });
 
-    it("passes attribution headers to compaction generateText call", async () => {
+    it("derives compaction attribution from the compaction model", async () => {
       vi.mocked(shouldCompact).mockReturnValueOnce(true);
       vi.mocked(compactMessages).mockResolvedValueOnce([
         { content: "Summary of our conversation so far:", role: "user" },
@@ -8554,7 +8613,14 @@ describe("createToolLoopHarness", () => {
         const config: ToolLoopHarnessConfig = {
           handleEvent: emit,
           mode: "conversation",
-          resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
+          resolveModel: vi.fn().mockImplementation(async (reference) =>
+            reference.id === "compaction-model"
+              ? "anthropic/claude-sonnet-4-5"
+              : new MockLanguageModelV3({
+                  provider: "anthropic.messages",
+                  modelId: "claude-sonnet-4-5-20250514",
+                }),
+          ),
           runtimeIdentity: {
             agentId: "weather-agent",
             agentName: "Weather Agent",
@@ -8564,12 +8630,25 @@ describe("createToolLoopHarness", () => {
           tools: new Map(),
         };
         const runStep = createToolLoopHarness(config);
-        await runStep(createTestSession(), { message: "hi" });
+        await runStep(
+          createTestSession({
+            agent: {
+              compactionModelReference: { id: "compaction-model" },
+              modelReference: { id: "main-model" },
+              system: "You are a test assistant.",
+              tools: [],
+            },
+          }),
+          { message: "hi" },
+        );
 
+        const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+        expect(agentCall?.headers).toBeUndefined();
         const compactCall = vi.mocked(compactMessages).mock.calls[0];
         expect(compactCall?.[5]).toEqual({
           "x-title": "Weather Agent",
           "http-referer": "https://my-agent.vercel.app",
+          "user-agent": expect.stringMatching(/^eve\/.+/),
         });
       } finally {
         if (originalProductionUrl === undefined) {
@@ -9322,6 +9401,7 @@ describe("createToolLoopHarness", () => {
         content: "You are a test assistant.\n\ndynamic-system-instruction",
         providerOptions: {
           anthropic: { cacheControl: { type: "ephemeral" } },
+          bedrock: { cachePoint: { type: "default" } },
         },
       });
     });
