@@ -245,6 +245,15 @@ describe("classifyModelCallError", () => {
     const fetchFailed = new Error("fetch failed");
     expect(classifyModelCallError(fetchFailed)).toBe("retry");
 
+    // A stalled response stream killed by undici's body timeout: the
+    // provider accepted the request, went silent past the timeout, and
+    // undici terminated the fetch. Nothing about the request was wrong —
+    // repeating it is exactly right.
+    const bodyTimeout = Object.assign(new TypeError("terminated"), {
+      cause: Object.assign(new Error("Body Timeout Error"), { code: "UND_ERR_BODY_TIMEOUT" }),
+    });
+    expect(classifyModelCallError(bodyTimeout)).toBe("retry");
+
     // The old substring policy is gone: prose that merely mentions a
     // network token no longer forces a retry loop.
     expect(classifyModelCallError(new Error("network configuration invalid"))).toBe("recoverable");
