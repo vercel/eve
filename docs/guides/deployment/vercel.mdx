@@ -60,7 +60,7 @@ eve deploy
 Vercel uses the generated output to configure these services:
 
 - **Web runtime**: serves health, session, stream, channel, callback, and schedule routes
-- **Vercel Workflow**: persists and resumes durable runs
+- **Vercel Workflow**: persists and resumes durable runs, with optimistic replay preconditions enabled so stale event-log snapshots reload before they can commit
 - **Vercel Cron**: invokes authored schedules
 - **Vercel Sandbox**: runs sandbox sessions selected by `defaultBackend()`
 
