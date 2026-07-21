@@ -8,6 +8,7 @@ import { defineConfig, type GeistdocsNavbarOssProduct } from "@vercel/geistdocs/
 import {
   agent,
   basePath,
+  eveAgent,
   github,
   Logo,
   nav,
@@ -19,12 +20,20 @@ import {
 } from "@/geistdocs";
 
 const navbarOssProducts: GeistdocsNavbarOssProduct[] = [
-  { href: "https://ai-sdk.dev/", logo: <LogoAiSdk height={12} /> },
-  { href: "https://flags-sdk.dev/", logo: <LogoFlagsSdk height={20} /> },
-  { href: "https://chat-sdk.dev/", logo: <LogoChatSdk height={20} /> },
-  { href: "https://workflow-sdk.dev/", logo: <LogoWorkflowSdk height={12} /> },
-  { href: "https://turborepo.dev/", logo: <LogoTurborepo height={14} /> },
-  { href: "https://elements.ai-sdk.dev/", logo: <LogoAiElements height={12} /> },
+  { href: "https://ai-sdk.dev/", label: "AI SDK", logo: <LogoAiSdk height={12} /> },
+  { href: "https://flags-sdk.dev/", label: "Flags SDK", logo: <LogoFlagsSdk height={20} /> },
+  { href: "https://chat-sdk.dev/", label: "Chat SDK", logo: <LogoChatSdk height={20} /> },
+  {
+    href: "https://workflow-sdk.dev/",
+    label: "Workflow SDK",
+    logo: <LogoWorkflowSdk height={12} />,
+  },
+  { href: "https://turborepo.dev/", label: "Turborepo", logo: <LogoTurborepo height={14} /> },
+  {
+    href: "https://elements.ai-sdk.dev/",
+    label: "AI Elements",
+    logo: <LogoAiElements height={12} />,
+  },
 ];
 
 export const config = defineConfig({
@@ -43,6 +52,8 @@ export const config = defineConfig({
   pageActions: { editSource: false },
   content: [{ id: "docs", label: "Docs", dir: "docs", route: "/docs" }],
   ai: {
+    eveAgent,
+    // Used only if eveAgent is removed and chat falls back to gateway mode.
     prompt,
     suggestions,
   },
