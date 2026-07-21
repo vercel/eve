@@ -1,5 +1,16 @@
 # eve
 
+## 0.26.2
+
+### Patch Changes
+
+- dbca15c: Bump the vendored chat SDK (`chat`, `@chat-adapter/*`) from 4.31.0 to 4.34.0. Slack card tables now render as native data table blocks — paginated and sortable — instead of plain table blocks, and `Table()` supports optional `caption` and `pageSize` fields.
+- 938ef92: Identify Eve and its version on AI Gateway, Sandbox, and Workflow service requests.
+- d034e01: Fixed the default chat message reducer dropping assistant text when a single turn produced more than one message — for example, text shown before an OAuth authorization prompt was overwritten by the text that followed it once authorization completed. Each message now renders in the order it arrived.
+- dad9472: `eve info` now reports discovered subagents and schedules in both the human table and the `--json` output, matching what the CLI reference already documented. Previously both surfaces silently omitted them even though discovery resolved them correctly.
+- f1253c5: Listing or loading static skills no longer requires opening a sandbox. Dynamic skills and access to supporting skill package files, such as references, assets, and scripts, remain sandbox-backed.
+- de917a6: Fix a crash when an agent is triggered by a bare mention with no text (e.g. sending just `@bot` in a Microsoft Teams channel). The agent now responds normally instead of failing.
+
 ## 0.26.1
 
 ### Patch Changes
