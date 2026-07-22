@@ -335,6 +335,15 @@ export const veltLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const sendblueLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M18.7 7.2c-1.5-.7-3-1-4.6-1-1.8 0-3 .6-3 1.6 0 .9.8 1.3 3.7 1.9 4.3.9 6.2 2.3 6.2 5.2 0 3.3-2.8 5.4-7.2 5.4-2.5 0-5-.6-6.8-1.7l1.3-2.8c1.7 1 3.8 1.6 5.6 1.6 2.1 0 3.4-.7 3.4-1.9 0-1-.9-1.5-3.9-2.1-4.1-.8-5.9-2.2-5.9-5 0-3.1 2.7-5.1 6.8-5.1 2.1 0 4.2.4 5.8 1.2l-1.4 2.7Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -473,6 +482,7 @@ export const logos = {
 
   zernio: zernioLogo,
   velt: veltLogo,
+  sendblue: sendblueLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,

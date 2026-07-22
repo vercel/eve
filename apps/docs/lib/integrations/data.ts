@@ -602,6 +602,49 @@ export default channel;
 See the [Velt adapter documentation](https://chat-sdk.dev/adapters/vendor-official/velt) for supported events, capabilities, and credentials.`,
     configure: `Create a Velt bot user and webhook, set \`VELT_API_KEY\` and \`VELT_WEBHOOK_SECRET\`, then send comment events to \`/eve/v1/velt\`. The adapter maps documents to channels, annotations to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
+  "chat-sdk-sendblue": {
+    logo: "sendblue",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: ["chat sdk", "sendblue", "imessage", "sms", "rcs", "tapbacks", "phone"],
+    install: `Install eve, Chat SDK, the Sendblue adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat chat-adapter-sendblue @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Sendblue.`,
+    quickStart: `Create \`agent/channels/sendblue.ts\`:
+
+\`\`\`ts
+// agent/channels/sendblue.ts
+import { createSendblueAdapter } from "chat-adapter-sendblue";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    sendblue: createSendblueAdapter(),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [Sendblue adapter documentation](https://chat-sdk.dev/adapters/vendor-official/sendblue) for supported events, capabilities, and credentials.`,
+    configure: `Set \`SENDBLUE_API_KEY\`, \`SENDBLUE_API_SECRET\`, and \`SENDBLUE_FROM_NUMBER\`, then point Sendblue webhooks at \`/eve/v1/sendblue\`. The adapter also supports tapbacks, typing indicators, delivery callbacks, and number lookup. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
