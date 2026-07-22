@@ -34,6 +34,10 @@ import type { MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
  */
 export interface TestAppDescriptor {
   readonly agent?: {
+    readonly limits?: {
+      readonly maxInputTokensPerSession?: number | false;
+      readonly maxOutputTokensPerSession?: number | false;
+    };
     readonly model?: string;
     readonly name?: string;
     readonly outputSchema?: JsonObject;
@@ -132,6 +136,10 @@ export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRunti
   const compileInput: {
     name: string;
     model: string;
+    limits?: {
+      readonly maxInputTokensPerSession?: number | false;
+      readonly maxOutputTokensPerSession?: number | false;
+    };
     outputSchema?: JsonObject;
     tools?: readonly {
       readonly name: string;
@@ -146,6 +154,7 @@ export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRunti
   } = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
+    limits: descriptor.agent?.limits,
     outputSchema: descriptor.agent?.outputSchema,
   };
 
