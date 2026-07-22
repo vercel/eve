@@ -52,11 +52,15 @@ export const Gallery = ({ integrations }: GalleryProps) => {
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-3 min-[1024px]:flex-row min-[1024px]:items-center min-[1024px]:justify-between">
-        <div className="grid w-full grid-cols-2 gap-0.5 rounded-md border bg-background-100 p-1 sm:grid-cols-4 min-[1024px]:w-fit">
+        <div
+          aria-label="Integration type"
+          className="flex w-full gap-0.5 overflow-x-auto rounded-md border bg-background-100 p-1 [scrollbar-width:none] min-[1024px]:w-fit [&::-webkit-scrollbar]:hidden"
+          role="group"
+        >
           {FILTERS.map(({ value, label }) => (
             <button
               className={cn(
-                "rounded px-3 py-1 font-medium text-sm transition-colors",
+                "shrink-0 whitespace-nowrap rounded px-3 py-1 font-medium text-sm transition-colors",
                 filter === value
                   ? "bg-gray-100 text-gray-1000"
                   : "text-gray-900 hover:bg-gray-100/40 hover:text-gray-1000",
