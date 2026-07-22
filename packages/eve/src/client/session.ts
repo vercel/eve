@@ -145,8 +145,9 @@ export class ClientSession {
    * Opens this session's event stream for the current session ID.
    *
    * Resumes from the session's stored stream cursor unless `options.startIndex`
-   * overrides it. The stream reconnects from its cursor when the connection
-   * ends. Negative indices read relative to the current tail on one connection
+   * overrides it. By default, the stream reconnects from its cursor when the
+   * connection ends; pass `streamReconnectPolicy: { reconnect: false }` to use
+   * one connection. Negative indices read relative to the current tail on one connection
    * and do not advance the stored absolute cursor.
    *
    * @throws {Error} If the session has no session ID (no message has been sent
@@ -230,6 +231,7 @@ export class ClientSession {
         host: this.#context.host,
         resolveHeaders: () => this.#context.resolveHeaders(input.headers),
         redirect: this.#context.redirect,
+        streamReconnectPolicy: input.streamReconnectPolicy,
         sessionId,
         signal: input.signal,
         startIndex: initialState.sessionId === sessionId ? initialState.streamIndex : 0,
@@ -265,6 +267,7 @@ export class ClientSession {
         host: this.#context.host,
         resolveHeaders: () => this.#context.resolveHeaders(),
         redirect: this.#context.redirect,
+        streamReconnectPolicy: options?.streamReconnectPolicy,
         sessionId,
         signal: options?.signal,
         startIndex: streamIndex,

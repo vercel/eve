@@ -49,10 +49,13 @@ export type {
   HeadersValue,
   HealthResult,
   MessageResult,
+  ResolvedStreamReconnectPolicy,
   SendTurnInput,
   SendTurnPayload,
   SessionState,
   StreamOptions,
+  StreamReconnectPolicy,
+  StreamReconnectRetryPolicy,
   TokenValue,
 } from "#client/types.js";
 

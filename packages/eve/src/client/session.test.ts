@@ -418,6 +418,86 @@ describe("ClientSession", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("does not reconnect a manually opened stream when disabled", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(createStreamResponse([{ type: "turn.started", data: {} }]));
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    const eventTypes: string[] = [];
+    for await (const event of session.stream({ streamReconnectPolicy: { reconnect: false } })) {
+      eventTypes.push(event.type);
+    }
+
+    expect(eventTypes).toEqual(["turn.started"]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(session.state.streamIndex).toBe(1);
+  });
+
+  it("does not reconnect a sent turn's response stream when disabled", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      return createStreamResponse([{ type: "turn.started", data: {} }]);
+    });
+    const session = createSession();
+
+    const eventTypes: string[] = [];
+    for await (const event of await session.send({
+      message: "first",
+      streamReconnectPolicy: { reconnect: false },
+    })) {
+      eventTypes.push(event.type);
+    }
+
+    expect(eventTypes).toEqual(["turn.started"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(session.state.streamIndex).toBe(1);
+  });
+
+  it("does not retry a failed stream open when reconnection is disabled", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError("fetch failed"));
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    await expect(async () => {
+      for await (const _event of session.stream({ streamReconnectPolicy: { reconnect: false } })) {
+        // The stream fails before producing an event.
+      }
+    }).rejects.toThrow("fetch failed");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("uses a configured stream-open reconnect policy", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError("fetch failed"));
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    vi.useFakeTimers();
+    try {
+      const consumed = (async () => {
+        for await (const _event of session.stream({
+          streamReconnectPolicy: {
+            streamOpenReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
+          },
+        })) {
+          // The stream fails before producing an event.
+        }
+      })();
+      const assertion = expect(consumed).rejects.toThrow("fetch failed");
+      await vi.advanceTimersByTimeAsync(10);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("retries a transient fetch failure while reopening an active turn stream", async () => {
     const encoder = new TextEncoder();
     const streamUrls: string[] = [];
