@@ -391,9 +391,9 @@ export const kapsoLogo = (props: LogoProps) => (
 );
 
 export const photonLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+  <svg fill="none" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
-      d="M6 3h7.2C17.4 3 20 5.4 20 9.1s-2.6 6.2-6.8 6.2H9V21H6V3Zm3 2.8v6.7h4c2.5 0 4-1.2 4-3.4 0-2.1-1.5-3.3-4-3.3H9Z"
+      d="m34 13-4 16h9l4-16h-9Zm-17 13-4 16h9l4-16h-9Zm16 10-4 16h9l4-16h-9Z"
       fill="currentColor"
     />
   </svg>
