@@ -348,6 +348,12 @@ export const sendblueLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const novuLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M4 20V4h3.2L17 15.3V4h3v16h-3.1L7 8.6V20H4Z" fill="currentColor" />
+  </svg>
+);
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -487,6 +493,7 @@ export const logos = {
   zernio: zernioLogo,
   velt: veltLogo,
   sendblue: sendblueLogo,
+  novu: novuLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
