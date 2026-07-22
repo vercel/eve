@@ -755,29 +755,35 @@ async function handleEventPost(input: {
 
   if (envelope === null) return new Response("ok");
 
+  // Handler precedence, in fall-through order:
+  // 1) an authored mention/DM handler for its own event kind,
+  // 2) an authored generic `onEvent` fallback,
+  // 3) the built-in mention/DM defaults.
   let dispatch: (() => Promise<void>) | null = null;
+  let builtinDefault: (() => Promise<void>) | null = null;
   if (payload.kind === "app_mention" || payload.kind === "direct_message") {
     const kind = payload.kind;
     const message = slackMessageFromWebhookPayload(payload);
-    const authored = kind === "app_mention" ? config.onAppMention : config.onDirectMessage;
-    const handler =
-      authored ??
-      (config.onEvent === undefined
-        ? kind === "app_mention"
-          ? defaultOnAppMention
-          : defaultOnDirectMessage
-        : undefined);
-    if (message !== null && handler !== undefined) {
-      dispatch = () =>
-        dispatchInboundMessage({
-          credentials: config.credentials,
-          handler,
-          kind,
-          message,
-          send: input.send,
-          threadContext: config.threadContext,
-          uploadPolicy: input.uploadPolicy,
-        });
+    if (message !== null) {
+      const dispatchMessageWith =
+        (handler: NonNullable<SlackChannelConfig["onAppMention"]>) => () =>
+          dispatchInboundMessage({
+            credentials: config.credentials,
+            handler,
+            kind,
+            message,
+            send: input.send,
+            threadContext: config.threadContext,
+            uploadPolicy: input.uploadPolicy,
+          });
+      const authored = kind === "app_mention" ? config.onAppMention : config.onDirectMessage;
+      if (authored !== undefined) {
+        dispatch = dispatchMessageWith(authored);
+      } else {
+        builtinDefault = dispatchMessageWith(
+          kind === "app_mention" ? defaultOnAppMention : defaultOnDirectMessage,
+        );
+      }
     }
   }
 
@@ -794,6 +800,8 @@ async function handleEventPost(input: {
         send: input.send,
       });
   }
+
+  dispatch ??= builtinDefault;
   if (dispatch === null) return new Response("ok");
 
   const eventId = envelope.event_id;
