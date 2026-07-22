@@ -697,6 +697,62 @@ export default channel;
 See the [Novu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/novu) for supported events, capabilities, and credentials.`,
     configure: `Run \`npx novu connect --runtime chat-sdk\` to authenticate Novu, choose a channel, and create the required environment variables. Novu manages provider credentials, identity, delivery, and conversation history across its supported channels. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
+  "chat-sdk-liveblocks": {
+    logo: "liveblocks",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: [
+      "chat sdk",
+      "liveblocks",
+      "comments",
+      "collaboration",
+      "threads",
+      "mentions",
+      "reactions",
+    ],
+    install: `Install eve, Chat SDK, the Liveblocks adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @liveblocks/chat-sdk-adapter @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Liveblocks.`,
+    quickStart: `Create \`agent/channels/liveblocks.ts\`:
+
+\`\`\`ts
+// agent/channels/liveblocks.ts
+import { createLiveblocksAdapter } from "@liveblocks/chat-sdk-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    liveblocks: createLiveblocksAdapter({
+      apiKey: process.env.LIVEBLOCKS_SECRET_KEY!,
+      webhookSecret: process.env.LIVEBLOCKS_WEBHOOK_SECRET!,
+      botUserId: "my-agent",
+      botUserName: "My Agent",
+    }),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) for supported events, capabilities, and credentials.`,
+    configure: `Create a Liveblocks webhook, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send comment events to \`/eve/v1/liveblocks\`. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {

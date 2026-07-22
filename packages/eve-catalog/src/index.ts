@@ -200,6 +200,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-liveblocks",
+    name: "Liveblocks",
+    kind: "channel",
+    tagline: "Bring your agent into Liveblocks comment threads, mentions, and reactions.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",

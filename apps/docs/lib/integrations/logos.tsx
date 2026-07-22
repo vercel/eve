@@ -357,6 +357,12 @@ export const novuLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const liveblocksLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M14.5 5H3l3 3.8v4.5L14.5 5ZM9 19h12l-3-3.2v-5L9 19Z" fill="currentColor" />
+  </svg>
+);
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -497,6 +503,7 @@ export const logos = {
   velt: veltLogo,
   sendblue: sendblueLogo,
   novu: novuLogo,
+  liveblocks: liveblocksLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
