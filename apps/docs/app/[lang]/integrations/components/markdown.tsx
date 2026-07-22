@@ -42,6 +42,12 @@ export const Markdown = ({ children }: MarkdownProps) => {
       className="text-gray-900 [&_a]:font-medium [&_a]:text-gray-1000 [&_a]:underline [&_a]:underline-offset-4 [&_code]:text-gray-1000 [&_li]:my-1 [&_p]:my-3 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5"
       components={components}
       mode="static"
+      // Streamdown's link-safety modal is on by default, built for
+      // AI-generated content: with no onLinkCheck it interposes an
+      // "Open external link?" dialog on EVERY link, including internal
+      // /docs/* paths. This markdown is static, repo-authored copy, so
+      // links are trusted and navigate like the rest of the docs site.
+      linkSafety={{ enabled: false }}
       plugins={{ code: codePlugin }}
       shikiTheme={[geistShikiTheme, geistShikiTheme]}
     >
