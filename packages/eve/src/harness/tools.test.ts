@@ -771,6 +771,11 @@ describe("buildToolSet", () => {
       "Expected content file part to include base64 string data.",
     ],
     [
+      "empty file data",
+      [{ ...contentFilePart, data: { type: "data", data: "" } }],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
       "a non-base64 string",
       [{ ...contentFilePart, data: { type: "data", data: "not base64 data" } }],
       "Expected content file part to include base64 string data.",

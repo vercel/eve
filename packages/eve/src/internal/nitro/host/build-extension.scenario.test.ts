@@ -225,8 +225,8 @@ describe("extension build output", () => {
     expect(manifest.builtWithEve).toMatch(/^\d+\.\d+\.\d+/);
     expect(manifest.requires).toEqual({
       extension: 1,
-      tool: 2,
-      dynamicTool: 3,
+      tool: 3,
+      dynamicTool: 4,
       skill: 1,
       config: 1,
       state: 2,

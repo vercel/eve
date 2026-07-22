@@ -85,12 +85,43 @@ describe("estimateTokens", () => {
     expect(estimateTokens(large)).toBeGreaterThan(estimateTokens(small));
   });
 
+  it("counts inline file data at a fixed cost", () => {
+    const messagesWithFileData = (data: string): ModelMessage[] => [
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                { text: "Inspect the screenshot.", type: "text" },
+                {
+                  data: { data, type: "data" },
+                  filename: "screenshot.png",
+                  mediaType: "image/png",
+                  type: "file",
+                },
+              ],
+            },
+            toolCallId: "call-1",
+            toolName: "screenshot",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+
+    const small = messagesWithFileData("iVBORw0KGgo=");
+    const large = messagesWithFileData("A".repeat(600 * 1_024));
+
+    expect(estimateTokens(large)).toBe(estimateTokens(small));
+  });
+
   it("counts all content parts including reasoning", () => {
-    // The simplified estimator uses JSON.stringify(messages).length / 4 with
-    // no type-specific skipping. Reasoning contributes to the estimate like
-    // any other payload — this is intentional: the true token count comes
-    // back from the model each step via `lastKnownInputTokens`, so the
-    // heuristic only needs to roughly track size.
+    // Reasoning contributes to the estimate like every non-file-data payload.
+    // This is intentional: the true token count comes back from the model each
+    // step via `lastKnownInputTokens`, so the heuristic only needs to roughly
+    // track size.
     const base: ModelMessage[] = [
       {
         content: [

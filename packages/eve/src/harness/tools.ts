@@ -304,7 +304,7 @@ function normalizeToolModelContentPart(part: unknown): ToolModelContentPart {
 }
 
 function isBase64Data(value: unknown): value is string {
-  if (typeof value !== "string") return false;
+  if (typeof value !== "string" || value.length === 0) return false;
 
   const match = /^([A-Za-z0-9+/]*)(={0,2})$/.exec(value);
   if (match === null) return false;
