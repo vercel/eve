@@ -111,7 +111,10 @@ import {
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
-import { convertStaleResponsesToUserMessage } from "#harness/stale-input-responses.js";
+import {
+  convertStaleResponsesToUserMessage,
+  dropStaleSessionLimitContinuationResponses,
+} from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { normalizeUserContent, resolveAssistantStepText } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
@@ -538,10 +541,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = resolvedRuntimeActions.session;
 
+    // Stale-response handling is two passes: drop what must never reach the
+    // model (session-limit continuation answers), then convert what should
+    // reach it as plain text.
+    const pendingRequestIds = getPendingInputRequestIds(session.state);
     const staleConversion = convertStaleResponsesToUserMessage({
       history: resolvedRuntimeActions.messages,
-      pendingRequestIds: getPendingInputRequestIds(session.state),
-      stepInput: stepInput.input,
+      pendingRequestIds,
+      stepInput: dropStaleSessionLimitContinuationResponses({
+        pendingRequestIds,
+        stepInput: stepInput.input,
+      }),
     });
     const effectiveStepInput = staleConversion.stepInput;
     const preambleStepInput =

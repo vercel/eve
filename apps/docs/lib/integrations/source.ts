@@ -1,6 +1,6 @@
 import { createSource, type FumadocsCollection } from "@vercel/geistdocs/source";
 import { config } from "@/lib/geistdocs/config";
-import { integrationSearchText } from "./discovery";
+import { integrationMarkdown, integrationSearchText, integrationsIndexMarkdown } from "./discovery";
 import { integrations } from "./data";
 
 const structuredData = (content: string) => ({
@@ -28,10 +28,12 @@ const integrationFiles = [
       excludeFrom: ["search" as const],
       type: "directory",
       structuredData: structuredData("Integrations for eve."),
-      getText: async () => "Integrations for eve.",
+      getText: async () => integrationsIndexMarkdown(),
     },
   },
   ...integrations.map((integration) => {
+    const markdown = integrationMarkdown(integration);
+
     return {
       type: "page" as const,
       path: `${integration.slug}.md`,
@@ -42,7 +44,7 @@ const integrationFiles = [
         type: integration.type,
         keywords: integration.keywords,
         structuredData: structuredData(integrationSearchText(integration)),
-        getText: async () => integration.tagline,
+        getText: async () => markdown,
       },
     };
   }),

@@ -4,8 +4,55 @@ import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js"
 import {
   parseAppMentionEvent,
   parseDirectMessageEvent,
+  parseSlackEventEnvelope,
   slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
+
+describe("parseSlackEventEnvelope", () => {
+  it("preserves an arbitrary Events API payload and its delivery envelope", () => {
+    const envelope = parseSlackEventEnvelope(
+      JSON.stringify({
+        api_app_id: "A01",
+        event: {
+          item: { channel: "C01", ts: "1700000000.000100", type: "message" },
+          reaction: "eyes",
+          type: "reaction_added",
+          user: "U01",
+        },
+        event_id: "Ev01",
+        event_time: 1_700_000_000,
+        team_id: "T01",
+        type: "event_callback",
+      }),
+    );
+
+    expect(envelope).toMatchObject({
+      api_app_id: "A01",
+      event: {
+        item: { channel: "C01", ts: "1700000000.000100", type: "message" },
+        reaction: "eyes",
+        type: "reaction_added",
+        user: "U01",
+      },
+      event_id: "Ev01",
+      event_time: 1_700_000_000,
+      team_id: "T01",
+    });
+  });
+
+  it("returns null for non-event callbacks and missing event types", () => {
+    expect(
+      parseSlackEventEnvelope(JSON.stringify({ challenge: "abc", type: "url_verification" })),
+    ).toBeNull();
+    expect(
+      parseSlackEventEnvelope(JSON.stringify({ event: { user: "U01" }, type: "event_callback" })),
+    ).toBeNull();
+  });
+
+  it("throws for invalid JSON", () => {
+    expect(() => parseSlackEventEnvelope("not-json")).toThrow();
+  });
+});
 
 describe("parseAppMentionEvent", () => {
   it("returns a SlackMessage with mrkdwn re-rendered as GFM", () => {

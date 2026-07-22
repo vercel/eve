@@ -20,6 +20,7 @@ import type {
 } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import { isObject } from "#shared/guards.js";
 
 /**
  * Author metadata for an inbound Slack message. Channel-owned shape;
@@ -76,6 +77,16 @@ export interface SlackMessage {
 }
 
 /**
+ * Open-ended Slack Events API payload handed to `slackChannel({ onEvent })`.
+ * `type` is the Slack event discriminator; all event-specific fields pass
+ * through unchanged from the signed webhook body.
+ */
+export interface SlackEvent {
+  readonly type: string;
+  readonly [key: string]: unknown;
+}
+
+/**
  * Slack `app_mention` event envelope (subset of fields the channel
  * actually reads).
  */
@@ -124,6 +135,30 @@ export interface SlackEventCallback {
   readonly event_id?: string;
   readonly event_time?: number;
   readonly [key: string]: unknown;
+}
+
+/**
+ * Validated Slack Events API callback envelope handed to `onEvent` through
+ * {@link SlackInboundEventContext}. Unlike the permissive parser input type,
+ * this shape always carries an event with a non-empty `type` discriminator.
+ */
+export interface SlackEventEnvelope extends SlackEventCallback {
+  readonly event: SlackEvent;
+}
+
+/**
+ * Parses a raw JSON webhook body into an open-ended Slack Events API envelope.
+ * Returns `null` for URL verification, interactivity, and malformed callback
+ * payloads. Invalid JSON is allowed to throw so the route can log it once.
+ */
+export function parseSlackEventEnvelope(body: string): SlackEventEnvelope | null {
+  const envelope = JSON.parse(body) as unknown;
+  if (!isObject(envelope) || envelope.type !== "event_callback") return null;
+
+  const event = envelope.event;
+  if (!isObject(event) || typeof event.type !== "string" || event.type.length === 0) return null;
+
+  return envelope as SlackEventEnvelope;
 }
 
 /**

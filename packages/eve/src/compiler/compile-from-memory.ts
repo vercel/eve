@@ -28,6 +28,11 @@ export interface CompileFromMemoryInput {
   readonly agentRoot?: string;
   /** Model id assigned to the synthetic agent config. */
   readonly model: string;
+  /** Session token limits assigned to the synthetic agent config. */
+  readonly limits?: {
+    readonly maxInputTokensPerSession?: number | false;
+    readonly maxOutputTokensPerSession?: number | false;
+  };
   readonly outputSchema?: JsonObject;
   /**
    * Authored tools to project into the compiled manifest and module map.
@@ -95,6 +100,9 @@ export function compileFromMemory(input: CompileFromMemoryInput): CompileFromMem
     model: { id: input.model, routing: classifyModelRouting(input.model) },
     name: agentName,
   };
+  if (input.limits !== undefined) {
+    config.limits = input.limits;
+  }
   if (input.outputSchema !== undefined) {
     config.outputSchema = input.outputSchema;
   }

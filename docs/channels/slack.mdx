@@ -44,17 +44,52 @@ VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1 vercel deploy --prod
 
 `VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1` lets the Vercel CLI recognize eve as a framework during the build. eve's own setup commands set the same flag.
 
-## How the channel handles messages
+## How the channel handles inbound events
 
 ### Dispatch
 
-Inbound hooks decide whether to dispatch a turn and with what `auth`. Return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
+The message hooks decide whether to dispatch a turn and with what `auth`. Return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
 
 - `onAppMention(ctx, message)` handles `app_mention` events. The default derives workspace-scoped auth and posts a `Thinking…` indicator.
 - `onDirectMessage(ctx, message)` handles `message.im` events (needs `im:history` scope). Bot-authored messages and edits are filtered out first.
-- `onInteraction(action, ctx)` handles `block_actions` callbacks not consumed by HITL.
+
+`onInteraction(action, ctx)` separately handles `block_actions` callbacks not consumed by HITL.
 
 eve attaches the triggering Slack user id to the same model message as the message text. This keeps speaker attribution intact when several people use one thread without making profile lookup requests.
+
+### Other Events API callbacks
+
+Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. `ctx.receive(options)` is the current Slack channel's pre-bound form of the schedule API's `receive(slack, options)`: call it zero, one, or many times to start turns. Each call accepts `message`, `target`, and `auth`, and returns the resulting session.
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+const onboardingChannels = ["C0123ABC", "C0456DEF"];
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  async onEvent({ receive }, event) {
+    if (event.type !== "team_join") return;
+
+    await Promise.all(
+      onboardingChannels.map((channelId) =>
+        receive({
+          message: `A user joined the Slack workspace. Onboard them from this event:\n${JSON.stringify(event)}`,
+          target: { channelId },
+          auth: null,
+        }),
+      ),
+    );
+  },
+});
+```
+
+The webhook invocation already keeps an awaited `onEvent` handler alive. Use `ctx.waitUntil(promise)` for deliberately detached work, matching a handler-form schedule. `ctx.slack.request(operation, body)` provides workspace-scoped Slack Web API access, while `ctx.envelope` carries delivery metadata such as `team_id`, `event_id`, and `event_time`. Calls to `ctx.receive` automatically seed the callback's team id into Slack session state.
+
+Authored specific handlers take precedence. If both `onAppMention` and `onEvent` are present, an `app_mention` runs only `onAppMention`; the same rule applies to `onDirectMessage`. When `onEvent` is present without the matching specific handler, it receives that event instead of the built-in mention or DM default. Bot-authored and subtype DMs rejected by `onDirectMessage` can still reach `onEvent`. When `onEvent` is omitted, the existing mention and DM defaults remain unchanged and other events are acknowledged and ignored.
+
+`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration; eve can only handle events Slack sends.
 
 You get the triggering mention by default, but not the earlier replies in the thread. Enable `threadContext` to fetch and inject them with every message attributed by stable Slack user id. Use `since: "last-agent-reply"` so repeated mentions inject only what is new:
 
@@ -78,7 +113,7 @@ export default slackChannel({
 
 ### Slack API calls outside a handler
 
-Inside webhook-side handlers (`onAppMention`, `onInteraction`, `events`),
+Inside webhook-side handlers (`onAppMention`, `onEvent`, `onInteraction`, `events`),
 `ctx.slack.request(operation, body)` is the raw-API escape hatch. Outside
 those contexts there is no handle — a schedule resolving reactions on old
 messages, for example, has no inbound Slack request. For that, call the
@@ -105,7 +140,7 @@ when you need the bearer token itself.
 
 ### Delivery
 
-The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, a truncated reasoning snippet on `reasoning.appended`, and an action label on `actions.requested` — the tool name plus its most telling argument (`grep useEveAgent`, `read_file agent/agent.ts`), the subagent or remote-agent name for dispatched calls, and `+N more` when the model requests several actions at once. The model's own pre-tool narration, when present, takes precedence over the derived label. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use the five-second refresh interval to avoid one Slack request per token. Override `events["reasoning.appended"]` if you prefer generic wording. Override `onAppMention` or the `events` handlers to customize.
+The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, a truncated reasoning snippet on `reasoning.appended`, and an action label on `actions.requested` — the tool name plus its most telling argument (`grep useEveAgent`, `read_file agent/agent.ts`), the subagent or remote-agent name for dispatched calls, and `+N more` when the model requests several actions at once. The model's own pre-tool narration, when present, takes precedence over the derived label. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use the five-second refresh interval to avoid one Slack request per token. Override `events["reasoning.appended"]` if you prefer generic wording. Override an inbound handler or the `events` handlers to customize.
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 

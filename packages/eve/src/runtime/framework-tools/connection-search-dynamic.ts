@@ -32,6 +32,7 @@ import {
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { DynamicToolEvents, DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
+import { toError } from "#shared/errors.js";
 import type { ModelMessage } from "ai";
 
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
@@ -191,6 +192,12 @@ async function executeConnectionSearch(
       ? registry.getConnections().filter((c) => c.connectionName === input.connection)
       : registry.getConnections();
 
+  if (input.connection && targetConnections.length === 0) {
+    throw new Error(
+      `Connection "${input.connection}" is not registered. Available connections: ${registry.getConnectionNames().join(", ")}.`,
+    );
+  }
+
   const authChallenges: AuthorizationChallenge[] = [];
 
   for (const conn of targetConnections) {
@@ -238,10 +245,17 @@ async function executeConnectionSearch(
                 resume,
               });
             } catch (startErr) {
+              const error = toError(startErr);
               logger.warn("startAuthorization failed", {
                 connection: conn.connectionName,
-                error: startErr instanceof Error ? startErr : new Error(String(startErr)),
+                error,
               });
+              failedConnections.push({
+                connection: conn.connectionName,
+                description: conn.description,
+                error: `Failed to start authorization for "${conn.connectionName}": ${error.message}`,
+              });
+              continue;
             }
           }
         }
@@ -268,15 +282,15 @@ async function executeConnectionSearch(
         continue;
       }
 
-      const message = err instanceof Error ? err.message : "unknown error";
+      const error = toError(err);
       logger.warn("failed to load connection tools", {
         connection: conn.connectionName,
-        error: err instanceof Error ? err : new Error(message),
+        error,
       });
       failedConnections.push({
         connection: conn.connectionName,
         description: conn.description,
-        error: `Failed to load tools for "${conn.connectionName}": ${message}`,
+        error: `Failed to load tools for "${conn.connectionName}": ${error.message}`,
       });
       continue;
     }
@@ -301,6 +315,14 @@ async function executeConnectionSearch(
 
   if (authChallenges.length > 0) {
     return requestAuthorization(authChallenges);
+  }
+
+  const terminalFailures = failedConnections.filter((failure) => failure.error !== undefined);
+  if (targetConnections.length > 0 && terminalFailures.length === targetConnections.length) {
+    // When every targeted connection reaches a terminal error, connection_search itself fails.
+    // AI SDK catches this rejection, emits a tool-error result, and preserves the failed call in
+    // agent-run observability. Partial failures stay in the successful result so usable tools remain discoverable.
+    throw new Error(terminalFailures.map((failure) => failure.error).join("\n"));
   }
 
   results.sort((a, b) => b.score - a.score);
