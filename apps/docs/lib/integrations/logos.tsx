@@ -317,8 +317,12 @@ export const ticketTailorLogo = (props: LogoProps) => (
 );
 
 export const zernioLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
-    <path d="M4 4h16v2.6L8.5 17H20v3H4v-2.7L15.5 7H4V4Z" fill="currentColor" />
+  <svg fill="none" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect width="1000" height="1000" fill="#eb3514" rx="161.29" />
+    <path
+      fill="#fff"
+      d="M253.803 294.019V478.63l287.132-75.382c35.782-9.394 68.263 23.575 58.337 59.212l-80.068 287.458h183.083l37.941-186.23a47.92 47.92 0 0 0-12.635-43.011L483.105 269.754a47.92 47.92 0 0 0-43.893-13.514z"
+    />
   </svg>
 );
 
