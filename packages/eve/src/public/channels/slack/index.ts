@@ -25,6 +25,7 @@ export {
   type SlackInstrumentationMetadata,
   type SlackInitialMessage,
   type SlackInteractionAction,
+  type SlackViewSubmission,
   type SlackMentionResult,
   type SlackMentionResultOrPromise,
   type SlackReceiveTarget,

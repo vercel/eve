@@ -281,6 +281,37 @@ export interface SlackInteractionAction {
    * `block_actions` payload.
    */
   readonly user: SlackInteractionUser;
+  /**
+   * Slack `trigger_id` off the interaction payload, required to open a
+   * modal via `views.open`. Slack invalidates it roughly three seconds
+   * after the click, so a handler that opens a modal must call
+   * `views.open` inline, not behind queued work.
+   */
+  readonly triggerId?: string;
+}
+
+/**
+ * A Slack modal (`view_submission`) payload not consumed by the
+ * framework's HITL pipeline, forwarded to `onViewSubmission`. Slack
+ * carries no channel or thread on view submissions — a channel that
+ * needs routing context should stash it in `private_metadata` when it
+ * opens the modal and read it back here.
+ */
+export interface SlackViewSubmission {
+  /** The `callback_id` the modal was opened with. */
+  readonly callbackId: string;
+  /** Verbatim `private_metadata` from the modal view, when set. */
+  readonly privateMetadata?: string;
+  /** Flattened `view.state.values`: one entry per input block. */
+  readonly values: readonly {
+    readonly blockId: string;
+    readonly actionId: string;
+    readonly value?: string;
+    readonly selectedOptionValue?: string;
+  }[];
+  /** Slack actor who submitted the modal. */
+  readonly user: SlackInteractionUser;
+  readonly teamId?: string;
 }
 
 /** Slack actor on {@link SlackInteractionAction.user}, mirroring `body.user`. */
@@ -439,6 +470,18 @@ export interface SlackChannelConfig {
    * Slack Web API calls and `action.messageTs` to target `chat.update`.
    */
   onInteraction?(action: SlackInteractionAction, ctx: SlackContext): void | Promise<void>;
+
+  /**
+   * Handler for Slack `view_submission` payloads (modal submits) whose
+   * `callback_id` is **not** the framework's HITL freeform modal. Pair
+   * with {@link SlackInteractionAction.triggerId}: `onInteraction`
+   * opens a modal with `views.open`, stashing any routing context in
+   * `private_metadata`, and the submit arrives here. Runs via
+   * `waitUntil()` after the empty-200 ack that closes the modal, so
+   * submissions cannot be rejected with validation errors. Errors are
+   * caught and logged.
+   */
+  onViewSubmission?(view: SlackViewSubmission): void | Promise<void>;
 
   readonly events?: SlackChannelEvents;
 }

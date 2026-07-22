@@ -52,6 +52,7 @@ import type {
   SlackContext,
   SlackInteractionAction,
   SlackInteractionUser,
+  SlackViewSubmission,
 } from "#public/channels/slack/slackChannel.js";
 import type { SendFn } from "#public/definitions/channel.js";
 
@@ -116,6 +117,7 @@ export function parseBlockActionsPayload(
   };
 
   const messageBlocks = message?.blocks ?? [];
+  const triggerId = typeof rawBody.trigger_id === "string" ? rawBody.trigger_id : undefined;
 
   return {
     actions: actions.map((a: Record<string, unknown>) => ({
@@ -126,6 +128,7 @@ export function parseBlockActionsPayload(
       messageTs: message?.ts,
       label: extractActionLabel(a),
       user,
+      triggerId,
     })),
     channelId: channel,
     threadTs,
@@ -158,6 +161,7 @@ function parseSharedBlockActionsPayload(
         username: action.user?.username,
         name: action.user?.name,
       },
+      triggerId: body.triggerId,
     })),
     channelId: body.channelId,
     threadTs: body.threadTs,
@@ -490,17 +494,61 @@ async function openFreeformModal(input: {
   }
 }
 
+/**
+ * Non-HITL modal submits flow to the user-supplied `onViewSubmission`
+ * hook (dropped, with a debug log, when the channel does not define
+ * one). Runs under `waitUntil` after the ack — the modal is already
+ * closing; errors are caught and logged.
+ */
+function forwardViewSubmission(
+  payload: SlackViewSubmissionPayload,
+  ctx: { waitUntil: (task: Promise<unknown>) => void },
+  deps: InteractionHandlerDeps,
+): void {
+  const onViewSubmission = deps.config.onViewSubmission;
+  if (!onViewSubmission) {
+    log.debug("view_submission with a foreign callback_id and no onViewSubmission handler", {
+      callbackId: payload.callbackId,
+    });
+    return;
+  }
+  const view: SlackViewSubmission = {
+    callbackId: payload.callbackId ?? "",
+    privateMetadata: payload.privateMetadata,
+    values: (payload.values ?? []).map((value) => ({
+      blockId: value.blockId,
+      actionId: value.actionId,
+      value: value.value,
+      selectedOptionValue: value.selectedOptionValue,
+    })),
+    user: {
+      id: payload.userId,
+      username: payload.user?.username,
+      name: payload.user?.name,
+    },
+    teamId: payload.user?.teamId ?? payload.teamId,
+  };
+  ctx.waitUntil(
+    Promise.resolve(onViewSubmission(view)).catch((error: unknown) => {
+      log.error("custom view_submission handler failed", { error });
+    }),
+  );
+}
+
 async function handleViewSubmission(
   payload: SlackViewSubmissionPayload,
   ctx: {
     send: SendFn<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
-  _deps: InteractionHandlerDeps,
+  deps: InteractionHandlerDeps,
 ): Promise<Response> {
   // Slack view submissions require an empty 200 body to close the modal.
   const ack = new Response(null, { status: 200 });
-  if (payload.callbackId !== HITL_FREEFORM_MODAL_CALLBACK_ID) return ack;
+  if (payload.callbackId !== HITL_FREEFORM_MODAL_CALLBACK_ID) {
+    forwardViewSubmission(payload, ctx, deps);
+    return ack;
+  }
 
   let metadata: HitlFreeformModalMetadata;
   try {
@@ -565,7 +613,7 @@ async function handleViewSubmission(
       messageTs: metadata.messageTs,
       answerLabel: text,
       userId: triggeringUserId ?? undefined,
-      deps: _deps,
+      deps,
     }).catch((error: unknown) => {
       log.error("freeform answered-card update failed", { error });
     }),
