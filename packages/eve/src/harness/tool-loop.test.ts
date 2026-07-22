@@ -1209,7 +1209,7 @@ describe("createToolLoopHarness", () => {
           allowFreeform: false,
           display: "confirmation",
           options: [
-            { id: "continue", label: "Continue", style: "primary" },
+            { id: "continue", label: "Approve", style: "primary" },
             { id: "stop", label: "Stop", style: "danger" },
           ],
           requestId: LIMIT_REQUEST_ID,
@@ -1267,47 +1267,60 @@ describe("createToolLoopHarness", () => {
     expect(getSessionTokenLimitViolation(resumed.session)).toBeNull();
   });
 
-  it("ends the session gracefully when the user declines the limit continuation prompt", async () => {
+  it("cancels the turn when the user declines the limit continuation prompt", async () => {
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
-
-    const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
-    const declined = await runStep(parked.session, {
-      inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
-    });
-
-    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-    expect(declined.next).toEqual({ done: true, output: "" });
-    // A decline is a user decision, not an error: no failure events, no extra
-    // chat copy — the resolved prompt is the acknowledgment.
-    expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
-    expect(events.at(-2)?.type).toBe("turn.completed");
-    expect(events.at(-1)?.type).toBe("session.completed");
-  });
-
-  it("fails the task when a proxied user declines the limit continuation prompt", async () => {
-    const { emit, events } = createEventCollector();
+    const requestTurnCancellation = vi.fn().mockResolvedValue(undefined);
     const runStep = createToolLoopHarness(
-      createTestConfig("task", emit, { capabilities: { requestInput: true } }),
+      createTestConfig("conversation", emit, { requestTurnCancellation }),
     );
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
-    expect(parked.next).toBeNull();
-
-    const declined = await runStep(parked.session, {
-      inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
-    });
+    await expect(
+      runStep(parked.session, {
+        inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
+      }),
+    ).rejects.toThrow(TurnCancelledError);
 
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-    expect(declined.next).toEqual({
-      done: true,
-      isError: true,
-      output: "The session reached its configured input token limit.",
-    });
-    expect(events.find((event) => event.type === "step.failed")?.data).toMatchObject({
-      code: "SESSION_TOKEN_LIMIT_REACHED",
-      details: { kind: "input", limit: 12, usedTokens: 12 },
-    });
+    // A decline is a user decision, not an error: the thrown cancellation
+    // settles as `turn.cancelled` → `session.waiting` in the driver, so the
+    // harness emits neither failure nor completion events.
+    expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
+    expect(events.some((event) => event.type === "session.completed")).toBe(false);
+    // A root session cancels itself by throwing; there is no separate root
+    // turn to signal.
+    expect(requestTurnCancellation).not.toHaveBeenCalled();
+  });
+
+  it("cancels the root turn when a proxied user declines the limit continuation prompt", async () => {
+    const { emit, events } = createEventCollector();
+    const requestTurnCancellation = vi.fn().mockResolvedValue(undefined);
+    const runStep = createToolLoopHarness(
+      createTestConfig("task", emit, {
+        capabilities: { requestInput: true },
+        requestTurnCancellation,
+      }),
+    );
+    const session: HarnessSession = {
+      ...createLimitReachedSession(),
+      rootSessionId: "root-session",
+    };
+
+    const parked = await runStep(session, { message: "Hi again" });
+    expect(parked.next).toBeNull();
+
+    await expect(
+      runStep(parked.session, {
+        inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
+      }),
+    ).rejects.toThrow(TurnCancelledError);
+
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    // The delegating parent must never receive an error result it could
+    // retry against a fresh budget share: the decline cancels the root turn
+    // (which cascades to every descendant) instead of failing this step.
+    expect(requestTurnCancellation).toHaveBeenCalledExactlyOnceWith("root-session");
+    expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
   });
 
   it("re-raises the limit prompt when the user replies without answering it", async () => {

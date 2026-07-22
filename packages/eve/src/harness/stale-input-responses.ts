@@ -3,6 +3,7 @@ import type { ModelMessage, UserContent } from "ai";
 import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
 import { isApprovalRequest } from "#harness/input-requests.js";
 import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
+import { isSessionLimitContinuationRequestId } from "#harness/session-limit-continuation.js";
 import type { StepInput } from "#harness/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 
@@ -26,6 +27,11 @@ type StaleResponseConversion =
  * plain user-message text. A stale response never reaches structured HITL
  * processing, so a stale approval cannot authorize an earlier tool call.
  * Request details recovered from history are best-effort model context.
+ *
+ * Stale answers to session-limit continuation prompts are the exception:
+ * they are dropped entirely. Surfacing a stale "Stop" as conversational
+ * prose would read fail-open, and a stale grant must not extend any budget
+ * — a currently pending prompt (if any) stays parked and re-raises.
  */
 export function convertStaleResponsesToUserMessage(input: {
   readonly history: readonly ModelMessage[];
@@ -39,16 +45,31 @@ export function convertStaleResponsesToUserMessage(input: {
 
   const currentResponses: InputResponse[] = [];
   const staleResponses: InputResponse[] = [];
+  let droppedStaleContinuation = false;
   for (const response of responses) {
     if (input.pendingRequestIds.has(response.requestId)) {
       currentResponses.push(response);
+    } else if (isSessionLimitContinuationRequestId(response.requestId)) {
+      droppedStaleContinuation = true;
     } else {
       staleResponses.push(response);
     }
   }
 
-  if (staleResponses.length === 0) {
+  if (staleResponses.length === 0 && !droppedStaleContinuation) {
     return { kind: "unchanged", stepInput: input.stepInput };
+  }
+
+  if (staleResponses.length === 0) {
+    // Only dropped continuation answers: strip them so the leftover
+    // responses cannot resolve (and clear) a pending batch they never
+    // answered.
+    const { inputResponses: _dropped, ...remainingInput } = input.stepInput;
+    const stepInput: { -readonly [K in keyof StepInput]: StepInput[K] } = { ...remainingInput };
+    if (currentResponses.length > 0) {
+      stepInput.inputResponses = currentResponses;
+    }
+    return { kind: "unchanged", stepInput };
   }
 
   const requests = extractHistoricalInputRequests({

@@ -145,3 +145,60 @@ it("returns unchanged when every response matches the pending batch", () => {
   expect(result.kind).toBe("unchanged");
   expect(result.stepInput).toBe(stepInput);
 });
+
+it("drops a stale session-limit continuation answer instead of converting it", () => {
+  const result = convertStaleResponsesToUserMessage({
+    history: [],
+    pendingRequestIds: new Set(),
+    stepInput: {
+      inputResponses: [{ optionId: "stop", requestId: "sess-1:limit:input:12" }],
+      message: "also do this",
+    },
+  });
+
+  // Nothing model-visible: a stale "Stop" must not read as prose, and a
+  // stale grant must not extend any budget.
+  expect(result.kind).toBe("unchanged");
+  expect(result.stepInput?.inputResponses).toBeUndefined();
+  expect(result.stepInput?.message).toBe("also do this");
+});
+
+it("keeps pending responses while dropping stale continuation answers", () => {
+  const result = convertStaleResponsesToUserMessage({
+    history: questionHistory,
+    pendingRequestIds: new Set(["question-1"]),
+    stepInput: {
+      inputResponses: [
+        { optionId: "candidate", requestId: "question-1" },
+        { optionId: "continue", requestId: "sess-1:limit:input:12" },
+      ],
+    },
+  });
+
+  expect(result.kind).toBe("unchanged");
+  expect(result.stepInput?.inputResponses).toEqual([
+    { optionId: "candidate", requestId: "question-1" },
+  ]);
+});
+
+it("still converts other stale responses when a continuation answer is dropped alongside", () => {
+  const result = convertStaleResponsesToUserMessage({
+    history: questionHistory,
+    pendingRequestIds: new Set(),
+    stepInput: {
+      inputResponses: [
+        { optionId: "candidate", requestId: "question-1" },
+        { optionId: "stop", requestId: "sess-1:limit:input:12" },
+      ],
+    },
+  });
+
+  expect(result.kind).toBe("converted");
+  if (result.kind !== "converted") {
+    throw new Error("Expected the stale response to be converted.");
+  }
+
+  expect(result.stepInput.inputResponses).toBeUndefined();
+  expect(result.stepInput.message).toEqual(expect.stringContaining("question-1"));
+  expect(result.stepInput.message).not.toEqual(expect.stringContaining("limit:input"));
+});
