@@ -377,8 +377,16 @@ export const linqLogo = (props: LogoProps) => (
 );
 
 export const kapsoLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
-    <path d="M5 4h3v6.7L14.2 4H18l-7 7.5L18.5 20h-4L8 12.6V20H5V4Z" fill="currentColor" />
+  <svg fill="none" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path fill="#100e0d" d="M0 0h32v32H0z" />
+    <path
+      fill="#ededed"
+      d="M9 7h3l1 7 1.172-1.531L15.75 10.5c.51-.65 1.02-1.3 1.547-1.969C19 7 19 7 23 7c0 2 0 2-2.5 4.625L18 14c1.258 3.482 2.773 6.065 5 9v2c-2.312-.187-2.312-.187-5-1-1.687-2.563-1.687-2.563-3-5h-2l-1 6H9z"
+    />
+    <path
+      fill="#e4e4e4"
+      d="M15 14h2c1.508 1.898 1.508 1.898 3.125 4.375l1.633 2.46C23 23 23 23 23 25c-2.312-.187-2.312-.187-5-1-1.687-2.5-1.687-2.5-3-5l-2-1z"
+    />
   </svg>
 );
 
