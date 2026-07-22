@@ -19,19 +19,53 @@ type StaleResponseConversion =
     };
 
 /**
- * A response is stale when its request ID is not in the currently pending
- * HITL batch: the request was already answered, cleared by a follow-up
- * message, or cancelled.
+ * Filter pass: removes stale answers to session-limit continuation prompts
+ * from the step input before any stale handling runs.
+ *
+ * These are dropped rather than converted: surfacing a stale "Stop" as
+ * conversational prose would read fail-open, and a stale grant must not
+ * extend any budget — a currently pending prompt (if any) stays parked and
+ * re-raises. Stripping the responses also keeps them from resolving (and
+ * clearing) a pending batch they never answered. Answers to a currently
+ * pending continuation prompt pass through untouched.
+ */
+export function dropStaleSessionLimitContinuationResponses(input: {
+  readonly pendingRequestIds: ReadonlySet<string>;
+  readonly stepInput?: StepInput;
+}): StepInput | undefined {
+  const responses = input.stepInput?.inputResponses;
+  if (input.stepInput === undefined || responses === undefined || responses.length === 0) {
+    return input.stepInput;
+  }
+
+  const retained = responses.filter(
+    (response) =>
+      input.pendingRequestIds.has(response.requestId) ||
+      !isSessionLimitContinuationRequestId(response.requestId),
+  );
+  if (retained.length === responses.length) {
+    return input.stepInput;
+  }
+
+  const { inputResponses: _dropped, ...remainingInput } = input.stepInput;
+  if (retained.length === 0) {
+    return remainingInput;
+  }
+  return { ...remainingInput, inputResponses: retained };
+}
+
+/**
+ * Transformation pass: a response is stale when its request ID is not in
+ * the currently pending HITL batch — the request was already answered,
+ * cleared by a follow-up message, or cancelled.
  *
  * Responses for pending requests stay structured; stale responses become
  * plain user-message text. A stale response never reaches structured HITL
  * processing, so a stale approval cannot authorize an earlier tool call.
  * Request details recovered from history are best-effort model context.
  *
- * Stale answers to session-limit continuation prompts are the exception:
- * they are dropped entirely. Surfacing a stale "Stop" as conversational
- * prose would read fail-open, and a stale grant must not extend any budget
- * — a currently pending prompt (if any) stays parked and re-raises.
+ * Assumes {@link dropStaleSessionLimitContinuationResponses} already ran:
+ * stale continuation answers must never reach this conversion.
  */
 export function convertStaleResponsesToUserMessage(input: {
   readonly history: readonly ModelMessage[];
@@ -43,18 +77,9 @@ export function convertStaleResponsesToUserMessage(input: {
     return { kind: "unchanged", stepInput: input.stepInput };
   }
 
-  // Drop pass: stale continuation answers leave the batch before the
-  // stale/current partition ever sees them.
-  const retainedResponses = responses.filter(
-    (response) =>
-      input.pendingRequestIds.has(response.requestId) ||
-      !isSessionLimitContinuationRequestId(response.requestId),
-  );
-  const droppedStaleContinuation = retainedResponses.length < responses.length;
-
   const currentResponses: InputResponse[] = [];
   const staleResponses: InputResponse[] = [];
-  for (const response of retainedResponses) {
+  for (const response of responses) {
     if (input.pendingRequestIds.has(response.requestId)) {
       currentResponses.push(response);
     } else {
@@ -62,20 +87,8 @@ export function convertStaleResponsesToUserMessage(input: {
     }
   }
 
-  if (staleResponses.length === 0 && !droppedStaleContinuation) {
-    return { kind: "unchanged", stepInput: input.stepInput };
-  }
-
   if (staleResponses.length === 0) {
-    // Only dropped continuation answers: strip them so the leftover
-    // responses cannot resolve (and clear) a pending batch they never
-    // answered.
-    const { inputResponses: _dropped, ...remainingInput } = input.stepInput;
-    const stepInput: { -readonly [K in keyof StepInput]: StepInput[K] } = { ...remainingInput };
-    if (currentResponses.length > 0) {
-      stepInput.inputResponses = currentResponses;
-    }
-    return { kind: "unchanged", stepInput };
+    return { kind: "unchanged", stepInput: input.stepInput };
   }
 
   const requests = extractHistoricalInputRequests({
