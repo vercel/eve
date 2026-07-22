@@ -319,6 +319,9 @@ async function executeConnectionSearch(
 
   const terminalFailures = failedConnections.filter((failure) => failure.error !== undefined);
   if (targetConnections.length > 0 && terminalFailures.length === targetConnections.length) {
+    // When every targeted connection reaches a terminal error, connection_search itself fails.
+    // AI SDK catches this rejection, emits a tool-error result, and preserves the failed call in
+    // agent-run observability. Partial failures stay in the successful result so usable tools remain discoverable.
     throw new Error(terminalFailures.map((failure) => failure.error).join("\n"));
   }
 
