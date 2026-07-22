@@ -363,6 +363,12 @@ export const liveblocksLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const linqLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M6 4h3v13h9v3H6V4Z" fill="currentColor" />
+  </svg>
+);
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -504,6 +510,7 @@ export const logos = {
   sendblue: sendblueLogo,
   novu: novuLogo,
   liveblocks: liveblocksLogo,
+  linq: linqLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,

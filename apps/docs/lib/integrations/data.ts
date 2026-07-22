@@ -753,6 +753,52 @@ export default channel;
 See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) for supported events, capabilities, and credentials.`,
     configure: `Create a Liveblocks webhook, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send comment events to \`/eve/v1/liveblocks\`. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
+  "chat-sdk-linq": {
+    logo: "linq",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: ["chat sdk", "linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
+    install: `Install eve, Chat SDK, the Linq adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @linqapp/chat-sdk-adapter @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Linq.`,
+    quickStart: `Create \`agent/channels/linq.ts\`:
+
+\`\`\`ts
+// agent/channels/linq.ts
+import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    linq: createLinqAdapter({
+      apiKey: process.env.LINQ_API_KEY!,
+      signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+    }),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [Linq adapter documentation](https://chat-sdk.dev/adapters/vendor-official/linq) for supported events, capabilities, and credentials.`,
+    configure: `Create a Linq account, set \`LINQ_API_KEY\` and \`LINQ_WEBHOOK_SECRET\`, then point its signed webhook at \`/eve/v1/linq\`. Linq supports iMessage and SMS DMs and group chats, media, buffered streaming, and tapbacks. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
