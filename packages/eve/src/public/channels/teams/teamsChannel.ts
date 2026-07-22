@@ -70,8 +70,6 @@ export interface TeamsContext {
 
 /** Message-scoped context handed to `teamsChannel({ onMessage })`. */
 export interface TeamsInboundMessageContext extends TeamsContext {
-  /** Returns whether the inbound activity explicitly mentions this bot. */
-  isBotMentioned(): boolean;
   /** Returns whether this message belongs to a thread with an active eve session. */
   isSubscribed(): Promise<boolean>;
 }
@@ -580,7 +578,6 @@ async function dispatchMessage(input: {
   const continuationToken = stateToken(state);
   const ctx: TeamsInboundMessageContext = {
     ...binding,
-    isBotMentioned: () => input.activity.isBotMentioned,
     isSubscribed: async () =>
       (await input.resolveActiveSession({ continuationToken })) !== undefined,
   };

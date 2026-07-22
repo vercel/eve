@@ -126,16 +126,13 @@ describe("teamsChannel", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("exposes mention and subscription helpers to onMessage", async () => {
-    const observed: Array<{ mentioned: boolean; subscribed: boolean }> = [];
+  it("exposes the subscription helper to onMessage", async () => {
+    const observed: boolean[] = [];
     const resolveActiveSession = vi.fn().mockResolvedValue({ sessionId: "SESSION" });
     const channel = teamsChannel({
       credentials: { webhookVerifier: () => true },
       async onMessage(ctx) {
-        observed.push({
-          mentioned: ctx.isBotMentioned(),
-          subscribed: await ctx.isSubscribed(),
-        });
+        observed.push(await ctx.isSubscribed());
         return null;
       },
     });
@@ -145,7 +142,7 @@ describe("teamsChannel", () => {
 
     await firePost(channel, raw, { resolveActiveSession });
 
-    expect(observed).toEqual([{ mentioned: false, subscribed: true }]);
+    expect(observed).toEqual([true]);
     expect(resolveActiveSession).toHaveBeenCalledWith({
       continuationToken: "TENANT:CONV:THREAD_ROOT",
     });
@@ -154,8 +151,8 @@ describe("teamsChannel", () => {
   it("allows a mention-or-subscription onMessage policy", async () => {
     const channel = teamsChannel({
       credentials: { webhookVerifier: () => true },
-      async onMessage(ctx) {
-        return ctx.isBotMentioned() || (await ctx.isSubscribed()) ? { auth: null } : null;
+      async onMessage(ctx, message) {
+        return message.isBotMentioned || (await ctx.isSubscribed()) ? { auth: null } : null;
       },
     });
     const raw = messageActivity({ conversationType: "channel" });

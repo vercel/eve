@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Added `isBotMentioned()` and `isSubscribed()` helpers to the Slack and Microsoft Teams `onMessage` hooks for custom routing that can continue active conversations without repeated mentions.
+Added a Slack `onMessage` hook with `isBotMentioned()` and `isSubscribed()` helpers for custom message routing.
