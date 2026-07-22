@@ -1,5 +1,23 @@
 # eve
 
+## 0.27.1
+
+### Patch Changes
+
+- eaaf6d6: Enable Workflow's optimistic concurrency precondition guard in every generated Vercel workflow function so stale replays reload concurrent events before committing.
+- 6ded22e: Preserve every queued delivery's message, context, and input responses when eve batches payloads before routing.
+- 3ffaf12: Added a Slack `onMessage` hook with `isBotMentioned()` and `isSubscribed()` helpers for custom message routing.
+- 49f2f13: Report `connection_search` as failed when every targeted connection fails to load, including authorization startup failures, so tool-call observability preserves the underlying error. Requests for unregistered connections now fail instead of returning an empty result.
+- 9679abc: Added an `isSubscribed()` helper to the Microsoft Teams `onMessage` hook for custom routing that can continue conversations without repeated mentions.
+- 1a618ba: Add a generic Slack `onEvent` fallback for subscribed Events API callbacks. Handlers can use a Slack-bound `receive` function to start zero, one, or many agent turns while authored mention and direct-message handlers retain precedence.
+- 0df8ab9: Update the bundled AI SDK and provider integrations to their latest compatible releases.
+- 394b467: Update the bundled Vercel integrations and core execution utilities to their latest compatible releases.
+- f2724fb: Update the Vite integration and Vitest test tooling to their latest compatible releases.
+- 01552fc: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- dd1ba23: Declining a session token-budget prompt now cancels the in-flight turn cleanly (`turn.cancelled` → `session.waiting`) instead of completing the session or surfacing an error to the delegating parent. Declining a delegated child's prompt cancels the whole turn tree from the root, so the parent can no longer retry the child against a fresh quota share, and stale answers to budget prompts are dropped instead of being shown to the model. The prompt copy is reworded ("This session has hit the input-token limit (2M) per session…") with Approve/Stop buttons.
+- a70d4ce: Restart native progress feedback across built-in chat channels when a completed connection authorization resumes the agent session. Slack also shows an explicit connected and resuming status.
+- d3cd770: Generated Web Chat apps now retain completed sessions for follow-up messages and cancel the active durable turn when Stop is clicked instead of only disconnecting the browser stream.
+
 ## 0.27.0
 
 ### Minor Changes
