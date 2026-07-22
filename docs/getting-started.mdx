@@ -41,7 +41,7 @@ prompt that guides the setup. The prompt distinguishes `eve dev`, which starts
 eve's HMR server and the agent's terminal REPL, from `eve dev --no-ui`, which is
 the controllable background mode for verification.
 
-`eve init` holds the terminal, so stop it with Ctrl+C to get your shell back before editing the generated agent. The command does not create a Vercel project or deploy.
+`eve init` holds the terminal, so stop it with Ctrl+C to get your shell back before editing the generated agent. The command does not create a Vercel project or deploy automatically. You can do both things via `/model`.
 
 To add eve to an existing project, run `eve init .` from a directory that already has a `package.json` and no `agent/` files yet. eve adds the missing `eve`, `ai`, and `zod` dependencies without touching anything else the project owns. The eve dependency and the Node engine come from the same release. eve pins `engines.node` to the lowest major that release supports (for example `24.x`). It keeps an existing range only when every version that range allows stays within that major; otherwise it replaces the range and prints a warning.
 
