@@ -235,6 +235,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-agentphone",
+    name: "AgentPhone",
+    kind: "channel",
+    tagline: "SMS, MMS, iMessage, and voice conversations through AgentPhone.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
