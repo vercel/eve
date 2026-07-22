@@ -171,7 +171,55 @@ describe("createVercelSandbox", () => {
     expect(templateSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
   });
 
+  it("passes environment credentials to fresh Vercel sandbox creates", async () => {
+    vi.stubEnv("VERCEL_TOKEN", "vercel-token");
+    vi.stubEnv("VERCEL_TEAM_ID", "team_123");
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+
+    const templateSandbox = createMockSandbox({ name: "template-key" });
+    const sessionSandbox = createMockSandbox({ name: "session-key" });
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(templateSandbox)
+      .mockResolvedValueOnce(sessionSandbox);
+    const sandboxModule = {
+      Sandbox: {
+        create,
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const backend = createVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+    await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    for (const [createOptions] of create.mock.calls) {
+      expect(createOptions).toEqual(
+        expect.objectContaining({
+          projectId: "prj_123",
+          teamId: "team_123",
+          token: process.env.VERCEL_TOKEN,
+        }),
+      );
+    }
+  });
+
   it("forwards double-underscore create fields through Sandbox.create", async () => {
+    vi.stubEnv("VERCEL_TOKEN", "vercel-token");
+    vi.stubEnv("VERCEL_TEAM_ID", "team_123");
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const sandboxModule = {
       Sandbox: {
