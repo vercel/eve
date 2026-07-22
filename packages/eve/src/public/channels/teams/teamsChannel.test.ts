@@ -116,6 +116,16 @@ describe("teamsChannel", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("default dispatch ignores bot-authored personal messages", async () => {
+    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
+    const raw = messageActivity({ conversationType: "personal" });
+    raw.from = { id: "OTHER_BOT", name: "Other bot", role: "bot" };
+
+    const { send } = await firePost(channel, raw);
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("exposes mention and subscription helpers to onMessage", async () => {
     const observed: Array<{ mentioned: boolean; subscribed: boolean }> = [];
     const resolveActiveSession = vi.fn().mockResolvedValue({ sessionId: "SESSION" });
