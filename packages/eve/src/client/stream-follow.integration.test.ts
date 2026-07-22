@@ -85,6 +85,64 @@ describe("stream following over real sockets", () => {
     expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 6 });
   });
 
+  it("accepts one clean current-tail response without durable-follow reconnect", async () => {
+    let connections = 0;
+    let requestedUrl: string | undefined;
+    const host = await listen(
+      createServer((req, res) => {
+        connections += 1;
+        requestedUrl = req.url;
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.end(
+          `${JSON.stringify({
+            type: "session.waiting",
+            data: { wait: "next-user-message", continuationToken: "eve:current" },
+          })}\n`,
+        );
+      }),
+    );
+    const session = new Client({ host }).session({ sessionId: "s1", streamIndex: 0 });
+
+    const received: string[] = [];
+    for await (const event of session.stream({ throughCurrentTail: true })) {
+      received.push(event.type);
+    }
+
+    expect(received).toEqual(["session.waiting"]);
+    expect(connections).toBe(1);
+    expect(new URL(requestedUrl ?? "", host).searchParams.get("throughCurrentTail")).toBe("true");
+    expect(session.state).toEqual({
+      continuationToken: "eve:current",
+      sessionId: "s1",
+      streamIndex: 1,
+    });
+  });
+
+  it("fails an abruptly interrupted current-tail body without opening another snapshot", async () => {
+    let connections = 0;
+    const host = await listen(
+      createServer((req, res) => {
+        connections += 1;
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.write(`${JSON.stringify({ type: "turn.started", data: {} })}\n`);
+        setTimeout(() => req.socket.destroy(), 80);
+      }),
+    );
+    const session = new Client({ host }).session({ sessionId: "s1", streamIndex: 0 });
+    const received: string[] = [];
+
+    const consumed = (async () => {
+      for await (const event of session.stream({ throughCurrentTail: true })) {
+        received.push(event.type);
+      }
+    })();
+
+    await expect(consumed).rejects.toBeInstanceOf(Error);
+    expect(received).toEqual(["turn.started"]);
+    expect(connections).toBe(1);
+    expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 1 });
+  });
+
   it("gives up after the idle-reconnect budget when a settled run's stream ends boundary-less", async () => {
     let connections = 0;
     const host = await listen(

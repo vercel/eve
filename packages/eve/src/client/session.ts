@@ -147,16 +147,26 @@ export class ClientSession {
    * Resumes from the session's stored stream cursor unless `options.startIndex`
    * overrides it. The stream reconnects from its cursor when the connection
    * ends. Negative indices read relative to the current tail on one connection
-   * and do not advance the stored absolute cursor.
+   * and do not advance the stored absolute cursor. Set `throughCurrentTail` for
+   * one finite absolute replay whose boundary is captured by the same request.
    *
    * @throws {Error} If the session has no session ID (no message has been sent
    *   yet).
+   * @throws {RangeError} If `throughCurrentTail` is combined with a negative
+   *   effective start index.
    */
   stream(options?: StreamOptions): AsyncIterable<HandleMessageStreamEvent> {
     const sessionId = this.#state.sessionId;
 
     if (!sessionId) {
       throw new Error("Session has no session ID. Send a message first.");
+    }
+
+    if (
+      options?.throughCurrentTail === true &&
+      (options.startIndex ?? this.#state.streamIndex) < 0
+    ) {
+      throw new RangeError("throughCurrentTail requires a nonnegative startIndex.");
     }
 
     return this.#streamAndAdvance(sessionId, options);
@@ -268,6 +278,7 @@ export class ClientSession {
         sessionId,
         signal: options?.signal,
         startIndex: streamIndex,
+        throughCurrentTail: options?.throughCurrentTail,
       })) {
         events.push(event);
         yield event;

@@ -482,6 +482,20 @@ describe("eveChannel — stream cursor", () => {
     });
   });
 
+  it("uses the absolute stream origin when finite replay omits a start index", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?throughCurrentTail=true",
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler.getEventStream).toHaveBeenCalledWith({
+      startIndex: undefined,
+      throughCurrentTail: true,
+    });
+  });
+
   it("rejects a tail-relative cursor for finite replay", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 

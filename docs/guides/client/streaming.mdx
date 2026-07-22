@@ -160,6 +160,21 @@ for await (const event of session.stream({ startIndex: -1 })) {
 
 Tail-relative attachments do not automatically reconnect or advance the session's stored absolute `streamIndex`. Break after the event you need when using one as a tail lookup.
 
+For an atomic finite recovery replay, pass an absolute cursor with `throughCurrentTail: true`:
+
+```ts
+for await (const event of session.stream({
+  startIndex: 0,
+  throughCurrentTail: true,
+})) {
+  rebuildState(event);
+}
+
+await save(session.state);
+```
+
+The same stream request captures the server's current tail and closes after the first current-turn boundary at or beyond it. If the cursor is already current, the stream closes empty. A clean close completes without reconnecting, while an interrupted response rejects so a later request cannot silently substitute a different snapshot. Every delivered event advances the session's absolute `streamIndex`. `throughCurrentTail` cannot be combined with a negative tail-relative index.
+
 `stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
 
 ## Abort a request

@@ -175,6 +175,15 @@ export interface StreamOptions {
   readonly startIndex?: number;
 
   /**
+   * Captures the current exclusive event cursor on the stream request and
+   * closes after the first current-turn boundary at or beyond that cursor.
+   * A stream already at the captured cursor closes empty. The effective start
+   * index must be absolute and nonnegative. Omitted or `false` preserves
+   * durable live-stream reconnection.
+   */
+  readonly throughCurrentTail?: boolean;
+
+  /**
    * Abort signal for cancelling the stream.
    */
   readonly signal?: AbortSignal;

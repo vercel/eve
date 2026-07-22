@@ -24,6 +24,7 @@ interface FollowStreamInput {
   readonly sessionId: string;
   readonly signal?: AbortSignal;
   readonly startIndex: number;
+  readonly throughCurrentTail?: boolean;
 }
 
 /**
@@ -32,8 +33,8 @@ interface FollowStreamInput {
  *
  * Transport endings reconnect from the advanced cursor. Progress resets the
  * idle budget; repeated empty streams eventually stop the follow. Callers own
- * boundary handling. Negative tail-relative cursors use one connection because
- * they cannot be advanced safely.
+ * boundary handling. Negative tail-relative cursors and finite current-tail
+ * snapshots use one connection because they cannot be reopened safely.
  */
 export async function* followStreamIterable(
   input: FollowStreamInput,
@@ -64,12 +65,16 @@ export async function* followStreamIterable(
         yield event;
       }
     } catch (error) {
+      if (input.throughCurrentTail === true) {
+        if (input.signal?.aborted) return;
+        throw error;
+      }
       if (!isStreamDisconnectError(error)) {
         throw error;
       }
     }
 
-    if (input.signal?.aborted || input.startIndex < 0) {
+    if (input.signal?.aborted || input.startIndex < 0 || input.throughCurrentTail === true) {
       return;
     }
 
@@ -103,12 +108,15 @@ export async function openStreamBody(
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
   let retryDelayMs = STREAM_OPEN_RETRY_BASE_DELAY_MS;
+  const searchParams: Record<string, string> = {};
+  if (input.startIndex !== 0) searchParams.startIndex = String(input.startIndex);
+  if (input.throughCurrentTail === true) searchParams.throughCurrentTail = "true";
 
   for (let attempt = 0; attempt < STREAM_OPEN_RETRY_ATTEMPTS; attempt += 1) {
     const url = createClientUrl(
       input.host,
       createEveMessageStreamRoutePath(input.sessionId),
-      input.startIndex !== 0 ? { startIndex: String(input.startIndex) } : undefined,
+      searchParams,
     );
 
     const headers = await input.resolveHeaders();

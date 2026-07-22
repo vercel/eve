@@ -520,6 +520,130 @@ describe("ClientSession", () => {
     });
   });
 
+  it("advances the absolute cursor through one finite multi-turn snapshot", async () => {
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      requests.push(String(request));
+      return createStreamResponse([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:previous", wait: "next-user-message" },
+        },
+        { type: "turn.started", data: { sequence: 2, turnId: "turn-2" } },
+        {
+          type: "message.received",
+          data: { message: "accepted before replay", sequence: 2, turnId: "turn-2" },
+        },
+        { type: "turn.completed", data: { sequence: 2, turnId: "turn-2" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:current", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession({
+      continuationToken: "eve:saved",
+      sessionId: "session_1",
+      streamIndex: 99,
+    });
+
+    const eventTypes: string[] = [];
+    for await (const event of session.stream({ startIndex: 2, throughCurrentTail: true })) {
+      eventTypes.push(event.type);
+    }
+
+    expect(eventTypes).toEqual([
+      "session.waiting",
+      "turn.started",
+      "message.received",
+      "turn.completed",
+      "session.waiting",
+    ]);
+    expect(requests).toHaveLength(1);
+    expect(new URL(requests[0]!).searchParams).toEqual(
+      new URLSearchParams({ startIndex: "2", throughCurrentTail: "true" }),
+    );
+    expect(session.state).toEqual({
+      continuationToken: "eve:current",
+      sessionId: "session_1",
+      streamIndex: 7,
+    });
+  });
+
+  it("keeps the cursor unchanged when the captured current-tail snapshot is empty", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(createStreamResponse([]));
+    const initialState = {
+      continuationToken: "eve:current",
+      sessionId: "session_1",
+      streamIndex: 7,
+    };
+    const session = createSession(initialState);
+
+    const eventTypes: string[] = [];
+    for await (const event of session.stream({ throughCurrentTail: true })) {
+      eventTypes.push(event.type);
+    }
+
+    expect(eventTypes).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams).toEqual(
+      new URLSearchParams({ startIndex: "7", throughCurrentTail: "true" }),
+    );
+    expect(session.state).toEqual(initialState);
+  });
+
+  it("fails an interrupted current-tail snapshot after advancing through delivered events", async () => {
+    const encoder = new TextEncoder();
+    let pulled = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!pulled) {
+              pulled = true;
+              controller.enqueue(
+                encoder.encode(
+                  `${JSON.stringify({ type: "turn.started", data: { sequence: 2, turnId: "turn-2" } })}\n`,
+                ),
+              );
+              return;
+            }
+            controller.error(new Error("snapshot interrupted"));
+          },
+        }),
+      ),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 3 });
+    const eventTypes: string[] = [];
+
+    const consumed = (async () => {
+      for await (const event of session.stream({ throughCurrentTail: true })) {
+        eventTypes.push(event.type);
+      }
+    })();
+
+    await expect(consumed).rejects.toThrow("snapshot interrupted");
+    expect(eventTypes).toEqual(["turn.started"]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(session.state).toEqual({ sessionId: "session_1", streamIndex: 4 });
+  });
+
+  it.each([
+    { startIndex: -1, storedStreamIndex: 3 },
+    { startIndex: undefined, storedStreamIndex: -1 },
+  ])(
+    "rejects a tail-relative current-tail snapshot at effective index $startIndex/$storedStreamIndex",
+    ({ startIndex, storedStreamIndex }) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      const session = createSession({ sessionId: "session_1", streamIndex: storedStreamIndex });
+
+      expect(() => session.stream({ startIndex, throughCurrentTail: true })).toThrow(
+        new RangeError("throughCurrentTail requires a nonnegative startIndex."),
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps session.stream() boundary-blind across subsequent turns", async () => {
     const streamStartIndices: Array<string | null> = [];
     let streamRequest = 0;
