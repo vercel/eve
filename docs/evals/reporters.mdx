@@ -44,6 +44,21 @@ A reporter instance observes the evals that reference it. Share one instance acr
 
 Braintrust needs its SDK installed in the app and credentials in the environment: install the `braintrust` package (`npm install braintrust`) and set `BRAINTRUST_API_KEY`. Pass `--skip-report` to run the eval without shipping results, which also suppresses config reporters and is useful locally when iterating.
 
+## Datadog
+
+`Datadog()` is an experimental, no-op reporter skeleton for developing a Datadog Experiments integration:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { Datadog } from "eve/evals/reporters";
+
+export default defineEvalConfig({
+  reporters: [Datadog()],
+});
+```
+
+Runtime tracing remains an agent concern. Configure `agent/instrumentation.ts` to export OTel spans to Datadog, then implement the reporter lifecycle to associate those spans and eval results with an Experiment. The `datadog-eval-reporter` app under `apps/fixtures` is a runnable starter.
+
 ## JUnit
 
 `JUnit({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, usually the better fit because CI owns the output path, not the eval:
