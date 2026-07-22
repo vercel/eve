@@ -1,12 +1,7 @@
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 
-/**
- * Creates an experimental Datadog reporter skeleton.
- *
- * The reporter is intentionally a no-op while the Datadog integration is
- * developed.
- */
+/** Creates an intentionally no-op Datadog reporter skeleton. */
 export function Datadog(): EvalReporter {
   return new DatadogReporter();
 }
