@@ -38,22 +38,6 @@ export default slackChannel({
 
 `connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
 
-### Continue conversations without repeated mentions
-
-Use `onMessage` to handle explicit mentions and continue replies in threads with an active eve session:
-
-```ts title="agent/channels/slack.ts"
-export default slackChannel({
-  credentials: connectSlackCredentials("slack/my-agent"),
-  async onMessage(ctx, message) {
-    if (message.author?.isBot) return null;
-    return ctx.isBotMentioned() || (await ctx.isSubscribed()) ? { auth: null } : null;
-  },
-});
-```
-
-`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
-
 ### Deploy
 
 Deploy once the trigger destination and channel file are ready:
@@ -74,16 +58,35 @@ Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.
 - `onDirectMessage(ctx, message)` handles only DMs and takes precedence over `onMessage`. Bot-authored messages and edits are filtered first; Slack requires `message.im` and `im:history`.
 
-| Incoming event         | Handler order                                           |
-| ---------------------- | ------------------------------------------------------- |
-| App mention            | `onAppMention` → `onMessage` → built-in mention default |
-| Direct message         | `onDirectMessage` → `onMessage` → built-in DM default   |
-| Other human message    | `onMessage` → `onEvent` → ignore                        |
-| Other Events API event | `onEvent` → ignore                                      |
+| Incoming event         | Handler order                                                       |
+| ---------------------- | ------------------------------------------------------------------- |
+| App mention            | `onAppMention` → `onMessage` → `onEvent` → built-in mention default |
+| Direct message         | `onDirectMessage` → `onMessage` → `onEvent` → built-in DM default   |
+| Other Slack message    | `onMessage` → `onEvent` → ignore                                    |
+| Other Events API event | `onEvent` → ignore                                                  |
 
 Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
 
 `onInteraction(action, ctx)` separately handles `block_actions` callbacks not consumed by HITL. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
+
+#### Continue conversations without repeated mentions
+
+Use `onMessage` to handle explicit mentions and continue replies in threads with an active eve session:
+
+```ts title="agent/channels/slack.ts"
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  async onMessage(ctx, message) {
+    if (message.author?.isBot) return null;
+    const isDirectMessage = message.raw.channel_type === "im";
+    return isDirectMessage || ctx.isBotMentioned() || (await ctx.isSubscribed())
+      ? { auth: null }
+      : null;
+  },
+});
+```
+
+`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
 
 ### Other Events API callbacks
 
