@@ -242,6 +242,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-lark",
+    name: "Lark / Feishu",
+    kind: "channel",
+    tagline: "Lark and Feishu chats with native card streaming via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
