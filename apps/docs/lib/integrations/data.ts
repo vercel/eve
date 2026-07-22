@@ -849,7 +849,7 @@ See the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-offic
   "chat-sdk-photon": {
     logo: "imessage",
     docsHref: "/docs/channels/chat-sdk",
-    badge: "Chat SDK",
+    badge: "Provider official",
     keywords: [
       "chat sdk",
       "imessage",
