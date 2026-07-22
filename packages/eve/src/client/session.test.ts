@@ -47,6 +47,14 @@ async function collectEventTypes(events: AsyncIterable<{ type: string }>): Promi
   return eventTypes;
 }
 
+async function collectFiniteEventTypes(events: AsyncIterable<{ type: string }>): Promise<string[]> {
+  const eventTypes: string[] = [];
+  for await (const event of events) {
+    eventTypes.push(event.type);
+  }
+  return eventTypes;
+}
+
 function createAcceptedResponse() {
   return Response.json(
     {
@@ -473,7 +481,7 @@ describe("ClientSession", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(streamUrls.map((url) => new URL(url).searchParams.get("startIndex"))).toEqual([
-      null,
+      "0",
       "1",
       "1",
     ]);
@@ -592,9 +600,14 @@ describe("ClientSession", () => {
     expect(session.state).toEqual(initialState);
   });
 
-  it("fails an interrupted current-tail snapshot after advancing through delivered events", async () => {
+  it("keeps the public cursor unchanged when an interrupted current-tail snapshot delivers events", async () => {
     const encoder = new TextEncoder();
     let pulled = false;
+    const initialState = {
+      continuationToken: "eve:original",
+      sessionId: "session_1",
+      streamIndex: 3,
+    };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         new ReadableStream<Uint8Array>({
@@ -603,7 +616,10 @@ describe("ClientSession", () => {
               pulled = true;
               controller.enqueue(
                 encoder.encode(
-                  `${JSON.stringify({ type: "turn.started", data: { sequence: 2, turnId: "turn-2" } })}\n`,
+                  `${JSON.stringify({
+                    type: "session.waiting",
+                    data: { continuationToken: "eve:historical", wait: "next-user-message" },
+                  })}\n`,
                 ),
               );
               return;
@@ -613,7 +629,7 @@ describe("ClientSession", () => {
         }),
       ),
     );
-    const session = createSession({ sessionId: "session_1", streamIndex: 3 });
+    const session = createSession(initialState);
     const eventTypes: string[] = [];
 
     const consumed = (async () => {
@@ -623,9 +639,259 @@ describe("ClientSession", () => {
     })();
 
     await expect(consumed).rejects.toThrow("snapshot interrupted");
-    expect(eventTypes).toEqual(["turn.started"]);
+    expect(eventTypes).toEqual(["session.waiting"]);
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(session.state).toEqual({ sessionId: "session_1", streamIndex: 4 });
+    expect(session.state).toEqual(initialState);
+  });
+
+  it("keeps the public cursor unchanged when a current-tail snapshot is malformed", async () => {
+    const encoder = new TextEncoder();
+    const initialState = {
+      continuationToken: "eve:original",
+      sessionId: "session_1",
+      streamIndex: 3,
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `${JSON.stringify({
+                  type: "session.waiting",
+                  data: { continuationToken: "eve:historical", wait: "next-user-message" },
+                })}\n`,
+              ),
+            );
+            controller.enqueue(encoder.encode("{not-json\n"));
+            controller.close();
+          },
+        }),
+      ),
+    );
+    const session = createSession(initialState);
+
+    await expect(
+      collectFiniteEventTypes(session.stream({ throughCurrentTail: true })),
+    ).rejects.toThrow(SyntaxError);
+    expect(session.state).toEqual(initialState);
+  });
+
+  it("replays from the original cursor after a finite failure and commits only after a clean retry", async () => {
+    const encoder = new TextEncoder();
+    const requests: Array<{ body?: unknown; method: string; url: string }> = [];
+    const initialState = {
+      continuationToken: "eve:original",
+      sessionId: "session_1",
+      streamIndex: 5,
+    };
+    let streamRequest = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      const method = init?.method ?? "GET";
+      requests.push({
+        body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        method,
+        url,
+      });
+
+      if (method === "POST") {
+        return Response.json({ ok: true, sessionId: "session_1" }, { status: 200 });
+      }
+
+      streamRequest += 1;
+      if (streamRequest === 1) {
+        let pull = 0;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              pull += 1;
+              if (pull === 1) {
+                controller.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({
+                      type: "session.waiting",
+                      data: { continuationToken: "eve:historical", wait: "next-user-message" },
+                    })}\n`,
+                  ),
+                );
+                return;
+              }
+              if (pull === 2) {
+                controller.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({
+                      type: "turn.started",
+                      data: { sequence: 2, turnId: "turn-2" },
+                    })}\n`,
+                  ),
+                );
+                return;
+              }
+              controller.error(new Error("snapshot interrupted"));
+            },
+          }),
+        );
+      }
+
+      return createStreamResponse([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:historical", wait: "next-user-message" },
+        },
+        { type: "turn.started", data: { sequence: 2, turnId: "turn-2" } },
+        { type: "turn.completed", data: { sequence: 2, turnId: "turn-2" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:current", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession(initialState);
+
+    await expect(
+      collectFiniteEventTypes(session.stream({ throughCurrentTail: true })),
+    ).rejects.toThrow("snapshot interrupted");
+    expect(session.state).toEqual(initialState);
+
+    await session.send("next after failed replay");
+    expect(session.state).toEqual(initialState);
+
+    await expect(
+      collectFiniteEventTypes(session.stream({ throughCurrentTail: true })),
+    ).resolves.toEqual(["session.waiting", "turn.started", "turn.completed", "session.waiting"]);
+
+    const streamStartIndices = requests
+      .filter((request) => request.method === "GET")
+      .map((request) => new URL(request.url).searchParams.get("startIndex"));
+    const postBodies = requests
+      .filter((request) => request.method === "POST")
+      .map((request) => request.body);
+    expect(streamStartIndices).toEqual(["5", "5"]);
+    expect(postBodies).toEqual([
+      { continuationToken: "eve:original", message: "next after failed replay" },
+    ]);
+    expect(session.state).toEqual({
+      continuationToken: "eve:current",
+      sessionId: "session_1",
+      streamIndex: 9,
+    });
+  });
+
+  it("does not commit a current-tail snapshot when the consumer returns early", async () => {
+    const cancel = vi.fn();
+    const encoder = new TextEncoder();
+    const initialState = {
+      continuationToken: "eve:original",
+      sessionId: "session_1",
+      streamIndex: 5,
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          cancel,
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `${JSON.stringify({
+                  type: "session.waiting",
+                  data: { continuationToken: "eve:historical", wait: "next-user-message" },
+                })}\n`,
+              ),
+            );
+          },
+        }),
+      ),
+    );
+    const session = createSession(initialState);
+
+    for await (const _event of session.stream({ throughCurrentTail: true })) {
+      break;
+    }
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(session.state).toEqual(initialState);
+  });
+
+  it("does not commit a current-tail snapshot when its signal aborts", async () => {
+    const encoder = new TextEncoder();
+    const abortController = new AbortController();
+    const initialState = {
+      continuationToken: "eve:original",
+      sessionId: "session_1",
+      streamIndex: 5,
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (_request, init) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  `${JSON.stringify({
+                    type: "session.waiting",
+                    data: { continuationToken: "eve:historical", wait: "next-user-message" },
+                  })}\n`,
+                ),
+              );
+              init?.signal?.addEventListener(
+                "abort",
+                () => controller.error(new DOMException("Aborted", "AbortError")),
+                { once: true },
+              );
+            },
+          }),
+        ),
+    );
+    const session = createSession(initialState);
+    const eventTypes: string[] = [];
+
+    for await (const event of session.stream({
+      signal: abortController.signal,
+      throughCurrentTail: true,
+    })) {
+      eventTypes.push(event.type);
+      abortController.abort();
+    }
+
+    expect(eventTypes).toEqual(["session.waiting"]);
+    expect(session.state).toEqual(initialState);
+  });
+
+  it("keeps default live stream early return advancement unchanged", async () => {
+    const encoder = new TextEncoder();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `${JSON.stringify({
+                  type: "session.waiting",
+                  data: { continuationToken: "eve:live", wait: "next-user-message" },
+                })}\n`,
+              ),
+            );
+          },
+        }),
+      ),
+    );
+    const session = createSession({
+      continuationToken: "eve:original",
+      sessionId: "session_1",
+      streamIndex: 5,
+    });
+
+    for await (const _event of session.stream()) {
+      break;
+    }
+
+    expect(session.state).toEqual({
+      continuationToken: "eve:live",
+      sessionId: "session_1",
+      streamIndex: 6,
+    });
   });
 
   it.each([
@@ -686,7 +952,7 @@ describe("ClientSession", () => {
       vi.useRealTimers();
     }
 
-    expect(streamStartIndices).toEqual([null, "1"]);
+    expect(streamStartIndices).toEqual(["0", "1"]);
     expect(session.state).toEqual({
       continuationToken: "eve:first",
       sessionId: "session_1",

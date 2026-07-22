@@ -121,7 +121,7 @@ describe("ClientSession current-tail replay through the eve channel", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(getEventStream).toHaveBeenCalledOnce();
     expect(getEventStream).toHaveBeenCalledWith({
-      startIndex: undefined,
+      startIndex: 0,
       throughCurrentTail: true,
     });
     expect(session.state).toEqual({

@@ -314,7 +314,7 @@ describe("useEveAgent", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/eve/agents/support/eve/v1/session");
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "/eve/agents/support/eve/v1/session/session_1/stream",
+      "/eve/agents/support/eve/v1/session/session_1/stream?startIndex=0&throughCurrentTail=false",
     );
   });
 

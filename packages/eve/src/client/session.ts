@@ -270,6 +270,9 @@ export class ClientSession {
     const streamIndex = options?.startIndex ?? initialState.streamIndex;
     const events: HandleMessageStreamEvent[] = [];
 
+    const finiteReplay = options?.throughCurrentTail === true;
+    let cleanCompletion = false;
+
     try {
       for await (const event of followStreamIterable({
         host: this.#context.host,
@@ -283,8 +286,9 @@ export class ClientSession {
         events.push(event);
         yield event;
       }
+      cleanCompletion = options?.signal?.aborted !== true;
     } finally {
-      if (streamIndex >= 0) {
+      if (streamIndex >= 0 && (!finiteReplay || cleanCompletion)) {
         this.#state = advanceSession({
           continuationToken: initialState.continuationToken,
           events,

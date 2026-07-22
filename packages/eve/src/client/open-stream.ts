@@ -108,9 +108,10 @@ export async function openStreamBody(
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
   let retryDelayMs = STREAM_OPEN_RETRY_BASE_DELAY_MS;
-  const searchParams: Record<string, string> = {};
-  if (input.startIndex !== 0) searchParams.startIndex = String(input.startIndex);
-  if (input.throughCurrentTail === true) searchParams.throughCurrentTail = "true";
+  const searchParams: Record<string, string> = {
+    startIndex: String(input.startIndex),
+    throughCurrentTail: input.throughCurrentTail === true ? "true" : "false",
+  };
 
   for (let attempt = 0; attempt < STREAM_OPEN_RETRY_ATTEMPTS; attempt += 1) {
     const url = createClientUrl(

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { followStreamIterable } from "#client/open-stream.js";
+import { followStreamIterable, openStreamBody } from "#client/open-stream.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 const TURN_STARTED: HandleMessageStreamEvent = {
@@ -64,6 +64,39 @@ describe("followStreamIterable current-tail snapshots", () => {
     );
     expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
     expect(resolveHeaders).toHaveBeenCalledOnce();
+  });
+
+  it("overrides host reserved query keys with effective zero and true values", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(createStreamResponse([]));
+
+    await openStreamBody({
+      host: "https://eve.test/proxy?token=secret&startIndex=-1&throughCurrentTail=false",
+      resolveHeaders: async () => new Headers(),
+      sessionId: "session_1",
+      startIndex: 0,
+      throughCurrentTail: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://eve.test/proxy/eve/v1/session/session_1/stream?token=secret&startIndex=0&throughCurrentTail=true",
+    );
+  });
+
+  it("overrides host current-tail injection with the effective default false value", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(createStreamResponse([]));
+
+    await openStreamBody({
+      host: "https://eve.test/proxy?throughCurrentTail=true&token=secret",
+      resolveHeaders: async () => new Headers(),
+      sessionId: "session_1",
+      startIndex: 4,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://eve.test/proxy/eve/v1/session/session_1/stream?throughCurrentTail=false&token=secret&startIndex=4",
+    );
   });
 
   it("retries transient failures before a response body without recapturing after open", async () => {

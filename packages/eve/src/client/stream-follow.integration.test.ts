@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -25,6 +25,14 @@ async function listen(server: Server): Promise<string> {
 
 function startIndexOf(url: string | undefined): number {
   return Number(new URL(url ?? "", "http://127.0.0.1").searchParams.get("startIndex") ?? "0");
+}
+
+async function readRequestJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 function follow(host: string) {
@@ -140,7 +148,100 @@ describe("stream following over real sockets", () => {
     await expect(consumed).rejects.toBeInstanceOf(Error);
     expect(received).toEqual(["turn.started"]);
     expect(connections).toBe(1);
-    expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 1 });
+    expect(session.state).toEqual({ sessionId: "s1", streamIndex: 0 });
+  });
+
+  it("retries a failed current-tail replay from the original cursor and does not send a stale historical token", async () => {
+    const historicalWaiting = {
+      type: "session.waiting",
+      data: { wait: "next-user-message", continuationToken: "eve:historical" },
+    };
+    const currentWaiting = {
+      type: "session.waiting",
+      data: { wait: "next-user-message", continuationToken: "eve:current" },
+    };
+    const streamUrls: string[] = [];
+    const postBodies: unknown[] = [];
+    let streamRequest = 0;
+    const host = await listen(
+      createServer(async (req, res) => {
+        if (req.method === "POST") {
+          postBodies.push(await readRequestJson(req));
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true, sessionId: "s1" }));
+          return;
+        }
+
+        streamRequest += 1;
+        streamUrls.push(req.url ?? "");
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        if (streamRequest === 1) {
+          res.write(`${JSON.stringify(historicalWaiting)}\n`);
+          res.write(
+            `${JSON.stringify({ type: "turn.started", data: { sequence: 2, turnId: "turn-2" } })}\n`,
+          );
+          setTimeout(() => req.socket.destroy(), 80);
+          return;
+        }
+
+        res.end(
+          [
+            historicalWaiting,
+            { type: "turn.started", data: { sequence: 2, turnId: "turn-2" } },
+            { type: "turn.completed", data: { sequence: 2, turnId: "turn-2" } },
+            currentWaiting,
+          ]
+            .map((event) => JSON.stringify(event))
+            .join("\n") + "\n",
+        );
+      }),
+    );
+    const initialState = {
+      continuationToken: "eve:original",
+      sessionId: "s1",
+      streamIndex: 4,
+    };
+    const session = new Client({ host }).session(initialState);
+    const failedEvents: string[] = [];
+
+    const failedReplay = (async () => {
+      for await (const event of session.stream({ throughCurrentTail: true })) {
+        failedEvents.push(event.type);
+      }
+    })();
+
+    await expect(failedReplay).rejects.toBeInstanceOf(Error);
+    expect(failedEvents).toEqual(["session.waiting", "turn.started"]);
+    expect(session.state).toEqual(initialState);
+
+    await session.send("next after failed replay");
+    expect(postBodies).toEqual([
+      { continuationToken: "eve:original", message: "next after failed replay" },
+    ]);
+    expect(session.state).toEqual(initialState);
+
+    const retryEvents: string[] = [];
+    for await (const event of session.stream({ throughCurrentTail: true })) {
+      retryEvents.push(event.type);
+    }
+
+    expect(retryEvents).toEqual([
+      "session.waiting",
+      "turn.started",
+      "turn.completed",
+      "session.waiting",
+    ]);
+    expect(streamUrls.map(startIndexOf)).toEqual([4, 4]);
+    expect(
+      streamUrls.map((url) =>
+        new URL(url, "http://127.0.0.1").searchParams.get("throughCurrentTail"),
+      ),
+    ).toEqual(["true", "true"]);
+    expect(session.state).toEqual({
+      continuationToken: "eve:current",
+      sessionId: "s1",
+      streamIndex: 8,
+    });
   });
 
   it("gives up after the idle-reconnect budget when a settled run's stream ends boundary-less", async () => {
