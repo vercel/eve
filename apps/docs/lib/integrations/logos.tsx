@@ -9,6 +9,7 @@ import {
   SiEgnyte,
   SiGooglechat,
   SiHuggingface,
+  SiMatrix,
   SiMake,
   SiMessenger,
   SiMiro,
@@ -447,6 +448,8 @@ export const larkLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const matrixLogo = (props: LogoProps) => <SiMatrix color="default" {...props} />;
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -594,6 +597,7 @@ export const logos = {
   dial: dialLogo,
   agentphone: agentphoneLogo,
   lark: larkLogo,
+  matrix: matrixLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,

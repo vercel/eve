@@ -249,6 +249,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-matrix",
+    name: "Matrix",
+    kind: "channel",
+    tagline: "Matrix rooms and Beeper-bridged networks via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
