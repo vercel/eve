@@ -316,6 +316,12 @@ export const ticketTailorLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const zernioLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M4 4h16v2.6L8.5 17H20v3H4v-2.7L15.5 7H4V4Z" fill="currentColor" />
+  </svg>
+);
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -389,6 +395,7 @@ export const logos = {
   zapier: zapierLogo,
   zomato: zomatoLogo,
 
+  zernio: zernioLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,

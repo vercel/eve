@@ -172,6 +172,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-zernio",
+    name: "Zernio",
+    kind: "channel",
+    tagline: "Reach seven social and messaging platforms through one Zernio integration.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
