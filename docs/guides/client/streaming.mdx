@@ -173,7 +173,7 @@ for await (const event of session.stream({
 await save(session.state);
 ```
 
-The same stream request captures the server's current tail and closes after the first current-turn boundary at or beyond it. If the cursor is already current, the stream closes empty. A clean close completes without reconnecting, while an interrupted response rejects so a later request cannot silently substitute a different snapshot. Every delivered event advances the session's absolute `streamIndex`. `throughCurrentTail` cannot be combined with a negative tail-relative index.
+The same stream request captures the server's current tail and closes after the first current-turn boundary at or beyond it. If the cursor is already current, the stream closes empty. A clean, fully consumed replay atomically commits its delivered events, current continuation, and absolute cursor to the public session state. A body error, malformed NDJSON, abort, or intentional early consumer return leaves public session state unchanged, so retry starts from the original cursor. `throughCurrentTail` cannot be combined with a negative tail-relative index.
 
 `stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
 
