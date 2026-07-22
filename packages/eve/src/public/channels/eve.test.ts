@@ -373,6 +373,22 @@ describe("eveChannel — events", () => {
 });
 
 describe("eveChannel — stream cursor", () => {
+  it("establishes the NDJSON body before the first durable event", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+    const reader = response.body!.getReader();
+
+    const firstChunk = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out waiting for the NDJSON response body")), 25),
+      ),
+    ]);
+    await reader.cancel();
+
+    expect(new TextDecoder().decode(firstChunk.value)).toBe("\n");
+  });
+
   it("forwards negative tail-relative start indices", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
