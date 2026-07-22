@@ -261,14 +261,6 @@ export interface ToolLoopHarnessConfig {
     readonly fallback: RuntimeModelReference;
     readonly messages: readonly ModelMessage[];
   }) => Promise<void>;
-  /**
-   * Requests cancellation of another session's in-flight turn by session id.
-   * Injected by the execution layer (backed by the durable cancel hook); a
-   * target with no active turn is a benign no-op. The harness uses it to
-   * cancel the root turn when a user declines a delegated child's
-   * session-limit continuation prompt.
-   */
-  readonly requestTurnCancellation?: (sessionId: string) => Promise<void>;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.

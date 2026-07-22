@@ -22,7 +22,7 @@ import {
 } from "#harness/emission.js";
 import { setPendingInputBatch } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
 import {
   extendSessionTokenBudget,
   getSessionTokenLimitViolation,
@@ -48,10 +48,11 @@ interface SessionLimitPolicyInput {
  * Declined: a user decision, not an error — the decline cancels the
  * in-flight turn tree through the standard cancellation path, settling as
  * `turn.cancelled` → `session.waiting` with no failure surfaced anywhere.
- * For a delegated child the decline first requests cancellation of the root
- * turn, whose cancelled arm cascades to every other descendant, so the
- * delegating parent never receives an error result it could retry against a
- * fresh budget share.
+ * The harness only declares the intent by throwing
+ * {@link SessionLimitDeclinedError}; the execution layer detects it at the
+ * step boundary and cancels the root turn, whose cancelled arm cascades to
+ * every descendant, so the delegating parent never receives an error result
+ * it could retry against a fresh budget share.
  *
  * Returns `result: null` when the step should continue with `session`.
  */
@@ -87,13 +88,7 @@ export async function applySessionLimitContinuation(
     };
   }
 
-  // The cascade's redundant cancel back to this already-settling session
-  // is a benign no-op, as is a root whose turn already finished.
-  if (input.session.rootSessionId !== undefined) {
-    await input.config.requestTurnCancellation?.(input.session.rootSessionId);
-  }
-
-  throw new TurnCancelledError("The user declined a fresh session token budget.");
+  throw new SessionLimitDeclinedError();
 }
 
 /**

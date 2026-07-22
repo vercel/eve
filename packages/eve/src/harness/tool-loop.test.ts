@@ -44,7 +44,7 @@ import {
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionTokenLimitViolation,
   getSessionTokenUsage,
@@ -1269,57 +1269,42 @@ describe("createToolLoopHarness", () => {
 
   it("cancels the turn when the user declines the limit continuation prompt", async () => {
     const { emit, events } = createEventCollector();
-    const requestTurnCancellation = vi.fn().mockResolvedValue(undefined);
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
+    const declined = runStep(parked.session, {
+      inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
+    });
+
+    // A decline is a user decision, not an error: the harness declares
+    // intent by throwing the decline-flavored cancellation, which the
+    // execution layer settles as `turn.cancelled` → `session.waiting` (and,
+    // for delegated sessions, escalates to a root-turn cancel). No failure
+    // or completion events are emitted here.
+    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
+    expect(events.some((event) => event.type === "session.completed")).toBe(false);
+  });
+
+  it("declines with the same cancellation when the prompt was proxied to a task session", async () => {
+    const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, { requestTurnCancellation }),
+      createTestConfig("task", emit, { capabilities: { requestInput: true } }),
     );
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
-    await expect(
-      runStep(parked.session, {
-        inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
-      }),
-    ).rejects.toThrow(TurnCancelledError);
-
-    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-    // A decline is a user decision, not an error: the thrown cancellation
-    // settles as `turn.cancelled` → `session.waiting` in the driver, so the
-    // harness emits neither failure nor completion events.
-    expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
-    expect(events.some((event) => event.type === "session.completed")).toBe(false);
-    // A root session cancels itself by throwing; there is no separate root
-    // turn to signal.
-    expect(requestTurnCancellation).not.toHaveBeenCalled();
-  });
-
-  it("cancels the root turn when a proxied user declines the limit continuation prompt", async () => {
-    const { emit, events } = createEventCollector();
-    const requestTurnCancellation = vi.fn().mockResolvedValue(undefined);
-    const runStep = createToolLoopHarness(
-      createTestConfig("task", emit, {
-        capabilities: { requestInput: true },
-        requestTurnCancellation,
-      }),
-    );
-    const session: HarnessSession = {
-      ...createLimitReachedSession(),
-      rootSessionId: "root-session",
-    };
-
-    const parked = await runStep(session, { message: "Hi again" });
     expect(parked.next).toBeNull();
 
-    await expect(
-      runStep(parked.session, {
-        inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
-      }),
-    ).rejects.toThrow(TurnCancelledError);
+    const declined = runStep(parked.session, {
+      inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
+    });
 
-    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     // The delegating parent must never receive an error result it could
-    // retry against a fresh budget share: the decline cancels the root turn
-    // (which cascades to every descendant) instead of failing this step.
-    expect(requestTurnCancellation).toHaveBeenCalledExactlyOnceWith("root-session");
+    // retry against a fresh budget share: task-mode declines throw the same
+    // decline-flavored cancellation instead of failing the step.
+    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
   });
 

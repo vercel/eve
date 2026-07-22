@@ -24,7 +24,6 @@ import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 
 const log = createLogger("execution.node-step");
 
@@ -91,11 +90,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
     dispatchDynamicModelEvent: dispatchModelEvent,
-    // Both `accepted` and `no_active_turn` are successful outcomes: a
-    // target whose turn already finished has nothing to cancel.
-    requestTurnCancellation: async (sessionId) => {
-      await requestWorkflowTurnCancellation({ sessionId });
-    },
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
