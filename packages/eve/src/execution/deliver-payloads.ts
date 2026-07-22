@@ -1,25 +1,29 @@
 import type { DeliverPayload } from "#channel/types.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import { coalesceTurnInputs } from "#harness/messages.js";
+import type { StepInput } from "#harness/types.js";
 
-/** Coalesces channel payloads while preserving every structured input response. */
+const COALESCED_DELIVER_FIELDS = ["context", "inputResponses", "message", "outputSchema"] as const;
+
+/** Coalesces channel payloads while preserving turn input and adapter-specific fields. */
 export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): DeliverPayload {
   if (payloads.length === 0) return {};
   if (payloads.length === 1) return payloads[0] ?? {};
 
   const merged: Record<string, unknown> = {};
-  const inputResponses: InputResponse[] = [];
+  let turnInput: StepInput = {};
 
   for (const payload of payloads) {
     for (const [key, value] of Object.entries(payload)) {
-      if (key !== "inputResponses" && value !== undefined) {
+      if (value !== undefined) {
         merged[key] = value;
       }
     }
-    if (payload.inputResponses !== undefined) {
-      inputResponses.push(...payload.inputResponses);
-    }
+    turnInput = coalesceTurnInputs(turnInput, payload);
   }
 
-  if (inputResponses.length > 0) merged.inputResponses = inputResponses;
-  return merged as DeliverPayload;
+  for (const field of COALESCED_DELIVER_FIELDS) {
+    delete merged[field];
+  }
+
+  return Object.assign(merged, turnInput);
 }
