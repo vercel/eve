@@ -122,7 +122,7 @@ eve dev --tools full --assistant-response-stats tokens --context-size 200000
 | `--context-size <tokens>`           | a token count                                      | Model context window size, shown as a usage percentage. |
 | `--logs <mode>`                     | `all` / `stderr` / `sandbox` / `none`              | Which server and agent logs to show (default `stderr`). |
 
-Connection flags: `--host` and `--port` bind the local server, and `--no-ui` runs headless (also the automatic fallback when stdout is not a TTY). See the [CLI](../reference/cli) for the full flag list.
+Connection flags: `--host` and `--port` bind the local server, and `--no-ui` runs headless (also the automatic fallback when stdout is not a TTY). Pass `--workflow-ui` to start the Workflow SDK Web UI for inspecting local durable runs and steps; it defaults to `http://localhost:3456`, or use `--workflow-ui-port <port>`. See the [CLI](../reference/cli) for the full flag list.
 
 ## Remote: `eve dev <url>`
 

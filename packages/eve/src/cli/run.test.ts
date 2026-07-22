@@ -328,6 +328,70 @@ describe("eve dev --logs", () => {
   });
 });
 
+describe("eve dev --workflow-ui", () => {
+  it("starts and closes the Workflow SDK Web UI with the local server", async () => {
+    const closeWorkflowUi = vi.fn(async () => {});
+    const startWorkflowWebUi = vi.fn(async () => ({
+      close: closeWorkflowUi,
+      url: "http://localhost:4567",
+    }));
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+
+    await runInteractiveDev(["dev", "--workflow-ui", "--workflow-ui-port", "4567"], {
+      startHost,
+      startWorkflowWebUi,
+    });
+
+    expect(startWorkflowWebUi).toHaveBeenCalledWith({
+      agentServerUrl: "http://127.0.0.1:4321/",
+      appRoot: "/canonical/app",
+      port: 4567,
+    });
+    expect(closeWorkflowUi).toHaveBeenCalledOnce();
+  });
+
+  it("treats an explicit Workflow UI port as enabling the UI", async () => {
+    const startWorkflowWebUi = vi.fn(async () => ({
+      close: async () => {},
+      url: "http://localhost:4567",
+    }));
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+
+    await runInteractiveDev(["dev", "--workflow-ui-port", "4567"], {
+      startHost,
+      startWorkflowWebUi,
+    });
+
+    expect(startWorkflowWebUi).toHaveBeenCalledOnce();
+  });
+
+  it("rejects port zero because the resolved UI URL must be known", async () => {
+    await expect(runInteractiveDev(["dev", "--workflow-ui-port", "0"])).rejects.toThrow(
+      "Workflow SDK Web UI port must be greater than 0",
+    );
+  });
+
+  it("rejects the Workflow UI flag for a remote target", async () => {
+    await expect(
+      runInteractiveDev(["dev", "--url", "https://example.com", "--workflow-ui"]),
+    ).rejects.toThrow("--workflow-ui requires eve dev to start a local server");
+  });
+});
+
 describe("eve dev boot progress", () => {
   it("passes one reporter through local startup and clears the row on failure", async () => {
     const writes: string[] = [];

@@ -1,5 +1,5 @@
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
-import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
+import { registerBuildCommand } from "#cli/commands/build.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -7,87 +7,31 @@ import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
-import {
-  parseDevelopmentHeaderOption,
-  resolveDevelopmentUrlTarget,
-  type DevelopmentRequestHeaders,
-} from "#cli/dev/url-target.js";
+import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import type {
+  CliLogger,
+  CliRuntimeDependencies,
+  CliRuntimeOverrides,
+  DevelopmentCliOptions,
+  EvalCliOptions,
+  ProductionCliOptions,
+} from "#cli/run-types.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
 import { createLogger } from "#internal/logging.js";
-import type {
-  DevelopmentServer,
-  DevelopmentServerOptions,
-  ProductionServerHandle,
-} from "#internal/nitro/host/types.js";
+import type { DevelopmentServer, ProductionServerHandle } from "#internal/nitro/host/types.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
   TerminalPartDisplayMode,
 } from "#cli/dev/tui/types.js";
+import type { WorkflowWebUiHandle } from "#cli/dev/workflow-web-ui.js";
 
 export { resolveDevUiMode, resolveTuiDisplayOptions };
-
-interface CliLogger {
-  error(message: string): void;
-  log(message: string): void;
-}
-
-interface DevelopmentCliOptions {
-  assistantResponseStats?: AssistantResponseStatsMode;
-  connectionAuth?: TerminalPartDisplayMode;
-  contextSize?: number;
-  header?: DevelopmentRequestHeaders;
-  host?: string;
-  input?: string;
-  logs?: LogDisplayMode;
-  name?: string;
-  port?: number;
-  reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
-  tools?: TerminalPartDisplayMode;
-  ui?: boolean;
-  url?: string;
-}
-
-interface ProductionCliOptions {
-  host?: string;
-  port?: number;
-}
-
-interface CliRuntimeDependencies {
-  isCodingAgentLaunch(): Promise<boolean>;
-  isActiveDevelopmentServerForApp(input: {
-    readonly appRoot: string;
-    readonly serverUrl: string;
-  }): Promise<boolean>;
-  buildHost: BuildHost;
-  printApplicationInfo(
-    logger: CliLogger,
-    appRoot: string,
-    options?: { json?: boolean },
-  ): Promise<void>;
-  runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
-  runEvalCommand(
-    evalIds: readonly string[],
-    options: EvalCliOptions,
-    logger: CliLogger,
-  ): Promise<void>;
-  startHost(appRoot: string, options?: DevelopmentServerOptions): DevelopmentServer;
-  startProductionHost(
-    appRoot: string,
-    options?: {
-      host?: string;
-      port?: number;
-    },
-  ): Promise<ProductionServerHandle>;
-}
-
-type CliRuntimeOverrides = Partial<CliRuntimeDependencies>;
 
 const devBootLog = createLogger("dev.boot");
 
@@ -114,19 +58,6 @@ function createDevBootProgressReporter(
   };
 }
 
-interface EvalCliOptions {
-  json?: boolean;
-  junit?: string;
-  list?: boolean;
-  maxConcurrency?: string;
-  skipReport?: boolean;
-  strict?: boolean;
-  tag?: string[];
-  timeout?: string;
-  url?: string;
-  verbose?: boolean;
-}
-
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
   return (await import("#cli/commands/info.js")).printApplicationInfo;
 }
@@ -148,6 +79,10 @@ const loadIsActiveDevelopmentServerForApp = async () =>
 
 async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startProductionHost"]> {
   return (await import("#internal/nitro/host.js")).startProductionServer;
+}
+
+async function loadStartWorkflowWebUi(): Promise<CliRuntimeDependencies["startWorkflowWebUi"]> {
+  return (await import("#cli/dev/workflow-web-ui.js")).startWorkflowWebUi;
 }
 
 function shouldPrintCliBootBanner(actionCommand: Command): boolean {
@@ -202,6 +137,14 @@ function parsePortOption(value: string): number {
     throw new InvalidArgumentError(`Expected a port between 0 and 65535, received "${value}".`);
   }
 
+  return port;
+}
+
+function parseWorkflowUiPortOption(value: string): number {
+  const port = parsePortOption(value);
+  if (port === 0) {
+    throw new InvalidArgumentError("The Workflow SDK Web UI port must be greater than 0.");
+  }
   return port;
 }
 
@@ -404,6 +347,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       parseDevelopmentHeaderOption,
     )
     .option("--no-ui", "Start the server without an interactive UI")
+    .option("--workflow-ui", "Start the local Workflow SDK Web UI")
+    .option(
+      "--workflow-ui-port <port>",
+      "Port for the Workflow SDK Web UI (defaults to 3456)",
+      parseWorkflowUiPortOption,
+    )
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input, or start onboarding with /model")
     .option(
@@ -452,6 +401,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       const mode = resolveDevUiMode({ options, interactive });
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
+      }
+      if (
+        remoteServerUrl !== undefined &&
+        (options.workflowUi === true || options.workflowUiPort !== undefined)
+      ) {
+        throw new InvalidArgumentError("--workflow-ui requires eve dev to start a local server.");
       }
       let existingLocalDevelopmentServer = false;
       if (remoteServerUrl !== undefined) {
@@ -526,14 +481,16 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
       let closed = false;
       let server: DevelopmentServer | undefined;
+      let workflowWebUi: WorkflowWebUiHandle | undefined;
       const closeServer = async () => {
-        if (closed || server === undefined) {
+        if (closed) {
           return;
         }
 
         closed = true;
+        await workflowWebUi?.close();
         // No-op when this instance attached to a server another process owns.
-        await server.close();
+        await server?.close();
       };
 
       try {
@@ -557,6 +514,36 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
               tone: "success",
             }),
           );
+        }
+
+        if (options.workflowUi === true || options.workflowUiPort !== undefined) {
+          buildProgress?.update("Starting Workflow SDK Web UI");
+          try {
+            const startWorkflowWebUi =
+              runtime.startWorkflowWebUi ?? (await loadStartWorkflowWebUi());
+            workflowWebUi = await startWorkflowWebUi({
+              agentServerUrl: handle.url,
+              appRoot: handle.appRoot,
+              port: options.workflowUiPort ?? 3456,
+            });
+            buildProgress?.stop();
+            logger.log(
+              renderCliTaggedLine(theme, {
+                message: `Workflow SDK Web UI at ${workflowWebUi.url}`,
+                tag: "dev",
+                tone: "success",
+              }),
+            );
+          } catch (error) {
+            buildProgress?.stop();
+            logger.error(
+              renderCliTaggedLine(theme, {
+                message: `Workflow SDK Web UI failed to start: ${error instanceof Error ? error.message : String(error)}`,
+                tag: "dev",
+                tone: "warning",
+              }),
+            );
+          }
         }
 
         if (mode === "headless") {

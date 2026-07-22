@@ -151,6 +151,8 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `-u, --url <url>`                   | string | none               | Connect to an existing server URL instead of starting one                                 |
 | `-H, --header <header>`             | string | none               | Request header for a URL target, in `Name: value` form; repeat for multiple headers       |
 | `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                                                |
+| `--workflow-ui`                     | flag   | off                | Start the local Workflow SDK Web UI                                                       |
+| `--workflow-ui-port <port>`         | number | 3456               | Port for the Workflow SDK Web UI; also enables it                                         |
 | `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                                            |
 | `--input <text>`                    | string | none               | Pre-fill the prompt input; bare local `/model` starts onboarding                          |
 | `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
@@ -162,6 +164,8 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
 
 A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, then opens `/model`. Other input stays editable in the prompt.
+
+Pass `--workflow-ui` to start the version-matched Workflow SDK observability UI against eve's local `.eve/.workflow-data` store. It runs at `http://localhost:3456` by default, does not open a browser automatically, and stops with `eve dev`. Use `--workflow-ui-port <port>` to choose another port; specifying the port also enables the UI. This option is local-only and cannot be combined with a URL target.
 
 For a URL target protected by HTTP Basic auth, put the credentials in the URL. Eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
 
