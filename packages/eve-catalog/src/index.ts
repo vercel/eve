@@ -221,10 +221,10 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
-    slug: "chat-sdk-imessage",
-    name: "iMessage",
+    slug: "chat-sdk-photon",
+    name: "Photon",
     kind: "channel",
-    tagline: "Reach iMessage conversations through a choice of Chat SDK adapters.",
+    tagline: "Cloud, self-hosted, and local iMessage messaging through Photon.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
