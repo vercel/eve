@@ -354,26 +354,109 @@ async function buildNitroOutput(
   return outputDirectory;
 }
 
-async function buildVercelNitroSurface(
+async function createVercelNitroSurface(
   preparedHost: PreparedApplicationHost,
   workspace: ApplicationBuildWorkspace,
   surface: Exclude<NitroBuildSurface, "all">,
+  outputDir: string,
   profiler: ApplicationBuildProfiler | undefined,
-): Promise<string> {
+): Promise<Nitro> {
   const phasePrefix = `nitro.${surface}`;
-  const nitro = await measureBuildPhase(profiler, `${phasePrefix}.create`, () =>
+  return await measureBuildPhase(profiler, `${phasePrefix}.create`, () =>
     createProductionApplicationNitro(preparedHost, {
       buildDir: join(workspace.nitro.buildDir, surface),
-      outputDir: join(workspace.nitro.surfaceOutputDir, surface),
+      outputDir,
       surface,
     }),
   );
+}
 
-  try {
-    return await buildNitroOutput(nitro, profiler, phasePrefix);
-  } finally {
-    await measureBuildPhase(profiler, `${phasePrefix}.close`, () => nitro.close());
+interface VercelNitroSurfaces {
+  readonly app: Nitro;
+  readonly flow: Nitro;
+}
+
+async function createVercelNitroSurfaces(
+  preparedHost: PreparedApplicationHost,
+  workspace: ApplicationBuildWorkspace,
+  profiler: ApplicationBuildProfiler | undefined,
+): Promise<VercelNitroSurfaces> {
+  const [appResult, flowResult] = await Promise.allSettled([
+    createVercelNitroSurface(
+      preparedHost,
+      workspace,
+      "app",
+      workspace.publication.output.stagedDir,
+      profiler,
+    ),
+    createVercelNitroSurface(
+      preparedHost,
+      workspace,
+      "flow",
+      join(workspace.nitro.surfaceOutputDir, "flow"),
+      profiler,
+    ),
+  ]);
+
+  if (appResult.status === "fulfilled" && flowResult.status === "fulfilled") {
+    return {
+      app: appResult.value,
+      flow: flowResult.value,
+    };
   }
+
+  await Promise.all([
+    ...(appResult.status === "fulfilled"
+      ? [measureBuildPhase(profiler, "nitro.app.close", () => appResult.value.close())]
+      : []),
+    ...(flowResult.status === "fulfilled"
+      ? [measureBuildPhase(profiler, "nitro.flow.close", () => flowResult.value.close())]
+      : []),
+  ]);
+
+  if (appResult.status === "rejected") {
+    throw appResult.reason;
+  }
+
+  if (flowResult.status === "rejected") {
+    throw flowResult.reason;
+  }
+
+  throw new Error("Expected one Vercel Nitro surface creation to fail.");
+}
+
+async function buildVercelNitroSurfaces(
+  surfaces: VercelNitroSurfaces,
+  profiler: ApplicationBuildProfiler | undefined,
+): Promise<string> {
+  const [appResult, flowResult] = await Promise.allSettled([
+    buildNitroOutput(surfaces.app, profiler, "nitro.app"),
+    buildNitroOutput(surfaces.flow, profiler, "nitro.flow"),
+  ]);
+
+  if (appResult.status === "fulfilled" && flowResult.status === "fulfilled") {
+    return flowResult.value;
+  }
+
+  if (appResult.status === "rejected") {
+    throw appResult.reason;
+  }
+
+  if (flowResult.status === "rejected") {
+    throw flowResult.reason;
+  }
+
+  throw new Error("Expected one Vercel Nitro surface bundle to fail.");
+}
+
+async function closeVercelNitroSurfaces(
+  surfaces: VercelNitroSurfaces,
+  profiler: ApplicationBuildProfiler | undefined,
+): Promise<void> {
+  await Promise.all([
+    measureBuildPhase(profiler, "nitro.app.close", () => surfaces.app.close()),
+    measureBuildPhase(profiler, "nitro.flow.close", () => surfaces.flow.close()),
+  ]);
 }
 
 /**
@@ -485,19 +568,13 @@ async function buildApplicationInWorkspace(
       preparedHost.compileResult.project.agentRoot,
     ),
   );
-  const nitro = await measureBuildPhase(profiler, "nitro.app.create", () =>
-    createProductionApplicationNitro(preparedHost, {
-      buildDir: join(workspace.nitro.buildDir, "app"),
-      outputDir: workspace.publication.output.stagedDir,
-      surface: "app",
-    }),
-  );
+  const nitroSurfaces = await createVercelNitroSurfaces(preparedHost, workspace, profiler);
 
   try {
-    await buildNitroOutput(nitro, profiler, "nitro.app");
     // Run sandbox prewarm before emitting the workflow functions so a
-    // prewarm failure aborts the build before we spend time bundling
-    // function output that we would never deploy.
+    // prewarm failure aborts the build before we spend time bundling either
+    // Vercel function surface. Both Nitro candidates are cheap to create and
+    // can then bundle concurrently after prewarm succeeds.
     if (!options.skipVercelSandboxPrewarm) {
       await measureBuildPhase(profiler, "sandbox.prewarm", () =>
         runVercelBuildPrewarm({
@@ -517,12 +594,7 @@ async function buildApplicationInWorkspace(
         }),
       );
     }
-    const flowNitroOutputDir = await buildVercelNitroSurface(
-      preparedHost,
-      workspace,
-      "flow",
-      profiler,
-    );
+    const flowNitroOutputDir = await buildVercelNitroSurfaces(nitroSurfaces, profiler);
     await measureBuildPhase(profiler, "workflow.emit", () =>
       emitVercelWorkflowFunctions({
         agentName: preparedHost.compileResult.manifest.config.name,
@@ -556,7 +628,7 @@ async function buildApplicationInWorkspace(
       }),
     );
   } finally {
-    await measureBuildPhase(profiler, "nitro.app.close", () => nitro.close());
+    await closeVercelNitroSurfaces(nitroSurfaces, profiler);
   }
 
   await measureBuildPhase(profiler, "output.publish", () =>

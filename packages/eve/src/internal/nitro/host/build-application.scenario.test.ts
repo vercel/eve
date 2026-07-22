@@ -19,7 +19,7 @@ import {
   VERCEL_EVE_AGENT_SUMMARY_VERSION,
 } from "#internal/vercel-agent-summary.js";
 
-const buildNitroMock = vi.fn(async (nitro: Nitro) => {
+async function buildNitroStub(nitro: Nitro): Promise<void> {
   const outputDir = nitro.options.output.dir;
   const functionDirectory = join(outputDir, "functions", "__server.func");
 
@@ -56,7 +56,9 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
     join(outputDir, "functions", "eve", "v1", "health.func"),
     "dir",
   );
-});
+}
+
+const buildNitroMock = vi.fn(buildNitroStub);
 const copyPublicAssetsMock = vi.fn(async () => undefined);
 const createProductionApplicationNitroMock = vi.fn();
 const prepareProductionApplicationHostMock = vi.fn();
@@ -177,6 +179,7 @@ describe("buildApplication", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    buildNitroMock.mockImplementation(buildNitroStub);
     workflowBuilderConstructors.length = 0;
   });
 
@@ -514,6 +517,69 @@ describe("buildApplication", () => {
     expect(summary.kind).toBe(VERCEL_EVE_AGENT_SUMMARY_KIND);
     expect(summary.schemaVersion).toBe(VERCEL_EVE_AGENT_SUMMARY_VERSION);
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
+  });
+
+  it("waits for sandbox prewarm before bundling either Vercel function surface", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const appRoot = await createScratchDirectory("eve-build-application-vercel-prewarm-failure-");
+    const outputDir = join(appRoot, ".vercel", "output");
+    const outputMarkerPath = join(outputDir, "last-good-output.txt");
+    const createdNitros: Nitro[] = [];
+
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) => {
+        const nitro = createNitroStub(options.outputDir);
+        createdNitros.push(nitro);
+        return nitro;
+      },
+    );
+    runVercelBuildPrewarmMock.mockRejectedValueOnce(new Error("injected sandbox prewarm failure"));
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(outputMarkerPath, "last-good-output\n");
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    await expect(buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS)).rejects.toThrow(
+      "injected sandbox prewarm failure",
+    );
+
+    expect(createdNitros).toHaveLength(2);
+    expect(buildNitroMock).not.toHaveBeenCalled();
+    expect(workflowBuilderBuildVercelOutputMock).not.toHaveBeenCalled();
+    for (const nitro of createdNitros) {
+      expect(nitro.close).toHaveBeenCalledOnce();
+    }
+    await expect(readFile(outputMarkerPath, "utf8")).resolves.toBe("last-good-output\n");
+  });
+
+  it("bundles the Vercel app and flow surfaces concurrently after prewarm", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const appRoot = await createScratchDirectory("eve-build-application-vercel-concurrent-");
+    const firstBundleStarted = Promise.withResolvers<void>();
+    const releaseBundles = Promise.withResolvers<void>();
+    let bundleCalls = 0;
+
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
+    buildNitroMock.mockImplementation(async (nitro: Nitro) => {
+      bundleCalls += 1;
+      if (bundleCalls === 1) {
+        firstBundleStarted.resolve();
+      }
+      await releaseBundles.promise;
+      await mkdir(nitro.options.output.dir, { recursive: true });
+    });
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    const build = buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+
+    await firstBundleStarted.promise;
+    await vi.waitFor(() => expect(bundleCalls).toBe(2));
+    releaseBundles.resolve();
+    await expect(build).resolves.toBe(join(appRoot, ".vercel", "output"));
   });
 
   it("skips Vercel sandbox prewarm only when the build opts out", async () => {
