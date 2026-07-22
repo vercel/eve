@@ -847,7 +847,7 @@ See the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-offic
     configure: `Connect a WhatsApp number in Kapso, set \`KAPSO_API_KEY\`, \`KAPSO_PHONE_NUMBER_ID\`, and \`KAPSO_WEBHOOK_SECRET\`, then point the Kapso webhook at \`/eve/v1/kapso\`. Use this provider-managed option when you do not want to integrate directly with the WhatsApp Cloud API. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   "chat-sdk-photon": {
-    logo: "imessage",
+    logo: "photon",
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: [
@@ -903,7 +903,7 @@ export default channel;
 \`\`\`
 
 See the [Photon adapter documentation](https://chat-sdk.dev/adapters/vendor-official/photon) for all supported events and credentials.`,
-    configure: `Photon is the recommended adapter because it is dedicated to iMessage and supports cloud, self-hosted, and local macOS deployments. Set \`IMESSAGE_PROJECT_ID\` and \`IMESSAGE_PROJECT_SECRET\`, then point Photon’s signed webhook at \`/eve/v1/imessage\`. Other vendor-official choices are [Sendblue](https://chat-sdk.dev/adapters/vendor-official/sendblue) for iMessage/SMS/RCS, [Linq](https://chat-sdk.dev/adapters/vendor-official/linq) for iMessage/SMS, and [AgentPhone](https://chat-sdk.dev/adapters/vendor-official/agentphone) or [Dial](https://chat-sdk.dev/adapters/vendor-official/dial) when voice is part of the same agent. [Blooio](https://chat-sdk.dev/adapters/community/blooio) is a community option. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+    configure: `Set \`IMESSAGE_PROJECT_ID\` and \`IMESSAGE_PROJECT_SECRET\`, then point Photon’s signed webhook at \`/eve/v1/imessage\`. Photon supports cloud, self-hosted, and local macOS deployments. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
 };
 
