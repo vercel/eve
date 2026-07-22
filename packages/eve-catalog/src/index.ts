@@ -214,6 +214,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-kapso",
+    name: "Kapso",
+    kind: "channel",
+    tagline: "Managed WhatsApp conversations, media, buttons, and history through Kapso.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
