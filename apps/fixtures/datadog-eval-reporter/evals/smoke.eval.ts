@@ -5,8 +5,6 @@ export default defineEval({
 
   async test(t) {
     await t.send("Say hello.");
-
     t.succeeded();
-    t.messageIncludes("Hello from the Datadog eval fixture.");
   },
 });

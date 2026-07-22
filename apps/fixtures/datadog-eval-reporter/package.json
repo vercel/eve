@@ -4,19 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "eve build",
-    "dev": "eve dev",
-    "eval": "eve eval --strict",
-    "typecheck": "eve build && tsc"
+    "eval": "eve eval --strict"
   },
   "dependencies": {
-    "@opentelemetry/core": "2.6.1",
     "@opentelemetry/sdk-trace-base": "2.6.1",
     "@vercel/otel": "2.1.2",
     "eve": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "catalog:",
-    "typescript": "catalog:"
   }
 }
