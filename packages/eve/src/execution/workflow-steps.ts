@@ -11,7 +11,11 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
-import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import {
+  isSessionLimitDecline,
+  isTurnCancellation,
+  throwIfTurnAborted,
+} from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -62,6 +66,7 @@ import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import {
   createWorkflowRuntime,
+  requestWorkflowTurnCancellation,
   startWorkflowPreferLatest,
   turnWorkflowReference,
 } from "#execution/workflow-runtime.js";
@@ -368,6 +373,19 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   } catch (error) {
     if (!isTurnCancellation(error)) throw error;
     writer.releaseLock();
+    // A declined session-limit prompt stops the whole delegation tree: a
+    // delegated session cancels the root turn before settling itself, and
+    // the root's cancelled arm cascades back down to every descendant. Root
+    // sessions carry no parent lineage and need no upward call — their own
+    // cancelled park runs the cascade. Both `accepted` and `no_active_turn`
+    // are successful outcomes, and the cascade's redundant cancel back to
+    // this already-settling session is a benign no-op.
+    if (isSessionLimitDecline(error)) {
+      const rootSessionId = readRootSessionId(input.serializedContext);
+      if (rootSessionId !== undefined) {
+        await requestWorkflowTurnCancellation({ sessionId: rootSessionId });
+      }
+    }
     return {
       action: "cancelled",
       serializedContext: input.serializedContext,
