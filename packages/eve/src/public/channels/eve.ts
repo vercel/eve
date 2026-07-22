@@ -897,6 +897,9 @@ function serializeAsNdjson(events: ReadableStream<unknown>): ReadableStream<Uint
   const encoder = new TextEncoder();
   return events.pipeThrough(
     new TransformStream<unknown, Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("\n"));
+      },
       transform(event, controller) {
         controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       },
