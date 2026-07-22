@@ -8,6 +8,7 @@ import {
   SiDatadog,
   SiEgnyte,
   SiGooglechat,
+  SiResend,
   SiHuggingface,
   SiMake,
   SiMessenger,
@@ -457,6 +458,8 @@ export const beeperLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const resendLogo = (props: LogoProps) => <SiResend {...props}>;
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -605,6 +608,7 @@ export const logos = {
   agentphone: agentphoneLogo,
   lark: larkLogo,
   beeper: beeperLogo,
+  resend: resendLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,

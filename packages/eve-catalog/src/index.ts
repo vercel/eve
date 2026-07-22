@@ -256,6 +256,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-resend",
+    name: "Resend",
+    kind: "channel",
+    tagline: "Send and receive threaded email through Resend via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
