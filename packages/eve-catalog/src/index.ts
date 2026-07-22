@@ -228,6 +228,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-dial",
+    name: "Dial",
+    kind: "channel",
+    tagline: "Give your agent a phone number for SMS, MMS, iMessage, and voice transcripts.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
