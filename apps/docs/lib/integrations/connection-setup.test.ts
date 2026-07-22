@@ -50,7 +50,7 @@ describe("Vercel MCP connection setup", () => {
     expect(quickStart).toContain('auth: connect("vercel")');
     const configure = buildConnectionConfigure(integration);
     expect(configure).toContain("vercel connect create vercel");
-    expect(configure).toContain("vercel connect attach vercel");
+    expect(configure).not.toContain("vercel connect attach");
     expect(configure.indexOf("vercel link")).toBeLessThan(
       configure.indexOf("vercel connect create vercel"),
     );
