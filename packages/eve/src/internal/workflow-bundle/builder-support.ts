@@ -21,11 +21,6 @@ export interface WorkflowBundleBuilderOptions {
   appRoot: string;
   compiledArtifactsBootstrapPath: string;
   outDir: string;
-  /**
-   * The agent's resolved public route prefix, baked into every emitted Vercel
-   * workflow function's environment for callback-URL minting.
-   */
-  publicRoutePrefix?: string;
   rootDir: string;
   watch: boolean;
   /** Test-harness-only: also scans `src/internal/testing/`. */

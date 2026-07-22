@@ -32,19 +32,8 @@ import {
   computeChannelRouteRegistrations,
   registerChannelVirtualHandlers,
 } from "#internal/nitro/host/channel-routes.js";
-import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
-
-function includesApplicationRoutes(surface: NitroBuildSurface): boolean {
-  return surface === "all" || surface === "app";
-}
-
-function includesWorkflowBundles(surface: NitroBuildSurface): boolean {
-  return includesWorkflowRoute(surface);
-}
-
-function includesWorkflowRoute(surface: NitroBuildSurface): boolean {
-  return surface === "all" || surface === "flow";
-}
+import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/nitro/host/vercel-build-output-config.js";
 
 function registerHandler(
   nitro: Nitro,
@@ -362,7 +351,7 @@ async function registerWorkflowRoute(
     bundleName: "workflows",
     bundlePath: workflowBundlePath,
     directHandlers,
-    route: "/.well-known/workflow/v1/flow",
+    route: EVE_WORKFLOW_FLOW_ROUTE_PATH,
     runtimeImportSpecifier,
     workflowWorldPluginPath: preparedHost.compiledArtifacts.workflowWorldPluginPath,
   });
@@ -415,45 +404,38 @@ export async function configureDevelopmentNitroRoutes(
 }
 
 /**
- * Wires the subset of eve's package-owned endpoints that belong to the given
- * build surface into a production Nitro host.
+ * Wires eve's package-owned app, channel, and Workflow SDK endpoints into the
+ * production Nitro host.
  */
 export async function configureProductionNitroRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
-  surface: NitroBuildSurface,
 ): Promise<void> {
-  if (includesWorkflowBundles(surface)) {
-    const builder = new WorkflowBundleBuilder({
-      agentName: preparedHost.compileResult.manifest.config.name,
-      appRoot: preparedHost.appRoot,
-      compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
-      outDir: preparedHost.workflowBuildDir,
-      rootDir: resolvePackageRoot(),
-      watch: false,
+  const builder = new WorkflowBundleBuilder({
+    agentName: preparedHost.compileResult.manifest.config.name,
+    appRoot: preparedHost.appRoot,
+    compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
+    outDir: preparedHost.workflowBuildDir,
+    rootDir: resolvePackageRoot(),
+    watch: false,
+  });
+  const syncWorkflowArtifacts = async () => {
+    await builder.build({
+      nitroStepOutfile: join(resolveNitroWorkflowBuildDirectory(nitro), "steps.mjs"),
     });
-    const syncWorkflowArtifacts = async () => {
-      await builder.build({
-        nitroStepOutfile: join(resolveNitroWorkflowBuildDirectory(nitro), "steps.mjs"),
-      });
-    };
-    await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
-  }
+  };
+  await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
 
-  if (includesApplicationRoutes(surface)) {
-    registerApplicationRoutes(nitro, preparedHost, createProductionNitroArtifactsConfig());
-  }
+  registerApplicationRoutes(nitro, preparedHost, createProductionNitroArtifactsConfig());
 
-  if (includesWorkflowRoute(surface)) {
-    const workflowBundlePath = join(preparedHost.workflowBuildDir, "workflows.mjs");
-    const hasConfiguredWorkflowWorld =
-      preparedHost.compileResult.manifest.config.experimental?.workflow?.world !== undefined;
-    const directHandlers =
-      !isVercelBuildEnvironment() && hasConfiguredWorkflowWorld
-        ? [createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath)]
-        : [];
-    await registerWorkflowRoute(nitro, preparedHost, workflowBundlePath, directHandlers);
-  }
+  const workflowBundlePath = join(preparedHost.workflowBuildDir, "workflows.mjs");
+  const hasConfiguredWorkflowWorld =
+    preparedHost.compileResult.manifest.config.experimental?.workflow?.world !== undefined;
+  const directHandlers =
+    !isVercelBuildEnvironment() && hasConfiguredWorkflowWorld
+      ? [createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath)]
+      : [];
+  await registerWorkflowRoute(nitro, preparedHost, workflowBundlePath, directHandlers);
 
   nitro.routing.sync();
 }
