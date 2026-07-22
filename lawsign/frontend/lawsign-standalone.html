@@ -1,0 +1,2151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>로싸인 LawSign — 법무 특화 전자서명 워크스페이스</title>
+</head>
+<body>
+<noscript>로싸인 프로토타입은 JavaScript가 필요합니다.</noscript>
+<script>
+// CSS를 JS에서 주입 — <style> 태그를 제거하는 뷰어에서도 디자인 유지
+(function () {
+  var s = document.createElement("style");
+  s.id = "ls-style";
+  s.textContent = "/* ================================================================\n   로싸인(LawSign) 디자인 시스템 v1.0\n   - 토큰 기반(CSS Custom Properties) / 라이트·다크 자동 대응\n   - 모바일(≤768px) Bottom Navigation 반응형\n   ================================================================ */\n\n:root {\n  --font-sans: \"Pretendard Variable\", Pretendard, -apple-system, BlinkMacSystemFont,\n    \"Apple SD Gothic Neo\", \"Segoe UI\", \"Noto Sans KR\", \"Malgun Gothic\", sans-serif;\n  --font-mono: \"JetBrains Mono\", \"SF Mono\", ui-monospace, Menlo, Consolas, monospace;\n\n  --brand-600: #3348e0;\n  --brand-500: #4059ec;\n  --brand-100: #e4e8fd;\n  --brand-50: #f1f3fe;\n  --gold-500: #c99a2e;\n  --gold-100: #f7ecd2;\n\n  --bg: #f4f6fb;\n  --surface: #ffffff;\n  --surface-2: #f8f9fd;\n  --border: #e4e7f0;\n  --border-strong: #ccd2e3;\n  --text: #171c2b;\n  --text-2: #565e75;\n  --text-3: #8b93aa;\n\n  --red-600: #d6455d;\n  --red-100: #fbe4e9;\n  --amber-600: #b07514;\n  --amber-100: #fbf0d9;\n  --green-600: #1d8a56;\n  --green-100: #ddf3e7;\n  --blue-600: #2470c2;\n  --blue-100: #e0edfb;\n  --violet-600: #7048c8;\n  --violet-100: #ece4fb;\n\n  --shadow-sm: 0 1px 2px rgba(23, 28, 43, 0.05);\n  --shadow-md: 0 4px 14px rgba(23, 28, 43, 0.08);\n  --shadow-lg: 0 14px 42px rgba(23, 28, 43, 0.16);\n  --radius: 12px;\n  --radius-lg: 16px;\n  --lnb-w: 232px;\n}\n\n:root[data-theme=\"dark\"] {\n  --bg: #10141f;\n  --surface: #181d2c;\n  --surface-2: #1e2436;\n  --border: #2a3147;\n  --border-strong: #3b4460;\n  --text: #eef0f7;\n  --text-2: #a6adc4;\n  --text-3: #6e7690;\n  --brand-100: #26305e;\n  --brand-50: #1d2544;\n  --red-100: #46232b;\n  --amber-100: #423318;\n  --green-100: #1a3a2b;\n  --blue-100: #1c3350;\n  --violet-100: #2d2347;\n  --gold-100: #3d3118;\n  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);\n  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);\n  --shadow-lg: 0 14px 42px rgba(0, 0, 0, 0.6);\n}\n\n* { box-sizing: border-box; margin: 0; padding: 0; }\nhtml { -webkit-text-size-adjust: 100%; }\nbody {\n  font-family: var(--font-sans);\n  background: var(--bg);\n  color: var(--text);\n  font-size: 14px;\n  line-height: 1.55;\n  -webkit-font-smoothing: antialiased;\n}\nbutton { font: inherit; color: inherit; cursor: pointer; background: none; border: none; }\ninput, select, textarea { font: inherit; color: inherit; }\na { color: var(--brand-600); text-decoration: none; }\n::placeholder { color: var(--text-3); }\n\n/* ── 앱 셸 ─────────────────────────────────────── */\n.app-shell { display: flex; min-height: 100vh; }\n\n.lnb {\n  width: var(--lnb-w);\n  flex: 0 0 var(--lnb-w);\n  background: var(--surface);\n  border-right: 1px solid var(--border);\n  padding: 20px 14px;\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  position: sticky;\n  top: 0;\n  height: 100vh;\n}\n.lnb-logo {\n  display: flex; align-items: center; gap: 10px;\n  font-size: 19px; font-weight: 800; letter-spacing: -0.02em;\n  padding: 4px 10px 18px;\n}\n.lnb-logo .mark {\n  width: 32px; height: 32px; border-radius: 9px;\n  background: linear-gradient(135deg, var(--brand-600), #6e5be8);\n  color: #fff; display: grid; place-items: center; font-size: 15px; font-weight: 900;\n}\n.lnb-logo .law { color: var(--brand-600); }\n.lnb-cta {\n  display: flex; align-items: center; justify-content: center; gap: 8px;\n  background: var(--brand-600); color: #fff; font-weight: 700;\n  border-radius: 10px; padding: 11px 12px; margin-bottom: 14px;\n  box-shadow: var(--shadow-sm); transition: background 0.15s;\n}\n.lnb-cta:hover { background: var(--brand-500); }\n.lnb-item {\n  display: flex; align-items: center; gap: 10px;\n  padding: 9px 12px; border-radius: 9px; color: var(--text-2);\n  font-weight: 600; transition: background 0.12s, color 0.12s;\n}\n.lnb-item:hover { background: var(--surface-2); color: var(--text); }\n.lnb-item.active { background: var(--brand-50); color: var(--brand-600); }\n.lnb-item .cnt {\n  margin-left: auto; font-size: 11px; font-weight: 700;\n  background: var(--red-100); color: var(--red-600);\n  border-radius: 20px; padding: 1px 7px;\n}\n.lnb-footer { margin-top: auto; padding: 10px 12px; color: var(--text-3); font-size: 12px; }\n.lnb-user { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-top: 1px solid var(--border); }\n.avatar {\n  width: 30px; height: 30px; border-radius: 50%; flex: none;\n  background: var(--gold-100); color: var(--gold-500);\n  display: grid; place-items: center; font-weight: 800; font-size: 12px;\n}\n.lnb-user b { font-size: 13px; }\n.lnb-user small { display: block; color: var(--text-3); font-size: 11px; }\n\n.main { flex: 1; min-width: 0; padding: 26px 30px 80px; }\n.page { max-width: 1180px; margin: 0 auto; }\n\n/* ── 공통 컴포넌트 ─────────────────────────────── */\n.card {\n  background: var(--surface); border: 1px solid var(--border);\n  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);\n}\n.card-pad { padding: 20px 22px; }\n.section-title { font-size: 15px; font-weight: 800; display: flex; align-items: center; gap: 8px; }\n.muted { color: var(--text-2); }\n.dim { color: var(--text-3); }\n.mono { font-family: var(--font-mono); font-size: 12px; }\n\n.btn {\n  display: inline-flex; align-items: center; gap: 7px;\n  border: 1px solid var(--border-strong); background: var(--surface);\n  border-radius: 9px; padding: 8px 14px; font-weight: 700; font-size: 13px;\n  transition: background 0.12s, border-color 0.12s; white-space: nowrap;\n}\n.btn:hover { background: var(--surface-2); }\n.btn.primary { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }\n.btn.primary:hover { background: var(--brand-500); }\n.btn.danger { color: var(--red-600); border-color: var(--red-600); }\n.btn.ghost { border-color: transparent; color: var(--text-2); }\n.btn.sm { padding: 5px 10px; font-size: 12px; border-radius: 7px; }\n.btn:disabled { opacity: 0.45; cursor: not-allowed; }\n\n.badge {\n  display: inline-flex; align-items: center; gap: 4px;\n  font-size: 11px; font-weight: 700; border-radius: 20px; padding: 2px 9px;\n}\n.badge.gray { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }\n.badge.red { background: var(--red-100); color: var(--red-600); }\n.badge.amber { background: var(--amber-100); color: var(--amber-600); }\n.badge.green { background: var(--green-100); color: var(--green-600); }\n.badge.blue { background: var(--blue-100); color: var(--blue-600); }\n.badge.violet { background: var(--violet-100); color: var(--violet-600); }\n.badge.brand { background: var(--brand-100); color: var(--brand-600); }\n.badge.gold { background: var(--gold-100); color: var(--gold-500); }\n\n.input, select.input {\n  width: 100%; background: var(--surface); border: 1px solid var(--border-strong);\n  border-radius: 9px; padding: 9px 12px; font-size: 13px; outline: none;\n  transition: border-color 0.12s, box-shadow 0.12s;\n}\n.input:focus { border-color: var(--brand-500); box-shadow: 0 0 0 3px var(--brand-100); }\n.field-label { display: block; font-size: 12px; font-weight: 700; color: var(--text-2); margin: 0 0 6px 2px; }\n\n.toolbar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }\n.search-box { position: relative; flex: 1; min-width: 200px; max-width: 340px; }\n.search-box .input { padding-left: 34px; }\n.search-box svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-3); }\n\n/* ── 토스트 / 모달 ─────────────────────────────── */\n#toast-root { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 90; display: flex; flex-direction: column; gap: 8px; align-items: center; }\n.toast {\n  background: var(--text); color: var(--bg);\n  border-radius: 10px; padding: 10px 18px; font-weight: 600; font-size: 13px;\n  box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 10px;\n  animation: toast-in 0.22s ease;\n}\n.toast .bar { height: 4px; width: 120px; background: rgba(255,255,255,0.25); border-radius: 4px; overflow: hidden; }\n.toast .bar i { display: block; height: 100%; background: #7ee2a8; width: 0; transition: width 0.3s; }\n@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }\n\n.modal-backdrop {\n  position: fixed; inset: 0; background: rgba(13, 17, 30, 0.55);\n  z-index: 80; display: grid; place-items: center; padding: 20px;\n  animation: fade-in 0.15s ease;\n}\n@keyframes fade-in { from { opacity: 0; } }\n.modal {\n  width: 100%; max-width: 560px; max-height: 88vh; overflow: auto;\n  background: var(--surface); border-radius: var(--radius-lg);\n  box-shadow: var(--shadow-lg); animation: modal-in 0.18s ease;\n}\n.modal.wide { max-width: 760px; }\n@keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(0.98); } }\n.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 0; }\n.modal-head h3 { font-size: 16px; }\n.modal-body { padding: 16px 22px 22px; }\n.modal-close { color: var(--text-3); font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 7px; }\n.modal-close:hover { background: var(--surface-2); }\n\n/* ── 대시보드 ─────────────────────────────────── */\n.dash-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }\n.dash-head h1 { font-size: 22px; letter-spacing: -0.02em; }\n.dash-head .sub { color: var(--red-600); font-weight: 700; margin-top: 3px; }\n\n.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }\n.stat {\n  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);\n  padding: 15px 17px; cursor: pointer; transition: transform 0.12s, box-shadow 0.12s;\n  position: relative; overflow: hidden;\n}\n.stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }\n.stat .k { font-size: 12px; font-weight: 700; color: var(--text-2); display: flex; align-items: center; gap: 6px; }\n.stat .v { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin-top: 4px; }\n.stat .dot { width: 8px; height: 8px; border-radius: 50%; }\n.stat::after { content: \"\"; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent, transparent); }\n\n.dash-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }\n.chart-wrap { height: 210px; margin-top: 12px; }\n.chart-wrap svg { width: 100%; height: 100%; display: block; }\n\n.urgent-item {\n  border: 1px solid var(--border); border-left: 3px solid var(--red-600);\n  border-radius: 10px; padding: 12px 14px; margin-top: 10px; background: var(--surface-2);\n}\n.urgent-item .t { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.urgent-item .meta { display: flex; align-items: center; gap: 10px; margin: 6px 0 9px; font-size: 12px; color: var(--text-2); }\n\n.tpl-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }\n.tpl-card {\n  border: 1px solid var(--border); border-radius: var(--radius); padding: 15px 14px;\n  background: var(--surface); cursor: pointer; text-align: left;\n  transition: border-color 0.12s, transform 0.12s, box-shadow 0.12s;\n}\n.tpl-card:hover { border-color: var(--brand-500); transform: translateY(-2px); box-shadow: var(--shadow-md); }\n.tpl-card .ic { width: 36px; height: 36px; border-radius: 9px; background: var(--brand-50); color: var(--brand-600); display: grid; place-items: center; margin-bottom: 10px; }\n.tpl-card b { display: block; font-size: 13px; margin-bottom: 3px; }\n.tpl-card.add { border-style: dashed; display: grid; place-items: center; color: var(--text-3); font-weight: 700; min-height: 108px; }\n.tpl-card.add:hover { color: var(--brand-600); }\n\n/* ── 문서함: 리스트 & 칸반 ─────────────────────── */\n.docbox-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }\n.view-toggle { display: inline-flex; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 9px; padding: 3px; }\n.view-toggle button { padding: 6px 13px; border-radius: 7px; font-weight: 700; font-size: 12px; color: var(--text-2); }\n.view-toggle button.active { background: var(--brand-600); color: #fff; }\n\n.status-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }\n.status-tabs button {\n  padding: 6px 13px; border-radius: 20px; font-weight: 700; font-size: 12px;\n  color: var(--text-2); border: 1px solid var(--border); background: var(--surface); white-space: nowrap;\n}\n.status-tabs button.active { background: var(--text); color: var(--surface); border-color: var(--text); }\n\ntable.doc-table { width: 100%; border-collapse: collapse; }\n.doc-table th {\n  text-align: left; font-size: 11px; color: var(--text-3); font-weight: 700;\n  text-transform: uppercase; letter-spacing: 0.04em;\n  padding: 12px 16px; border-bottom: 1px solid var(--border);\n}\n.doc-table td { padding: 13px 16px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }\n.doc-table tr:last-child td { border-bottom: none; }\n.doc-table tbody tr { cursor: pointer; transition: background 0.1s; }\n.doc-table tbody tr:hover { background: var(--surface-2); }\n.doc-title-cell { font-weight: 700; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.doc-title-cell small { display: block; font-weight: 500; color: var(--text-3); font-size: 11px; }\n\n.kanban { display: grid; grid-template-columns: repeat(4, minmax(230px, 1fr)); gap: 12px; overflow-x: auto; align-items: start; padding-bottom: 8px; }\n.kanban-col { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); min-height: 320px; }\n.kanban-col.drag-over { border-color: var(--brand-500); background: var(--brand-50); }\n.kanban-col-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; font-weight: 800; font-size: 13px; position: sticky; top: 0; }\n.kanban-col-head .cnt { color: var(--text-3); font-weight: 700; font-size: 12px; }\n.kanban-col-body { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 8px; max-height: 62vh; overflow-y: auto; }\n.kcard {\n  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;\n  padding: 11px 12px; cursor: grab; box-shadow: var(--shadow-sm);\n  transition: box-shadow 0.12s, border-color 0.12s;\n}\n.kcard:hover { box-shadow: var(--shadow-md); }\n.kcard.dragging { opacity: 0.45; }\n.kcard.stale { border-color: var(--red-600); }\n.kcard .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }\n.kcard .t { font-weight: 700; font-size: 13px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }\n.kcard .who { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; margin-top: 7px; }\n.kcard .foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-3); }\n.kcard .menu-btn { color: var(--text-3); padding: 2px 6px; border-radius: 6px; }\n.kcard .menu-btn:hover { background: var(--surface-2); }\n\n/* ── 서명 요청 플로우 (Seamless Stepper) ───────── */\n.stepper { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }\n.step-pill { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 22px; border: 1px solid var(--border); background: var(--surface); color: var(--text-3); font-weight: 700; font-size: 13px; cursor: pointer; }\n.step-pill .n { width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; font-size: 11px; }\n.step-pill.active { border-color: var(--brand-600); color: var(--brand-600); background: var(--brand-50); }\n.step-pill.active .n { background: var(--brand-600); color: #fff; }\n.step-pill.done { color: var(--green-600); border-color: var(--green-600); }\n.step-arrow { color: var(--text-3); }\n\n.request-layout { display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start; }\n.signer-row { display: grid; grid-template-columns: 34px 1fr 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px dashed var(--border); position: relative; }\n.signer-order { width: 26px; height: 26px; border-radius: 50%; background: var(--brand-100); color: var(--brand-600); display: grid; place-items: center; font-weight: 800; font-size: 12px; }\n.autocomplete { position: absolute; z-index: 30; top: calc(100% - 6px); left: 44px; right: 0; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-lg); overflow: hidden; }\n.autocomplete button { display: flex; width: 100%; justify-content: space-between; gap: 12px; padding: 9px 14px; font-size: 13px; text-align: left; }\n.autocomplete button:hover { background: var(--brand-50); }\n.checklist li { list-style: none; display: flex; align-items: flex-start; gap: 9px; padding: 9px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }\n.checklist li:last-child { border-bottom: none; }\n.checklist input[type=\"checkbox\"] { margin-top: 3px; accent-color: var(--brand-600); width: 15px; height: 15px; }\n\n/* ── 문서 편집기 ──────────────────────────────── */\n.editor-layout { display: grid; grid-template-columns: 172px 1fr 118px; gap: 14px; align-items: start; }\n.tool-palette { position: sticky; top: 18px; display: flex; flex-direction: column; gap: 6px; }\n.tool-btn {\n  display: flex; align-items: center; gap: 9px; width: 100%;\n  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);\n  background: var(--surface); font-weight: 700; font-size: 13px; text-align: left;\n  transition: border-color 0.12s, background 0.12s;\n}\n.tool-btn:hover { border-color: var(--brand-500); background: var(--brand-50); }\n.tool-btn .ic { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; background: var(--brand-50); color: var(--brand-600); flex: none; }\n.signer-select { margin-bottom: 8px; }\n\n.doc-canvas-wrap { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 22px; display: grid; place-items: center; position: relative; }\n.doc-page {\n  position: relative; background: #fff; color: #1c2333;\n  width: 100%; max-width: 560px; aspect-ratio: 210 / 297;\n  box-shadow: var(--shadow-md); border-radius: 4px; overflow: hidden;\n  touch-action: none; user-select: none;\n}\n:root[data-theme=\"dark\"] .doc-page { background: #f4f2ec; }\n.doc-page .paper { position: absolute; inset: 0; padding: 7% 8%; font-size: clamp(7px, 1.5vw, 11px); line-height: 1.9; }\n.doc-page .paper h4 { text-align: center; font-size: 1.7em; letter-spacing: 0.5em; margin-bottom: 1.6em; }\n.doc-page .paper .clause { margin-bottom: 1em; }\n.doc-page .paper .sig-line { display: flex; justify-content: space-between; border-top: 1px solid #888; margin-top: 2.4em; padding-top: 1em; }\n.snap-guide { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--brand-500); z-index: 5; pointer-events: none; }\n\n.field-block {\n  position: absolute; z-index: 10; cursor: grab;\n  border: 1.5px solid; border-radius: 6px;\n  display: flex; align-items: center; gap: 5px; padding: 3px 8px;\n  font-size: 11px; font-weight: 700; background: rgba(255, 255, 255, 0.82);\n  box-shadow: var(--shadow-sm); white-space: nowrap;\n}\n.field-block.selected { box-shadow: 0 0 0 3px var(--brand-100); cursor: grabbing; }\n.field-block .del { margin-left: 3px; opacity: 0.6; font-size: 12px; padding: 0 2px; }\n.field-block .del:hover { opacity: 1; }\n.field-c0 { border-color: #3348e0; color: #3348e0; }\n.field-c1 { border-color: #1d8a56; color: #1d8a56; }\n.field-c2 { border-color: #b07514; color: #b07514; }\n\n.thumb-rail { position: sticky; top: 18px; display: flex; flex-direction: column; gap: 8px; }\n.thumb { border: 2px solid var(--border); border-radius: 6px; background: #fff; aspect-ratio: 210 / 297; display: grid; place-items: center; color: #9aa1b5; font-size: 11px; font-weight: 700; cursor: pointer; }\n.thumb.active { border-color: var(--brand-600); color: var(--brand-600); }\n\n.editor-hint { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); background: var(--blue-100); color: var(--blue-600); border-radius: 9px; padding: 8px 12px; margin-bottom: 10px; }\n\n/* ── 검증 포털 ────────────────────────────────── */\n.validator-hero { text-align: center; padding: 34px 20px 10px; }\n.validator-hero h1 { font-size: 24px; letter-spacing: -0.02em; }\n.validator-hero .shield { width: 54px; height: 54px; border-radius: 16px; margin: 0 auto 14px; background: linear-gradient(135deg, var(--brand-600), #6e5be8); color: #fff; display: grid; place-items: center; }\n.dropzone {\n  margin: 22px auto 0; max-width: 620px; border: 2px dashed var(--border-strong);\n  border-radius: var(--radius-lg); padding: 44px 24px; text-align: center;\n  background: var(--surface); cursor: pointer; transition: border-color 0.15s, background 0.15s;\n}\n.dropzone.over, .dropzone:hover { border-color: var(--brand-500); background: var(--brand-50); }\n.verify-result { max-width: 620px; margin: 18px auto 0; border-radius: var(--radius-lg); padding: 20px 22px; border: 1px solid; }\n.verify-result.ok { background: var(--green-100); border-color: var(--green-600); }\n.verify-result.bad { background: var(--red-100); border-color: var(--red-600); }\n.verify-result h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; }\n.verify-result.ok h3 { color: var(--green-600); }\n.verify-result.bad h3 { color: var(--red-600); }\n.verify-result dl { display: grid; grid-template-columns: 96px 1fr; gap: 5px 12px; margin-top: 12px; font-size: 13px; }\n.verify-result dt { color: var(--text-2); font-weight: 700; }\n.verify-result dd { word-break: break-all; }\n\n/* ── 감사추적 인증서 ──────────────────────────── */\n.cert { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; padding: 30px 34px; position: relative; }\n.cert::before { content: \"\"; position: absolute; inset: 8px; border: 1px solid var(--gold-500); border-radius: 3px; pointer-events: none; opacity: 0.55; }\n.cert-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }\n.cert h2 { text-align: center; font-size: 18px; letter-spacing: 0.14em; margin: 18px 0 4px; }\n.cert .sub-en { text-align: center; color: var(--text-3); font-size: 11px; letter-spacing: 0.08em; margin-bottom: 20px; }\n.cert-sec { margin-top: 18px; }\n.cert-sec h4 { font-size: 13px; border-bottom: 2px solid var(--text); padding-bottom: 6px; margin-bottom: 10px; }\n.cert-sec dl { display: grid; grid-template-columns: 130px 1fr; gap: 6px 14px; font-size: 13px; }\n.cert-sec dt { color: var(--text-2); font-weight: 700; }\n.cert-sec dd { word-break: break-all; }\n.hash-chip { font-family: var(--font-mono); font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); padding: 7px 10px; border-radius: 7px; display: block; word-break: break-all; }\n.timeline { list-style: none; margin-top: 4px; }\n.timeline li { display: flex; gap: 12px; padding: 7px 0; font-size: 13px; align-items: baseline; }\n.timeline .when { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); flex: none; width: 128px; }\n.qr-box { width: 92px; height: 92px; flex: none; border: 1px solid var(--border-strong); border-radius: 6px; padding: 6px; background: #fff; }\n.qr-box svg { width: 100%; height: 100%; display: block; }\n.cert-foot { margin-top: 22px; padding-top: 14px; border-top: 1px dashed var(--border-strong); font-size: 11.5px; color: var(--text-3); display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; }\n\n/* ── 진행 프로그레스 (백그라운드 대량 발송) ───── */\n.bg-progress { position: fixed; right: 22px; bottom: 22px; z-index: 70; width: 300px; }\n.bg-progress .bar { height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; margin-top: 9px; }\n.bg-progress .bar i { display: block; height: 100%; background: var(--brand-600); transition: width 0.25s; }\n\n/* ── 접근성: 포커스 링 & 모션 축소 ────────────── */\n:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; border-radius: 4px; }\n@media (prefers-reduced-motion: reduce) {\n  *, *::before, *::after { animation: none !important; transition: none !important; }\n}\n\n/* ── 마이크로 인터랙션 ────────────────────────── */\n.btn:active, .tpl-card:active, .stat:active { transform: scale(0.985); }\n\n/* ── 스켈레톤 로딩 ────────────────────────────── */\n.skeleton { position: relative; overflow: hidden; background: var(--surface-2); border-radius: 10px; }\n.skeleton::after {\n  content: \"\"; position: absolute; inset: 0;\n  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);\n  animation: shimmer 1.3s infinite;\n}\n:root[data-theme=\"dark\"] .skeleton::after {\n  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);\n}\n@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }\n.skel-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }\n.skel-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }\n\n/* ── Empty State ──────────────────────────────── */\n.empty-state { text-align: center; padding: 44px 20px; color: var(--text-3); }\n.empty-state .art { margin: 0 auto 14px; width: 72px; height: 72px; border-radius: 20px; background: var(--surface-2); display: grid; place-items: center; color: var(--text-3); }\n.empty-state b { display: block; color: var(--text-2); font-size: 14px; margin-bottom: 4px; }\n.empty-state p { font-size: 12.5px; margin-bottom: 14px; }\n\n/* ── 차트 호버 툴팁 ───────────────────────────── */\n.chart-wrap { position: relative; }\n.chart-tip {\n  position: absolute; z-index: 20; pointer-events: none; display: none;\n  background: var(--text); color: var(--bg); border-radius: 8px;\n  padding: 6px 10px; font-size: 11.5px; font-weight: 700; white-space: nowrap;\n  transform: translate(-50%, calc(-100% - 10px)); box-shadow: var(--shadow-md);\n}\n.chart-tip small { display: block; font-weight: 500; opacity: 0.7; }\n.chart-cursor { pointer-events: none; }\n\n/* ── 토스트 액션 버튼 (실행취소) ──────────────── */\n.toast button.undo {\n  background: rgba(255, 255, 255, 0.16); color: inherit; border-radius: 7px;\n  padding: 3px 10px; font-weight: 700; font-size: 12px;\n}\n:root[data-theme=\"dark\"] .toast button.undo { background: rgba(0, 0, 0, 0.18); }\n.toast button.undo:hover { background: rgba(255, 255, 255, 0.28); }\n\n/* ── 잔여 건수 쿼터 (플랜 사용량) ──────────────── */\n.lnb-quota { display: flex; align-items: center; gap: 8px; padding: 0 4px 14px; font-size: 11.5px; color: var(--text-3); }\n.lnb-quota b { color: var(--text-2); }\n.lnb-quota .bar { flex: 1; height: 5px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }\n.lnb-quota .bar i { display: block; height: 100%; background: var(--text-2); border-radius: 5px; }\n\n/* ── 메일함 레이아웃 (폴더 레일 + 리스트) ──────── */\n.mailbox-layout { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 14px; align-items: start; }\n.mail-rail { position: sticky; top: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; display: flex; flex-direction: column; gap: 2px; }\n.rail-group { font-size: 10.5px; font-weight: 800; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; padding: 12px 10px 4px; }\n.rail-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--text-2); text-align: left; }\n.rail-item:hover { background: var(--surface-2); color: var(--text); }\n.rail-item.active { background: var(--brand-50); color: var(--brand-600); }\n.rail-item .cnt { font-size: 11px; font-weight: 700; color: var(--text-3); }\n.rail-item.active .cnt { color: var(--brand-600); }\n.rail-item.hot .cnt { background: var(--red-100); color: var(--red-600); border-radius: 12px; padding: 0 7px; }\n\n.mail-list { overflow: hidden; }\n.mail-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }\n.mail-row:last-child { border-bottom: none; }\n.mail-row:hover { background: var(--surface-2); }\n.mail-avatar { width: 34px; height: 34px; border-radius: 50%; flex: none; background: var(--brand-100); color: var(--brand-600); display: grid; place-items: center; font-weight: 800; font-size: 13px; }\n.mail-main { flex: 1; min-width: 0; }\n.mail-top { display: flex; align-items: center; gap: 8px; min-width: 0; }\n.mail-title { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.mail-row.unread .mail-title { font-weight: 800; }\n.mail-row.unread .mail-avatar { background: var(--brand-600); color: #fff; }\n.mail-snippet { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }\n.mail-side { flex: none; display: flex; align-items: center; gap: 4px; }\n.mail-time { font-size: 11.5px; color: var(--text-3); }\n.mail-actions { display: none; gap: 2px; }\n.icon-a { padding: 6px; border-radius: 7px; color: var(--text-2); display: grid; place-items: center; }\n.icon-a:hover { background: var(--brand-50); color: var(--brand-600); }\n@media (hover: hover) {\n  .mail-row:hover .mail-time { display: none; }\n  .mail-row:hover .mail-actions { display: flex; }\n}\n@media (hover: none) {\n  .mail-actions { display: flex; }\n}\n\n/* ── 캘린더 뷰 ────────────────────────────────── */\n.cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; font-size: 11px; font-weight: 700; color: var(--text-3); text-align: center; margin-bottom: 4px; }\n.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }\n.cal-cell { min-height: 78px; border: 1px solid var(--border); border-radius: 8px; padding: 6px; background: var(--surface); display: flex; flex-direction: column; gap: 4px; }\n.cal-cell.off { background: transparent; border-color: transparent; }\n.cal-cell.today { border-color: var(--brand-600); box-shadow: 0 0 0 2px var(--brand-100); }\n.cal-cell.has { cursor: pointer; }\n.cal-cell.has:hover { background: var(--brand-50); border-color: var(--brand-500); }\n.cal-cell .d { font-size: 11.5px; font-weight: 700; color: var(--text-2); }\n.cal-cell.today .d { color: var(--brand-600); }\n.cal-chips { display: flex; flex-direction: column; gap: 2px; }\n.cal-chip { font-size: 10.5px; font-weight: 700; border-radius: 6px; padding: 1px 6px; white-space: nowrap; width: fit-content; }\n.cal-chip.send { background: var(--blue-100); color: var(--blue-600); }\n.cal-chip.done { background: var(--green-100); color: var(--green-600); }\n.cal-chip.wait { background: var(--amber-100); color: var(--amber-600); }\n\n/* 대시보드 미니 캘린더: 셀을 낮추고 칩을 가로로 흘려 한 화면에 담는다 */\n.cal-grid.mini .cal-cell { min-height: 46px; padding: 4px 5px; gap: 2px; }\n.cal-grid.mini .cal-chips { flex-direction: row; flex-wrap: wrap; }\n.cal-grid.mini .cal-chip { font-size: 10px; padding: 0 4px; }\n\n/* ── 요청 방식 선택 카드 ──────────────────────── */\n.method-grid { display: grid; gap: 10px; margin-top: 12px; }\n.method-card { display: flex; align-items: center; gap: 14px; text-align: left; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: var(--surface); transition: border-color 0.12s, transform 0.12s, box-shadow 0.12s; }\n.method-card:hover { border-color: var(--brand-500); transform: translateY(-1px); box-shadow: var(--shadow-md); }\n.method-card .ic { width: 44px; height: 44px; border-radius: 12px; flex: none; background: var(--brand-50); color: var(--brand-600); display: grid; place-items: center; }\n.method-card b { display: block; font-size: 14px; }\n.method-card small { color: var(--text-2); font-size: 12.5px; }\n\n/* ── 모바일 상단 앱바 ─────────────────────────── */\n/* ── AI 어시스턴트 (RAG 채팅) ─────────────────── */\n.ai-keybar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 16px; }\n.ai-chat { display: flex; flex-direction: column; gap: 12px; min-height: 200px; }\n.ai-msg { display: flex; gap: 10px; align-items: flex-start; }\n.ai-msg.user { justify-content: flex-end; }\n.ai-msg .bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 10px 14px; font-size: 13.5px; line-height: 1.65; max-width: 86%; white-space: pre-wrap; word-break: break-word; }\n.ai-msg.user .bubble { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }\n.ai-avatar { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--brand-600), var(--violet-600)); color: #fff; display: grid; place-items: center; font-size: 14px; flex: none; }\n.ai-src { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }\n.ai-src .badge { cursor: pointer; border: 0; font: inherit; font-size: 11px; font-weight: 700; }\n.ai-suggest { margin: 14px 0 10px; }\n.ai-inputbar { display: flex; gap: 8px; align-items: flex-end; position: sticky; bottom: 12px; }\n.ai-inputbar textarea { resize: none; flex: 1; }\n.ai-typing i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); margin-right: 4px; animation: ai-blink 1.2s infinite; }\n.ai-typing i:nth-child(2) { animation-delay: 0.2s; }\n.ai-typing i:nth-child(3) { animation-delay: 0.4s; }\n@keyframes ai-blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }\n\n.top-appbar { display: none; }\n\n/* ── 하단 모바일 내비게이션 ───────────────────── */\n.bottom-nav { display: none; }\n\n@media (max-width: 1020px) {\n  .dash-grid, .request-layout { grid-template-columns: 1fr; }\n  .mailbox-layout { grid-template-columns: 1fr; }\n  .mail-rail { position: static; flex-direction: row; overflow-x: auto; }\n  .mail-rail .rail-group { display: none; }\n  .rail-item { white-space: nowrap; width: auto; flex: none; }\n  .editor-layout { grid-template-columns: 148px 1fr; }\n  .thumb-rail { display: none; }\n  .stat-grid, .tpl-grid { grid-template-columns: repeat(2, 1fr); }\n}\n\n@media (max-width: 768px) {\n  .lnb { display: none; }\n  .top-appbar {\n    display: flex; position: sticky; top: 0; z-index: 55;\n    align-items: center; justify-content: space-between; gap: 10px;\n    background: var(--surface); border-bottom: 1px solid var(--border);\n    padding: 10px 14px calc(10px);\n  }\n  .top-appbar .lnb-logo { padding: 0; font-size: 17px; }\n  .top-appbar .lnb-logo .mark { width: 27px; height: 27px; font-size: 13px; }\n  .top-appbar .actions { display: flex; align-items: center; gap: 6px; }\n  .top-appbar .icon-btn { padding: 7px; border-radius: 9px; color: var(--text-2); display: grid; place-items: center; }\n  .top-appbar .icon-btn:active { background: var(--surface-2); }\n  .main { padding: 16px 14px 96px; }\n  .skel-grid { grid-template-columns: repeat(2, 1fr); }\n  .skel-row { grid-template-columns: 1fr; }\n  .kanban { display: flex; }\n  .kanban-col { min-width: 240px; flex: none; width: 78vw; max-width: 300px; }\n  .editor-layout { grid-template-columns: 1fr; }\n  .tool-palette { position: fixed; left: 0; right: 0; bottom: 62px; top: auto; z-index: 60; flex-direction: row; overflow-x: auto; background: var(--surface); border-top: 1px solid var(--border); padding: 9px 10px; gap: 8px; }\n  .tool-btn { width: auto; flex: none; }\n  .doc-table .hide-m { display: none; }\n  .cal-cell { min-height: 58px; padding: 4px; }\n  .cal-chip { font-size: 9.5px; padding: 0 4px; }\n  .cal-grid.mini .cal-cell { min-height: 40px; }\n  .ai-inputbar { bottom: calc(74px + env(safe-area-inset-bottom)); }\n  .ai-msg .bubble { max-width: 94%; }\n  .bottom-nav {\n    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 65;\n    background: var(--surface); border-top: 1px solid var(--border);\n    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));\n  }\n  .bottom-nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; color: var(--text-3); font-size: 10.5px; font-weight: 700; border-radius: 9px; }\n  .bottom-nav a.active { color: var(--brand-600); }\n}\n\n@media print {\n  .lnb, .bottom-nav, .no-print, #toast-root { display: none !important; }\n  .main { padding: 0; }\n  body { background: #fff; }\n}\n";
+  (document.head || document.documentElement).appendChild(s);
+})();
+/**
+ * 로싸인(LawSign) 모의 백엔드 계층 (Mock API Layer)
+ * ------------------------------------------------------------------
+ * 실제 백엔드 연동 시 이 파일의 각 함수 본문만 fetch() 호출로 교체하면
+ * 화면(View) 코드는 수정 없이 그대로 동작하도록 REST 계약과 1:1로 설계.
+ * 계약 문서: lawsign/docs/API.md
+ *
+ *   LS.api.getDashboardSummary()        GET  /api/v1/dashboard/summary
+ *   LS.api.listDocuments(params)        GET  /api/v1/documents
+ *   LS.api.getDocument(id)              GET  /api/v1/documents/{id}
+ *   LS.api.updateDocumentStatus(id, s)  PATCH /api/v1/documents/{id}
+ *   LS.api.sendDocument(payload)        POST /api/v1/documents/{id}/send
+ *   LS.api.remindSigners(id)            POST /api/v1/documents/{id}/remind
+ *   LS.api.searchContacts(q)            GET  /api/v1/contacts?q=
+ *   LS.api.listTemplates()              GET  /api/v1/templates
+ *   LS.api.verifyHash(hexHash)          POST /api/v1/verify
+ */
+window.LS = window.LS || {};
+(function (LS) {
+  'use strict';
+
+  const LATENCY_MS = 120; // 네트워크 왕복 시뮬레이션
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms || LATENCY_MS));
+  const uid = (p) => (p || 'id') + '_' + Math.random().toString(36).slice(2, 10);
+
+  const WORKSPACE = { id: 'ws_cheong', name: '법무법인청' };
+
+  const LABELS = ['합의서', '처벌불원서', '위임장', '약정서', '내용증명', '인사관리문서'];
+
+  const CONTACTS = [
+    { name: '김동우', email: 'dongwoo.kim@example.com', phone: '010-1234-5678' },
+    { name: '박예빈', email: 'yebin.park@example.com', phone: '010-9876-5432' },
+    { name: '김영신', email: 'ys.kim@example.com', phone: '010-2222-8282' },
+    { name: '김연호', email: 'yeonho.kim@example.com', phone: '010-7777-1111' },
+    { name: '송이슬', email: 'iseul.song@example.com', phone: '010-3141-5926' },
+    { name: '우창현', email: 'ch.woo@example.com', phone: '010-8282-0909' },
+    { name: '최현지', email: 'hj.choi@example.com', phone: '010-3333-4444' },
+    { name: '이영민', email: 'ym.lee@example.com', phone: '010-1111-2222' },
+    { name: '김춘중', email: 'cj.kim@example.com', phone: '010-5555-6666' },
+    { name: '장태근', email: 'law4kwak@example.com', phone: '010-2824-2468' },
+    { name: '강춘철', email: 'cc.kang@example.com', phone: '010-6060-7070' },
+    { name: '노진명', email: 'jm.noh@example.com', phone: '010-4545-2323' },
+  ];
+
+  const TEMPLATES = [
+    { id: 'tpl_agree', title: '합의서 (형사 표준)', fields: 6, usedCount: 182 },
+    { id: 'tpl_nopunish', title: '처벌불원서', fields: 4, usedCount: 141 },
+    { id: 'tpl_poa', title: '위임장 (소송)', fields: 5, usedCount: 97 },
+    { id: 'tpl_fee', title: '수임 약정서', fields: 8, usedCount: 64 },
+  ];
+
+  // ── 문서 시드 데이터 ──────────────────────────────────────────────
+  // status: DRAFT | SCHEDULED | NEED_MY_SIGN | PENDING_OTHERS | COMPLETED | REJECTED
+  const now = Date.now();
+  const H = 3600 * 1000;
+  const D = 24 * H;
+
+  function doc(o) {
+    const d = Object.assign(
+      {
+        id: uid('doc'),
+        workspaceId: WORKSPACE.id,
+        label: null,
+        urgent: false,
+        locked: false,
+        expirationDays: 14,
+        hash: null,
+        signers: [],
+        createdAt: now - 3 * D,
+        lastActivityAt: now - 3 * D,
+        completedAt: null,
+        audit: [],
+      },
+      o
+    );
+    if (d.status === 'COMPLETED') {
+      d.locked = true;
+      d.hash = pseudoSha256(d.id + d.title);
+      d.completedAt = d.completedAt || d.lastActivityAt;
+    }
+    if (!d.audit.length) d.audit = defaultAudit(d);
+    return d;
+  }
+
+  /** 프로토타입용 결정적 해시(표시용). 실서비스는 서버가 파일 버퍼로 SHA-256 생성. */
+  function pseudoSha256(seed) {
+    let h1 = 0x811c9dc5;
+    let out = '';
+    for (let i = 0; out.length < 64; i++) {
+      const c = seed.charCodeAt(i % seed.length) + i;
+      h1 = ((h1 ^ c) * 0x01000193) >>> 0;
+      out += h1.toString(16).padStart(8, '0');
+    }
+    return out.slice(0, 64);
+  }
+
+  function defaultAudit(d) {
+    const events = [
+      { at: d.createdAt, type: 'ISSUED', actor: WORKSPACE.name, detail: '문서 발행 및 서명 요청', ip: '112.153.24.11', ua: 'Windows 11 · Chrome' },
+    ];
+    if (['PENDING_OTHERS', 'NEED_MY_SIGN', 'COMPLETED'].includes(d.status)) {
+      events.push({ at: d.createdAt + 2 * H, type: 'VIEWED', actor: (d.signers[0] || {}).name || '서명자', detail: '문서 열람', ip: '211.234.88.42', ua: 'iOS 17 · Safari' });
+    }
+    if (d.status === 'COMPLETED') {
+      events.push({ at: d.completedAt - 5 * 60000, type: 'SIGNED', actor: (d.signers[0] || {}).name || '서명자', detail: '서명 완료', ip: '211.234.88.42', ua: 'iOS 17 · Safari' });
+      events.push({ at: d.completedAt, type: 'LOCKED', actor: 'LawSign 시스템', detail: '전체 완료 · 해시 등록 · 문서 잠금', ip: '-', ua: '-' });
+    }
+    return events;
+  }
+
+  const seedDocs = [
+    doc({ title: '서울고등 26노3663 임승주 항소이유서 열람 동의', status: 'DRAFT', signers: [{ name: '김동우', contact: 'dongwoo.kim@example.com', status: 'WAITING' }], createdAt: now - 7 * D, lastActivityAt: now - 7 * D }),
+    doc({ title: '(임시 저장) 수원지법 위임장 초안', status: 'DRAFT', signers: [], createdAt: now - 8 * D, lastActivityAt: now - 8 * D, expiresNote: '22일 후 삭제 예정' }),
+    doc({ title: '260710 김민석 약정서(민사) 예약 발송', status: 'SCHEDULED', label: '약정서', signers: [{ name: '김민석', contact: '010-9090-1212', status: 'WAITING' }], createdAt: now - 1 * D, lastActivityAt: now - 1 * D }),
+    doc({ title: '합의서(박예빈)_피해자 김영신 님', status: 'NEED_MY_SIGN', label: '합의서', urgent: true, signers: [{ name: '김영신', contact: 'ys.kim@example.com', status: 'SIGNED' }, { name: WORKSPACE.name, contact: 'me', status: 'WAITING' }], createdAt: now - 2 * D, lastActivityAt: now - 3 * H }),
+    doc({ title: '춘천 26고단10049 김연호 합의서', status: 'PENDING_OTHERS', label: '합의서', signers: [{ name: '김연호', contact: 'yeonho.kim@example.com', status: 'VIEWED' }, { name: '송이슬', contact: 'iseul.song@example.com', status: 'WAITING' }], createdAt: now - 1 * D, lastActivityAt: now - 40 * 60000 }),
+    doc({ title: '합의서(장호철)_피해자 장태근 님', status: 'PENDING_OTHERS', label: '합의서', signers: [{ name: '장태근', contact: 'law4kwak@example.com', status: 'WAITING' }], createdAt: now - 4 * D, lastActivityAt: now - 3 * D - 5 * H }),
+    doc({ title: '정태환 합의 및 처벌불원서_우창현', status: 'PENDING_OTHERS', label: '처벌불원서', signers: [{ name: '우창현', contact: 'ch.woo@example.com', status: 'WAITING' }], createdAt: now - 11 * D, lastActivityAt: now - 10 * D }),
+    doc({ title: '260703 노진명약정서(형사)_작성자 강춘철사무장', status: 'PENDING_OTHERS', label: '약정서', signers: [{ name: '노진명', contact: 'jm.noh@example.com', status: 'VIEWED' }], createdAt: now - 4 * D, lastActivityAt: now - 1 * D }),
+    doc({ title: '합의서(김진원)_피해자 최현지 님', status: 'COMPLETED', label: '합의서', signers: [{ name: '최현지', contact: 'hj.choi@example.com', status: 'SIGNED' }], createdAt: now - 2 * D, lastActivityAt: now - 2 * H, completedAt: now - 2 * H }),
+    doc({ title: '합의서(김춘중)_피해자 이영민 님', status: 'COMPLETED', label: '합의서', signers: [{ name: '이영민', contact: 'ym.lee@example.com', status: 'SIGNED' }], createdAt: now - 3 * D, lastActivityAt: now - 5 * H, completedAt: now - 5 * H }),
+    doc({ title: '내용증명 회신 동의서(강춘철)_요청 취소', status: 'REJECTED', label: '내용증명', signers: [{ name: '강춘철', contact: 'cc.kang@example.com', status: 'REJECTED' }], createdAt: now - 6 * D, lastActivityAt: now - 5 * D }),
+    doc({ title: '위임장(노진명)_서명 거절', status: 'REJECTED', label: '위임장', signers: [{ name: '노진명', contact: 'jm.noh@example.com', status: 'REJECTED' }], createdAt: now - 9 * D, lastActivityAt: now - 8 * D }),
+  ];
+
+  // 완료 문서 물량 생성 (총 325건 규모 시뮬레이션 — 리스트/칸반 가상 스크롤 검증용)
+  const FILLER_TITLES = ['합의서', '처벌불원서', '위임장', '수임 약정서', '내용증명 회신 동의서'];
+  const fillerDocs = [];
+  for (let i = 0; i < 40; i++) {
+    const c = CONTACTS[i % CONTACTS.length];
+    const label = LABELS[i % LABELS.length];
+    fillerDocs.push(
+      doc({
+        title: FILLER_TITLES[i % FILLER_TITLES.length] + '(' + c.name + ')_' + (2026060 + i) + '호',
+        status: i % 5 === 0 ? 'PENDING_OTHERS' : 'COMPLETED',
+        label,
+        signers: [{ name: c.name, contact: c.email, status: i % 5 === 0 ? 'WAITING' : 'SIGNED' }],
+        createdAt: now - (5 + i) * D,
+        lastActivityAt: now - (4 + i) * D,
+        completedAt: i % 5 === 0 ? null : now - (4 + i) * D,
+      })
+    );
+  }
+  const DB = { documents: seedDocs.concat(fillerDocs) };
+
+  // 실제 상태별 총계는 서버 집계값 사용을 가정 (완료 325건 등)
+  const REMOTE_TOTALS = { NEED_MY_SIGN: 1, PENDING_OTHERS: 32, COMPLETED: 325, SCHEDULED: 1, DRAFT: 3 };
+
+  // ── 검증 포털용 해시 원장 (프로토타입: 데모 파일 해시를 부팅 시 등록) ──
+  const HASH_LEDGER = new Map(); // hexHash -> document meta
+  DB.documents.filter((d) => d.hash).forEach((d) => {
+    HASH_LEDGER.set(d.hash, { documentId: d.id, title: d.title, issuer: WORKSPACE.name, completedAt: d.completedAt, txId: '0x' + d.hash.slice(0, 40) });
+  });
+
+  /** 데모 원본 파일 — 내용 기반 실제 SHA-256을 원장에 등록해 검증 성공 경로를 재현한다. */
+  const DEMO_FILE = {
+    name: '합의서(김진원)_원본.txt',
+    content: [
+      '전자서명 완료 문서 (로싸인 데모 원본)',
+      '문서명: 합의서(김진원)_피해자 최현지 님',
+      '발행처: 법무법인청 / 발행 플랫폼: LawSign',
+      '본 파일의 SHA-256 해시는 로싸인 검증 원장에 등록되어 있습니다.',
+    ].join('\n'),
+  };
+
+  async function sha256Hex(buffer) {
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  let demoLedgerReady = null;
+  function ensureDemoLedger() {
+    if (!demoLedgerReady) {
+      demoLedgerReady = (async () => {
+        if (!window.crypto || !crypto.subtle) return;
+        const buf = new TextEncoder().encode(DEMO_FILE.content);
+        const hex = await sha256Hex(buf);
+        const src = DB.documents.find((d) => d.title.indexOf('김진원') >= 0) || DB.documents[0];
+        HASH_LEDGER.set(hex, { documentId: src.id, title: src.title, issuer: WORKSPACE.name, completedAt: src.completedAt, txId: '0x' + hex.slice(0, 40) });
+      })();
+    }
+    return demoLedgerReady;
+  }
+
+  // ── 공개 API ──────────────────────────────────────────────────────
+  LS.workspace = WORKSPACE;
+  LS.labels = LABELS;
+  /** 연동된 발신 계정 — 실서비스: Gmail OAuth2(gmail.send 스코프) + 카카오 비즈메시지 발신프로필 */
+  LS.senderAccounts = {
+    gmail: { email: 'cheong.law@gmail.com', connected: true },
+    kakao: { profile: '@법무법인청', connected: true },
+  };
+
+  LS.api = {
+    /** GET /api/v1/dashboard/summary */
+    async getDashboardSummary() {
+      await delay();
+      const trend = [];
+      for (let i = 29; i >= 0; i--) {
+        const base = 6 + Math.round(5 * Math.sin(i / 4)) + (i % 7 === 0 ? 4 : 0);
+        trend.push({ date: new Date(now - i * D).toISOString().slice(5, 10).replace('-', '.'), completed: Math.max(1, base + ((i * 13) % 5)) });
+      }
+      const stale = Date.now() - 3 * D;
+      const tooOld = Date.now() - 15 * D; // 15일 초과 건은 별도 만료 처리 대상으로 분리
+      const urgent = DB.documents
+        .filter((d) => d.status === 'PENDING_OTHERS' && d.lastActivityAt < stale && d.lastActivityAt > tooOld)
+        .sort((a, b) => a.lastActivityAt - b.lastActivityAt)
+        .slice(0, 4);
+      return { counts: Object.assign({}, REMOTE_TOTALS), trend, urgent, urgentTotal: urgent.length };
+    },
+
+    /** GET /api/v1/documents?status=&q=&label=&range=&page=&size= — status=REMIND는 서버측 지연 필터 */
+    async listDocuments(params) {
+      params = params || {};
+      await delay();
+      let rows = DB.documents.slice();
+      if (params.status === 'REMIND') {
+        const staleLine = Date.now() - 3 * D;
+        rows = rows.filter((d) => d.status === 'PENDING_OTHERS' && d.lastActivityAt < staleLine);
+      } else if (params.status) rows = rows.filter((d) => d.status === params.status);
+      if (params.rangeDays) {
+        const since = Date.now() - Number(params.rangeDays) * D;
+        rows = rows.filter((d) => d.lastActivityAt >= since);
+      }
+      if (params.label) rows = rows.filter((d) => d.label === params.label);
+      if (params.q) {
+        const q = params.q.toLowerCase();
+        rows = rows.filter((d) => d.title.toLowerCase().includes(q) || d.signers.some((s) => s.name.toLowerCase().includes(q)));
+      }
+      rows.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+      const size = params.size || 50;
+      const page = params.page || 1;
+      const total = params.status && !params.q && !params.label ? Math.max(rows.length, REMOTE_TOTALS[params.status] || rows.length) : rows.length;
+      return { items: rows.slice((page - 1) * size, page * size), total, page, size };
+    },
+
+    /** GET /api/v1/documents/{id} */
+    async getDocument(id) {
+      await delay();
+      const d = DB.documents.find((x) => x.id === id);
+      if (!d) throw new Error('DOCUMENT_NOT_FOUND');
+      return d;
+    },
+
+    /** PATCH /api/v1/documents/{id} — 칸반 드래그 앤 드롭 상태 변경 (Optimistic UI 대상) */
+    async updateDocumentStatus(id, status) {
+      await delay(220);
+      const d = await this.getDocument(id);
+      d.status = status;
+      d.lastActivityAt = Date.now();
+      d.audit.push({ at: d.lastActivityAt, type: 'STATUS', actor: WORKSPACE.name, detail: '상태 변경 → ' + status, ip: '112.153.24.11', ua: 'Web' });
+      return d;
+    },
+
+    /** POST /api/v1/documents — 서명 요청 생성(발송). 서버는 큐에 적재 후 즉시 응답. */
+    async sendDocument(payload) {
+      await delay(300);
+      const d = doc({
+        title: payload.title,
+        label: payload.label || null,
+        status: payload.scheduledAt ? 'SCHEDULED' : 'PENDING_OTHERS',
+        expirationDays: payload.expirationDays || 14,
+        signers: (payload.signers || []).map((s, i) => ({ name: s.name, contact: s.contact, order: i + 1, status: 'WAITING' })),
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      DB.documents.unshift(d);
+      REMOTE_TOTALS.PENDING_OTHERS += payload.scheduledAt ? 0 : 1;
+      return { document: d, queuedNotifications: (payload.signers || []).length };
+    },
+
+    /** POST /api/v1/documents/{id}/remind — 독촉 알림(카카오톡/이메일) 발송 */
+    async remindSigners(id) {
+      await delay(260);
+      const d = await this.getDocument(id);
+      d.lastActivityAt = Date.now();
+      d.audit.push({ at: d.lastActivityAt, type: 'REMIND', actor: WORKSPACE.name, detail: '독촉 알림 발송 (카카오톡·이메일)', ip: '112.153.24.11', ua: 'Web' });
+      return { sent: d.signers.filter((s) => s.status !== 'SIGNED').length };
+    },
+
+    /**
+     * POST /api/v1/documents/{id}/notify — 메일함 발신
+     * channel: 'EMAIL'(Gmail API users.messages.send) | 'KAKAO'(알림톡 템플릿)
+     * 서버는 큐 적재 후 202 응답, Worker가 실제 발신. 발신 내역은 감사 로그에 기록.
+     */
+    async sendNotification(id, payload) {
+      await delay(320);
+      const d = await this.getDocument(id);
+      const channelLabel = payload.channel === 'KAKAO' ? '카카오톡 알림톡' : 'Gmail 이메일';
+      d.lastActivityAt = Date.now();
+      d.audit.push({
+        at: d.lastActivityAt,
+        type: 'NOTIFY',
+        actor: WORKSPACE.name,
+        detail: channelLabel + ' 발신 → ' + (payload.to || []).join(', '),
+        ip: '112.153.24.11',
+        ua: 'Web',
+      });
+      return {
+        sent: (payload.to || []).length,
+        channel: payload.channel,
+        messageId: (payload.channel === 'KAKAO' ? 'kko_' : 'gml_') + Math.random().toString(36).slice(2, 12),
+      };
+    },
+
+    /** GET /api/v1/contacts?q= — 스마트 연락처 자동완성 (서버측 prefix 검색 가정) */
+    async searchContacts(q) {
+      await delay(80);
+      if (!q) return [];
+      const needle = q.toLowerCase();
+      return CONTACTS.filter((c) => c.name.includes(q) || c.email.toLowerCase().includes(needle) || c.phone.replace(/-/g, '').includes(needle.replace(/-/g, ''))).slice(0, 5);
+    },
+
+    /** GET /api/v1/templates */
+    async listTemplates() {
+      await delay(60);
+      return TEMPLATES.slice();
+    },
+
+    /**
+     * POST /api/v1/verify { hash }
+     * 원본 파일은 절대 서버로 전송하지 않는다(Zero-Knowledge).
+     * 브라우저에서 계산한 SHA-256 hex 문자열만 대조한다.
+     */
+    async verifyHash(hexHash) {
+      await ensureDemoLedger();
+      await delay(180);
+      const record = HASH_LEDGER.get(hexHash);
+      return record ? { valid: true, record } : { valid: false };
+    },
+
+    /** 검증 데모용 파일 정의(변조본은 클라이언트에서 1글자 수정 생성) */
+    getDemoFile() {
+      return DEMO_FILE;
+    },
+
+    sha256Hex,
+  };
+})(window.LS);
+
+/**
+ * 로싸인(LawSign) 프론트엔드 SPA 코어
+ * - 해시 기반 라우팅(#/documents?view=kanban&status=...) → 필터 상태를 URL에 보존
+ * - 공통 UI(토스트/모달/뱃지/차트/QR), 대시보드, 문서함(리스트·칸반), 검증 포털
+ * - 서명 요청 3단계 플로우는 js/request.js 참조
+ */
+(function (LS) {
+  'use strict';
+
+  // ── 유틸 ──────────────────────────────────────────────────────────
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+  function debounce(fn, ms) {
+    let t;
+    return function () {
+      clearTimeout(t);
+      const args = arguments;
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
+  }
+
+  function relTime(ts) {
+    const diff = Date.now() - ts;
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return '방금 전';
+    if (m < 60) return m + '분 전';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + '시간 전';
+    const d = Math.floor(h / 24);
+    if (d < 8) return d + '일 전';
+    return fmtDate(ts);
+  }
+  function fmtDate(ts) {
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function fmtDateTime(ts) {
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, '0');
+    return fmtDate(ts) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  const staleDays = (d) => Math.floor((Date.now() - d.lastActivityAt) / 86400000);
+
+  // ── 아이콘 (24px stroke 아이콘 셋, 자체 제작) ────────────────────
+  const I = (path, size) =>
+    '<svg width="' + (size || 16) + '" height="' + (size || 16) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+  const icons = {
+    home: I('<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>'),
+    pen: I('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
+    folder: I('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>'),
+    shield: I('<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Z"/><path d="m9 12 2 2 4-4"/>'),
+    search: I('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>'),
+    bell: I('<path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/>'),
+    clock: I('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    user: I('<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-5.5 8-5.5s6.5 1.5 8 5.5"/>'),
+    doc: I('<path d="M6 2h8l4 4v16H6Z"/><path d="M14 2v4h4"/>'),
+    plus: I('<path d="M12 5v14M5 12h14"/>'),
+    check: I('<path d="m4 12.5 5 5L20 6.5"/>'),
+    x: I('<path d="m6 6 12 12M18 6 6 18"/>'),
+    dots: I('<circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/>'),
+    grid: I('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'),
+    rows: I('<rect x="4" y="5" width="16" height="4" rx="1.5"/><rect x="4" y="15" width="16" height="4" rx="1.5"/>'),
+    text: I('<path d="M5 6h14M12 6v13"/>'),
+    checkbox: I('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12 2.5 2.5L16 9"/>'),
+    calendar: I('<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>'),
+    image: I('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m5 18 5-5 3 3 3-3 3 3"/>'),
+    stamp: I('<path d="M9 11V6a3 3 0 0 1 6 0v5"/><path d="M5 15a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2H5Z"/><path d="M5 20h14"/>'),
+    download: I('<path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>'),
+    sun: I('<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12h2.5M19 12h2.5M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19"/>'),
+    send: I('<path d="m3.5 11.5 17-7.5-7.5 17-2-7.5Z"/>'),
+    warn: I('<path d="M12 3 2.5 20h19Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.2" r="0.8" fill="currentColor" stroke="none"/>'),
+    diamond: I('<path d="M6 3h12l4 6-10 12L2 9Z"/><path d="M2 9h20M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/>'),
+    mail: I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'),
+    chat: I('<path d="M21 12a8 8 0 0 1-8 8H4l2.5-3A8 8 0 1 1 21 12Z"/>'),
+    link: I('<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>'),
+    upload: I('<path d="M12 16V5"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>'),
+    spark: I('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"/><path d="M19 15l0.9 2.1L22 18l-2.1 0.9L19 21l-0.9-2.1L16 18l2.1-0.9Z"/>'),
+  };
+  LS.icons = icons;
+
+  // ── 상태 메타 ─────────────────────────────────────────────────────
+  const STATUS = {
+    DRAFT: { label: '요청 전', color: 'gray' },
+    SCHEDULED: { label: '예약됨', color: 'violet' },
+    NEED_MY_SIGN: { label: '내 서명 필요', color: 'red' },
+    PENDING_OTHERS: { label: '상대 서명 대기', color: 'blue' },
+    COMPLETED: { label: '서명 완료', color: 'green' },
+    REJECTED: { label: '거절·취소', color: 'gray' },
+  };
+  const statusBadge = (s) => '<span class="badge ' + STATUS[s].color + '">' + STATUS[s].label + '</span>';
+
+  // ── 토스트 & 모달 ─────────────────────────────────────────────────
+  function toast(msg, opts) {
+    opts = opts || {};
+    const root = $('#toast-root');
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = msg;
+    if (opts.action) {
+      const b = document.createElement('button');
+      b.className = 'undo';
+      b.textContent = opts.action.label;
+      b.addEventListener('click', () => { el.remove(); opts.action.onClick(); });
+      el.appendChild(b);
+    }
+    root.appendChild(el);
+    setTimeout(() => {
+      el.style.transition = 'opacity 0.3s';
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 320);
+    }, opts.ms || (opts.action ? 5000 : 2600));
+    return el;
+  }
+
+  function openModal(html, opts) {
+    closeModal();
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop';
+    back.innerHTML = '<div class="modal ' + ((opts && opts.wide) ? 'wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div>';
+    back.addEventListener('click', (e) => { if (e.target === back) closeModal(); });
+    document.body.appendChild(back);
+    $$('.modal-close', back).forEach((b) => b.addEventListener('click', closeModal));
+    return back;
+  }
+  function closeModal() {
+    const b = $('.modal-backdrop');
+    if (b) b.remove();
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+  function emptyState(title, desc, ctaHtml) {
+    return (
+      '<div class="empty-state"><div class="art">' + icons.doc.replace('width="16" height="16"', 'width="30" height="30"') + '</div>' +
+      '<b>' + title + '</b><p>' + desc + '</p>' + (ctaHtml || '') + '</div>');
+  }
+  LS.ui = { esc, $, $$, debounce, relTime, fmtDate, fmtDateTime, toast, openModal, closeModal, statusBadge, STATUS, staleDays };
+
+  // ── SVG 꺾은선 차트 (외부 라이브러리 없이 렌더) ──────────────────
+  function lineChart(points, opts) {
+    const W = 640, Hh = 200, padX = 34, padY = 22;
+    const max = Math.max.apply(null, points.map((p) => p.completed)) * 1.15;
+    const stepX = (W - padX * 2) / (points.length - 1);
+    const xy = points.map((p, i) => [padX + i * stepX, Hh - padY - (p.completed / max) * (Hh - padY * 2)]);
+    const path = xy.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+    const area = path + ' L' + xy[xy.length - 1][0].toFixed(1) + ' ' + (Hh - padY) + ' L' + padX + ' ' + (Hh - padY) + ' Z';
+    const gridY = [0.25, 0.5, 0.75].map((r) => {
+      const y = Hh - padY - r * (Hh - padY * 2);
+      return '<line x1="' + padX + '" x2="' + (W - padX) + '" y1="' + y + '" y2="' + y + '" stroke="var(--border)" stroke-dasharray="3 4"/>';
+    }).join('');
+    const labels = points.filter((_, i) => i % 7 === 0).map((p, i) => '<text x="' + (padX + i * 7 * stepX) + '" y="' + (Hh - 4) + '" font-size="10" fill="var(--text-3)" text-anchor="middle">' + esc(p.date) + '</text>').join('');
+    const last = xy[xy.length - 1];
+    const svg =
+      '<svg viewBox="0 0 ' + W + ' ' + Hh + '" preserveAspectRatio="none" role="img" aria-label="최근 30일 서명 완료 추이">' +
+      '<defs><linearGradient id="lg-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--brand-500)" stop-opacity="0.22"/><stop offset="1" stop-color="var(--brand-500)" stop-opacity="0"/></linearGradient></defs>' +
+      gridY +
+      '<path d="' + area + '" fill="url(#lg-fill)"/>' +
+      '<path d="' + path + '" fill="none" stroke="var(--brand-600)" stroke-width="2.5" stroke-linejoin="round"/>' +
+      '<circle class="chart-cursor" r="4" fill="var(--brand-600)" stroke="#fff" stroke-width="1.5" opacity="0"/>' +
+      '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="4" fill="var(--brand-600)"/>' +
+      labels +
+      '</svg>';
+    return { svg, xy, W, H: Hh };
+  }
+
+  /** 차트 호버/터치 툴팁 — 뷰포트 좌표 → 최근접 데이터 포인트 매핑 */
+  function bindChartTooltip(wrap, chart, points) {
+    const tip = document.createElement('div');
+    tip.className = 'chart-tip';
+    wrap.appendChild(tip);
+    const svg = $('svg', wrap);
+    const cursor = $('.chart-cursor', wrap);
+    const hide = () => { tip.style.display = 'none'; cursor.setAttribute('opacity', '0'); };
+    wrap.addEventListener('pointermove', (e) => {
+      const r = svg.getBoundingClientRect();
+      const fx = (e.clientX - r.left) / r.width; // 0..1
+      const i = Math.max(0, Math.min(points.length - 1, Math.round(((fx * chart.W) - chart.xy[0][0]) / ((chart.xy[1][0] - chart.xy[0][0]) || 1))));
+      const [vx, vy] = chart.xy[i];
+      cursor.setAttribute('cx', vx);
+      cursor.setAttribute('cy', vy);
+      cursor.setAttribute('opacity', '1');
+      tip.style.display = 'block';
+      tip.style.left = (vx / chart.W) * r.width + (r.left - wrap.getBoundingClientRect().left) + 'px';
+      tip.style.top = (vy / chart.H) * r.height + (r.top - wrap.getBoundingClientRect().top) + 'px';
+      tip.innerHTML = '완료 ' + points[i].completed + '건<small>' + esc(points[i].date) + '</small>';
+    });
+    wrap.addEventListener('pointerleave', hide);
+  }
+
+  // ── 의사 QR (검증 URL 시각화 · 프로토타입 표기) ──────────────────
+  function qrSvg(seed) {
+    const N = 21;
+    let acc = 0;
+    for (let i = 0; i < seed.length; i++) acc = ((acc << 5) - acc + seed.charCodeAt(i)) >>> 0;
+    const rnd = () => { acc = (acc * 1664525 + 1013904223) >>> 0; return acc / 4294967296; };
+    let cells = '';
+    const finder = (x, y) =>
+      '<rect x="' + x + '" y="' + y + '" width="7" height="7" fill="#111"/><rect x="' + (x + 1) + '" y="' + (y + 1) + '" width="5" height="5" fill="#fff"/><rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="3" height="3" fill="#111"/>';
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        const inFinder = (x < 8 && y < 8) || (x > N - 9 && y < 8) || (x < 8 && y > N - 9);
+        if (!inFinder && rnd() > 0.52) cells += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="#111"/>';
+      }
+    return '<svg viewBox="0 0 ' + N + ' ' + N + '" shape-rendering="crispEdges">' + cells + finder(0, 0) + finder(N - 7, 0) + finder(0, N - 7) + '</svg>';
+  }
+  LS.qrSvg = qrSvg;
+
+  // ── 라우터 ───────────────────────────────────────────────────────
+  const routes = {};
+  LS.route = (name, render) => { routes[name] = render; };
+
+  function parseHash() {
+    const h = location.hash.replace(/^#\/?/, '') || 'dashboard';
+    const [path, qs] = h.split('?');
+    const params = {};
+    if (qs) qs.split('&').forEach((kv) => { const [k, v] = kv.split('='); params[decodeURIComponent(k)] = decodeURIComponent(v || ''); });
+    return { path: path || 'dashboard', params };
+  }
+  function nav(path, params) {
+    const qs = params ? Object.keys(params).filter((k) => params[k] !== '' && params[k] != null).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&') : '';
+    location.hash = '#/' + path + (qs ? '?' + qs : '');
+  }
+  LS.nav = nav;
+
+  async function render() {
+    const { path, params } = parseHash();
+    const view = routes[path] || routes.dashboard;
+    $$('.lnb-item, .bottom-nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === path));
+    const main = $('#app-main');
+    // 스켈레톤 로딩 — 텍스트 대신 실제 레이아웃 형태를 미리 그려 CLS 제거
+    main.innerHTML =
+      '<div class="page" aria-busy="true">' +
+      '<div class="skeleton" style="height:34px;width:280px;margin-bottom:18px"></div>' +
+      '<div class="skel-grid">' + '<div class="skeleton" style="height:86px"></div>'.repeat(4) + '</div>' +
+      '<div class="skel-row"><div class="skeleton" style="height:280px"></div><div class="skeleton" style="height:280px"></div></div></div>';
+    try {
+      await view(main, params);
+    } catch (e) {
+      main.innerHTML = '<div class="page"><div class="card card-pad">화면을 불러오지 못했습니다: ' + esc(e.message) + '</div></div>';
+    }
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener('hashchange', render);
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면 1: 홈 대시보드
+  // ══════════════════════════════════════════════════════════════════
+  LS.route('dashboard', async (main) => {
+    const sum = await LS.api.getDashboardSummary();
+    const c = sum.counts;
+    const stats = [
+      { k: '내 서명 필요', v: c.NEED_MY_SIGN, color: 'var(--red-600)', status: 'NEED_MY_SIGN' },
+      { k: '상대 서명 대기', v: c.PENDING_OTHERS, color: 'var(--blue-600)', status: 'PENDING_OTHERS' },
+      { k: '서명 완료', v: c.COMPLETED, color: 'var(--green-600)', status: 'COMPLETED' },
+      { k: '예약 발송', v: c.SCHEDULED, color: 'var(--violet-600)', status: 'SCHEDULED' },
+    ];
+    const tpls = await LS.api.listTemplates();
+    const docs = (await LS.api.listDocuments({ size: 500 })).items;
+
+    const today = new Date();
+    const todayLabel = today.getFullYear() + '년 ' + (today.getMonth() + 1) + '월 ' + today.getDate() + '일 (' + '일월화수목금토'[today.getDay()] + ')';
+    const chart = lineChart(sum.trend);
+
+    // 이번 달 미니 캘린더: 일자별 ①발송약정 ②서명됨 ③서명대기 집계 (메일함 캘린더 뷰와 동일 규칙)
+    const calY = today.getFullYear();
+    const calM = today.getMonth();
+    const calByDay = {};
+    const calSlot = (day) => (calByDay[day] = calByDay[day] || { sent: 0, signed: 0, waiting: 0 });
+    docs.forEach((d) => {
+      const c = new Date(d.createdAt);
+      if (c.getFullYear() === calY && c.getMonth() === calM) {
+        const s = calSlot(c.getDate());
+        s.sent++;
+        if (d.status === 'PENDING_OTHERS' || d.status === 'NEED_MY_SIGN' || d.status === 'SCHEDULED') s.waiting++;
+      }
+      if (d.completedAt) {
+        const e = new Date(d.completedAt);
+        if (e.getFullYear() === calY && e.getMonth() === calM) calSlot(e.getDate()).signed++;
+      }
+    });
+    const calFirst = new Date(calY, calM, 1).getDay();
+    const calDays = new Date(calY, calM + 1, 0).getDate();
+    let calCells = '';
+    for (let i = 0; i < calFirst; i++) calCells += '<div class="cal-cell off"></div>';
+    for (let day = 1; day <= calDays; day++) {
+      const s = calByDay[day];
+      calCells +=
+        '<div class="cal-cell' + (day === today.getDate() ? ' today' : '') + (s ? ' has' : '') + '" data-day="' + day + '">' +
+        '<span class="d">' + day + '</span>' +
+        (s
+          ? '<span class="cal-chips">' +
+            (s.sent ? '<span class="cal-chip send" title="발송약정">📤 ' + s.sent + '</span>' : '') +
+            (s.signed ? '<span class="cal-chip done" title="서명됨">✅ ' + s.signed + '</span>' : '') +
+            (s.waiting ? '<span class="cal-chip wait" title="서명대기">⏳ ' + s.waiting + '</span>' : '') +
+            '</span>'
+          : '') +
+        '</div>';
+    }
+    const calHtml =
+      '<section class="card card-pad" id="dash-cal">' +
+      '<div class="toolbar-row" style="justify-content:space-between;margin-bottom:10px">' +
+      '<div class="section-title" style="margin:0">' + icons.calendar + ' ' + (calM + 1) + '월 발송·체결 캘린더 <span class="badge gold">' + icons.check + ' Google Calendar 연동됨</span></div>' +
+      '<button class="btn sm" id="dash-cal-full">전체 캘린더 보기 ›</button></div>' +
+      '<div class="toolbar-row" style="gap:12px;margin-bottom:8px;font-size:12px">' +
+      '<span class="cal-chip send">📤 발송약정</span><span class="cal-chip done">✅ 서명됨</span><span class="cal-chip wait">⏳ 서명대기</span></div>' +
+      '<div class="cal-week">' + ['일', '월', '화', '수', '목', '금', '토'].map((w) => '<span>' + w + '</span>').join('') + '</div>' +
+      '<div class="cal-grid mini">' + calCells + '</div></section>';
+
+    main.innerHTML =
+      '<div class="page">' +
+      '<div class="dash-head"><div><div class="dim" style="font-size:12px;font-weight:700;letter-spacing:0.02em">' + todayLabel + '</div>' +
+      '<h1>' + esc(LS.workspace.name) + ' 님, 환영합니다</h1>' +
+      '<div class="sub">' + icons.warn + ' 오늘 처리해야 할 요주의 문서가 ' + (c.NEED_MY_SIGN + sum.urgent.length) + '건 있습니다.</div></div>' +
+      '<button class="btn primary" id="dash-new">' + icons.pen + ' 새 서명 요청 시작하기</button></div>' +
+
+      '<div class="stat-grid">' + stats.map((s) =>
+        '<div class="stat" style="--accent:' + s.color + '" data-status="' + s.status + '" role="button" tabindex="0">' +
+        '<div class="k"><span class="dot" style="background:' + s.color + '"></span>' + s.k + '</div>' +
+        '<div class="v">' + s.v.toLocaleString() + '<span class="dim" style="font-size:13px;font-weight:600"> 건</span></div></div>').join('') +
+      '</div>' +
+
+      '<div class="dash-grid">' +
+      calHtml +
+
+      '<section class="card card-pad"><div class="section-title" style="color:var(--red-600)">' + icons.warn + ' 마감 임박 · 요주의 문서</div>' +
+      (sum.urgent.length ? sum.urgent.map((d) =>
+        '<div class="urgent-item"><div class="t">' + esc(d.title) + '</div>' +
+        '<div class="meta"><span class="badge red">' + staleDays(d) + '일 경과</span><span>' + icons.clock + ' ' + relTime(d.lastActivityAt) + '</span></div>' +
+        '<button class="btn sm" data-remind="' + d.id + '">' + icons.bell + ' 독촉 알림 발송 (카카오톡·이메일)</button></div>').join('')
+        : '<p class="dim" style="margin-top:12px">지연 중인 문서가 없습니다. 👍</p>') +
+      '</section></div>' +
+
+      '<section class="card card-pad" style="margin-top:16px"><div class="section-title">⚡ 퀵 템플릿 — 자주 쓰는 양식으로 바로 시작</div>' +
+      '<div class="tpl-grid">' + tpls.map((t) =>
+        '<button class="tpl-card" data-tpl="' + t.id + '"><span class="ic">' + icons.doc + '</span><b>' + esc(t.title) + '</b>' +
+        '<span class="dim" style="font-size:11.5px">입력 필드 ' + t.fields + '개 · ' + t.usedCount + '회 사용</span></button>').join('') +
+      '<button class="tpl-card add">' + icons.plus + ' 내 템플릿 추가</button></div></section>' +
+
+      '<section class="card card-pad" style="margin-top:16px"><div class="section-title">' + icons.grid + ' 서명 파이프라인 현황 <span class="badge gray">최근 30일</span></div>' +
+      '<div class="chart-wrap" id="dash-chart">' + chart.svg + '</div></section>' +
+      '</div>';
+
+    $('#dash-new').addEventListener('click', () => nav('request'));
+    $('#dash-cal-full').addEventListener('click', () => nav('documents', { view: 'calendar' }));
+    $$('#dash-cal .cal-cell.has', main).forEach((cell) => cell.addEventListener('click', () => nav('documents', { view: 'calendar' })));
+    bindChartTooltip($('#dash-chart'), chart, sum.trend);
+    $$('.stat', main).forEach((el) => el.addEventListener('click', () => nav('documents', { status: el.dataset.status, view: 'kanban' })));
+    $$('[data-tpl]', main).forEach((el) => el.addEventListener('click', () => nav('request', { tpl: el.dataset.tpl })));
+    $$('[data-remind]', main).forEach((el) =>
+      el.addEventListener('click', async () => {
+        el.disabled = true;
+        const r = await LS.api.remindSigners(el.dataset.remind);
+        toast('🔔 서명자 ' + r.sent + '명에게 독촉 알림을 발송했습니다.');
+        el.innerHTML = icons.check + ' 발송 완료';
+      })
+    );
+  });
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면 2: 문서함 (리스트 뷰 ⇄ 칸반 뷰, 필터 상태는 URL에 유지)
+  // ══════════════════════════════════════════════════════════════════
+  const KANBAN_COLS = [
+    { key: 'PRE', title: '📝 요청 전 (작성·예약)', statuses: ['DRAFT', 'SCHEDULED'], drop: 'DRAFT' },
+    { key: 'NEED_MY_SIGN', title: '✍️ 내 서명 필요', statuses: ['NEED_MY_SIGN'], drop: 'NEED_MY_SIGN' },
+    { key: 'PENDING_OTHERS', title: '⏳ 상대 서명 대기', statuses: ['PENDING_OTHERS'], drop: 'PENDING_OTHERS' },
+    { key: 'COMPLETED', title: '✅ 서명 완료됨', statuses: ['COMPLETED'], drop: 'COMPLETED' },
+  ];
+
+  // 벤치마크 LNB(모든 상태/진행 중/종결됨/요청 전/문서 관리)를 메일함 폴더 레일로 재구성
+  const MAIL_GROUPS = [
+    { title: '', items: [{ key: '', label: '전체 문서함' }] },
+    { title: '진행 중', items: [{ key: 'NEED_MY_SIGN', label: '내 서명 필요' }, { key: 'PENDING_OTHERS', label: '상대 서명 대기' }] },
+    { title: '종결됨', items: [{ key: 'COMPLETED', label: '서명 완료됨' }, { key: 'REJECTED', label: '거절·취소됨' }] },
+    { title: '요청 전', items: [{ key: 'DRAFT', label: '작성 중' }, { key: 'SCHEDULED', label: '예약됨' }] },
+    { title: '문서 관리', items: [{ key: 'REMIND', label: '리마인더' }, { key: '_EXPORT', label: '데이터 추출' }] },
+  ];
+  const folderLabel = (key) => {
+    for (const g of MAIL_GROUPS) for (const it of g.items) if (it.key === key) return it.label;
+    return '전체 문서함';
+  };
+
+  LS.route('documents', async (main, params) => {
+    const view = params.view === 'kanban' ? 'kanban' : params.view === 'calendar' ? 'calendar' : 'mail';
+    const state = { q: params.q || '', status: params.status || '', label: params.label || '', range: params.range || '' };
+    const urlOf = (over) => Object.assign({ view, q: state.q, status: state.status, label: state.label, range: state.range }, over || {});
+    const syncUrl = () => nav('documents', urlOf());
+
+    const filtersHtml =
+      '<div class="toolbar-row" style="margin-bottom:12px">' +
+      '<div class="search-box">' + icons.search + '<input class="input" id="doc-q" placeholder="문서 제목·서명자로 찾기" value="' + esc(state.q) + '"></div>' +
+      '<select class="input" id="doc-label" style="width:auto"><option value="">🏷️ 라벨 전체</option>' +
+      LS.labels.map((l) => '<option ' + (state.label === l ? 'selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>' +
+      '<select class="input" id="doc-range" style="width:auto">' +
+      [['', '📅 기간 전체'], ['1', '오늘'], ['7', '최근 7일'], ['30', '최근 30일']].map(([v, t]) =>
+        '<option value="' + v + '" ' + (state.range === v ? 'selected' : '') + '>' + t + '</option>').join('') + '</select>' +
+      (view === 'kanban' ? '<span class="dim" style="font-size:12px">카드를 드래그하여 상태를 변경할 수 있습니다</span>' : '') +
+      '</div>';
+
+    main.innerHTML =
+      '<div class="page">' +
+      '<div class="docbox-head"><h1 style="font-size:20px">' + icons.mail + ' 메일함 ' +
+      '<span class="badge gold">' + icons.check + ' Gmail 연동됨</span> <span class="badge amber">💬 카카오 알림톡</span></h1>' +
+      '<div class="toolbar-row">' +
+      '<div class="view-toggle">' +
+      [['mail', icons.mail + ' 메일함'], ['kanban', icons.grid + ' 칸반'], ['calendar', icons.calendar + ' 캘린더']].map(([v, t]) =>
+        '<button data-v="' + v + '" class="' + (view === v ? 'active' : '') + '">' + t + '</button>').join('') + '</div>' +
+      '<button class="btn primary" id="doc-new">' + icons.pen + ' 새 서명 요청</button></div></div>' +
+      (view === 'mail'
+        ? '<div class="mailbox-layout"><aside class="mail-rail" id="mail-rail" aria-label="메일함 폴더"></aside>' +
+          '<section class="mail-pane">' + filtersHtml + '<div id="doc-body"></div></section></div>'
+        : view === 'kanban'
+        ? filtersHtml + '<div id="doc-body"></div>'
+        : '<div id="doc-body"></div>') +
+      '</div>';
+
+    $('#doc-new').addEventListener('click', () => nav('request'));
+    $$('.view-toggle button', main).forEach((b) => b.addEventListener('click', () => nav('documents', urlOf({ view: b.dataset.v }))));
+    const labelSel = $('#doc-label');
+    if (labelSel) labelSel.addEventListener('change', (e) => { state.label = e.target.value; syncUrl(); });
+    const rangeSel = $('#doc-range');
+    if (rangeSel) rangeSel.addEventListener('change', (e) => { state.range = e.target.value; syncUrl(); });
+    // 실시간 검색: 500ms 디바운스로 서버 질의 횟수를 통제 (본문만 갱신, URL은 replaceState)
+    const qInput = $('#doc-q');
+    if (qInput) qInput.addEventListener('input', debounce((e) => {
+      state.q = e.target.value.trim();
+      const p = urlOf();
+      history.replaceState(null, '', '#/documents?' + Object.keys(p).filter((k) => p[k]).map((k) => k + '=' + encodeURIComponent(p[k])).join('&'));
+      drawBody();
+    }, 500));
+
+    // ── 폴더 레일 (전체/진행 중/종결됨/요청 전/문서 관리 + 건수) ──
+    async function drawRail() {
+      const rail = $('#mail-rail');
+      if (!rail) return;
+      const all = await LS.api.listDocuments({ size: 500 });
+      const counts = { '': all.items.length, REMIND: 0 };
+      all.items.forEach((d) => {
+        counts[d.status] = (counts[d.status] || 0) + 1;
+        if (d.status === 'PENDING_OTHERS' && staleDays(d) >= 3) counts.REMIND++;
+      });
+      rail.innerHTML = MAIL_GROUPS.map((g) =>
+        (g.title ? '<div class="rail-group">' + g.title + '</div>' : '') +
+        g.items.map((it) => {
+          if (it.key === '_EXPORT') return '<button class="rail-item" data-export="1">' + icons.download + ' <span>데이터 추출</span></button>';
+          const n = counts[it.key] || 0;
+          return '<button class="rail-item' + (state.status === it.key ? ' active' : '') + (it.key === 'REMIND' && n ? ' hot' : '') + '" data-key="' + it.key + '">' +
+            '<span>' + it.label + '</span><span class="cnt">' + n.toLocaleString() + '</span></button>';
+        }).join('')
+      ).join('');
+      $$('.rail-item[data-key]', rail).forEach((b) => b.addEventListener('click', () => { state.status = b.dataset.key; syncUrl(); }));
+      const exp = $('[data-export]', rail);
+      if (exp) exp.addEventListener('click', exportCsv);
+    }
+
+    /** 데이터 추출 — 현재 필터 결과를 CSV(UTF-8 BOM, 엑셀 호환)로 내려받기 */
+    async function exportCsv() {
+      const res = await LS.api.listDocuments({ q: state.q, status: state.status, label: state.label, rangeDays: state.range, size: 500 });
+      const cell = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const rows = [['문서 제목', '상태', '서명자', '라벨', '마지막 활동', '해시 등록'].map(cell).join(',')]
+        .concat(res.items.map((d) => [d.title, STATUS[d.status].label, d.signers.map((s) => s.name).join(' / '), d.label || '', LS.ui.fmtDateTime(d.lastActivityAt), d.hash ? 'Y' : 'N'].map(cell).join(',')));
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' }));
+      a.download = 'lawsign_documents_' + LS.ui.fmtDate(Date.now()) + '.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('📊 문서 ' + res.items.length + '건을 CSV로 추출했습니다.');
+    }
+
+    // ── 캘린더 뷰: 일자별 ①발송약정 ②서명됨 ③서명대기 집계 ──────────
+    async function drawCalendar(body) {
+      const res = await LS.api.listDocuments({ size: 500 });
+      const y = cal.y;
+      const m = cal.m;
+      const byDay = {}; // day -> { sent, signed, waiting, docs: [] }
+      const slot = (day) => (byDay[day] = byDay[day] || { sent: 0, signed: 0, waiting: 0, docs: [] });
+      res.items.forEach((d) => {
+        const c = new Date(d.createdAt);
+        if (c.getFullYear() === y && c.getMonth() === m) {
+          const s = slot(c.getDate());
+          s.sent++; // 발송약정: 해당 일자에 발송(예약 포함)된 요청
+          if (d.status === 'PENDING_OTHERS' || d.status === 'NEED_MY_SIGN' || d.status === 'SCHEDULED') s.waiting++;
+          s.docs.push(d);
+        }
+        if (d.completedAt) {
+          const e = new Date(d.completedAt);
+          if (e.getFullYear() === y && e.getMonth() === m) {
+            const s = slot(e.getDate());
+            s.signed++;
+            if (!s.docs.includes(d)) s.docs.push(d);
+          }
+        }
+      });
+      const first = new Date(y, m, 1).getDay();
+      const days = new Date(y, m + 1, 0).getDate();
+      const today = new Date();
+      let cells = '';
+      for (let i = 0; i < first; i++) cells += '<div class="cal-cell off"></div>';
+      for (let day = 1; day <= days; day++) {
+        const s = byDay[day];
+        const isToday = today.getFullYear() === y && today.getMonth() === m && today.getDate() === day;
+        cells +=
+          '<div class="cal-cell' + (isToday ? ' today' : '') + (s ? ' has' : '') + '" data-day="' + day + '">' +
+          '<span class="d">' + day + '</span>' +
+          (s
+            ? '<span class="cal-chips">' +
+              (s.sent ? '<span class="cal-chip send" title="발송약정">📤 ' + s.sent + '</span>' : '') +
+              (s.signed ? '<span class="cal-chip done" title="서명됨">✅ ' + s.signed + '</span>' : '') +
+              (s.waiting ? '<span class="cal-chip wait" title="서명대기">⏳ ' + s.waiting + '</span>' : '') +
+              '</span>'
+            : '') +
+          '</div>';
+      }
+      body.innerHTML =
+        '<div class="card card-pad">' +
+        '<div class="toolbar-row" style="justify-content:space-between;margin-bottom:12px">' +
+        '<div class="section-title">' + icons.calendar + ' ' + y + '년 ' + (m + 1) + '월 발송·체결 캘린더 <span class="badge gold">' + icons.check + ' Google Calendar 연동됨</span></div>' +
+        '<span class="toolbar-row"><button class="btn sm" id="cal-prev">‹ 이전 달</button><button class="btn sm" id="cal-next">다음 달 ›</button></span></div>' +
+        '<div class="toolbar-row" style="gap:14px;margin-bottom:10px;font-size:12px">' +
+        '<span class="cal-chip send">📤 발송약정</span><span class="cal-chip done">✅ 서명됨</span><span class="cal-chip wait">⏳ 서명대기</span>' +
+        '<span class="dim">날짜를 클릭하면 해당 일자의 문서를 확인합니다. 서명 기한·예약 발송은 Google Calendar에 자동 등록됩니다.</span></div>' +
+        '<div class="cal-week">' + ['일', '월', '화', '수', '목', '금', '토'].map((w) => '<span>' + w + '</span>').join('') + '</div>' +
+        '<div class="cal-grid">' + cells + '</div></div>';
+      $('#cal-prev').addEventListener('click', () => { cal.m--; if (cal.m < 0) { cal.m = 11; cal.y--; } drawBody(); });
+      $('#cal-next').addEventListener('click', () => { cal.m++; if (cal.m > 11) { cal.m = 0; cal.y++; } drawBody(); });
+      $$('.cal-cell.has', body).forEach((cell) =>
+        cell.addEventListener('click', () => {
+          const s = byDay[+cell.dataset.day];
+          openModal(
+            '<div class="modal-head"><h3>' + (m + 1) + '월 ' + cell.dataset.day + '일 — 발송약정 ' + s.sent + ' · 서명됨 ' + s.signed + ' · 서명대기 ' + s.waiting + '</h3><button class="modal-close">×</button></div>' +
+            '<div class="modal-body"><div class="card mail-list">' + s.docs.map(mailRow).join('') + '</div></div>',
+            { wide: true });
+          bindMailActions($('.modal-backdrop'));
+          bindRowMenus($('.modal-backdrop'));
+        }));
+    }
+
+    // 벤치마크 규칙: 10개씩 보기 + 페이지네이션 (상태별 목록의 기본 탐색 단위)
+    let pageSize = 10;
+    let pageNo = 1;
+    const nowD = new Date();
+    const cal = { y: nowD.getFullYear(), m: nowD.getMonth() };
+
+    function mailRow(d) {
+      const unread = d.status === 'NEED_MY_SIGN' || (d.status === 'PENDING_OTHERS' && Date.now() - d.lastActivityAt < 86400000);
+      const first = d.signers[0];
+      const meta = [
+        '요청 ' + LS.ui.fmtDate(d.createdAt).slice(5),
+        d.completedAt ? '체결 ' + LS.ui.fmtDate(d.completedAt).slice(5) : null,
+        d.label || null,
+        d.hash ? '🔒 해시 등록' : '기한 ' + d.expirationDays + '일',
+      ].filter(Boolean).join(' · ');
+      return (
+        '<div class="mail-row' + (unread ? ' unread' : '') + '" data-id="' + d.id + '" role="button" tabindex="0">' +
+        '<span class="mail-avatar">' + esc(((first && first.name) || '문').slice(0, 1)) + '</span>' +
+        '<div class="mail-main"><div class="mail-top"><span class="mail-title">' + esc(d.title) + '</span>' + statusBadge(d.status) +
+        (d.status === 'PENDING_OTHERS' && staleDays(d) >= 3 ? ' <span class="badge red">⏳ 리마인드</span>' : '') + '</div>' +
+        '<div class="mail-snippet">' + esc(d.signers.map((s) => s.name).join(', ') || '서명자 미지정') + ' · ' + meta + '</div></div>' +
+        '<div class="mail-side"><span class="mail-time">' + relTime(d.lastActivityAt) + '</span>' +
+        '<span class="mail-actions">' +
+        '<button class="icon-a" title="Gmail 이메일 발신" data-mail="' + d.id + '" aria-label="이메일 발신">' + icons.mail + '</button>' +
+        '<button class="icon-a" title="카카오톡 알림 발신" data-kakao="' + d.id + '" aria-label="카카오톡 알림">' + icons.chat + '</button>' +
+        '<button class="icon-a" title="이력·검증" data-menu="' + d.id + '" aria-label="문서 메뉴">' + icons.dots + '</button>' +
+        '</span></div></div>');
+    }
+
+    function bindMailActions(root) {
+      $$('[data-mail]', root).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); LS.openComposeModal(b.dataset.mail, 'EMAIL'); }));
+      $$('[data-kakao]', root).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); LS.openComposeModal(b.dataset.kakao, 'KAKAO'); }));
+      $$('.mail-row', root).forEach((r) => r.addEventListener('click', () => openHistoryModal(r.dataset.id)));
+    }
+
+    async function drawBody() {
+      drawRail();
+      const body = $('#doc-body');
+      if (view === 'calendar') {
+        await drawCalendar(body);
+        return;
+      }
+      if (view === 'mail') {
+        const res = await LS.api.listDocuments({ q: state.q, status: state.status, label: state.label, rangeDays: state.range, size: 500 });
+        const total = res.items.length;
+        const pages = Math.max(1, Math.ceil(total / pageSize));
+        pageNo = Math.min(pageNo, pages);
+        const slice = res.items.slice((pageNo - 1) * pageSize, pageNo * pageSize);
+        const remindHead = state.status === 'REMIND'
+          ? '<div class="editor-hint" style="margin-bottom:12px">📅 <b>오늘의 리마인드가 ' + total + '건</b> 있습니다 — 3일 이상 응답이 없는 요청입니다. 행의 발신 버튼으로 즉시 독촉하세요.</div>'
+          : '';
+        body.innerHTML = total
+          ? remindHead + '<div class="card mail-list">' + slice.map(mailRow).join('') + '</div>' +
+            '<div class="toolbar-row" style="margin-top:12px;justify-content:space-between">' +
+            '<span class="dim" style="font-size:12px">총 ' + total.toLocaleString() + '건 · ' + pageNo + '/' + pages + ' 페이지</span>' +
+            '<span class="toolbar-row"><select class="input" id="page-size" style="width:auto;padding:5px 8px;font-size:12px">' +
+            [10, 25, 50].map((n) => '<option value="' + n + '" ' + (pageSize === n ? 'selected' : '') + '>' + n + '개씩 보기</option>').join('') + '</select>' +
+            '<button class="btn sm" id="pg-prev" ' + (pageNo <= 1 ? 'disabled' : '') + '>‹ 이전</button>' +
+            '<button class="btn sm" id="pg-next" ' + (pageNo >= pages ? 'disabled' : '') + '>다음 ›</button></span></div>'
+          : remindHead + '<div class="card">' + emptyState(
+              "'" + folderLabel(state.status) + "' 상태의 문서가 없습니다",
+              state.q ? '「' + esc(state.q) + '」 검색어를 바꾸거나 필터를 해제해 보세요.' : '다른 폴더를 확인하거나 새 서명 요청을 시작해 보세요.',
+              '<button class="btn sm" id="back-all">↩ 모든 문서로 돌아가기</button> <button class="btn primary sm" onclick="LS.nav(\'request\')">' + icons.pen + ' 새 서명 요청</button>') + '</div>';
+        const backAll = $('#back-all', body);
+        if (backAll) backAll.addEventListener('click', () => { state.status = ''; syncUrl(); });
+        const ps = $('#page-size', body);
+        if (ps) ps.addEventListener('change', (e) => { pageSize = +e.target.value; pageNo = 1; drawBody(); });
+        const pv = $('#pg-prev', body);
+        if (pv) pv.addEventListener('click', () => { pageNo--; drawBody(); });
+        const px = $('#pg-next', body);
+        if (px) px.addEventListener('click', () => { pageNo++; drawBody(); });
+        bindMailActions(body);
+        bindRowMenus(body);
+      } else {
+        const res = await LS.api.listDocuments({ q: state.q, label: state.label });
+        body.innerHTML = '<div class="kanban">' + KANBAN_COLS.map((col) => {
+          const items = res.items.filter((d) => col.statuses.includes(d.status));
+          const total = col.key === 'COMPLETED' ? Math.max(items.length, 325) : items.length;
+          return (
+            '<div class="kanban-col" data-drop="' + col.drop + '"><div class="kanban-col-head">' + col.title +
+            ' <span class="cnt">' + total.toLocaleString() + '건</span></div><div class="kanban-col-body">' +
+            (items.slice(0, 12).map(kanbanCard).join('') || '<p class="dim" style="font-size:12px;padding:6px 4px">문서 없음</p>') +
+            (items.length > 12 ? '<button class="btn ghost sm">더 보기 (' + (total - 12).toLocaleString() + '건) — 가상 스크롤 구간</button>' : '') +
+            '</div></div>');
+        }).join('') + '</div>';
+        bindKanban(body);
+        bindRowMenus(body);
+      }
+    }
+
+    function kanbanCard(d) {
+      const stale = d.status === 'PENDING_OTHERS' && staleDays(d) >= 3;
+      return (
+        '<div class="kcard' + (stale ? ' stale' : '') + '" draggable="true" data-id="' + d.id + '">' +
+        '<div class="top">' + (d.urgent ? '<span class="badge red">⚠️ 긴급</span>' : d.label ? '<span class="badge brand">' + esc(d.label) + '</span>' : '<span class="badge gray">라벨 없음</span>') +
+        '<button class="menu-btn" data-menu="' + d.id + '" aria-label="문서 메뉴">' + icons.dots + '</button></div>' +
+        '<div class="t">' + esc(d.title) + '</div>' +
+        '<div class="who">' + icons.user + ' ' + esc(d.signers.map((s) => s.name).join(', ') || '서명자 미지정') + '</div>' +
+        '<div class="foot"><span>' + icons.clock + ' ' + relTime(d.lastActivityAt) + '</span>' +
+        (stale ? '<span class="badge red">⏳ 리마인드 필요</span>' : d.status === 'COMPLETED' ? '<span class="badge gold">' + icons.diamond + ' 해시 증명</span>' : '') +
+        '</div></div>');
+    }
+
+    // 칸반 DnD: Optimistic UI — 화면 먼저 이동, 서버 PATCH는 후행. 실패 시 롤백.
+    function bindKanban(root) {
+      let dragged = null;
+      $$('.kcard', root).forEach((card) => {
+        card.addEventListener('dragstart', () => { dragged = card; card.classList.add('dragging'); });
+        card.addEventListener('dragend', () => { card.classList.remove('dragging'); });
+      });
+      $$('.kanban-col', root).forEach((col) => {
+        col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drag-over'); });
+        col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+        col.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          col.classList.remove('drag-over');
+          if (!dragged) return;
+          const id = dragged.dataset.id;
+          const target = col.dataset.drop;
+          const from = dragged.parentElement;
+          col.querySelector('.kanban-col-body').prepend(dragged); // Optimistic move
+          if (target === 'PENDING_OTHERS') {
+            openSendConfirm(id, () => { from.prepend(dragged); });
+          } else {
+            const prevStatus = (await LS.api.getDocument(id)).status;
+            try {
+              await LS.api.updateDocumentStatus(id, target);
+              toast('상태를 「' + STATUS[target].label + '」(으)로 변경했습니다.', {
+                action: {
+                  label: '실행취소',
+                  onClick: async () => {
+                    await LS.api.updateDocumentStatus(id, prevStatus);
+                    from.prepend(dragged);
+                    toast('↩️ 이동을 취소했습니다.');
+                  },
+                },
+              });
+            } catch (err) {
+              from.prepend(dragged); // 롤백
+              toast('⚠️ 상태 변경 실패 — 원위치로 복구했습니다.');
+            }
+          }
+        });
+      });
+    }
+
+    function openSendConfirm(id, rollback) {
+      const m = openModal(
+        '<div class="modal-head"><h3>' + icons.send + ' 서명 요청을 발송할까요?</h3><button class="modal-close">×</button></div>' +
+        '<div class="modal-body"><p class="muted">카드를 「상대 서명 대기」로 이동하면 지정된 서명자에게 카카오톡·이메일로 서명 요청이 즉시 발송됩니다.</p>' +
+        '<div class="toolbar-row" style="margin-top:16px;justify-content:flex-end"><button class="btn" id="send-cancel">취소</button>' +
+        '<button class="btn primary" id="send-ok">' + icons.send + ' 발송하기</button></div></div>');
+      $('#send-cancel', m).addEventListener('click', () => { rollback(); closeModal(); });
+      $('#send-ok', m).addEventListener('click', async () => {
+        await LS.api.updateDocumentStatus(id, 'PENDING_OTHERS');
+        closeModal();
+        toast('🚀 서명 요청을 발송했습니다.');
+      });
+    }
+
+    function bindRowMenus(root) {
+      $$('[data-menu]', root).forEach((b) =>
+        b.addEventListener('click', (e) => { e.stopPropagation(); openHistoryModal(b.dataset.menu); }));
+      $$('tr[data-id]', root).forEach((tr) => tr.addEventListener('click', () => openHistoryModal(tr.dataset.id)));
+    }
+
+    await drawBody();
+  });
+
+  // ── 문서 이력 & 무결성 검증 모달 ─────────────────────────────────
+  const AUDIT_DOT = { ISSUED: '🟢', VIEWED: '🟡', SIGNED: '🔵', LOCKED: '🟣', REMIND: '🔔', STATUS: '⚙️', NOTIFY: '✉️' };
+  async function openHistoryModal(id) {
+    const d = await LS.api.getDocument(id);
+    openModal(
+      '<div class="modal-head"><h3>문서 진행 이력 · 무결성 검증</h3><button class="modal-close">×</button></div>' +
+      '<div class="modal-body">' +
+      '<p style="font-weight:800">' + esc(d.title) + '</p>' +
+      '<div style="margin:6px 0 14px">' + statusBadge(d.status) + (d.label ? ' <span class="badge brand">' + esc(d.label) + '</span>' : '') + '</div>' +
+      (d.hash
+        ? '<label class="field-label">🔒 문서 고유 해시 (SHA-256)</label><code class="hash-chip">' + d.hash + '</code>'
+        : '<p class="dim" style="font-size:12.5px">해시는 모든 서명 완료 후 문서 잠금 시점에 생성·등록됩니다.</p>') +
+      '<label class="field-label" style="margin-top:16px">진행 타임라인 (Audit Trail)</label>' +
+      '<ul class="timeline">' + d.audit.map((a) =>
+        '<li><span class="when">' + LS.ui.fmtDateTime(a.at) + '</span><span>' + (AUDIT_DOT[a.type] || '·') + ' <b>' + esc(a.detail) + '</b>' +
+        '<span class="dim"> — ' + esc(a.actor) + (a.ip !== '-' ? ' · IP ' + esc(a.ip) + ' · ' + esc(a.ua) : '') + '</span></span></li>').join('') + '</ul>' +
+      '<div class="toolbar-row" style="margin-top:16px;justify-content:flex-end">' +
+      (d.status === 'PENDING_OTHERS' ? '<button class="btn" id="hist-remind">' + icons.bell + ' 독촉 알림</button>' : '') +
+      (d.hash ? '<button class="btn" id="hist-cert">' + icons.doc + ' 감사추적 인증서</button>' : '') +
+      '<button class="btn primary">' + icons.download + ' 원본 PDF</button></div></div>',
+      { wide: true }
+    );
+    const rm = $('#hist-remind');
+    if (rm) rm.addEventListener('click', async () => { const r = await LS.api.remindSigners(id); toast('🔔 ' + r.sent + '명에게 독촉 알림 발송'); closeModal(); });
+    const ct = $('#hist-cert');
+    if (ct) ct.addEventListener('click', () => { closeModal(); nav('certificate', { id: d.id }); });
+  }
+  LS.openHistoryModal = openHistoryModal;
+
+  // ── 메시지 발신 컴포즈 모달 (Gmail API · 카카오 알림톡) ──────────
+  LS.openComposeModal = async function (id, channel) {
+    const d = await LS.api.getDocument(id);
+    let chan = channel || 'EMAIL';
+    const targets = d.signers.filter((s) => s.status !== 'SIGNED');
+    const recipients = (targets.length ? targets : d.signers).map((s) => s.name + ' <' + s.contact + '>');
+    const acc = LS.senderAccounts;
+    const defaultBody =
+      '안녕하세요, ' + ((targets[0] || d.signers[0] || {}).name || '고객') + '님.\n' +
+      '「' + d.title + '」 문서의 전자서명이 대기 중입니다.\n' +
+      '아래 링크에서 내용을 확인하신 후 서명을 완료해 주세요. (기한: ' + d.expirationDays + '일)\n' +
+      'https://sign.lawsign.example/d/' + d.id;
+
+    const m = openModal(
+      '<div class="modal-head"><h3>' + icons.send + ' 메시지 발신</h3><button class="modal-close">×</button></div>' +
+      '<div class="modal-body">' +
+      '<div class="toolbar-row" style="margin-bottom:14px">' +
+      '<button class="btn chan-pill" data-chan="EMAIL">' + icons.mail + ' 이메일 (Gmail)</button>' +
+      '<button class="btn chan-pill" data-chan="KAKAO">' + icons.chat + ' 카카오톡 알림톡</button></div>' +
+      '<div style="display:grid;gap:12px">' +
+      '<div><label class="field-label">받는 사람</label><div class="toolbar-row">' +
+      recipients.map((r) => '<span class="badge brand">' + esc(r) + '</span>').join('') + '</div></div>' +
+      '<div id="cmp-subject-row"><label class="field-label">제목</label>' +
+      '<input class="input" id="cmp-subject" value="' + esc('[로싸인] 「' + d.title + '」 서명 요청 안내') + '"></div>' +
+      '<div><label class="field-label">메시지</label><textarea class="input" id="cmp-body" rows="5">' + esc(defaultBody) + '</textarea></div>' +
+      '<div class="dim" id="cmp-account" style="font-size:12px"></div></div>' +
+      '<div class="toolbar-row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" id="cmp-ai">✦ AI 초안</button>' +
+      '<button class="btn" id="cmp-cancel">취소</button><button class="btn primary" id="cmp-send">' + icons.send + ' 발신하기</button></div></div>',
+      { wide: true });
+
+    function paint() {
+      LS.ui.$$('.chan-pill', m).forEach((b) => b.classList.toggle('primary', b.dataset.chan === chan));
+      LS.ui.$('#cmp-subject-row', m).style.display = chan === 'EMAIL' ? '' : 'none';
+      LS.ui.$('#cmp-account', m).innerHTML = chan === 'EMAIL'
+        ? '발신 계정: <b>' + acc.gmail.email + '</b> <span class="badge green">Gmail 연동됨</span> — Gmail API(users.messages.send) 경유'
+        : '발신 프로필: <b>' + acc.kakao.profile + '</b> <span class="badge amber">알림톡 승인 템플릿</span> — 카카오 비즈메시지 경유';
+    }
+    LS.ui.$$('.chan-pill', m).forEach((b) => b.addEventListener('click', () => { chan = b.dataset.chan; paint(); }));
+    LS.ui.$('#cmp-ai', m).addEventListener('click', async () => {
+      const b = LS.ui.$('#cmp-ai', m);
+      b.disabled = true;
+      b.textContent = '✦ 작성 중…';
+      LS.ui.$('#cmp-body', m).value = await LS.ai.draftMessage(d, chan);
+      b.disabled = false;
+      b.textContent = '✦ AI 초안';
+      toast('✦ AI가 발신문 초안을 작성했습니다. 검토 후 발신하세요.');
+    });
+    LS.ui.$('#cmp-cancel', m).addEventListener('click', closeModal);
+    LS.ui.$('#cmp-send', m).addEventListener('click', async () => {
+      const btn = LS.ui.$('#cmp-send', m);
+      btn.disabled = true;
+      const res = await LS.api.sendNotification(id, {
+        channel: chan,
+        to: recipients,
+        subject: chan === 'EMAIL' ? LS.ui.$('#cmp-subject', m).value : undefined,
+        body: LS.ui.$('#cmp-body', m).value,
+      });
+      closeModal();
+      toast((chan === 'EMAIL' ? '✉️ Gmail로 ' : '💬 카카오톡으로 ') + res.sent + '명에게 발신 완료 (ID: ' + res.messageId + ')');
+    });
+    paint();
+  };
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면 3: 감사추적 인증서 (완료 PDF 마지막 페이지 병합본의 웹 미리보기)
+  // ══════════════════════════════════════════════════════════════════
+  LS.route('certificate', async (main, params) => {
+    const d = await LS.api.getDocument(params.id);
+    const tx = '0x' + (d.hash || '').slice(0, 40);
+    main.innerHTML =
+      '<div class="page" style="max-width:820px">' +
+      '<div class="toolbar-row no-print" style="justify-content:space-between;margin-bottom:14px">' +
+      '<button class="btn" onclick="history.back()">← 돌아가기</button>' +
+      '<button class="btn primary" onclick="window.print()">🖨️ 인쇄 / PDF 저장</button></div>' +
+      '<div class="cert">' +
+      '<div class="cert-head"><div class="lnb-logo" style="padding:0"><span class="mark">L</span><span><span class="law">Law</span>Sign</span></div>' +
+      '<div style="text-align:center"><div class="qr-box">' + qrSvg(d.hash || d.id) + '</div><small class="dim" style="font-size:10px">검증용 QR (스캔 시 원본 대조)</small></div></div>' +
+      '<h2>전자서명 감사추적 인증서</h2><div class="sub-en">AUDIT TRAIL CERTIFICATE</div>' +
+
+      '<div class="cert-sec"><h4>1. 문서 기본 정보 (Document Identity)</h4><dl>' +
+      '<dt>문서 번호 (ID)</dt><dd class="mono">' + esc(d.id) + '</dd>' +
+      '<dt>문서 제목</dt><dd><b>' + esc(d.title) + '</b></dd>' +
+      '<dt>발행처 (Issuer)</dt><dd>' + esc(LS.workspace.name) + '</dd>' +
+      '<dt>서명 기한</dt><dd>' + d.expirationDays + '일</dd>' +
+      '<dt>문서 상태</dt><dd>✅ 모든 서명 완료 · 문서 잠금 적용됨</dd></dl></div>' +
+
+      '<div class="cert-sec"><h4>2. 무결성 검증 정보 (Integrity &amp; Security)</h4><dl>' +
+      '<dt>파일 해시<br><small class="dim">SHA-256</small></dt><dd><code class="hash-chip">' + (d.hash || '-') + '</code></dd>' +
+      '<dt>블록체인 TXID</dt><dd><code class="hash-chip">' + tx + '</code><small class="dim">Private Ledger Network 기록 · 블록 탐색기에서 독립 확인 가능</small></dd></dl></div>' +
+
+      '<div class="cert-sec"><h4>3. 서명 진행 이력 (Audit Trail Logs)</h4>' +
+      '<ul class="timeline">' + d.audit.map((a) =>
+        '<li><span class="when">' + LS.ui.fmtDateTime(a.at) + '</span><span>' + (AUDIT_DOT[a.type] || '·') + ' <b>' + esc(a.detail) + '</b>' +
+        '<span class="dim"> — ' + esc(a.actor) + (a.ip !== '-' ? ' · IP ' + esc(a.ip) + ' · ' + esc(a.ua) : '') + '</span></span></li>').join('') + '</ul></div>' +
+
+      '<div class="cert-foot"><span>본 인증서는 로싸인(LawSign) 시스템에 의해 전자서명법 및 관련 법령에 의거하여 기록·발급되었습니다.<br>우측 상단 QR 코드를 스캔하면 위변조 여부와 원본을 즉시 확인할 수 있습니다.</span>' +
+      '<span>발급일시: ' + LS.ui.fmtDateTime(Date.now()) + '<br>LawSign Trust Service</span></div>' +
+      '</div></div>';
+  });
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면 4: 원본 검증 포털 (Zero-Knowledge — 파일은 서버로 전송하지 않음)
+  // ══════════════════════════════════════════════════════════════════
+  LS.route('validator', async (main) => {
+    main.innerHTML =
+      '<div class="page">' +
+      '<div class="validator-hero"><div class="shield">' + icons.shield.replace('width="16" height="16"', 'width="28" height="28"') + '</div>' +
+      '<h1>LawSign 원본 검증 포털</h1>' +
+      '<p class="muted" style="max-width:560px;margin:8px auto 0">문서 파일을 올리면 <b>브라우저 안에서만</b> SHA-256 해시를 계산해 발행 원장과 대조합니다.<br>' +
+      '원본 파일은 <b>절대 서버로 전송되지 않으며</b>, 해시 문자열 하나만 대조됩니다 (Zero-Knowledge 검증).</p></div>' +
+      '<div class="dropzone" id="vz" role="button" tabindex="0">' +
+      '<div style="font-size:30px;margin-bottom:8px">📄</div><b>검증할 문서를 여기에 끌어다 놓거나 클릭하여 선택</b>' +
+      '<p class="dim" style="margin-top:6px;font-size:12.5px">PDF · 이미지 · 모든 파일 형식 지원</p></div>' +
+      '<input type="file" id="vz-file" hidden>' +
+      '<div class="toolbar-row no-print" style="justify-content:center;margin-top:14px">' +
+      '<button class="btn sm" id="demo-ok">✅ 정품 샘플 파일 내려받기</button>' +
+      '<button class="btn sm" id="demo-bad">🚨 변조 샘플 파일 내려받기</button></div>' +
+      '<div id="vz-result"></div></div>';
+
+    const dz = $('#vz');
+    const fileInput = $('#vz-file');
+    dz.addEventListener('click', () => fileInput.click());
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+    dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('over'); if (e.dataTransfer.files[0]) verify(e.dataTransfer.files[0]); });
+    fileInput.addEventListener('change', () => fileInput.files[0] && verify(fileInput.files[0]));
+
+    const demo = LS.api.getDemoFile();
+    const dl = (name, content) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+    $('#demo-ok').addEventListener('click', () => dl(demo.name, demo.content));
+    $('#demo-bad').addEventListener('click', () => dl('변조된_' + demo.name, demo.content + ' ')); // 1바이트 변조
+
+    async function verify(file) {
+      const out = $('#vz-result');
+      out.innerHTML = '<p class="dim" style="text-align:center;margin-top:16px">브라우저에서 해시 계산 중… (Web Crypto API)</p>';
+      if (!window.crypto || !crypto.subtle) {
+        out.innerHTML = '<div class="verify-result bad"><h3>' + icons.warn + ' 이 브라우저에서는 Web Crypto API를 사용할 수 없습니다</h3></div>';
+        return;
+      }
+      const hex = await LS.api.sha256Hex(await file.arrayBuffer());
+      const res = await LS.api.verifyHash(hex);
+      if (res.valid) {
+        const r = res.record;
+        out.innerHTML =
+          '<div class="verify-result ok"><h3>' + icons.check + ' 위변조되지 않은 원본 문서입니다</h3><dl>' +
+          '<dt>문서 제목</dt><dd><b>' + esc(r.title) + '</b></dd>' +
+          '<dt>발행처</dt><dd>' + esc(r.issuer) + ' <span class="badge gold">' + icons.diamond + ' 블록체인 증명됨</span></dd>' +
+          '<dt>완료 일시</dt><dd>' + LS.ui.fmtDateTime(r.completedAt || Date.now()) + '</dd>' +
+          '<dt>파일 해시</dt><dd class="mono">' + hex + '</dd>' +
+          '<dt>원장 TXID</dt><dd class="mono">' + esc(r.txId) + '</dd></dl></div>';
+      } else {
+        out.innerHTML =
+          '<div class="verify-result bad"><h3>' + icons.warn + ' 문서가 변조되었거나 등록되지 않은 파일입니다</h3>' +
+          '<p class="muted" style="margin-top:8px;font-size:13px">단 1바이트만 수정되어도 해시가 완전히 달라집니다. 발행처에 원본 재발급을 요청하세요.</p>' +
+          '<dl><dt>계산된 해시</dt><dd class="mono">' + hex + '</dd><dt>원장 대조</dt><dd>일치 항목 없음</dd></dl></div>';
+      }
+    }
+  });
+
+  // ── 앱 셸 부트스트랩 ─────────────────────────────────────────────
+  function boot() {
+    const navItems = [
+      { route: 'dashboard', label: '홈', ic: icons.home },
+      { route: 'documents', label: '메일함', ic: icons.mail },
+      { route: 'request', label: '서명 요청', ic: icons.pen },
+      { route: 'assistant', label: 'AI 비서', ic: icons.spark },
+      { route: 'validator', label: '검증 포털', ic: icons.shield },
+    ];
+    document.body.innerHTML =
+      '<header class="top-appbar"><div class="lnb-logo"><span class="mark">L</span><span><span class="law">Law</span>Sign</span></div>' +
+      '<div class="actions"><button class="icon-btn" id="appbar-theme" aria-label="테마 전환">' + icons.sun + '</button>' +
+      '<button class="icon-btn" id="appbar-new" aria-label="새 서명 요청" style="color:var(--brand-600)">' + icons.pen + '</button>' +
+      '<span class="avatar" style="width:27px;height:27px;font-size:11px">청</span></div></header>' +
+      '<div class="app-shell">' +
+      '<nav class="lnb"><div class="lnb-logo"><span class="mark">L</span><span><span class="law">Law</span>Sign</span></div>' +
+      '<button class="lnb-cta" id="lnb-new">' + icons.pen + ' 새 서명 요청</button>' +
+      '<div class="lnb-quota"><span>잔여 <b>1,836</b>건</span><span class="bar"><i style="width:28%"></i></span></div>' +
+      navItems.map((n) => '<a class="lnb-item" data-route="' + n.route + '" href="#/' + n.route + '">' + n.ic + ' ' + n.label +
+        (n.route === 'documents' ? '<span class="cnt">1</span>' : '') + '</a>').join('') +
+      '<button class="lnb-item" id="theme-toggle">' + icons.sun + ' 테마 전환</button>' +
+      '<div class="lnb-footer">LawSign v1.0 · 프론트엔드 프로토타입</div>' +
+      '<div class="lnb-user"><span class="avatar">청</span><div><b>' + esc(LS.workspace.name) + '</b><small>Enterprise 플랜</small></div></div></nav>' +
+      '<main class="main" id="app-main"></main></div>' +
+      '<nav class="bottom-nav">' + navItems.map((n) => '<a data-route="' + n.route + '" href="#/' + n.route + '">' + n.ic + ' <span>' + n.label + '</span></a>').join('') + '</nav>' +
+      '<div id="toast-root"></div>';
+
+    $('#lnb-new').addEventListener('click', () => nav('request'));
+    // 샌드박스 iframe 등 저장소 접근이 차단된 환경 대비
+    const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 무시 */ } } };
+    const saved = store.get('ls-theme');
+    if (saved) document.documentElement.dataset.theme = saved;
+    else if (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
+    const flipTheme = () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      store.set('ls-theme', next);
+    };
+    $('#theme-toggle').addEventListener('click', flipTheme);
+    $('#appbar-theme').addEventListener('click', flipTheme);
+    $('#appbar-new').addEventListener('click', () => nav('request'));
+    render();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})(window.LS);
+
+/**
+ * 로싸인(LawSign) — 서명 요청 플로우 (SPA Seamless Stepper)
+ * 1단계 서명자 지정(스마트 연락처 자동완성) → 2단계 필드 배치(자석 스냅 편집기)
+ * → 3단계 설정 체크리스트 → 발송(백그라운드 큐)
+ * 페이지 이동 없이 한 화면에서 단계를 오가며, 단계별 데이터는 draft 상태로 유지.
+ */
+(function (LS) {
+  'use strict';
+  const { esc, $, $$, debounce, toast, openModal, closeModal } = LS.ui;
+  const icons = LS.icons;
+
+  // 벤치마크 도구 세트: 기본(사인·도장/텍스트/체크박스/서명한 날짜/날짜/드롭다운/이미지/첨부파일 요청)
+  // + 자동 입력(서명 시점에 시스템이 값을 채우는 필드)
+  const TOOLS = [
+    { type: 'SIGNATURE', label: '사인·도장', ic: icons.stamp, w: 21, h: 6, tab: 'basic' },
+    { type: 'TEXT', label: '텍스트', ic: icons.text, w: 24, h: 5, tab: 'basic' },
+    { type: 'CHECKBOX', label: '체크박스', ic: icons.checkbox, w: 8, h: 4.5, tab: 'basic' },
+    { type: 'SIGNED_DATE', label: '서명한 날짜', ic: icons.calendar, w: 20, h: 5, tab: 'basic' },
+    { type: 'DATE', label: '날짜', ic: icons.calendar, w: 20, h: 5, tab: 'basic' },
+    { type: 'DROPDOWN', label: '드롭다운', ic: icons.rows, w: 22, h: 5, tab: 'basic' },
+    { type: 'IMAGE', label: '이미지', ic: icons.image, w: 22, h: 8, tab: 'basic' },
+    { type: 'FILE_REQ', label: '첨부파일 요청', ic: icons.doc, w: 24, h: 5, tab: 'basic' },
+    { type: 'AUTO_NAME', label: '서명자 이름 (자동)', ic: icons.user, w: 22, h: 5, tab: 'auto' },
+    { type: 'AUTO_DATE', label: '서명 일시 (자동)', ic: icons.clock, w: 22, h: 5, tab: 'auto' },
+    { type: 'AUTO_ORG', label: '요청 조직명 (자동)', ic: icons.home, w: 22, h: 5, tab: 'auto' },
+  ];
+  const CHANNELS = [
+    { key: 'EMAIL', label: '이메일', ic: icons.mail, placeholder: '이메일 주소' },
+    { key: 'KAKAO', label: '카카오톡', ic: icons.chat, placeholder: '휴대폰 번호' },
+    { key: 'IN_PERSON', label: '대면서명', ic: icons.user, placeholder: '식별용 연락처 (선택)' },
+  ];
+  // 문서 본문 텍스트 베이스라인(%) — 실서비스는 PDF.js 텍스트 레이어 좌표에서 추출
+  const SNAP_LINES = [16, 22, 28, 34, 40, 46, 52, 58, 64, 70, 76, 84];
+  const SNAP_THRESHOLD = 1.6; // %
+  const PAGE_COUNT = 3;
+
+  function newDraft() {
+    return {
+      method: null, // SINGLE | BULK | LINK — 벤치마크 '요청 방식' 선택
+      uploaded: false,
+      requestType: 'SIGN', // SIGN(계약 서명 요청) | VIEW(문서 열람 요청)
+      step: 1,
+      title: '',
+      label: '',
+      expirationDays: 14,
+      lockOnComplete: true,
+      sequential: true,
+      scheduledAt: '',
+      signers: [{ name: '', contact: '', channel: 'EMAIL' }],
+      fields: [], // { id, type, signerIdx, page, x, y, w, h }
+      page: 1,
+      attachments: [],
+      ccList: [],
+      reminderRule: '',
+      note: '',
+      authMethod: '',
+    };
+  }
+  let draft = newDraft();
+  let fieldSeq = 0;
+
+  function applyTemplate(tpl) {
+    draft.title = tpl.title + '_' + new Date().toISOString().slice(2, 10).replace(/-/g, '');
+    draft.label = tpl.title.split(' ')[0].replace(/\(.*/, '');
+    // 템플릿에는 필드 좌표가 사전 세팅되어 있음 (대량전송 시 2단계 생략 근거)
+    draft.fields = [
+      { id: 'f' + ++fieldSeq, type: 'SIGNATURE', signerIdx: 0, page: 1, x: 62, y: 84, w: 21, h: 6 },
+      { id: 'f' + ++fieldSeq, type: 'SIGNED_DATE', signerIdx: 0, page: 1, x: 14, y: 84, w: 20, h: 5 },
+    ];
+    draft.uploaded = true;
+  }
+
+  LS.route('request', async (main, params) => {
+    draft = newDraft();
+    if (params.tpl) {
+      const tpl = (await LS.api.listTemplates()).find((t) => t.id === params.tpl);
+      if (tpl) {
+        draft.method = 'SINGLE';
+        applyTemplate(tpl);
+      }
+    }
+    renderFlow(main);
+  });
+
+  function renderFlow(main) {
+    if (!draft.method) return renderMethod(main);
+    if (draft.method === 'BULK') return renderBulk(main);
+    if (draft.method === 'LINK') return renderLink(main);
+    if (!draft.uploaded) return renderUpload(main);
+    renderStepper(main);
+  }
+
+  // ── 방식 선택: 기본(단건) / 고급(대량전송·링크서명) ────────────────
+  function renderMethod(main) {
+    const card = (method, ic, title, desc) =>
+      '<button class="method-card" data-m="' + method + '"><span class="ic">' + ic + '</span><span><b>' + title + '</b><small>' + desc + '</small></span></button>';
+    main.innerHTML =
+      '<div class="page" style="max-width:760px">' +
+      '<h1 style="font-size:20px;margin-bottom:4px">' + esc(LS.workspace.name) + ' 님,</h1>' +
+      '<p class="muted" style="margin-bottom:18px">어떤 방식으로 서명을 요청할까요?</p>' +
+      '<div class="card card-pad" style="margin-bottom:14px"><div class="section-title">기본</div><div class="method-grid">' +
+      card('SINGLE', icons.pen, '단건 요청', '한 문서에 서명자를 1명 또는 여러 명으로 지정해서 요청해요.') + '</div></div>' +
+      '<div class="card card-pad"><div class="section-title">고급</div><div class="method-grid">' +
+      card('BULK', icons.send, '대량전송', '동일 양식의 문서를 지정된 다수에게 일괄 요청해요.') +
+      card('LINK', icons.link, '링크서명', '서명자를 미리 지정하지 않고, 링크로 서명을 받아요.') + '</div></div></div>';
+    $$('.method-card', main).forEach((b) =>
+      b.addEventListener('click', () => { draft.method = b.dataset.m; renderFlow(main); }));
+  }
+
+  // ── 문서 업로드 / 준비된 템플릿으로 시작 ──────────────────────────
+  async function renderUpload(main) {
+    const tpls = await LS.api.listTemplates();
+    main.innerHTML =
+      '<div class="page" style="max-width:820px">' +
+      '<button class="btn sm" id="up-back" style="margin-bottom:14px">‹ 이전</button>' +
+      '<div class="card card-pad"><div class="section-title">' + icons.upload + ' 문서 업로드</div>' +
+      '<div class="dropzone" id="up-zone" style="margin-top:14px;padding:34px 20px">' +
+      '<b>전송할 문서를 드래그 앤 드롭 또는 버튼 눌러 업로드</b>' +
+      '<div style="margin-top:10px"><span class="btn sm">＋ 문서 추가</span></div></div>' +
+      '<input type="file" id="up-file" hidden accept=".pdf,.hwp,.hwpx,.docx,.xlsx,.pptx,.jpg,.png">' +
+      '<p class="dim" style="font-size:12px;margin-top:10px">· PDF: 최대 10MB<br>· HWP, HWPX, DOCX, XLSX, PPTX, JPG, PNG: 최대 5MB</p></div>' +
+      '<div class="card card-pad" style="margin-top:14px"><div class="section-title">준비된 템플릿으로 시작</div>' +
+      '<p class="dim" style="font-size:12.5px;margin:4px 0 10px">계약서, 통지서 등 다양한 문서 템플릿이 준비되어 있습니다. 필드 좌표가 사전 세팅되어 2단계를 건너뛸 수 있습니다.</p>' +
+      '<div class="tpl-grid">' + tpls.map((t) =>
+        '<button class="tpl-card" data-tpl="' + t.id + '"><span class="ic">' + icons.doc + '</span><b>' + esc(t.title) + '</b>' +
+        '<span class="dim" style="font-size:11.5px">필드 ' + t.fields + '개 · ' + t.usedCount + '회 사용</span></button>').join('') + '</div></div></div>';
+    $('#up-back').addEventListener('click', () => { draft.method = null; renderFlow(main); });
+    const zone = $('#up-zone');
+    const file = $('#up-file');
+    const accept = (name) => {
+      draft.uploaded = true;
+      draft.title = draft.title || String(name || '').replace(/\.[^.]+$/, '');
+      LS.ui.toast('📄 문서 업로드 완료 — 서명자 지정으로 이동합니다.');
+      renderFlow(main);
+    };
+    zone.addEventListener('click', () => file.click());
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+    zone.addEventListener('drop', (e) => { e.preventDefault(); accept(e.dataTransfer.files[0] && e.dataTransfer.files[0].name); });
+    file.addEventListener('change', () => accept(file.files[0] && file.files[0].name));
+    $$('[data-tpl]', main).forEach(async (b) =>
+      b.addEventListener('click', async () => {
+        const tpl = (await LS.api.listTemplates()).find((t) => t.id === b.dataset.tpl);
+        applyTemplate(tpl);
+        renderFlow(main);
+      }));
+  }
+
+  // ── 대량전송: 템플릿 + 수신자 명단 일괄 발송 ──────────────────────
+  async function renderBulk(main) {
+    const tpls = await LS.api.listTemplates();
+    main.innerHTML =
+      '<div class="page" style="max-width:760px">' +
+      '<button class="btn sm" id="bk-back" style="margin-bottom:14px">‹ 요청 방식으로</button>' +
+      '<div class="card card-pad"><div class="section-title">' + icons.send + ' 대량전송</div>' +
+      '<p class="dim" style="font-size:12.5px;margin:4px 0 14px">동일 양식(템플릿)의 문서를 다수에게 일괄 요청합니다. 필드가 사전 세팅된 템플릿을 사용하므로 편집 단계가 생략됩니다.</p>' +
+      '<div style="display:grid;gap:14px">' +
+      '<div><label class="field-label">양식 템플릿 *</label><select class="input" id="bk-tpl">' +
+      tpls.map((t) => '<option value="' + t.id + '">' + esc(t.title) + ' (필드 ' + t.fields + '개)</option>').join('') + '</select></div>' +
+      '<div><label class="field-label">수신자 명단 * — 한 줄에 「이름, 이메일 또는 휴대폰」</label>' +
+      '<textarea class="input" id="bk-list" rows="6" placeholder="김동우, dongwoo.kim@example.com&#10;박예빈, 010-9876-5432"></textarea>' +
+      '<p class="dim" style="font-size:12px;margin-top:6px">실서비스: 기기 주소록(Contact Picker API)·CSV 불러오기 지원, 발송은 메시지 큐에서 병렬 처리</p></div>' +
+      '<div class="toolbar-row" style="justify-content:flex-end"><span class="dim" id="bk-count" style="font-size:12px"></span>' +
+      '<button class="btn primary" id="bk-send">' + icons.send + ' 일괄 발송</button></div></div></div></div>';
+    $('#bk-back').addEventListener('click', () => { draft.method = null; renderFlow(main); });
+    const parse = () => $('#bk-list').value.split('\n').map((l) => l.split(',').map((s) => s.trim())).filter((p) => p[0] && p[1]).map((p) => ({ name: p[0], contact: p[1] }));
+    $('#bk-list').addEventListener('input', () => { $('#bk-count').textContent = '수신자 ' + parse().length + '명'; });
+    $('#bk-send').addEventListener('click', async () => {
+      const list = parse();
+      if (!list.length) { LS.ui.toast('⚠️ 수신자를 1명 이상 입력하세요.'); return; }
+      const tpl = tpls.find((t) => t.id === $('#bk-tpl').value);
+      $('#bk-send').disabled = true;
+      for (const r of list.slice(0, 20)) {
+        await LS.api.sendDocument({ title: tpl.title + '(' + r.name + ')_일괄', label: draft.label || tpl.title.split(' ')[0], expirationDays: 14, signers: [r], fields: [] });
+      }
+      LS.ui.toast('🚀 ' + list.length + '건의 대량 서명 요청을 백그라운드 큐에 적재했습니다.');
+      LS.nav('documents', { view: 'kanban' });
+    });
+  }
+
+  // ── 링크서명: 서명자 미지정, 링크로 수집 ──────────────────────────
+  async function renderLink(main) {
+    const tpls = await LS.api.listTemplates();
+    main.innerHTML =
+      '<div class="page" style="max-width:640px">' +
+      '<button class="btn sm" id="lk-back" style="margin-bottom:14px">‹ 요청 방식으로</button>' +
+      '<div class="card card-pad"><div class="section-title">' + icons.link + ' 링크서명</div>' +
+      '<p class="dim" style="font-size:12.5px;margin:4px 0 14px">서명자를 미리 지정하지 않고, 링크에 접속한 누구나 본인 인증 후 서명하도록 합니다.</p>' +
+      '<div style="display:grid;gap:14px">' +
+      '<div><label class="field-label">양식 템플릿 *</label><select class="input" id="lk-tpl">' +
+      tpls.map((t) => '<option value="' + t.id + '">' + esc(t.title) + '</option>').join('') + '</select></div>' +
+      '<div class="toolbar-row" style="justify-content:flex-end"><button class="btn primary" id="lk-make">' + icons.link + ' 서명 링크 생성</button></div>' +
+      '</div></div></div>';
+    $('#lk-back').addEventListener('click', () => { draft.method = null; renderFlow(main); });
+    $('#lk-make').addEventListener('click', async () => {
+      const tpl = tpls.find((t) => t.id === $('#lk-tpl').value);
+      const res = await LS.api.sendDocument({ title: tpl.title + '_링크서명', label: tpl.title.split(' ')[0], expirationDays: 14, signers: [{ name: '링크 서명자(미지정)', contact: 'link' }], fields: [] });
+      const url = 'https://sign.lawsign.example/l/' + res.document.id;
+      const m = LS.ui.openModal(
+        '<div class="modal-head"><h3>' + icons.link + ' 서명 링크가 생성되었습니다</h3><button class="modal-close">×</button></div>' +
+        '<div class="modal-body"><code class="hash-chip">' + url + '</code>' +
+        '<div class="toolbar-row" style="margin-top:14px;justify-content:flex-end"><button class="btn primary" id="lk-copy">📋 링크 복사</button></div></div>');
+      LS.ui.$('#lk-copy', m).addEventListener('click', () => {
+        try { navigator.clipboard.writeText(url); } catch (e) { /* 클립보드 차단 환경 */ }
+        LS.ui.toast('📋 링크를 복사했습니다.');
+        LS.ui.closeModal();
+        LS.nav('documents', { view: 'kanban' });
+      });
+    });
+  }
+
+  function renderStepper(main) {
+    main.innerHTML =
+      '<div class="page">' +
+      '<div class="toolbar-row" style="justify-content:space-between;margin-bottom:14px"><h1 style="font-size:20px">' + icons.pen + ' 새 서명 요청</h1>' +
+      '<span class="badge gray">임시저장됨 · ' + LS.ui.fmtDateTime(Date.now()) + '</span></div>' +
+      '<div class="stepper" id="req-stepper"></div>' +
+      '<div id="req-body"></div>' +
+      '<div class="toolbar-row" style="justify-content:space-between;margin-top:18px">' +
+      '<button class="btn" id="req-prev">← 이전 단계로</button>' +
+      '<button class="btn primary" id="req-next">다음 단계로 →</button></div></div>';
+
+    $('#req-prev').addEventListener('click', () => go(draft.step - 1));
+    $('#req-next').addEventListener('click', () => {
+      if (draft.step === 3) return submit();
+      go(draft.step + 1);
+    });
+    drawStep(main);
+  }
+
+  function go(step) {
+    if (step < 1 || step > 3) return;
+    if (step > 1 && !draft.signers.some((s) => s.name && (s.contact || s.channel === 'IN_PERSON'))) {
+      toast('⚠️ 서명자 이름과 연락처를 1명 이상 입력하세요. (대면서명은 연락처 생략 가능)');
+      return;
+    }
+    draft.step = step;
+    drawStep(document.getElementById('app-main'));
+  }
+
+  function drawStep(main) {
+    const steps = ['서명자', '입력 (필드 배치)', '기타 설정'];
+    $('#req-stepper').innerHTML = steps
+      .map((s, i) => {
+        const n = i + 1;
+        const cls = n === draft.step ? 'active' : n < draft.step ? 'done' : '';
+        return '<button class="step-pill ' + cls + '" data-step="' + n + '"><span class="n">' + (n < draft.step ? '✓' : n) + '</span>' + s + '</button>' +
+          (n < 3 ? '<span class="step-arrow">›</span>' : '');
+      })
+      .join('');
+    $$('#req-stepper .step-pill').forEach((b) => b.addEventListener('click', () => go(+b.dataset.step)));
+    $('#req-prev').style.visibility = draft.step === 1 ? 'hidden' : 'visible';
+    $('#req-next').innerHTML = draft.step === 3 ? icons.send + ' 설정 완료 · 서명 요청 발송' : '다음 단계로 →';
+
+    const body = $('#req-body');
+    if (draft.step === 1) drawSigners(body);
+    else if (draft.step === 2) drawEditor(body);
+    else drawSettings(body);
+  }
+
+  // ── 1단계: 서명자 (서명/열람 탭 · 순서 · 채널 · 자동완성) ─────────
+  function drawSigners(body) {
+    body.innerHTML =
+      '<div class="request-layout">' +
+      '<section class="card card-pad">' +
+      '<div class="view-toggle" style="margin-bottom:14px">' +
+      '<button data-rt="SIGN" class="' + (draft.requestType === 'SIGN' ? 'active' : '') + '">계약 서명 요청</button>' +
+      '<button data-rt="VIEW" class="' + (draft.requestType === 'VIEW' ? 'active' : '') + '">문서 열람 요청</button></div>' +
+      '<div class="toolbar-row" style="margin-bottom:10px;gap:16px">' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600"><input type="radio" name="seq" value="1" ' + (draft.sequential ? 'checked' : '') + ' style="accent-color:var(--brand-600)"> 순서대로 한 명씩 서명</label>' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600"><input type="radio" name="seq" value="" ' + (!draft.sequential ? 'checked' : '') + ' style="accent-color:var(--brand-600)"> 순서없이 서명</label></div>' +
+      '<p class="dim" style="font-size:12.5px;margin:0 0 10px">이메일·전화번호 일부만 입력해도 이전 연락처가 자동완성됩니다 (300ms 디바운스 서버 질의).</p>' +
+      '<div id="signer-rows"></div>' +
+      '<button class="btn" id="add-signer" style="margin-top:12px;width:100%;justify-content:center;padding:14px">' + icons.plus + ' 서명자 추가하기 (<span id="signer-cnt"></span>/30)</button>' +
+      '<div style="text-align:center;margin-top:10px"><button class="btn ghost sm" id="del-empty">빈 서명자 카드 모두 삭제</button></div>' +
+      '</section>' +
+      '<aside class="card card-pad"><div class="section-title">서명 순서 미리보기</div><div id="order-preview" style="margin-top:10px"></div>' +
+      '<p class="dim" style="font-size:12px;margin-top:12px">여러 이해관계자(법무법인·피의자·합의권자 등)가 얽힌 서명 순서를 플로우로 확인합니다. ▲▼로 순서를 조정하세요. 알림 언어: 🌐 ko</p></aside></div>';
+
+    $$('[data-rt]', body).forEach((b) => b.addEventListener('click', () => { draft.requestType = b.dataset.rt; drawSigners(body); }));
+    $$('input[name="seq"]', body).forEach((r) => r.addEventListener('change', (e) => { draft.sequential = !!e.target.value; drawOrder(); }));
+    $('#add-signer').addEventListener('click', () => {
+      if (draft.signers.length >= 30) { toast('⚠️ 서명자는 최대 30명까지 지정할 수 있습니다.'); return; }
+      draft.signers.push({ name: '', contact: '', channel: 'EMAIL' });
+      drawRows();
+    });
+    $('#del-empty').addEventListener('click', () => {
+      draft.signers = draft.signers.filter((s) => s.name || s.contact);
+      if (!draft.signers.length) draft.signers.push({ name: '', contact: '', channel: 'EMAIL' });
+      drawRows();
+    });
+
+    function drawRows() {
+      $('#signer-cnt').textContent = draft.signers.length;
+      $('#signer-rows').innerHTML = draft.signers
+        .map((s, i) =>
+          '<div class="signer-row" data-i="' + i + '">' +
+          '<span class="signer-order">' + (i + 1) + '</span>' +
+          '<input class="input s-name" placeholder="이름 (예: 김영신)" value="' + esc(s.name) + '">' +
+          '<div class="toolbar-row" style="flex-wrap:nowrap;gap:6px">' +
+          '<select class="input s-chan" style="width:auto;flex:none">' +
+          CHANNELS.map((c) => '<option value="' + c.key + '" ' + (s.channel === c.key ? 'selected' : '') + '>' + c.label + '</option>').join('') + '</select>' +
+          '<input class="input s-contact" placeholder="' + (CHANNELS.find((c) => c.key === s.channel) || CHANNELS[0]).placeholder + '" value="' + esc(s.contact) + '" autocomplete="off"></div>' +
+          '<span style="display:flex;gap:2px">' +
+          '<button class="btn ghost sm s-up" ' + (i === 0 ? 'disabled' : '') + ' title="위로">▲</button>' +
+          '<button class="btn ghost sm s-down" ' + (i === draft.signers.length - 1 ? 'disabled' : '') + ' title="아래로">▼</button>' +
+          '<button class="btn ghost sm s-del" ' + (draft.signers.length === 1 ? 'disabled' : '') + '>' + icons.x + '</button></span>' +
+          '<div class="ac-slot"></div></div>')
+        .join('');
+
+      $$('.signer-row').forEach((row) => {
+        const i = +row.dataset.i;
+        $('.s-name', row).addEventListener('input', (e) => { draft.signers[i].name = e.target.value; drawOrder(); });
+        $('.s-chan', row).addEventListener('change', (e) => { draft.signers[i].channel = e.target.value; drawRows(); });
+        $('.s-up', row).addEventListener('click', () => { const t = draft.signers[i - 1]; draft.signers[i - 1] = draft.signers[i]; draft.signers[i] = t; drawRows(); drawOrder(); });
+        $('.s-down', row).addEventListener('click', () => { const t = draft.signers[i + 1]; draft.signers[i + 1] = draft.signers[i]; draft.signers[i] = t; drawRows(); drawOrder(); });
+        $('.s-del', row).addEventListener('click', () => { draft.signers.splice(i, 1); drawRows(); });
+        const contactInput = $('.s-contact', row);
+        const slot = $('.ac-slot', row);
+        const query = debounce(async (q) => {
+          if (!q || q.length < 2) { slot.innerHTML = ''; return; }
+          const hits = await LS.api.searchContacts(q);
+          slot.innerHTML = hits.length
+            ? '<div class="autocomplete">' + hits.map((c, j) =>
+                '<button data-j="' + j + '"><span><b>' + esc(c.name) + '</b> · ' + esc(c.email) + '</span><span class="dim">' + esc(c.phone) + '</span></button>').join('') + '</div>'
+            : '';
+          $$('.autocomplete button', slot).forEach((b) =>
+            b.addEventListener('click', () => {
+              const c = hits[+b.dataset.j];
+              draft.signers[i] = { name: c.name, contact: c.email };
+              drawRows();
+              drawOrder();
+            }));
+        }, 300);
+        contactInput.addEventListener('input', (e) => {
+          draft.signers[i].contact = e.target.value;
+          query(e.target.value.trim());
+          // 프론트 유효성 검사: 이메일 or 010 휴대폰 형식
+          const v = e.target.value.trim();
+          const ok = !v || /@.+\./.test(v) || /^01[016789]-?\d{3,4}-?\d{4}$/.test(v);
+          contactInput.style.borderColor = ok ? '' : 'var(--red-600)';
+        });
+        contactInput.addEventListener('blur', () => setTimeout(() => { slot.innerHTML = ''; }, 180));
+      });
+      drawOrder();
+    }
+    function drawOrder() {
+      const names = draft.signers.map((s, i) => '<span class="badge ' + (i === 0 ? 'brand' : 'gray') + '">' + (i + 1) + '. ' + esc(s.name || '미입력') + '</span>');
+      $('#order-preview').innerHTML = draft.sequential
+        ? names.join(' <span class="dim">→</span> ')
+        : names.join(' ') + '<div class="dim" style="font-size:12px;margin-top:8px">동시 발송 (순서 없음)</div>';
+    }
+    drawRows();
+  }
+
+  // ── 2단계: 문서 편집기 (Touch & Floating + 자석 스냅) ─────────────
+  function drawEditor(body) {
+    const validSigners = draft.signers.filter((s) => s.name);
+    let activeSigner = 0;
+    let selected = null;
+
+    body.innerHTML =
+      '<div class="editor-hint">' + icons.grid + ' 도구를 <b>클릭하면 화면 중앙에 필드가 생성</b>됩니다. 드래그 시 문서의 텍스트 베이스라인에 <b>자석 스냅</b>으로 정렬됩니다.</div>' +
+      '<div class="editor-layout">' +
+      '<div class="tool-palette">' +
+      '<select class="input signer-select" id="ed-signer">' + validSigners.map((s, i) => '<option value="' + i + '">' + (i + 1) + ' · ' + esc(s.name) + '</option>').join('') + '</select>' +
+      '<div class="view-toggle" style="width:100%;margin-bottom:2px"><button data-ttab="basic" class="active" style="flex:1">기본</button><button data-ttab="auto" style="flex:1">자동 입력</button></div>' +
+      '<div id="tool-list" style="display:flex;flex-direction:column;gap:6px"></div>' +
+      '<button class="tool-btn" id="copy-all-pages" title="선택한 필드를 모든 페이지 동일 위치에 복사"><span class="ic">' + icons.doc + '</span>모든 페이지에 복사</button>' +
+      '</div>' +
+      '<div class="doc-canvas-wrap"><div class="doc-page" id="doc-page">' + paperHtml() + '<div class="snap-guide" id="snap-guide" hidden></div><div id="field-layer"></div></div></div>' +
+      '<div class="thumb-rail" id="thumb-rail">' +
+      Array.from({ length: PAGE_COUNT }, (_, i) => '<div class="thumb ' + (draft.page === i + 1 ? 'active' : '') + '" data-p="' + (i + 1) + '">' + (i + 1) + ' 페이지<br><small class="fcount"></small></div>').join('') +
+      '</div></div>';
+
+    const page = $('#doc-page');
+    const layer = $('#field-layer');
+    const guide = $('#snap-guide');
+
+    $('#ed-signer').addEventListener('change', (e) => { activeSigner = +e.target.value; });
+
+    let toolTab = 'basic';
+    function drawTools() {
+      $('#tool-list').innerHTML = TOOLS.filter((t) => t.tab === toolTab)
+        .map((t) => '<button class="tool-btn" data-tool="' + t.type + '"><span class="ic">' + t.ic + '</span>' + t.label + '</button>').join('');
+      $$('#tool-list .tool-btn').forEach((b) =>
+        b.addEventListener('click', () => {
+          const t = TOOLS.find((x) => x.type === b.dataset.tool);
+          // Touch & Floating: 화면 중앙에 즉시 생성(Spawn) — 모바일 드래그 유실 방지
+          const f = { id: 'f' + ++fieldSeq, type: t.type, signerIdx: activeSigner, page: draft.page, x: 50 - t.w / 2, y: 47, w: t.w, h: t.h };
+          draft.fields.push(f);
+          selected = f.id;
+          drawFields();
+        }));
+    }
+    $$('[data-ttab]').forEach((b) =>
+      b.addEventListener('click', () => {
+        toolTab = b.dataset.ttab;
+        $$('[data-ttab]').forEach((x) => x.classList.toggle('active', x === b));
+        drawTools();
+      }));
+    drawTools();
+    $('#copy-all-pages').addEventListener('click', () => {
+      const src = draft.fields.find((f) => f.id === selected);
+      if (!src) { toast('복사할 필드를 먼저 선택하세요.'); return; }
+      for (let p = 1; p <= PAGE_COUNT; p++) {
+        if (p === src.page) continue;
+        draft.fields.push(Object.assign({}, src, { id: 'f' + ++fieldSeq, page: p }));
+      }
+      toast('📄 ' + (PAGE_COUNT - 1) + '개 페이지의 동일 위치에 복사했습니다.');
+      drawFields();
+    });
+    $$('.thumb').forEach((th) =>
+      th.addEventListener('click', () => {
+        draft.page = +th.dataset.p;
+        $$('.thumb').forEach((x) => x.classList.toggle('active', x === th));
+        drawFields();
+      })
+    );
+
+    function toolMeta(type) { return TOOLS.find((t) => t.type === type); }
+
+    function drawFields() {
+      layer.innerHTML = draft.fields
+        .filter((f) => f.page === draft.page)
+        .map((f) => {
+          const m = toolMeta(f.type);
+          const s = validSigners[f.signerIdx] || { name: '?' };
+          return (
+            '<div class="field-block field-c' + (f.signerIdx % 3) + (selected === f.id ? ' selected' : '') + '" data-fid="' + f.id + '"' +
+            ' style="left:' + f.x + '%;top:' + f.y + '%;width:' + f.w + '%;height:' + f.h + '%">' +
+            m.ic + ' ' + esc(s.name) + ' · ' + m.label +
+            '<button class="del" data-del="' + f.id + '" aria-label="삭제">✕</button></div>');
+        })
+        .join('');
+      $$('.thumb', $('#thumb-rail')).forEach((th) => {
+        const n = draft.fields.filter((f) => f.page === +th.dataset.p).length;
+        $('.fcount', th).textContent = n ? '필드 ' + n : '';
+      });
+      bindDrag();
+    }
+
+    // Pointer Events 기반 DnD — 마우스·터치·펜 공통 처리, %(상대 좌표)로 저장
+    function bindDrag() {
+      $$('.field-block', layer).forEach((el) => {
+        el.addEventListener('pointerdown', (e) => {
+          if (e.target.closest('.del')) return;
+          e.preventDefault();
+          const fid = el.dataset.fid;
+          selected = fid;
+          $$('.field-block', layer).forEach((x) => x.classList.toggle('selected', x === el));
+          const f = draft.fields.find((x) => x.id === fid);
+          const rect = page.getBoundingClientRect();
+          const startX = e.clientX, startY = e.clientY, ox = f.x, oy = f.y;
+          el.setPointerCapture(e.pointerId);
+
+          const move = (ev) => {
+            let nx = ox + ((ev.clientX - startX) / rect.width) * 100;
+            let ny = oy + ((ev.clientY - startY) / rect.height) * 100;
+            nx = Math.max(0, Math.min(100 - f.w, nx));
+            ny = Math.max(0, Math.min(100 - f.h, ny));
+            // 자석 스냅: 필드 하단을 텍스트 베이스라인에 정렬
+            let snapped = null;
+            for (const line of SNAP_LINES) {
+              if (Math.abs(ny + f.h - line) < SNAP_THRESHOLD) { ny = line - f.h; snapped = line; break; }
+            }
+            guide.hidden = snapped == null;
+            if (snapped != null) guide.style.top = snapped + '%';
+            f.x = Math.round(nx * 10) / 10;
+            f.y = Math.round(ny * 10) / 10;
+            el.style.left = f.x + '%';
+            el.style.top = f.y + '%';
+          };
+          const up = () => {
+            guide.hidden = true;
+            el.removeEventListener('pointermove', move);
+            el.removeEventListener('pointerup', up);
+            // 실서비스: 이 시점에 디바운스된 PUT /documents/{id} 자동 저장 1회 발생
+          };
+          el.addEventListener('pointermove', move);
+          el.addEventListener('pointerup', up);
+        });
+      });
+      $$('[data-del]', layer).forEach((b) =>
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          draft.fields = draft.fields.filter((f) => f.id !== b.dataset.del);
+          if (selected === b.dataset.del) selected = null;
+          drawFields();
+        })
+      );
+    }
+
+    drawFields();
+  }
+
+  function paperHtml() {
+    return (
+      '<div class="paper"><h4>합 의 서</h4>' +
+      '<div class="clause"><b>제1조 (합의 내용)</b><br>가해자와 피해자는 본 사건에 관하여 상호 원만히 합의하였으며, 피해자는 가해자의 처벌을 원하지 아니한다.</div>' +
+      '<div class="clause"><b>제2조 (합의금 지급)</b><br>가해자는 피해자에게 합의금을 지급하며, 지급이 완료된 때에 본 합의의 효력이 발생한다.</div>' +
+      '<div class="clause"><b>제3조 (권리 포기)</b><br>피해자는 본 사건과 관련하여 향후 민·형사상 일체의 이의를 제기하지 아니한다.</div>' +
+      '<div class="clause"><b>제4조 (관할 법원)</b><br>본 합의와 관련한 분쟁은 서울중앙지방법원을 제1심 관할 법원으로 한다.</div>' +
+      '<div class="sig-line"><span>위임인 (갑) : ___________ (인)</span><span>수임인 (을) : ___________ (인)</span></div></div>'
+    );
+  }
+
+  // ── 3단계: 기타 설정 (벤치마크 카드 스택 + 우측 체크리스트) ───────
+  function drawSettings(body) {
+    body.innerHTML =
+      '<div class="request-layout">' +
+      '<section style="display:grid;gap:12px;min-width:0">' +
+      '<div class="card card-pad"><div class="section-title">' + icons.doc + ' 문서 정보</div>' +
+      '<div style="display:grid;gap:14px;margin-top:14px">' +
+      '<div><label class="field-label">문서 제목 *</label><input class="input" id="set-title" placeholder="예: 260707 합의서(김영신)_피해자" value="' + esc(draft.title) + '"></div>' +
+      '<div class="toolbar-row"><div style="flex:1"><label class="field-label">라벨</label><select class="input" id="set-label"><option value="">선택 안 함</option>' +
+      LS.labels.map((l) => '<option ' + (draft.label === l ? 'selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></div>' +
+      '<div style="flex:1"><label class="field-label">서명 기한</label><select class="input" id="set-exp">' +
+      [7, 14, 30].map((d) => '<option value="' + d + '" ' + (draft.expirationDays === d ? 'selected' : '') + '>' + d + '일</option>').join('') + '</select></div></div>' +
+      '<div><label class="field-label">전송 예약 (선택)</label><input class="input" id="set-sched" type="datetime-local" value="' + esc(draft.scheduledAt) + '"></div>' +
+      '</div></div>' +
+
+      '<div class="card card-pad"><div class="toolbar-row" style="justify-content:space-between"><div class="section-title">📎 첨부파일</div>' +
+      '<button class="btn sm" id="set-attach">' + icons.upload + ' 업로드</button></div>' +
+      '<div id="attach-list" class="toolbar-row" style="margin-top:8px">' + (draft.attachments.map((a) => '<span class="badge gray">📎 ' + esc(a) + '</span>').join('') || '<span class="dim" style="font-size:12px">서명 요청과 함께 전달할 참고 자료를 첨부합니다.</span>') + '</div></div>' +
+
+      '<div class="card card-pad"><div class="toolbar-row" style="justify-content:space-between"><div class="section-title">👥 외부 참조자</div>' +
+      '<button class="btn sm" id="set-cc">＋ 설정</button></div>' +
+      '<div id="cc-list" class="toolbar-row" style="margin-top:8px">' + (draft.ccList.map((c) => '<span class="badge blue">' + esc(c) + '</span>').join('') || '<span class="dim" style="font-size:12px">완료본을 이메일로 공유받을 참조자를 지정합니다 (서명 권한 없음).</span>') + '</div></div>' +
+
+      '<div class="card card-pad"><div class="toolbar-row" style="justify-content:space-between"><div class="section-title">⏰ 계약 리마인더</div>' +
+      '<select class="input" id="set-remind" style="width:auto">' +
+      [['', '설정 안 함'], ['D3', '기한 3일 전'], ['D1', '기한 1일 전'], ['EVERY', '서명 전까지 매일']].map(([v, t]) =>
+        '<option value="' + v + '" ' + (draft.reminderRule === v ? 'selected' : '') + '>' + t + '</option>').join('') + '</select></div>' +
+      '<p class="dim" style="font-size:12px;margin-top:8px">미서명자에게 카카오톡·이메일 리마인드를 자동 발송하고, 메일함 「리마인더」 폴더와 캘린더에 표시합니다.</p></div>' +
+
+      '<div class="card card-pad"><div class="section-title">✍️ 첫 번째 서명자 옵션</div>' +
+      '<div style="display:grid;gap:12px;margin-top:12px">' +
+      '<div><label class="field-label">💬 남길 말 입력</label><textarea class="input" id="set-note" rows="2" placeholder="서명자에게 전달할 메시지 (알림 메시지에 포함)">' + esc(draft.note) + '</textarea></div>' +
+      '<div><label class="field-label">🔒 인증 수단 추가</label><select class="input" id="set-auth">' +
+      [['', '기본 (고유 링크)'], ['KAKAO_CERT', '카카오 본인인증'], ['PHONE', '휴대폰 본인확인'], ['CERT', '공동인증서']].map(([v, t]) =>
+        '<option value="' + v + '" ' + (draft.authMethod === v ? 'selected' : '') + '>' + t + '</option>').join('') + '</select></div></div></div>' +
+      '</section>' +
+
+      '<aside class="card card-pad"><div class="section-title">' + icons.checkbox + ' 발송 전 체크리스트</div>' +
+      '<p class="dim" style="font-size:12px;margin:4px 0 6px">놓치기 쉬운 설정을 시스템이 검사합니다.</p>' +
+      '<ul class="checklist">' +
+      '<li><input type="checkbox" checked disabled><span>서명자 <b>' + draft.signers.filter((s) => s.name).length + '명</b> 지정 완료</span></li>' +
+      '<li><input type="checkbox" ' + (draft.fields.length ? 'checked' : '') + ' disabled><span>서명 필드 <b>' + draft.fields.length + '개</b> 배치 ' + (draft.fields.length ? '완료' : '<span style="color:var(--red-600)">— 2단계에서 배치 필요</span>') + '</span></li>' +
+      '<li><input type="checkbox" id="chk-lock" ' + (draft.lockOnComplete ? 'checked' : '') + '><span><b>완료 문서 잠금</b> — 체결 즉시 해시 등록·수정 차단</span></li>' +
+      '<li><input type="checkbox" id="chk-cc"><span>외부 참조자(CC)에게 완료본 공유</span></li>' +
+      '</ul></aside></div>';
+
+    $('#set-title').addEventListener('input', (e) => { draft.title = e.target.value; });
+    $('#set-label').addEventListener('change', (e) => { draft.label = e.target.value; });
+    $('#set-exp').addEventListener('change', (e) => { draft.expirationDays = +e.target.value; });
+    $('#set-sched').addEventListener('change', (e) => { draft.scheduledAt = e.target.value; });
+    $('#chk-lock').addEventListener('change', (e) => { draft.lockOnComplete = e.target.checked; });
+    $('#set-remind').addEventListener('change', (e) => { draft.reminderRule = e.target.value; });
+    $('#set-note').addEventListener('input', (e) => { draft.note = e.target.value; });
+    $('#set-auth').addEventListener('change', (e) => { draft.authMethod = e.target.value; });
+    $('#set-attach').addEventListener('click', () => {
+      draft.attachments.push('참고자료_' + (draft.attachments.length + 1) + '.pdf');
+      drawSettings(body);
+    });
+    $('#set-cc').addEventListener('click', () => {
+      const v = prompt('참조자 이메일을 입력하세요');
+      if (v && /@.+\./.test(v)) { draft.ccList.push(v); drawSettings(body); }
+      else if (v) toast('⚠️ 올바른 이메일 형식이 아닙니다.');
+    });
+  }
+
+  // ── 발송: Optimistic UI + 백그라운드 진행 표시 ────────────────────
+  async function submit() {
+    if (!draft.title.trim()) { toast('⚠️ 문서 제목을 입력하세요.'); return; }
+    if (!draft.fields.length) { toast('⚠️ 2단계에서 서명 필드를 1개 이상 배치하세요.'); go(2); return; }
+
+    const payload = {
+      title: draft.title.trim(),
+      label: draft.label,
+      expirationDays: draft.expirationDays,
+      scheduledAt: draft.scheduledAt || null,
+      signers: draft.signers.filter((s) => s.name && (s.contact || s.channel === 'IN_PERSON')).map((s) => ({ name: s.name, contact: s.contact || '대면서명', channel: s.channel })),
+      fields: draft.fields,
+    };
+    // 즉시 문서함으로 전환하고 발송은 백그라운드 진행 (멀티태스킹 보장)
+    LS.nav('documents', { view: 'kanban' });
+    const box = document.createElement('div');
+    box.className = 'bg-progress card card-pad';
+    box.innerHTML = '<b style="font-size:13px">🚀 서명 요청 발송 중…</b><div class="dim" style="font-size:12px">' + esc(payload.title) + '</div><div class="bar"><i style="width:15%"></i></div>';
+    document.body.appendChild(box);
+    const bar = box.querySelector('.bar i');
+    const timer = setInterval(() => { bar.style.width = Math.min(90, parseFloat(bar.style.width) + 22) + '%'; }, 180);
+
+    try {
+      const res = await LS.api.sendDocument(payload);
+      clearInterval(timer);
+      bar.style.width = '100%';
+      setTimeout(() => box.remove(), 900);
+      toast('✅ ' + res.queuedNotifications + '명에게 서명 요청을 발송했습니다 (카카오톡·이메일).');
+      LS.nav('documents', { view: 'kanban', _r: String(Date.now() % 1e7) }); // 목록 갱신
+    } catch (e) {
+      clearInterval(timer);
+      box.remove();
+      toast('⚠️ 발송에 실패했습니다. 임시저장본에서 다시 시도하세요.');
+    }
+  }
+})(window.LS);
+
+/**
+ * 로싸인(LawSign) AI 어시스턴트 — RAG(검색 증강 생성) + Qwen Max(OpenRouter)
+ *
+ * 보안 원칙:
+ * - API 키는 절대 코드·저장소에 두지 않는다. 브라우저 localStorage에만 보관하며
+ *   화면에서는 마스킹해 표시한다. (실서버 전환 시 서버 측 프록시로 이동 — docs/AI_PLAN.md)
+ * - 키 미설정·네트워크 차단 환경에서는 검색된 근거 문서만으로 데모 응답을 생성해
+ *   전체 UX를 동일하게 시연할 수 있다.
+ */
+(function (LS) {
+  'use strict';
+  const { $, $$, esc, toast } = LS.ui;
+  const icons = LS.icons;
+
+  const MODEL = 'qwen/qwen-max';
+  const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+  const KEY = 'ls-ai-key';
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 무시 */ } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { /* 무시 */ } },
+  };
+
+  const STATUS_KO = { DRAFT: '작성 중', SCHEDULED: '예약됨', NEED_MY_SIGN: '내 서명 필요', PENDING_OTHERS: '상대 서명 대기', COMPLETED: '서명 완료', REJECTED: '거절·취소' };
+
+  // ── RAG-라이트 검색기 ─────────────────────────────────────────────
+  // 질문 토큰과 문서 메타데이터(제목·라벨·서명자·상태)의 겹침을 점수화해
+  // 상위 k건을 근거 문서로 선별한다. 실서버에서는 임베딩 인덱스로 교체된다.
+  async function retrieve(query, k) {
+    const res = await LS.api.listDocuments({ size: 500 });
+    const q = String(query).toLowerCase();
+    const terms = q.split(/[\s,.·?!()「」'"]+/).filter((t) => t.length > 1);
+    const wantStale = /독촉|지연|리마인드|미서명|대기/.test(q);
+    const wantDone = /완료|체결|끝난/.test(q);
+    const scored = res.items.map((d) => {
+      const hay = (d.title + ' ' + (d.label || '') + ' ' + d.signers.map((s) => s.name + ' ' + s.contact).join(' ') + ' ' + STATUS_KO[d.status]).toLowerCase();
+      let score = 0;
+      terms.forEach((t) => { if (hay.includes(t)) score += 2; });
+      if (wantStale && d.status === 'PENDING_OTHERS') score += 1.5;
+      if (wantDone && d.status === 'COMPLETED') score += 1.5;
+      return { d, score };
+    }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, k || 5);
+    return scored.map((x) => x.d);
+  }
+
+  const docLine = (d) =>
+    '「' + d.title + '」 — 상태: ' + STATUS_KO[d.status] +
+    (d.label ? ', 라벨: ' + d.label : '') +
+    ', 서명자: ' + (d.signers.map((s) => s.name).join('·') || '미지정') +
+    ', 요청일: ' + LS.ui.fmtDate(d.createdAt) +
+    (d.completedAt ? ', 체결일: ' + LS.ui.fmtDate(d.completedAt) : '');
+
+  // ── 데모 폴백: 근거 문서만으로 결정론적 응답 생성 ─────────────────
+  async function mockAnswer(q, docs) {
+    if (/요약|현황|리포트|얼마나|몇\s*건/.test(q)) {
+      const sum = await LS.api.getDashboardSummary();
+      const c = sum.counts;
+      return '현재 워크스페이스 현황을 요약드립니다.\n\n' +
+        '· 내 서명 필요: ' + c.NEED_MY_SIGN + '건 (오늘 우선 처리 권장)\n' +
+        '· 상대 서명 대기: ' + c.PENDING_OTHERS + '건' + (sum.urgent.length ? ' — 이 중 ' + sum.urgent.length + '건이 3일 이상 응답 없음' : '') + '\n' +
+        '· 서명 완료 누적: ' + c.COMPLETED + '건 · 예약 발송 ' + c.SCHEDULED + '건 · 작성 중 ' + c.DRAFT + '건\n\n' +
+        (sum.urgent.length ? '지연 문서(' + sum.urgent.map((d) => '「' + d.title + '」').join(', ') + ')는 메일함 행의 발신 버튼으로 즉시 독촉하실 수 있습니다.' : '지연 중인 문서는 없습니다.');
+    }
+    if (/독촉|리마인드|재촉/.test(q) && docs.length) {
+      const d = docs[0];
+      const to = d.signers.find((s) => s.status !== 'SIGNED') || d.signers[0];
+      return '「' + d.title + '」 독촉 메시지 초안입니다. 메일함에서 해당 문서의 ✉️ 버튼을 누르면 바로 발신할 수 있습니다.\n\n' +
+        '---\n' + (to ? to.name : '고객') + '님, 안녕하세요. ' + LS.workspace.name + '입니다.\n' +
+        '요청드린 「' + d.title + '」 전자서명이 아직 완료되지 않아 다시 안내드립니다.\n' +
+        '바쁘시겠지만 기한(' + d.expirationDays + '일) 내 서명 부탁드립니다. 링크: https://sign.lawsign.example/d/' + d.id;
+    }
+    if (!docs.length) {
+      return '질문과 일치하는 문서를 찾지 못했습니다. 문서 제목·서명자 이름·라벨(합의서, 처벌불원서 등)로 다시 질문해 보세요.\n예) "장호철 합의서 진행 상황 알려줘"';
+    }
+    return '관련 문서 ' + docs.length + '건을 찾았습니다.\n\n' + docs.map((d, i) => (i + 1) + '. ' + docLine(d)).join('\n') +
+      '\n\n특정 문서의 이력·검증이 필요하면 아래 근거 문서 칩을 눌러 상세를 확인하세요.';
+  }
+
+  // ── Qwen Max 호출 (OpenRouter) — 실패 시 데모 응답으로 폴백 ───────
+  async function chat(userText, history) {
+    const docs = await retrieve(userText, 5);
+    const key = LS.ai.getKey();
+    if (!key) return { text: await mockAnswer(userText, docs), docs, mode: 'demo' };
+    const system =
+      '당신은 법무법인용 전자서명 워크스페이스 "로싸인(LawSign)"의 AI 어시스턴트입니다. ' +
+      '한국어로 정중하고 간결하게 답하세요. 아래 [근거 문서]에 있는 사실만 사용하고, 근거가 없으면 모른다고 답하세요.\n\n' +
+      '[근거 문서]\n' + (docs.length ? docs.map(docLine).join('\n') : '(검색 결과 없음)');
+    try {
+      const r = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [{ role: 'system', content: system }].concat(history || [], [{ role: 'user', content: userText }]),
+          max_tokens: 700,
+        }),
+      });
+      if (!r.ok) throw new Error('OpenRouter HTTP ' + r.status);
+      const j = await r.json();
+      return { text: j.choices[0].message.content, docs, mode: 'live' };
+    } catch (e) {
+      return { text: await mockAnswer(userText, docs), docs, mode: 'demo', error: e.message };
+    }
+  }
+
+  // ── 컴포즈 모달용 발신문 초안 생성 ────────────────────────────────
+  async function draftMessage(doc, channel) {
+    const to = doc.signers.find((s) => s.status !== 'SIGNED') || doc.signers[0];
+    const fallback =
+      (to ? to.name : '고객') + '님, 안녕하세요. ' + LS.workspace.name + '입니다.\n' +
+      '「' + doc.title + '」' + (doc.label ? '(' + doc.label + ')' : '') + ' 문서의 전자서명을 요청드립니다.\n' +
+      '아래 링크에서 내용을 검토하신 후 서명해 주시면 감사하겠습니다. 서명 기한은 요청일로부터 ' + doc.expirationDays + '일입니다.\n' +
+      'https://sign.lawsign.example/d/' + doc.id + '\n' +
+      '문의사항은 본 ' + (channel === 'KAKAO' ? '카카오톡' : '메일') + '으로 회신 주세요.';
+    const key = LS.ai.getKey();
+    if (!key) return fallback;
+    try {
+      const r = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [{
+            role: 'user',
+            content: '전자서명 요청 ' + (channel === 'KAKAO' ? '카카오 알림톡(간결, 4문장 이내)' : '이메일 본문') +
+              '을 한국어 존댓말로 작성해줘. 인사말 포함, 서명 링크 자리에 ' +
+              'https://sign.lawsign.example/d/' + doc.id + ' 사용. 문서: ' + docLine(doc) + ' / 발신처: ' + LS.workspace.name +
+              ' / 받는 사람: ' + (to ? to.name : '고객') + '. 본문 텍스트만 출력.',
+          }],
+          max_tokens: 400,
+        }),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      return j.choices[0].message.content.trim();
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  LS.ai = {
+    getKey: () => store.get(KEY) || '',
+    setKey: (k) => store.set(KEY, String(k).trim()),
+    clearKey: () => store.del(KEY),
+    maskedKey() { const k = this.getKey(); return k ? k.slice(0, 8) + '…' + k.slice(-4) : ''; },
+    retrieve, chat, draftMessage,
+  };
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면: AI 어시스턴트 (RAG 채팅)
+  // ══════════════════════════════════════════════════════════════════
+  const SUGGESTS = ['이번 달 서명 현황 요약해줘', '3일 넘게 지연된 문서 독촉문 써줘', '장호철 합의서 진행 상황은?', '처벌불원서 관련 문서 찾아줘'];
+
+  LS.route('assistant', async (main) => {
+    const hasKey = !!LS.ai.getKey();
+    main.innerHTML =
+      '<div class="page" style="max-width:860px">' +
+      '<div class="docbox-head"><h1 style="font-size:20px"><span class="ai-avatar" style="display:inline-grid;vertical-align:-7px">✦</span> AI 어시스턴트 ' +
+      '<span class="badge violet">Qwen Max · RAG</span></h1></div>' +
+
+      '<div class="card card-pad ai-keybar" id="ai-keybar">' +
+      (hasKey
+        ? '<span>' + icons.check + ' OpenRouter 키 연결됨 <code class="hash-chip">' + esc(LS.ai.maskedKey()) + '</code> — 실제 Qwen Max 모델로 응답합니다.</span>' +
+          '<button class="btn sm" id="ai-key-del">연결 해제</button>'
+        : '<span>' + icons.warn + ' API 키 미설정 — <b>데모 응답 모드</b>로 동작 중입니다. OpenRouter 키(sk-or-v1-…)를 입력하면 실제 Qwen Max가 응답합니다. 키는 이 브라우저에만 저장되며 서버·저장소로 전송되지 않습니다.</span>' +
+          '<span class="toolbar-row" style="flex:none"><input type="password" class="input" id="ai-key-in" placeholder="sk-or-v1-…" style="width:220px">' +
+          '<button class="btn primary sm" id="ai-key-save">저장</button></span>') +
+      '</div>' +
+
+      '<div class="ai-chat" id="ai-chat">' +
+      '<div class="ai-msg"><span class="ai-avatar">✦</span><div class="bubble">안녕하세요, ' + esc(LS.workspace.name) + ' 님. 문서함 전체를 근거로 답하는 로싸인 AI 어시스턴트입니다.\n서명 현황 요약, 지연 문서 독촉문 작성, 문서 검색을 도와드릴 수 있어요.</div></div>' +
+      '</div>' +
+      '<div class="toolbar-row ai-suggest" id="ai-suggest">' + SUGGESTS.map((s) => '<button class="btn sm">' + esc(s) + '</button>').join('') + '</div>' +
+      '<div class="ai-inputbar"><textarea class="input" id="ai-in" rows="1" placeholder="문서에 대해 무엇이든 물어보세요…"></textarea>' +
+      '<button class="btn primary" id="ai-send">' + icons.send + ' 보내기</button></div>' +
+      '</div>';
+
+    const chatBox = $('#ai-chat');
+    const input = $('#ai-in');
+    const history = [];
+
+    function bubble(role, html) {
+      const el = document.createElement('div');
+      el.className = 'ai-msg' + (role === 'user' ? ' user' : '');
+      el.innerHTML = (role === 'user' ? '' : '<span class="ai-avatar">✦</span>') + '<div class="bubble">' + html + '</div>';
+      chatBox.appendChild(el);
+      el.scrollIntoView({ block: 'end' });
+      return el;
+    }
+
+    async function send(text) {
+      text = (text || input.value).trim();
+      if (!text) return;
+      input.value = '';
+      bubble('user', esc(text));
+      const wait = bubble('ai', '<span class="ai-typing"><i></i><i></i><i></i></span>');
+      const btn = $('#ai-send');
+      btn.disabled = true;
+      const res = await LS.ai.chat(text, history.slice(-6));
+      btn.disabled = false;
+      history.push({ role: 'user', content: text }, { role: 'assistant', content: res.text });
+      wait.querySelector('.bubble').innerHTML =
+        esc(res.text) +
+        (res.docs.length
+          ? '<div class="ai-src">' + res.docs.map((d) => '<button class="badge brand" data-src="' + d.id + '">📄 ' + esc(d.title.slice(0, 22)) + (d.title.length > 22 ? '…' : '') + '</button>').join('') + '</div>'
+          : '') +
+        (res.mode === 'demo' ? '<div class="dim" style="font-size:11px;margin-top:6px">데모 응답' + (res.error ? ' (연결 실패: ' + esc(res.error) + ')' : '') + ' — 근거 문서 검색은 실제로 수행됨</div>' : '');
+      $$('[data-src]', wait).forEach((b) => b.addEventListener('click', () => LS.openHistoryModal(b.dataset.src)));
+      wait.scrollIntoView({ block: 'end' });
+    }
+
+    $('#ai-send').addEventListener('click', () => send());
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+    $$('#ai-suggest button').forEach((b) => b.addEventListener('click', () => send(b.textContent)));
+
+    const saveBtn = $('#ai-key-save');
+    if (saveBtn) saveBtn.addEventListener('click', () => {
+      const v = $('#ai-key-in').value.trim();
+      if (!/^sk-or-v1-/.test(v)) { toast('⚠️ OpenRouter 키 형식(sk-or-v1-…)이 아닙니다.'); return; }
+      LS.ai.setKey(v);
+      toast('🔐 키를 이 브라우저에 저장했습니다. 실제 모델로 응답합니다.');
+      LS.nav('assistant', { _r: String(Date.now() % 1e7) });
+    });
+    const delBtn = $('#ai-key-del');
+    if (delBtn) delBtn.addEventListener('click', () => {
+      LS.ai.clearKey();
+      toast('키 연결을 해제했습니다. 데모 응답 모드로 전환됩니다.');
+      LS.nav('assistant', { _r: String(Date.now() % 1e7) });
+    });
+  });
+})(window.LS);
+
+</script>
+</body>
+</html>
