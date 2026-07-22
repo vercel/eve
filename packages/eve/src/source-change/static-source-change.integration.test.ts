@@ -70,4 +70,23 @@ describe("createStaticSourceChange.updateModelName", () => {
 
     expect(result.kind).toBe("bail");
   });
+
+  it("atomically applies model, reasoning, and Fast mode settings", async () => {
+    const { agentRoot, manifest } = await scaffoldAgent();
+
+    const result = await createStaticSourceChange(manifest).updateModelSettings({
+      model: { kind: "set", value: "openai/gpt-5.5" },
+      reasoning: { kind: "set", value: "high" },
+      gatewayServiceTier: { kind: "set", value: "priority" },
+    });
+
+    expect(result).toEqual({
+      kind: "applied",
+      changed: ["model", "reasoning", "fast-mode"],
+    });
+    const written = await readFile(join(agentRoot, "agent.ts"), "utf8");
+    expect(written).toContain('model: "openai/gpt-5.5"');
+    expect(written).toContain('reasoning: "high"');
+    expect(written).toContain('serviceTier: "priority"');
+  });
 });

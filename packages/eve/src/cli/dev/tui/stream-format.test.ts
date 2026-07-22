@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   formatCompactTokenCount,
   formatTokenFlow,
+  formatTurnDuration,
+  typewriterText,
   isIncompletePaste,
   nextKey,
   parseKey,
@@ -70,6 +72,27 @@ describe("formatTokenFlow", () => {
       ),
     ).toBe("↑ 24K ↓ 300 12%");
     expect(formatTokenFlow({ inputTokens: 0, outputTokens: 0 }, FLOW_GLYPHS)).toBe("↑ 0 ↓ 0");
+  });
+});
+
+describe("typewriterText", () => {
+  it("reveals one character per step, then holds the full text", () => {
+    expect(typewriterText("Working…", 0, 80)).toBe("W");
+    expect(typewriterText("Working…", 79, 80)).toBe("W");
+    expect(typewriterText("Working…", 160, 80)).toBe("Wor");
+    expect(typewriterText("Working…", 560, 80)).toBe("Working…");
+    expect(typewriterText("Working…", 60_000, 80)).toBe("Working…");
+  });
+});
+
+describe("formatTurnDuration", () => {
+  it("scales through seconds, minutes, and hours", () => {
+    expect(formatTurnDuration(400)).toBe("1s");
+    expect(formatTurnDuration(42_000)).toBe("42s");
+    expect(formatTurnDuration(204_000)).toBe("3min 24s");
+    expect(formatTurnDuration(300_000)).toBe("5min");
+    expect(formatTurnDuration(4_320_000)).toBe("1h 12min");
+    expect(formatTurnDuration(3_600_000)).toBe("1h");
   });
 });
 

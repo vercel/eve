@@ -1,5 +1,6 @@
-import { jsonSchema, tool, type ToolSet } from "ai";
+import { tool, type ToolSet } from "ai";
 
+import { createLogger } from "#internal/logging.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { passesToolFilter, resolveHeaders } from "#runtime/connections/mcp-client.js";
 import {
@@ -25,7 +26,10 @@ import type {
   ConnectionToolMetadata,
 } from "#runtime/connections/types.js";
 import { isObject } from "#shared/guards.js";
+import { toInputSchema, type ToolSchema } from "#shared/tool-schema.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
+
+const log = createLogger("runtime.connections.openapi-client");
 
 interface OpenApiToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];
@@ -155,6 +159,18 @@ export class OpenApiConnectionClient implements ConnectionClient {
     const tools: ToolSet = {};
 
     for (const operation of selected) {
+      let inputSchema: ToolSchema;
+      try {
+        inputSchema = toInputSchema(operation.inputSchema);
+      } catch (error) {
+        log.warn("omitting OpenAPI operation with an invalid input schema", {
+          connectionName: this.#connection.connectionName,
+          error,
+          toolName: operation.toolName,
+        });
+        continue;
+      }
+
       operationMap.set(operation.toolName, operation);
       metadata.push({
         description: operation.description,
@@ -163,7 +179,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
       });
       tools[operation.toolName] = tool({
         description: operation.description,
-        inputSchema: jsonSchema(operation.inputSchema),
+        inputSchema,
         execute: async (input: unknown, toolOptions) =>
           this.#request(operation, baseUrl, isObject(input) ? input : {}, {
             abortSignal: toolOptions?.abortSignal,

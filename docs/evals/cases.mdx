@@ -102,6 +102,8 @@ export default defineEval({
 `t` drives the primary session; `t.newSession()` returns an independent `EveEvalSession` against the same target, whose events feed the same run-level assertions.
 
 - `t.send(input)` sends a turn and waits for it to settle. It accepts the same input as `ClientSession.send()` (a string or a structured message) and resolves to a turn carrying `.message` and `.expectOk()`.
+- `t.start(input)` starts a turn but returns as soon as the server accepts it. The returned live turn exposes `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()` for coordinating with work that is still running.
+- `t.cancel()` requests cooperative cancellation of the primary session's active turn. Both `accepted` and `no_active_turn` are successful outcomes.
 - `t.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
 - `t.requireInputRequest(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
 - `t.respond(...responses)` answers specific pending input requests and sends them as the next turn.
@@ -109,6 +111,35 @@ export default defineEval({
 - `t.reply` is the last assistant message (or `null`); `t.sessionId` is the current session id; `t.events` is the full typed event stream captured so far.
 
 Each `send` (and `respond`/`respondAll`) resolves to an immutable turn with `.message`, `.data`, `.events`, `.inputRequests`, `.toolCalls`, `.sessionId`, `.status`, and `.expectOk()`. Use `.sessionId` to relate turns or attach follow-up work to the session that produced a specific turn. `expectOk()` throws only when the turn ended failed; a session left open for a next message is the normal end state of a successful turn.
+
+## In-flight turns
+
+Use `start()` when the eval must observe or affect a turn before it settles. A live turn owns one stream consumer: `waitForEvent()` reads typed events from its buffer, and `result()` waits for the boundary and records the same buffered stream as an immutable turn. Event data matchers use the same partial-deep matcher language as `t.event(...)`.
+
+```ts title="evals/cancel-running-tool.eval.ts"
+import { defineEval } from "eve/evals";
+
+export default defineEval({
+  async test(t) {
+    const live = await t.start("Run the long operation.");
+
+    await live.waitForEvent("actions.requested", {
+      data: {
+        actions: (actions) =>
+          actions.some(
+            (action) => action.kind === "tool-call" && action.toolName === "long_operation",
+          ),
+      },
+    });
+
+    await live.cancel();
+    const turn = await live.result();
+    turn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
+  },
+});
+```
+
+`waitForEvent()` rejects if the stream fails or reaches its turn boundary before the requested event. Call `result()` after any coordination to settle the stream and make its events available to run-level assertions.
 
 Use `expectOk()` only when the next operation depends on that intermediate turn succeeding. A final `t.succeeded()` already records a complete-run gate.
 

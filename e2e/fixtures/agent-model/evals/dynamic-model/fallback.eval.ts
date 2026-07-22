@@ -1,5 +1,7 @@
 import { defineEval } from "eve/evals";
 
+const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol";
+
 /**
  * No selection marker: the resolver returns `null`, the fallback serves the
  * turn, and the runtime identity reports `dynamic:<fallback id>`.
@@ -15,8 +17,7 @@ export default defineEval({
     t.eventsSatisfy("runtime identity reports a dynamic model", (events) =>
       events.some(
         (event) =>
-          event.type === "session.started" &&
-          event.data.runtime?.modelId === "dynamic:openai/gpt-5.5",
+          event.type === "session.started" && event.data.runtime?.modelId === `dynamic:${model}`,
       ),
     );
   },

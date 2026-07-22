@@ -1,6 +1,7 @@
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
+  getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
-  getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
@@ -9,6 +10,7 @@ import {
 import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
 import type {
   AgentInfoData,
+  CompiledAgentManifest,
   CompiledSubagentNode,
   ResolvedSandboxDefinition,
   ResolvedScheduleDefinition,
@@ -19,9 +21,10 @@ import type {
   ResolvedChannelDefinition,
   ResolvedToolDefinition,
 } from "#runtime/types.js";
+import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 export interface AgentInfoSource {
@@ -169,6 +172,8 @@ export interface AgentInfoResponse {
       readonly contextWindowTokens?: number;
       readonly id: string;
       readonly providerOptions?: unknown;
+      /** The agent's authored reasoning effort, forwarded to the model call. */
+      readonly reasoning?: AgentReasoningDefinition;
       readonly source?: AgentInfoSource;
       readonly routing?: ModelRouting;
       readonly endpoint?: ModelEndpointStatus;
@@ -215,7 +220,7 @@ export function buildAgentInfoResponse(
   },
 ): AgentInfoResponse {
   const agent = data.agent;
-  const tools = buildToolInfo(agent);
+  const tools = buildToolInfo(agent, getRootDelegationToolNames(data.manifest));
 
   return {
     agent: {
@@ -227,6 +232,7 @@ export function buildAgentInfoResponse(
         contextWindowTokens: agent.config.model.contextWindowTokens,
         id: agent.config.model.id,
         providerOptions: agent.config.model.providerOptions,
+        reasoning: agent.config.reasoning,
         source: agent.config.model.source ? toSource(agent.config.model.source) : undefined,
       },
       name: agent.config.name,
@@ -285,7 +291,7 @@ export function buildAgentInfoResponse(
     tools,
     version: 1,
     workflow: {
-      enabled: agent.workflowEnabled,
+      enabled: agent.workflowTool !== undefined,
       toolName: WORKFLOW_TOOL_NAME,
     },
     workspace: {
@@ -343,54 +349,29 @@ function buildChannelInfo(agent: ResolvedAgent): AgentInfoChannels {
   };
 }
 
-function buildToolInfo(agent: ResolvedAgent): AgentInfoTools {
+function buildToolInfo(
+  agent: ResolvedAgent,
+  delegationToolNames: ReadonlySet<string>,
+): AgentInfoTools {
   const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
   const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
   const allFrameworkToolNames = getAllFrameworkToolNames();
-  const frameworkToolDefinitions = getFrameworkToolDefinitions({
-    hasConnections: agent.connections.length > 0,
-  });
   const dynamicFrameworkResolvers =
     agent.connections.length > 0 ? [createConnectionSearchResolver()] : [];
-  const activeFrameworkTools = frameworkToolDefinitions.filter(
-    (tool) => !authoredToolNames.has(tool.name) && !disabledFrameworkTools.has(tool.name),
-  );
   const authored = agent.tools.map((tool) =>
     renderTool(tool, {
       origin: "authored",
       replacesFrameworkTool: allFrameworkToolNames.has(tool.name),
     }),
   );
-  const framework = frameworkToolDefinitions.map((tool) => {
-    const replacedByAuthoredTool = authoredToolNames.has(tool.name);
-    const disabledByAuthor = disabledFrameworkTools.has(tool.name);
-    const status: AgentInfoFrameworkToolEntry["status"] = disabledByAuthor
-      ? "disabled"
-      : replacedByAuthoredTool
-        ? "replaced"
-        : "active";
-
-    return {
-      ...renderTool(tool, {
-        origin: "framework",
-        replacesFrameworkTool: false,
-      }),
-      disabledByAuthor,
-      replacedByAuthoredTool,
-      status,
-    };
+  const frameworkInfo = buildFrameworkToolInfo({
+    authoredToolNames,
+    delegationToolNames,
+    disabledFrameworkToolNames: disabledFrameworkTools,
   });
 
   return {
-    available: [
-      ...activeFrameworkTools.map((tool) =>
-        renderTool(tool, {
-          origin: "framework",
-          replacesFrameworkTool: false,
-        }),
-      ),
-      ...authored,
-    ],
+    available: [...frameworkInfo.available, ...authored],
     authored,
     disabledFramework: [...agent.disabledFrameworkTools],
     dynamic: [
@@ -401,9 +382,61 @@ function buildToolInfo(agent: ResolvedAgent): AgentInfoTools {
         renderDynamicResolver(resolver, { origin: "authored" }),
       ),
     ],
-    framework,
+    framework: frameworkInfo.framework,
     reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
   };
+}
+
+export function buildFrameworkToolInfo(input: {
+  readonly authoredToolNames: ReadonlySet<string>;
+  readonly delegationToolNames: ReadonlySet<string>;
+  readonly disabledFrameworkToolNames: ReadonlySet<string>;
+}): Pick<AgentInfoTools, "available" | "framework"> {
+  const occupiedToolNames = new Set([...input.authoredToolNames, ...input.delegationToolNames]);
+  const available: AgentInfoToolEntry[] = [];
+  const framework: AgentInfoFrameworkToolEntry[] = [];
+
+  for (const definition of getAllFrameworkToolDefinitions()) {
+    const disabledByAuthor = input.disabledFrameworkToolNames.has(definition.name);
+    const replacedByAuthoredTool = input.authoredToolNames.has(definition.name);
+    const status: AgentInfoFrameworkToolEntry["status"] = disabledByAuthor
+      ? "disabled"
+      : occupiedToolNames.has(definition.name)
+        ? "replaced"
+        : "active";
+    const rendered = renderTool(definition, {
+      origin: "framework",
+      replacesFrameworkTool: false,
+    });
+
+    if (status === "active") {
+      available.push(rendered);
+    }
+
+    framework.push({
+      ...rendered,
+      disabledByAuthor,
+      replacedByAuthoredTool,
+      status,
+    });
+  }
+
+  return { available, framework };
+}
+
+export function getRootDelegationToolNames(manifest: CompiledAgentManifest): ReadonlySet<string> {
+  const rootChildNodeIds = new Set(
+    manifest.subagentEdges
+      .filter((edge) => edge.parentNodeId === ROOT_COMPILED_AGENT_NODE_ID)
+      .map((edge) => edge.childNodeId),
+  );
+
+  return new Set([
+    ...manifest.subagents
+      .filter((subagent) => rootChildNodeIds.has(subagent.nodeId))
+      .map((subagent) => subagent.name),
+    ...manifest.remoteAgents.map((remoteAgent) => remoteAgent.name),
+  ]);
 }
 
 export function renderChannel(
@@ -429,17 +462,20 @@ export function renderTool(
     readonly replacesFrameworkTool: boolean;
   },
 ): AgentInfoToolEntry {
+  const inputSchema = serializeInputSchema(tool.inputSchema);
+  const outputSchema = serializeOutputSchema(tool.outputSchema);
+
   return {
     ...toSource(tool),
     description: tool.description,
     hasAuth: false,
     hasExecute: tool.execute !== undefined,
     hasModelOutputProjection: tool.toModelOutput !== undefined,
-    hasOutputSchema: tool.outputSchema !== undefined && tool.outputSchema !== null,
-    inputSchema: tool.inputSchema,
+    hasOutputSchema: outputSchema !== undefined,
+    inputSchema,
     name: tool.name,
     origin: input.origin,
-    outputSchema: tool.outputSchema,
+    outputSchema,
     replacesFrameworkTool: input.replacesFrameworkTool,
     requiresApproval: tool.approval !== undefined,
   };

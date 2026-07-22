@@ -7,6 +7,8 @@ import {
   initAgentDevHandoff,
   initAgentInstructions,
   initAgentReplPrompt,
+  initExtensionHandoff,
+  initExtensionInstructions,
   SETUP_SECTIONS,
 } from "./agent-instructions.js";
 
@@ -25,6 +27,7 @@ describe("initAgentInstructions", () => {
     // pre-scaffold guide renders the universal `npx eve dev` through the shared
     // prompt renderer rather than a launcher-specific command.
     expect(instructions).toContain("npx eve@latest init <name>");
+    expect(instructions).toContain("npx eve@latest extension init <name>");
     expect(instructions).toContain("full docs are bundled");
     expect(instructions).toContain("node_modules/eve/docs/");
     expect(instructions).toContain("resolve\nthe installed `eve` package location");
@@ -88,6 +91,35 @@ describe("initAgentReplPrompt", () => {
     expect(prompt).toContain("What should the agent do?");
     expect(prompt).toContain("pnpm exec eve dev --no-ui");
     expect(prompt).not.toContain("{{");
+  });
+});
+
+describe("initExtensionInstructions", () => {
+  it("points coding agents at extension init with a package name", () => {
+    const instructions = initExtensionInstructions();
+
+    expect(instructions).toContain("npx eve@latest extension init <name>");
+    expect(instructions).toContain("eve extension build");
+    expect(instructions).toContain("does not start eve dev");
+    expect(instructions).not.toContain("{{");
+  });
+});
+
+describe("initExtensionHandoff", () => {
+  it("describes the scaffold and mount next steps without eve dev", () => {
+    const handoff = initExtensionHandoff({
+      packageManager: "pnpm",
+      packageName: "my-crm",
+      projectPath: "/tmp/my-crm",
+    });
+
+    expect(handoff).toContain("extension/extension.ts");
+    expect(handoff).toContain("pnpm run build");
+    expect(handoff).toContain("eve extension build");
+    expect(handoff).toContain('import ext from "my-crm"');
+    expect(handoff).toContain("agent/extensions/my-crm.ts");
+    expect(handoff).toContain("/tmp/my-crm");
+    expect(handoff).not.toContain("eve dev");
   });
 });
 

@@ -45,10 +45,7 @@ export function resizeCanvas(
   return dpr;
 }
 
-export function getCanvasLogicalSize(
-  canvas: HTMLCanvasElement,
-  devicePixelRatio: number,
-) {
+export function getCanvasLogicalSize(canvas: HTMLCanvasElement, devicePixelRatio: number) {
   // The renderer pads the logical scene size by a DPR-scaled bloom radius on each side before
   // allocating its offscreen back/depth targets. The canvas itself is that padded physical render
   // target, so subtract the same physical padding here. Passing CSS/logical logo dimensions would

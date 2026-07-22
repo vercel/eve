@@ -11,8 +11,9 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
+import { atomicWriteFile } from "#shared/atomic-write-file.js";
 import {
-  atomicWriteFile,
   bundleFinalWorkflowOutput,
   collectWorkflowInputFiles,
   convertClassesManifest,
@@ -31,10 +32,7 @@ import {
   type WorkflowBundleCreateWorkflowsBundleResult,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { writeNitroStepEntrypoint } from "#internal/workflow-bundle/nitro-step-entry.js";
 import {
   copyNitroFunctionDirectory,
@@ -49,10 +47,6 @@ import {
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
-
-// Serialize same-output builds so parallel Vercel surfaces never read
-// `workflows.mjs` between the workflow wrapper write and literal rewrite pass.
-const workflowBundleBuildLocks = new Map<string, Promise<void>>();
 
 export class WorkflowBundleBuilder {
   readonly #agentName: string;
@@ -86,13 +80,7 @@ export class WorkflowBundleBuilder {
   async build(
     options: { nitroStepOutfile?: string; nitroWorkflowOutfile?: string } = {},
   ): Promise<void> {
-    const previous = workflowBundleBuildLocks.get(this.#outDir) ?? Promise.resolve();
-    const next = previous.then(() => this.#performBuild(options));
-    workflowBundleBuildLocks.set(
-      this.#outDir,
-      next.catch(() => {}),
-    );
-    await next;
+    await runQueuedWorkflowBuild(this.#outDir, async () => this.#performBuild(options));
   }
 
   async #performBuild(options: {
@@ -132,6 +120,7 @@ export class WorkflowBundleBuilder {
       outfile: stepsOutfile,
       preferAbsoluteFileImports: true,
       projectRoot: this.config.projectRoot ?? this.config.workingDir,
+      sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
       workingDir: this.config.workingDir,
     });
     const nitroStepOutfile = options.nitroStepOutfile;
@@ -143,6 +132,7 @@ export class WorkflowBundleBuilder {
         outfile: nitroStepOutfile,
         preferAbsoluteFileImports: true,
         projectRoot: this.config.projectRoot ?? this.config.workingDir,
+        sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
         workingDir: this.config.workingDir,
       });
     }
@@ -280,42 +270,39 @@ export class WorkflowBundleBuilder {
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
       ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
     ].join("\n");
-    const output = await buildWithNitroRolldown({
-      cwd: this.config.workingDir,
-      input: WORKFLOW_VIRTUAL_ENTRY_ID,
-      platform: "neutral",
-      plugins: [
-        createWorkflowVirtualEntryPlugin(virtualEntrySource),
-        createWorkflowPseudoPackagePlugin(),
-        createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
-        createWorkflowTransformPlugin({
-          manifest: workflowManifest,
-          projectRoot: this.transformProjectRoot,
-          sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
-          workingDir: this.config.workingDir,
-        }),
-        // Must run after the transform so `"use step"` bodies are already
-        // stubbed and their node:* imports stripped from this graph.
-        createWorkflowNodeBuiltinGuardPlugin(),
-      ],
-      resolve: {
-        conditionNames: ["eve-source", "workflow", "node", "import", "default"],
-        extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
-        mainFields: ["module", "main"],
-      },
-      tsconfig: tsconfigPath ?? false,
-      write: false,
-      output: {
-        banner: "globalThis.__private_workflows = new Map();",
-        codeSplitting: false,
-        comments: false,
-        format: "cjs",
-        sourcemap: "inline",
-      },
-    });
-    const interimBundle = getSingleRolldownChunk(
-      output,
+    const interimBundle = await buildSingleRolldownChunk(
       `intermediate workflow bundle for "${outfile}"`,
+      {
+        cwd: this.config.workingDir,
+        input: WORKFLOW_VIRTUAL_ENTRY_ID,
+        platform: "neutral",
+        plugins: [
+          createWorkflowVirtualEntryPlugin(virtualEntrySource),
+          createWorkflowPseudoPackagePlugin(),
+          createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
+          createWorkflowTransformPlugin({
+            manifest: workflowManifest,
+            projectRoot: this.transformProjectRoot,
+            sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
+            workingDir: this.config.workingDir,
+          }),
+          // Must run after the transform so `"use step"` bodies are already
+          // stubbed and their node:* imports stripped from this graph.
+          createWorkflowNodeBuiltinGuardPlugin(),
+        ],
+        resolve: {
+          conditionNames: ["eve-source", "workflow", "node", "import", "default"],
+          extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+          mainFields: ["module", "main"],
+        },
+        tsconfig: tsconfigPath ?? false,
+        output: {
+          banner: "globalThis.__private_workflows = new Map();",
+          comments: false,
+          format: "cjs",
+          sourcemap: "inline",
+        },
+      },
     );
 
     await bundleFinalWorkflowOutput({
@@ -453,8 +440,7 @@ export class WorkflowBundleBuilder {
   }
 
   async #getBuildInputFiles(): Promise<string[]> {
-    const inputFiles = await this.getInputFiles();
-    return [...inputFiles, this.#compiledArtifactsBootstrapPath];
+    return await this.getInputFiles();
   }
 
   async #patchVercelFunctionConfig(

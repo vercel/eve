@@ -12,6 +12,7 @@ import {
 import { isVercelAuthChallenge } from "#services/dev-client/vercel-auth-error.js";
 import { resolveVercelDeployment } from "#setup/vercel-deployment.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { createDevDiagnostics } from "../diagnostics.js";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
@@ -119,5 +120,14 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   if (initialInput !== undefined) options.initialInput = initialInput;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
 
-  await new EveTUIRunner(options).run();
+  const diagnostics =
+    prepared.kind === "local"
+      ? await createDevDiagnostics(prepared.target.workspaceRoot).catch(() => undefined)
+      : undefined;
+  if (diagnostics !== undefined) options.diagnostics = diagnostics;
+  try {
+    await new EveTUIRunner(options).run();
+  } finally {
+    await diagnostics?.close();
+  }
 }

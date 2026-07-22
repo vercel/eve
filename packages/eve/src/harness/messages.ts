@@ -53,6 +53,30 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 }
 
 /**
+ * Removes text parts with no model-visible content from a user message.
+ *
+ * Returns `undefined` when no parts remain, allowing callers to omit the user
+ * turn entirely rather than create an empty model prompt block.
+ */
+export function normalizeUserContent(
+  content: string | UserContent | undefined,
+): string | UserContent | undefined {
+  if (content === undefined) {
+    return undefined;
+  }
+
+  if (typeof content === "string") {
+    return content.trim().length > 0 ? content : undefined;
+  }
+
+  const parts = content.filter((part) => part.type !== "text" || part.text.trim().length > 0);
+  if (parts.length === 0) {
+    return undefined;
+  }
+  return parts.length === content.length ? content : parts;
+}
+
+/**
  * Extracts the final visible assistant text from model response messages.
  *
  * Prefers text extracted from the last assistant message that contains visible
@@ -134,30 +158,41 @@ function coalesceContext(input: {
 }
 
 /**
- * Merges two optional turn messages into one.
- *
- * When both sides are strings, concatenates with a blank line. When
- * either side is a structured {@link UserContent} array, promotes both
- * to arrays and concatenates their parts so attachments carried on the
- * deferred or newer input are preserved end-to-end.
+ * Merges two optional turn messages into one after removing blank content.
  */
 function coalesceMessage(input: {
   readonly a?: string | UserContent;
   readonly b?: string | UserContent;
 }): string | UserContent | undefined {
-  if (input.a === undefined) {
-    return input.b;
+  const a = normalizeUserContent(input.a);
+  const b = normalizeUserContent(input.b);
+
+  if (a === undefined) {
+    return b;
   }
 
-  if (input.b === undefined) {
-    return input.a;
+  if (b === undefined) {
+    return a;
   }
 
-  if (typeof input.a === "string" && typeof input.b === "string") {
-    return `${input.a}\n\n${input.b}`;
+  return appendUserContent({ appended: b, existing: a });
+}
+
+/**
+ * Appends user content while preserving structured attachment parts.
+ */
+export function appendUserContent(input: {
+  readonly appended: string | UserContent;
+  readonly existing: string | UserContent;
+}): string | UserContent {
+  if (typeof input.existing === "string" && typeof input.appended === "string") {
+    return `${input.existing}\n\n${input.appended}`;
   }
 
-  const merged: UserContentArray = [...toUserContentArray(input.a), ...toUserContentArray(input.b)];
+  const merged: UserContentArray = [
+    ...toUserContentArray(input.existing),
+    ...toUserContentArray(input.appended),
+  ];
   return merged;
 }
 

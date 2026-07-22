@@ -212,7 +212,8 @@ function packageJsonTemplate(input: {
 `;
 }
 
-const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
+/** Trailing fields only written when the scaffold is not a workspace member. */
+export const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
   "engines": {
     "node": "__EVE_INIT_NODE_ENGINE__"
   }
@@ -237,14 +238,13 @@ const SHARED_TEMPLATE_FILES: Record<string, string> = {
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["agent/**/*.ts", "evals/**/*.ts", ".eve/**/*.d.ts"]
+  "include": ["agent/**/*.ts", "evals/**/*.ts"]
 }
 `,
   ".gitignore": `node_modules
 .env*
 .eve
 .vercel
-.workflow-data
 .next
 .output
 .nitro
@@ -257,7 +257,6 @@ dist
   ".vercelignore": `node_modules
 .env*
 .eve
-.workflow-data
 .next
 .output
 .nitro

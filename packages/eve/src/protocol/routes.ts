@@ -33,6 +33,13 @@ export const EVE_CONTINUE_SESSION_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:
 export const EVE_MESSAGE_STREAM_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/stream`;
 
 /**
+ * Stable framework-owned route pattern for cancelling a session's
+ * in-flight turn. Accepts an optional `{ turnId }` body guard scoping
+ * the cancel to the turn the caller observed.
+ */
+export const EVE_CANCEL_TURN_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/cancel`;
+
+/**
  * Framework-owned route pattern for dispatching one authored schedule
  * exactly once from the dev server.
  *
@@ -108,6 +115,13 @@ export function createEveMessageStreamRoutePath(sessionId: string): string {
  */
 export function createEveContinueSessionRoutePath(sessionId: string): string {
   return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}`;
+}
+
+/**
+ * Creates the stable framework-owned cancel-turn route path for one session.
+ */
+export function createEveCancelTurnRoutePath(sessionId: string): string {
+  return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}/cancel`;
 }
 
 /**

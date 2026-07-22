@@ -214,6 +214,21 @@ describe("defineChannel", () => {
     void invalid;
   });
 
+  it("wires a turn.cancelled handler onto the built adapter", () => {
+    const channel = defineChannel({
+      routes: [POST("/x", async () => new Response("ok"))],
+      events: {
+        "turn.cancelled"(event) {
+          const turnId: string = event.turnId;
+          void turnId;
+        },
+      },
+    });
+
+    const adapter = getAdapter(channel) as Record<string, unknown>;
+    expect(typeof adapter["turn.cancelled"]).toBe("function");
+  });
+
   it("falls back to open metadata for channels without metadata()", () => {
     const channel = defineChannel({
       routes: [POST("/x", async () => new Response("ok"))],
@@ -543,6 +558,9 @@ describe("defineChannel", () => {
         return {
           id: channelId,
           continuationToken: channelId,
+          async cancel() {
+            return { status: "no_active_turn" as const };
+          },
           async getEventStream() {
             return new ReadableStream();
           },

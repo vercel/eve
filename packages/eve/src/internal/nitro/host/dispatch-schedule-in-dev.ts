@@ -1,5 +1,5 @@
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
+import type { DevelopmentNitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
+import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedule.js";
 
@@ -51,12 +51,25 @@ export class UnknownDevScheduleError extends Error {
  * Re-resolves authored schedule registrations from disk on every call so
  * the route picks up edits made by the authored-source watcher without a
  * dev-server restart.
+ *
+ * The artifacts config is resolved before Nitro bundles this module and
+ * baked into the virtual handler. Re-deriving its loader path here would
+ * resolve relative to the app instead of the installed eve package.
  */
 export async function dispatchScheduleInDev(input: {
-  readonly appRoot: string;
+  readonly artifactsConfig: DevelopmentNitroArtifactsConfig;
   readonly scheduleId: string;
 }): Promise<DispatchScheduleInDevResult> {
-  const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(input.appRoot);
+  const { appRoot, moduleMapLoaderPath } = input.artifactsConfig;
+  if (!appRoot || !moduleMapLoaderPath) {
+    throw new Error(
+      'Dev schedule dispatch requires "appRoot" and "moduleMapLoaderPath" in the artifacts config.',
+    );
+  }
+
+  // Resolve the active generation once and reuse it for the task dispatch so
+  // a rebuild between the two loads cannot split them across generations.
+  const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(input.artifactsConfig);
   const schedules = await loadResolvedCompiledSchedules({ compiledArtifactsSource });
   const registrations = createScheduleRegistrations(schedules);
   const registration = registrations.find((candidate) => candidate.scheduleId === input.scheduleId);
@@ -68,12 +81,12 @@ export async function dispatchScheduleInDev(input: {
     );
   }
 
-  const { dispatchScheduleTask } = await import("#internal/nitro/routes/schedule-task.js");
-  const artifactsConfig = createNitroArtifactsConfig({
-    appRoot: input.appRoot,
-    dev: true,
-  });
-  const result = await dispatchScheduleTask(registration.taskName, artifactsConfig);
+  const { dispatchScheduleTaskFromArtifacts } =
+    await import("#internal/nitro/routes/schedule-task.js");
+  const result = await dispatchScheduleTaskFromArtifacts(
+    registration.taskName,
+    compiledArtifactsSource,
+  );
 
   return {
     scheduleId: result.scheduleId,

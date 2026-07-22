@@ -121,7 +121,10 @@ function normalizeJsonValueCandidate(
   return normalized;
 }
 
-function isJsonObjectValue(value: JsonValue): value is JsonObject {
+/**
+ * Narrows an already-normalized {@link JsonValue} to a {@link JsonObject}.
+ */
+export function isJsonObjectValue(value: JsonValue | undefined): value is JsonObject {
   return value !== null && !Array.isArray(value) && typeof value === "object";
 }
 

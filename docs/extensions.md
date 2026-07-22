@@ -1,134 +1,198 @@
 ---
 title: "Extensions"
-description: "Package tools, connections, skills, and hooks as a reusable package and mount it into an agent."
+description: "Publish reusable eve capabilities as an npm package, then install and mount them in an agent."
 ---
 
-An extension packages eve capabilities — tools, connections, skills, instructions, hooks — as a reusable npm or local package. You author it as an agent-shaped directory; a consuming agent mounts it under `agent/extensions/`, and its contributions compose into the agent under a namespace. Nothing is copied — upgrades come through the package manager.
+Extensions package eve tools, connections, skills, instruction fragments, and hooks. A publisher builds and distributes a package; a consumer installs it and mounts it in an agent.
 
-## Authoring
+This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A memory extension could use hooks to capture context and tools to recall it. A self-improving extension could pair hooks with dynamic instructions.
 
-An extension is an agent-shaped directory without `agent.ts` or `sandbox` (those belong to the consuming agent). Every slot works as it does in an agent, with names derived from paths.
+## Publisher: create and publish an extension
+
+### Create the package
+
+Start with the extension scaffold:
+
+```bash
+npx eve@latest extension init my-crm
+```
+
+The command creates the package, installs dependencies, and initializes Git. It includes `extension/extension.ts`, TypeScript configuration, and the package metadata required to build and publish.
+
+An extension uses the same file conventions as an agent for its contributions:
 
 ```
 @acme/crm/
   package.json
-  ext/
-    extension.ts        # the extension declaration — see Configuration
+  extension/
+    extension.ts
     tools/search.ts
     connections/api.ts
     skills/triage/SKILL.md
+    instructions.md
     hooks/audit.ts
-    lib/http.ts         # shared helpers, imported as ../lib/http
+    lib/http.ts
 ```
 
-Name tools and connections for what they do (`search`, not `crm_search`) — the mount supplies the namespace. Shared code goes in `ext/lib/`, imported by relative path — eve compiles the source, so relative imports need no `.js` extension.
+Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/tools/` can contain `defineDynamic(...)`.
 
-### Configuration
+Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. Keep shared code in `extension/lib/`.
 
-Declare the extension in `ext/extension.ts` with `defineExtension`; its default export is the mount factory a consumer calls. Pass `config` — any [Standard Schema](https://standardschema.dev) (a Zod object here), like a tool's `inputSchema` — to accept consumer settings:
+Keep agent configuration, sandboxes, schedules, and nested extensions in the consumer's agent.
 
-```ts title="ext/extension.ts"
+### Add configuration and contributions
+
+The publisher's `extension/extension.ts` default-exports a `defineExtension` handle. Give it a [Standard Schema](https://standardschema.dev) when consumers need to provide settings:
+
+```ts title="extension/extension.ts"
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
 export default defineExtension({
   config: z.object({
     apiKey: z.string(),
-    baseUrl: z.string().default("https://api.acme.example"),
+    baseUrl: z.string().url().default("https://api.acme.example"),
   }),
 });
 ```
 
-Config is optional — `defineExtension()` with no schema. Read it off the handle, imported from the declaration; it's typed from the schema:
+Contributions import that handle to read the validated configuration. Defaults have already been applied:
 
-```ts title="ext/tools/search.ts"
+```ts title="extension/tools/search.ts"
 import { defineTool } from "eve/tools";
+import { z } from "zod";
 
 import extension from "../extension";
 
 export default defineTool({
   description: "Search the CRM.",
-  inputSchema: {
-    /* ... */
-  },
+  inputSchema: z.object({ query: z.string() }),
   async execute({ query }) {
-    const { apiKey, baseUrl } = extension.config; // validated, defaults applied
+    const { apiKey, baseUrl } = extension.config;
+    return { query, baseUrl, authenticated: apiKey.length > 0 };
   },
 });
 ```
 
-Config is bound once when the consumer mounts the extension and stays constant for the session; per-request values belong in connection auth instead.
+If no configuration is needed, export `defineExtension()` and let consumers re-export it directly. Config schemas must validate synchronously.
 
-### State
+`defineState` is automatically scoped to the publisher's package, so the same state name does not collide with the consumer or another extension.
 
-`defineState` is scoped to the extension's package automatically, so identically-named state never collides with the consuming agent or another extension. Author it exactly as in an agent — `defineState("budget", …)`.
+### Build and publish
 
-## Publishing
-
-Point `eve.extension` at the source directory and run `eve build` (wired to `build`/`prepare`):
+The scaffold's `package.json` declares separate source and distribution roots:
 
 ```jsonc title="package.json"
 {
-  "name": "@acme/crm",
+  "name": "my-crm",
+  "version": "0.0.0",
   "type": "module",
-  "eve": { "extension": "./ext" },
-  "files": ["ext", "dist"],
-  "peerDependencies": { "eve": "^x" },
-  "dependencies": { "zod": "^3" },
-  "scripts": { "build": "eve build", "prepare": "eve build" },
-}
-```
-
-Author the source with `moduleResolution: "bundler"` — eve compiles it, so relative imports need no `.js` extension:
-
-```jsonc title="tsconfig.json"
-{
-  "compilerOptions": {
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "noEmit": true,
-    "types": ["node"],
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension",
+    },
   },
-  "include": ["ext/**/*.ts"],
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs",
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs",
+    },
+  },
+  "scripts": {
+    "build": "eve extension build",
+    "prepare": "eve extension build",
+    "typecheck": "tsc",
+  },
+  "dependencies": {
+    "zod": "^x",
+  },
+  "devDependencies": {
+    "@types/node": "^x",
+    "eve": "x.y.z",
+    "typescript": "^x",
+  },
+  "peerDependencies": {
+    "eve": "*",
+  },
+  "engines": {
+    "node": ">=24",
+  },
 }
 ```
 
-`eve build` compiles the package's entry points to plain JavaScript with type declarations — the mount factory (`dist/index.mjs`) and the tool re-exports overrides use (`dist/tools`) — and fills the `exports` map so you never hand-list it. Compiling is what lets an installed extension load directly; local and workspace packages also work without publishing.
+The scaffold omits `engines` when it creates a workspace package.
 
-### Dependencies
+Build the package with `eve extension build`:
 
-`eve` is a **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. Declare the eve versions your extension supports as the peer range (`"eve": "^1"`) — eve enforces it when the extension is mounted, failing the build with a clear error if the app's eve is out of range, rather than surfacing a confusing compile break. Everything else the extension imports (SDKs, `zod`, …) goes in `dependencies`; each extension resolves its own versions. The consumer recompiles the extension's contributions from source, so `files` must ship both `ext/` (that source) and `dist/` (the compiled entry points).
+```bash
+eve extension build
+```
 
-Those deps resolve from `node_modules` under `eve dev`/`eve eval` and are bundled into the deployable by `eve build`. A dependency that can't be bundled (a native addon) must be listed in the **consuming agent's** `build.externalDependencies` — an extension can't declare build config, so note it in your README.
+`eve extension build` writes an agent-shaped `dist/extension` tree, copies skill assets, emits declarations, and records compatibility metadata. It also manages the package exports for the mount factory (`@acme/crm`) and tool definitions (`@acme/crm/tools`). Publish `dist/`; consumers do not need the publisher's TypeScript source.
 
-## Mounting
+The exact `eve` development pin controls the publisher's authoring API and build tooling. The wildcard peer lets the consumer provide the runtime copy of eve. At consumption time, eve checks generated metadata, not the npm peer range. Do not add eve to regular `dependencies`.
 
-A consuming agent mounts an extension under `agent/extensions/` — a single file, or a directory when it needs [overrides](#overrides). The namespace is the file basename or directory name; contributions compose as `<namespace>__<name>` (`crm__search`, `crm__api`).
+Put runtime packages such as `zod` or an SDK in `dependencies`. If a dependency cannot be bundled, such as a native addon, tell consumers to add it to `build.externalDependencies` in `agent.ts`.
+
+Consumers can now add the built package to an agent.
+
+## Consumer: install and mount an extension
+
+A mount gives the publisher's contributions a namespace. Updating the package updates the mounted extension; nothing is copied into the consumer's agent.
+
+### Install the package
+
+Install the extension in the consumer's agent project:
+
+```bash
+npm install @acme/crm
+```
+
+### Mount it
+
+Create a file under `agent/extensions/`. Its filename becomes the mount namespace. Call the publisher's default export when the extension needs configuration:
 
 ```ts title="agent/extensions/crm.ts"
 import crm from "@acme/crm";
 
-export default crm({ apiKey: process.env.CRM_API_KEY });
+export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-A no-config extension takes no factory call — mount it with a bare re-export:
+Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local development.
+
+The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, and `connections/api.ts` becomes `crm__api`.
+
+For a publisher with no configuration, mount its default export directly:
 
 ```ts title="agent/extensions/gizmo.ts"
 export { default } from "@acme/gizmo";
 ```
 
-### Overrides
+The same mount shape works with an npm package, a workspace dependency, or a linked local package.
 
-To override a mounted extension's contributions, author the mount as a directory: the declaration in `extension.ts`, override slots alongside it.
+### Override a contribution
+
+Use a directory mount to replace or remove a publisher contribution. Put the mount declaration in `extension.ts` and add overrides beside it:
 
 ```
 agent/extensions/crm/
-  extension.ts         # export default crm({ apiKey: process.env.CRM_API_KEY })
-  tools/search.ts      # composes as crm__search, shadowing the extension's own
+  extension.ts
+  tools/search.ts
 ```
 
-A file in an override slot composes under the mount namespace and wins on a name collision. Name it for the bare contribution name (`search`, not `crm__search`) — the directory supplies the prefix. To tweak the extension's own definition, import and re-define it:
+```ts title="agent/extensions/crm/extension.ts"
+import crm from "@acme/crm";
+
+export default crm({ apiKey: process.env.CRM_API_KEY! });
+```
+
+A same-named consumer tool, connection, or skill wins. To adjust a publisher tool, import it from the package's `./tools` export and define it again:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { search } from "@acme/crm/tools";
@@ -138,7 +202,7 @@ import { always } from "eve/tools/approval";
 export default defineTool({ ...search, approval: always() });
 ```
 
-Or drop it entirely by opting out of the slot with `disableTool()`:
+To remove a publisher tool, use `disableTool()` in its matching slot:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { disableTool } from "eve/tools";
@@ -146,13 +210,13 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-An override targets one slot, matched by name and kind: a static file replaces the extension's static tool, a dynamic file replaces its dynamic resolver, and `disableTool()` removes whichever the extension put there. Because a dynamic tool wins over a same-named static one at runtime, replace or disable a dynamic tool through its own slot — a static file of the same name won't shadow it.
+Hooks and instruction fragments are additive, so they cannot be replaced. To replace a dynamic tool, use a dynamic definition in the same slot; dynamic tools win over same-named static tools at runtime. `disableTool()` removes either kind.
 
-Overrides only work here — the `<namespace>__` prefix is reserved, so an agent-root contribution named `crm__…` is a build error and an extension can't be shadowed from outside its mount.
+The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, or another agent-root slot.
 
-### Typed tool results
+### Use a publisher tool result in a hook
 
-A consuming agent can narrow a mounted extension's tool result in a hook: import the tool from the extension's `./tools` export and pass it to [`toolResultFrom`](/guides/hooks#narrowing-tool-results). It matches the namespaced result (`crm__search`) because identity keys off the tool definition, not its name.
+To retain a publisher tool's result type in a consumer hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/guides/hooks#narrowing-tool-results):
 
 ```ts title="agent/hooks/narrow-crm.ts"
 import { defineHook } from "eve/hooks";
@@ -163,14 +227,23 @@ export default defineHook({
   events: {
     "action.result"(event) {
       const match = toolResultFrom(event.data.result, search);
-      if (match) console.log(match.output); // typed as search's output
+      if (match) console.log(match.output);
     },
   },
 });
 ```
 
-Matching keys off the tool's description, so keep extension tool descriptions distinct — one shared with another tool makes the identity ambiguous and `toolResultFrom` stops matching.
+`toolResultFrom` recognizes the mounted `crm__search` result from the original definition, not the namespaced string. Publishers should keep tool descriptions distinct so eve can assign each definition an unambiguous identity.
 
-## Limits
+### Compatibility
 
-An extension cannot declare a `sandbox`, agent config, schedules, or limits, and cannot mount other extensions — those are the consuming agent's to own (background scheduling, for instance, runs on the agent's deployment under its limits). An extension's tools run within the consuming agent's per-session limits.
+At build time, eve checks the publisher's generated capability metadata. If the extension needs an unsupported capability contract, upgrade eve or install a compatible extension release.
+
+## What to read next
+
+- [Tools](/docs/tools): static tools, approval, and tool output
+- [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic tools, skills, and instructions
+- [Instructions](/docs/instructions): static and TypeScript instructions
+- [Skills](/docs/skills): package procedures and supporting files
+- [Connections](/docs/connections): integrate external services
+- [Hooks](/docs/guides/hooks): observe agent events

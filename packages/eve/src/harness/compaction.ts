@@ -1,42 +1,31 @@
 import { generateText, type LanguageModel, type ModelMessage, type TelemetryOptions } from "ai";
 
+import {
+  COMPACTION_CHECKPOINT_MARKER,
+  COMPACTION_PROMPT_ENVELOPE,
+  COMPACTION_RESUMPTION_MESSAGE,
+  createCompactionPrompt,
+  TODO_COMPACTION_PRESERVATION_LABEL,
+  TRANSCRIPT_PAYLOAD_LIMIT,
+} from "#harness/compaction-prompt.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
 
-const COMPACTION_SYSTEM_PROMPT = [
-  "You are a conversation summarizer.",
-  "Write a concise but useful summary for continuing the work.",
-  "Preserve the goal, important instructions, technical decisions, discoveries, open work, and relevant tool results.",
-  "Use the same language as the conversation.",
-  "Prefer short labeled sections such as Goal, Instructions, Discoveries, Accomplished, and Next steps when helpful.",
-  "Do not answer questions or invent facts.",
-].join(" ");
-
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
-const COMPACTION_TEXT_LIMIT = 280;
-const COMPACTION_COLLECTION_LIMIT = 3;
-
-interface CompactionTranscriptMessage {
-  readonly content: string;
-  readonly role: ModelMessage["role"];
-}
 
 /**
  * Element type of a non-string `ModelMessage.content` array.
  */
 type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 
-/**
- * Rough token estimate: serialized JSON length / 4. Good enough for
- * deciding whether compaction is needed; the real token count comes back
- * from the model each step via {@link CompactionConfig.lastKnownInputTokens}.
- *
- * Accepts any JSON-serializable value so callers can apply the same heuristic
- * to whole message arrays or individual content parts on one consistent ruler.
- */
-export function estimateTokens(value: unknown): number {
-  return JSON.stringify(value).length / 4;
-}
+// Static envelope estimate stays valid because createCompactionPrompt bounds
+// its transcript to the caller's threshold budget, so the summarization call
+// itself never grows past threshold + envelope + checkpoint.
+const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
+  { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
+  { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
+] satisfies ModelMessage[]);
 
 /**
  * Best available input-token count: the model-reported count from the last
@@ -64,13 +53,17 @@ export function getInputTokenCount(
 }
 
 /**
- * Returns true when the message history exceeds the compaction threshold.
+ * Returns true when the message history and fixed compaction-prompt envelope
+ * exceed the compaction threshold.
  */
 export function shouldCompact(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
 ): boolean {
-  return getInputTokenCount(messages, config) > config.threshold;
+  return (
+    messages.length > 0 &&
+    getInputTokenCount(messages, config) + COMPACTION_PROMPT_OVERHEAD_TOKENS > config.threshold
+  );
 }
 
 /**
@@ -100,9 +93,87 @@ export async function resolveCompactionModel(input: {
   };
 }
 
+/** Conversation regions and config handed to each compaction heuristic. */
+interface CompactionHeuristicInput {
+  readonly config: CompactionConfig;
+  readonly conversation: readonly ModelMessage[];
+  readonly older: readonly ModelMessage[];
+  readonly previousCheckpoint: string | undefined;
+  readonly recent: readonly ModelMessage[];
+}
+
 /**
- * Compacts messages by summarizing older history and keeping only the most
- * recent messages.
+ * A heuristic either produces a complete replacement history that fits the
+ * threshold, or signals that the next strategy must run. Heuristics have no
+ * failure channel — anything exceptional throws.
+ */
+type CompactionHeuristicOutcome =
+  | { readonly messages: ModelMessage[]; readonly type: "within-limit" }
+  | { readonly type: "insufficient" };
+
+type CompactionHeuristic = (input: CompactionHeuristicInput) => CompactionHeuristicOutcome;
+
+/**
+ * Model-free heuristics tried in order before falling back to LLM
+ * summarization. Each is a pure transformation of the split conversation;
+ * composing a new strategy (pruning variants, protect-lists) means adding an
+ * entry here.
+ */
+const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolResultCapHeuristic];
+
+/**
+ * Caps oversized tool-result outputs in the older region while every message
+ * — including its tool calls and the recent tail — stays structurally
+ * verbatim. Most history bulk is a handful of large tool outputs, so this
+ * usually suffices with no model call and no rewriting.
+ */
+function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
+  const checkpointHead: ModelMessage[] =
+    input.previousCheckpoint === undefined
+      ? []
+      : [
+          { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
+          { content: input.previousCheckpoint, role: "assistant" },
+        ];
+  const capped = withResumptionGuard(
+    [...checkpointHead, ...capToolResults(input.older), ...input.recent],
+    input.conversation,
+  );
+
+  // Evaluate on the same ruler shouldCompact uses (envelope included):
+  // capping can be a near no-op when the older region holds few large
+  // results, and accepting one on a looser ruler would let shouldCompact
+  // re-fire every step without compaction ever making progress.
+  const evaluation = evaluateThreshold(capped, input.config, "should-compact");
+  return evaluation.type === "within-limit"
+    ? { messages: capped, type: "within-limit" }
+    : { type: "insufficient" };
+}
+
+/**
+ * Measures a candidate history against the compaction threshold.
+ * The "should-compact" ruler includes the fixed prompt-envelope overhead that
+ * {@link shouldCompact} adds, so a history accepted on it cannot immediately
+ * re-trigger compaction; "estimate" is the bare history size.
+ */
+function evaluateThreshold(
+  messages: readonly ModelMessage[],
+  config: CompactionConfig,
+  ruler: "estimate" | "should-compact",
+): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
+  const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
+  const estimatedTokens = estimateTokens(messages) + overhead;
+  return {
+    estimatedTokens,
+    type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
+  };
+}
+
+/**
+ * Compacts messages by escalation: try each {@link CompactionHeuristic} in
+ * order, then fall back to summarizing the older region with the compaction
+ * model — keeping the recent tail verbatim when it fits, degrading it to
+ * text-only, then shrinking the window.
  */
 export async function compactMessages(
   messages: ModelMessage[],
@@ -113,59 +184,182 @@ export async function compactMessages(
   headers?: Record<string, string>,
   abortSignal?: AbortSignal,
 ): Promise<ModelMessage[]> {
-  let keep = selectRecentWindowSize(messages, config);
+  const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  let keep = selectRecentWindowSize(conversation, config);
 
-  while (true) {
-    const { older, recent } = splitMessagesForCompaction(messages, keep);
-    if (older.length === 0) {
+  {
+    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+    if (older.length === 0 && previousCheckpoint === undefined) {
       return keepNonToolResultMessages(recent);
     }
 
-    const prunedOlder: CompactionTranscriptMessage[] = older.map((message) => ({
-      content: summarizeCompactionMessageContent(message),
-      role: message.role,
-    }));
+    for (const heuristic of COMPACTION_HEURISTICS) {
+      const outcome = heuristic({ config, conversation, older, previousCheckpoint, recent });
+      if (outcome.type === "within-limit") {
+        return outcome.messages;
+      }
+    }
+  }
+
+  while (true) {
+    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+
+    const summaryPrompt = createCompactionPrompt({
+      messages: older,
+      previousCheckpoint,
+      transcriptBudgetTokens: config.threshold,
+    });
 
     const result = await generateText({
       abortSignal,
       headers,
       model,
-      prompt: formatCompactionPrompt(prunedOlder),
+      prompt: summaryPrompt.prompt,
       providerOptions,
-      system: COMPACTION_SYSTEM_PROMPT,
+      system: summaryPrompt.system,
       telemetry: telemetry ? { ...telemetry, functionId: "eve.compaction" } : undefined,
       temperature: 0,
     });
 
-    // Keep recent context as plain conversation: tool results are dropped (the
-    // summary above already captures the older ones) and assistant tool calls
-    // are stripped, so no tool_use survives without its result. The summarized
-    // older region is the durable record of tool activity.
-    const keptTail = keepNonToolResultMessages(recent);
-
-    // The kept tail may be empty or trail with an assistant message; the summary
-    // assistant message also precedes it. Providers that don't support assistant
-    // prefill reject a request that ends on assistant content, so append a
-    // synthetic user message to resume from a user turn.
-    const lastKeptRole = keptTail.at(-1)?.role;
-    const trailingAssistantGuard: ModelMessage[] =
-      lastKeptRole === undefined || lastKeptRole === "assistant"
-        ? [{ role: "user", content: "Continue." }]
-        : [];
-
-    const compacted: ModelMessage[] = [
-      { content: "Summary of our conversation so far:", role: "user" },
+    const summaryHead: ModelMessage[] = [
+      { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
       { content: result.text, role: "assistant" },
-      ...keptTail,
-      ...trailingAssistantGuard,
     ];
 
-    if (estimateTokens(compacted) <= config.threshold || keep === 0) {
-      return compacted;
+    // Prefer keeping the recent tail verbatim — surviving tool results are the
+    // model's evidence that work already ran. Degrade to text-only, then to a
+    // smaller window, only under threshold pressure.
+    const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
+    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
+      return verbatim;
+    }
+
+    const stripped = withResumptionGuard(
+      [...summaryHead, ...keepNonToolResultMessages(recent)],
+      conversation,
+    );
+    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
+      return stripped;
     }
 
     keep -= 1;
   }
+}
+
+const CAPPED_RESULT_ANNOTATION =
+  "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
+
+/**
+ * Caps oversized tool-result outputs in place, keeping message structure and
+ * tool_use/tool_result pairing untouched. The cap matches the transcript
+ * payload clip, so a later summarization sees the same content the model
+ * kept — capping never destroys material the summarizer would need, unlike
+ * dropping results outright. The annotation leads the value so it survives
+ * prefix-capped renderings.
+ */
+function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
+  return messages.map((message) => {
+    if (message.role !== "tool" || typeof message.content === "string") {
+      return message;
+    }
+
+    let changed = false;
+    const content = message.content.map((part) => {
+      if (part.type !== "tool-result") {
+        return part;
+      }
+      const serialized = JSON.stringify(part.output) ?? "";
+      if (serialized.length <= TRANSCRIPT_PAYLOAD_LIMIT) {
+        return part;
+      }
+
+      changed = true;
+      return {
+        ...part,
+        output: {
+          type: "text" as const,
+          value: `${CAPPED_RESULT_ANNOTATION}\n\n${serialized.slice(0, TRANSCRIPT_PAYLOAD_LIMIT)}`,
+        },
+      };
+    });
+
+    return changed ? { ...message, content } : message;
+  });
+}
+
+/**
+ * Providers that don't support assistant prefill reject a request that ends on
+ * assistant content, so compaction must resume from a user turn. Rather than
+ * a contentless synthetic prompt, replay the conversation's last real user
+ * message when compaction folded it away — the model resumes against its
+ * actual instruction, with the checkpoint as background. Falls back to
+ * "Continue." when the last real user message still survives in the kept
+ * messages (the model was mid-work on it) or none exists.
+ */
+function withResumptionGuard(
+  messages: ModelMessage[],
+  conversation: readonly ModelMessage[],
+): ModelMessage[] {
+  const lastRole = messages.at(-1)?.role;
+  if (lastRole !== undefined && lastRole !== "assistant") {
+    return messages;
+  }
+
+  const replay = findLastRealUserMessage(conversation);
+  const alreadyKept =
+    replay !== undefined &&
+    messages.some((message) => message.role === "user" && message.content === replay.content);
+
+  return [
+    ...messages,
+    replay !== undefined && !alreadyKept
+      ? replay
+      : { content: COMPACTION_RESUMPTION_MESSAGE, role: "user" },
+  ];
+}
+
+/**
+ * Latest user message authored by the user rather than synthesized by the
+ * framework (resumption prompts, checkpoint markers, and todo preservation
+ * messages are all `role: "user"` but carry no user intent).
+ */
+function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
+  for (let index = conversation.length - 1; index >= 0; index -= 1) {
+    const message = conversation[index];
+    if (message?.role !== "user" || typeof message.content !== "string") {
+      continue;
+    }
+    if (
+      message.content === COMPACTION_RESUMPTION_MESSAGE ||
+      message.content === COMPACTION_CHECKPOINT_MARKER ||
+      message.content.startsWith(TODO_COMPACTION_PRESERVATION_LABEL)
+    ) {
+      continue;
+    }
+    return message;
+  }
+
+  return undefined;
+}
+
+function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
+  readonly conversation: ModelMessage[];
+  readonly previousCheckpoint: string | undefined;
+} {
+  const marker = messages[0];
+  const checkpoint = messages[1];
+  if (
+    marker?.role !== "user" ||
+    marker.content !== COMPACTION_CHECKPOINT_MARKER ||
+    checkpoint?.role !== "assistant"
+  ) {
+    return { conversation: [...messages], previousCheckpoint: undefined };
+  }
+
+  return {
+    conversation: messages.slice(2),
+    previousCheckpoint: assistantMessageText(checkpoint),
+  };
 }
 
 /**
@@ -264,119 +458,16 @@ function splitMessagesForCompaction(
     };
   }
 
+  // The recent tail survives verbatim, so it must not open with tool results
+  // whose tool calls fall in the older region — providers reject a tool_result
+  // without its preceding tool_use. Snap such messages into the older region.
+  let split = messages.length - keep;
+  while (split < messages.length && messages[split]?.role === "tool") {
+    split += 1;
+  }
+
   return {
-    older: messages.slice(0, -keep),
-    recent: messages.slice(-keep),
+    older: messages.slice(0, split),
+    recent: messages.slice(split),
   };
-}
-
-function formatCompactionPrompt(messages: readonly CompactionTranscriptMessage[]): string {
-  const sections = messages
-    .filter((message) => message.content.trim().length > 0)
-    .map((message) => `### ${message.role}\n${message.content.trim()}`);
-
-  if (sections.length === 0) {
-    return "Summarize the conversation so far.";
-  }
-
-  return ["Conversation transcript:", ...sections].join("\n\n");
-}
-
-function summarizeCompactionMessageContent(message: ModelMessage): string {
-  if (typeof message.content === "string") {
-    return summarizeText(message.content);
-  }
-
-  return message.content
-    .map((part) => summarizeCompactionContentPart(part))
-    .filter((summary) => summary.length > 0)
-    .join("\n")
-    .trim();
-}
-
-function summarizeCompactionContentPart(part: ModelMessageContentPart): string {
-  switch (part.type) {
-    case "text":
-      return summarizeText(part.text);
-    case "reasoning":
-      return "";
-    case "file":
-      return part.filename
-        ? `Attached file ${part.filename} (${part.mediaType})`
-        : `Attached file attachment (${part.mediaType})`;
-    case "tool-call":
-      return summarizeToolCallPart(part);
-    case "tool-result":
-      return summarizeToolResultPart(part);
-    default:
-      return "";
-  }
-}
-
-function summarizeToolCallPart(part: { toolName: string; input?: unknown }): string {
-  const input = part.input !== undefined ? summarizeCompactValue(part.input) : "";
-  return input ? `Called ${part.toolName} with ${input}` : `Called ${part.toolName}`;
-}
-
-function summarizeToolResultPart(part: {
-  toolName: string;
-  output?: unknown;
-  isError?: boolean;
-}): string {
-  const output = part.output !== undefined ? summarizeCompactValue(part.output) : "";
-  const status = part.isError ? "errored" : "returned";
-  return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
-}
-
-function summarizeCompactValue(value: unknown, depth = 0): string {
-  if (value === null) return "null";
-  if (value === undefined) return "";
-  if (typeof value === "string") return summarizeText(value);
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return "array(0)";
-    }
-
-    if (depth >= 2) {
-      return `array(${value.length})`;
-    }
-
-    const entries = value
-      .slice(0, COMPACTION_COLLECTION_LIMIT)
-      .map((item) => summarizeCompactValue(item, depth + 1));
-    const suffix = value.length > COMPACTION_COLLECTION_LIMIT ? ", …" : "";
-    return `array(${value.length}: ${entries.join(", ")}${suffix})`;
-  }
-
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) {
-      return "object(0)";
-    }
-
-    if (depth >= 2) {
-      return `object(${entries.length} keys)`;
-    }
-
-    const rendered = entries
-      .slice(0, COMPACTION_COLLECTION_LIMIT)
-      .map(([key, nested]) => `${key}=${summarizeCompactValue(nested, depth + 1)}`);
-    const suffix = entries.length > COMPACTION_COLLECTION_LIMIT ? ", …" : "";
-    return `object(${rendered.join(", ")}${suffix})`;
-  }
-
-  return "";
-}
-
-function summarizeText(value: string): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (normalized.length <= COMPACTION_TEXT_LIMIT) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, COMPACTION_TEXT_LIMIT).trimEnd()}…`;
 }

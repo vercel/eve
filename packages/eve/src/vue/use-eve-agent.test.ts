@@ -138,7 +138,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_1"),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -296,7 +296,9 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     const startResponse = createDeferred<Response>();
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
+      .mockResolvedValueOnce(
+        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
+      );
 
     const store = new EveAgentStore<readonly string[]>({
       initialSession: {
@@ -341,7 +343,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_1"),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -382,7 +384,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
       .mockResolvedValueOnce(
         createEagerStreamResponse([
           createMessageReceivedEvent({ message: "After", sequence: 0, turnId: "turn_1" }),
-          createSessionWaitingEvent(),
+          createSessionWaitingEvent("eve:http:session_1"),
         ]),
       );
 

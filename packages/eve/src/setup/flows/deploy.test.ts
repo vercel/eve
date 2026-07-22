@@ -29,6 +29,7 @@ function createDeployProjectDeps(probe: DeploymentInfo = DEPLOYED) {
       async () => true,
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => probe),
+    syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
   };
 }
 

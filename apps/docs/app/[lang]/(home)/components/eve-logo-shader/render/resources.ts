@@ -3,7 +3,12 @@
 // Imported only by render/renderer.ts.
 
 import { Device } from "@vgpu/core";
-import { createBackParamsBinding, createEnvParamsBinding, createParamsBinding, createUniformParamsBinding } from "./bindings";
+import {
+  createBackParamsBinding,
+  createEnvParamsBinding,
+  createParamsBinding,
+  createUniformParamsBinding,
+} from "./bindings";
 import { BLOOM_RADIUS, PAINT_PARAMS_BYTE_SIZE, VORONOI_NOISE_PARAMS_BYTE_SIZE } from "./constants";
 import { createStudioCubemap, renderStudioCubemap } from "./cubemap";
 import { EVE_DARK_ENV_LIGHTS, EVE_LIGHT_ENV_LIGHTS } from "./env-lights";
@@ -114,8 +119,21 @@ export function createResources(
     usage: ["uniform", "copy_dst"],
   });
 
-  const params = { insideParams, backDepthParams, envBgParams, outsideParams, opaqueOutsideParams, wireParams };
-  const buffers = { blurParamsBuffer, compositeParamsBuffer, paintParamsBuffer, voronoiNoiseParamsBuffer, previewMode };
+  const params = {
+    insideParams,
+    backDepthParams,
+    envBgParams,
+    outsideParams,
+    opaqueOutsideParams,
+    wireParams,
+  };
+  const buffers = {
+    blurParamsBuffer,
+    compositeParamsBuffer,
+    paintParamsBuffer,
+    voronoiNoiseParamsBuffer,
+    previewMode,
+  };
   const samplers = { blurSampler, previewSampler };
 
   return {

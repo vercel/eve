@@ -21,6 +21,10 @@ import { vercelOidc } from "eve/agents/auth";
  * Vercel OIDC as the fallback.
  */
 const resolveVercelOidc = vercelOidc();
+const matrixModel = process.env.EVE_E2E_MODEL ?? "anthropic/claude-opus-4.8";
+const promptCacheModel = matrixModel.startsWith("anthropic/")
+  ? matrixModel
+  : "anthropic/claude-opus-4.8";
 
 const anthropic = createAnthropic({
   baseURL: "https://ai-gateway.vercel.sh/v1",
@@ -39,7 +43,7 @@ const anthropic = createAnthropic({
 });
 
 const agent: AgentDefinition = defineAgent({
-  model: anthropic("anthropic/claude-haiku-4-5"),
+  model: anthropic(promptCacheModel),
   modelContextWindowTokens: 200_000,
 });
 

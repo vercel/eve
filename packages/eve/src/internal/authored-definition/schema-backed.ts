@@ -1,12 +1,20 @@
-import { isDisabledToolSentinel, isEnableWorkflowToolSentinel } from "#public/definitions/tool.js";
+import {
+  isDisabledToolSentinel,
+  isExperimentalWorkflowToolDefinition,
+} from "#public/definitions/tool.js";
 import {
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
+  expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
-import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
+import {
+  serializeInputSchema,
+  serializeOutputSchema,
+  type ToolSchemaSource,
+} from "#shared/tool-schema.js";
 import {
   isDynamicSentinel,
   rejectDynamicSentinelFallback,
@@ -34,7 +42,7 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "enable-workflow" }
+  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
@@ -43,7 +51,7 @@ type NormalizedToolEntry =
 /**
  * Normalizes one authored tool default export. Recognizes real tool
  * definitions (`defineTool(...)`), disable sentinels (`disableTool()`), and the
- * `Workflow` opt-in sentinel.
+ * experimental `Workflow` tool definition.
  *
  * Authored `name` fields are rejected — tool identity is path-derived.
  */
@@ -58,8 +66,16 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };
   }
-  if (isEnableWorkflowToolSentinel(value)) {
-    return { kind: "enable-workflow" };
+  if (isExperimentalWorkflowToolDefinition(value)) {
+    const record = expectObjectRecord(value, message);
+    expectOnlyKnownKeys(record, ["kind", "maxSubagents"], message);
+    return {
+      kind: "workflow-tool",
+      maxSubagents:
+        record.maxSubagents === undefined
+          ? undefined
+          : expectPositiveInteger(record.maxSubagents, message),
+    };
   }
 
   const record = expectObjectRecord(value, message);
@@ -69,11 +85,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     message,
   );
   const inputSchema =
-    record.inputSchema === undefined ? null : normalizeJsonSchemaDefinition(record.inputSchema);
-  const outputSchema =
-    record.outputSchema === undefined
-      ? undefined
-      : normalizeJsonSchemaDefinition(record.outputSchema, "output");
+    record.inputSchema === undefined
+      ? null
+      : serializeInputSchema(record.inputSchema as ToolSchemaSource);
+  const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
     execute: expectFunction(record.execute, message),

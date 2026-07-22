@@ -13,6 +13,7 @@ import {
 } from "#runtime/sessions/runtime-session.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { serializeInputSchema } from "#shared/tool-schema.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -152,7 +153,7 @@ export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRunti
     compileInput.tools = descriptor.tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: tool.inputSchema,
+      inputSchema: serializeInputSchema(tool.inputSchema),
     }));
   }
 

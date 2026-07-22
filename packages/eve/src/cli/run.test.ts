@@ -1,6 +1,9 @@
+import { resolve } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
+import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
@@ -50,6 +53,20 @@ describe("CLI command registration", () => {
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).not.toContain("setup");
+  });
+
+  it("registers the diagnostic logs commands", async () => {
+    const output: string[] = [];
+    const logger = {
+      error: (message: string) => output.push(message),
+      log: (message: string) => output.push(message),
+    };
+
+    await runCli(["logs", "--help"], logger).catch(() => {});
+
+    const help = output.join("\n");
+    expect(help).toContain("show [options] [logid]");
+    expect(help).toContain("ls");
   });
 });
 
@@ -351,7 +368,11 @@ describe("eve dev boot progress", () => {
 
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
-    expect(writes.at(-1)).toBe("\r\u001B[K");
+    // Replaying every write through a terminal emulator: the boot progress row
+    // is erased, leaving a clean screen for the error to print onto.
+    const screen = new MockScreen({ columns: 80, rows: 10 });
+    screen.write(writes.join(""));
+    expect(screen.snapshot()).toBe("");
     expect(close).toHaveBeenCalledOnce();
   });
 });
@@ -402,6 +423,61 @@ describe("eve dev local server ownership", () => {
   });
 });
 
+describe("eve build output ownership", () => {
+  it("forwards a profile path relative to the application root", async () => {
+    const buildHost = vi.fn(async () => "/app/.output");
+    const profilePath = ".eve/build-profiles/notes.json";
+
+    await runCli(
+      ["build", "--profile", profilePath],
+      { error: () => {}, log: () => {} },
+      { buildHost },
+    );
+
+    expect(buildHost).toHaveBeenCalledWith(process.cwd(), {
+      profileOutputPath: resolve(process.cwd(), profilePath),
+      skipVercelSandboxPrewarm: false,
+      vercelServiceOutput: undefined,
+    });
+  });
+
+  it("resolves the internal service output directory from the build working directory", async () => {
+    const buildHost = vi.fn(async () => "/service/.vercel/output");
+    const configuredDirectory = ".eve/vercel-services/eve/.vercel/output";
+    const configuredHostDirectory = ".vercel/output";
+    vi.stubEnv("EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY", configuredDirectory);
+    vi.stubEnv("EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY", configuredHostDirectory);
+
+    try {
+      await runCli(["build"], { error: () => {}, log: () => {} }, { buildHost });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(buildHost).toHaveBeenCalledWith(process.cwd(), {
+      skipVercelSandboxPrewarm: false,
+      vercelServiceOutput: {
+        hostOutputDirectory: resolve(process.cwd(), configuredHostDirectory),
+        serviceOutputDirectory: resolve(process.cwd(), configuredDirectory),
+      },
+    });
+  });
+
+  it("rejects an incomplete internal Vercel service output contract", async () => {
+    vi.stubEnv("EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY", ".eve/vercel-services/eve/.vercel/output");
+
+    try {
+      await expect(
+        runCli(["build"], { error: () => {}, log: () => {} }, { buildHost: vi.fn() }),
+      ).rejects.toThrow(
+        "EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY and EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY must be set together.",
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
 describe("resolveDevUiMode", () => {
   it("defaults to the terminal UI in an interactive terminal", () => {
     expect(resolveDevUiMode({ options: {}, interactive: true })).toBe("tui");
@@ -417,10 +493,12 @@ describe("resolveDevUiMode", () => {
 });
 
 describe("resolveTuiDisplayOptions", () => {
-  it("defaults tools to auto-collapsed, reasoning to full, and stderr logs visible", () => {
+  it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
       logs: "stderr",
-      reasoning: "full",
+      // Collapsed reasoning is the fixed thinking line; `--reasoning full`
+      // restores the streaming transcript trace.
+      reasoning: "auto-collapsed",
       tools: "auto-collapsed",
     });
   });

@@ -12,11 +12,7 @@ import {
 import type { Dirent } from "node:fs";
 import { basename, dirname, extname, join, relative } from "node:path";
 
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-  type RolldownBuild,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import {
   EVE_SHARED_SERVER_FUNCTION_PATH,
   isEveVercelFunctionPath,
@@ -44,6 +40,7 @@ export const WORKFLOW_STEP_EXTERNAL_PACKAGES = [
 export const WORKFLOW_BUILDER_DEFERRED_PACKAGES = ["@chat-adapter/slack", "chat"] as const;
 
 const WORKFLOW_FUNCTION_NODE_OPTIONS = "--experimental-require-module";
+const WORKFLOW_PRECONDITION_GUARD_ENABLED = "1";
 
 /**
  * Builds the environment block every generated Vercel workflow function needs.
@@ -55,6 +52,8 @@ export function createWorkflowFunctionEnvironment(environment?: unknown): Record
     Object.assign(nextEnvironment, environment);
   }
 
+  // Reject replay decisions made from an event log that missed a concurrent wake.
+  nextEnvironment.WORKFLOW_PRECONDITION_GUARD = WORKFLOW_PRECONDITION_GUARD_ENABLED;
   nextEnvironment.NODE_OPTIONS = WORKFLOW_FUNCTION_NODE_OPTIONS;
   return nextEnvironment;
 }
@@ -305,36 +304,32 @@ export async function emitBundledWorkflowFunctionDirectory(input: {
   await prepareVercelFunctionDirectory(input.targetPath);
 
   const pluginModulePaths = await emitBundledWorkflowPluginModules({
-    build: buildWithNitroRolldown,
     pluginPaths: input.pluginPaths ?? [],
     targetPath: input.targetPath,
   });
   const entrypointId = join(dirname(input.bundlePath), "__eve_workflow_function_entry.js");
-  const result = await buildWithNitroRolldown({
-    cwd: dirname(input.bundlePath),
-    input: entrypointId,
-    platform: "node",
-    plugins: [
-      createVirtualModulePlugin({
-        id: entrypointId,
-        moduleType: "js",
-        source: createWorkflowFunctionEntrypointSource({
-          bundlePath: input.bundlePath,
-          pluginModulePaths,
-        }),
-      }),
-    ],
-    write: false,
-    output: {
-      codeSplitting: false,
-      comments: false,
-      format: "cjs",
-      sourcemap: false,
-    },
-  });
-  const outputFile = getSingleRolldownChunk(
-    result,
+  const outputFile = await buildSingleRolldownChunk(
     `Vercel workflow function for "${input.bundlePath}"`,
+    {
+      cwd: dirname(input.bundlePath),
+      input: entrypointId,
+      platform: "node",
+      plugins: [
+        createVirtualModulePlugin({
+          id: entrypointId,
+          moduleType: "js",
+          source: createWorkflowFunctionEntrypointSource({
+            bundlePath: input.bundlePath,
+            pluginModulePaths,
+          }),
+        }),
+      ],
+      output: {
+        comments: false,
+        format: "cjs",
+        sourcemap: false,
+      },
+    },
   );
 
   await Promise.all([
@@ -360,24 +355,20 @@ export async function emitBundledWorkflowFunctionDirectory(input: {
 }
 
 async function emitBundledWorkflowPluginModules(input: {
-  build: RolldownBuild;
   pluginPaths: readonly string[];
   targetPath: string;
 }): Promise<string[]> {
   return await Promise.all(
     input.pluginPaths.map(async (pluginPath, index) => {
-      const result = await input.build({
+      const outputFile = await buildSingleRolldownChunk(`workflow plugin for "${pluginPath}"`, {
         input: pluginPath,
         platform: "node",
-        write: false,
         output: {
-          codeSplitting: false,
           comments: false,
           format: "esm",
           sourcemap: false,
         },
       });
-      const outputFile = getSingleRolldownChunk(result, `workflow plugin for "${pluginPath}"`);
 
       const emittedPluginFilename = `__eve_workflow_plugin_${index}.mjs`;
       await writeFile(join(input.targetPath, emittedPluginFilename), outputFile.code);

@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { startRemoteAgentSession } from "#execution/remote-agent-dispatch.js";
+import {
+  cancelRemoteAgentTurn,
+  isRetryableRemoteAgentCancelError,
+  startRemoteAgentSession,
+} from "#execution/remote-agent-dispatch.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
@@ -171,6 +175,102 @@ describe("startRemoteAgentSession", () => {
         }),
       }),
     );
+  });
+});
+
+describe("cancelRemoteAgentTurn", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts to the standard cancel endpoint with freshly resolved remote auth", async () => {
+    const auth = vi
+      .fn()
+      .mockResolvedValueOnce({ headers: { authorization: "Bearer first" } })
+      .mockResolvedValueOnce({ headers: { authorization: "Bearer second" } });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "remote/session id", status: "no_active_turn" },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "remote/session id", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const remote = { ...createRemoteAgent(), auth };
+
+    await expect(
+      cancelRemoteAgentTurn({ remote, sessionId: "remote/session id" }),
+    ).resolves.toEqual({ status: "no_active_turn" });
+    await expect(
+      cancelRemoteAgentTurn({ remote, sessionId: "remote/session id" }),
+    ).resolves.toEqual({ status: "accepted" });
+
+    expect(auth).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://remote.example.com/eve/v1/session/remote%2Fsession%20id/cancel",
+      {
+        headers: {
+          authorization: "Bearer first",
+          "x-static": "yes",
+        },
+        method: "POST",
+      },
+    );
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toEqual({
+      authorization: "Bearer second",
+      "x-static": "yes",
+    });
+  });
+
+  it("rejects responses for a different session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { ok: true, sessionId: "another-session", status: "accepted" },
+            { status: 202 },
+          ),
+        ),
+    );
+
+    const error = await cancelRemoteAgentTurn({
+      remote: createRemoteAgent(),
+      sessionId: "remote-session",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isRetryableRemoteAgentCancelError(error)).toBe(false);
+  });
+
+  it("classifies only propagation and transient HTTP failures as retryable", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const transient = await cancelRemoteAgentTurn({
+      remote: createRemoteAgent(),
+      sessionId: "remote-session",
+    }).catch((error: unknown) => error);
+    const permanent = await cancelRemoteAgentTurn({
+      remote: createRemoteAgent(),
+      sessionId: "remote-session",
+    }).catch((error: unknown) => error);
+
+    expect(isRetryableRemoteAgentCancelError(transient)).toBe(true);
+    expect(isRetryableRemoteAgentCancelError(permanent)).toBe(false);
+    expect(isRetryableRemoteAgentCancelError(new TypeError("network unavailable"))).toBe(true);
   });
 });
 

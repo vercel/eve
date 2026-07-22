@@ -38,7 +38,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     throw error;
   });
 
-  await screen.waitForText("❯", 5_000);
+  await screen.waitForIdlePrompt(5_000);
 
   const promptLines = [
     "Use the ask_question tool exactly once to ask me to choose an environment.",
@@ -53,7 +53,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.type(promptLines.join(" · "));
   input.enter();
 
-  await screen.waitForText("▶ Production", 60_000);
+  await screen.waitForText("▶ 1. Production", 60_000);
   console.log(theme.muted("[tui-freeform] select UI live, highlight on Production"));
 
   await sleep(500);
@@ -62,26 +62,24 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.emit("data", Buffer.from("\x1B[B")); // → Staging
   input.emit("data", Buffer.from("\x1B[B")); // → Preview
   input.emit("data", Buffer.from("\x1B[B")); // → Type your own answer
-  await screen.waitForText("▶ Type your own answer", 2_000);
+  await screen.waitForText("▶ 4. Type your own answer", 2_000);
   console.log(theme.muted("[tui-freeform] highlight moved to freeform row"));
 
-  // Enter on the freeform row activates text mode. Text mode clears the
-  // status hints, so the proof it is active is the typed text rendering
-  // in the input row before we submit it.
-  input.enter();
+  // The freeform row focuses its inline elbow editor the moment the cursor
+  // reaches it — typing lands there directly, no Enter required.
   input.type(FREEFORM_ANSWER);
   await screen.waitForText(FREEFORM_ANSWER, 2_000);
-  console.log(theme.muted("[tui-freeform] text mode active, answer typed"));
+  console.log(theme.muted("[tui-freeform] inline editor active, answer typed"));
 
   input.enter();
 
-  await screen.waitForText(`✓ ${FREEFORM_ANSWER}`, 5_000);
+  await screen.waitForText(`⎿  ${FREEFORM_ANSWER}`, 5_000);
   console.log(theme.muted("[tui-freeform] freeform answer recorded in body"));
 
   // The follow-up assistant turn renders a `▲`-prefixed section below
   // the answered question that echoes the freeform text.
   await waitForCondition(
-    () => assistantReplyAfter(screen.snapshot(), `✓ ${FREEFORM_ANSWER}`, FREEFORM_ANSWER),
+    () => assistantReplyAfter(screen.snapshot(), `⎿  ${FREEFORM_ANSWER}`, FREEFORM_ANSWER),
     {
       timeoutMs: 60_000,
       label: "follow-up assistant section echoing the freeform answer",
@@ -102,7 +100,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   // The turn is complete; wait until the runner is back at the prompt so
   // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
   // turn and returns to the prompt (Claude Code's two-step exit).
-  await screen.waitForText("❯", 30_000);
+  await screen.waitForIdlePrompt(30_000);
   input.ctrlC();
   await runPromise;
 });

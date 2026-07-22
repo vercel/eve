@@ -51,7 +51,6 @@ import {
 import { discoverSandboxSource } from "#discover/sandbox.js";
 import { discoverScheduleSources } from "#discover/schedules.js";
 import { discoverSkills } from "#discover/skills.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { stripNpmPackageScope } from "#shared/package-name.js";
 
 /**
@@ -74,12 +73,6 @@ interface DiscoverAgentInput {
    * not resolve further extensions (transitive mounting is a non-goal).
    */
   role?: "agent" | "extension";
-  /**
-   * The app's eve version, checked against each mounted extension's
-   * `peerDependencies.eve`. Defaults to the running eve's version; injectable
-   * for tests.
-   */
-  eveVersion?: string;
 }
 
 /**
@@ -99,7 +92,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   const appRoot = resolve(input.appRoot);
   const agentRoot = resolve(input.agentRoot);
   const role = input.role ?? "agent";
-  const eveVersion = input.eveVersion ?? resolveInstalledPackageInfo().version;
   const diagnostics: DiscoverDiagnostic[] = [];
   const packageName = await tryReadPackageJsonName(source, appRoot);
   const rootEntries = await readSortedDirectoryEntries(source, agentRoot);
@@ -298,7 +290,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
         appRoot,
         mount: descriptor.mountRef,
         namespace: descriptor.namespace,
-        eveVersion,
       });
       diagnostics.push(...located.diagnostics);
       if (located.location === undefined) {
@@ -382,7 +373,7 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
  * file form (`extensions/crm.ts`) or the directory form
  * (`extensions/crm/extension.ts` with optional override slots).
  */
-interface ExtensionMountDescriptor {
+export interface ExtensionMountDescriptor {
   /** Mount namespace prefixed onto every composed contribution. */
   readonly namespace: string;
   /** Module ref for the mount declaration the package specifier is read from. */
@@ -393,6 +384,43 @@ interface ExtensionMountDescriptor {
    * the flat file form.
    */
   readonly overridesRoot?: string;
+}
+
+/**
+ * Discovers extension mount declarations without resolving or inspecting their
+ * package distributions. Development uses this before building local mounts.
+ */
+export async function discoverExtensionMountDeclarations(input: {
+  readonly agentRoot: string;
+  readonly source?: ProjectSource;
+}): Promise<{
+  diagnostics: DiscoverDiagnostic[];
+  mounts: ExtensionMountDescriptor[];
+}> {
+  const source = input.source ?? createDiskProjectSource();
+  const agentRoot = resolve(input.agentRoot);
+  const rootEntries = await readSortedDirectoryEntries(source, agentRoot);
+  const extensionsResult = await discoverNamedSourceDirectory({
+    directoryName: "extensions",
+    invalidDirectoryCode: DISCOVER_EXTENSIONS_DIRECTORY_INVALID,
+    invalidDirectoryMessage: `Expected "${join(agentRoot, "extensions")}" to be a directory of extension mounts.`,
+    recursive: false,
+    rootEntries,
+    rootPath: agentRoot,
+    source,
+    validateSegment: createExtensionNameDiagnostic,
+  });
+  const collection = await collectExtensionMounts({
+    agentRoot,
+    fileMounts: extensionsResult.sources,
+    rootEntries,
+    source,
+  });
+
+  return {
+    diagnostics: [...extensionsResult.diagnostics, ...collection.diagnostics],
+    mounts: collection.mounts,
+  };
 }
 
 /**

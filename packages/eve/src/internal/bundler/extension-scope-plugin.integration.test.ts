@@ -4,10 +4,7 @@ import { join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
-import {
-  buildWithNitroRolldown,
-  getSingleRolldownChunk,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import {
   createExtensionScopePlugin,
   createFixedNamespaceScopePlugin,
@@ -27,7 +24,7 @@ const roots: string[] = [];
 function scratchModule(source: string): { modulePath: string; sourceRoot: string } {
   const dir = mkdtempSync(join(tmpdir(), "eve-ext-scope-"));
   roots.push(dir);
-  const sourceRoot = join(dir, "ext");
+  const sourceRoot = join(dir, "extension");
   mkdirSync(join(sourceRoot, "tools"), { recursive: true });
   const modulePath = join(sourceRoot, "tools", "budget.ts");
   writeFileSync(modulePath, source, "utf8");
@@ -35,15 +32,14 @@ function scratchModule(source: string): { modulePath: string; sourceRoot: string
 }
 
 async function bundle(input: string, plugins: unknown[]): Promise<string> {
-  const result = await buildWithNitroRolldown({
+  const chunk = await buildSingleRolldownChunk("test module", {
     input,
     platform: "node",
     plugins,
     resolve: { extensions: [".ts", ".js", ".mjs"] },
-    write: false,
     output: { comments: false, format: "esm" },
   });
-  return getSingleRolldownChunk(result, "test module").code;
+  return chunk.code;
 }
 
 const STATE_MODULE = [
@@ -72,7 +68,10 @@ describe("extension-scope plugin (bundled)", () => {
     const { modulePath } = scratchModule(STATE_MODULE);
     const code = await bundle(modulePath, [
       createExtensionScopePlugin([
-        { sourceRoot: join(tmpdir(), "some-other-extension", "ext"), packageNamespace: "acme-crm" },
+        {
+          sourceRoot: join(tmpdir(), "some-other-extension", "extension"),
+          packageNamespace: "acme-crm",
+        },
       ]),
       externalizeEvePlugin,
     ]);

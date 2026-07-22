@@ -22,6 +22,12 @@ function isMissingEnvironmentFileError(error: unknown): error is NodeJS.ErrnoExc
 
 interface DevelopmentEnvironmentLoader {
   reload(): void;
+  stageReload(): DevelopmentEnvironmentReload;
+}
+
+export interface DevelopmentEnvironmentReload {
+  commit(): void;
+  rollback(): void;
 }
 
 const developmentEnvironmentLoaders = new Map<string, DevelopmentEnvironmentLoader>();
@@ -48,6 +54,23 @@ export function loadDevelopmentEnvironmentFiles(appRoot: string): void {
   getDevelopmentEnvironmentLoader(appRoot).reload();
 }
 
+export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEnvironmentReload {
+  return getDevelopmentEnvironmentLoader(appRoot).stageReload();
+}
+
+export function readDevelopmentEnvironmentHostValues(
+  appRoot: string,
+): Readonly<Record<string, string | null>> {
+  const values: Record<string, string | null> = {};
+  const fileValues = readDevelopmentEnvironmentValues(resolve(appRoot));
+
+  for (const key of [...fileValues.keys()].sort((left, right) => left.localeCompare(right))) {
+    values[key] = process.env[key] ?? null;
+  }
+
+  return values;
+}
+
 function getDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmentLoader {
   const resolvedAppRoot = resolve(appRoot);
   const existingLoader = developmentEnvironmentLoaders.get(resolvedAppRoot);
@@ -65,32 +88,78 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
   const protectedKeys = new Set(Object.keys(process.env));
   const managedValues = new Map<string, string>();
 
+  const stageReload = (): DevelopmentEnvironmentReload => {
+    const previousManagedValues = new Map(managedValues);
+    const nextValues = readDevelopmentEnvironmentValues(appRoot);
+    const affectedKeys = new Set([...managedValues.keys(), ...nextValues.keys()]);
+    const previousEnvironment = new Map(
+      [...affectedKeys].map((key) => [key, process.env[key]] as const),
+    );
+    let settled = false;
+
+    applyDevelopmentEnvironmentValues({
+      managedValues,
+      nextValues,
+      protectedKeys,
+    });
+
+    return {
+      commit() {
+        settled = true;
+      },
+      rollback() {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        managedValues.clear();
+        for (const [key, value] of previousManagedValues) {
+          managedValues.set(key, value);
+        }
+        for (const [key, value] of previousEnvironment) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        }
+      },
+    };
+  };
+
   return {
     reload() {
-      const nextValues = readDevelopmentEnvironmentValues(appRoot);
-
-      for (const [key, previousValue] of managedValues) {
-        if (nextValues.has(key) || protectedKeys.has(key)) {
-          continue;
-        }
-
-        if (process.env[key] === previousValue) {
-          delete process.env[key];
-        }
-
-        managedValues.delete(key);
-      }
-
-      for (const [key, value] of nextValues) {
-        if (protectedKeys.has(key)) {
-          continue;
-        }
-
-        process.env[key] = value;
-        managedValues.set(key, value);
-      }
+      stageReload().commit();
     },
+    stageReload,
   };
+}
+
+function applyDevelopmentEnvironmentValues(input: {
+  readonly managedValues: Map<string, string>;
+  readonly nextValues: ReadonlyMap<string, string>;
+  readonly protectedKeys: ReadonlySet<string>;
+}): void {
+  for (const [key, previousValue] of input.managedValues) {
+    if (input.nextValues.has(key) || input.protectedKeys.has(key)) {
+      continue;
+    }
+
+    if (process.env[key] === previousValue) {
+      delete process.env[key];
+    }
+
+    input.managedValues.delete(key);
+  }
+
+  for (const [key, value] of input.nextValues) {
+    if (input.protectedKeys.has(key)) {
+      continue;
+    }
+
+    process.env[key] = value;
+    input.managedValues.set(key, value);
+  }
 }
 
 function readDevelopmentEnvironmentValues(appRoot: string): Map<string, string> {

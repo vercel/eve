@@ -1,14 +1,14 @@
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import {
+  type DurableCompiledArtifactsSource,
+  resolveDurableCompiledArtifactsSource,
+} from "#runtime/durable-compiled-artifacts-source.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import { createSession } from "#execution/session.js";
-import {
-  resolveInheritedCountLimit,
-  resolveInheritedTokenLimit,
-} from "#execution/run-session-limits.js";
+import { resolveInheritedTokenLimit } from "#execution/run-session-limits.js";
 import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -29,7 +29,7 @@ export interface CreateSessionStepResult {
  * the root agent.
  */
 export async function createSessionStep(input: {
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly inheritedLimits?: RunSessionLimits;
   readonly outputSchema?: JsonObject;
@@ -41,11 +41,11 @@ export async function createSessionStep(input: {
   "use step";
 
   const bundle = await getCompiledRuntimeAgentBundle({
-    compiledArtifactsSource: input.compiledArtifactsSource,
+    compiledArtifactsSource: resolveDurableCompiledArtifactsSource(input.compiledArtifactsSource),
     nodeId: input.nodeId,
   });
 
-  // Every axis below resolves tighter-wins against the cap inherited from the
+  // Both token axes resolve tighter-wins against the cap inherited from the
   // delegating parent: a child may narrow what its parent granted, never widen
   // it. Root runs have no inherited limits, so their configured values apply.
   const session = createSession({
@@ -70,18 +70,8 @@ export async function createSessionStep(input: {
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     subagentDepth: input.subagentDepth,
-    // Depth is absolute (root = 0), so the tighter cap lets a child stop
-    // delegation earlier in its subtree but never extend past the root's cap.
-    subagentMaxDepth: resolveInheritedCountLimit({
-      configured: bundle.resolvedAgent.config.limits?.maxSubagentDepth,
-      inherited: input.inheritedLimits?.maxSubagentDepth,
-    }),
     turnAgent: bundle.turnAgent,
-    // Caps one Workflow invocation's fan-out anywhere in this session.
-    workflowMaxSubagents: resolveInheritedCountLimit({
-      configured: bundle.resolvedAgent.config.limits?.maxSubagents,
-      inherited: input.inheritedLimits?.maxSubagents,
-    }),
+    workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,
   });
 
   return { state: createDurableSessionState({ session }) };

@@ -28,7 +28,6 @@ describe("compiledAgentManifestSchema", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
-          maxSubagentDepth: 4,
         },
         model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
         name: "app",
@@ -40,8 +39,59 @@ describe("compiledAgentManifestSchema", () => {
     expect(parsed.config.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
-      maxSubagentDepth: 4,
     });
+  });
+
+  it("rejects the removed maxSubagentDepth limit", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+
+    expect(() =>
+      compiledAgentManifestSchema.parse({
+        ...manifest,
+        config: { ...manifest.config, limits: { maxSubagentDepth: 4 } },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects the removed agent-level maxSubagents limit", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+
+    expect(() =>
+      compiledAgentManifestSchema.parse({
+        ...manifest,
+        config: { ...manifest.config, limits: { maxSubagents: 4 } },
+      }),
+    ).toThrow();
+  });
+
+  it("preserves experimental Workflow tool configuration", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+      workflowTool: { maxSubagents: 6 },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.workflowTool).toEqual({ maxSubagents: 6 });
   });
 
   it("preserves dynamic model resolver source", () => {

@@ -12,6 +12,6 @@ import { defineAgent } from "eve";
 export default defineAgent({
   description:
     "Smoke-test echo subagent. Call this whenever the user mentions the phrase 'echo marker subagent'. Pass any short text as the input; the subagent replies with a fixed marker token.",
-  model: "anthropic/claude-sonnet-5",
+  model: process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol",
   reasoning: "high",
 });

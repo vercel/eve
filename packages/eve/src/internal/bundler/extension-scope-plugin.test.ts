@@ -6,7 +6,7 @@ import {
   type ExtensionScopeBundlerPlugin,
 } from "#internal/bundler/extension-scope-plugin.js";
 
-const SCOPES = [{ sourceRoot: "/pkg/crm/ext", packageNamespace: "acme-crm" }];
+const SCOPES = [{ sourceRoot: "/pkg/crm/extension", packageNamespace: "acme-crm" }];
 
 function pathPlugin(): ExtensionScopeBundlerPlugin {
   const created = createExtensionScopePlugin(SCOPES);
@@ -22,12 +22,12 @@ describe("createExtensionScopePlugin (path containment)", () => {
   });
 
   it("redirects eve/context to a namespaced shim for extension-owned importers", () => {
-    const id = pathPlugin().resolveId("eve/context", "/pkg/crm/ext/tools/budget.ts");
+    const id = pathPlugin().resolveId("eve/context", "/pkg/crm/extension/tools/budget.ts");
     expect(id).toBe("\0eve-ext-scope:context:acme-crm");
   });
 
   it("redirects eve/extension to a namespaced shim for extension-owned importers", () => {
-    const id = pathPlugin().resolveId("eve/extension", "/pkg/crm/ext/config.ts");
+    const id = pathPlugin().resolveId("eve/extension", "/pkg/crm/extension/config.ts");
     expect(id).toBe("\0eve-ext-scope:extension:acme-crm");
   });
 
@@ -40,8 +40,10 @@ describe("createExtensionScopePlugin (path containment)", () => {
   });
 
   it("only intercepts the scoped framework modules", () => {
-    expect(pathPlugin().resolveId("eve/tools", "/pkg/crm/ext/tools/budget.ts")).toBeUndefined();
-    expect(pathPlugin().resolveId("zod", "/pkg/crm/ext/tools/budget.ts")).toBeUndefined();
+    expect(
+      pathPlugin().resolveId("eve/tools", "/pkg/crm/extension/tools/budget.ts"),
+    ).toBeUndefined();
+    expect(pathPlugin().resolveId("zod", "/pkg/crm/extension/tools/budget.ts")).toBeUndefined();
   });
 });
 
@@ -89,6 +91,6 @@ describe("shim baking (shared)", () => {
   });
 
   it("passes through non-shim ids in load", () => {
-    expect(pathPlugin().load("/pkg/crm/ext/tools/budget.ts")).toBeUndefined();
+    expect(pathPlugin().load("/pkg/crm/extension/tools/budget.ts")).toBeUndefined();
   });
 });

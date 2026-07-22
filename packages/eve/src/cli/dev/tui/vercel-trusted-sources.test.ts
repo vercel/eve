@@ -2,7 +2,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import type { VercelCaptureResult } from "#setup/primitives/index.js";
 import type { Prompter, PrompterValue, SingleSelectOptions } from "#setup/prompter.js";
-import { trustedSourcesToJSON } from "@vercel/sdk/models/updateprojectprojectsoptionsallowlist.js";
+import { trustedSourcesToJSON } from "@vercel/sdk/models/updateprojectprojectsbranchmatcher.js";
 import { describe, expect, it } from "vitest";
 import { vi } from "vitest";
 

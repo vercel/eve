@@ -1,5 +1,207 @@
 # eve
 
+## 0.27.0
+
+### Minor Changes
+
+- 1db41fd: `eve/nuxt` now deploys the agent through Vercel's stable services model: on Vercel builds the module generates an eve Build Output service and a `/eve/v1/*` service route instead of writing legacy `experimentalServices` to `vercel.json`, which Vercel no longer routes (every agent request returned a platform NOT_FOUND). The `configureVercelJson` and `servicePrefix` module options and the `EVE_NUXT_SERVICE_PREFIX` export were removed. Delete any generated `experimentalServices` block from `vercel.json` — the module warns when it sees one — or declare the eve service and its rewrite yourself under the stable `services` field to keep managing routing manually.
+
+  A generated eve service build now also skips host middleware preservation when the host's Build Output config is not yet present, instead of failing the build. Unlike the Next.js integration, which writes that config early, the Nuxt web service emits it only at the end of its own build, so an isolated eve service build could crash reading a file that had no middleware to preserve.
+
+### Patch Changes
+
+- 707de7f: Anthropic models served through the standard `@ai-sdk/amazon-bedrock` Converse provider are now detected as cacheable. Prompt-cache breakpoints previously only matched on the provider name, so Bedrock (which reports provider `amazon-bedrock` and carries the Anthropic identity in the model id) fell through to no caching. The cache marker now also carries the Bedrock `cachePoint` namespace that the Converse provider reads.
+- 7df0bf1: Compaction now reserves room for its checkpoint prompt before reaching the configured threshold. The prompt asks the compaction model to distinguish completed work from remaining work, and later compactions receive the previous checkpoint intact instead of truncating it with ordinary transcript text.
+- 7df0bf1: Compaction now feeds the summarizer full-fidelity conversation text (tool payloads stay compact) and first tries evicting older tool results before summarizing; the kept recent window retains tool results verbatim. Agents lose less context per compaction and stop re-running completed tools.
+- c0e368a: Routes protected by `httpBasic()` now advertise a standards-compliant `WWW-Authenticate: Basic` challenge on 401, using an optional realm that defaults to `"eve"`; HTTP Basic credentials are normalized to Unicode NFC to match the advertised UTF-8 encoding. `routeAuth` collects challenges from the configured auth strategies instead of always emitting `Bearer`.
+
+## 0.26.2
+
+### Patch Changes
+
+- dbca15c: Bump the vendored chat SDK (`chat`, `@chat-adapter/*`) from 4.31.0 to 4.34.0. Slack card tables now render as native data table blocks — paginated and sortable — instead of plain table blocks, and `Table()` supports optional `caption` and `pageSize` fields.
+- 938ef92: Identify Eve and its version on AI Gateway, Sandbox, and Workflow service requests.
+- d034e01: Fixed the default chat message reducer dropping assistant text when a single turn produced more than one message — for example, text shown before an OAuth authorization prompt was overwritten by the text that followed it once authorization completed. Each message now renders in the order it arrived.
+- dad9472: `eve info` now reports discovered subagents and schedules in both the human table and the `--json` output, matching what the CLI reference already documented. Previously both surfaces silently omitted them even though discovery resolved them correctly.
+- f1253c5: Listing or loading static skills no longer requires opening a sandbox. Dynamic skills and access to supporting skill package files, such as references, assets, and scripts, remain sandbox-backed.
+- de917a6: Fix a crash when an agent is triggered by a bare mention with no text (e.g. sending just `@bot` in a Microsoft Teams channel). The agent now responds normally instead of failing.
+
+## 0.26.1
+
+### Patch Changes
+
+- 1f04ff7: The dev TUI renders Markdown through a real GFM parser (width-fitted tables, code blocks, task lists, links), presents every builtin tool with semantic activity copy (`Fetch <url>`, `Run <command>`, `Search <query>` — including `web_search` across provider input shapes, `todo`, `ask_question`, `agent`, and `connection_search`), and shows rejected tool approvals as denied instead of successful. Tool activity now accumulates in place: an in-flight batch renders as one counted header with its newest calls listed first behind a `│` rail and a `… (N more)` elision, then collapses to a single past-tense line (`▪ Fetched 30 URLs`) once every call settles — failures keep their itemized per-call error rail — and each `write_file` keeps its own block rendering a real line diff (`+`/`-` rows with context, computed from content the session has already seen — prior writes and full-file reads; new files show all additions). `ask_question` prompts open as a numbered overlay panel above the input (number keys select directly, the "Type your own answer" row focuses its inline editor on reach, Esc dismisses to plain text input), committing as `? question ⎿ answer` in the transcript. The `todo` tool no longer emits transcript blocks; it drives a pinned panel above the input showing per-task state, which commits as a completed block once every task settles. An empty prompt now shows a quiet `›` mark with a rotating placeholder of things to try, switching to the active `❯` once typing starts. Reasoning defaults to a fixed one-line thinking indicator that updates in place (persisting as `○ Thought for 12s` only for long thoughts; `--reasoning full` restores the streaming trace), the prompt stays anchored during a turn with Enter inert (the draft carries into the next prompt), and completed turns close with a `└ Done in <duration>` stats coda (per-turn token flow, context fill) when the turn was long or expensive. Subagent calls render as individual `※ subagent(<name>) #N` sections in the tool column whose child rows window to the three most recently active (failures stay itemized while settled work condenses to one counted row) and close on a corner that reports `Done` once the call's final message arrives; captured server output renders as one open-railed `○ stderr` / `○ stdout` stream section per source (streams are continuous — no closing corner, and interleaved activity never fragments them): the section sits at its newest write's position — everything that happened after the last error displays after it — and shows only that newest write, with earlier ones behind an `… (N more)` count (the stored-diagnostics pointer carries the history); the status bar names the model's actual routing and credential (`via ai-gateway(oidc:<project>)`, `via ai-gateway(api-key)`, or `via <provider>⌝` for a directly-authored endpoint); an empty prompt no longer submits; and a mid-conversation session replacement marks the context cut with a `┌── Session restarted, clear context.` boundary line.
+
+## 0.26.0
+
+### Minor Changes
+
+- 26504e9: The client now reconnects durable event streams from their last cursor, so long turns continue across transient connection cuts without replaying events. Stream retries are now managed internally, interrupted sessions remain resumable, and `maxReconnectAttempts` has been removed from `ClientOptions`, `EveAgentStoreInit`, and the React, Svelte, and Vue `UseEveAgentOptions` APIs.
+
+### Patch Changes
+
+- 82fba04: Provide dynamic tools with the full auth-capable `ToolContext`, including `ctx.getToken(provider)` and `ctx.requireAuth(provider)`, across live execution and durable replay.
+- 82fba04: Canonicalize Windows publication-lock watcher paths to avoid Node/libuv crashes when temporary directories use 8.3 short names.
+- 51beea7: Workflow now keeps sandbox bridge capacity aligned with its configured `maxSubagents` budget, so large `Promise.all` fan-outs park and dispatch child sessions instead of failing at code mode's lower internal concurrency limit.
+- 9a1800f: Fix `experimental_chatgpt` sending requests in an improper format that the
+  Codex backend rejected with a 400 Bad Request: system instructions are now sent
+  in the top-level `instructions` field and the unsupported `max_output_tokens`
+  parameter is dropped.
+- 65a7823: `eve dev` now writes a private per-process diagnostic log under `.eve/logs/` capturing stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records (stored structured, with level, namespace, and JSON fields). The file is JSON Lines: every line is one JSON record with `at` and `source` fields. Long stderr output collapses in the transcript to a one-line summary pointing at the log file (the raw text stays available in the `all` log mode), and error details reference the log instead of flooding the transcript.
+- 65a7823: `eve dev` now writes an environment dump next to each diagnostic log (`.eve/logs/dev-<instance>.dump`): one JSON document capturing eve, Node.js, and Vercel CLI versions, the Vercel CLI path, local session-store size, and running session stats (prompts, token usage, tool calls by name, subagent dispatches). `eve logs --dump` prints the dump and its JSONL log together as one parseable report.
+- 65a7823: The dev TUI's `/model` "Change model" row now opens a value menu — Model, Reasoning effort, Service tier, Done. Reasoning and tier adjust inline with `←`/`→` (Tab acts as `→`, both wrap as a ring): a `●─◉─○` track slides over the model's supported effort levels — snapping to the closest supported level when a pick changes what the model serves — and the tier flips between `fast ↯` and `normal`; the tier row disappears when the catalog prices no priority tier for the model. Enter on Model opens the searchable catalog as model ids on a `▏` rail — the same railed list component the team and project pickers now render with. All drafted changes commit through one atomic `agent.ts` edit. The provider picker marks and describes the currently-active provider and reports an accepted key as `AI_GATEWAY_API_KEY set.`. Linking an existing project now suggests the team project named after the agent, searching for it when it is not among the recents. Command cancellations now read "dismissed". The status line drops its `·` separators and shows the model as `slug@level ↯`.
+- 65a7823: New `eve logs` command for reading the diagnostic logs `eve dev` writes under `.eve/logs/`: `eve logs` prints the most recent log, `eve logs ls [--json]` lists them, and `eve logs <logid>` prints a specific log by id, file name, transcript path, or unambiguous prefix.
+- 65a7823: `eve logs --events` interleaves session events (session/turn/step lifecycle, message deltas) into the diagnostic-log output, resolved at query time from the local workflow store — nothing extra is written while `eve dev` runs.
+- b53d713: Fixed transient TUI and CLI output rendering by standardizing spinners and progress rows on the shared `LiveRegion`. Streamed command output now stays aligned beneath active spinners, while failed operations preserve their command transcript for diagnostics.
+- 65a7823: Errors that escape a session — not just model-call failures — now pass through a semantic-error catalog: declarative, linter-style rules applied to any thrown error. Rules cover AI Gateway (auth, model-not-found, rate limits, upstream availability), model providers (missing API keys, unsupported capabilities), the durable workflow runtime (store version/access, replay divergence, corrupted event logs), sandbox backends (Docker CLI/daemon, provisioning), and system failures (port in use, disk full, network dials). Matched failures render a stable, actionable summary in the transcript with the raw error routed to the `eve dev` diagnostic log, and failure events carry a stable `semanticErrorId` for correlation.
+
+## 0.25.3
+
+### Patch Changes
+
+- 4fb1924: Fix `eve dev` snapshots for extensions installed as physical `node_modules` directories, making dependency handling consistent across npm, Yarn, and pnpm layouts.
+
+## 0.25.2
+
+### Patch Changes
+
+- a4c48a9: The integrations catalog gains 4 Chat SDK adapter channels for surfaces without a first-class eve channel (Google Chat, WhatsApp, X, and Messenger), each with a `chatSdkChannel` quick start. The `eve channels add` picker is unchanged.
+- d9c49fc: Tool schemas that cannot be rehydrated into local validators no longer fail the turn. Serialized JSON Schemas first retry rehydration as JSON Schema 2020-12 (so MCP `$defs` references validate correctly), and schemas outside the supported conversion subset (such as inline JSON Pointer `$ref`s) are now advertised to the model unchanged with validation left to the tool's own executor — OpenAPI operations with such schemas are kept instead of omitted.
+
+## 0.25.1
+
+### Patch Changes
+
+- b2bc6b6: Make default-exported hooks emit portable extension declarations while preserving typed event handlers and authored event keys.
+
+## 0.25.0
+
+### Minor Changes
+
+- b9bb8b2: Scaffold extensions with separate source and dist roots, a required wildcard eve peer, and dist-only publication. `eve extension build` now emits an agent-shaped JavaScript distribution with declarations, assets, and capability compatibility metadata instead of requiring author TypeScript in the published package.
+
+### Patch Changes
+
+- 29ecffc: Build mounted source-backed workspace extensions before `eve dev` compiles the agent, then rebuild only the affected extension when its source changes. Failed extension builds keep the previous dist and active development generation serving.
+- 46b78b8: Stop development microsandboxes on `eve dev` shutdown by discovering resources from their run labels and loading the application's installed microsandbox version during cleanup.
+- 6a5a36a: Deliver stale HITL responses — answers to a question or approval that is no longer pending — as a new user message, letting the model decide whether the old selection still matters. A stale approval never authorizes the earlier tool call.
+- f7c69b1: The Vercel Framework Preset is now reconciled with the host framework on disk when running `/deploy` via the TUI.
+- bbec675: Extensions installed with a registry-style store layout (e.g. from npm with pnpm) now work in `eve dev` and `eve eval`. Extension modules reached through a node_modules symlink resolve their dependencies from the package's real location — matching standard resolver semantics — instead of failing with `UNRESOLVED_IMPORT`/`ERR_MODULE_NOT_FOUND` or silently picking up another copy of the dependency from the consuming app.
+- 14501dc: Every eve-owned tool input is now validated against its schema before execution, so invalid calls are returned to the model for retry instead of failing the run. Subagent calls treat an empty `outputSchema` as absent, and OpenAPI operations with invalid schemas are omitted with a warning.
+
+## 0.24.6
+
+### Patch Changes
+
+- 3029647: Update the generated Web Chat template for Next.js 16.3 preview type declarations.
+- b97f1d1: Custom channel routes can now cancel a session's in-flight turn: route handlers receive a `cancel({ continuationToken, turnId? })` helper addressed by the channel-local continuation token, and `Session` handles returned by `send()` and `getSession()` expose `cancel({ turnId? })` for session-id-addressed cancellation. `ClientSession.cancel()` accepts the same optional `turnId` stale-request guard.
+
+## 0.24.5
+
+### Patch Changes
+
+- bfbbe92: Add `eve build --profile <path>` for a machine-readable build-timing and final-output-size report. Profile collection is best-effort, so reporting failures do not fail an otherwise successful build.
+- dab9889: Allow agents to remove the root-only built-in `agent` delegation tool with `disableTool()` from `agent/tools/agent.ts`.
+- e1cb505: Retry transient network failures while reopening client session streams so active turns remain attached.
+- 2568387: Cancel active local, nested, and remote subagent turns when their parent turn is cancelled. Client and eval sessions can now cancel active turns directly, and eval live-turn handles can wait for typed mid-turn events before cancellation or settlement.
+- 20cd9a1: Added `POST /eve/v1/session/:sessionId/cancel` to the eve HTTP channel for requesting cancellation of an in-flight turn. The optional `{ turnId }` body limits the request to the turn the caller observed; the response reports `"accepted"` when a cancellation hook accepts it or the benign `"no_active_turn"` when no resumable target exists.
+- 02698fd: Fix Vercel deploys for the Next.js web channel. `eve` no longer scaffolds a
+  `vercel.json` `experimentalServices` block, which the Vercel platform now
+  rejects (it requires the `services` key and a stricter schema). For Next.js the
+  block was also redundant — `withEve()` generates the eve service and
+  `/eve/v1/*` routes into the Build Output at build time — so the scaffold now
+  writes a minimal `vercel.json`.
+- e45a066: `eve link` now lets you create a Vercel project or link an existing one, matching the project setup available through `/model` usage.
+- 5f8818b: `eve channels add web` now updates the Vercel Framework Preset when adding a
+  Next.js web channel to an already-linked eve project to prevent deployment
+  failures.
+- 887908c: Bundle authored modules in each development generation as one shared graph, avoiding repeated parsing and emission of dependencies for every tool.
+- 376a82f: Report the root-only `agent` action alongside other framework tools in agent info, including whether it is active, disabled, or replaced.
+- 4f2863d: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- d9d3226: Fix `withEve` producing a broken Vercel build command in npm workspaces, where the `eve` module is located in the workspace root.
+
+## 0.24.4
+
+### Patch Changes
+
+- d5db876: Session teardown now disposes authorization hooks without waiting on pending durable iterator reads, preventing cancelled sessions from hanging during cleanup.
+- 0dbea62: Store local Workflow World data under `.eve/.workflow-data` for both `eve dev` and `eve start`.
+- 9058962: Keep an active `eve dev` REPL session across successful authored-source reloads, so its next turn continues the durable conversation on the latest generation.
+- 4531a3d: Route all of eve's single-file bundles through a shared Rolldown helper that always disables code splitting. This closes a remaining gap where a dynamic import reachable from a final workflow bundle could still fail with "Expected one bundled ..." during builds.
+- b6e5923: Include the current continuation token in `session.waiting` events, and allow negative stream start indexes such as `-1` to read relative to the current tail.
+- 159d674: Turns are now cancellable: resuming a session's durable cancel hook (`{sessionId}:cancel`, with an optional `turnId` guard) aborts in-flight work and settles the turn as a new `turn.cancelled` stream event followed by `session.waiting` — never as a failure. Channels and stream-event hooks can handle `turn.cancelled`, and `eve/client` finalizes partially streamed messages. The HTTP cancellation API ships in a following release.
+
+## 0.24.3
+
+### Patch Changes
+
+- dddfb20: Fix `eve dev` generation bundling for authored modules whose dependencies use dynamic imports. Development generations now bundle ordinary dependencies directly instead of inheriting a copied server-external package list and tracing dependency closures; Nitro remains the sole owner of hosted dependency packaging.
+- 2494b33: Bound `eve dev` runtime snapshot storage with a World-independent retention policy. Superseded generations remain available for at least 30 minutes, and the five most recently superseded generations are retained as an additional rebuild-rate safety net.
+- 0333a63: Fix the dev-only schedule dispatch route to load compiled artifacts from the active development generation instead of the authored app root, which returned a 500 for every dispatch.
+- 0333a63: Rework `eve dev` structural reloads to never interrupt admitted work: an isolated candidate must compile, bundle, and start before it is promoted atomically, the retired worker keeps serving the responses and sockets it already admitted until they settle, and a failed candidate or crashed worker leaves the server available with shutdown bounded even while streams are open.
+- 5473f76: Keep active local Workflow turns on the development generation they selected across reloads, retries, and server restarts. New turns use the latest successful generation, and `eve dev` stores local Workflow state under `.workflow-data`.
+- 0333a63: Retry transient Windows filesystem contention while atomically releasing build publication locks.
+
+## 0.24.2
+
+### Patch Changes
+
+- 72ccdc0: Compaction now reserves room for its checkpoint prompt before reaching the configured threshold. The prompt asks the compaction model to distinguish completed work from remaining work, and later compactions receive the previous checkpoint intact instead of truncating it with ordinary transcript text.
+- 2c12460: Tool approvals now resolve before channel context is added to the next model request, so approving a tool from channels such as Linear executes the tool instead of leaving a dangling tool call.
+- d810570: Keep generated eve service builds isolated from a colocated Next.js Build Output and preserve host middleware mappings when Vercel collects the generated service.
+
+## 0.24.1
+
+### Patch Changes
+
+- e0b64a5: Keep development runtime generations executable after authored source or dependencies change by bundling ordinary dependencies and materializing configured external dependency closures.
+- c4f5b58: Model calls now merge multiple system instructions into one message, avoiding provider failures when dynamic instructions are combined with array-form user content.
+- 6aac45d: `eve build` now uses invocation-owned compiler, host, Nitro, Workflow, and output workspaces. Concurrent builds can run beside `eve dev`, and failed builds preserve the last successfully published output.
+- 0046308: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+
+## 0.24.0
+
+### Minor Changes
+
+- 1f85922: Replace the `ExperimentalWorkflow` marker with `experimental_workflow(options)` and move the per-program `maxSubagents` setting from `defineAgent({ limits })` to that Workflow tool definition.
+
+### Patch Changes
+
+- ce5c06d: `ToolContext` now exposes `toolName`, the final runtime tool name, so executors can share routing, authorization, and observability logic without duplicating path-derived or qualified names.
+- e0f09b4: The `eve dev` schedule dispatch route now reuses the module loader path resolved when the server is built, preventing module resolution failures in the bundled Windows dev server.
+- d194243: Fix Microsoft Teams HITL cards to show tool arguments, resume the recorded channel thread for message and invoke submissions, and authorize submissions as the Teams user who clicked the card.
+- 4649f70: Local `vercel build` runs now select the hosted Workflow runtime and prewarm sandbox templates, so their output can be deployed with `vercel deploy --prebuilt`. Builds that require templates fail with setup guidance when Vercel OIDC credentials are unavailable instead of emitting broken prebuilt output.
+
+## 0.23.0
+
+### Minor Changes
+
+- e5d142f: Make the built-in `agent` tool root-only, so copies created by it cannot delegate recursively. Declared subagents can still call their own nested subagents, and `limits.maxSubagentDepth` has been removed.
+- 9a594c2: Infer authored channel metadata directly from the channel definition passed to `isChannel`, without compiler-generated declarations. Use `isChannel(...)` whenever you need authored metadata type narrowing; direct `channel:<name>` comparisons continue to identify channels but no longer narrow authored metadata.
+
+  The `.eve/**/*.d.ts` TypeScript include is no longer needed. Existing apps may remove it, but leaving the unmatched glob in place does not change typechecking.
+
+## 0.22.6
+
+### Patch Changes
+
+- 5035812: Vercel deployments now emit `framework: { slug: "eve" }` alongside the version in the Build Output API config. Vercel's build-output deserializer drops the entire `framework` object when `slug` is absent, so this restores framework attribution end to end — `framework_slug` and `framework_version` are now populated in AI Gateway routing and access logs.
+- 9cd5c99: chatSdkChannel now mounts both GET and POST on each adapter's webhook route, so adapters that verify with a GET challenge like X's CRC check work through the bridge. POST-only adapters are unaffected.
+- caa0c17: `eve dev` now keeps Nitro build inputs outside prunable runtime snapshots. Long-running development servers no longer fail structural rebuilds with stale import errors after snapshot cleanup.
+- 01f0345: Resume active local workflow runs on the agent-scoped queue after restarting the eve server.
+
+## 0.22.5
+
+### Patch Changes
+
+- c8f00aa: Add `experimental_chatgpt` under the new `eve/models/openai` subpath: it returns an AI SDK language model served through the local Codex login (`codex login`), billed to the ChatGPT subscription, and defaults to `gpt-5.6-sol`. Direct provider API request errors now also surface their upstream message when one is available.
+- 640cd8e: Keep provider streams moving while durable event writes are in flight. eve now coalesces only adjacent queued text or reasoning appends behind an ordered writer, preserving event order while avoiding one durable round trip per provider delta.
+- a5b43e7: Add `eve extension init` and `eve extension build` for scaffolding and building extension packages.
+- a325195: `limits.maxSubagentDepth` now defaults to `1` instead of `3`. Agents that rely on deeper default delegation should set `limits: { maxSubagentDepth: 3 }` (or another value) explicitly.
+- 4f86a21: Persist AI SDK approval-resume response messages in session history so approved local tool results survive later provider requests.
+- 3577534: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- bd780bd: Update the bundled Workflow runtime to `@workflow/core@5.0.0-beta.30` and align its world packages.
+
 ## 0.22.4
 
 ### Patch Changes
