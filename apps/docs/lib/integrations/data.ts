@@ -1043,7 +1043,53 @@ export default channel;
 
 See the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/lark) for all supported events and credentials.`,
     configure: `Create a Lark or Feishu app and set \`LARK_APP_ID\` and \`LARK_APP_SECRET\`. The adapter uses Lark’s WebSocket long connection rather than an HTTP webhook, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. This is a vendor-official Chat SDK adapter built on the official Lark Node SDK. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
-  },};
+  },
+  "chat-sdk-beeper": {
+    logo: "matrix",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: ["chat sdk", "matrix", "beeper", "encrypted chat", "e2ee", "signal", "instagram"],
+    install: `Install eve, Chat SDK, the Beeper Matrix adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @beeper/chat-adapter-matrix @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+    quickStart: `Create \`agent/channels/matrix.ts\`:
+
+\`\`\`ts
+// agent/channels/matrix.ts
+import { createMatrixAdapter } from "@beeper/chat-adapter-matrix";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    matrix: createMatrixAdapter(),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+await bot.initialize();
+
+export default channel;
+\`\`\`
+
+See the [Beeper Matrix adapter documentation](https://chat-sdk.dev/adapters/vendor-official/matrix) for all supported events and credentials.`,
+    configure: `Set the Matrix homeserver, access token, and bot identity environment variables documented by Beeper. This adapter consumes Matrix sync rather than webhooks, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. It requires Node.js 22 or newer and a durable state adapter in production. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
+};
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
   browserbase: {
