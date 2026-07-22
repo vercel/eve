@@ -51,7 +51,7 @@ export function buildDynamicInstructionMessages(ctx: {
  * Dispatches a stream event to dynamic instruction resolvers.
  *
  * Each resolver's output replaces its own slot (keyed by slug) in the
- * scope-appropriate durable key (session or turn). The tool-loop calls
+ * scope-appropriate durable key (session or turn). The generate harness calls
  * {@link buildDynamicInstructionMessages} to assemble the flattened
  * result for the model call.
  */

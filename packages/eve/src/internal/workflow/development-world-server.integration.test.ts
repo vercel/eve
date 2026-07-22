@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { turnWorkflowReference, workflowEntryReference } from "#execution/workflow-runtime.js";
+import { turnWorkflowReference, workflowEntryReference } from "#internal/loops/workflow/runtime.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";

@@ -1,4 +1,5 @@
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import { withOutcomeState } from "#harness/step-result.js";
+import type { GenerateOutcome, HarnessLoopTypes, HarnessSession } from "#harness/types.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { connectionProvider } from "#context/providers/connection.js";
@@ -69,17 +70,17 @@ export async function withContextScope<T>(
  * Runs one harness step inside the unified context.
  *
  * Delegates to {@link withContextScope} for provider lifecycle, then
- * reassembles the {@link StepResult}.
+ * re-attaches the provider-committed session to the classified outcome.
  */
 export async function runStep(
   ctx: ContextContainer,
   harnessSession: HarnessSession,
-  callback: (session: HarnessSession) => Promise<StepResult>,
-): Promise<StepResult> {
+  callback: (session: HarnessSession) => Promise<GenerateOutcome>,
+): Promise<GenerateOutcome> {
   const { result, session } = await withContextScope(ctx, harnessSession, async (enriched) => {
-    const stepResult = await callback(enriched);
-    return { result: stepResult.next, session: stepResult.session };
+    const outcome = await callback(enriched);
+    return { result: outcome, session: outcome.state };
   });
 
-  return { next: result, session };
+  return result.state === session ? result : withOutcomeState<HarnessLoopTypes>(result, session);
 }

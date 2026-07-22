@@ -8,7 +8,7 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
+import type { HandleEventFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
 async function* streamOf(parts: TextStreamPart<ToolSet>[]): AsyncIterable<TextStreamPart<ToolSet>> {
@@ -24,7 +24,7 @@ const EMISSION_STATE: HarnessEmissionState = {
   turnId: "turn_0",
 };
 
-function createEmitStub(): HarnessEmitFn {
+function createEmitStub(): HandleEventFn {
   return vi.fn(async () => {});
 }
 
@@ -132,7 +132,7 @@ describe("emitStreamContent empty delivery", () => {
     const writeReleases: Array<() => void> = [];
     let providerDeltas = 0;
     let providerFinished = false;
-    const emit = vi.fn(async (_event: Parameters<HarnessEmitFn>[0]) => {
+    const emit = vi.fn(async (_event: Parameters<HandleEventFn>[0]) => {
       await new Promise<void>((resolve) => {
         writeReleases.push(resolve);
       });
@@ -280,8 +280,8 @@ describe("emitStreamContent action requests", () => {
   });
 
   it("emits a provider action batch before any provider result arrives", async () => {
-    const events: Parameters<HarnessEmitFn>[0][] = [];
-    const emit: HarnessEmitFn = async (event) => {
+    const events: Parameters<HandleEventFn>[0][] = [];
+    const emit: HandleEventFn = async (event) => {
       events.push(event);
     };
     let releaseResults!: () => void;

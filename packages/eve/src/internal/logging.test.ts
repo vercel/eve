@@ -114,14 +114,14 @@ describe("createLogger", () => {
     const records: LogRecord[] = [];
     setLogRecordSubscriber((record) => records.push(record));
     try {
-      const logger = createLogger("harness.tool-loop");
+      const logger = createLogger("harness.generate");
       const cause = Object.assign(new Error("upstream"), { statusCode: 429 });
       logger.error("tool execution failed", { toolName: "always_fail", error: cause });
 
       expect(records).toHaveLength(1);
       expect(records[0]).toMatchObject({
         level: "error",
-        namespace: "harness.tool-loop",
+        namespace: "harness.generate",
         message: "tool execution failed",
         fields: {
           toolName: "always_fail",
@@ -133,9 +133,9 @@ describe("createLogger", () => {
       setLogRecordSubscriber(undefined);
     }
 
-    const logger = createLogger("harness.tool-loop");
+    const logger = createLogger("harness.generate");
     logger.error("after unsubscribe");
-    expect(errorSpy).toHaveBeenCalledWith("[eve:harness.tool-loop] after unsubscribe");
+    expect(errorSpy).toHaveBeenCalledWith("[eve:harness.generate] after unsubscribe");
   });
 
   it("falls back to the console when the subscriber throws", () => {

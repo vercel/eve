@@ -56,7 +56,7 @@ export interface Logger {
 
 /**
  * Builds a logger bound to a stable namespace (e.g. `"slack.route"` or
- * `"harness.tool-loop"`). The namespace appears in every rendered line
+ * `"harness.generate"`). The namespace appears in every rendered line
  * and is threaded through to OTel span events so a single grep can
  * correlate structured logs with traces.
  */

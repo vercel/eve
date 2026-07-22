@@ -9,10 +9,10 @@ import { notifyDelegatedParentStep } from "#execution/delegated-parent-notificat
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#internal/loops/workflow/session-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import { dispatchTurnStep } from "#execution/workflow-steps.js";
+import { dispatchTurnStep } from "#internal/loops/workflow/steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
@@ -52,7 +52,7 @@ vi.mock("./delegated-parent-notification.js", () => ({
   notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("./workflow-steps.js", () => ({
+vi.mock("#internal/loops/workflow/steps.js", () => ({
   dispatchTurnStep: vi.fn().mockImplementation(async () => ({ runId: "turn-run" })),
 }));
 

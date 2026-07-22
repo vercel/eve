@@ -3,7 +3,7 @@ import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
-import { dispatchTurnStep } from "#execution/workflow-steps.js";
+import { dispatchTurnStep } from "#internal/loops/workflow/steps.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 /** One settled turn: its terminal driver action plus deferred hook cleanup. */

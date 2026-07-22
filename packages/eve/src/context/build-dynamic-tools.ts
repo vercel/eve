@@ -85,7 +85,7 @@ function buildReplayedApproval(
 
 /**
  * Builds live dynamic tool definitions. Narrower scopes appear first
- * so they win on name collision (the tool-loop uses `??=` for dedup).
+ * so they win on name collision (the generate harness uses `??=` for dedup).
  *
  * Step tools are live closures (re-resolved every step via
  * `LiveStepToolsKey`). Session/turn tools are replayed from durable

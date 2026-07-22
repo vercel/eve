@@ -55,7 +55,7 @@ import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type {
-  HarnessEmitFn,
+  HandleEventFn,
   HarnessSession,
   HarnessToolMap,
   SessionStateMap,
@@ -100,7 +100,7 @@ export function getHarnessEmissionState(state: SessionStateMap | undefined): Har
  * epilogue (or recoverable failure cascade) and reset.
  *
  * Returns `false` while a turn is in progress, including during
- * tool-loop continuations and runtime-action resumes within the same
+ * generation continuations and runtime-action resumes within the same
  * turn. Callers that gate per-turn work (eg. lifecycle hook dispatch)
  * use this predicate to distinguish a fresh delivery from a
  * continuation of an in-flight turn.
@@ -138,7 +138,7 @@ export function setHarnessEmissionState(
  * beginning of a new turn. Returns updated emission state.
  */
 export async function emitTurnPreamble(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   input: StepInput,
   state: HarnessEmissionState,
   runtimeIdentity?: RuntimeIdentity,
@@ -173,7 +173,7 @@ export async function emitTurnPreamble(
  * Emits `step.started` for one model call.
  */
 export async function emitStepStarted(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   state: HarnessEmissionState,
   messages?: readonly import("ai").ModelMessage[],
 ): Promise<void> {
@@ -199,7 +199,7 @@ interface FailedStepPayload {
  * the third event (`session.failed` vs. `session.waiting`).
  */
 async function emitStepAndTurnFailed(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   state: HarnessEmissionState,
   input: FailedStepPayload,
 ): Promise<void> {
@@ -230,7 +230,7 @@ async function emitStepAndTurnFailed(
  * further follow-up is possible on the same continuation token.
  */
 export async function emitFailedStep(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   state: HarnessEmissionState,
   input: FailedStepPayload & { readonly sessionId: string },
 ): Promise<void> {
@@ -243,7 +243,7 @@ export async function emitFailedStep(
  * `turn.failed` → `session.waiting`.
  */
 export async function emitRecoverableFailedTurn(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   state: HarnessEmissionState,
   input: FailedStepPayload & { readonly continuationToken: string },
 ): Promise<HarnessEmissionState> {
@@ -273,7 +273,7 @@ export function advanceStep(state: HarnessEmissionState): HarnessEmissionState {
  * Returns updated emission state with an incremented sequence.
  */
 export async function emitTurnEpilogue(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   state: HarnessEmissionState,
   mode: RunMode,
   continuationToken: string,
@@ -354,7 +354,7 @@ interface StreamActionEmissionOptions {
  * without a streamed call resumes a call from an earlier step.
  */
 export async function emitStreamContent(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   state: HarnessEmissionState,
   fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
   options?: StreamActionEmissionOptions,
@@ -382,7 +382,7 @@ export async function emitStreamContent(
 }
 
 async function consumeStreamContent(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   state: HarnessEmissionState,
   fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
   providerActionBatch: ReturnType<typeof createProviderStreamActionBatch>,

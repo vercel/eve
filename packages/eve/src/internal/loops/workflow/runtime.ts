@@ -71,7 +71,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
-const log = createLogger("execution.workflow-runtime");
+const log = createLogger("loops.workflow.runtime");
 
 interface WorkflowHookRecord {
   readonly runId: string;

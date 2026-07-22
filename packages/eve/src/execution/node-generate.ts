@@ -3,11 +3,12 @@ import type { LanguageModel } from "ai";
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
+import { createGenerate } from "#harness/generate.js";
+import type { HandleEventFn, HarnessToolMap, GenerateFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
+import type { EveAttributeWriter } from "#runtime/attributes/normalize.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 import type { RunMode } from "#shared/run-mode.js";
 import {
@@ -41,8 +42,8 @@ export type CreateRuntime = (config: {
 /**
  * Input for building a harness step for one resolved runtime node.
  */
-export interface CreateExecutionNodeStepInput {
-  /** Cancellation signal forwarded to the tool-loop harness. */
+export interface CreateNodeGenerateInput {
+  /** Cancellation signal forwarded to the generate harness. */
   readonly abortSignal?: AbortSignal;
   /**
    * Session-level capabilities propagated from the runtime. The
@@ -60,6 +61,8 @@ export interface CreateExecutionNodeStepInput {
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  /** Runtime-owned writer for eve observability attributes. */
+  readonly writeEveAttributes?: EveAttributeWriter;
   /**
    * Effective `maxSubagents` cap configured by the experimental Workflow tool
    * definition and materialized on the session at creation.
@@ -71,7 +74,7 @@ export interface CreateExecutionNodeStepInput {
  * Builds a harness step for one resolved runtime node using the execution-owned
  * tool, sandbox, and subagent wiring.
  */
-export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): StepFn {
+export function createNodeGenerate(input: CreateNodeGenerateInput): GenerateFn {
   const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
   const dispatchModelEvent =
     input.node.turnAgent.dynamicModel === undefined
@@ -81,7 +84,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.node.turnAgent.dynamicModel,
         );
   const tools = createNodeHarnessTools({ node: input.node });
-  return createToolLoopHarness({
+  return createGenerate({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     workflow: input.node.agent.workflowTool !== undefined,
@@ -93,6 +96,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
+    writeEveAttributes: input.writeEveAttributes,
   });
 }
 
@@ -140,7 +144,7 @@ function createRuntimeModelResolver(
 function createRuntimeDynamicModelEventDispatcher(
   scope: RuntimeModelResolutionScope,
   dynamicModel: NonNullable<ResolvedRuntimeAgentNode["turnAgent"]["dynamicModel"]>,
-): NonNullable<Parameters<typeof createToolLoopHarness>[0]["dispatchDynamicModelEvent"]> {
+): NonNullable<Parameters<typeof createGenerate>[0]["dispatchDynamicModelEvent"]> {
   return (input) =>
     dispatchDynamicModelEvent({
       ctx: input.ctx,

@@ -189,7 +189,7 @@ function durableKeyForEvent(
 /**
  * Builds live dynamic tool definitions from session + turn + step
  * durable metadata keys. Session-scoped tools appear first, then
- * turn, then step. The tool-loop calls this right before the model
+ * turn, then step. The generate harness calls this right before the model
  * call — no virtual key needed.
  */
 // ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ async function resolveToolsFromEvent(
 /**
  * Dispatches a stream event to dynamic tool resolvers. Each
  * resolver's metadata replaces its slot (by slug) in the
- * scope-appropriate durable key. The tool-loop calls
+ * scope-appropriate durable key. The generate harness calls
  * {@link buildDynamicTools} to assemble the effective toolset.
  */
 export async function dispatchDynamicToolEvent(input: {

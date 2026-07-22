@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { STABLE_WORKFLOW_NAMES } from "#execution/workflow-runtime.js";
+import { STABLE_WORKFLOW_NAMES } from "#internal/loops/workflow/runtime.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.js";
 

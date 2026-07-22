@@ -3,7 +3,7 @@ import type {
   MessageAppendedStreamEvent,
   ReasoningAppendedStreamEvent,
 } from "#protocol/message.js";
-import type { HarnessEmitFn } from "#harness/types.js";
+import type { HandleEventFn } from "#harness/types.js";
 
 const MAX_PENDING_EVENTS = 64;
 const MAX_PENDING_DELTA_CHARACTERS = 64 * 1024;
@@ -18,7 +18,7 @@ interface PendingEmission {
 
 interface OrderedStreamEmitter {
   closeAndDrain(): Promise<void>;
-  emit: HarnessEmitFn;
+  emit: HandleEventFn;
   readonly failureSignal: AbortSignal;
 }
 
@@ -30,7 +30,7 @@ interface OrderedStreamEmitter {
  * event, so event-count reconnect cursors remain aligned with chunk indexes.
  */
 export function createOrderedStreamEmitter(
-  emitFn: HarnessEmitFn,
+  emitFn: HandleEventFn,
   options: { readonly maxPendingEvents?: number } = {},
 ): OrderedStreamEmitter {
   const maxPendingEvents = options.maxPendingEvents ?? MAX_PENDING_EVENTS;

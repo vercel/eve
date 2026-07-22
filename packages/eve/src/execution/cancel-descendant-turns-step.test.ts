@@ -8,7 +8,7 @@ import {
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
-import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
+import { requestWorkflowTurnCancellation } from "#internal/loops/workflow/runtime.js";
 import {
   recordPendingSubagentChild,
   setPendingRuntimeActionBatch,
@@ -20,7 +20,7 @@ vi.mock("#context/serialize.js", () => ({
   deserializeContext: vi.fn(),
 }));
 
-vi.mock("./workflow-runtime.js", () => ({
+vi.mock("#internal/loops/workflow/runtime.js", () => ({
   requestWorkflowTurnCancellation: vi.fn(),
 }));
 

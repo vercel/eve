@@ -91,7 +91,7 @@ import { ContextKey } from "#context/key.js";
 /**
  * Durable pending skill announcement text. Set by
  * {@link dispatchDynamicSkillEvent} whenever the dynamic skill manifest
- * changes. Read by the tool-loop to inject the announcement into model
+ * changes. Read by the generate harness to inject the announcement into model
  * context.
  */
 export const PendingSkillAnnouncementKey = new ContextKey<string>("eve.pendingSkillAnnouncement");
@@ -104,7 +104,7 @@ export const PendingSkillAnnouncementKey = new ContextKey<string>("eve.pendingSk
  * Dispatches a stream event to dynamic skill resolvers. On a matching
  * event: runs handlers, materializes resolved skills to the sandbox,
  * cleans up removed skills, and stores a pending announcement for the
- * tool-loop to inject.
+ * generate harness to inject.
  */
 export async function dispatchDynamicSkillEvent(input: {
   readonly ctx: ContextContainer;

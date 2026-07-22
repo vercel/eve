@@ -18,7 +18,9 @@ import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
+import { applyLoopSelection, LOOP_OPTION_DESCRIPTION, parseLoopOption } from "#cli/loop-option.js";
 import { createLogger } from "#internal/logging.js";
+import type { LoopKind } from "#internal/loops/contract.js";
 import type {
   DevelopmentServer,
   DevelopmentServerOptions,
@@ -45,6 +47,7 @@ interface DevelopmentCliOptions {
   host?: string;
   input?: string;
   logs?: LogDisplayMode;
+  loop?: LoopKind;
   name?: string;
   port?: number;
   reasoning?: TerminalPartDisplayMode;
@@ -441,6 +444,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       "Which server/agent logs to show: all | stderr | sandbox | none",
       parseLogsMode,
     )
+    .option("--loop <implementation>", LOOP_OPTION_DESCRIPTION, parseLoopOption)
     .addHelpText(
       "after",
       "\nYou can also pass a bare URL, for example: eve dev https://example.com\n",
@@ -448,6 +452,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
       const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
       const remoteServerUrl = remoteTarget?.serverUrl;
+      if (options.loop !== undefined && remoteServerUrl !== undefined) {
+        throw new InvalidArgumentError(
+          "--loop selects the local server's loop implementation; it cannot apply to a URL target.",
+        );
+      }
+      applyLoopSelection(options.loop);
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
       if (options.input !== undefined && mode === "headless") {

@@ -33,7 +33,7 @@ describe("presentDiagnostic", () => {
   it("surfaces the error headline of a collapsed logger dump", () => {
     const presentation = presentDiagnostic(
       [
-        "[eve:harness.tool-loop] tool execution failed {",
+        "[eve:harness.generate] tool execution failed {",
         "  toolName: 'get_weather',",
         "  toolCallId: 'c1',",
         "  error: {",
@@ -49,14 +49,14 @@ describe("presentDiagnostic", () => {
 
     expect(presentation).toMatchObject({
       kind: "stored",
-      summary: "[eve:harness.tool-loop] tool execution failed {",
+      summary: "[eve:harness.generate] tool execution failed {",
       headline: "message: 'fetch failed',",
       omittedLines: 8,
     });
     if (presentation.kind === "stored") {
       expect(formatStoredDiagnostic(presentation)).toBe(
         [
-          "[eve:harness.tool-loop] tool execution failed {",
+          "[eve:harness.generate] tool execution failed {",
           "message: 'fetch failed',",
           "… 8 diagnostic lines · details: .eve/logs/dev.log",
         ].join("\n"),

@@ -44,7 +44,7 @@ describe("createDevDiagnostics", () => {
     diagnostics.subscribeLogRecords((record) => displayed.push(record.message));
 
     try {
-      createLogger("harness.tool-loop").error("tool execution failed", {
+      createLogger("harness.generate").error("tool execution failed", {
         toolName: "always_fail",
       });
 
@@ -54,9 +54,9 @@ describe("createDevDiagnostics", () => {
       expect(errorSpy).not.toHaveBeenCalled();
 
       diagnostics.unsubscribeLogRecords();
-      createLogger("harness.tool-loop").error("after unsubscribe");
+      createLogger("harness.generate").error("after unsubscribe");
       expect(displayed).toHaveLength(1);
-      expect(errorSpy).toHaveBeenCalledWith("[eve:harness.tool-loop] after unsubscribe");
+      expect(errorSpy).toHaveBeenCalledWith("[eve:harness.generate] after unsubscribe");
     } finally {
       diagnostics.unsubscribeLogRecords();
       errorSpy.mockRestore();
@@ -72,7 +72,7 @@ describe("createDevDiagnostics", () => {
       expect.objectContaining({
         source: "log",
         level: "error",
-        namespace: "harness.tool-loop",
+        namespace: "harness.generate",
         message: "tool execution failed",
         fields: { toolName: "always_fail" },
       }),

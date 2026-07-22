@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { start } from "#internal/workflow/runtime.js";
 
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#internal/loops/workflow/session-workflow.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";

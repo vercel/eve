@@ -1,5 +1,5 @@
 import { expectScheduleRun, ScheduleDispatcher } from "#channel/schedule.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { resolveLoopDriver } from "#internal/loops/driver.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { loadResolvedCompiledScheduleByTaskName } from "#runtime/schedules/resolve-schedule.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -37,7 +37,8 @@ export async function dispatchScheduleTaskFromArtifacts(
   });
 
   const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
-  const runtime = createWorkflowRuntime({ compiledArtifactsSource });
+  const driver = await resolveLoopDriver({ compiledArtifactsSource });
+  const runtime = driver.createRuntime();
   const dispatcher = new ScheduleDispatcher({
     runtime,
     channels: bundle.graph.root.channels,

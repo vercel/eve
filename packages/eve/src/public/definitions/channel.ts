@@ -110,7 +110,7 @@ export interface RouteContext {
 /**
  * Route-facing handle to the agent that owns this request.
  *
- * `Agent` is conceptually the workflow runtime plus the tool-loop harness:
+ * `Agent` is conceptually the workflow runtime plus the generate harness:
  * routes call `run` to start a new session of the agent, `deliver` to
  * send a follow-up to a parked session, `cancelTurn` to stop in-flight work,
  * and `getEventStream` to read events from a previously-started session.

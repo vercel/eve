@@ -12,7 +12,7 @@ import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runt
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
+import { createNodeGenerate, createNodeHarnessTools } from "#execution/node-generate.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { toInputSchema } from "#shared/tool-schema.js";
@@ -267,7 +267,7 @@ describe("createNodeHarnessTools", () => {
   });
 });
 
-describe("createExecutionNodeStep", () => {
+describe("createNodeGenerate", () => {
   it("builds a usable harness step for the root node", async () => {
     setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
 
@@ -296,7 +296,7 @@ describe("createExecutionNodeStep", () => {
       moduleMap: { nodes: {} },
       nodeId: undefined,
     };
-    const step = createExecutionNodeStep({
+    const step = createNodeGenerate({
       createRuntime: () => createNoopRuntime(),
       mode: "task",
       modelResolutionScope,
@@ -330,7 +330,11 @@ describe("createExecutionNodeStep", () => {
       ),
     );
 
-    expect(result.next).toEqual({ done: true, output: "tool-output" });
+    expect(result.action).toBe("done");
+    if (result.action === "done") {
+      expect(result.output).toBe("tool-output");
+      expect(result.isError).toBeUndefined();
+    }
     expect(resolveRuntimeModelReference).toHaveBeenCalledWith(
       rootNode.turnAgent.model,
       modelResolutionScope,
@@ -358,7 +362,7 @@ describe("createExecutionNodeStep", () => {
         ],
       }),
     );
-    const step = createExecutionNodeStep({
+    const step = createNodeGenerate({
       createRuntime,
       mode: "task",
       modelResolutionScope: {
@@ -393,9 +397,12 @@ describe("createExecutionNodeStep", () => {
       ),
     );
 
-    expect(result.next).toBeNull();
+    expect(result.action).toBe("park");
+    if (result.action === "park") {
+      expect(result.pendingRuntimeActionKeys).toBeDefined();
+    }
     expect(createRuntime).not.toHaveBeenCalled();
-    expect(getPendingRuntimeActionBatch(result.session.state)).toEqual({
+    expect(getPendingRuntimeActionBatch(result.state.state)).toEqual({
       actions: [
         {
           callId: "call-subagent-1",

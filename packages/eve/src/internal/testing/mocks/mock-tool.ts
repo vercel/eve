@@ -26,7 +26,7 @@ export interface MockToolInput {
   /**
    * Tool body. Mirrors the authored tool signature: `(input, ctx)`.
    * The wrapper calls `buildCallbackContext()` at execution time,
-   * matching the real pipeline in `node-step.ts`.
+   * matching the real pipeline in `node-generate.ts`.
    *
    * When omitted the tool exists in the registry but is not executable —
    * useful for tests that assert on tool visibility without triggering a

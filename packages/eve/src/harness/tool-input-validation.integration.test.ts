@@ -3,8 +3,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import { getPendingInputRequestIds } from "#harness/input-requests.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { createGenerate } from "#harness/generate.js";
+import type { HarnessSession, GenerateConfig } from "#harness/types.js";
 import {
   ASK_QUESTION_INPUT_SCHEMA,
   ASK_QUESTION_TOOL_DEFINITION,
@@ -86,7 +86,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       modelId: "tool-validation-model",
       provider: "eve-integration-mock",
     });
-    const tools: ToolLoopHarnessConfig["tools"] = new Map([
+    const tools: GenerateConfig["tools"] = new Map([
       [
         "ask_question",
         {
@@ -96,7 +96,7 @@ describe("framework tool input validation (real AI SDK)", () => {
         },
       ],
     ]);
-    const config: ToolLoopHarnessConfig = {
+    const config: GenerateConfig = {
       capabilities: { requestInput: true },
       mode: "conversation",
       resolveModel: async (): Promise<LanguageModel> => model,
@@ -119,39 +119,43 @@ describe("framework tool input validation (real AI SDK)", () => {
       history: [],
       sessionId: "tool-validation-session",
     };
-    const runStep = createToolLoopHarness(config);
+    const runStep = createGenerate(config);
 
     const malformedStep = await runStep(session, { message: "Ask me which option to use." });
 
-    expect(typeof malformedStep.next).toBe("function");
-    expect(getPendingInputRequestIds(malformedStep.session.state)).toEqual(new Set());
-    expect(findToolResult(malformedStep.session.history, malformedCallId)).toMatchObject({
+    expect(malformedStep.action).toBe("continue");
+    expect(getPendingInputRequestIds(malformedStep.state.state)).toEqual(new Set());
+    expect(findToolResult(malformedStep.state.history, malformedCallId)).toMatchObject({
       output: expect.objectContaining({ type: "error-text" }),
       toolName: "ask_question",
     });
 
-    if (typeof malformedStep.next !== "function") {
+    if (malformedStep.action !== "continue") {
       throw new TypeError("Expected the malformed tool call to continue the tool loop.");
     }
-    const invalidStep = await malformedStep.next(malformedStep.session);
+    const invalidStep = await runStep(malformedStep.state);
 
-    expect(typeof invalidStep.next).toBe("function");
-    expect(getPendingInputRequestIds(invalidStep.session.state)).toEqual(new Set());
-    expect(findToolResult(invalidStep.session.history, invalidCallId)).toMatchObject({
+    expect(invalidStep.action).toBe("continue");
+    expect(getPendingInputRequestIds(invalidStep.state.state)).toEqual(new Set());
+    expect(findToolResult(invalidStep.state.history, invalidCallId)).toMatchObject({
       output: expect.objectContaining({ type: "error-text" }),
       toolName: "ask_question",
     });
 
-    if (typeof invalidStep.next !== "function") {
+    if (invalidStep.action !== "continue") {
       throw new TypeError("Expected the invalid tool call to continue the tool loop.");
     }
-    const validStep = await invalidStep.next(invalidStep.session);
+    const validStep = await runStep(invalidStep.state);
 
     expect(model.doGenerateCalls).toHaveLength(3);
     expect(findToolResult(model.doGenerateCalls[1]?.prompt ?? [], malformedCallId)).toBeDefined();
     expect(findToolResult(model.doGenerateCalls[2]?.prompt ?? [], invalidCallId)).toBeDefined();
-    expect(validStep.next).toBeNull();
-    expect(getPendingInputRequestIds(validStep.session.state)).toEqual(new Set([validCallId]));
+    expect(validStep).toMatchObject({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: true,
+    });
+    expect(getPendingInputRequestIds(validStep.state.state)).toEqual(new Set([validCallId]));
   });
 
   it("rejects invalid final_output input instead of terminating the task", async () => {
@@ -195,7 +199,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       modelId: "final-output-validation-model",
       provider: "eve-integration-mock",
     });
-    const config: ToolLoopHarnessConfig = {
+    const config: GenerateConfig = {
       mode: "task",
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
@@ -212,23 +216,27 @@ describe("framework tool input validation (real AI SDK)", () => {
       outputSchema,
       sessionId: "final-output-validation-session",
     };
-    const runStep = createToolLoopHarness(config);
+    const runStep = createGenerate(config);
 
     const invalidStep = await runStep(session, { message: "Finish the task." });
 
-    expect(typeof invalidStep.next).toBe("function");
-    expect(findToolResult(invalidStep.session.history, invalidCallId)).toMatchObject({
+    expect(invalidStep.action).toBe("continue");
+    expect(findToolResult(invalidStep.state.history, invalidCallId)).toMatchObject({
       output: expect.objectContaining({ type: "error-text" }),
       toolName: "final_output",
     });
 
-    if (typeof invalidStep.next !== "function") {
+    if (invalidStep.action !== "continue") {
       throw new TypeError("Expected invalid final output to continue the tool loop.");
     }
-    const validStep = await invalidStep.next(invalidStep.session);
+    const validStep = await runStep(invalidStep.state);
 
     expect(model.doGenerateCalls).toHaveLength(2);
     expect(findToolResult(model.doGenerateCalls[1]?.prompt ?? [], invalidCallId)).toBeDefined();
-    expect(validStep.next).toEqual({ done: true, output: { answer: "done" } });
+    expect(validStep).toEqual({
+      action: "done",
+      output: { answer: "done" },
+      state: expect.anything(),
+    });
   });
 });

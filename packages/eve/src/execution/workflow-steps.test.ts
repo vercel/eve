@@ -12,7 +12,8 @@ import {
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import { classifyParkedSession } from "#harness/step-result.js";
+import type { GenerateOutcome, HarnessSession } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
@@ -24,20 +25,20 @@ import {
 } from "#execution/durable-session-store.js";
 import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { createExecutionNodeStep } from "#execution/node-step.js";
-import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { createNodeGenerate } from "#execution/node-generate.js";
+import { dispatchRuntimeActionsStep } from "#internal/loops/workflow/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import {
   dispatchTurnStep,
   resolveEffectiveOutputSchema,
   turnStep,
-} from "#execution/workflow-steps.js";
+} from "#internal/loops/workflow/steps.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   turnWorkflowReference,
   workflowEntryReference,
-} from "#execution/workflow-runtime.js";
+} from "#internal/loops/workflow/runtime.js";
 
 vi.mock("./durable-session-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./durable-session-store.js")>();
@@ -100,8 +101,8 @@ function createTestWritable(
   });
 }
 
-vi.mock("./node-step.js", () => ({
-  createExecutionNodeStep: vi.fn(),
+vi.mock("./node-generate.js", () => ({
+  createNodeGenerate: vi.fn(),
 }));
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
@@ -738,10 +739,11 @@ describe("turnStep", () => {
       sessionId: "turn-step-session",
     });
     installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session): Promise<StepResult> => ({
-        next: { done: true, output: "ok" },
-        session,
+    vi.mocked(createNodeGenerate).mockImplementation(() => {
+      return async (session): Promise<GenerateOutcome> => ({
+        action: "done",
+        output: "ok",
+        state: session,
       });
     });
     const sessionState = createStubSessionState({
@@ -793,19 +795,20 @@ describe("turnStep", () => {
 
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
 
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (_session, input): Promise<StepResult> => {
+    vi.mocked(createNodeGenerate).mockImplementation(() => {
+      return async (_session, input): Promise<GenerateOutcome> => {
         invocationCount += 1;
         const text = typeof input?.message === "string" ? input.message : "";
         seenMessages.push(text);
 
         if (invocationCount === 1) {
-          return { next: null, session };
+          return classifyParkedSession(session);
         }
 
         return {
-          next: { done: true, output: text },
-          session,
+          action: "done",
+          output: text,
+          state: session,
         };
       };
     });
@@ -824,7 +827,7 @@ describe("turnStep", () => {
 
     expect(first.action).toBe("park");
     expect(seenMessages[0]).toBe("thread=alpha; user=seed:alpha");
-    expect(first.serializedContext[ThreadKey.name]).toBe("alpha");
+    expect(first.state.serializedContext[ThreadKey.name]).toBe("alpha");
 
     const second = await turnStep({
       input: {
@@ -832,8 +835,8 @@ describe("turnStep", () => {
         payloads: [{ message: "follow up" }],
       },
       parentWritable,
-      serializedContext: first.serializedContext,
-      sessionState: first.sessionState,
+      serializedContext: first.state.serializedContext,
+      sessionState: first.state.durable,
     });
 
     expect(second.action).toBe("done");
@@ -841,7 +844,7 @@ describe("turnStep", () => {
     if (second.action === "done") {
       expect(second.output).toBe("thread=alpha; user=follow up");
     }
-    expect(second.serializedContext[ThreadKey.name]).toBe("alpha");
+    expect(second.state.serializedContext[ThreadKey.name]).toBe("alpha");
   });
 
   it("carries session-total usage on the done result, not the final turn's", async () => {
@@ -882,10 +885,11 @@ describe("turnStep", () => {
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
 
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => ({
-        next: { done: true, output: "final" },
-        session: stepSession,
+    vi.mocked(createNodeGenerate).mockImplementation(() => {
+      return async (stepSession): Promise<GenerateOutcome> => ({
+        action: "done",
+        output: "final",
+        state: stepSession,
       });
     });
 
@@ -947,10 +951,10 @@ describe("turnStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
 
     let observedSystemPrompt: string | undefined;
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (refreshedSession): Promise<StepResult> => {
+    vi.mocked(createNodeGenerate).mockImplementation(() => {
+      return async (refreshedSession): Promise<GenerateOutcome> => {
         observedSystemPrompt = refreshedSession.agent.system;
-        return { next: null, session: refreshedSession };
+        return classifyParkedSession(refreshedSession);
       };
     });
 
@@ -1018,11 +1022,11 @@ describe("turnStep", () => {
 
     let observedPendingAuth: unknown;
     let observedStepInput: unknown = "not-called";
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session, stepInput): Promise<StepResult> => {
+    vi.mocked(createNodeGenerate).mockImplementation(() => {
+      return async (session, stepInput): Promise<GenerateOutcome> => {
         observedPendingAuth = getPendingAuthorization(session.state);
         observedStepInput = stepInput;
-        return { next: null, session };
+        return classifyParkedSession(session);
       };
     });
 
@@ -1093,11 +1097,11 @@ describe("turnStep", () => {
 
     let observedPendingAuth: unknown;
     let observedStepInput: unknown = "not-called";
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session, stepInput): Promise<StepResult> => {
+    vi.mocked(createNodeGenerate).mockImplementation(() => {
+      return async (session, stepInput): Promise<GenerateOutcome> => {
         observedPendingAuth = getPendingAuthorization(session.state);
         observedStepInput = stepInput;
-        return { next: null, session };
+        return classifyParkedSession(session);
       };
     });
 

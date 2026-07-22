@@ -1,6 +1,6 @@
 import { createActionsRequestedEvent } from "#protocol/message.js";
 import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
-import type { HarnessEmitFn } from "#harness/types.js";
+import type { HandleEventFn } from "#harness/types.js";
 
 interface ActionEventCoordinates {
   readonly sequence: number;
@@ -16,7 +16,7 @@ interface ProviderStreamActionBatch {
 
 /** Batches provider-managed calls that arrive in one streamed model response. */
 export function createProviderStreamActionBatch(input: {
-  readonly emitFn: HarnessEmitFn;
+  readonly emitFn: HandleEventFn;
   readonly state: ActionEventCoordinates;
 }): ProviderStreamActionBatch {
   const pendingActions = new Map<string, RuntimeToolCallActionRequest>();

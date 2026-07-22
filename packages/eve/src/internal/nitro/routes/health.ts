@@ -1,5 +1,5 @@
 import type { H3Event } from "nitro";
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#internal/loops/workflow/runtime.js";
 
 /**
  * Nitro route for eve's health endpoint.

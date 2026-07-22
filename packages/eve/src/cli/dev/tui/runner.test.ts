@@ -948,7 +948,7 @@ describe("EveTUIRunner failure rendering", () => {
       details: {
         errorId: "err-1",
         message: "model call failed terminally",
-        detail: "Error: model call failed terminally\n    at turn (harness/tool-loop.ts:1:1)",
+        detail: "Error: model call failed terminally\n    at turn (harness/generate.ts:1:1)",
       },
     };
     const session = sessionYielding([
@@ -976,7 +976,7 @@ describe("EveTUIRunner failure rendering", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({
       errorText: "MODEL_CALL_FAILED: model call failed terminally",
-      detail: "Error: model call failed terminally\n    at turn (harness/tool-loop.ts:1:1)",
+      detail: "Error: model call failed terminally\n    at turn (harness/generate.ts:1:1)",
     });
   });
 

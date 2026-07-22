@@ -1,5 +1,5 @@
 import { deserializeContext } from "#context/serialize.js";
-import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { dispatchRuntimeActionsStep } from "#internal/loops/workflow/dispatch-runtime-actions-step.js";
 import {
   createDurableSessionState,
   type DurableSessionState,

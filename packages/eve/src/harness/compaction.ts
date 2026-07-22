@@ -10,7 +10,8 @@ import {
 } from "#harness/compaction-prompt.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
+import type { HarnessStepResult } from "#harness/step-hooks.js";
+import type { CompactionConfig, GenerateConfig } from "#harness/types.js";
 
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 
@@ -76,7 +77,7 @@ export async function resolveCompactionModel(input: {
   readonly compactionModelReference?: RuntimeModelReference;
   readonly model: LanguageModel;
   readonly modelReference: RuntimeModelReference;
-  readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
+  readonly resolveModel: GenerateConfig["resolveModel"];
 }): Promise<{
   readonly model: LanguageModel;
   readonly providerOptions: Parameters<typeof generateText>[0]["providerOptions"];
@@ -470,4 +471,27 @@ function splitMessagesForCompaction(
     older: messages.slice(0, split),
     recent: messages.slice(split),
   };
+}
+
+export function createNextCompactionConfig(
+  current: CompactionConfig,
+  promptMessages: readonly ModelMessage[],
+  result: HarnessStepResult,
+): CompactionConfig {
+  const next: {
+    lastKnownInputTokens?: number;
+    lastKnownPromptMessageCount?: number;
+    recentWindowSize: number;
+    threshold: number;
+  } = {
+    recentWindowSize: current.recentWindowSize,
+    threshold: current.threshold,
+  };
+
+  if (result.usage?.inputTokens !== undefined) {
+    next.lastKnownInputTokens = result.usage.inputTokens;
+    next.lastKnownPromptMessageCount = promptMessages.length;
+  }
+
+  return next;
 }

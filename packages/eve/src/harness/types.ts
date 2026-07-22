@@ -1,14 +1,17 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
-import type { SessionCapabilities } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
+import type { LoopTypes, TurnStepResult } from "#core/types.js";
 import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#runtime/input/types.js";
+import type { EveAttributeWriter } from "#runtime/attributes/normalize.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -143,41 +146,32 @@ export interface StepInput {
 }
 
 /**
- * Terminal result indicating the conversation is finished.
+ * The harness's {@link LoopTypes} binding: the same runtime values as
+ * `EveLoopTypes` below the durable boundary, with the in-memory
+ * {@link HarnessSession} as the state the step vocabulary carries.
  */
-export interface StepDone {
-  readonly done: true;
-  readonly output: unknown;
-  /**
-   * Marks a terminal turn that failed (e.g. a task-mode turn that could not
-   * fulfil its output schema). For a delegated subagent this routes the result
-   * to the parent as an error tool-result rather than an empty success.
-   */
-  readonly isError?: boolean;
+export interface HarnessLoopTypes extends LoopTypes {
+  readonly childResult: RuntimeActionResult;
+  readonly delivery: DeliverHookPayload;
+  readonly state: HarnessSession;
+  readonly usage: TokenUsage;
 }
 
 /**
- * The harness's instruction to the runtime about what to do next.
- *
- * - A `StepFn` reference means "call this step immediately" (tool loop continuation).
- * - `null` means "park and wait for the next user message."
- * - `StepDone` means "the conversation is finished."
+ * The classified outcome of one harness generation — the core loop's
+ * {@link TurnStepResult} carrying the updated in-memory session as its
+ * state. The durable step boundary projects it onto the serialized
+ * session cursors without changing the classification.
  */
-export type StepNext = StepDone | StepFn | null;
+export type GenerateOutcome = TurnStepResult<HarnessLoopTypes>;
 
 /**
- * Result returned by one harness step invocation.
+ * A single step of AI work: one generation plus its inline tool execution.
+ * Takes the current session and optional user input and returns the core
+ * loop's classified outcome. This is the production implementation of the
+ * core `generate` port.
  */
-export interface StepResult {
-  readonly next: StepNext;
-  readonly session: HarnessSession;
-}
-
-/**
- * A single step of AI work. Takes the current session and optional user input,
- * returns the updated session and an instruction for the runtime.
- */
-export type StepFn = (session: HarnessSession, input?: StepInput) => Promise<StepResult>;
+export type GenerateFn = (session: HarnessSession, input?: StepInput) => Promise<GenerateOutcome>;
 
 /**
  * Map from tool name to its harness-owned definition.
@@ -188,24 +182,10 @@ export type StepFn = (session: HarnessSession, input?: StepInput) => Promise<Ste
 export type HarnessToolMap = ReadonlyMap<string, HarnessToolDefinition>;
 
 /**
- * Callback that writes one event to the event stream.
- *
- * Composed by the runtime from the underlying writable and the channel's
- * event handler, then injected into the harness so it can emit lifecycle
- * events without knowing about writables or handlers.
- */
-export type HarnessEmitFn = (
-  event: HandleMessageStreamEvent,
-  messages?: readonly import("ai").ModelMessage[],
-) => Promise<void>;
-
-/**
- * Unified event handler: emits the event to the stream, then
- * dispatches to hook subscribers and dynamic tool resolvers.
- *
- * Same signature as {@link HarnessEmitFn} but semantically broader —
- * every event goes through channel adapter, stream write, hooks,
- * and dynamic tool dispatch in one call.
+ * Unified event handler: emits the event to the stream (channel adapter,
+ * stream write), then dispatches to hook subscribers and dynamic
+ * resolvers. Composed by the runtime and injected into the harness so it
+ * can emit lifecycle events without knowing about writables or handlers.
  */
 export type HandleEventFn = (
   event: HandleMessageStreamEvent,
@@ -213,9 +193,9 @@ export type HandleEventFn = (
 ) => Promise<void>;
 
 /**
- * Dependencies injected into the tool-loop harness at construction time.
+ * Dependencies injected into the generate harness at construction time.
  */
-export interface ToolLoopHarnessConfig {
+export interface GenerateConfig {
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
   /**
@@ -279,4 +259,10 @@ export interface ToolLoopHarnessConfig {
    * definitions directly.
    */
   readonly tools: HarnessToolMap;
+  /**
+   * Runtime-owned writer for eve observability attributes. Optional so
+   * engines without an attribute store (or direct harness tests) run the
+   * loop without one; the harness never imports an engine emitter itself.
+   */
+  readonly writeEveAttributes?: EveAttributeWriter;
 }

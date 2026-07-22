@@ -2265,11 +2265,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(stub.subscribed).toBe(true);
     stub.emitLogRecord({
       level: "error",
-      namespace: "harness.tool-loop",
+      namespace: "harness.generate",
       message: "tool execution failed",
       fields: { toolName: "always_fail" },
     });
-    expect(screen.snapshot()).toContain("[eve:harness.tool-loop] tool execution failed");
+    expect(screen.snapshot()).toContain("[eve:harness.generate] tool execution failed");
 
     renderer.shutdown();
     expect(stub.subscribed).toBe(false);

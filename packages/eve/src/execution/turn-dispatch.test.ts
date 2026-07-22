@@ -13,7 +13,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
 }));
 
-vi.mock("./workflow-steps.js", () => ({
+vi.mock("#internal/loops/workflow/steps.js", () => ({
   dispatchTurnStep: vi.fn(async () => ({ runId: "turn-run" })),
 }));
 

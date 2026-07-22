@@ -95,7 +95,12 @@ describe("runStep with sessionProvider", () => {
       expect(session.turn.id).toBe("turn_0");
       expect(session.turn.sequence).toBe(0);
 
-      return { next: null, session: createStubSession() };
+      return {
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        state: createStubSession(),
+      };
     });
   });
 
@@ -144,7 +149,12 @@ describe("runStep with sessionProvider", () => {
         },
       });
 
-      return { next: null, session: createStubSession() };
+      return {
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        state: createStubSession(),
+      };
     });
   });
 
@@ -155,7 +165,12 @@ describe("runStep with sessionProvider", () => {
     const stepInTurn = async (session: HarnessSession) => {
       await runStep(ctx, session, async () => {
         turns.push(loadContext().require(SessionKey).turn);
-        return { next: null, session };
+        return {
+          action: "park",
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: false,
+          state: session,
+        };
       });
     };
 
@@ -219,7 +234,12 @@ describe("durable authored context", () => {
       const existing = ensureContext(TestCounterKey, () => ({ count: 0 }));
       expect(existing).toEqual({ count: 4 });
       expect(getContext(TestCounterKey)).toEqual({ count: 4 });
-      return { next: null, session };
+      return {
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        state: session,
+      };
     });
   });
 
@@ -231,7 +251,12 @@ describe("durable authored context", () => {
     await runStep(ctx, session, async () => {
       setContext(TestCounterKey, (current) => ({ count: (current?.count ?? 0) + 1 }));
       expect(getContext(TestCounterKey)).toEqual({ count: 8 });
-      return { next: null, session };
+      return {
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        state: session,
+      };
     });
 
     expect(ctx.require(TestCounterKey)).toEqual({ count: 8 });
@@ -243,7 +268,12 @@ describe("durable authored context", () => {
 
     await runStep(ctx, session, async () => {
       setContext(TestCodecKey, { value: "world" });
-      return { next: null, session };
+      return {
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        state: session,
+      };
     });
 
     const serialized = serializeContext(ctx);

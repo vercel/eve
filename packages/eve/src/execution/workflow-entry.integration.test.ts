@@ -5,13 +5,13 @@ import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#internal/loops/workflow/session-workflow.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
 } from "#execution/eve-workflow-attributes.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime } from "#internal/loops/workflow/runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";

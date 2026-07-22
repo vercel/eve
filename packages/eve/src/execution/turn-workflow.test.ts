@@ -1,18 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HookPayload } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
-import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
-import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
+import { dispatchRuntimeActionsStep } from "#internal/loops/workflow/dispatch-runtime-actions-step.js";
+import { dispatchWorkflowRuntimeActionsStep } from "#internal/loops/workflow/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
-import { turnWorkflow } from "#execution/turn-workflow.js";
+import { turnWorkflow } from "#internal/loops/workflow/turn-workflow.js";
 import {
   TURN_WORKFLOW_INPUT_VERSION,
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { turnStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#internal/loops/workflow/steps.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
@@ -34,15 +34,15 @@ vi.mock("./subagent-event-proxy-step.js", () => ({
   runProxySubagentEventStep: vi.fn(),
 }));
 
-vi.mock("./workflow-steps.js", () => ({
+vi.mock("#internal/loops/workflow/steps.js", () => ({
   turnStep: vi.fn(),
 }));
 
-vi.mock("./dispatch-runtime-actions-step.js", () => ({
+vi.mock("#internal/loops/workflow/dispatch-runtime-actions-step.js", () => ({
   dispatchRuntimeActionsStep: vi.fn(),
 }));
 
-vi.mock("./dispatch-workflow-runtime-actions-step.js", () => ({
+vi.mock("#internal/loops/workflow/dispatch-workflow-runtime-actions-step.js", () => ({
   dispatchWorkflowRuntimeActionsStep: vi.fn(),
 }));
 
@@ -55,6 +55,10 @@ vi.mock("./workflow-callback-url.js", () => ({
 }));
 
 describe("turnWorkflow", () => {
+  beforeEach(() => {
+    installInbox([]);
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     resumeHookMock.mockReset();
@@ -66,14 +70,14 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "done",
       output: "ok",
-      serializedContext: { state: "done" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "done" } },
     });
 
     const { input, parentWritable } = createInput({ sessionState });
     await turnWorkflow(input);
 
     expect(turnStep).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       input: input.stepInput.input,
       parentWritable,
       serializedContext: input.stepInput.serializedContext,
@@ -100,8 +104,7 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "done",
       output: "ok",
-      serializedContext: { state: "done" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "done" } },
     });
 
     await turnWorkflow({
@@ -115,6 +118,7 @@ describe("turnWorkflow", () => {
     });
 
     expect(turnStep).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       input: delivery,
       parentWritable,
       serializedContext: { state: "start" },
@@ -126,19 +130,17 @@ describe("turnWorkflow", () => {
     );
   });
 
-  it("keeps tool-loop continuations inside the same turn workflow", async () => {
+  it("keeps generation continuations inside the same turn workflow", async () => {
     const sessionState = createSessionState();
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
         action: "continue",
-        serializedContext: { state: "continued" },
-        sessionState,
+        state: { durable: sessionState, serializedContext: { state: "continued" } },
       })
       .mockResolvedValueOnce({
         action: "done",
         output: "after continue",
-        serializedContext: { state: "done" },
-        sessionState,
+        state: { durable: sessionState, serializedContext: { state: "done" } },
       });
 
     const { input } = createInput({ sessionState });
@@ -161,8 +163,7 @@ describe("turnWorkflow", () => {
       action: "park",
       hasPendingAuthorization: true,
       hasPendingInputBatch: false,
-      serializedContext: { state: "needs-auth" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "needs-auth" } },
     });
 
     const { input } = createInput({
@@ -183,39 +184,13 @@ describe("turnWorkflow", () => {
     );
   });
 
-  it("dispatches runtime actions when a runtime action batch is pending", async () => {
-    const sessionState = createSessionState();
-    vi.mocked(turnStep).mockResolvedValueOnce({
-      action: "park",
-      hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
-      pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
-      serializedContext: { state: "pending-runtime-action" },
-      sessionState,
-    });
-
-    const { input } = createInput({ mode: "task", sessionState });
-    await turnWorkflow(input);
-
-    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
-      action: {
-        kind: "dispatch-runtime-actions",
-        pendingActionKeys: ["subagent-call:delegate:call-1"],
-        serializedContext: { state: "pending-runtime-action" },
-        sessionState,
-      },
-      kind: "turn-result",
-    });
-  });
-
   it("parks for pending input when the channel supports input requests", async () => {
     const sessionState = createSessionState();
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
       hasPendingAuthorization: false,
       hasPendingInputBatch: true,
-      serializedContext: { state: "pending-input" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "pending-input" } },
     });
 
     const { input } = createInput({
@@ -243,8 +218,7 @@ describe("turnWorkflow", () => {
       action: "park",
       hasPendingAuthorization: false,
       hasPendingInputBatch: false,
-      serializedContext: { state: "task-wait" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "task-wait" } },
     });
 
     const { input } = createInput({ mode: "task", sessionState });
@@ -262,13 +236,11 @@ describe("turnWorkflow", () => {
     installInbox([]);
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "cancelled",
-      serializedContext: { state: "cancelled" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "cancelled" } },
     });
 
     // Task mode on purpose: cancellation bypasses the `canPark` gate.
     const { input } = createInput({
-      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
       mode: "task",
       sessionState,
     });
@@ -302,12 +274,10 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "done",
       output: "ok",
-      serializedContext: { state: "done" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "done" } },
     });
 
     const { input } = createInput({
-      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
       sessionState,
     });
     await turnWorkflow(input);
@@ -327,12 +297,10 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "done",
       output: "ok",
-      serializedContext: { state: "done" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "done" } },
     });
 
     const { input } = createInput({
-      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
       sessionState,
     });
     await turnWorkflow(input);
@@ -351,35 +319,16 @@ describe("turnWorkflow", () => {
     );
   });
 
-  it("registers no cancel hook when the driver cannot settle cancelled parks", async () => {
-    const sessionState = createSessionState();
-    installInbox([]);
-    vi.mocked(turnStep).mockResolvedValueOnce({
-      action: "done",
-      output: "ok",
-      serializedContext: { state: "done" },
-      sessionState,
-    });
-
-    const { input } = createInput({ driverCapabilities: { turnInbox: true }, sessionState });
-    await turnWorkflow(input);
-
-    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeUndefined();
-    expect(cancelHookTokens()).toEqual([]);
-  });
-
   it("registers no cancel hook when the session cannot park", async () => {
     const sessionState = createSessionState({ continuationToken: "" });
     installInbox([]);
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "done",
       output: "ok",
-      serializedContext: { state: "done" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "done" } },
     });
 
     const { input } = createInput({
-      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
       mode: "task",
       sessionState,
     });
@@ -399,12 +348,10 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "done",
       output: "ok",
-      serializedContext: { state: "done" },
-      sessionState,
+      state: { durable: sessionState, serializedContext: { state: "done" } },
     });
 
     const { input } = createInput({
-      driverCapabilities: { turnInbox: true },
       sessionState,
     });
     await Promise.all([turnWorkflow(input), turnWorkflow(input)]);
@@ -428,7 +375,7 @@ describe("turnWorkflow", () => {
         token: "turn-token:inbox",
       },
     });
-    const { input } = createInput({ driverCapabilities: { turnInbox: true } });
+    const { input } = createInput();
 
     await turnWorkflow(input);
 
@@ -441,7 +388,7 @@ describe("turnWorkflow", () => {
   it("reports non-conflict inbox claim failures to the driver", async () => {
     const failure = new Error("hook storage unavailable");
     const inbox = installInbox([], { claimError: failure });
-    const { input } = createInput({ driverCapabilities: { turnInbox: true } });
+    const { input } = createInput();
 
     await expect(turnWorkflow(input)).rejects.toBe(failure);
 
@@ -480,18 +427,15 @@ describe("turnWorkflow", () => {
         hasPendingAuthorization: false,
         hasPendingInputBatch: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
-        serializedContext: { state: "pending" },
-        sessionState: pendingState,
+        state: { durable: pendingState, serializedContext: { state: "pending" } },
       })
       .mockResolvedValueOnce({
         action: "done",
         output: "parent output",
-        serializedContext: { state: "done" },
-        sessionState: completedState,
+        state: { durable: completedState, serializedContext: { state: "done" } },
       });
 
     const { input, parentWritable } = createInput({
-      driverCapabilities: { turnInbox: true },
       mode: "task",
       sessionState: initialState,
     });
@@ -554,17 +498,14 @@ describe("turnWorkflow", () => {
         hasPendingAuthorization: false,
         hasPendingInputBatch: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
-        serializedContext: { state: "pending" },
-        sessionState: pendingState,
+        state: { durable: pendingState, serializedContext: { state: "pending" } },
       })
       .mockResolvedValueOnce({
         action: "cancelled",
-        serializedContext: { state: "cancelled" },
-        sessionState: adoptedState,
+        state: { durable: adoptedState, serializedContext: { state: "cancelled" } },
       });
 
     const { input } = createInput({
-      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
       mode: "task",
       sessionState: initialState,
     });
@@ -605,18 +546,15 @@ describe("turnWorkflow", () => {
       .mockResolvedValueOnce({
         action: "dispatch-workflow-runtime-actions",
         pendingRuntimeActionKeys: ["subagent-call:research:call-1"],
-        serializedContext: { state: "pending" },
-        sessionState: pendingState,
+        state: { durable: pendingState, serializedContext: { state: "pending" } },
       })
       .mockResolvedValueOnce({
         action: "done",
         output: "handled failure",
-        serializedContext: { state: "done" },
-        sessionState: completedState,
+        state: { durable: completedState, serializedContext: { state: "done" } },
       });
 
     const { input, parentWritable } = createInput({
-      driverCapabilities: { turnInbox: true },
       mode: "task",
       sessionState: pendingState,
     });
@@ -687,18 +625,15 @@ describe("turnWorkflow", () => {
         hasPendingAuthorization: false,
         hasPendingInputBatch: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
-        serializedContext: { state: "pending" },
-        sessionState: pendingState,
+        state: { durable: pendingState, serializedContext: { state: "pending" } },
       })
       .mockResolvedValueOnce({
         action: "done",
         output: "done",
-        serializedContext: { state: "done" },
-        sessionState: completedState,
+        state: { durable: completedState, serializedContext: { state: "done" } },
       });
 
     const { input } = createInput({
-      driverCapabilities: { turnInbox: true },
       mode: "task",
       sessionState: pendingState,
     });
@@ -797,18 +732,15 @@ describe("turnWorkflow", () => {
         hasPendingAuthorization: false,
         hasPendingInputBatch: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
-        serializedContext: { state: "pending" },
-        sessionState: pendingState,
+        state: { durable: pendingState, serializedContext: { state: "pending" } },
       })
       .mockResolvedValueOnce({
         action: "done",
         output: "done",
-        serializedContext: { state: "done" },
-        sessionState: completedState,
+        state: { durable: completedState, serializedContext: { state: "done" } },
       });
 
     const { input, parentWritable } = createInput({
-      driverCapabilities: { turnInbox: true },
       mode: "task",
       sessionState: pendingState,
     });
@@ -894,26 +826,22 @@ describe("turnWorkflow", () => {
         hasPendingAuthorization: false,
         hasPendingInputBatch: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
-        serializedContext: { state: "batch-1" },
-        sessionState: pendingState,
+        state: { durable: pendingState, serializedContext: { state: "batch-1" } },
       })
       .mockResolvedValueOnce({
         action: "park",
         hasPendingAuthorization: false,
         hasPendingInputBatch: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-2"],
-        serializedContext: { state: "batch-2" },
-        sessionState: pendingState,
+        state: { durable: pendingState, serializedContext: { state: "batch-2" } },
       })
       .mockResolvedValueOnce({
         action: "done",
         output: "done",
-        serializedContext: { state: "done" },
-        sessionState: completedState,
+        state: { durable: completedState, serializedContext: { state: "done" } },
       });
 
     const { input } = createInput({
-      driverCapabilities: { turnInbox: true },
       mode: "task",
       sessionState: pendingState,
     });

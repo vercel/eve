@@ -57,7 +57,7 @@ export class WorkflowBundleBuilder {
   readonly #discoveredEntries = new WeakMap<readonly string[], WorkflowBundleDiscoveredEntries>();
 
   constructor(options: WorkflowBundleBuilderOptions) {
-    const dirs = [resolvePackageSourceDirectoryPath("src/execution")];
+    const dirs = [...resolveEveWorkflowSourceDirectories()];
     if (options.includeTestFixtures === true) {
       dirs.push(resolvePackageSourceDirectoryPath("src/internal/testing"));
     }
@@ -92,9 +92,7 @@ export class WorkflowBundleBuilder {
     const inputFiles = await this.#getBuildInputFiles();
 
     if (inputFiles.length === 0) {
-      throw new Error(
-        `Expected the execution workflow source file under "${resolvePackageSourceDirectoryPath("src/execution")}".`,
-      );
+      throw new Error("Expected at least one eve workflow source file.");
     }
 
     const tsconfigPath = await this.findTsConfigPath();
@@ -495,6 +493,13 @@ export class WorkflowBundleBuilder {
 
     return {};
   }
+}
+
+/** Framework-owned roots that may contain Workflow functions or steps. */
+export function resolveEveWorkflowSourceDirectories(): readonly string[] {
+  return ["src/execution", "src/internal/loops/workflow"].map((path) =>
+    resolvePackageSourceDirectoryPath(path),
+  );
 }
 
 async function addStepRegistrationsImport(

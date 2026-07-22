@@ -8,6 +8,7 @@ allowBuilds:
   "@mongodb-js/zstd": true
   "@nestjs/core": true
   "@parcel/watcher": false
+  "@swc/core": true
   cbor-extract: true
   esbuild: true
   node-liblzma: false

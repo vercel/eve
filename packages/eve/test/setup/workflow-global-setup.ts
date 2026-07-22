@@ -10,7 +10,10 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 import { resolveWorkflowTestOutputDirectory } from "#internal/testing/workflow-vitest-plugin.js";
-import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
+import {
+  resolveEveWorkflowSourceDirectories,
+  WorkflowBundleBuilder,
+} from "#internal/workflow-bundle/builder.js";
 import {
   bundleWorkflowStepRegistrations,
   collectWorkflowInputFiles,
@@ -54,7 +57,9 @@ export default async function setupWorkflowTests(): Promise<void> {
 
 async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntries> {
   const inputFiles = [
-    ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/execution"))),
+    ...(
+      await Promise.all(resolveEveWorkflowSourceDirectories().map(collectWorkflowInputFiles))
+    ).flat(),
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/internal/testing"))),
     resolvePackageSourceFilePath("test/setup/compiled-artifacts-bootstrap.mjs"),
   ];

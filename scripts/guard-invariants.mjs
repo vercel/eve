@@ -92,6 +92,12 @@
  *             authoring roots, every historical epoch must be supported or
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
+ *   rule 37 — Production modules under `packages/eve/src/core/**` may import
+ *             only other core modules. The loop algorithms are engine-neutral;
+ *             concrete eve types bind once in `internal/loops/types.ts`.
+ *   rule 38 — Loop runtime implementation factories stay private to
+ *             `packages/eve/src/internal/loops/**`. Hosts resolve a runtime
+ *             only through `resolveLoopDriver()`.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -182,6 +188,8 @@ function isTsLike(relPath) {
  *   rule28: Violation[];
  *   rule33: Violation[];
  *   rule35: Violation[];
+ *   rule37: Violation[];
+ *   rule38: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -210,6 +218,8 @@ async function scanRepo(state) {
     checkRule28(posix, lines, state.rule28);
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
+    checkRule37(posix, lines, state.rule37);
+    checkRule38(posix, lines, state.rule38);
   }
 }
 
@@ -327,6 +337,60 @@ function checkRule35(posix, lines, violations) {
         message: `imports "#compiled/gray-matter" directly. gray-matter's default engines eval() a \`---js\` frontmatter fence, so parse through parseFrontmatter() from "#internal/helpers/gray-matter.js" instead — it is safe by default and takes an explicit { allowCodeEngines: true } opt-in for trusted input.`,
       });
     }
+  });
+}
+
+// ---------- Rule 37: dependency-free loop core ----------
+
+const CORE_SOURCE_PREFIX = "packages/eve/src/core/";
+const MODULE_SPECIFIER_RE = /\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/;
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule37(posix, lines, violations) {
+  if (!posix.startsWith(CORE_SOURCE_PREFIX) || posix.includes(".test.")) return;
+
+  lines.forEach((line, idx) => {
+    const match = MODULE_SPECIFIER_RE.exec(line);
+    const specifier = match?.[1] ?? match?.[2];
+    if (specifier === undefined || specifier.startsWith("#core/") || specifier.startsWith("./")) {
+      return;
+    }
+    violations.push({
+      rule: 37,
+      file: posix,
+      line: idx + 1,
+      message: `imports "${specifier}" from the loop core. Keep concrete eve and implementation dependencies in internal/loops/types.ts or an implementation adapter.`,
+    });
+  });
+}
+
+// ---------- Rule 38: private loop implementation factories ----------
+
+const LOOP_IMPLEMENTATION_FACTORY_RE =
+  /\b(?:createWorkflowRuntime|createInlineLoopRuntime|createTemporalLoopRuntime)\b/;
+const LOOP_SOURCE_PREFIX = "packages/eve/src/internal/loops/";
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule38(posix, lines, violations) {
+  if (posix.startsWith(LOOP_SOURCE_PREFIX) || posix.includes(".test.")) return;
+
+  lines.forEach((line, idx) => {
+    if (/^\s*(?:\/\/|\*)/.test(line)) return;
+    if (!LOOP_IMPLEMENTATION_FACTORY_RE.test(line)) return;
+    violations.push({
+      rule: 38,
+      file: posix,
+      line: idx + 1,
+      message: `references a concrete loop runtime factory outside internal/loops. Resolve the selected implementation through resolveLoopDriver().`,
+    });
   });
 }
 
@@ -1064,6 +1128,8 @@ async function main() {
     rule28: /** @type {Violation[]} */ ([]),
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
+    rule37: /** @type {Violation[]} */ ([]),
+    rule38: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1159,6 +1225,12 @@ async function main() {
   for (const issue of await checkExtensionCapabilityContracts()) {
     violations.push({ rule: 36, ...issue });
   }
+
+  // Rule 37
+  violations.push(...state.rule37);
+
+  // Rule 38
+  violations.push(...state.rule38);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

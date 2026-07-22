@@ -10,7 +10,7 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
+import type { HandleEventFn, HarnessSession } from "#harness/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
@@ -174,14 +174,14 @@ function buildEmptySession(continuationToken: string, sessionId: string): Harnes
  * round-trip sees them.
  */
 function buildCapturingEmit(ctx: ContextContainer): {
-  readonly emit: HarnessEmitFn;
+  readonly emit: HandleEventFn;
   readonly events: HandleMessageStreamEvent[];
   readonly persistAdapterState: () => void;
 } {
   const events: HandleMessageStreamEvent[] = [];
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
-  const emit: HarnessEmitFn = async (event) => {
+  const emit: HandleEventFn = async (event) => {
     const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
     events.push(transformed);
   };

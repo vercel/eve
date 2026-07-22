@@ -8,7 +8,7 @@ import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   turnWorkflowReference,
   workflowEntryReference,
-} from "#execution/workflow-runtime.js";
+} from "#internal/loops/workflow/runtime.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";

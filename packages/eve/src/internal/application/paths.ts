@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { workflowEntryReference } from "#internal/loops/workflow/runtime.js";
 import type { NitroBuildSurface } from "#internal/nitro/host/types.js";
 import {
   resolveInstalledPackageInfo,

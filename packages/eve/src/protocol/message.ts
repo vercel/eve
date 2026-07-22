@@ -23,7 +23,7 @@ export const EVE_MESSAGE_STREAM_VERSION = "19";
  * eve-owned finish reason for one completed assistant step.
  *
  * `tool-calls` is the only non-terminal assistant step in the current
- * tool-loop harness. All other values indicate the assistant step ended the
+ * generate harness. All other values indicate the assistant step ended the
  * current turn.
  */
 export type AssistantStepFinishReason =

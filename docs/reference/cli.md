@@ -160,6 +160,14 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic: `tokens` \| `tokensPerSecond`                                 |
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
+| `--loop <implementation>`           | enum   | `workflow`         | Local loop: `workflow` \| `inline` \| `temporal` (experimental)                           |
+
+A loop selection applies only to a locally started server. Inline is
+process-local and non-durable. Temporal starts a local Temporal Server and
+Worker and requires `@temporalio/testing@1.20.1` and
+`@temporalio/worker@1.20.1` in the application. Both alternatives are
+experimental and are rejected in Vercel Functions; Workflow remains the
+default.
 
 A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, then opens `/model`. Other input stays editable in the prompt.
 

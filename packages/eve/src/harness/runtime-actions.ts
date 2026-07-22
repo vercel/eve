@@ -11,7 +11,7 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type {
-  HarnessEmitFn,
+  HandleEventFn,
   HarnessSession,
   HarnessToolMap,
   SessionStateMap,
@@ -230,7 +230,7 @@ export function resolveRuntimeActionResultsForKeys(input: {
  * `action.result` events back onto the parent stream.
  */
 export async function resolvePendingRuntimeActions(input: {
-  readonly emit?: HarnessEmitFn;
+  readonly emit?: HandleEventFn;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }): Promise<ResolvePendingRuntimeActionsResult> {

@@ -30,6 +30,8 @@ export type NextDriverAction =
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;
       readonly authorizationNames?: readonly string[];
+      readonly hasPendingAuthorization?: boolean;
+      readonly hasPendingInputBatch?: boolean;
       /**
        * Set when the parked turn was cancelled: the driver runs
        * `settleCancelledTurnStep` before the normal park playbook. An

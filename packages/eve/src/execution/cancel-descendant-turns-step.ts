@@ -7,7 +7,7 @@ import {
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
-import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
+import { requestWorkflowTurnCancellation } from "#internal/loops/workflow/runtime.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type {

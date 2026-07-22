@@ -2,8 +2,8 @@ import { type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { createGenerate } from "#harness/generate.js";
+import type { HandleEventFn, HarnessSession, GenerateConfig } from "#harness/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
@@ -32,7 +32,7 @@ function createSession(): HarnessSession {
 }
 
 function createEventCollector(): {
-  readonly emit: HarnessEmitFn;
+  readonly emit: HandleEventFn;
   readonly events: HandleMessageStreamEvent[];
 } {
   const events: HandleMessageStreamEvent[] = [];
@@ -44,7 +44,7 @@ function createEventCollector(): {
   };
 }
 
-function createConfig(model: LanguageModel, emit: HarnessEmitFn): ToolLoopHarnessConfig {
+function createConfig(model: LanguageModel, emit: HandleEventFn): GenerateConfig {
   return {
     handleEvent: emit,
     mode: "task",
@@ -116,18 +116,22 @@ describe("tool loop streamed provider retries", () => {
     });
     const { emit, events } = createEventCollector();
 
-    const result = await createToolLoopHarness(createConfig(model, emit))(createSession(), {
+    const result = await createGenerate(createConfig(model, emit))(createSession(), {
       message: "Continue.",
     });
 
     expect(doStream).toHaveBeenCalledTimes(2);
-    expect(result.next).toEqual({ done: true, output: "Recovered answer." });
-    expect(result.session.history).toContainEqual({
+    expect(result).toEqual({
+      action: "done",
+      output: "Recovered answer.",
+      state: expect.anything(),
+    });
+    expect(result.state.history).toContainEqual({
       content: "Prior work is complete.",
       role: "assistant",
     });
-    expect(JSON.stringify(result.session.history)).toContain("Recovered answer.");
-    expect(JSON.stringify(result.session.history)).not.toContain("Discard this partial response.");
+    expect(JSON.stringify(result.state.history)).toContain("Recovered answer.");
+    expect(JSON.stringify(result.state.history)).not.toContain("Discard this partial response.");
     expect(events.filter((event) => event.type === "step.started")).toHaveLength(1);
     expect(events.filter((event) => event.type === "step.completed")).toHaveLength(1);
     expect(events.filter((event) => event.type === "step.failed")).toHaveLength(0);
@@ -154,7 +158,7 @@ describe("tool loop streamed provider retries", () => {
     });
     const { emit, events } = createEventCollector();
 
-    const result = await createToolLoopHarness(createConfig(model, emit))(createSession(), {
+    const result = await createGenerate(createConfig(model, emit))(createSession(), {
       message: "Continue.",
     });
 
@@ -162,8 +166,8 @@ describe("tool loop streamed provider retries", () => {
     // The exhausted failure reports the catalog's curated summary for the
     // overloaded shape rather than the provider's raw "Overloaded", with
     // the remediation hint riding along in the parent-facing output.
-    expect(result.next).toMatchObject({
-      done: true,
+    expect(result).toMatchObject({
+      action: "done",
       isError: true,
       output:
         "The model provider is overloaded or timing out upstream of AI Gateway. " +

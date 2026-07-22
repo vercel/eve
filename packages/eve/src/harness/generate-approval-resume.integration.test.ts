@@ -3,8 +3,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { setPendingInputBatch } from "#harness/input-requests.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { createGenerate } from "#harness/generate.js";
+import type { HarnessSession, GenerateConfig } from "#harness/types.js";
 
 const usage = {
   inputTokens: {
@@ -111,7 +111,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       modelId: "generate-approval-resume-model",
       provider: "eve-integration-mock",
     });
-    const tools: ToolLoopHarnessConfig["tools"] = new Map([
+    const tools: GenerateConfig["tools"] = new Map([
       [
         toolCall.toolName,
         {
@@ -128,13 +128,13 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         },
       ],
     ]);
-    const config: ToolLoopHarnessConfig = {
+    const config: GenerateConfig = {
       mode: "conversation",
       resolveModel: async (): Promise<LanguageModel> => model,
       tools,
     };
 
-    const result = await createToolLoopHarness(config)(createPendingApprovalSession(), {
+    const result = await createGenerate(config)(createPendingApprovalSession(), {
       inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
     });
 
@@ -152,24 +152,24 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       toolName: toolCall.toolName,
     });
 
-    expect(result.session.history.map((message) => message.role)).toEqual([
+    expect(result.state.history.map((message) => message.role)).toEqual([
       "user",
       "assistant",
       "tool",
       "tool",
       "assistant",
     ]);
-    expect(findPart(result.session.history, "tool-call")).toEqual(toolCall);
-    expect(findPart(result.session.history, "tool-approval-response")).toMatchObject({
+    expect(findPart(result.state.history, "tool-call")).toEqual(toolCall);
+    expect(findPart(result.state.history, "tool-approval-response")).toMatchObject({
       approvalId: approvalRequest.approvalId,
       approved: true,
     });
-    expect(findPart(result.session.history, "tool-result")).toMatchObject({
+    expect(findPart(result.state.history, "tool-result")).toMatchObject({
       output: { type: "text", value: "canonical:/workspace" },
       toolCallId: toolCall.toolCallId,
       toolName: toolCall.toolName,
     });
-    expect(result.session.history.at(-1)).toMatchObject({
+    expect(result.state.history.at(-1)).toMatchObject({
       content: [{ text: "The command returned /workspace.", type: "text" }],
       role: "assistant",
     });

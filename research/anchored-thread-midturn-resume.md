@@ -27,7 +27,7 @@ session start        mid-turn (connection auth)        park
                   now HookNotFound → new session)
 ```
 
-- `execution/workflow-entry.ts` claims the anchored thread token before
+- `internal/loops/workflow/session-workflow.ts` claims the anchored thread token before
   the first turn, so resume works while the session is parked.
 - `execution/turn-control-receiver.ts` rotates the slot to in-turn
   continuation tokens (`deliveryHook.rekey(...)`), and

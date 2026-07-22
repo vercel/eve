@@ -20,6 +20,8 @@ type TurnTerminalAction =
   | {
       readonly authorizationNames?: readonly string[];
       readonly cancelled?: true;
+      readonly hasPendingAuthorization?: boolean;
+      readonly hasPendingInputBatch?: boolean;
       readonly kind: "park";
     };
 

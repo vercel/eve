@@ -153,6 +153,49 @@ describe("eve dev --input", () => {
   });
 });
 
+describe("eve --loop implementation selection", () => {
+  it("rejects an unknown implementation", async () => {
+    await expect(
+      runCli(["dev", "--loop", "durable"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow('Expected "inline", "workflow", or "temporal", received "durable".');
+  });
+
+  it("rejects a URL target because selection applies to the local server", async () => {
+    await expect(
+      runCli(
+        ["dev", "--url", "https://example.com", "--loop", "inline"],
+        { error: () => {}, log: () => {} },
+        { runDevelopmentTui: vi.fn(async () => {}) },
+      ),
+    ).rejects.toThrow("--loop selects the local server's loop implementation");
+  });
+
+  it("exports the selection before the development host boots", async () => {
+    const previous = process.env.EVE_LOOP;
+    delete process.env.EVE_LOOP;
+    const seen: (string | undefined)[] = [];
+    try {
+      await runInteractiveDev(["dev", "--loop", "inline"], {
+        startHost: () => ({
+          close: async () => {},
+          start: async () => {
+            seen.push(process.env.EVE_LOOP);
+            return {
+              appRoot: "/canonical/app",
+              kind: "existing",
+              url: "http://127.0.0.1:2000",
+            };
+          },
+        }),
+      });
+    } finally {
+      if (previous === undefined) delete process.env.EVE_LOOP;
+      else process.env.EVE_LOOP = previous;
+    }
+    expect(seen).toEqual(["inline"]);
+  });
+});
+
 describe("eve dev --url protocol", () => {
   it("preserves query parameters on the remote target URL", async () => {
     const runDevelopmentTui = await runInteractiveDev([

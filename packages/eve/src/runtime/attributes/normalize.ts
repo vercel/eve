@@ -10,6 +10,9 @@ export const EVE_ATTRIBUTE_VALUE_MAX_BYTES = 256;
 /** Attribute value accepted by eve's internal attribute builders. */
 export type EveAttributeValue = string | number | undefined;
 
+/** Runtime-owned sink for eve observability attributes. */
+export type EveAttributeWriter = (attributes: Record<string, EveAttributeValue>) => Promise<void>;
+
 /**
  * Truncates a string to Workflow's UTF-8 byte budget without splitting
  * a surrogate pair.

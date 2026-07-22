@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
 import { createWorld } from "#compiled/@workflow/world-local/index.js";
-import { turnWorkflowReference } from "#execution/workflow-runtime.js";
+import { turnWorkflowReference } from "#internal/loops/workflow/runtime.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH,

@@ -1,5 +1,5 @@
 import type { Runtime } from "#channel/types.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { resolveLoopDriver } from "#internal/loops/driver.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
@@ -37,7 +37,8 @@ export async function resolveNitroChannelRuntimeBundle(
   const bundle = await getCompiledRuntimeAgentBundle({
     compiledArtifactsSource,
   });
-  const runtime = createWorkflowRuntime({ compiledArtifactsSource });
+  const driver = await resolveLoopDriver({ compiledArtifactsSource });
+  const runtime = driver.createRuntime();
   return {
     channels: bundle.graph.root.channels,
     runtime,
