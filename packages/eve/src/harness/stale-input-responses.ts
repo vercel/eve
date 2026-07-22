@@ -43,14 +43,20 @@ export function convertStaleResponsesToUserMessage(input: {
     return { kind: "unchanged", stepInput: input.stepInput };
   }
 
+  // Drop pass: stale continuation answers leave the batch before the
+  // stale/current partition ever sees them.
+  const retainedResponses = responses.filter(
+    (response) =>
+      input.pendingRequestIds.has(response.requestId) ||
+      !isSessionLimitContinuationRequestId(response.requestId),
+  );
+  const droppedStaleContinuation = retainedResponses.length < responses.length;
+
   const currentResponses: InputResponse[] = [];
   const staleResponses: InputResponse[] = [];
-  let droppedStaleContinuation = false;
-  for (const response of responses) {
+  for (const response of retainedResponses) {
     if (input.pendingRequestIds.has(response.requestId)) {
       currentResponses.push(response);
-    } else if (isSessionLimitContinuationRequestId(response.requestId)) {
-      droppedStaleContinuation = true;
     } else {
       staleResponses.push(response);
     }

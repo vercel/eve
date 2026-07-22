@@ -62,7 +62,7 @@ export function createSessionLimitContinuationRequest(input: {
         style: "primary",
       },
       {
-        description: "Cancel this session's work",
+        description: "Stop now",
         id: SESSION_LIMIT_STOP_OPTION_ID,
         label: "Stop",
         style: "danger",

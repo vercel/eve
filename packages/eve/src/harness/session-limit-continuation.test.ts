@@ -40,7 +40,7 @@ describe("createSessionLimitContinuationRequest", () => {
           style: "primary",
         },
         {
-          description: "Cancel this session's work",
+          description: "Stop now",
           id: "stop",
           label: "Stop",
           style: "danger",
