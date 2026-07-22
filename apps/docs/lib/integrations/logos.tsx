@@ -400,10 +400,14 @@ export const photonLogo = (props: LogoProps) => (
 );
 
 export const dialLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+  <svg fill="none" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect fill="#2C2C2A" height="512" rx="102" width="512" />
+    <circle cx="256" cy="256" fill="#F1EFE8" r="56" />
     <path
-      d="M5 4h6.2C16.5 4 20 7.1 20 12s-3.5 8-8.8 8H5V4Zm3 2.8v10.4h3c3.7 0 6-1.9 6-5.2s-2.3-5.2-6-5.2H8Z"
-      fill="currentColor"
+      d="M256 101c85.6 0 155 69.4 155 155M256 411c-85.6 0-155-69.4-155-155"
+      stroke="#F1EFE8"
+      strokeLinecap="round"
+      strokeWidth="14"
     />
   </svg>
 );
