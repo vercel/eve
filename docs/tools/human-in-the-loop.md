@@ -110,7 +110,7 @@ See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for
 
 ## Answering from a client or channel
 
-Channels turn requests into native UI: the Slack adapter renders approvals as buttons and questions as select menus, and writes the user's choice back as the answer. You get this for free on every [channel](/docs/channels).
+Channels turn requests into native UI: the Slack adapter renders approvals as buttons and questions as select menus, and writes the user's choice back as the answer. You get this for free on every [channel](/docs/channels/overview).
 
 From your own frontend, read the pending request off the latest message and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
 
