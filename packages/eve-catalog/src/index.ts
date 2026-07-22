@@ -221,6 +221,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-imessage",
+    name: "iMessage",
+    kind: "channel",
+    tagline: "Reach iMessage conversations through a choice of Chat SDK adapters.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",

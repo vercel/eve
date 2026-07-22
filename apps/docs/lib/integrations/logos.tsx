@@ -9,6 +9,7 @@ import {
   SiEgnyte,
   SiGooglechat,
   SiHuggingface,
+  SiImessage,
   SiMake,
   SiMessenger,
   SiMiro,
@@ -390,6 +391,8 @@ export const kapsoLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const imessageLogo = (props: LogoProps) => <SiImessage color="default" {...props} />;
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -533,6 +536,7 @@ export const logos = {
   liveblocks: liveblocksLogo,
   linq: linqLogo,
   kapso: kapsoLogo,
+  imessage: imessageLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
