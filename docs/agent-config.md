@@ -139,11 +139,16 @@ Input and output budgets are checked independently. The model call that crosses
 either limit is allowed to finish because providers only report exact token
 usage after a call completes. Before the next model call, eve pauses the
 session and sends a deterministic continuation prompt with two options:
-**Continue** grants a fresh budget window of the configured size (both input
-and output windows reset together), and **Stop** ends the session gracefully
-(`session.completed`) — declining is a user decision, not an error. A reply
-that answers neither option re-raises the prompt; the reply stays in history
-and is processed once the budget is granted.
+**Approve** grants a fresh budget window of the configured size (both input
+and output windows reset together), and **Stop** cancels the in-flight turn
+through the standard cancellation path (`turn.cancelled` → `session.waiting`)
+— a user decision, not an error. The session stays resumable; because it is
+still over budget, the next message re-raises the prompt. Declining a
+delegated child's prompt cancels the root turn, which cascades to the whole
+delegation tree — the delegating parent never receives an error result it
+could retry against a fresh quota share. A reply that answers neither option
+re-raises the prompt; the reply stays in history and is processed once the
+budget is granted.
 
 Sessions that cannot reach a human — task-mode runs such as schedules and
 subagents without input proxying — skip the prompt and fail the next model

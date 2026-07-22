@@ -51,6 +51,7 @@ export async function defaultOnMessage(
   ctx: TeamsContext,
   message: TeamsMessageActivity,
 ): Promise<TeamsInboundResult> {
+  if (message.from.role === "bot" || message.from.id === message.recipient.id) return null;
   if (message.scope !== "personal" && !message.isBotMentioned) return null;
   await ctx.thread.startTyping();
   return { auth: defaultTeamsAuth(message) };

@@ -203,6 +203,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "vercel",
+    name: "Vercel",
+    kind: "connection",
+    tagline: "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Vercel: manage projects and deployments, inspect logs, and search documentation.",
+      mcp: { url: "https://mcp.vercel.com" },
+    },
+  },
+  {
     slug: "linear",
     name: "Linear",
     kind: "connection",

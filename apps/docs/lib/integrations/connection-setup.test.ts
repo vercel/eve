@@ -40,3 +40,20 @@ describe("Kernel connection setup", () => {
     );
   });
 });
+
+describe("Vercel MCP connection setup", () => {
+  it("uses Vercel's MCP endpoint and Connect service", () => {
+    const integration = getIntegration("vercel")!;
+    const quickStart = buildConnectionSetup(integration).variants["mcp:user"];
+
+    expect(quickStart).toContain('url: "https://mcp.vercel.com"');
+    expect(quickStart).toContain('auth: connect("vercel")');
+    const configure = buildConnectionConfigure(integration);
+    expect(configure).toContain("vercel connect create vercel");
+    expect(configure).not.toContain("vercel connect attach");
+    expect(configure.indexOf("vercel link")).toBeLessThan(
+      configure.indexOf("vercel connect create vercel"),
+    );
+    expect(configure).toContain("select None");
+  });
+});

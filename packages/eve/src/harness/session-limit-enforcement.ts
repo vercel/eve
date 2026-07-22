@@ -5,7 +5,7 @@
  *
  * 1. {@link applySessionLimitContinuation} runs after pending-input
  *    resolution and acts on the user's answer to a continuation prompt —
- *    grant a fresh budget window, or end the session.
+ *    grant a fresh budget window, or cancel the in-flight turn tree.
  * 2. {@link enforceSessionTokenLimit} runs before each model call and, when
  *    the session is over budget, parks it on the deterministic continuation
  *    prompt (sessions that can reach a human) or fails it (task-mode sessions
@@ -13,11 +13,7 @@
  */
 import type { ModelMessage } from "ai";
 
-import {
-  createInputRequestedEvent,
-  createSessionCompletedEvent,
-  createTurnCompletedEvent,
-} from "#protocol/message.js";
+import { createInputRequestedEvent } from "#protocol/message.js";
 import {
   emitFailedStep,
   emitTurnEpilogue,
@@ -26,6 +22,7 @@ import {
 } from "#harness/emission.js";
 import { setPendingInputBatch } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
 import {
   extendSessionTokenBudget,
   getSessionTokenLimitViolation,
@@ -48,11 +45,14 @@ interface SessionLimitPolicyInput {
  *
  * Granted: resets the token budget windows via
  * {@link extendSessionTokenBudget} and lets the step continue transparently.
- * Declined: a user decision, not an error — conversation sessions end
- * gracefully (`turn.completed` → `session.completed`, no extra copy; the
- * resolved prompt is the acknowledgment), while task mode keeps the
- * structured failure so the parent tool call receives an error result rather
- * than an empty success.
+ * Declined: a user decision, not an error — the decline cancels the
+ * in-flight turn tree through the standard cancellation path, settling as
+ * `turn.cancelled` → `session.waiting` with no failure surfaced anywhere.
+ * The harness only declares the intent by throwing
+ * {@link SessionLimitDeclinedError}; the execution layer detects it at the
+ * step boundary and cancels the root turn, whose cancelled arm cascades to
+ * every descendant, so the delegating parent never receives an error result
+ * it could retry against a fresh budget share.
  *
  * Returns `result: null` when the step should continue with `session`.
  */
@@ -69,32 +69,26 @@ export async function applySessionLimitContinuation(
     return { result: null, session: extendSessionTokenBudget(input.session) };
   }
 
-  const violation = getSessionTokenLimitViolation(input.session);
-  if (violation === null) {
-    return { result: null, session: input.session };
-  }
-
-  if (input.config.mode === "task") {
+  // A session parked on the continuation prompt always satisfies the
+  // cancelled-park guard (conversation mode, or a continuation token
+  // anchoring it to a waiting parent) — parking the prompt required one of
+  // the two. The terminal fallback covers any future caller that resolves
+  // a decline outside that state, where a thrown cancellation could not
+  // settle as a park.
+  const canSettleCancelledPark =
+    input.config.mode === "conversation" || input.session.continuationToken !== "";
+  if (!canSettleCancelledPark) {
+    const violation = getSessionTokenLimitViolation(input.session);
     return {
-      result: await failSessionTokenLimit({ ...input, violation }),
+      result:
+        violation === null
+          ? { next: { done: true, output: "" }, session: input.session }
+          : await failSessionTokenLimit({ ...input, violation }),
       session: input.session,
     };
   }
 
-  if (input.emit) {
-    await input.emit(
-      createTurnCompletedEvent({
-        sequence: input.emissionState.sequence,
-        turnId: input.emissionState.turnId,
-      }),
-    );
-    await input.emit(createSessionCompletedEvent());
-  }
-
-  return {
-    result: { next: { done: true, output: "" }, session: input.session },
-    session: input.session,
-  };
+  throw new SessionLimitDeclinedError();
 }
 
 /**

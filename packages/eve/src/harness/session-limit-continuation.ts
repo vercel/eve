@@ -40,8 +40,6 @@ export function createSessionLimitContinuationRequest(input: {
 }): InputRequest {
   const { sessionId, totalUsedTokens, violation } = input;
   const requestId = `${sessionId}:limit:${violation.kind}:${String(totalUsedTokens)}`;
-  const limitLabel = violation.limit.toLocaleString("en-US");
-  const usedLabel = violation.usedTokens.toLocaleString("en-US");
 
   return {
     action: {
@@ -58,21 +56,44 @@ export function createSessionLimitContinuationRequest(input: {
     display: "confirmation",
     options: [
       {
-        description: "Reset quota and keep going",
+        description: "Grant a fresh token budget",
         id: SESSION_LIMIT_CONTINUE_OPTION_ID,
-        label: "Continue",
+        label: "Approve",
         style: "primary",
       },
       {
-        description: "End the session here",
+        description: "Stop now",
         id: SESSION_LIMIT_STOP_OPTION_ID,
         label: "Stop",
         style: "danger",
       },
     ],
-    prompt: `The session used ${usedLabel} of its ${limitLabel} ${violation.kind}-token budget. Continue with a fresh budget?`,
+    prompt:
+      `This session has hit the ${violation.kind}-token limit ` +
+      `(${formatCompactTokenCount(violation.limit)}) per session. This is a guardrail ` +
+      `against defective long-running sessions. If session activity looks fine, ` +
+      `just approve to keep going.`,
     requestId,
   };
+}
+
+/**
+ * Formats a token count compactly for prompt copy: `2M`, `1.9M`, `200K`;
+ * exact below 1,000.
+ */
+function formatCompactTokenCount(count: number): string {
+  if (count >= 1_000_000) {
+    return `${trimTrailingZero(count / 1_000_000)}M`;
+  }
+  if (count >= 1_000) {
+    return `${trimTrailingZero(count / 1_000)}K`;
+  }
+  return String(count);
+}
+
+function trimTrailingZero(value: number): string {
+  const rounded = value.toFixed(1);
+  return rounded.endsWith(".0") ? rounded.slice(0, -2) : rounded;
 }
 
 /**
@@ -81,6 +102,17 @@ export function createSessionLimitContinuationRequest(input: {
  */
 export function isSessionLimitContinuationRequest(request: InputRequest): boolean {
   return request.action.toolName === SESSION_LIMIT_CONTINUATION_TOOL_NAME;
+}
+
+/**
+ * Matches request ids minted by {@link createSessionLimitContinuationRequest}.
+ *
+ * Continuation requests never enter model history (no matching tool call
+ * exists), so the id shape is the only durable marker for recognizing a
+ * stale continuation answer after its request left the pending batch.
+ */
+export function isSessionLimitContinuationRequestId(requestId: string): boolean {
+  return /:limit:(?:input|output):\d+$/u.test(requestId);
 }
 
 /**

@@ -2,7 +2,10 @@ import { expect, it } from "vitest";
 
 import type { ModelMessage } from "ai";
 
-import { convertStaleResponsesToUserMessage } from "#harness/stale-input-responses.js";
+import {
+  convertStaleResponsesToUserMessage,
+  dropStaleSessionLimitContinuationResponses,
+} from "#harness/stale-input-responses.js";
 
 const approvalHistory: ModelMessage[] = [
   {
@@ -144,4 +147,79 @@ it("returns unchanged when every response matches the pending batch", () => {
 
   expect(result.kind).toBe("unchanged");
   expect(result.stepInput).toBe(stepInput);
+});
+
+it("drops a stale session-limit continuation answer and keeps the rest of the input", () => {
+  const stepInput = dropStaleSessionLimitContinuationResponses({
+    pendingRequestIds: new Set(),
+    stepInput: {
+      inputResponses: [{ optionId: "stop", requestId: "sess-1:limit:input:12" }],
+      message: "also do this",
+    },
+  });
+
+  // Nothing model-visible: a stale "Stop" must not read as prose, and a
+  // stale grant must not extend any budget.
+  expect(stepInput?.inputResponses).toBeUndefined();
+  expect(stepInput?.message).toBe("also do this");
+});
+
+it("keeps pending and non-continuation responses while dropping stale continuation answers", () => {
+  const stepInput = dropStaleSessionLimitContinuationResponses({
+    pendingRequestIds: new Set(["question-1", "sess-1:limit:input:20"]),
+    stepInput: {
+      inputResponses: [
+        { optionId: "candidate", requestId: "question-1" },
+        { optionId: "continue", requestId: "sess-1:limit:input:12" },
+        { optionId: "stop", requestId: "sess-1:limit:input:20" },
+      ],
+    },
+  });
+
+  // The stale grant is dropped; the pending question answer and the answer
+  // to the currently pending continuation prompt pass through.
+  expect(stepInput?.inputResponses).toEqual([
+    { optionId: "candidate", requestId: "question-1" },
+    { optionId: "stop", requestId: "sess-1:limit:input:20" },
+  ]);
+});
+
+it("returns the input unchanged when nothing is dropped", () => {
+  const stepInput = {
+    inputResponses: [{ optionId: "candidate", requestId: "question-1" }],
+  };
+
+  expect(
+    dropStaleSessionLimitContinuationResponses({
+      pendingRequestIds: new Set(),
+      stepInput,
+    }),
+  ).toBe(stepInput);
+});
+
+it("converts remaining stale responses after the drop pass", () => {
+  const pendingRequestIds = new Set<string>();
+  const stepInput = dropStaleSessionLimitContinuationResponses({
+    pendingRequestIds,
+    stepInput: {
+      inputResponses: [
+        { optionId: "candidate", requestId: "question-1" },
+        { optionId: "stop", requestId: "sess-1:limit:input:12" },
+      ],
+    },
+  });
+  const result = convertStaleResponsesToUserMessage({
+    history: questionHistory,
+    pendingRequestIds,
+    stepInput,
+  });
+
+  expect(result.kind).toBe("converted");
+  if (result.kind !== "converted") {
+    throw new Error("Expected the stale response to be converted.");
+  }
+
+  expect(result.stepInput.inputResponses).toBeUndefined();
+  expect(result.stepInput.message).toEqual(expect.stringContaining("question-1"));
+  expect(result.stepInput.message).not.toEqual(expect.stringContaining("limit:input"));
 });

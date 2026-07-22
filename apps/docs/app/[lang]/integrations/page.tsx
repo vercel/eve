@@ -15,8 +15,8 @@ export const metadata: Metadata = {
 export const generateStaticParams = () => Object.keys(translations).map((lang) => ({ lang }));
 
 const IntegrationsPage = () => (
-  <main className="mx-auto w-full max-w-[1080px] px-4 pb-32 sm:px-6">
-    <section className="flex flex-col items-center px-4 pt-24 pb-12 text-center">
+  <main className="mx-auto w-full min-w-0 max-w-[1080px] px-4 pb-32 sm:px-6">
+    <section className="flex min-w-0 flex-col items-center px-0 pt-24 pb-12 text-center sm:px-4">
       <h1 className="font-bold text-5xl text-gray-1000 tracking-tighter sm:text-6xl">
         Integrations
       </h1>

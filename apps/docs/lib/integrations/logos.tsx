@@ -153,6 +153,12 @@ export const twilioLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const vercelLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M12 3 23 21H1L12 3Z" fill="currentColor" />
+  </svg>
+);
+
 export const linearLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -343,6 +349,7 @@ export const logos = {
   teams: teamsLogo,
   telegram: telegramLogo,
   twilio: twilioLogo,
+  vercel: vercelLogo,
   linear: linearLogo,
   notion: notionLogo,
   datadog: datadogLogo,

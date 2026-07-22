@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createSessionLimitContinuationRequest,
   isSessionLimitContinuationRequest,
+  isSessionLimitContinuationRequestId,
   resolveSessionLimitContinuation,
 } from "#harness/session-limit-continuation.js";
 
@@ -33,22 +34,39 @@ describe("createSessionLimitContinuationRequest", () => {
       display: "confirmation",
       options: [
         {
-          description: "Reset quota and keep going",
+          description: "Grant a fresh token budget",
           id: "continue",
-          label: "Continue",
+          label: "Approve",
           style: "primary",
         },
         {
-          description: "End the session here",
+          description: "Stop now",
           id: "stop",
           label: "Stop",
           style: "danger",
         },
       ],
       prompt:
-        "The session used 40,120,500 of its 40,000,000 input-token budget. Continue with a fresh budget?",
+        "This session has hit the input-token limit (40M) per session. This is a guardrail " +
+        "against defective long-running sessions. If session activity looks fine, just " +
+        "approve to keep going.",
       requestId: "sess-test:limit:input:40120500",
     });
+  });
+
+  it("formats the limit compactly in the prompt copy", () => {
+    const promptFor = (limit: number): string =>
+      createSessionLimitContinuationRequest({
+        sessionId: "sess-test",
+        totalUsedTokens: limit + 1,
+        violation: { kind: "input", limit, usedTokens: limit + 1 },
+      }).prompt;
+
+    expect(promptFor(2_000_000)).toContain("(2M)");
+    expect(promptFor(1_872_014)).toContain("(1.9M)");
+    expect(promptFor(200_000)).toContain("(200K)");
+    expect(promptFor(1_500)).toContain("(1.5K)");
+    expect(promptFor(999)).toContain("(999)");
   });
 
   it("gives each violation instance its own id as the session total grows", () => {
@@ -65,6 +83,13 @@ describe("createSessionLimitContinuationRequest", () => {
 
   it("is recognized by isSessionLimitContinuationRequest", () => {
     expect(isSessionLimitContinuationRequest(createTestRequest())).toBe(true);
+  });
+
+  it("mints ids recognized by isSessionLimitContinuationRequestId", () => {
+    expect(isSessionLimitContinuationRequestId(createTestRequest().requestId)).toBe(true);
+    expect(isSessionLimitContinuationRequestId("sess-test:limit:output:12")).toBe(true);
+    expect(isSessionLimitContinuationRequestId("approval-1")).toBe(false);
+    expect(isSessionLimitContinuationRequestId("sess-test:limit:input:")).toBe(false);
   });
 });
 

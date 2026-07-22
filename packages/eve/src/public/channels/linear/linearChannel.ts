@@ -14,7 +14,6 @@ import {
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import { LINEAR_CHANNEL_DEFAULT_ROUTE } from "#public/channels/linear/constants.js";
 import { createDefaultEvents, defaultOnAgentSession } from "#public/channels/linear/defaults.js";
-import { resolveLinearPromptInputResponses } from "#public/channels/linear/hitl.js";
 import {
   formatLinearContextBlock,
   linearContinuationToken,
@@ -36,7 +35,6 @@ import {
 } from "#public/definitions/channel.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
-import type { InputResponse } from "#runtime/input/types.js";
 
 const log = createLogger("linear.channel");
 
@@ -344,12 +342,6 @@ async function dispatchAgentSession(input: {
   const result = await input.onAgentSession(context, event);
   if (result === null) return;
 
-  const body = event.agentActivity?.body;
-  const inputResponses =
-    event.action === "prompted" && body !== undefined
-      ? await resolvePromptResponses({ body, config: input.config, event })
-      : [];
-
   await input.send(
     {
       context: [
@@ -357,7 +349,6 @@ async function dispatchAgentSession(input: {
         ...event.previousComments,
         ...(result.context ?? []),
       ],
-      inputResponses,
       message: messageFromLinearAgentSessionEvent(event),
     },
     {
@@ -366,25 +357,6 @@ async function dispatchAgentSession(input: {
       state: stateFromAgentSession(event.agentSession),
     },
   );
-}
-
-async function resolvePromptResponses(input: {
-  readonly body: string;
-  readonly config: LinearChannelConfig;
-  readonly event: LinearAgentSessionEvent;
-}): Promise<readonly InputResponse[]> {
-  try {
-    const activities = await listLinearAgentSessionActivities({
-      api: input.config.api,
-      credentials: input.config.credentials,
-      agentSessionId: input.event.agentSession.id,
-      last: 20,
-    });
-    return resolveLinearPromptInputResponses({ activities, body: input.body });
-  } catch (error) {
-    log.warn("linear HITL activity lookup failed — treating prompt as a message", { error });
-    return [];
-  }
 }
 
 async function resolveReceiveSession(

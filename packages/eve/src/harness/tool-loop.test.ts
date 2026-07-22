@@ -44,7 +44,7 @@ import {
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionTokenLimitViolation,
   getSessionTokenUsage,
@@ -1209,7 +1209,7 @@ describe("createToolLoopHarness", () => {
           allowFreeform: false,
           display: "confirmation",
           options: [
-            { id: "continue", label: "Continue", style: "primary" },
+            { id: "continue", label: "Approve", style: "primary" },
             { id: "stop", label: "Stop", style: "danger" },
           ],
           requestId: LIMIT_REQUEST_ID,
@@ -1267,25 +1267,27 @@ describe("createToolLoopHarness", () => {
     expect(getSessionTokenLimitViolation(resumed.session)).toBeNull();
   });
 
-  it("ends the session gracefully when the user declines the limit continuation prompt", async () => {
+  it("cancels the turn when the user declines the limit continuation prompt", async () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
-    const declined = await runStep(parked.session, {
+    const declined = runStep(parked.session, {
       inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
     });
 
+    // A decline is a user decision, not an error: the harness declares
+    // intent by throwing the decline-flavored cancellation, which the
+    // execution layer settles as `turn.cancelled` → `session.waiting` (and,
+    // for delegated sessions, escalates to a root-turn cancel). No failure
+    // or completion events are emitted here.
+    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-    expect(declined.next).toEqual({ done: true, output: "" });
-    // A decline is a user decision, not an error: no failure events, no extra
-    // chat copy — the resolved prompt is the acknowledgment.
     expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
-    expect(events.at(-2)?.type).toBe("turn.completed");
-    expect(events.at(-1)?.type).toBe("session.completed");
+    expect(events.some((event) => event.type === "session.completed")).toBe(false);
   });
 
-  it("fails the task when a proxied user declines the limit continuation prompt", async () => {
+  it("declines with the same cancellation when the prompt was proxied to a task session", async () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
       createTestConfig("task", emit, { capabilities: { requestInput: true } }),
@@ -1294,20 +1296,16 @@ describe("createToolLoopHarness", () => {
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
     expect(parked.next).toBeNull();
 
-    const declined = await runStep(parked.session, {
+    const declined = runStep(parked.session, {
       inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
     });
 
+    // The delegating parent must never receive an error result it could
+    // retry against a fresh budget share: task-mode declines throw the same
+    // decline-flavored cancellation instead of failing the step.
+    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-    expect(declined.next).toEqual({
-      done: true,
-      isError: true,
-      output: "The session reached its configured input token limit.",
-    });
-    expect(events.find((event) => event.type === "step.failed")?.data).toMatchObject({
-      code: "SESSION_TOKEN_LIMIT_REACHED",
-      details: { kind: "input", limit: 12, usedTokens: 12 },
-    });
+    expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
   });
 
   it("re-raises the limit prompt when the user replies without answering it", async () => {

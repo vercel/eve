@@ -573,6 +573,16 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  vercel: {
+    logo: "vercel",
+    docsHref: "https://vercel.com/docs/agent-resources/vercel-mcp",
+    keywords: ["mcp", "projects", "deployments", "logs", "oauth", "connect"],
+    authModes: ["user"],
+    connector: "vercel",
+    connectorService: "vercel",
+    configureNote:
+      "When the Connect form asks for a token authentication method, select None. Vercel MCP completes OAuth when the agent first calls an authenticated tool.",
+  },
   linear: {
     logo: "linear",
     docsHref: "/docs/connections/mcp",

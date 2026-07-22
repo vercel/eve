@@ -54,6 +54,10 @@ describe("integration catalog", () => {
     expect(connectionProtocols(getIntegrationEntry("linear")!.connection!)).toEqual(["mcp"]);
   });
 
+  it("uses Vercel's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("vercel")!.connection!.mcp!.url).toBe("https://mcp.vercel.com");
+  });
+
   it("uses Linear's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
