@@ -127,7 +127,7 @@ async function firePost(
 
   const response = await post.handler(request, {
     cancel: vi.fn(),
-    resetSession: vi.fn(),
+    reset: vi.fn(),
     resolveActiveSession: async () => undefined,
     getSession: vi.fn() as any,
     params: {},

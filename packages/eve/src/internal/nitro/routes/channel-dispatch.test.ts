@@ -278,7 +278,7 @@ describe("dispatchChannelRequest", () => {
     );
   });
 
-  it("supplies a channel-scoped resetSession helper", async () => {
+  it("supplies a channel-scoped reset helper", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
       deliver: vi.fn(),
@@ -293,7 +293,7 @@ describe("dispatchChannelRequest", () => {
         {
           handler: async (_req, args) =>
             Response.json(
-              await args.resetSession({
+              await args.reset({
                 continuationToken: "direct:+15551234567:+15557654321",
                 reason: "User requested /new",
               }),

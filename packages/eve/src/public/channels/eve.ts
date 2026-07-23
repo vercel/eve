@@ -2,7 +2,7 @@ import { type FilePart, type TextPart, type UserContent } from "ai";
 
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
-import type { ResetSessionResponse } from "#protocol/reset-session.js";
+import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -247,16 +247,16 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
       }),
 
-      POST(EVE_RESET_SESSION_ROUTE_PATH, async (req, { resetSession }) => {
+      POST(EVE_RESET_SESSION_ROUTE_PATH, async (req, { reset }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
         const body = await parseResetSessionBody(req);
         if (body instanceof Response) return body;
 
-        let result: Awaited<ReturnType<typeof resetSession>>;
+        let result: Awaited<ReturnType<typeof reset>>;
         try {
-          result = await resetSession({
+          result = await reset({
             continuationToken: body.continuationToken,
             reason: "Client requested session reset",
           });
@@ -268,7 +268,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        const response: ResetSessionResponse =
+        const response: ResetResponse =
           result.status === "reset"
             ? { ok: true, previousSessionId: result.previousSessionId, status: "reset" }
             : { ok: true, status: "no_active_session" };

@@ -3,7 +3,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
-import type { ResetSessionStatus } from "#protocol/reset-session.js";
+import type { ResetStatus } from "#protocol/reset-session.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -229,15 +229,15 @@ export interface CancelSessionResult {
 }
 
 /** Result of terminally resetting a client session. */
-export type ResetSessionResult =
+export type ResetResult =
   | {
       /** The prior session was retired and its continuation token released. */
       readonly previousSessionId: string;
-      readonly status: Extract<ResetSessionStatus, "reset">;
+      readonly status: Extract<ResetStatus, "reset">;
     }
   | {
       /** The client had no continuation token or the token was already free. */
-      readonly status: Extract<ResetSessionStatus, "no_active_session">;
+      readonly status: Extract<ResetStatus, "no_active_session">;
     };
 
 /**

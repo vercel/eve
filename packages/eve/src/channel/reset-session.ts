@@ -1,4 +1,4 @@
-import type { ResetSessionFn, ResetSessionOptions, ResetSessionResult } from "#channel/routes.js";
+import type { ResetFn, ResetOptions, ResetResult } from "#channel/routes.js";
 import type { Runtime } from "#channel/types.js";
 
 /**
@@ -6,8 +6,8 @@ import type { Runtime } from "#channel/types.js";
  * retires that observed session id, so it can never cancel a later owner that
  * claimed the same continuation token.
  */
-export function createResetSessionFn(runtime: Runtime, channelName: string): ResetSessionFn {
-  return async (options: ResetSessionOptions): Promise<ResetSessionResult> => {
+export function createResetFn(runtime: Runtime, channelName: string): ResetFn {
+  return async (options: ResetOptions): Promise<ResetResult> => {
     const continuationToken = `${channelName}:${options.continuationToken}`;
     const owner = await runtime.resolveSession(continuationToken);
 

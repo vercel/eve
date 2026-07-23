@@ -252,7 +252,7 @@ function createCancelRouteCaller(): (
         cancel: () => {
           throw new Error("cancel route must not use the channel cancel helper");
         },
-        resetSession: () => {
+        reset: () => {
           throw new Error("cancel route must not reset a session");
         },
         getSession: () => {

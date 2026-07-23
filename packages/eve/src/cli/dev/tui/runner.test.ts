@@ -655,6 +655,39 @@ describe("EveTUIRunner development session continuity", () => {
     expect(resetRenderer).not.toHaveBeenCalled();
     expect(notices).toEqual(["Couldn't reset the session: World unavailable"]);
   });
+
+  it("resets rather than sending a queued /new after a turn boundary", async () => {
+    const initialSession = sessionYielding([{ type: "session.waiting" }]);
+    const reset = vi
+      .spyOn(initialSession, "reset")
+      .mockResolvedValue({ previousSessionId: "session_1", status: "reset" });
+    const newSession = sessionYielding([]);
+    const client = stubClient();
+    const createSession = vi.spyOn(client, "session").mockReturnValue(newSession);
+    const prompts: Array<string | undefined> = ["first", undefined];
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<unknown>) {
+          void event;
+        }
+      }),
+      takeQueuedPrompt: vi.fn(() => "/new"),
+    });
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer,
+      session: initialSession,
+    });
+
+    await runner.run();
+
+    expect(reset).toHaveBeenCalledOnce();
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(initialSession.send).toHaveBeenCalledOnce();
+    expect(newSession.send).not.toHaveBeenCalled();
+  });
 });
 
 describe("EveTUIRunner terminal-failure recovery", () => {

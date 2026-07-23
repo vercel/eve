@@ -29,9 +29,9 @@ export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
   CancelFn,
   CancelOptions,
-  ResetSessionFn,
-  ResetSessionOptions,
-  ResetSessionResult,
+  ResetFn,
+  ResetOptions,
+  ResetResult,
   HttpRouteDefinition,
   RouteDefinition,
   RouteHandlerArgs,

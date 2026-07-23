@@ -76,7 +76,7 @@ function createEveCreateHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
-        resetSession: vi.fn(),
+        reset: vi.fn(),
         getSession: vi.fn(),
         receive: vi.fn() as any,
         params: {},
@@ -120,7 +120,7 @@ function createEveContinueHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
-        resetSession: vi.fn(),
+        reset: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
         params: { sessionId: "test-session-id" },
@@ -154,7 +154,7 @@ function createEveCancelHandler(input: EveChannelInput) {
           send: vi.fn(),
           resolveActiveSession: async () => undefined,
           cancel: vi.fn(),
-          resetSession: vi.fn(),
+          reset: vi.fn(),
           getSession: vi.fn(),
           receive: vi.fn() as any,
           params: { sessionId: "test-session-id" },
@@ -188,19 +188,19 @@ function createEveResetHandler(input: EveChannelInput) {
   );
   if (!resetRoute) throw new Error("No session reset POST route found");
 
-  const resetSession = vi.fn().mockResolvedValue({
+  const reset = vi.fn().mockResolvedValue({
     previousSessionId: "test-session-id",
     status: "reset",
   });
 
   return {
-    resetSession,
+    reset,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
-        resetSession,
+        reset,
         getSession: vi.fn(),
         receive: vi.fn() as any,
         params: {},
@@ -243,7 +243,7 @@ function createEveStreamHandler(input: EveChannelInput) {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
-        resetSession: vi.fn(),
+        reset: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
         params: { sessionId: "test-session-id" },
@@ -1455,7 +1455,7 @@ describe("eveChannel — reset session", () => {
       previousSessionId: "test-session-id",
       status: "reset",
     });
-    expect(handler.resetSession).toHaveBeenCalledWith({
+    expect(handler.reset).toHaveBeenCalledWith({
       continuationToken: "eve:token",
       reason: "Client requested session reset",
     });
@@ -1463,7 +1463,7 @@ describe("eveChannel — reset session", () => {
 
   it("reports a token that is already free as a successful no-op", async () => {
     const handler = createEveResetHandler({ auth: none() });
-    handler.resetSession.mockResolvedValue({ status: "no_active_session" });
+    handler.reset.mockResolvedValue({ status: "no_active_session" });
 
     const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
 
@@ -1477,7 +1477,7 @@ describe("eveChannel — reset session", () => {
     const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
 
     expect(response.status).toBe(401);
-    expect(handler.resetSession).not.toHaveBeenCalled();
+    expect(handler.reset).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1490,12 +1490,12 @@ describe("eveChannel — reset session", () => {
     const response = await handler.fetch(resetRequest(body));
 
     expect(response.status).toBe(400);
-    expect(handler.resetSession).not.toHaveBeenCalled();
+    expect(handler.reset).not.toHaveBeenCalled();
   });
 
   it("returns 500 when reset fails unexpectedly", async () => {
     const handler = createEveResetHandler({ auth: none() });
-    handler.resetSession.mockRejectedValue(new Error("backing store outage"));
+    handler.reset.mockRejectedValue(new Error("backing store outage"));
 
     const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
 

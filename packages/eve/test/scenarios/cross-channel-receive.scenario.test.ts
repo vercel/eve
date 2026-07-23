@@ -181,7 +181,7 @@ describe("cross-channel receive end-to-end", () => {
           cancel: async () => {
             throw new Error("webhook should not cancel turns");
           },
-          resetSession: async () => {
+          reset: async () => {
             throw new Error("webhook should not reset sessions");
           },
           getSession: () => {

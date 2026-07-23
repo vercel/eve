@@ -30,9 +30,9 @@ export default defineChannel({
       const owner = await resolveActiveSession({ continuationToken: params.threadId ?? "" });
       return Response.json({ sessionId: owner?.sessionId ?? null });
     }),
-    POST("/session-reset/:threadId/new", async (_request, { params, resetSession }) => {
+    POST("/session-reset/:threadId/new", async (_request, { params, reset }) => {
       return Response.json(
-        await resetSession({
+        await reset({
           continuationToken: params.threadId ?? "",
           reason: "Vercel session reset integration test",
         }),

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createResetSessionFn } from "#channel/reset-session.js";
+import { createResetFn } from "#channel/reset-session.js";
 import type { Runtime } from "#channel/types.js";
 
 function createRuntime(overrides?: Partial<Runtime>): Runtime {
@@ -15,11 +15,11 @@ function createRuntime(overrides?: Partial<Runtime>): Runtime {
   };
 }
 
-describe("createResetSessionFn", () => {
+describe("createResetFn", () => {
   it("namespaces the channel-local token before resolving its owner", async () => {
     const runtime = createRuntime();
 
-    await createResetSessionFn(runtime, "imessage")({ continuationToken: "direct:+1:+2" });
+    await createResetFn(runtime, "imessage")({ continuationToken: "direct:+1:+2" });
 
     expect(runtime.resolveSession).toHaveBeenCalledWith("imessage:direct:+1:+2");
   });
@@ -28,7 +28,7 @@ describe("createResetSessionFn", () => {
     const runtime = createRuntime({ resolveSession: vi.fn().mockResolvedValue(undefined) });
 
     await expect(
-      createResetSessionFn(runtime, "imessage")({ continuationToken: "direct:+1:+2" }),
+      createResetFn(runtime, "imessage")({ continuationToken: "direct:+1:+2" }),
     ).resolves.toEqual({ status: "no_active_session" });
     expect(runtime.terminateSession).not.toHaveBeenCalled();
   });
@@ -37,7 +37,7 @@ describe("createResetSessionFn", () => {
     const runtime = createRuntime();
 
     await expect(
-      createResetSessionFn(
+      createResetFn(
         runtime,
         "imessage",
       )({
@@ -58,7 +58,7 @@ describe("createResetSessionFn", () => {
     });
 
     await expect(
-      createResetSessionFn(runtime, "imessage")({ continuationToken: "direct:+1:+2" }),
+      createResetFn(runtime, "imessage")({ continuationToken: "direct:+1:+2" }),
     ).resolves.toEqual({ status: "reset", previousSessionId: "sess_1" });
   });
 
@@ -68,7 +68,7 @@ describe("createResetSessionFn", () => {
       resolveSession: vi.fn().mockRejectedValue(resolutionFailure),
     });
     await expect(
-      createResetSessionFn(resolutionRuntime, "imessage")({ continuationToken: "direct:+1:+2" }),
+      createResetFn(resolutionRuntime, "imessage")({ continuationToken: "direct:+1:+2" }),
     ).rejects.toBe(resolutionFailure);
 
     const terminationFailure = new Error("World unavailable");
@@ -76,7 +76,7 @@ describe("createResetSessionFn", () => {
       terminateSession: vi.fn().mockRejectedValue(terminationFailure),
     });
     await expect(
-      createResetSessionFn(terminationRuntime, "imessage")({ continuationToken: "direct:+1:+2" }),
+      createResetFn(terminationRuntime, "imessage")({ continuationToken: "direct:+1:+2" }),
     ).rejects.toBe(terminationFailure);
   });
 });

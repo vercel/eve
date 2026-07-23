@@ -1,7 +1,7 @@
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
-import { ResetSessionResponseSchema } from "#protocol/reset-session.js";
+import { ResetResponseSchema } from "#protocol/reset-session.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
@@ -17,7 +17,7 @@ import { createClientUrl } from "#client/url.js";
 import type {
   CancelSessionResult,
   ClientRedirectPolicy,
-  ResetSessionResult,
+  ResetResult,
   SendTurnInput,
   SendTurnPayload,
   SessionState,
@@ -151,12 +151,13 @@ export class ClientSession {
    *
    * Unlike {@link cancel}, reset does not merely stop an active turn: it
    * releases the durable workflow owner so the next {@link send} creates a
-   * fresh conversation. Resetting a never-started handle is a successful
-   * no-op. After a successful reset, this handle has no session state.
+   * fresh conversation and initializes a new session-scoped sandbox on first
+   * sandbox use. Resetting a never-started handle is a successful no-op. After
+   * a successful reset, this handle has no session state.
    *
    * @throws {ClientError} If the reset route returns a non-successful status.
    */
-  async reset(): Promise<ResetSessionResult> {
+  async reset(): Promise<ResetResult> {
     const state = this.#state;
     const continuationToken = state.continuationToken;
 
@@ -198,7 +199,7 @@ export class ClientSession {
       throw new Error(`Reset route returned invalid JSON (${response.status}).`);
     }
 
-    const result = ResetSessionResponseSchema.safeParse(payload);
+    const result = ResetResponseSchema.safeParse(payload);
     if (!result.success) {
       throw new Error(`Reset route returned an invalid response (${response.status}).`);
     }
