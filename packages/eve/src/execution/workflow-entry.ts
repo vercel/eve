@@ -30,6 +30,7 @@ import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
 } from "#execution/session-delivery-hook.js";
+import { createSessionContinuationMarkers } from "#execution/session-continuation-markers.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
@@ -166,7 +167,10 @@ async function runDriverLoop(input: {
     `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
-  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+  const continuationMarkers = createSessionContinuationMarkers();
+  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries, (payload) =>
+    continuationMarkers.apply(payload),
+  );
 
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
@@ -301,6 +305,7 @@ async function runDriverLoop(input: {
   } finally {
     await disposeSettledTurnControl?.();
     await deliveryHook.dispose();
+    await continuationMarkers.dispose();
     // Dispose without closing the iterator: a session cancelled while
     // awaiting authorization can leave a durable read in flight, and an
     // async iterator only honors `return()` after that read settles.

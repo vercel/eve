@@ -1,6 +1,10 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type {
+  SessionContinuationMarkerHookPayload,
+  DeliverHookPayload,
+  HookPayload,
+} from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 
 interface HookRead {
@@ -17,6 +21,11 @@ interface SessionDeliveryHookState {
   pending: boolean;
   retired: boolean;
   resolved?: HookRead;
+}
+
+interface HookFailure {
+  readonly error: unknown;
+  readonly order: number;
 }
 
 /** Reads and rekeys the public delivery hook for one session driver. */
@@ -41,10 +50,12 @@ export interface SessionDeliveryHookHandle extends SessionDeliveryHook {
  */
 export function createSessionDeliveryHook(
   bufferedDeliveries: DeliverHookPayload[],
+  onSessionContinuationMarker?: (payload: SessionContinuationMarkerHookPayload) => Promise<void>,
 ): SessionDeliveryHookHandle {
   let active: SessionDeliveryHookState | undefined;
   const retired: SessionDeliveryHookState[] = [];
   const ready: HookRead[] = [];
+  const failures: HookFailure[] = [];
   let nextOrder = 0;
   let offered: Promise<IteratorResult<HookPayload>> | null = null;
   let offeredRead: HookRead | undefined;
@@ -76,6 +87,22 @@ export function createSessionDeliveryHook(
       : state.iterator.next();
     void next.then(
       (result) => {
+        if (!result.done && result.value.kind === "session-continuation-marker") {
+          void Promise.resolve(onSessionContinuationMarker?.(result.value)).then(
+            () => {
+              state.pending = false;
+              arm(state);
+            },
+            (error) => {
+              state.pending = false;
+              failures.push({ error, order: nextOrder++ });
+              failures.sort((left, right) => left.order - right.order);
+              wake?.();
+              wake = undefined;
+            },
+          );
+          return;
+        }
         const read: HookRead = {
           order: nextOrder++,
           result,
@@ -163,11 +190,14 @@ export function createSessionDeliveryHook(
       }
 
       offered = (async () => {
-        while (ready.length === 0) {
+        while (ready.length === 0 && failures.length === 0) {
           await new Promise<void>((resolve) => {
             wake = resolve;
           });
         }
+
+        const failure = failures.shift();
+        if (failure !== undefined) throw failure.error;
 
         const read = ready.shift()!;
         offeredRead = read;

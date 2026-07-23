@@ -21,6 +21,20 @@ import type { AuthorizationDefinition, TokenResult } from "#runtime/connections/
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#shared/tool-schema.js";
 
+async function waitForHookRemoval(token: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  const world = await getWorld();
+  while (Date.now() < deadline) {
+    try {
+      await world.hooks.getByToken(token);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for hook "${token}" to be removed.`);
+}
+
 function buildSerializedContext(overrides: {
   auth?: Record<string, unknown>;
   channelKind: string;
@@ -291,6 +305,73 @@ describe("workflowEntry integration", () => {
       } finally {
         stream.dispose();
         await run.cancel();
+      }
+    });
+  });
+
+  it("creates and removes continuation state without replacing the owning session", async () => {
+    const runtime = createTestRuntime({
+      agent: { name: "workflow-entry-session-continuation-marker" },
+    });
+    const continuationToken = "slack:C1:T1";
+    const stateToken = `${continuationToken}:unsubscribed`;
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      await waitForHook({ runId: run.runId }, { token: continuationToken });
+
+      try {
+        await stream.nextTurn();
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+
+        await workflowRuntime.setSessionContinuationMarker!({
+          active: true,
+          continuationToken,
+          key: "unsubscribed",
+        });
+        await waitForHook({ runId: run.runId }, { token: stateToken });
+        await expect(workflowRuntime.resolveSession(stateToken)).resolves.toEqual({
+          sessionId: run.runId,
+        });
+        await expect(workflowRuntime.resolveSession(continuationToken)).resolves.toEqual({
+          sessionId: run.runId,
+        });
+
+        await workflowRuntime.setSessionContinuationMarker!({
+          active: false,
+          continuationToken,
+          key: "unsubscribed",
+        });
+        await expect(waitForHookRemoval(stateToken)).resolves.toBeUndefined();
+        await expect(workflowRuntime.resolveSession(stateToken)).resolves.toBeUndefined();
+        await expect(workflowRuntime.resolveSession(continuationToken)).resolves.toEqual({
+          sessionId: run.runId,
+        });
+
+        await workflowRuntime.setSessionContinuationMarker!({
+          active: true,
+          continuationToken,
+          key: "unsubscribed",
+        });
+        await waitForHook({ runId: run.runId }, { token: stateToken });
+        await run.cancel();
+        await expect(waitForHookRemoval(stateToken)).resolves.toBeUndefined();
+      } finally {
+        stream.dispose();
+        const status = await run.status;
+        if (status === "pending" || status === "running") await run.cancel();
       }
     });
   });

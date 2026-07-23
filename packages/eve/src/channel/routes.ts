@@ -25,6 +25,8 @@ export interface RouteHandlerArgs<TState = undefined> {
    * This point-in-time lookup does not reserve the continuation.
    */
   resolveActiveSession: ResolveActiveSessionFn;
+  /** Adds or removes workflow-owned state on an active continuation. */
+  setSessionContinuationMarker?: SetSessionContinuationMarkerFn;
   cancel: CancelFn;
   getSession: GetSessionFn;
   /**
@@ -72,6 +74,13 @@ export type SendFn<TState = undefined> = (
 export type ResolveActiveSessionFn = (options: {
   readonly continuationToken: string;
 }) => Promise<{ readonly sessionId: string } | undefined>;
+
+/** Adds or removes state owned by the continuation's workflow session. */
+export type SetSessionContinuationMarkerFn = (options: {
+  readonly active: boolean;
+  readonly continuationToken: string;
+  readonly key: string;
+}) => Promise<void>;
 
 type BaseSendOptions = {
   auth: SessionAuthContext | null;

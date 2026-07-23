@@ -66,6 +66,63 @@ describe("createSessionDeliveryHook", () => {
     ]);
   });
 
+  it("handles continuation markers without exposing them as deliveries", async () => {
+    const onMarker = vi.fn(async () => undefined);
+    const hook = createMockHook({
+      reads: [
+        Promise.resolve({
+          done: false,
+          value: {
+            active: true,
+            kind: "session-continuation-marker",
+            continuationToken: "slack:C1:T1",
+            key: "unsubscribed",
+          },
+        }),
+        Promise.resolve(delivery("next")),
+      ],
+      token: "active",
+    });
+    installHooks(hook);
+    const deliveryHook = createSessionDeliveryHook([], onMarker);
+
+    await deliveryHook.rekey("active");
+    await expect(deliveryHook.next()).resolves.toEqual(delivery("next"));
+    deliveryHook.consumeNext();
+
+    expect(onMarker).toHaveBeenCalledWith({
+      active: true,
+      continuationToken: "slack:C1:T1",
+      key: "unsubscribed",
+      kind: "session-continuation-marker",
+    });
+  });
+
+  it("rejects the next delivery read when session-continuation-marker processing fails", async () => {
+    const failure = new Error("marker creation failed");
+    const hook = createMockHook({
+      reads: [
+        Promise.resolve({
+          done: false,
+          value: {
+            active: true,
+            continuationToken: "slack:C1:T1",
+            key: "unsubscribed",
+            kind: "session-continuation-marker",
+          },
+        }),
+      ],
+      token: "active",
+    });
+    installHooks(hook);
+    const deliveryHook = createSessionDeliveryHook([], async () => {
+      throw failure;
+    });
+
+    await deliveryHook.rekey("active");
+    await expect(deliveryHook.next()).rejects.toBe(failure);
+  });
+
   it("disposes a conflicting candidate without releasing the active hook", async () => {
     const oldHook = createMockHook({ token: "old" });
     const candidateHook = createMockHook({

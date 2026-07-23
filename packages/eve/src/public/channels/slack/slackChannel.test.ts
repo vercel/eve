@@ -252,11 +252,13 @@ async function firePost(
   overrides: {
     readonly cancel?: ReturnType<typeof vi.fn>;
     readonly resolveActiveSession?: ReturnType<typeof vi.fn>;
+    readonly setSessionContinuationMarker?: ReturnType<typeof vi.fn>;
   } = {},
 ): Promise<{
   cancel: ReturnType<typeof vi.fn>;
   response: Response;
   send: ReturnType<typeof vi.fn>;
+  setSessionContinuationMarker: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
 }> {
   const compiled = asCompiled(channel);
@@ -266,13 +268,19 @@ async function firePost(
   }
   const cancel = overrides.cancel ?? vi.fn().mockResolvedValue({ status: "accepted" });
   const send = vi.fn().mockResolvedValue({ id: "s1", continuationToken: "ct" });
+  const setSessionContinuationMarker =
+    overrides.setSessionContinuationMarker ?? vi.fn().mockResolvedValue(undefined);
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
     cancel,
     send,
     resolveActiveSession:
-      overrides.resolveActiveSession ?? vi.fn().mockResolvedValue({ sessionId: "s1" }),
+      overrides.resolveActiveSession ??
+      vi.fn(async ({ continuationToken }: { continuationToken: string }) =>
+        continuationToken.endsWith(":unsubscribed") ? undefined : { sessionId: "s1" },
+      ),
+    setSessionContinuationMarker,
     waitUntil,
     getSession: vi.fn() as any,
     params: {},
@@ -286,7 +294,7 @@ async function firePost(
     await Promise.allSettled(pending);
   }
 
-  return { cancel, response, send, waitUntil };
+  return { cancel, response, send, setSessionContinuationMarker, waitUntil };
 }
 
 describe("slackChannel() default event handlers", () => {
@@ -1439,6 +1447,118 @@ describe("slackChannel() onMessage", () => {
       { mentioned: true, subscribed: true },
       { mentioned: false, subscribed: true },
     ]);
+  });
+
+  it("unsubscribes on a handoff mention and posts a fixed acknowledgement", async () => {
+    const acknowledgement =
+      "You mentioned someone else, so I'll step back. Mention me again if you need me.";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ ok: true, ts: "1700000001.000001" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      async onMessage(ctx, message) {
+        if (message.author?.isBot) return null;
+
+        const mentions = [...message.text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)];
+        if (!ctx.isBotMentioned() && mentions.length > 0 && (await ctx.isSubscribed())) {
+          await ctx.unsubscribe();
+          await ctx.thread.post(acknowledgement);
+          return null;
+        }
+
+        return ctx.isBotMentioned() || (await ctx.isSubscribed()) ? { auth: null } : null;
+      },
+    });
+    const reply = buildEventBody(
+      {
+        channel: "C01",
+        channel_type: "channel",
+        text: "handing this to <@U02>",
+        thread_ts: "1700000000.000100",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U01",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send, setSessionContinuationMarker } = await firePost(
+      channel,
+      buildSignedRequest({ body: reply }),
+    );
+
+    expect(send).not.toHaveBeenCalled();
+    expect(setSessionContinuationMarker).toHaveBeenCalledWith({
+      active: true,
+      continuationToken: "C01:1700000000.000100",
+      key: "unsubscribed",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
+    expect(parseSlackRequestBody(init)).toMatchObject({
+      channel: "C01",
+      markdown_text: acknowledgement,
+      thread_ts: "1700000000.000100",
+    });
+  });
+
+  it("exposes an explicit subscribe helper", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      async onMessage(ctx) {
+        await ctx.subscribe();
+        return null;
+      },
+    });
+    const reply = buildEventBody({
+      channel: "C01",
+      channel_type: "channel",
+      text: "rejoin",
+      thread_ts: "1700000000.000100",
+      ts: "1700000000.000200",
+      type: "message",
+      user: "U01",
+    });
+
+    const { send, setSessionContinuationMarker } = await firePost(
+      channel,
+      buildSignedRequest({ body: reply }),
+    );
+
+    expect(send).not.toHaveBeenCalled();
+    expect(setSessionContinuationMarker).toHaveBeenCalledWith({
+      active: false,
+      continuationToken: "C01:1700000000.000100",
+      key: "unsubscribed",
+    });
+  });
+
+  it("logs and drops a mention when resubscription fails", async () => {
+    const onMessage = vi.fn(() => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onMessage,
+    });
+    const mention = buildMentionBody({ text: "<@U_BOT> come back" });
+    const failure = new Error("marker removal failed");
+    const resolveActiveSession = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    const setSessionContinuationMarker = vi.fn().mockRejectedValue(failure);
+
+    const { send } = await firePost(channel, buildSignedRequest({ body: mention.body }), {
+      resolveActiveSession,
+      setSessionContinuationMarker,
+    });
+
+    expect(setSessionContinuationMarker).toHaveBeenCalledWith({
+      active: false,
+      continuationToken: "C01:1700000000.000019",
+      key: "unsubscribed",
+    });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("allows a simple mention-or-subscription policy", async () => {
@@ -2751,6 +2871,8 @@ describe("slackChannel().receive", () => {
     const waitUntil = vi.fn();
     await post.handler(req, {
       send: inboundSend,
+      resolveActiveSession: vi.fn().mockResolvedValue(undefined),
+      setSessionContinuationMarker: vi.fn().mockResolvedValue(undefined),
       waitUntil,
       getSession: vi.fn() as any,
       receive: vi.fn() as any,

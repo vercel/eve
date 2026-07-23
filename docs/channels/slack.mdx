@@ -86,7 +86,33 @@ export default slackChannel({
 });
 ```
 
-`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
+`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to an active eve session that has not been unsubscribed.
+
+For example, the following policy treats mentioning another person without mentioning the bot as a handoff and unsubscribes the bot from the thread:
+
+```ts title="agent/channels/slack.ts"
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  async onMessage(ctx, message) {
+    if (message.author?.isBot) return null;
+
+    const mentions = [...message.text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)];
+    if (!ctx.isBotMentioned() && mentions.length > 0 && (await ctx.isSubscribed())) {
+      await ctx.unsubscribe();
+      await ctx.thread.post(
+        "You mentioned someone else, so I'll step back. Mention me again if you need me.",
+      );
+      return null;
+    }
+
+    return ctx.isBotMentioned() || (await ctx.isSubscribed()) ? { auth: null } : null;
+  },
+});
+```
+
+`ctx.unsubscribe()` marks the thread as unsubscribed while preserving its session and history, so later calls to `ctx.isSubscribed()` return `false`. Call `ctx.subscribe()` to mark it as subscribed again; explicitly mentioning the bot does this automatically and resumes the same session. Authored hook logic decides how subscription status affects message routing.
+
+For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
 
 Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:
 
