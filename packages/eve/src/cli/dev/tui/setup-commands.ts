@@ -316,6 +316,12 @@ async function executeSetupCommand(
         preserveFlowDiagnostics: command !== "model",
       };
     }
+    const upgrade = await vercelCliUpgradeOutcome(error, command, flows, {
+      appRoot,
+      prompter,
+      signal,
+    });
+    if (upgrade !== undefined) return upgrade;
     // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
     // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
     // dumping the raw "Human action required" message.
@@ -329,12 +335,102 @@ async function executeSetupCommand(
 }
 
 /**
+ * Offers to upgrade an old Vercel CLI when setup reports an unsupported
+ * capability. This prompt is intentionally at the TUI boundary: shared setup
+ * callers retain the structured human action, while an interactive command can
+ * perform the recovery in place after the user opts in.
+ */
+async function vercelCliUpgradeOutcome(
+  error: unknown,
+  command: string,
+  flows: TuiSetupFlows,
+  input: { appRoot: string; prompter: Prompter; signal: AbortSignal },
+): Promise<TuiSetupCommandResult | undefined> {
+  if (!(error instanceof HumanActionRequiredError) || error.action.kind !== "vercel-cli-upgrade") {
+    return undefined;
+  }
+
+  let choice: "upgrade" | "later";
+  try {
+    choice = await input.prompter.select({
+      message: "Your Vercel CLI needs an update to list your teams. Upgrade now?",
+      options: [
+        {
+          value: "upgrade",
+          label: "Upgrade Vercel CLI",
+          description: "Run the Vercel CLI's native upgrader",
+        },
+        { value: "later", label: "Not now" },
+      ],
+      initialValue: "upgrade",
+    });
+  } catch {
+    choice = "later";
+  }
+
+  if (choice === "later") {
+    return {
+      message: `The Vercel CLI needs an update — run \`vercel upgrade\`, then retry /${command}.`,
+      preserveFlowDiagnostics: true,
+    };
+  }
+
+  let result: InstallVercelCliResult;
+  try {
+    result = await flows.runInstallVercelCliFlow({
+      appRoot: input.appRoot,
+      prompter: input.prompter,
+      signal: input.signal,
+      upgrade: true,
+    });
+  } catch (error) {
+    return {
+      message: vercelCliUpgradeFailureMessage(command, errorMessage(error)),
+      preserveFlowDiagnostics: true,
+    };
+  }
+  switch (result.kind) {
+    case "installed":
+      return {
+        message: `Upgraded the Vercel CLI. Retry /${command}.`,
+        preserveFlowDiagnostics: false,
+      };
+    case "failed":
+      return {
+        message: vercelCliUpgradeFailureMessage(command, result.reason),
+        preserveFlowDiagnostics: true,
+      };
+    case "cancelled":
+      return {
+        message: `Vercel CLI upgrade cancelled — run \`vercel upgrade\`, then retry /${command}.`,
+        preserveFlowDiagnostics: true,
+      };
+    case "already":
+      return {
+        message: `The Vercel CLI is already up to date. Retry /${command}.`,
+        preserveFlowDiagnostics: false,
+      };
+  }
+}
+
+function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const compact = message.replace(/\s+/gu, " ").trim();
+  return compact.length <= 240 ? compact : `${compact.slice(0, 239)}…`;
+}
+
+function vercelCliUpgradeFailureMessage(command: string, reason?: string): string {
+  const detail = reason === undefined || reason === "" ? "" : ` (${reason})`;
+  return `Couldn't upgrade the Vercel CLI${detail} — run \`vercel upgrade\`, then retry /${command}.`;
+}
+
+/**
  * Translates a Vercel {@link HumanActionRequiredError} into the in-TUI routing
  * message, or `undefined` for anything else. One translator so every path that
  * can surface a provisioning action — the command catch, the `/channels`
  * partial-success result, and the deploy-and-chat continuation — routes
- * `vercel-login`, `vercel-forbidden`, and `vercel-cli-missing` the same way
- * rather than leaking the raw error text.
+ * login, forbidden-scope, and CLI recovery actions the same way rather than
+ * leaking the raw error text.
  */
 function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandResult | undefined {
   if (!(error instanceof HumanActionRequiredError)) return undefined;
@@ -351,6 +447,8 @@ function vercelActionMessage(kind: string, command: string): string | undefined 
       return `Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
     case "vercel-cli-missing":
       return `The Vercel CLI isn't installed — run /vc:install to install it, then retry /${command}.`;
+    case "vercel-cli-upgrade":
+      return `The Vercel CLI needs an update — run \`vercel upgrade\`, then retry /${command}.`;
     default:
       return undefined;
   }

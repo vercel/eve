@@ -34,10 +34,7 @@ describe("listTeams", () => {
       )
       .mockResolvedValueOnce(
         captured({
-          teams: [
-            { name: "Current", slug: "current", current: true },
-            { name: "Other", slug: "other", current: false },
-          ],
+          teams: [{ name: "Other", slug: "other" }],
           pagination: { next: null },
         }),
       );
@@ -47,8 +44,13 @@ describe("listTeams", () => {
       { name: "Other", slug: "other", current: false },
     ]);
     expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      1,
+      ["teams", "ls", "--format", "json", "--limit", "100"],
+      { cwd: "/repo", signal: undefined },
+    );
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
       2,
-      ["teams", "ls", "--format", "json", "--next", "20"],
+      ["api", "/v2/teams?limit=100&until=20"],
       { cwd: "/repo", signal: undefined },
     );
   });
@@ -56,7 +58,22 @@ describe("listTeams", () => {
   it("rejects a repeated pagination cursor", async () => {
     mockedCaptureVercel.mockResolvedValue(captured({ teams: [], pagination: { next: 20 } }));
 
-    await expect(listTeams("/repo")).rejects.toThrow("repeated pagination cursor");
+    await expect(listTeams("/repo")).rejects.toThrow(
+      "Vercel returned a repeated pagination cursor",
+    );
+  });
+
+  it("requests a CLI upgrade when the team-list flags are unsupported", async () => {
+    mockedCaptureVercel.mockResolvedValue(failed("Error: unknown or unexpected option: --limit"));
+
+    await expect(listTeams("/repo")).rejects.toMatchObject({
+      name: "HumanActionRequiredError",
+      action: {
+        kind: "vercel-cli-upgrade",
+        command: "vercel upgrade",
+        reason: expect.stringContaining("does not support"),
+      },
+    });
   });
 
   it("rejects an invalid entry instead of returning a partial page", async () => {

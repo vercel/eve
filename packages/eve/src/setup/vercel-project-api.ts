@@ -48,6 +48,16 @@ const VercelTeamPageSchema = z
   })
   .transform((data) => ({ items: data.teams, next: data.pagination?.next ?? undefined }));
 
+const VercelApiTeamPageSchema = z
+  .object({
+    teams: z.array(VercelTeamListEntrySchema.omit({ current: true })),
+    pagination: VercelPaginationSchema.optional(),
+  })
+  .transform((data) => ({
+    items: data.teams.map((team) => ({ ...team, current: false })),
+    next: data.pagination?.next ?? undefined,
+  }));
+
 const VercelProjectPageSchema = z
   .object({
     projects: z.array(VercelProjectListEntrySchema),
@@ -66,7 +76,7 @@ export function parseVercelJson(stdout: string, description: string): unknown {
 
 /**
  * Drains a cursor-paginated Vercel list, deduping by `key`. A repeated cursor
- * means Vercel paged us in a circle — bail rather than loop forever.
+ * means the API paged us in a circle — bail rather than loop forever.
  */
 async function drainPages<T>(
   label: string,
@@ -78,7 +88,10 @@ async function drainPages<T>(
   let next: number | undefined;
   while (true) {
     const page = await fetchPage(next);
-    for (const item of page.items) items.set(key(item), item);
+    for (const item of page.items) {
+      const itemKey = key(item);
+      if (!items.has(itemKey)) items.set(itemKey, item);
+    }
     if (page.next === undefined) return [...items.values()];
     if (cursors.has(page.next)) {
       throw new Error(`Vercel returned a repeated pagination cursor for ${label}.`);
@@ -99,21 +112,62 @@ export function requireVercelTeamAccess(failure: VercelCaptureFailure): never {
   });
 }
 
+const VERCEL_TEAM_PAGE_LIMIT = 100;
+
+function isUnsupportedTeamListFailure(failure: VercelCaptureFailure): boolean {
+  const output = `${failure.stderr}\n${failure.stdout}`;
+  return /(?:unknown|unexpected|invalid).*(?:--format|--limit)/iu.test(output);
+}
+
+function requireVercelCliUpgrade(failure: VercelCaptureFailure): never {
+  throw new HumanActionRequiredError({
+    kind: "vercel-cli-upgrade",
+    command: "vercel upgrade",
+    reason: `The installed Vercel CLI does not support the team-list options eve needs. ${failure.message} Upgrade it and retry.`,
+  });
+}
+
+async function captureTeamPage(
+  projectRoot: string,
+  options: VercelProjectOperationOptions,
+  args: string[],
+): Promise<string> {
+  const result = await captureVercel(args, { cwd: projectRoot, signal: options.signal });
+  options.signal?.throwIfAborted();
+  if (!result.ok) {
+    if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
+    if (isUnsupportedTeamListFailure(result.failure)) requireVercelCliUpgrade(result.failure);
+    throw new Error(`Could not list Vercel teams. ${result.failure.message}`);
+  }
+  return result.stdout;
+}
+
 async function fetchTeamPage(
   projectRoot: string,
   options: VercelProjectOperationOptions,
   next: number | undefined,
 ): Promise<VercelPage<VercelTeamListEntry>> {
-  const args = ["teams", "ls", "--format", "json"];
-  if (next !== undefined) args.push("--next", String(next));
-  const result = await captureVercel(args, { cwd: projectRoot, signal: options.signal });
-  options.signal?.throwIfAborted();
-  if (!result.ok) {
-    if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
-    throw new Error(`Could not list Vercel teams. ${result.failure.message}`);
+  if (next === undefined) {
+    const stdout = await captureTeamPage(projectRoot, options, [
+      "teams",
+      "ls",
+      "--format",
+      "json",
+      "--limit",
+      String(VERCEL_TEAM_PAGE_LIMIT),
+    ]);
+    const parsed = VercelTeamPageSchema.safeParse(parseVercelJson(stdout, "teams"));
+    if (!parsed.success) throw new Error("Could not read teams from Vercel CLI JSON output.");
+    return parsed.data;
   }
-  const parsed = VercelTeamPageSchema.safeParse(parseVercelJson(result.stdout, "teams"));
-  if (!parsed.success) throw new Error("Could not read teams from Vercel CLI JSON output.");
+
+  // The teams command currently sends its `--next` value as an API `next`
+  // parameter, while the teams API consumes the emitted timestamp as `until`.
+  // Use the CLI's authenticated API passthrough for continuation pages.
+  const path = `/v2/teams?limit=${VERCEL_TEAM_PAGE_LIMIT}&until=${next}`;
+  const stdout = await captureTeamPage(projectRoot, options, ["api", path]);
+  const parsed = VercelApiTeamPageSchema.safeParse(parseVercelJson(stdout, "teams"));
+  if (!parsed.success) throw new Error("Could not read teams from Vercel API JSON output.");
   return parsed.data;
 }
 
