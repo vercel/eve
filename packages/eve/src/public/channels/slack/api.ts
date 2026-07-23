@@ -210,6 +210,19 @@ export interface SlackThread {
   readonly recentMessages: readonly SlackThreadMessage[];
 
   /**
+   * Fetch the latest replies via {@link refresh} and return the unique
+   * human Slack user ids participating in this thread, ordered by first
+   * appearance. For a human-started thread, the first entry is the
+   * starting author. Bot messages and user-less system messages are
+   * excluded.
+   *
+   * Shares {@link refresh} semantics: it observes at most the first 50
+   * messages of the thread, and refresh failures are logged and swallowed,
+   * so the returned list may be empty or stale.
+   */
+  listParticipants(): Promise<readonly string[]>;
+
+  /**
    * Post a reply to this thread.
    *
    * Bare-form shortcuts: `string` becomes `{ markdown }` (so `**bold**` /
@@ -387,6 +400,16 @@ export function buildSlackBinding(input: {
 
   const thread: SlackThread = {
     recentMessages: messages,
+    async listParticipants() {
+      await thread.refresh();
+      const participants = new Set<string>();
+      for (const message of messages) {
+        if (message.user !== undefined && message.botId === undefined) {
+          participants.add(message.user);
+        }
+      }
+      return [...participants];
+    },
     async post(rawMessage) {
       const message = normalizePostInput(rawMessage);
       const files = message.files ?? [];

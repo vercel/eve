@@ -326,6 +326,15 @@ export const zernioLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const veltLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="50 50 130 130" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      fill="currentColor"
+      d="m138.239 85.116-19.019 27.897 37.616 2.959zm5.068-1.694 15.216 24.515-1.691-23.67zm19.018 8.891 1.691 21.557 8.031-5.918zm9.298 22.405-6.762 5.072 2.536 13.948zm-30.42 39.298 19.441-28.742 3.804 19.443zm-3.27 6.893 2.535 6.41 14.314-13.177zm-4.806 2.253-17.071 8.536 19.573-2.028zm-7.171-2.318-22.56 11.314-4.8-15.43zm-32.941-4.459 4.226 13.779-20.118-11.842zM73.904 125.52l-2.069 28.13 18.618-2.201-16.55-25.929zm-4.921-4.711-1.805 25.093-9.904-22.452zm-6.965-26.4L57 118.18l11.49-2.509-6.472-21.263zm2.815-8.554 7.792 25.181 18.18-31.344zm49.78 35.55-15.75 30.04 31.365 4.752zm42.379-.419-21.953 33.036-16.152-35.71zm-46.654-2.674-33.872 1.69 18.175 28.326zM95.862 81.403l-19.395 33.243 34.225-1.63zm37.769 1.185-18.481 27.603-14.821-31.323zm.424-18.908 5.94 14.401 11.401.78zm23.093 11.049-.31 2.04-6.47-5.881zm-31.139-16.494-22.742 15.722 30.782 3.54zM93.24 60.567l4.2 11.221L117.124 58l-23.882 2.567zm-4.721 2.241-17.8 16.254 21.872-5.115z"
+    />
+  </svg>
+);
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -463,6 +472,7 @@ export const logos = {
   zomato: zomatoLogo,
 
   zernio: zernioLogo,
+  velt: veltLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
