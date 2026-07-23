@@ -447,8 +447,6 @@ export const larkLogo = (props: LogoProps) => (
   </svg>
 );
 
-export const googlechatLo
-
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
