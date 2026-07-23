@@ -12,12 +12,20 @@ function mergeUnique<T>(existing: readonly T[] | undefined, added: readonly T[])
   return [...new Set([...(existing ?? []), ...added])];
 }
 
+function normalizeBundlerPlugins(plugins: unknown): unknown[] {
+  if (plugins === undefined) {
+    return [];
+  }
+
+  return Array.isArray(plugins) ? plugins : [plugins];
+}
+
 function mergeBundlerConfig(
   existing: Record<string, unknown> | undefined,
   added: Record<string, unknown>,
 ): Record<string, unknown> {
-  const existingPlugins = Array.isArray(existing?.plugins) ? existing.plugins : [];
-  const addedPlugins = Array.isArray(added.plugins) ? added.plugins : [];
+  const existingPlugins = normalizeBundlerPlugins(existing?.plugins);
+  const addedPlugins = normalizeBundlerPlugins(added.plugins);
   const existingOnLog = existing?.onLog;
   const addedOnLog = added.onLog;
   const merged: Record<string, unknown> = {

@@ -221,6 +221,32 @@ describe("createEveNitroContribution", () => {
     ]);
   });
 
+  it.each(["rollupConfig", "rolldownConfig"] as const)(
+    "preserves a host %s single plugin option",
+    (configKey) => {
+      const contribution = createEveNitroContribution(createPreparedHost(), {
+        mode: "production",
+        preset: undefined,
+        surface: "all",
+      });
+      const hostPlugin = { name: "host-plugin" };
+
+      const merged = mergeEveNitroConfig(
+        {
+          [configKey]: { plugins: hostPlugin },
+        },
+        contribution,
+      );
+
+      expect(merged[configKey]?.plugins).toEqual([
+        hostPlugin,
+        ...(Array.isArray(contribution.configDelta[configKey].plugins)
+          ? contribution.configDelta[configKey].plugins
+          : []),
+      ]);
+    },
+  );
+
   it("applies the additive delta to resolved Nitro options without changing host policy", () => {
     const contribution = createEveNitroContribution(createPreparedHost(), {
       host: "embedded",
