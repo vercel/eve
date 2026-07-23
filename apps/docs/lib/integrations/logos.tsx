@@ -458,7 +458,7 @@ export const beeperLogo = (props: LogoProps) => (
   </svg>
 );
 
-export const resendLogo = (props: LogoProps) => <SiResend {...props}>;
+export const resendLogo = (props: LogoProps) => <SiResend {...props} />;
 
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
