@@ -80,6 +80,8 @@ interface ExecuteInfo {
   params: string;
   /** Body source (block statement including braces) */
   body: string;
+  /** Function body AST used to identify actual identifier references */
+  bodyNode: AstNode;
   /** Scope entries from nested functions between handler and this execute */
   nestedScopes: readonly ScopeEntry[];
 }
@@ -382,18 +384,22 @@ function walkForExecuteProps(
         if (isFn || isMethod) {
           const params = extractFnParams(source, fn);
           const body = extractFnBody(source, fn);
+          const bodyNode = fn.body as AstNode | undefined;
           const isAsync = fn.async === true;
 
-          results.push({
-            propStart: prop.start,
-            propEnd: prop.end,
-            fnSource: source.slice(fn.start, fn.end),
-            isAsync,
-            params,
-            body,
-            hoistedName: `__eve_dynamic_exec_${transformCounter++}`,
-            nestedScopes,
-          });
+          if (bodyNode) {
+            results.push({
+              propStart: prop.start,
+              propEnd: prop.end,
+              fnSource: source.slice(fn.start, fn.end),
+              isAsync,
+              params,
+              body,
+              bodyNode,
+              hoistedName: `__eve_dynamic_exec_${transformCounter++}`,
+              nestedScopes,
+            });
+          }
         }
       }
     }
@@ -494,7 +500,7 @@ function applyTransform(source: string, handlers: HandlerInfo[]): { code: string
       // Only capture vars the execute body actually references. This
       // avoids TDZ errors when the execute is inside a nested function
       // that runs before later handler-level declarations are initialized.
-      const bodyText = exec.body;
+      const referencedNames = collectReferencedIdentifierNames(exec.bodyNode);
 
       // Exclude names that collide with the execute function's own
       // parameters — the hoisted function already has those as formal
@@ -503,8 +509,7 @@ function applyTransform(source: string, handlers: HandlerInfo[]): { code: string
       const execParamNames = extractExecuteParamNames(exec.params);
 
       const allVars = deduped.filter(
-        (name) =>
-          !execParamNames.has(name) && new RegExp(`\\b${escapeForRegex(name)}\\b`).test(bodyText),
+        (name) => !execParamNames.has(name) && referencedNames.has(name),
       );
 
       const varsObj = allVars.length > 0 ? `{ ${allVars.join(", ")} }` : "{}";
@@ -615,8 +620,108 @@ function findProperty(obj: AstNode, name: string): AstNode | undefined {
   );
 }
 
-function escapeForRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function collectReferencedIdentifierNames(node: AstNode): Set<string> {
+  const names = new Set<string>();
+
+  const visit = (
+    current: AstNode,
+    parent: AstNode | undefined,
+    parentKey: string | undefined,
+    ancestors: readonly AstNode[],
+  ): void => {
+    if (
+      current.type === "Identifier" &&
+      current.name &&
+      isIdentifierReference(parent, parentKey, ancestors)
+    ) {
+      names.add(current.name);
+    }
+
+    const nextAncestors = [...ancestors, current];
+    for (const [key, value] of Object.entries(current)) {
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          if (isAstNode(child)) {
+            visit(child, current, key, nextAncestors);
+          }
+        }
+      } else if (isAstNode(value)) {
+        visit(value, current, key, nextAncestors);
+      }
+    }
+  };
+
+  visit(node, undefined, undefined, []);
+  return names;
+}
+
+function isIdentifierReference(
+  parent: AstNode | undefined,
+  parentKey: string | undefined,
+  ancestors: readonly AstNode[],
+): boolean {
+  if (!parent || !parentKey) return false;
+
+  if (
+    parentKey === "typeAnnotation" ||
+    parentKey === "returnType" ||
+    parentKey === "typeParameters" ||
+    parentKey === "typeArguments" ||
+    ancestors.some((ancestor) => ancestor.type?.startsWith("TS"))
+  ) {
+    return false;
+  }
+
+  if (
+    (parent.type === "MemberExpression" ||
+      parent.type === "OptionalMemberExpression" ||
+      parent.type === "Property" ||
+      parent.type === "MethodDefinition" ||
+      parent.type === "PropertyDefinition") &&
+    parentKey === "key"
+  ) {
+    return parent.computed === true;
+  }
+
+  if (
+    (parent.type === "MemberExpression" || parent.type === "OptionalMemberExpression") &&
+    parentKey === "property"
+  ) {
+    return parent.computed === true;
+  }
+
+  if (
+    (parent.type === "VariableDeclarator" && parentKey === "id") ||
+    ((parent.type === "FunctionExpression" ||
+      parent.type === "ArrowFunctionExpression" ||
+      parent.type === "FunctionDeclaration") &&
+      (parentKey === "id" || parentKey === "params")) ||
+    (parent.type === "CatchClause" && parentKey === "param") ||
+    ((parent.type === "ClassDeclaration" || parent.type === "ClassExpression") &&
+      parentKey === "id") ||
+    ((parent.type === "LabeledStatement" ||
+      parent.type === "BreakStatement" ||
+      parent.type === "ContinueStatement") &&
+      parentKey === "label")
+  ) {
+    return false;
+  }
+
+  if (
+    parent.type === "ObjectPattern" ||
+    parent.type === "ArrayPattern" ||
+    ancestors.some(
+      (ancestor) => ancestor.type === "ObjectPattern" || ancestor.type === "ArrayPattern",
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isAstNode(value: unknown): value is AstNode {
+  return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
 }
 
 /**

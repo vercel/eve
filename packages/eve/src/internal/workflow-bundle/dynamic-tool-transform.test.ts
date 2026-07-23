@@ -271,6 +271,61 @@ export default defineDynamic({
     expect(readStepFn).not.toBe(writeStepFn);
   });
 
+  it("does not capture object keys or text from string literals", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => {
+      const tools = {};
+
+      tools.probe_alpha = defineTool({
+        description: "probe alpha",
+        inputSchema: { type: "object" },
+        execute({ q }) {
+          return { url: "/x/" + q, note: "answer from app tools only" };
+        },
+      });
+
+      {
+        const url = "https://example.com";
+        const cred = { a: 1 };
+        tools.probe_beta = defineTool({
+          description: "probe beta",
+          inputSchema: { type: "object" },
+          execute() {
+            return { target: url, cred };
+          },
+        });
+      }
+
+      return tools;
+    },
+  },
+});
+`;
+
+    const { callHandler } = await transformAndEval("tools/reference-analysis.ts", source);
+    const tools = await callHandler();
+    const alpha = tools.probe_alpha as Record<string, unknown>;
+    const beta = tools.probe_beta as Record<string, unknown>;
+
+    expect(alpha.__closureVars).toEqual({});
+    expect((alpha.execute as Function)({ q: "one" })).toEqual({
+      note: "answer from app tools only",
+      url: "/x/one",
+    });
+    expect(beta.__closureVars).toEqual({
+      cred: { a: 1 },
+      url: "https://example.com",
+    });
+    expect((beta.execute as Function)()).toEqual({
+      cred: { a: 1 },
+      target: "https://example.com",
+    });
+  });
+
   it("async execute preserves await semantics", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";
