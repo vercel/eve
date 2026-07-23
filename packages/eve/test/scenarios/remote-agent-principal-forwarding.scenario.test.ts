@@ -11,10 +11,10 @@ import {
 import { startEveDev } from "./dev-server-harness.js";
 
 /**
- * Locks the remote-agent auth-forwarding hop over a real HTTP boundary: the
+ * Locks the remote-agent principal-forwarding hop over a real HTTP boundary: the
  * test process plays the router deployment (driving the real sender dispatch
  * function) against a receiver dev server whose `eveChannel` configures
- * `acceptForwardedAuth`. The receiver's `onMessage` asserts that the
+ * `acceptForwardedPrincipalFrom`. The receiver's `onMessage` asserts that the
  * forwarded principal — not the transport caller — became the effective
  * session caller, with the `eve:forwarded-by` audit attribute stamped from
  * the verified transport principal.
@@ -50,7 +50,7 @@ export default eveChannel({
       principalType: "service",
     };
   },
-  acceptForwardedAuth: (caller) => caller.principalId === "router-app",
+  acceptForwardedPrincipalFrom: (caller) => caller.principalId === "router-app",
   onMessage(ctx) {
     const caller = ctx.eve.caller;
     if (
@@ -67,7 +67,7 @@ export default eveChannel({
     "agent/instructions.md": "Reply tersely.\n",
   },
   installDependencies: true,
-  name: "forwarded-auth-receiver",
+  name: "forwarded-principal-receiver",
 };
 
 const FORWARDED_USER: SessionAuthContext = {
@@ -103,7 +103,7 @@ describe("remote agent auth forwarding", () => {
         // The 202 response carries the acceptance acknowledgment.
         const rawResponse = await fetch(new URL("/eve/v1/session", receiver.url), {
           body: JSON.stringify({
-            forwardedAuth: { current: FORWARDED_USER },
+            forwardedPrincipal: { current: FORWARDED_USER },
             message: "raw forwarded create",
             mode: "task",
           }),
@@ -115,7 +115,7 @@ describe("remote agent auth forwarding", () => {
         });
         expect(rawResponse.status).toBe(202);
         await expect(rawResponse.json()).resolves.toMatchObject({
-          forwardedAuth: "accepted",
+          forwardedPrincipal: "accepted",
           ok: true,
         });
 
@@ -165,7 +165,7 @@ function createRemote(input: {
   return {
     auth: async () => ({ headers: { authorization: `Bearer ${input.token}` } }),
     description: "Executes site operations as the requesting user.",
-    forwardAuth: true,
+    forwardPrincipal: true,
     kind: "remote",
     logicalPath: "subagents/site-ops.ts",
     name: "site-ops",

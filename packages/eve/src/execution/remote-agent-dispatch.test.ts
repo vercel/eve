@@ -179,7 +179,7 @@ describe("startRemoteAgentSession", () => {
   });
 });
 
-describe("startRemoteAgentSession — forwarded auth", () => {
+describe("startRemoteAgentSession — forwarded principal", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -204,7 +204,7 @@ describe("startRemoteAgentSession — forwarded auth", () => {
 
   function acceptedResponse(): Response {
     return new Response(
-      JSON.stringify({ forwardedAuth: "accepted", ok: true, sessionId: "remote-session" }),
+      JSON.stringify({ forwardedPrincipal: "accepted", ok: true, sessionId: "remote-session" }),
       { status: 202 },
     );
   }
@@ -219,7 +219,7 @@ describe("startRemoteAgentSession — forwarded auth", () => {
     };
   }
 
-  it("forwards the current and initiator principals when forwardAuth is set", async () => {
+  it("forwards the current and initiator principals when forwardPrincipal is set", async () => {
     const fetchMock = vi.fn().mockResolvedValue(acceptedResponse());
     vi.stubGlobal("fetch", fetchMock);
 
@@ -229,12 +229,12 @@ describe("startRemoteAgentSession — forwarded auth", () => {
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
         initiatorAuth: INITIATOR_AUTH,
-        remote: { ...createRemoteAgent(), forwardAuth: true },
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
         session: createSession(),
       }),
     ).resolves.toBe("remote-session");
 
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedAuth).toEqual({
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedPrincipal).toEqual({
       current: CURRENT_AUTH,
       initiator: INITIATOR_AUTH,
     });
@@ -249,11 +249,11 @@ describe("startRemoteAgentSession — forwarded auth", () => {
       auth: CURRENT_AUTH,
       callbackBaseUrl: "https://caller.example.com",
       initiatorAuth: null,
-      remote: { ...createRemoteAgent(), forwardAuth: true },
+      remote: { ...createRemoteAgent(), forwardPrincipal: true },
       session: createSession(),
     });
 
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedAuth).toEqual({
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedPrincipal).toEqual({
       current: CURRENT_AUTH,
     });
   });
@@ -272,17 +272,17 @@ describe("startRemoteAgentSession — forwarded auth", () => {
         auth: null,
         callbackBaseUrl: "https://caller.example.com",
         initiatorAuth: null,
-        remote: { ...createRemoteAgent(), forwardAuth: true },
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
         session: createSession(),
       }),
     ).resolves.toBe("remote-session");
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
-      "forwardedAuth",
+      "forwardedPrincipal",
     );
   });
 
-  it("does not forward when forwardAuth is unset even with auth in scope", async () => {
+  it("does not forward when forwardPrincipal is unset even with auth in scope", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
@@ -302,7 +302,7 @@ describe("startRemoteAgentSession — forwarded auth", () => {
     ).resolves.toBe("remote-session");
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
-      "forwardedAuth",
+      "forwardedPrincipal",
     );
   });
 
@@ -325,10 +325,10 @@ describe("startRemoteAgentSession — forwarded auth", () => {
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
         initiatorAuth: INITIATOR_AUTH,
-        remote: { ...createRemoteAgent(), forwardAuth: true },
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
         session: createSession(),
       }),
-    ).rejects.toThrow(/did not acknowledge forwarded auth/);
+    ).rejects.toThrow(/did not acknowledge the forwarded principal/);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
@@ -351,10 +351,10 @@ describe("startRemoteAgentSession — forwarded auth", () => {
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
         initiatorAuth: null,
-        remote: { ...createRemoteAgent(), forwardAuth: true },
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
         session: createSession(),
       }),
-    ).rejects.toThrow(/did not acknowledge forwarded auth/);
+    ).rejects.toThrow(/did not acknowledge the forwarded principal/);
   });
 });
 

@@ -296,7 +296,7 @@ function normalizeRemoteAgentDefinition(
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["auth", "description", "forwardAuth", "headers", "kind", "outputSchema", "path", "url"],
+    ["auth", "description", "forwardPrincipal", "headers", "kind", "outputSchema", "path", "url"],
     message,
   );
 
@@ -304,10 +304,14 @@ function normalizeRemoteAgentDefinition(
     throw new Error(`${message} Expected "kind" to be "remote".`);
   }
 
-  // `forwardAuth` rides the module-backed runtime definition (like `auth` and
-  // `headers`), so it is validated here but never baked into the manifest.
-  if (record.forwardAuth !== undefined) {
-    expectBoolean(record.forwardAuth, `${message} Expected "forwardAuth" to be a boolean.`);
+  // `forwardPrincipal` rides the module-backed runtime definition (like
+  // `auth` and `headers`), so it is validated here but never baked into the
+  // manifest.
+  if (record.forwardPrincipal !== undefined) {
+    expectBoolean(
+      record.forwardPrincipal,
+      `${message} Expected "forwardPrincipal" to be a boolean.`,
+    );
   }
 
   return {

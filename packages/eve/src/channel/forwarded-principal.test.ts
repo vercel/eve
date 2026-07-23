@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   FORWARDED_BY_ATTRIBUTE,
-  parseForwardedAuth,
+  parseForwardedPrincipal,
   stampForwardedBy,
-} from "#channel/forwarded-auth.js";
+} from "#channel/forwarded-principal.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 function slackUser(overrides: Partial<SessionAuthContext> = {}): SessionAuthContext {
@@ -19,19 +19,19 @@ function slackUser(overrides: Partial<SessionAuthContext> = {}): SessionAuthCont
   };
 }
 
-describe("parseForwardedAuth", () => {
+describe("parseForwardedPrincipal", () => {
   it("accepts a current-only payload", () => {
-    const result = parseForwardedAuth({ current: slackUser() });
+    const result = parseForwardedPrincipal({ current: slackUser() });
 
-    expect(result).toEqual({ forwardedAuth: { current: slackUser() }, ok: true });
+    expect(result).toEqual({ forwardedPrincipal: { current: slackUser() }, ok: true });
   });
 
   it("accepts a payload with a distinct initiator", () => {
     const initiator = slackUser({ principalId: "slack:U999", subject: "U999" });
-    const result = parseForwardedAuth({ current: slackUser(), initiator });
+    const result = parseForwardedPrincipal({ current: slackUser(), initiator });
 
     expect(result).toEqual({
-      forwardedAuth: { current: slackUser(), initiator },
+      forwardedPrincipal: { current: slackUser(), initiator },
       ok: true,
     });
   });
@@ -39,7 +39,7 @@ describe("parseForwardedAuth", () => {
   it("keeps authenticator and principalType open for channel-produced contexts", () => {
     // The flagship use case: a Slack-authenticated user forwarded by a router
     // deployment. The wire schema must not mirror the runtime enum schema.
-    const result = parseForwardedAuth({
+    const result = parseForwardedPrincipal({
       current: {
         attributes: {},
         authenticator: "twilio-webhook",
@@ -52,13 +52,13 @@ describe("parseForwardedAuth", () => {
   });
 
   it("accepts string-array attribute values", () => {
-    const result = parseForwardedAuth({
+    const result = parseForwardedPrincipal({
       current: slackUser({ attributes: { groups: ["eng", "ops"], team: "T1" } }),
     });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.forwardedAuth.current.attributes).toEqual({
+      expect(result.forwardedPrincipal.current.attributes).toEqual({
         groups: ["eng", "ops"],
         team: "T1",
       });
@@ -66,7 +66,7 @@ describe("parseForwardedAuth", () => {
   });
 
   it("omits absent optional fields instead of writing undefined", () => {
-    const result = parseForwardedAuth({
+    const result = parseForwardedPrincipal({
       current: {
         attributes: {},
         authenticator: "jwt-hmac",
@@ -77,8 +77,8 @@ describe("parseForwardedAuth", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(Object.keys(result.forwardedAuth.current)).not.toContain("issuer");
-      expect(Object.keys(result.forwardedAuth.current)).not.toContain("subject");
+      expect(Object.keys(result.forwardedPrincipal.current)).not.toContain("issuer");
+      expect(Object.keys(result.forwardedPrincipal.current)).not.toContain("subject");
     }
   });
 
@@ -87,49 +87,49 @@ describe("parseForwardedAuth", () => {
     ["null", null],
     ["an array", [slackUser()]],
   ])("rejects %s payload", (_label, value) => {
-    const result = parseForwardedAuth(value);
+    const result = parseForwardedPrincipal(value);
 
     expect(result.ok).toBe(false);
   });
 
   it("rejects a payload without current", () => {
-    const result = parseForwardedAuth({ initiator: slackUser() });
+    const result = parseForwardedPrincipal({ initiator: slackUser() });
 
     expect(result).toMatchObject({
-      message: expect.stringContaining("forwardedAuth.current"),
+      message: expect.stringContaining("forwardedPrincipal.current"),
       ok: false,
     });
   });
 
   it("rejects unknown keys at the top level", () => {
-    const result = parseForwardedAuth({ current: slackUser(), token: "secret" });
+    const result = parseForwardedPrincipal({ current: slackUser(), token: "secret" });
 
     expect(result).toMatchObject({
-      message: expect.stringContaining("Invalid forwardedAuth metadata"),
+      message: expect.stringContaining("Invalid forwardedPrincipal metadata"),
       ok: false,
     });
   });
 
   it("rejects unknown keys inside a context", () => {
-    const result = parseForwardedAuth({ current: { ...slackUser(), credential: "secret" } });
+    const result = parseForwardedPrincipal({ current: { ...slackUser(), credential: "secret" } });
 
     expect(result).toMatchObject({
-      message: expect.stringContaining("forwardedAuth.current"),
+      message: expect.stringContaining("forwardedPrincipal.current"),
       ok: false,
     });
   });
 
   it("rejects an empty principalId", () => {
-    const result = parseForwardedAuth({ current: slackUser({ principalId: "" }) });
+    const result = parseForwardedPrincipal({ current: slackUser({ principalId: "" }) });
 
     expect(result).toMatchObject({
-      message: expect.stringContaining("forwardedAuth.current.principalId"),
+      message: expect.stringContaining("forwardedPrincipal.current.principalId"),
       ok: false,
     });
   });
 
   it("rejects non-string attribute values", () => {
-    const result = parseForwardedAuth({
+    const result = parseForwardedPrincipal({
       current: slackUser({ attributes: { count: 3 } as never }),
     });
 
