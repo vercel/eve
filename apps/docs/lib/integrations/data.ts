@@ -663,7 +663,7 @@ const extensionPresentations: Record<string, ExtensionPresentation> = {
     install: `Install the Browserbase extension for eve:
 
 \`\`\`bash
-npm install @browserbasehq/eve
+pnpm add @browserbasehq/eve
 \`\`\`
 
 The extension requires Node.js 24 or later. A Browserbase API key covers both cloud browser sessions and Stagehand inference through Browserbase Model Gateway, so you do not need a separate model-provider key.`,
@@ -716,7 +716,7 @@ Browserbase uses keep-alive sessions and eve's durable per-session state to reco
     install: `Install the Kernel extension for eve:
 
 \`\`\`bash
-npm install @onkernel/eve-extension
+pnpm add @onkernel/eve-extension
 \`\`\`
 
 The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kernel's hosted MCP browser tools and a \`browse\` skill without requiring you to maintain browser tool code.`,
@@ -760,7 +760,7 @@ The default mount can execute JavaScript in the browser VM and reuse authenticat
     install: `Install the Jetty extension for eve:
 
 \`\`\`bash
-npm install @jetty/eve
+pnpm add @jetty/eve
 \`\`\`
 
 The extension requires Node.js 24 or later and eve 0.25 or later. It can ingest every completed turn as a durable Jetty trajectory, grade turns inline, steer experiments from their grades, and report native \`eve eval\` results.`,
@@ -819,7 +819,7 @@ Jetty trajectories persist agent inputs and outputs. Redact PII before grading, 
     install: `Install the GitHub Tools extension and Vercel Connect client:
 
 \`\`\`bash
-npm install @github-tools/eve-extension @vercel/connect
+pnpm add @github-tools/eve-extension @vercel/connect
 \`\`\`
 
 The extension provides the GitHub toolset as a versioned eve package. Use a Vercel Connect connector for short-lived, scoped GitHub tokens, or omit \`@vercel/connect\` and authenticate with a GitHub token.`,
@@ -884,7 +884,7 @@ For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`
     install: `Install the agent-browser extension for eve:
 
 \`\`\`bash
-npm install @agent-browser/eve
+pnpm add @agent-browser/eve
 \`\`\`
 
 The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox, Docker, or microsandbox.`,

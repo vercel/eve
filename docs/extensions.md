@@ -148,10 +148,10 @@ A mount gives the publisher's contributions a namespace. Updating the package up
 
 ### Install the package
 
-Install the extension in the consumer's agent project:
+Install the extension with the package manager already used by the consumer's agent project. Fresh eve projects use pnpm:
 
 ```bash
-npm install @acme/crm
+pnpm add @acme/crm
 ```
 
 ### Mount it
