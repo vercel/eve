@@ -88,6 +88,22 @@ export default slackChannel({
 
 `isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
 
+Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:
+
+```ts
+async onMessage(ctx, message) {
+  if (!message.author || message.author.isBot) return null;
+
+  const participants = await ctx.thread.listParticipants();
+  const isGroupFollowUpFromStarter =
+    participants.length > 1 && participants[0] === message.author.userId;
+
+  return isGroupFollowUpFromStarter ? { auth: null } : null;
+}
+```
+
+Like `threadContext`, this helper calls `conversations.replies` and requires the matching Slack history scope. It observes at most the first 50 messages of the thread, and a failed fetch is logged and swallowed, so the returned list may be empty or stale — treat an unexpected empty list as "don't route" rather than "no participants".
+
 ### Other Events API callbacks
 
 Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. `ctx.receive(options)` is the current Slack channel's pre-bound form of the schedule API's `receive(slack, options)`: call it zero, one, or many times to start turns. Each call accepts `message`, `target`, and `auth`, and returns the resulting session.

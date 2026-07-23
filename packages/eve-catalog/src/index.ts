@@ -179,6 +179,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-velt",
+    name: "Velt",
+    kind: "channel",
+    tagline: "Add agents to anchored comments across documents, canvases, PDFs, and video.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
