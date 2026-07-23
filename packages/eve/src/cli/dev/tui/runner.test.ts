@@ -3040,3 +3040,36 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     expect(view.complete).toHaveBeenCalledWith({ callId: "call-1" });
   });
 });
+
+describe("EveTUIRunner command shutdown", () => {
+  it("unwinds a blocked prompt", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const prompt = createDeferred<string | undefined>();
+    const controller = new AbortController();
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(() => prompt.promise),
+      renderAgentHeader: vi.fn(),
+      renderStream: vi.fn(async () => {}),
+      requestInterrupt: vi.fn(() => prompt.reject(interruptedError())),
+    };
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      lifecycle: {
+        signal: controller.signal,
+        stopped: new Promise<NodeJS.Signals | undefined>(() => {}),
+        requestStop: () => controller.abort(),
+        dispose: () => {},
+      },
+    });
+
+    const run = runner.run();
+    await settleAsyncWork();
+    controller.abort();
+
+    await expect(run).resolves.toBeUndefined();
+    expect(renderer.requestInterrupt).toHaveBeenCalledOnce();
+  });
+});

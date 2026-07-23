@@ -19,6 +19,15 @@ export interface RunningEveDev {
   readonly stderr: () => string;
   readonly stdout: () => string;
   readonly url: string;
+  signalAndAwaitExit(
+    signal: NodeJS.Signals,
+    deadlineMs?: number,
+  ): Promise<{
+    readonly code: number | null;
+    readonly durationMs: number;
+    readonly forcedKill: boolean;
+    readonly signal: NodeJS.Signals | null;
+  }>;
   stop(): Promise<void>;
 }
 
@@ -26,6 +35,43 @@ export interface StartEveDevOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Runtime executing the CLI. Defaults to the current Node executable. */
   readonly runtime?: "bun" | "node";
+}
+
+export async function signalEveDevDuringStartup(
+  appRoot: string,
+  signal: NodeJS.Signals,
+): Promise<{ readonly durationMs: number; readonly forcedKill: boolean }> {
+  const child = spawnEveDev(appRoot, {});
+  let output = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    output += chunk;
+  });
+  child.stderr.on("data", (chunk: string) => {
+    output += chunk;
+  });
+  const deadline = Date.now() + 30_000;
+  while (!output.includes("eve")) {
+    if (Date.now() >= deadline)
+      throw new Error(`Timed out waiting for eve dev startup.\n${output}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const startedAt = Date.now();
+  let forcedKill = false;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      forcedKill = true;
+      child.kill("SIGKILL");
+    }, 1_000);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill(signal);
+  });
+  return { durationMs: Date.now() - startedAt, forcedKill };
 }
 
 /**
@@ -78,6 +124,24 @@ export async function startEveDev(
     },
     stderr: () => stderr,
     stdout: () => stdout,
+    async signalAndAwaitExit(signal, deadlineMs = 1_000) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return { code: child.exitCode, durationMs: 0, forcedKill: false, signal: child.signalCode };
+      }
+      const startedAt = Date.now();
+      return await new Promise((resolve) => {
+        let forcedKill = false;
+        const timer = setTimeout(() => {
+          forcedKill = true;
+          child.kill("SIGKILL");
+        }, deadlineMs);
+        child.once("exit", (code, exitSignal) => {
+          clearTimeout(timer);
+          resolve({ code, durationMs: Date.now() - startedAt, forcedKill, signal: exitSignal });
+        });
+        child.kill(signal);
+      });
+    },
     async stop() {
       await stopEveDevChild(child);
     },

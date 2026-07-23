@@ -192,6 +192,25 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(latest.screen.snapshot()).not.toContain("ses_first");
   });
 
+  it("restores the terminal when a forced process exit preempts teardown", async () => {
+    const before = process.listeners("exit");
+    const { screen, input, renderer } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    const added = process.listeners("exit").filter((listener) => !before.includes(listener));
+    expect(added).toHaveLength(1);
+
+    // Simulate the lifecycle backstop's process.exit() firing mid-session.
+    (added[0] as () => void)();
+    expect(input.rawModes.at(-1)).toBe(false);
+    expect(screen.rawOutput()).toContain("\x1b[?2004l"); // bracketed paste off
+    expect(screen.rawOutput()).toContain("\x1b[?25h"); // cursor visible
+
+    // A normal teardown removes the last-resort hook.
+    input.ctrlC();
+    await expect(prompt).rejects.toThrow("Interrupted");
+    expect(process.listeners("exit")).toEqual(before);
+  });
+
   it("renders the brand line with the agent name and a tip", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({
