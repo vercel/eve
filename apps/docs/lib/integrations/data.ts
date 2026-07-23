@@ -1045,7 +1045,7 @@ See the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vend
     configure: `Create a Lark or Feishu app and set \`LARK_APP_ID\` and \`LARK_APP_SECRET\`. The adapter uses Lark’s WebSocket long connection rather than an HTTP webhook, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. This is a vendor-official Chat SDK adapter built on the official Lark Node SDK. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
   "chat-sdk-beeper": {
-    logo: "matrix",
+    logo: "beeper",
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "matrix", "beeper", "encrypted chat", "e2ee", "signal", "instagram"],
