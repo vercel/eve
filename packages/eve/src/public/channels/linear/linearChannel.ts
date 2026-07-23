@@ -14,6 +14,7 @@ import {
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import { LINEAR_CHANNEL_DEFAULT_ROUTE } from "#public/channels/linear/constants.js";
 import { createDefaultEvents, defaultOnAgentSession } from "#public/channels/linear/defaults.js";
+import { attachLinearInboundImages } from "#public/channels/linear/inbound-images.js";
 import {
   formatLinearContextBlock,
   linearContinuationToken,
@@ -342,6 +343,12 @@ async function dispatchAgentSession(input: {
   const result = await input.onAgentSession(context, event);
   if (result === null) return;
 
+  const message = await attachLinearInboundImages({
+    content: messageFromLinearAgentSessionEvent(event),
+    credentials: input.config.credentials,
+    fetch: input.config.api?.fetch,
+  });
+
   await input.send(
     {
       context: [
@@ -349,7 +356,7 @@ async function dispatchAgentSession(input: {
         ...event.previousComments,
         ...(result.context ?? []),
       ],
-      message: messageFromLinearAgentSessionEvent(event),
+      message,
     },
     {
       auth: result.auth,

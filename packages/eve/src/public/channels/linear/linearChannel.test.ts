@@ -204,6 +204,44 @@ describe("linearChannel inbound Agent Session events", () => {
     expect(payload.message).toBe("approve");
   });
 
+  it("attaches authenticated Linear upload images to prompted messages", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "image/webp" },
+      }),
+    );
+    const channel = linearChannel({
+      api: { fetch: fetchMock },
+      credentials: { accessToken: "linear-token", webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        sessionPayload({
+          action: "prompted",
+          agentActivity: {
+            content: {
+              body: "Inspect ![screenshot](https://uploads.linear.app/acme/image.webp).",
+              type: "prompt",
+            },
+            id: "activity_prompt",
+            user: { id: "user_1" },
+            userId: "user_1",
+          },
+        }),
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer linear-token",
+    );
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.message[0]).toEqual({ text: "Inspect screenshot.", type: "text" });
+    expect(payload.message[1]).toMatchObject({ mediaType: "image/webp", type: "file" });
+    expect(payload.message[1].data).toEqual(Buffer.from([1, 2, 3]));
+  });
+
   it("acks generic data webhooks without dispatch when no hook is configured", async () => {
     const body = JSON.stringify({
       action: "create",
