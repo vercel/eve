@@ -1193,10 +1193,12 @@ describe("emitTerminalSessionFailureStep", () => {
     // raw Errors to this shape (`normalizeSerializableError`) before
     // handing them into the step so they survive JSON serialization.
     const error = {
-      message: "attachment staging failed",
+      detail: "private attachment name: confidential.png",
+      message: "attachment staging failed for confidential.png",
       name: "EveAttachmentError",
       kind: "resolver-threw",
     };
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await emitTerminalSessionFailureStep({
       error,
@@ -1209,8 +1211,18 @@ describe("emitTerminalSessionFailureStep", () => {
       data: { code: string; message: string; details?: { errorId?: string } };
     };
     expect(data.code).toBe("EveAttachmentError");
-    expect(data.message).toContain("attachment staging failed");
+    expect(data.message).toContain("attachment staging failed for confidential.png");
     expect(typeof data.details?.errorId).toBe("string");
+
+    const providerLog = errorLog.mock.calls.find(([line]) =>
+      String(line).includes("workflow loop threw"),
+    );
+    expect(providerLog?.[1]).toEqual({
+      code: "EveAttachmentError",
+      errorId: data.details?.errorId,
+      sessionId: "session-terminal",
+    });
+    expect(JSON.stringify(providerLog)).not.toContain("confidential.png");
 
     // The terminal step must also write the event to the durable
     // stream so event-stream consumers see a canonical tail instead
@@ -1254,8 +1266,8 @@ describe("emitTerminalSessionFailureStep", () => {
     expect(data.message).toContain("ECONNREFUSED");
     expect(data.details?.semanticErrorId).toBe("network-request-failed");
     expect(data.details?.hint).toContain("Check your internet connection");
-    // The raw inspection stays attached so the diagnostic log keeps the
-    // evidence the curated message summarizes away.
+    // The raw inspection stays attached so the private session trace keeps
+    // the evidence the curated message summarizes away.
     expect(data.details?.detail).toContain("fetch failed");
   });
 

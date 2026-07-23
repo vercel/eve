@@ -21,8 +21,8 @@ export async function emitTerminalSessionFailureStep(input: {
   "use step";
 
   // Cataloged failures replace the raw identity with the curated one; the
-  // `detail` dump stays attached so the local diagnostic log keeps the
-  // raw evidence while the transcript shows the actionable summary.
+  // `detail` dump stays attached to the private event so the session trace
+  // keeps the raw evidence while the transcript shows the actionable summary.
   const formatted = formatError(input.error);
   const summary = summarizeKnownError(input.error);
   let details = formatted;
@@ -43,9 +43,6 @@ export async function emitTerminalSessionFailureStep(input: {
     sessionId,
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
     code,
-    message,
-    hint: summary?.hint,
-    detail: typeof details.detail === "string" ? details.detail : undefined,
   });
 
   const event = createSessionFailedEvent({ code, details, message, sessionId });
