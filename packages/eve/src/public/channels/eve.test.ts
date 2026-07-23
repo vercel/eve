@@ -615,6 +615,26 @@ describe("eveChannel — create session (text)", () => {
     });
   });
 
+  it("accepts callback metadata whose URL is mounted behind a public route prefix", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        callback: {
+          callId: "call-1",
+          subagentName: "research",
+          token: "tok123",
+          url: "https://caller.example.com/eve/agents/support/eve/v1/callback/tok123",
+        },
+        message: "hi",
+        mode: "task",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects callback metadata without a call id", async () => {
     const handler = createEveCreateHandler({ auth: none() });
 
