@@ -1423,25 +1423,80 @@ describe("slackChannel() onMessage", () => {
     );
   });
 
-  it("passes bot-authored messages to onMessage", async () => {
+  it("passes messages from other bots to onMessage", async () => {
     const onMessage = vi.fn((_ctx, _message: { author?: { isBot: boolean } }) => null);
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
       onMessage,
     });
-    const body = buildEventBody({
-      bot_id: "B01",
-      channel: "C01",
-      text: "automated",
-      ts: "1700000000.000200",
-      type: "message",
-      user: "U_BOT",
-    });
+    const body = buildEventBody(
+      {
+        app_id: "A_OTHER",
+        bot_id: "B_OTHER",
+        channel: "C01",
+        text: "automated",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U_OTHER_BOT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
 
     await firePost(channel, buildSignedRequest({ body }));
 
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(onMessage.mock.calls[0]![1].author?.isBot).toBe(true);
+  });
+
+  it.each([
+    [
+      "bot user id",
+      {
+        bot_id: "B01",
+        channel: "C01",
+        text: "agent reply",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U_BOT",
+      },
+    ],
+    [
+      "app id when user is absent",
+      {
+        app_id: "A01",
+        bot_id: "B01",
+        channel: "C01",
+        text: "agent reply",
+        ts: "1700000000.000200",
+        type: "message",
+      },
+    ],
+    [
+      "bot user id in a direct message",
+      {
+        bot_id: "B01",
+        channel: "D01",
+        channel_type: "im",
+        text: "agent reply",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U_BOT",
+      },
+    ],
+  ])("drops the app's own message identified by %s", async (_label, event) => {
+    const onMessage = vi.fn(() => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onMessage,
+    });
+    const body = buildEventBody(event, {
+      authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("gives specialized message hooks precedence", async () => {
@@ -1803,6 +1858,30 @@ describe("slackChannel() inbound direct message pipeline", () => {
     });
 
     const { body } = buildDirectMessageBody({ botId: "B01" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onDirectMessage).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("filters the app's own DM by its authorized bot user id", async () => {
+    const onDirectMessage = vi.fn(() => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage,
+    });
+    const body = buildEventBody(
+      {
+        channel: "D01",
+        channel_type: "im",
+        text: "agent reply",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U_BOT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(onDirectMessage).not.toHaveBeenCalled();

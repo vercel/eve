@@ -791,7 +791,7 @@ async function handleEventPost(input: {
   if (payload.kind === "app_mention" || payload.kind === "direct_message") {
     const kind = payload.kind;
     const message = slackMessageFromWebhookPayload(payload);
-    if (message !== null) {
+    if (message !== null && !isSelfAuthoredSlackMessage(envelope, message)) {
       const dispatchMessageWith =
         (handler: NonNullable<SlackChannelConfig["onAppMention"]>) => () =>
           dispatchInboundMessage({
@@ -828,7 +828,7 @@ async function handleEventPost(input: {
 
   if (dispatch === null && config.onMessage !== undefined) {
     const message = parseMessageEvent(envelope);
-    if (message !== null) {
+    if (message !== null && !isSelfAuthoredSlackMessage(envelope, message)) {
       const botUserId = slackEventBotUserId(envelope);
       // Slack also emits message.channels for an app mention. The app_mention
       // callback owns that user action so the generic message is not duplicated.
@@ -850,7 +850,7 @@ async function handleEventPost(input: {
   }
 
   // Specialized handlers retain their bot/subtype filters. onMessage receives
-  // every structurally valid message event; onEvent remains the raw fallback.
+  // structurally valid messages except this app's own; onEvent is the raw fallback.
   const onEvent = config.onEvent;
   if (dispatch === null && onEvent !== undefined) {
     dispatch = () =>
@@ -882,6 +882,18 @@ async function handleEventPost(input: {
 
   input.waitUntil(dispatch());
   return new Response("ok");
+}
+
+function isSelfAuthoredSlackMessage(envelope: SlackEventEnvelope, message: SlackMessage): boolean {
+  const botUserId = slackEventBotUserId(envelope);
+  if (botUserId !== undefined && message.author?.userId === botUserId) {
+    return true;
+  }
+
+  // App-authored message events can omit `user`, so match Slack's app identity
+  // as a fallback. Other bots keep flowing to authored onMessage handlers.
+  const apiAppId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
+  return apiAppId !== undefined && message.raw.app_id === apiAppId;
 }
 
 async function dispatchSlackMessage(input: {
