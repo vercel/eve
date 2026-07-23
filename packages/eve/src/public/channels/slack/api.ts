@@ -210,10 +210,15 @@ export interface SlackThread {
   readonly recentMessages: readonly SlackThreadMessage[];
 
   /**
-   * Fetch the latest replies and return the unique human Slack user ids
-   * participating in this thread, ordered by first appearance. For a
-   * human-started thread, the first entry is the starting author. Bot and
-   * system messages are excluded.
+   * Fetch the latest replies via {@link refresh} and return the unique
+   * human Slack user ids participating in this thread, ordered by first
+   * appearance. For a human-started thread, the first entry is the
+   * starting author. Bot messages and user-less system messages are
+   * excluded.
+   *
+   * Shares {@link refresh} semantics: it observes at most the first 50
+   * messages of the thread, and refresh failures are logged and swallowed,
+   * so the returned list may be empty or stale.
    */
   listParticipants(): Promise<readonly string[]>;
 
