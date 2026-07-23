@@ -400,30 +400,32 @@ export function buildSlackBinding(input: {
     });
   }
 
-  async function refreshMessages(): Promise<void> {
-    if (!input.channelId || !currentThreadTs) {
-      messages = [];
-      return;
-    }
-    try {
-      const response = await fetchSlackThreadReplies({
-        ...createSlackApiOptions(input.botToken),
-        channel: input.channelId,
-        limit: 50,
-        ts: currentThreadTs,
-      });
-      const refreshed = (response.messages as Record<string, unknown>[]).map((raw) =>
-        parseThreadMessage(raw, currentThreadTs),
-      );
-      messages = refreshed;
-    } catch (error) {
-      logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
-    }
-  }
-
-  function refreshThread(): Promise<void> {
+  function refreshMessages(): Promise<void> {
     if (refreshInFlight !== undefined) return refreshInFlight;
-    const refresh = refreshMessages().finally(() => {
+
+    // Scoped inside the coalescing check so no caller can start an
+    // uncoalesced fetch.
+    async function fetchAndReplace(): Promise<void> {
+      if (!input.channelId || !currentThreadTs) {
+        messages = [];
+        return;
+      }
+      try {
+        const response = await fetchSlackThreadReplies({
+          ...createSlackApiOptions(input.botToken),
+          channel: input.channelId,
+          limit: 50,
+          ts: currentThreadTs,
+        });
+        messages = (response.messages as Record<string, unknown>[]).map((raw) =>
+          parseThreadMessage(raw, currentThreadTs),
+        );
+      } catch (error) {
+        logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
+      }
+    }
+
+    const refresh = fetchAndReplace().finally(() => {
       if (refreshInFlight === refresh) {
         refreshInFlight = undefined;
       }
@@ -525,7 +527,7 @@ export function buildSlackBinding(input: {
       }
     },
     refresh() {
-      return refreshThread();
+      return refreshMessages();
     },
     mentionUser(userId) {
       return `<@${userId}>`;
