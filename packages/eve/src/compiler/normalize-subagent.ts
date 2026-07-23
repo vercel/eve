@@ -15,6 +15,7 @@ import {
   type ManifestCompileContext,
 } from "#compiler/normalize-helpers.js";
 import {
+  expectBoolean,
   expectObjectRecord,
   expectOnlyKnownKeys,
   expectString,
@@ -295,12 +296,18 @@ function normalizeRemoteAgentDefinition(
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["auth", "description", "headers", "kind", "outputSchema", "path", "url"],
+    ["auth", "description", "forwardAuth", "headers", "kind", "outputSchema", "path", "url"],
     message,
   );
 
   if (record.kind !== "remote") {
     throw new Error(`${message} Expected "kind" to be "remote".`);
+  }
+
+  // `forwardAuth` rides the module-backed runtime definition (like `auth` and
+  // `headers`), so it is validated here but never baked into the manifest.
+  if (record.forwardAuth !== undefined) {
+    expectBoolean(record.forwardAuth, `${message} Expected "forwardAuth" to be a boolean.`);
   }
 
   return {

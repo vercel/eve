@@ -220,6 +220,26 @@ You do not have to keep `vercelOidc()` in the final policy. For a self-hosted ap
 
 Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment variables. Route-auth secrets never land in compiled artifacts. The runtime re-materializes them from the authored channel definition at boot.
 
+## Accepting forwarded identity from another deployment
+
+A `defineRemoteAgent({ forwardAuth: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on the create-session request as a `forwardedAuth` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which callers you trust. Do that with `acceptForwardedAuth` on `eveChannel`:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  // Only the router deployment may assert a forwarded principal.
+  acceptForwardedAuth: ({ subject }) =>
+    subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
+});
+```
+
+The predicate authorizes the _verified transport caller_ (the route-auth result — who is asserting), not the forwarded identity (what is asserted). Match it precisely: a permissive predicate like `() => true` lets any caller that passes route auth assert any principal, including preview deployments of your own project when `vercelOidc()` is in the walk. `acceptForwardedAuth` exists only on your authored channel — the framework default channel never accepts forwarded auth, so a receiving deployment must author `agent/channels/eve.ts`.
+
+When the predicate accepts, the forwarded identity replaces the session principal: `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly, so user-scoped connections, local subagents, and further `forwardAuth` hops all see that user. The verified transport caller is recorded on the accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it), and the `202` response acknowledges acceptance with `forwardedAuth: "accepted"` — the sender requires that acknowledgment and fails its dispatch without it. Everything else fails loud: a forwarded body without `acceptForwardedAuth` configured or with a caller the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+
 ## What reaches `ctx.session.auth`
 
 Inside runtime code, `ctx.session.auth` carries the result of the channel's route auth (the walk above) forward as the caller snapshot:

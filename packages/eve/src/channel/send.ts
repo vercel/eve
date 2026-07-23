@@ -18,6 +18,7 @@ export function createSendFn<TState = undefined>(
     options: SendOptions<TState>,
   ): Promise<Session> => {
     const auth = (options as { auth: SessionAuthContext | null }).auth;
+    const initiatorAuth = (options as { initiatorAuth?: SessionAuthContext | null }).initiatorAuth;
     const callback = (options as { callback?: SendOptions<TState>["callback"] }).callback;
     const mode = (options as { mode?: SendOptions<TState>["mode"] }).mode ?? "conversation";
     const state = (options as { state?: TState }).state;
@@ -59,7 +60,9 @@ export function createSendFn<TState = undefined>(
       ? { ...adapter, state: { ...adapter.state, ...(state as Record<string, unknown>) } }
       : adapter;
 
-    const runInput: RunInput = {
+    const runInput: {
+      -readonly [K in keyof RunInput]: RunInput[K];
+    } = {
       adapter: sessionAdapter,
       auth,
       capabilities: mode === "conversation" ? { requestInput: true } : undefined,
@@ -71,6 +74,9 @@ export function createSendFn<TState = undefined>(
       requestId: metadata.requestId,
       title,
     };
+    if (initiatorAuth !== undefined) {
+      runInput.initiatorAuth = initiatorAuth;
+    }
     const handle = await runtime.run(runInput);
 
     return createSession(handle.sessionId, rawToken, runtime);

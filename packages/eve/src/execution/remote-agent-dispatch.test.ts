@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { SessionAuthContext } from "#channel/types.js";
 import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
@@ -175,6 +176,185 @@ describe("startRemoteAgentSession", () => {
         }),
       }),
     );
+  });
+});
+
+describe("startRemoteAgentSession — forwarded auth", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const CURRENT_AUTH: SessionAuthContext = {
+    attributes: { user_id: "U123" },
+    authenticator: "slack-webhook",
+    issuer: "slack",
+    principalId: "slack:U123",
+    principalType: "user",
+    subject: "U123",
+  };
+
+  const INITIATOR_AUTH: SessionAuthContext = {
+    attributes: {},
+    authenticator: "slack-webhook",
+    issuer: "slack",
+    principalId: "slack:U999",
+    principalType: "user",
+    subject: "U999",
+  };
+
+  function acceptedResponse(): Response {
+    return new Response(
+      JSON.stringify({ forwardedAuth: "accepted", ok: true, sessionId: "remote-session" }),
+      { status: 202 },
+    );
+  }
+
+  function createSession() {
+    return {
+      agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+      compaction: { recentWindowSize: 10, threshold: 100000 },
+      continuationToken: "eve:parent-token",
+      history: [],
+      sessionId: "parent-session",
+    };
+  }
+
+  it("forwards the current and initiator principals when forwardAuth is set", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(acceptedResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: INITIATOR_AUTH,
+        remote: { ...createRemoteAgent(), forwardAuth: true },
+        session: createSession(),
+      }),
+    ).resolves.toBe("remote-session");
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedAuth).toEqual({
+      current: CURRENT_AUTH,
+      initiator: INITIATOR_AUTH,
+    });
+  });
+
+  it("omits the initiator when the dispatching turn has none", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(acceptedResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      auth: CURRENT_AUTH,
+      callbackBaseUrl: "https://caller.example.com",
+      initiatorAuth: null,
+      remote: { ...createRemoteAgent(), forwardAuth: true },
+      session: createSession(),
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedAuth).toEqual({
+      current: CURRENT_AUTH,
+    });
+  });
+
+  it("omits the field and skips the ack when the turn has no auth", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: null,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: null,
+        remote: { ...createRemoteAgent(), forwardAuth: true },
+        session: createSession(),
+      }),
+    ).resolves.toBe("remote-session");
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
+      "forwardedAuth",
+    );
+  });
+
+  it("does not forward when forwardAuth is unset even with auth in scope", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: INITIATOR_AUTH,
+        remote: createRemoteAgent(),
+        session: createSession(),
+      }),
+    ).resolves.toBe("remote-session");
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
+      "forwardedAuth",
+    );
+  });
+
+  it("fails the dispatch and cancels the orphan when the ack is missing", async () => {
+    // A pre-forwarding receiver ignores the unknown field, starts the session
+    // as the calling service, and responds without the acknowledgment.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, sessionId: "orphan-session" }), { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ ok: true, sessionId: "orphan-session", status: "accepted" }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: INITIATOR_AUTH,
+        remote: { ...createRemoteAgent(), forwardAuth: true },
+        session: createSession(),
+      }),
+    ).rejects.toThrow(/did not acknowledge forwarded auth/);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://remote.example.com/eve/v1/session/orphan-session/cancel",
+    );
+  });
+
+  it("fails the dispatch even when the orphan cancel fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, sessionId: "orphan-session" }), { status: 202 }),
+      )
+      .mockRejectedValueOnce(new TypeError("network unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: null,
+        remote: { ...createRemoteAgent(), forwardAuth: true },
+        session: createSession(),
+      }),
+    ).rejects.toThrow(/did not acknowledge forwarded auth/);
   });
 });
 
