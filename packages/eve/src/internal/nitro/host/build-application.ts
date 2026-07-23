@@ -314,6 +314,7 @@ async function emitVercelWorkflowFunctions(input: {
   compiledArtifactsBootstrapPath: string;
   flowNitroOutputDir: string;
   outputDir: string;
+  publicRoutePrefix: string | undefined;
   workflowBuildDir: string;
 }): Promise<void> {
   const builder = new WorkflowBundleBuilder({
@@ -321,6 +322,7 @@ async function emitVercelWorkflowFunctions(input: {
     appRoot: input.appRoot,
     compiledArtifactsBootstrapPath: input.compiledArtifactsBootstrapPath,
     outDir: input.workflowBuildDir,
+    publicRoutePrefix: input.publicRoutePrefix,
     rootDir: resolvePackageRoot(),
     watch: false,
   });
@@ -530,6 +532,7 @@ async function buildApplicationInWorkspace(
         compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
         flowNitroOutputDir,
         outputDir: workspace.publication.output.stagedDir,
+        publicRoutePrefix: options.publicRoutePrefix,
         workflowBuildDir: workspace.workflow.buildDir,
       }),
     );
