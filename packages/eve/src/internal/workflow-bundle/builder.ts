@@ -179,30 +179,20 @@ export class WorkflowBundleBuilder {
   }
 
   protected async findTsConfigPath(): Promise<string | undefined> {
-    let current = this.config.workingDir;
+    for (const filename of ["tsconfig.json", "jsconfig.json"]) {
+      const candidate = join(this.config.workingDir, filename);
 
-    while (true) {
-      for (const filename of ["tsconfig.json", "jsconfig.json"]) {
-        const candidate = join(current, filename);
-
-        try {
-          await readFile(candidate);
-          return candidate;
-        } catch (error) {
-          if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-            throw error;
-          }
+      try {
+        await readFile(candidate);
+        return candidate;
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+          throw error;
         }
       }
-
-      const parent = dirname(current);
-
-      if (parent === current) {
-        return undefined;
-      }
-
-      current = parent;
     }
+
+    return undefined;
   }
 
   protected async getInputFiles(): Promise<string[]> {

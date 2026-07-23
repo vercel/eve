@@ -27,6 +27,10 @@ class InspectableWorkflowBundleBuilder extends WorkflowBundleBuilder {
   get snapshot() {
     return this.config;
   }
+
+  resolveTsConfigPath(): Promise<string | undefined> {
+    return this.findTsConfigPath();
+  }
 }
 
 class StepEntryOnlyWorkflowBundleBuilder extends WorkflowBundleBuilder {
@@ -104,6 +108,34 @@ describe("WorkflowBundleBuilder", () => {
     expect(builder.snapshot.projectRoot).toBe(appRoot);
     expect(builder.snapshot.workingDir).toBe(rootDir);
     expect(builder.snapshot.dirs).toEqual([resolvePackageSourceDirectoryPath("src/execution")]);
+  });
+
+  it("does not inherit a tsconfig from outside the eve package", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-tsconfig-"));
+    const packageRoot = join(workspaceRoot, "node_modules", "eve");
+
+    try {
+      await mkdir(packageRoot, { recursive: true });
+      await writeFile(join(workspaceRoot, "tsconfig.json"), "{}\n");
+
+      const builder = new InspectableWorkflowBundleBuilder({
+        agentName: "test-agent",
+        appRoot: workspaceRoot,
+        compiledArtifactsBootstrapPath: join(workspaceRoot, "compiled-artifacts-bootstrap.js"),
+        outDir: join(workspaceRoot, ".eve", "workflows"),
+        rootDir: packageRoot,
+        watch: false,
+      });
+
+      await expect(builder.resolveTsConfigPath()).resolves.toBeUndefined();
+
+      const packageTsConfigPath = join(packageRoot, "tsconfig.json");
+      await writeFile(packageTsConfigPath, "{}\n");
+
+      await expect(builder.resolveTsConfigPath()).resolves.toBe(packageTsConfigPath);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
   });
 
   it("writes a Nitro-owned step registration entry", async () => {
