@@ -77,6 +77,13 @@ type BaseSendOptions = {
   auth: SessionAuthContext | null;
   callback?: SessionCallback;
   continuationToken: string;
+  /**
+   * The original (top-level) caller's auth for a newly started session,
+   * becoming `session.auth.initiator`. Defaults to {@link auth} when omitted
+   * (root session behavior). Ignored when the send resolves to an existing
+   * session, whose initiator never changes after start.
+   */
+  initiatorAuth?: SessionAuthContext | null;
   mode?: RunMode;
   /**
    * Human-readable title for a newly started workflow session. Defaults to

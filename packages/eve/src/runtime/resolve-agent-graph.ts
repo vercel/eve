@@ -352,6 +352,7 @@ async function resolveRuntimeRemoteAgent(input: {
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
     description: string;
+    forwardAuth?: boolean;
     headers?: HeadersValue;
     kind: "remote";
     logicalPath: string;
@@ -381,6 +382,10 @@ async function resolveRuntimeRemoteAgent(input: {
 
   if (typeof resolvedRecord.auth === "function") {
     resolvedRemoteAgent.auth = resolvedRecord.auth as ResolvedRuntimeRemoteAgentNode["auth"];
+  }
+
+  if (resolvedRecord.forwardAuth === true) {
+    resolvedRemoteAgent.forwardAuth = true;
   }
 
   const headers = resolveRemoteAgentHeaders(resolvedRecord.headers);

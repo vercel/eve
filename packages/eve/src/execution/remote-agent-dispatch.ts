@@ -1,13 +1,17 @@
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#protocol/routes.js";
-import type { CancelTurnResult } from "#channel/types.js";
+import type { CancelTurnResult, SessionAuthContext } from "#channel/types.js";
+import type { ForwardedAuth } from "#channel/forwarded-auth.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { formatSubagentInput } from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
+import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
+
+const log = createLogger("execution.remote-agent-dispatch");
 
 class RemoteAgentCancelRequestError extends Error {
   readonly retryable: boolean;
@@ -21,8 +25,12 @@ class RemoteAgentCancelRequestError extends Error {
 
 export async function startRemoteAgentSession(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
+  /** The dispatching turn's session principal, forwarded when `remote.forwardAuth` is set. */
+  readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
   readonly callbackToken?: string;
+  /** The root initiator's principal, forwarded alongside {@link auth}. */
+  readonly initiatorAuth?: SessionAuthContext | null;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
 }): Promise<string> {
@@ -34,23 +42,40 @@ export async function startRemoteAgentSession(input: {
     throw new Error("Cannot dispatch remote agent without a callback base URL.");
   }
 
+  const forwardedAuth = buildForwardedAuthField(input);
+  const requestBody: {
+    callback: {
+      callId: string;
+      subagentName: string;
+      token: string;
+      url: string;
+    };
+    forwardedAuth?: ForwardedAuth;
+    message: string;
+    mode: "task";
+    outputSchema?: object;
+  } = {
+    callback: {
+      callId: input.action.callId,
+      subagentName: input.action.remoteAgentName,
+      token: callbackToken,
+      url: createWorkflowCallbackUrl(
+        input.callbackBaseUrl,
+        createEveCallbackRoutePath(callbackToken),
+      ),
+    },
+    message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),
+    mode: "task",
+    outputSchema:
+      (input.action.input.outputSchema as object | undefined) ?? input.remote.outputSchema,
+  };
+  if (forwardedAuth !== undefined) {
+    requestBody.forwardedAuth = forwardedAuth;
+  }
+
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
   const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
-    body: JSON.stringify({
-      callback: {
-        callId: input.action.callId,
-        subagentName: input.action.remoteAgentName,
-        token: callbackToken,
-        url: createWorkflowCallbackUrl(
-          input.callbackBaseUrl,
-          createEveCallbackRoutePath(callbackToken),
-        ),
-      },
-      message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),
-      mode: "task",
-      outputSchema:
-        (input.action.input.outputSchema as object | undefined) ?? input.remote.outputSchema,
-    }),
+    body: JSON.stringify(requestBody),
     headers: {
       "content-type": "application/json",
       ...headers,
@@ -64,23 +89,76 @@ export async function startRemoteAgentSession(input: {
     );
   }
 
-  const sessionIdFromHeader = response.headers.get(EVE_SESSION_ID_HEADER);
-  if (sessionIdFromHeader !== null && sessionIdFromHeader.length > 0) {
-    return sessionIdFromHeader;
-  }
-
+  let responseBody: { readonly forwardedAuth?: unknown; readonly sessionId?: unknown } | undefined;
   try {
-    const body = (await response.json()) as { readonly sessionId?: unknown };
-    if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
-      return body.sessionId;
-    }
+    responseBody = (await response.json()) as typeof responseBody;
   } catch {
-    // Fall through to the generic error below.
+    responseBody = undefined;
   }
 
-  throw new Error(
-    `Remote agent "${input.action.remoteAgentName}" create-session response did not include a session id.`,
-  );
+  const sessionIdFromHeader = response.headers.get(EVE_SESSION_ID_HEADER);
+  const sessionId =
+    sessionIdFromHeader !== null && sessionIdFromHeader.length > 0
+      ? sessionIdFromHeader
+      : typeof responseBody?.sessionId === "string" && responseBody.sessionId.length > 0
+        ? responseBody.sessionId
+        : undefined;
+
+  if (sessionId === undefined) {
+    throw new Error(
+      `Remote agent "${input.action.remoteAgentName}" create-session response did not include a session id.`,
+    );
+  }
+
+  // A pre-forwarding receiver silently drops unknown body fields and runs the
+  // session as the calling service — the exact silent downgrade forwarding
+  // rejects. Require the explicit acceptance acknowledgment, and best-effort
+  // cancel the already-started orphan before failing the dispatch.
+  if (forwardedAuth !== undefined && responseBody?.forwardedAuth !== "accepted") {
+    await cancelUnacknowledgedForwardedSession({ remote: input.remote, sessionId });
+    throw new Error(
+      `Remote agent "${input.action.remoteAgentName}" did not acknowledge forwarded auth. ` +
+        `The receiving deployment must configure eveChannel({ acceptForwardedAuth }) to accept a forwarded principal.`,
+    );
+  }
+
+  return sessionId;
+}
+
+function buildForwardedAuthField(input: {
+  readonly auth?: SessionAuthContext | null;
+  readonly initiatorAuth?: SessionAuthContext | null;
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+}): ForwardedAuth | undefined {
+  if (input.remote.forwardAuth !== true) {
+    return undefined;
+  }
+  // No current principal (the request was accepted with no credentials):
+  // proceed on transport trust alone, with no acknowledgment required.
+  if (input.auth === null || input.auth === undefined) {
+    return undefined;
+  }
+  const field: { current: SessionAuthContext; initiator?: SessionAuthContext } = {
+    current: input.auth,
+  };
+  if (input.initiatorAuth !== null && input.initiatorAuth !== undefined) {
+    field.initiator = input.initiatorAuth;
+  }
+  return field;
+}
+
+async function cancelUnacknowledgedForwardedSession(input: {
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+  readonly sessionId: string;
+}): Promise<void> {
+  try {
+    await cancelRemoteAgentTurn({ remote: input.remote, sessionId: input.sessionId });
+  } catch (error) {
+    logError(log, "failed to cancel the unacknowledged forwarded-auth session", error, {
+      remoteAgentName: input.remote.name,
+      sessionId: input.sessionId,
+    });
+  }
 }
 
 export async function cancelRemoteAgentTurn(input: {
