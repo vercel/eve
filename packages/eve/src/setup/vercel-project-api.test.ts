@@ -24,42 +24,25 @@ beforeEach(() => {
 });
 
 describe("listTeams", () => {
-  it("drains every page and deduplicates by slug", async () => {
-    mockedCaptureVercel
-      .mockResolvedValueOnce(
-        captured({
-          teams: [{ name: "Current", slug: "current", current: true }],
-          pagination: { next: 20 },
-        }),
-      )
-      .mockResolvedValueOnce(
-        captured({
-          teams: [{ name: "Other", slug: "other" }],
-          pagination: { next: null },
-        }),
-      );
+  it("requests the maximum team page", async () => {
+    mockedCaptureVercel.mockResolvedValue(
+      captured({
+        teams: [
+          { name: "Current", slug: "current", current: true },
+          { name: "Other", slug: "other", current: false },
+        ],
+        pagination: { next: null },
+      }),
+    );
 
     await expect(listTeams("/repo")).resolves.toEqual([
       { name: "Current", slug: "current", current: true },
       { name: "Other", slug: "other", current: false },
     ]);
-    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
-      1,
+    expect(mockedCaptureVercel).toHaveBeenCalledOnce();
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
       ["teams", "ls", "--format", "json", "--limit", "100"],
       { cwd: "/repo", signal: undefined },
-    );
-    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
-      2,
-      ["api", "/v2/teams?limit=100&until=20"],
-      { cwd: "/repo", signal: undefined },
-    );
-  });
-
-  it("rejects a repeated pagination cursor", async () => {
-    mockedCaptureVercel.mockResolvedValue(captured({ teams: [], pagination: { next: 20 } }));
-
-    await expect(listTeams("/repo")).rejects.toThrow(
-      "Vercel returned a repeated pagination cursor",
     );
   });
 

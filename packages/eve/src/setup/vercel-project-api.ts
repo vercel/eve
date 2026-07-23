@@ -46,17 +46,7 @@ const VercelTeamPageSchema = z
     teams: z.array(VercelTeamListEntrySchema),
     pagination: VercelPaginationSchema.optional(),
   })
-  .transform((data) => ({ items: data.teams, next: data.pagination?.next ?? undefined }));
-
-const VercelApiTeamPageSchema = z
-  .object({
-    teams: z.array(VercelTeamListEntrySchema.omit({ current: true })),
-    pagination: VercelPaginationSchema.optional(),
-  })
-  .transform((data) => ({
-    items: data.teams.map((team) => ({ ...team, current: false })),
-    next: data.pagination?.next ?? undefined,
-  }));
+  .transform((data) => data.teams);
 
 const VercelProjectPageSchema = z
   .object({
@@ -71,33 +61,6 @@ export function parseVercelJson(stdout: string, description: string): unknown {
     return JSON.parse(stdout);
   } catch {
     throw new Error(`Could not parse ${description} JSON from Vercel CLI output.`);
-  }
-}
-
-/**
- * Drains a cursor-paginated Vercel list, deduping by `key`. A repeated cursor
- * means the API paged us in a circle — bail rather than loop forever.
- */
-async function drainPages<T>(
-  label: string,
-  key: (item: T) => string,
-  fetchPage: (next: number | undefined) => Promise<VercelPage<T>>,
-): Promise<T[]> {
-  const items = new Map<string, T>();
-  const cursors = new Set<number>();
-  let next: number | undefined;
-  while (true) {
-    const page = await fetchPage(next);
-    for (const item of page.items) {
-      const itemKey = key(item);
-      if (!items.has(itemKey)) items.set(itemKey, item);
-    }
-    if (page.next === undefined) return [...items.values()];
-    if (cursors.has(page.next)) {
-      throw new Error(`Vercel returned a repeated pagination cursor for ${label}.`);
-    }
-    cursors.add(page.next);
-    next = page.next;
   }
 }
 
@@ -142,45 +105,22 @@ async function captureTeamPage(
   return result.stdout;
 }
 
-async function fetchTeamPage(
-  projectRoot: string,
-  options: VercelProjectOperationOptions,
-  next: number | undefined,
-): Promise<VercelPage<VercelTeamListEntry>> {
-  if (next === undefined) {
-    const stdout = await captureTeamPage(projectRoot, options, [
-      "teams",
-      "ls",
-      "--format",
-      "json",
-      "--limit",
-      String(VERCEL_TEAM_PAGE_LIMIT),
-    ]);
-    const parsed = VercelTeamPageSchema.safeParse(parseVercelJson(stdout, "teams"));
-    if (!parsed.success) throw new Error("Could not read teams from Vercel CLI JSON output.");
-    return parsed.data;
-  }
-
-  // The teams command currently sends its `--next` value as an API `next`
-  // parameter, while the teams API consumes the emitted timestamp as `until`.
-  // Use the CLI's authenticated API passthrough for continuation pages.
-  const path = `/v2/teams?limit=${VERCEL_TEAM_PAGE_LIMIT}&until=${next}`;
-  const stdout = await captureTeamPage(projectRoot, options, ["api", path]);
-  const parsed = VercelApiTeamPageSchema.safeParse(parseVercelJson(stdout, "teams"));
-  if (!parsed.success) throw new Error("Could not read teams from Vercel API JSON output.");
-  return parsed.data;
-}
-
-/** Lists every Vercel scope available to the current CLI user. */
+/** Lists up to the maximum 100 Vercel scopes supported by the CLI. */
 export async function listTeams(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},
 ): Promise<VercelTeamListEntry[]> {
-  return drainPages(
-    "Vercel teams",
-    (team) => team.slug,
-    (next) => fetchTeamPage(projectRoot, options, next),
-  );
+  const stdout = await captureTeamPage(projectRoot, options, [
+    "teams",
+    "ls",
+    "--format",
+    "json",
+    "--limit",
+    String(VERCEL_TEAM_PAGE_LIMIT),
+  ]);
+  const parsed = VercelTeamPageSchema.safeParse(parseVercelJson(stdout, "teams"));
+  if (!parsed.success) throw new Error("Could not read teams from Vercel CLI JSON output.");
+  return parsed.data;
 }
 
 async function fetchProjectPage(
