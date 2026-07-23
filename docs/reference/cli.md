@@ -183,13 +183,37 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 
 A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, then opens `/model`. Other input stays editable in the prompt.
 
-For a URL target protected by HTTP Basic auth, put the credentials in the URL. Eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
+For a URL target protected by HTTP Basic auth, put the credentials in the URL. eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
 
 ```bash
 eve dev https://user:pass@your-app.example.com
 ```
 
 For bearer tokens or custom schemes, pass explicit headers with `-H`.
+
+### `eve invoke`
+
+| Option                  | Type   | Default | Description                                     |
+| ----------------------- | ------ | ------- | ----------------------------------------------- |
+| `[prompt]`              | string | none    | Prompt, follow-up, or answer to a pending input |
+| `-u, --url <url>`       | string | local   | Invoke an existing server                       |
+| `-H, --header <header>` | string | none    | Request header for a URL target; repeatable     |
+| `--resume`              | flag   | off     | Read a previous resumable result from stdin     |
+| `--scope <team>`        | string | current | Vercel team that owns the URL target            |
+| `--json-schema`         | flag   | off     | Print the result JSON Schema and exit           |
+
+Use `eve invoke` to submit a turn without opening the TUI. It emits JSON after the invocation completes or reaches a blocking input or authorization event.
+
+```bash
+eve invoke "Summarize station telemetry"
+result=$(eve invoke "Deploy the application")
+printf '%s' "$result" | eve invoke --resume "approve"
+eve invoke --json-schema
+```
+
+`--resume` reads a complete previous result from stdin. Supply text for a `ready` follow-up or pending input; the agent harness resolves input text against all pending requests. A `ready` result includes the previous turn's completed or failed `outcome`. An `authorization-required` result lists every unresolved challenge in `authorizations`; complete them, then resume without text. Pass explicit headers again for protected remote servers. If the URL belongs to another Vercel team, pass its slug with `--scope`; this does not relink the current directory. Pass the scope again when resuming. Paused invocations exit `3`; failures exit `1`.
+
+Local callback-based connection authorization requires a persistent server. Run `eve dev`, then use `eve invoke --url <dev-url>` instead. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `running` result before exiting.
 
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 

@@ -12,11 +12,7 @@ import type {
 } from "#client/types.js";
 import type { HandleMessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
-import {
-  deriveResultStatus,
-  extractCompletedMessage,
-  extractInputRequests,
-} from "#client/session-utils.js";
+import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
@@ -246,13 +242,14 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   #recordObservedTurn(sessionId: string, events: readonly HandleMessageStreamEvent[]): EveEvalTurn {
+    const summary = summarizeTurnEvents(events);
     return this.#recordTurn({
       data: extractCompletedResult(events),
       events,
-      inputRequests: extractInputRequests(events),
-      message: extractCompletedMessage(events),
+      inputRequests: summary.inputRequests,
+      message: summary.message,
       sessionId,
-      status: deriveResultStatus(events),
+      status: summary.status,
     });
   }
 

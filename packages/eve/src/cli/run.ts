@@ -22,6 +22,10 @@ import {
   type DevelopmentRequestHeaders,
 } from "#cli/dev/url-target.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import {
+  registerRuntimeInvokeCommand,
+  type InvokeCliRuntimeDependencies,
+} from "#cli/invoke/command.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
@@ -81,6 +85,7 @@ interface CliRuntimeDependencies {
     options?: { json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
+  runInvoke: InvokeCliRuntimeDependencies["runInvoke"];
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
@@ -159,14 +164,6 @@ async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startP
   return (await import("#internal/nitro/host.js")).startProductionServer;
 }
 
-function shouldPrintCliBootBanner(actionCommand: Command): boolean {
-  return (
-    actionCommand.name() === "info" ||
-    actionCommand.name() === "dev" ||
-    actionCommand.name() === "init"
-  );
-}
-
 function parsePortOption(value: string): number {
   if (!/^-?\d+$/.test(value)) {
     throw new InvalidArgumentError(`Expected a numeric port, received "${value}".`);
@@ -242,7 +239,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .showHelpAfterError()
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
-      if (shouldPrintCliBootBanner(actionCommand)) {
+      if (["info", "dev", "init"].includes(actionCommand.name())) {
         logger.log(eveCliBanner());
       }
     })
@@ -370,6 +367,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
       await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });
+
+  registerRuntimeInvokeCommand({ appRoot, logger, program, runtime });
 
   program
     .command("dev")

@@ -46,7 +46,7 @@ import {
 } from "./errors.js";
 
 import { pickAgentHeaderTip } from "./agent-header.js";
-import { probeAgentInfo } from "./agent-info-probe.js";
+import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import { parseLogDisplayMode } from "./log-display-mode.js";
 import {
   formatPromptCommandHelp,
