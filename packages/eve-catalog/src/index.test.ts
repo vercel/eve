@@ -62,10 +62,9 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
 
-  it("uses Kernel's streamable HTTP MCP endpoint", () => {
-    expect(getIntegrationEntry("kernel")!.connection!.mcp!.url).toBe(
-      "https://mcp.onkernel.com/mcp",
-    );
+  it("exposes Kernel as an extension", () => {
+    expect(getIntegrationEntry("kernel")?.kind).toBe("extension");
+    expect(getIntegrationEntry("kernel")?.connection).toBeUndefined();
   });
 
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {

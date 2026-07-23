@@ -29,15 +29,16 @@ describe("Browser Use connection setup", () => {
   });
 });
 
-describe("Kernel connection setup", () => {
-  it("uses the named Connect connector created for Kernel's MCP service", () => {
+describe("Kernel extension setup", () => {
+  it("uses Kernel's eve extension with Vercel Connect", () => {
     const integration = getIntegration("kernel")!;
-    const setup = buildConnectionSetup(integration);
 
-    expect(setup.variants["mcp:user"]).toContain('auth: connect("mcp.onkernel.com/kernel")');
-    expect(buildConnectionConfigure(integration)).toContain(
-      "vercel connect create mcp.onkernel.com --name kernel",
+    expect(integration.type).toBe("extension");
+    expect(integration.install).toContain("npm install @onkernel/eve-extension");
+    expect(integration.quickStart).toContain(
+      'kernel({ connect: "mcp.onkernel.com/eve-extension" })',
     );
+    expect(integration.configure).toContain("KERNEL_API_KEY");
   });
 });
 

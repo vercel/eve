@@ -181,14 +181,9 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
     slug: "kernel",
     name: "Kernel",
-    kind: "connection",
-    tagline: "Launch cloud browsers and automate web interactions through Kernel's MCP server.",
+    kind: "extension",
+    tagline: "Add a Kernel cloud browser and browser automation skills to an eve agent.",
     surfaces: { scaffoldable: false, gallery: true },
-    connection: {
-      description:
-        "Kernel: launch and automate cloud browsers, run Playwright, and inspect replays.",
-      mcp: { url: "https://mcp.onkernel.com/mcp" },
-    },
   },
   {
     slug: "browser-use",

@@ -494,6 +494,49 @@ Credentials come from the \`createMessengerAdapter\` config or the adapter's env
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
+  kernel: {
+    logo: "kernel",
+    docsHref: "https://www.kernel.sh/docs/integrations/vercel/eve-extension",
+    keywords: [
+      "browser",
+      "browser automation",
+      "cloud browser",
+      "playwright",
+      "mcp",
+      "managed auth",
+      "vercel connect",
+    ],
+    install: `Install the Kernel extension for eve:
+
+\`\`\`bash
+npm install @onkernel/eve-extension
+\`\`\`
+
+The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kernel's hosted MCP browser tools and a \`browse\` skill without requiring you to maintain browser tool code.`,
+    quickStart: `Create and attach a Kernel connector with [Vercel Connect](https://vercel.com/connect):
+
+\`\`\`bash
+vercel connect create mcp.onkernel.com --name eve-extension
+vercel connect attach mcp.onkernel.com/eve-extension
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/kernel.ts"
+import kernel from "@onkernel/eve-extension";
+
+export default kernel({ connect: "mcp.onkernel.com/eve-extension" });
+\`\`\`
+
+The filename supplies the \`kernel\` namespace. The extension adds browser management, Playwright, computer control, managed auth, profiles, proxies, and replay tools under \`kernel__browser__*\`, along with the \`browse\` skill.`,
+    configure: `For a personal or single-tenant agent, you can authenticate with a Kernel API key instead. Set \`KERNEL_API_KEY\`, then mount the extension with its default configuration:
+
+\`\`\`ts title="agent/extensions/kernel.ts"
+export { default } from "@onkernel/eve-extension";
+\`\`\`
+
+The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
+  },
   "agent-browser": {
     logo: "agent-browser",
     docsHref:
@@ -551,16 +594,6 @@ The extension also supports inline screenshots, session naming, proxies, and pro
  * note.
  */
 const connectionPresentations: Record<string, ConnectionPresentation> = {
-  kernel: {
-    logo: "kernel",
-    docsHref: "https://www.kernel.sh/docs/reference/mcp-server/",
-    keywords: ["mcp", "browser", "browser automation", "playwright", "cloud browser"],
-    authModes: ["user"],
-    connector: "mcp.onkernel.com/kernel",
-    connectorService: "mcp.onkernel.com",
-    configureNote:
-      "Kernel's MCP server can launch browsers, execute Playwright, and manage recordings. Add approval gates or tool filters before allowing unattended browser actions.",
-  },
   "browser-use": {
     logo: "browser-use",
     docsHref: "https://docs.browser-use.com/cloud/guides/mcp-server",
