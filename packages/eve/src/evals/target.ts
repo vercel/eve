@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "#client/client.js";
 import type { AgentInfoResult } from "#client/types.js";
 import { createEveDevDispatchSchedulePath } from "#protocol/routes.js";
+import { DEVELOPMENT_CONTROL_TOKEN_HEADER } from "#internal/nitro/dev-control-auth.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { stripNpmPackageScope } from "#shared/package-name.js";
 import { EvalSessionManager } from "#evals/session.js";
@@ -18,6 +19,7 @@ const HEALTH_TIMEOUT_MS = 60_000;
 
 export async function resolveEvalTargetHandle(input: {
   readonly client: Client;
+  readonly developmentControlToken?: string;
   readonly expectedAgentName?: string;
   readonly kind: "local" | "remote";
   readonly url: string;
@@ -38,6 +40,7 @@ export async function resolveEvalTargetHandle(input: {
   return createEvalTargetHandle({
     capabilities: capabilitiesFromInfo(info),
     client: input.client,
+    developmentControlToken: input.developmentControlToken,
     kind: input.kind,
     url: input.url,
   });
@@ -46,12 +49,14 @@ export async function resolveEvalTargetHandle(input: {
 export function createEvalTargetHandle(input: {
   readonly capabilities: EveEvalTargetCapabilities;
   readonly client: Client;
+  readonly developmentControlToken?: string;
   readonly kind: "local" | "remote";
   readonly url: string;
 }): EveEvalTargetHandle {
   return createHandle({
     capabilities: input.capabilities,
     client: input.client,
+    developmentControlToken: input.developmentControlToken,
     kind: input.kind,
     sessions: undefined,
     url: input.url,
@@ -77,6 +82,7 @@ export function scopeEvalTargetHandle(
 function createHandle(input: {
   readonly capabilities: EveEvalTargetCapabilities;
   readonly client: Client | undefined;
+  readonly developmentControlToken?: string;
   readonly delegate?: EveEvalTargetHandle;
   readonly kind: "local" | "remote";
   readonly sessions: EvalSessionManager | undefined;
@@ -138,7 +144,15 @@ function createHandle(input: {
         throw new Error("target.dispatchSchedule() requires a target with dev routes enabled.");
       }
 
+      if (base !== undefined) {
+        return await base.dispatchSchedule(scheduleId);
+      }
+
       const response = await fetchTarget(createEveDevDispatchSchedulePath(scheduleId), {
+        headers:
+          input.developmentControlToken === undefined
+            ? undefined
+            : { [DEVELOPMENT_CONTROL_TOKEN_HEADER]: input.developmentControlToken },
         method: "POST",
       });
       if (!response.ok) {

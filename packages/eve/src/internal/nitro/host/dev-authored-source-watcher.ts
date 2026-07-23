@@ -14,6 +14,7 @@ import {
   formatChangeDetectedLogLine,
   type WatcherChangeEvent,
 } from "#internal/nitro/host/dev-watcher-log.js";
+import { createWatchPathMap, syncWatcherPaths } from "#internal/nitro/host/watch-paths.js";
 
 const DEBOUNCE_MS = 120;
 const WATCHED_LOCKFILE_NAMES = [
@@ -189,7 +190,7 @@ async function waitForWatcherReady(input: {
   });
 }
 
-async function resolveAuthoredWatchPaths(
+export async function resolveAuthoredWatchPaths(
   host: PreparedDevelopmentApplicationHost,
 ): Promise<string[]> {
   const watchPaths = new Set<string>([
@@ -228,55 +229,6 @@ async function resolveAuthoredWatchPaths(
   }
 
   return [...watchPaths].sort((left, right) => left.localeCompare(right));
-}
-
-function createWatchPathMap(paths: readonly string[]): Map<string, string> {
-  const watchPathsByKey = new Map<string, string>();
-
-  for (const path of paths) {
-    watchPathsByKey.set(toWatchPathKey(path), path);
-  }
-
-  return watchPathsByKey;
-}
-
-function syncWatcherPaths(input: {
-  nextWatchPaths: readonly string[];
-  previousWatchPathsByKey: ReadonlyMap<string, string>;
-  watcher: {
-    add(paths: string | readonly string[]): unknown;
-    unwatch(paths: string | readonly string[]): unknown;
-  };
-}): Map<string, string> {
-  const nextWatchPathsByKey = createWatchPathMap(input.nextWatchPaths);
-  const pathsToAdd: string[] = [];
-  const pathsToRemove: string[] = [];
-
-  for (const [pathKey, path] of nextWatchPathsByKey) {
-    if (!input.previousWatchPathsByKey.has(pathKey)) {
-      pathsToAdd.push(path);
-    }
-  }
-
-  for (const [pathKey, path] of input.previousWatchPathsByKey) {
-    if (!nextWatchPathsByKey.has(pathKey)) {
-      pathsToRemove.push(path);
-    }
-  }
-
-  if (pathsToAdd.length > 0) {
-    input.watcher.add(pathsToAdd);
-  }
-
-  if (pathsToRemove.length > 0) {
-    input.watcher.unwatch(pathsToRemove);
-  }
-
-  return nextWatchPathsByKey;
-}
-
-function toWatchPathKey(path: string): string {
-  return normalize(resolve(path));
 }
 
 function resolveLockfileSearchDirectories(appRoot: string): string[] {

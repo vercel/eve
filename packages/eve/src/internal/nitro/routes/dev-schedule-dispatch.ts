@@ -3,6 +3,7 @@ import {
   UnknownDevScheduleError,
 } from "#internal/nitro/host/dispatch-schedule-in-dev.js";
 import type { DevelopmentNitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
+import { hasValidDevelopmentControlToken } from "#internal/nitro/dev-control-auth.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
 /**
@@ -27,12 +28,23 @@ const DEV_DISPATCH_SCHEDULE_PATH_PATTERN = new RegExp(
  * and returns `{ scheduleId, sessionIds }` so callers can subscribe to
  * the existing per-session stream route for each id.
  *
- * Auth: none. The dev server is local-only and the route is dev-only.
+ * The per-process development control token is presented in a non-simple
+ * request header. Only its digest is baked into the Nitro handler bundle.
  */
 export async function handleDevScheduleDispatchRequest(
-  input: DevelopmentNitroArtifactsConfig,
+  input: {
+    readonly artifactsConfig: DevelopmentNitroArtifactsConfig;
+    readonly controlTokenDigest: string;
+  },
   request: Request,
 ): Promise<Response> {
+  if (!hasValidDevelopmentControlToken(request.headers, input.controlTokenDigest)) {
+    return Response.json(
+      { error: "Unauthorized." },
+      { headers: { "cache-control": "no-store" }, status: 401 },
+    );
+  }
+
   const url = new URL(request.url);
   const match = url.pathname.match(DEV_DISPATCH_SCHEDULE_PATH_PATTERN);
   const encodedScheduleId = match?.[1];
@@ -53,7 +65,7 @@ export async function handleDevScheduleDispatchRequest(
 
   try {
     const result = await dispatchScheduleInDev({
-      artifactsConfig: input,
+      artifactsConfig: input.artifactsConfig,
       scheduleId,
     });
     return Response.json({

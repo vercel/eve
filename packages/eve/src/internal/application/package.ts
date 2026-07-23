@@ -37,6 +37,13 @@ function resolveCurrentModulePath(): string {
     return __filename;
   }
 
+  // Vite's module runner provides the original module URL but does not expose
+  // Node CallSite file names, so prefer the ESM-native identity before the
+  // compatibility fallback used by older bundled evaluators.
+  if (import.meta.url.startsWith("file:")) {
+    return fileURLToPath(import.meta.url);
+  }
+
   return resolveCurrentModulePathFromStack();
 }
 

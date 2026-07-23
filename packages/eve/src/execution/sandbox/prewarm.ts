@@ -19,7 +19,11 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { loadCompileMetadata } from "#runtime/loaders/compile-metadata.js";
-import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
+import {
+  readBundledCompiledArtifacts,
+  type BundledCompiledArtifacts,
+  withBundledCompiledArtifacts,
+} from "#runtime/loaders/bundled-artifacts.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
@@ -218,23 +222,63 @@ export async function prewarmBuiltAppSandboxes(input: {
       sessionId: "built-app-prewarm",
     },
     async () => {
-      const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
-      const graph = await resolveRuntimeAgentGraph({
-        manifest,
-        moduleMap,
-      });
-
-      await prewarmSandboxes({
+      await prewarmBundledArtifacts({
         appRoot: input.appRoot,
+        artifacts: { manifest, metadata: metadata ?? undefined, moduleMap },
         compileDirectoryPath:
           resolveRuntimeCompilerArtifactPaths(builtArtifactsRoot).compileDirectoryPath,
-        compiledArtifactsSource,
         dispatch: input.dispatch,
-        graph,
         log: input.log,
       });
     },
   );
+}
+
+/** Prewarms a deployed bundled graph from resources staged beside its server artifact. */
+export async function prewarmBundledAppSandboxes(input: {
+  readonly appRoot: string;
+  readonly log?: (message: string) => void;
+  readonly dispatch?: SandboxBackendPrewarmDispatch;
+}): Promise<void> {
+  const artifacts = readBundledCompiledArtifacts();
+  if (artifacts === null) {
+    throw new Error("Bundled compiled artifacts are not installed.");
+  }
+  if (artifacts.compilerArtifactsRoot === undefined) {
+    throw new Error(
+      "Bundled sandbox resources could not be located. Set EVE_COMPILER_ARTIFACTS_ROOT to the deployed .eve directory.",
+    );
+  }
+  await prewarmBundledArtifacts({
+    appRoot: input.appRoot,
+    artifacts,
+    compileDirectoryPath: join(artifacts.compilerArtifactsRoot, "compile"),
+    dispatch: input.dispatch,
+    log: input.log,
+  });
+}
+
+async function prewarmBundledArtifacts(input: {
+  readonly appRoot: string;
+  readonly artifacts: BundledCompiledArtifacts;
+  readonly compileDirectoryPath: string;
+  readonly log?: (message: string) => void;
+  readonly dispatch?: SandboxBackendPrewarmDispatch;
+}): Promise<void> {
+  const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
+  const graph = await resolveRuntimeAgentGraph({
+    manifest: input.artifacts.manifest,
+    moduleMap: input.artifacts.moduleMap,
+  });
+
+  await prewarmSandboxes({
+    appRoot: input.appRoot,
+    compileDirectoryPath: input.compileDirectoryPath,
+    compiledArtifactsSource,
+    dispatch: input.dispatch,
+    graph,
+    log: input.log,
+  });
 }
 
 async function collectPrewarmTargets(input: {

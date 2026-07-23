@@ -13,7 +13,7 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import { trackActiveSandboxHandle } from "#execution/sandbox/active-handles.js";
 import { waitForDevelopmentSandboxPrewarm } from "#execution/sandbox/development-prewarm.js";
-import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
+import { prewarmAppSandboxes, prewarmBundledAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { waitForSandboxTemplatePrewarmLock } from "#execution/sandbox/template-prewarm-lock.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createRuntimeSandboxKeys } from "#runtime/sandbox/keys.js";
@@ -192,19 +192,22 @@ async function createBackendHandleWithPrewarmRetry(input: {
   try {
     return await input.backend.create(input.createInput);
   } catch (error) {
-    if (
-      input.createInput.templateKey === null ||
-      input.compiledArtifactsSource.kind !== "disk" ||
-      !SandboxTemplateNotProvisionedError.is(error)
-    ) {
+    if (input.createInput.templateKey === null || !SandboxTemplateNotProvisionedError.is(error)) {
       throw error;
     }
 
-    await prewarmAppSandboxes({
-      appRoot: input.appRoot,
-      compiledArtifactsSource: input.compiledArtifactsSource,
-      log: (message) => logDevelopmentSandbox(message),
-    });
+    if (input.compiledArtifactsSource.kind === "disk") {
+      await prewarmAppSandboxes({
+        appRoot: input.appRoot,
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        log: (message) => logDevelopmentSandbox(message),
+      });
+    } else {
+      await prewarmBundledAppSandboxes({
+        appRoot: input.appRoot,
+        log: (message) => logDevelopmentSandbox(message),
+      });
+    }
     await waitForSandboxTemplatePrewarmLock({
       appRoot: input.appRoot,
       backendName: input.backend.name,

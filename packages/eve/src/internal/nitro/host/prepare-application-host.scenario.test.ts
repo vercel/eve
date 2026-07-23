@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,13 +9,17 @@ import {
   createApplicationBuildWorkspace,
   removeApplicationBuildWorkspace,
 } from "#internal/application/build-workspace.js";
-import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
+import {
+  useTemporaryAppRoots,
+  useTemporaryDirectories,
+} from "#internal/testing/use-temporary-app-roots.js";
 import {
   prepareDevelopmentApplicationHost,
   prepareProductionApplicationHost,
 } from "#internal/nitro/host/prepare-application-host.js";
 
 const createAppRoot = useTemporaryAppRoots();
+const createTemporaryDirectory = useTemporaryDirectories();
 
 describe("application host preparation", () => {
   afterEach(() => {
@@ -132,5 +136,54 @@ describe("application host preparation", () => {
 
     expect(existsSync(firstHost.generation.snapshotRoot)).toBe(false);
     expect(existsSync(firstBootstrapPath)).toBe(true);
+  });
+
+  it("prepares development hosts with an absolute sibling agent root", async () => {
+    const workspaceRoot = await createTemporaryDirectory("eve-external-agent-host-");
+    const appRoot = join(workspaceRoot, "host-app");
+    const agentRoot = join(workspaceRoot, "agents", "support");
+    const nestedModulePath = join(agentRoot, "internal", "model.mjs");
+
+    await mkdir(join(agentRoot, "internal"), { recursive: true });
+    await mkdir(appRoot, { recursive: true });
+    await writeFile(join(workspaceRoot, "package.json"), '{"private":true,"type":"module"}\n');
+    await writeFile(join(appRoot, "package.json"), '{"name":"host-app","type":"module"}\n');
+    await writeFile(join(agentRoot, "instructions.md"), "Support the user.\n");
+    await writeFile(nestedModulePath, 'export const model = "openai/gpt-5.4";\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { model } from "./internal/model.mjs";\nexport default { model };\n',
+    );
+
+    const preparedHost = await prepareDevelopmentApplicationHost(appRoot, { agentRoot });
+    const runtimeManifest = JSON.parse(
+      await readFile(
+        join(
+          preparedHost.generation.runtimeAppRoot,
+          ".eve",
+          "compile",
+          "compiled-agent-manifest.json",
+        ),
+        "utf8",
+      ),
+    ) as { agentRoot: string; appRoot: string };
+
+    expect(preparedHost.compileResult.project).toEqual({
+      agentRoot,
+      appRoot,
+      layout: "nested",
+    });
+    expect(runtimeManifest.appRoot).toBe(preparedHost.generation.runtimeAppRoot);
+    expect(runtimeManifest.agentRoot).toBe(
+      join(preparedHost.generation.runtimeAppRoot, ".eve", "external-agent"),
+    );
+    await expect(
+      readFile(join(runtimeManifest.agentRoot, "internal", "model.mjs"), "utf8"),
+    ).resolves.toBe('export const model = "openai/gpt-5.4";\n');
+    expect(
+      existsSync(
+        join(preparedHost.generation.runtimeAppRoot, ".eve", "compile", "authored-modules.json"),
+      ),
+    ).toBe(true);
   });
 });

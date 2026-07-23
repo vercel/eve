@@ -228,6 +228,75 @@ describe("development runtime artifact snapshots", () => {
     });
   });
 
+  it("maps an external agent root into the runtime snapshot", async () => {
+    const workspaceRoot = await createScratchDirectory("eve-dev-runtime-external-agent-");
+    const appRoot = join(workspaceRoot, "app");
+    const agentRoot = join(workspaceRoot, "authored-agents", "support");
+    const agentModulePath = join(agentRoot, "internal", "agent.ts");
+    const extensionRoot = join(agentRoot, "extensions", "crm");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
+
+    await mkdir(extensionRoot, { recursive: true });
+    await mkdir(join(agentRoot, "internal"), { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(agentModulePath, 'export default { model: "openai/gpt-5.4" };\n');
+
+    const manifest = createCompiledAgentManifest({
+      agentRoot,
+      appRoot,
+      config: {
+        model: {
+          id: "openai/gpt-5.4",
+          routing: {
+            kind: "gateway",
+            target: "openai/gpt-5.4",
+          },
+        },
+        name: "External Agent",
+        source: {
+          logicalPath: "internal/agent.ts",
+          sourceId: "internal/agent.ts",
+          sourceKind: "module",
+        },
+      },
+      extensionMounts: [
+        {
+          mountLogicalPath: "extensions/crm/extension.ts",
+          mountSourceId: "extensions/crm/extension.ts",
+          namespace: "crm",
+          packageName: "@acme/crm",
+          packageNamespace: "acme-crm",
+          sourceRoot: extensionRoot,
+        },
+      ],
+    });
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      manifest,
+      paths: { compileDirectoryPath },
+      project: { agentRoot, appRoot, layout: "nested" },
+    } as CompileAgentResult);
+    const runtimeManifest = JSON.parse(
+      await readFile(
+        join(snapshot.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
+        "utf8",
+      ),
+    ) as typeof manifest;
+
+    expect(runtimeManifest.appRoot).toBe(snapshot.runtimeAppRoot);
+    expect(runtimeManifest.agentRoot).toBe(join(snapshot.runtimeAppRoot, ".eve", "external-agent"));
+    expect(runtimeManifest.config.source?.logicalPath).toBe("internal/agent.ts");
+    expect(runtimeManifest.extensionMounts[0]?.sourceRoot).toBe(
+      join(runtimeManifest.agentRoot, "extensions", "crm"),
+    );
+    await expect(
+      readFile(join(runtimeManifest.agentRoot, "internal", "agent.ts"), "utf8"),
+    ).resolves.toBe('export default { model: "openai/gpt-5.4" };\n');
+  });
+
   it("excludes generated output and dependency directories from source snapshots", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-generated-output-");
     const agentRoot = join(appRoot, "agent");

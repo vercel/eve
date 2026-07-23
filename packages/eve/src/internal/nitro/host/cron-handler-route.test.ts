@@ -42,6 +42,20 @@ describe("applyEveCronHandlerRoute", () => {
     );
   });
 
+  it("preserves unrelated Vercel options while replacing the cron handler route", () => {
+    const nitro = createNitroStub({
+      vercel: {
+        config: { version: 3 },
+        cronHandlerRoute: "/_vercel/cron",
+      },
+    });
+
+    applyEveCronHandlerRoute(nitro);
+
+    expect(nitro.options.vercel?.config).toEqual({ version: 3 });
+    expect(nitro.options.vercel?.cronHandlerRoute).not.toBe("/_vercel/cron");
+  });
+
   it("populates the route even when the preset has not initialized one yet", () => {
     const nitro = createNitroStub({ vercel: {} });
 
@@ -61,7 +75,9 @@ describe("applyEveCronHandlerRoute", () => {
   });
 });
 
-function createNitroStub(input: { vercel?: { cronHandlerRoute?: string } }): Nitro {
+function createNitroStub(input: {
+  vercel?: { config?: { version: number }; cronHandlerRoute?: string };
+}): Nitro {
   return {
     options: {
       vercel: input.vercel,

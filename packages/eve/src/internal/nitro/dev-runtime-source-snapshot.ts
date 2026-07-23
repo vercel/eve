@@ -1,12 +1,28 @@
 import { existsSync } from "node:fs";
 import { lstat, readlink, realpath } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   parseTsConfigObject,
   readTextFileIfExists,
   resolveTsConfigDependencyPaths,
 } from "#internal/application/tsconfig-dependencies.js";
+import {
+  createDevelopmentSourceSnapshotPathMappings,
+  isAuthoredSourcePath,
+  isPathInsideOrEqual,
+  toDevelopmentSourceSnapshotPath,
+  type DevelopmentSourceSnapshotPathMapping,
+} from "#internal/nitro/dev-runtime-source-snapshot-paths.js";
+
+export {
+  DevelopmentRuntimeSourceSnapshotError,
+  isAuthoredSourcePath,
+  resolveDevelopmentSourceSnapshotPlanPath,
+  toDevelopmentSourceSnapshotPath,
+  toDevelopmentSourceSnapshotPlanPath,
+  type DevelopmentSourceSnapshotPathMapping,
+} from "#internal/nitro/dev-runtime-source-snapshot-paths.js";
 
 export const DEV_RUNTIME_SOURCE_DIRECTORY = "source";
 
@@ -28,18 +44,12 @@ const PACKAGE_DEPENDENCY_FIELDS = [
   "peerDependencies",
 ] as const;
 
-export class DevelopmentRuntimeSourceSnapshotError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DevelopmentRuntimeSourceSnapshotError";
-  }
-}
-
 export interface DevelopmentSourceSnapshotPlan {
   readonly appRoot: string;
   readonly copyFiles: readonly string[];
   readonly copyRoots: readonly string[];
   readonly dependencyMounts: readonly DevelopmentSourceSnapshotDependencyMount[];
+  readonly pathMappings: readonly DevelopmentSourceSnapshotPathMapping[];
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
@@ -68,13 +78,29 @@ interface SnapshotPlanState {
 }
 
 export async function createDevelopmentSourceSnapshotPlan(input: {
+  readonly agentRoot?: string;
   readonly appRoot: string;
   readonly snapshotRoot: string;
 }): Promise<DevelopmentSourceSnapshotPlan> {
   const appRoot = resolve(input.appRoot);
+  const agentRoot = input.agentRoot === undefined ? undefined : resolve(input.agentRoot);
   const snapshotRoot = resolve(input.snapshotRoot);
   const sourceRoot = resolveDevelopmentSourceRoot(appRoot);
   const snapshotSourceRoot = join(snapshotRoot, DEV_RUNTIME_SOURCE_DIRECTORY);
+  const runtimeAppRoot = toDevelopmentSourceSnapshotPath({
+    snapshotSourceRoot,
+    sourcePath: appRoot,
+    sourceRoot,
+  });
+  const externalAgentRoot =
+    agentRoot !== undefined && !isPathInsideOrEqual(agentRoot, appRoot) ? agentRoot : undefined;
+  const pathMappings = createDevelopmentSourceSnapshotPathMappings({
+    appRoot,
+    externalAgentRoot,
+    runtimeAppRoot,
+    snapshotSourceRoot,
+    sourceRoot,
+  });
   const state: SnapshotPlanState = {
     appRoot,
     copyFiles: new Set(),
@@ -114,6 +140,12 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
   }
 
   const copyRoots = normalizeCopyRoots([...state.copyRoots]);
+  if (externalAgentRoot !== undefined && !copyRoots.includes(externalAgentRoot)) {
+    // An ancestor copy keeps its own target mapping, so the agent root must
+    // remain an explicit copy even when another planned root contains it.
+    copyRoots.push(externalAgentRoot);
+    copyRoots.sort((left, right) => left.localeCompare(right));
+  }
   const copyFiles = [...state.copyFiles]
     .filter((path) => isPathInsideOrEqual(path, sourceRoot))
     .sort((left, right) => left.localeCompare(right));
@@ -137,7 +169,8 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
     copyFiles,
     copyRoots,
     dependencyMounts,
-    runtimeAppRoot: toSnapshotPath({ sourcePath: appRoot, sourceRoot, snapshotSourceRoot }),
+    pathMappings,
+    runtimeAppRoot,
     snapshotRoot,
     snapshotSourceRoot,
     sourceRoot,
@@ -156,14 +189,6 @@ export async function resolveDevelopmentSourceSnapshotWatchPaths(
   });
 
   return [...plan.watchPaths];
-}
-
-export function toDevelopmentSourceSnapshotPath(input: {
-  readonly snapshotSourceRoot: string;
-  readonly sourcePath: string;
-  readonly sourceRoot: string;
-}): string {
-  return toSnapshotPath(input);
 }
 
 /** Resolves the repository/workspace boundary used for authored development sources. */
@@ -575,40 +600,6 @@ function createWatchPaths(input: {
 
 function joinNodeModulesPackagePath(packageRoot: string, dependencyName: string): string {
   return join(packageRoot, "node_modules", ...dependencyName.split("/"));
-}
-
-function toSnapshotPath(input: {
-  readonly snapshotSourceRoot: string;
-  readonly sourcePath: string;
-  readonly sourceRoot: string;
-}): string {
-  if (!isPathInsideOrEqual(input.sourcePath, input.sourceRoot)) {
-    throw new DevelopmentRuntimeSourceSnapshotError(
-      `Cannot map source path "${input.sourcePath}" into a development runtime snapshot because it is outside source root "${input.sourceRoot}".`,
-    );
-  }
-
-  return join(input.snapshotSourceRoot, relative(input.sourceRoot, input.sourcePath));
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
-}
-
-/** Returns whether a path is authored workspace source rather than installed dependency data. */
-export function isAuthoredSourcePath(path: string, sourceRoot: string): boolean {
-  if (!isPathInsideOrEqual(path, sourceRoot)) {
-    return false;
-  }
-
-  const relativePath = relative(sourceRoot, path);
-
-  return !relativePath.split(/[\\/]/).includes("node_modules");
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

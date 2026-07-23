@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
 import {
   createDevelopmentSourceSnapshotPlan,
-  toDevelopmentSourceSnapshotPath,
+  type DevelopmentSourceSnapshotPathMapping,
+  resolveDevelopmentSourceSnapshotPlanPath,
 } from "#internal/nitro/dev-runtime-source-snapshot.js";
 import {
   DEVELOPMENT_RUNTIME_ARTIFACTS_ACTIVATED_MARKER,
@@ -85,6 +86,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
     `${Date.now().toString(36)}-${randomUUID()}`,
   );
   const sourceSnapshotPlan = await createDevelopmentSourceSnapshotPlan({
+    agentRoot: compileResult.project.agentRoot,
     appRoot: compileResult.project.appRoot,
     snapshotRoot,
   });
@@ -99,16 +101,13 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
       },
     );
     await rewriteSnapshotCompiledManifest({
-      appRoot: compileResult.project.appRoot,
       manifestPath: join(
         sourceSnapshotPlan.runtimeAppRoot,
         ".eve",
         "compile",
         "compiled-agent-manifest.json",
       ),
-      runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
-      snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
-      sourceRoot: sourceSnapshotPlan.sourceRoot,
+      pathMappings: sourceSnapshotPlan.pathMappings,
     });
     await validateSnapshotCompiledManifestRoots({
       manifestPath: join(
@@ -334,18 +333,12 @@ function readDevelopmentRuntimeArtifactsPointer(
 }
 
 async function rewriteSnapshotCompiledManifest(input: {
-  readonly appRoot: string;
   readonly manifestPath: string;
-  readonly runtimeAppRoot: string;
-  readonly snapshotSourceRoot: string;
-  readonly sourceRoot: string;
+  readonly pathMappings: readonly DevelopmentSourceSnapshotPathMapping[];
 }): Promise<void> {
   const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as unknown;
   const rewritten = rewriteManifestRoots({
-    appRoot: input.appRoot,
-    runtimeAppRoot: input.runtimeAppRoot,
-    snapshotSourceRoot: input.snapshotSourceRoot,
-    sourceRoot: input.sourceRoot,
+    pathMappings: input.pathMappings,
     value: manifest,
   });
 
@@ -353,10 +346,7 @@ async function rewriteSnapshotCompiledManifest(input: {
 }
 
 function rewriteManifestRoots(input: {
-  readonly appRoot: string;
-  readonly runtimeAppRoot: string;
-  readonly snapshotSourceRoot: string;
-  readonly sourceRoot: string;
+  readonly pathMappings: readonly DevelopmentSourceSnapshotPathMapping[];
   readonly value: unknown;
 }): unknown {
   if (Array.isArray(input.value)) {
@@ -369,29 +359,19 @@ function rewriteManifestRoots(input: {
 
   const rewritten: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input.value)) {
-    if (typeof value === "string" && (key === "appRoot" || key === "agentRoot")) {
-      rewritten[key] = rewritePathWithinAppRoot({
-        appRoot: input.appRoot,
+    if (
+      typeof value === "string" &&
+      (key === "appRoot" || key === "agentRoot" || key === "sourceRoot")
+    ) {
+      rewritten[key] = rewritePathWithinSnapshotPlan({
         path: value,
-        runtimeAppRoot: input.runtimeAppRoot,
-      });
-      continue;
-    }
-
-    if (typeof value === "string" && key === "sourceRoot") {
-      rewritten[key] = rewritePathWithinSourceRoot({
-        path: value,
-        snapshotSourceRoot: input.snapshotSourceRoot,
-        sourceRoot: input.sourceRoot,
+        pathMappings: input.pathMappings,
       });
       continue;
     }
 
     rewritten[key] = rewriteManifestRoots({
-      appRoot: input.appRoot,
-      runtimeAppRoot: input.runtimeAppRoot,
-      snapshotSourceRoot: input.snapshotSourceRoot,
-      sourceRoot: input.sourceRoot,
+      pathMappings: input.pathMappings,
       value,
     });
   }
@@ -399,37 +379,14 @@ function rewriteManifestRoots(input: {
   return rewritten;
 }
 
-function rewritePathWithinSourceRoot(input: {
+function rewritePathWithinSnapshotPlan(input: {
   readonly path: string;
-  readonly snapshotSourceRoot: string;
-  readonly sourceRoot: string;
+  readonly pathMappings: readonly DevelopmentSourceSnapshotPathMapping[];
 }): string {
-  if (!isPathInsideOrEqual(input.path, input.sourceRoot)) {
-    return input.path;
-  }
-
-  return toDevelopmentSourceSnapshotPath({
-    snapshotSourceRoot: input.snapshotSourceRoot,
-    sourcePath: input.path,
-    sourceRoot: input.sourceRoot,
-  });
-}
-
-function rewritePathWithinAppRoot(input: {
-  readonly appRoot: string;
-  readonly path: string;
-  readonly runtimeAppRoot: string;
-}): string {
-  if (!isPathInsideOrEqual(input.path, input.appRoot)) {
-    return input.path;
-  }
-
-  const relativePath = relative(input.appRoot, input.path);
-  if (relativePath.length === 0) {
-    return input.runtimeAppRoot;
-  }
-
-  return join(input.runtimeAppRoot, relativePath);
+  return (
+    resolveDevelopmentSourceSnapshotPlanPath({ pathMappings: input.pathMappings }, input.path) ??
+    input.path
+  );
 }
 
 async function writeDevelopmentRuntimeArtifactsPointer(input: {

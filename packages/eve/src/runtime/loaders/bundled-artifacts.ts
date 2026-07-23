@@ -12,6 +12,8 @@ import {
  * embedded directly into the server bundle.
  */
 export interface BundledCompiledArtifacts {
+  /** Runtime-resolved root containing the staged `.eve/compile` resource tree. */
+  compilerArtifactsRoot?: string;
   manifest: CompiledAgentManifest;
   metadata?: CompileMetadata;
   moduleMap: CompiledModuleMap;
@@ -33,6 +35,7 @@ export interface WithBundledCompiledArtifactsInput extends BundledCompiledArtifa
  */
 export function installBundledCompiledArtifacts(input: BundledCompiledArtifacts): void {
   getActiveRuntimeSession().compiledArtifacts = {
+    compilerArtifactsRoot: input.compilerArtifactsRoot,
     manifest: input.manifest,
     metadata: input.metadata,
     moduleMap: input.moduleMap,

@@ -96,6 +96,11 @@
       "import": "./dist/src/public/sveltekit/index.js",
       "default": "./dist/src/public/sveltekit/index.js"
     },
+    "./nitro": {
+      "types": "./dist/src/public/nitro/index.d.ts",
+      "import": "./dist/src/public/nitro/index.js",
+      "default": "./dist/src/public/nitro/index.js"
+    },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",
       "import": "./dist/src/public/tools/approval/index.js",
