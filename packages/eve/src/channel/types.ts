@@ -31,6 +31,18 @@ export interface CancelTurnResult {
   readonly status: CancelTurnStatus;
 }
 
+/** Identifies a session to transition permanently to a terminal state. */
+export interface TerminateSessionInput {
+  /** Human-readable reason recorded on the terminal workflow transition. */
+  readonly reason?: string;
+  readonly sessionId: string;
+}
+
+/** Result of attempting to terminally retire a session. */
+export type TerminateSessionResult =
+  | { readonly status: "terminated" }
+  | { readonly status: "already_terminal" };
+
 // ---------------------------------------------------------------------------
 // Lineage
 // ---------------------------------------------------------------------------
@@ -382,6 +394,9 @@ export interface Runtime {
 
   /** Requests cancellation of a session's in-flight turn. */
   cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+
+  /** Terminally retires a session and releases its non-retained continuation hooks. */
+  terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult>;
 
   /**
    * Delivers a follow-up message to a parked session.

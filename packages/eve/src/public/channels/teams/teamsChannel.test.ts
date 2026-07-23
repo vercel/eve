@@ -47,6 +47,7 @@ async function firePost(
       getSession: vi.fn(),
       resolveActiveSession: overrides.resolveActiveSession ?? vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn(),
+      resetSession: vi.fn(),
       params: {},
       receive: vi.fn(),
       requestIp: null,

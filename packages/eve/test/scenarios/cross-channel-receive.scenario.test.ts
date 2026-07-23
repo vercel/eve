@@ -104,6 +104,9 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async getEventStream() {
       return new ReadableStream();
     },
+    async terminateSession() {
+      throw new Error("terminateSession should not be called in this scenario");
+    },
   };
 }
 
@@ -177,6 +180,9 @@ describe("cross-channel receive end-to-end", () => {
           },
           cancel: async () => {
             throw new Error("webhook should not cancel turns");
+          },
+          resetSession: async () => {
+            throw new Error("webhook should not reset sessions");
           },
           getSession: () => {
             throw new Error("webhook should not read sessions directly");
