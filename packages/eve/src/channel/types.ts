@@ -547,6 +547,8 @@ export interface RunInput {
   readonly input: {
     /** Omitted only when creating a conversation session before its first turn. */
     readonly message?: string | UserContent;
+    /** @internal Channel-owned serializable data for durable delivery processing. */
+    readonly channelData?: unknown;
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;
   };

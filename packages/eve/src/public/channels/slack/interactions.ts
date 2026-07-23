@@ -233,8 +233,8 @@ function readInstallationTeamId(value: unknown): string | undefined {
 
 /** Channel-supplied dependencies for {@link handleInteractionPost}. */
 export interface InteractionHandlerDeps {
-  readonly config: SlackChannelConfig;
-  readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
+  readonly config: SlackChannelConfig<unknown>;
+  readonly onInputResponse: NonNullable<SlackChannelConfig<unknown>["onInputResponse"]>;
 }
 
 /**

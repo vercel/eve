@@ -239,6 +239,7 @@ function createInitialDelivery(
           message: input.input.message,
           context: input.input.context,
           outputSchema: input.input.outputSchema,
+          channelData: input.input.channelData,
         },
         readClientContext(input.input),
       ),

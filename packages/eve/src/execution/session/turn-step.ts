@@ -30,6 +30,7 @@ import {
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { withContextScope } from "#context/run-step.js";
 import {
   emitTurnPreamble,
   getHarnessEmissionState,
@@ -171,7 +172,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
   }
   const backgroundTaskDelivery = getBackgroundTaskDelivery(delivery);
-  const initialSession = hydrateDurableSession({
+  let initialSession = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },
@@ -251,28 +252,38 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       delivery !== undefined && !isHarnessBetweenTurns(initialSession)
         ? structuredClone(adapterCtx.state)
         : undefined;
-    // Run the adapter's deliver hook for each queued payload and coalesce
-    // the resulting StepInput values; runtime results ride the same input.
+    // Run delivery policies inside the hydrated session scope so they can use
+    // SessionContext and persist provider-backed state before starting a turn.
     let resolved: StepInput | undefined;
+    let deliverySessionChanged = false;
     if (delivery !== undefined) {
-      const results: StepInput[] = [];
+      const beforeDeliverySession = initialSession;
       try {
-        for (const payload of delivery.payloads) {
-          const result = adapter.deliver
-            ? await adapter.deliver(payload, adapterCtx)
-            : defaultDeliverResult(payload);
+        const scoped = await withContextScope(ctx, initialSession, async (enrichedSession) => {
+          const results: StepInput[] = [];
+          for (const payload of delivery.payloads) {
+            const result = adapter.deliver
+              ? await adapter.deliver(payload, adapterCtx)
+              : defaultDeliverResult(payload);
 
-          if (result !== undefined && result !== null) {
-            results.push(
-              backgroundTaskDelivery === undefined ? result : markBackgroundTaskStepInput(result),
-            );
+            if (result !== undefined && result !== null) {
+              results.push(
+                backgroundTaskDelivery === undefined ? result : markBackgroundTaskStepInput(result),
+              );
+            }
           }
-        }
+          return {
+            result: results.length === 0 ? undefined : results.reduce(coalesceTurnInputs),
+            session: enrichedSession,
+          };
+        });
+        resolved = scoped.result;
+        initialSession = scoped.session;
+        deliverySessionChanged = initialSession !== beforeDeliverySession;
       } catch (error) {
         await failChannelDeliveries(error);
         throw error;
       }
-      resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !isHarnessBetweenTurns(initialSession);
@@ -362,7 +373,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       const aliased = reconcileSessionContinuationToken(ctx, initialSession);
       const nextSerializedContext = serializeContext(ctx);
       const nextState =
-        aliased === initialSession
+        !deliverySessionChanged && aliased === initialSession
           ? input.sessionState
           : createDurableSessionState({ session: aliased });
 
