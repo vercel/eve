@@ -1,5 +1,3 @@
-import type { FlexibleSchema } from "ai";
-
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -37,6 +35,7 @@ import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
+import type { ToolSchema } from "#shared/tool-schema.js";
 
 /**
  * Runtime-owned source ref describing one additive config module import.
@@ -146,24 +145,26 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
 };
 
 /**
- * Runtime-owned authored tool definition resolved from a compiled module map.
+ * Runtime-owned tool definition resolved from a compiled module map or
+ * declared by the framework catalog.
  * A tool without `execute` is surfaced to the client and never executed by eve.
  */
 export type ResolvedToolDefinition = Readonly<
-  Optional<InternalToolDefinitionWithExecuteFn<unknown, unknown>, "execute">
+  Omit<
+    Optional<InternalToolDefinitionWithExecuteFn<unknown, unknown>, "execute">,
+    "inputSchema" | "outputSchema"
+  >
 > &
   ResolvedModuleSourceRef & {
     /**
-     * Optional live Standard Schema reattached from the authored module at
-     * resolve time. When present, the AI SDK uses it for both JSON schema
-     * extraction and runtime validation with transforms/defaults.
+     * Validated runtime input schema. Compiled and durable JSON Schemas are
+     * rehydrated before entering this runtime-owned definition.
      */
-    readonly inputStandardSchema?: FlexibleSchema;
+    readonly inputSchema: ToolSchema | null;
     /**
-     * Optional live Standard Schema reattached from the authored module at
-     * resolve time for tool output typing/validation.
+     * Optional validated runtime output schema.
      */
-    readonly outputStandardSchema?: FlexibleSchema;
+    readonly outputSchema?: ToolSchema;
     /**
      * Optional per-tool approval gate. When set, determines whether user
      * approval is required before executing this tool. See
@@ -327,6 +328,11 @@ export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
+  /**
+   * Mount namespace when this resolver comes from an extension. Names of tools
+   * the resolver produces are prefixed with `${extensionNamespace}__`.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
@@ -340,6 +346,11 @@ export interface ResolvedDynamicSkillResolver extends Readonly<ModuleSourceRef> 
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
+  /**
+   * Mount namespace when this resolver comes from an extension. Names of skills
+   * a map resolver produces are prefixed with `${extensionNamespace}__`.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
@@ -377,13 +388,13 @@ export interface ResolvedAgent {
    */
   readonly disabledFrameworkTools: readonly string[];
   /**
-   * Whether the author opted into the framework `Workflow` orchestration tool
-   * by re-exporting the `Workflow` marker as the default export of a file in
-   * `agent/tools/`. When true, the harness exposes an isolated JavaScript sandbox
-   * whose only callable operations are this agent's subagents and remote
-   * agents.
+   * Configuration for the experimental framework `Workflow` orchestration
+   * tool. Present when an authored tool module exports
+   * `experimental_workflow(...)`.
    */
-  readonly workflowEnabled: boolean;
+  readonly workflowTool?: {
+    readonly maxSubagents?: number;
+  };
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
   readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];

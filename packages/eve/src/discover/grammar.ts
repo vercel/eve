@@ -59,6 +59,12 @@ export const DISCOVER_HOOKS_DIRECTORY_INVALID = "discover/hooks-directory-invali
 export const DISCOVER_CHANNELS_DIRECTORY_INVALID = "discover/channels-directory-invalid";
 
 /**
+ * Shared diagnostic emitted when the authored `extensions/` root is not a
+ * directory.
+ */
+export const DISCOVER_EXTENSIONS_DIRECTORY_INVALID = "discover/extensions-directory-invalid";
+
+/**
  * Shared diagnostic emitted when an authored `tools/*.{ts,…}` filename does
  * not satisfy the model tool-name charset rule.
  */
@@ -96,6 +102,12 @@ export const DISCOVER_CHANNEL_NAME_INVALID = "discover/channel-name-invalid";
 export const DISCOVER_HOOK_NAME_INVALID = "discover/hook-name-invalid";
 
 /**
+ * Shared diagnostic emitted when an authored `extensions/*.{ts,…}` mount
+ * filename does not satisfy the extension namespace charset rule.
+ */
+export const DISCOVER_EXTENSION_NAME_INVALID = "discover/extension-name-invalid";
+
+/**
  * Tool filename charset. The slug must start with an ASCII letter and may
  * contain ASCII letters, digits, underscores, and dashes. The 64-character
  * cap matches the most restrictive provider tool-name limit.
@@ -126,6 +138,15 @@ export const CHANNEL_SLUG_PATTERN = /^(\.?[a-z][a-z0-9-]{0,63}|\[[a-zA-Z][a-zA-Z
  * are not allowed — hooks have no URL semantics.
  */
 export const HOOK_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+
+/**
+ * Extension mount filename charset. The basename becomes the namespace the
+ * consumer's build prefixes onto every contribution (`crm` → `crm__search`),
+ * so it uses the same restrictive charset as tool slugs: ASCII letters,
+ * digits, underscores, and dashes, starting with a letter, up to 64
+ * characters.
+ */
+export const EXTENSION_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
 /**
  * Shared diagnostic emitted when discovery ignores one unsupported directory.
@@ -486,6 +507,31 @@ export function createHookNameDiagnostic(
     code: DISCOVER_HOOK_NAME_INVALID,
     message:
       `Hook path segment "${segment}" is not a legal hook name. ` +
+      `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
+    sourcePath,
+  });
+}
+
+/**
+ * Returns a discovery diagnostic when an extension mount filename violates
+ * {@link EXTENSION_SLUG_PATTERN}, or `null` when it satisfies the rule.
+ *
+ * The mount basename becomes the namespace prefixed onto every contribution
+ * the extension composes into the consuming agent, so it must be a legal
+ * identifier segment.
+ */
+export function createExtensionNameDiagnostic(
+  slotName: string,
+  sourcePath: string,
+): DiscoverDiagnostic | null {
+  if (EXTENSION_SLUG_PATTERN.test(slotName)) {
+    return null;
+  }
+
+  return createDiscoverErrorDiagnostic({
+    code: DISCOVER_EXTENSION_NAME_INVALID,
+    message:
+      `Extension mount filename "${slotName}" is not a legal extension namespace. ` +
       `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
     sourcePath,
   });

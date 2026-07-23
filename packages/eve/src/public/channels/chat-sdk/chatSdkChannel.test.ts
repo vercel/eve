@@ -100,6 +100,9 @@ async function firePost(
   const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
     continuationToken: "chat-sdk:test",
     id: "session-1",
+    async cancel() {
+      return { status: "no_active_turn" as const };
+    },
     async getEventStream() {
       return new ReadableStream();
     },
@@ -114,6 +117,8 @@ async function firePost(
     }),
     {
       getSession: vi.fn() as any,
+      resolveActiveSession: async () => undefined,
+      cancel: vi.fn(),
       params: {},
       receive: vi.fn() as any,
       requestIp: null,
@@ -133,7 +138,7 @@ async function firePost(
 }
 
 describe("chatSdkChannel", () => {
-  it("mounts one webhook route per Chat SDK adapter", () => {
+  it("mounts GET and POST webhook routes per Chat SDK adapter", () => {
     const bridge = chatSdkChannel({
       adapters: {
         test: testAdapter(),
@@ -144,7 +149,42 @@ describe("chatSdkChannel", () => {
 
     expect(
       bridge.channel.routes.map((route) => ({ method: route.method, path: route.path })),
-    ).toEqual([{ method: "POST", path: "/eve/v1/test" }]);
+    ).toEqual([
+      { method: "GET", path: "/eve/v1/test" },
+      { method: "POST", path: "/eve/v1/test" },
+    ]);
+  });
+
+  it("routes GET verification challenges to the adapter webhook", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const compiled = asCompiled<ChatSdkChannelState>(bridge.channel);
+    const get = compiled.routes.find(
+      (route) => route.method === "GET" && route.path === "/eve/v1/test",
+    );
+    if (!get || !isHttpRouteDefinition(get)) {
+      throw new Error("Expected GET /eve/v1/test.");
+    }
+
+    const response = await get.handler(
+      new Request("https://example.com/eve/v1/test?crc_token=abc123", { method: "GET" }),
+      {
+        getSession: vi.fn() as any,
+        resolveActiveSession: async () => undefined,
+        cancel: vi.fn(),
+        params: {},
+        receive: vi.fn() as any,
+        requestIp: null,
+        send: vi.fn() as any,
+        waitUntil: vi.fn(),
+      } satisfies RouteHandlerArgs<ChatSdkChannelState>,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ response_token: "sha256=abc123" });
   });
 
   it("hands Chat SDK mentions to Eve through bridge.send", async () => {
@@ -207,6 +247,9 @@ describe("chatSdkChannel", () => {
     const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
       continuationToken: "chat-sdk:test",
       id: "session-1",
+      async cancel() {
+        return { status: "no_active_turn" as const };
+      },
       async getEventStream() {
         return new ReadableStream();
       },
@@ -631,6 +674,10 @@ class TestAdapter {
   }
 
   async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
+    if (request.method === "GET") {
+      const crcToken = new URL(request.url).searchParams.get("crc_token");
+      return Response.json({ response_token: `sha256=${crcToken}` });
+    }
     const body = (await request.json()) as {
       actionId?: string;
       kind?: string;

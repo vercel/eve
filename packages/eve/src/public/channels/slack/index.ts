@@ -19,27 +19,35 @@ export {
   type SlackChannelState,
   type SlackContext,
   type SlackEventContext,
+  type SlackEventReceiveFn,
+  type SlackEventReceiveOptions,
   type SlackHandle,
+  type SlackInboundEventContext,
   type SlackInboundResult,
   type SlackInboundResultOrPromise,
-  type SlackInstrumentationMetadata,
   type SlackInitialMessage,
+  type SlackInstrumentationMetadata,
   type SlackInteractionAction,
   type SlackMentionResult,
   type SlackMentionResultOrPromise,
   type SlackReceiveTarget,
   type SlackThread,
   type SlackWebhookVerifier,
+  type SlackWorkspaceHandle,
 } from "#public/channels/slack/slackChannel.js";
 
 export type {
   SlackAttachment,
   SlackAuthor,
+  SlackEvent,
+  SlackEventEnvelope,
   SlackInboundContext,
   SlackMessage,
 } from "#public/channels/slack/inbound.js";
 
 export {
+  callSlackApi,
+  resolveSlackBotToken,
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,
@@ -49,6 +57,11 @@ export {
 } from "#public/channels/slack/api.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+
+export {
+  describeActionRequest,
+  describeActionRequests,
+} from "#public/channels/slack/action-status.js";
 
 export {
   loadThreadContextMessages,

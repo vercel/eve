@@ -170,7 +170,7 @@ describe("dispatchAndAwaitTurn", () => {
     ]);
 
     const bufferedDeliveries: DeliverHookPayload[] = [delivery];
-    const action = await dispatchAndAwaitTurn({
+    const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
@@ -182,8 +182,36 @@ describe("dispatchAndAwaitTurn", () => {
     });
 
     expect(forwardTurnDeliveryStep).toHaveBeenCalledOnce();
-    expect(action.kind).toBe("park");
+    expect(turn.action.kind).toBe("park");
     expect(bufferedDeliveries).toEqual([delivery]);
+  });
+
+  it("defers control-hook disposal until the caller invokes dispose()", async () => {
+    const state = createState("http:test");
+    installControlHook([
+      {
+        action: { kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      deliveryHook: createDeliveryHook(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state,
+    });
+
+    // The turn run's final control send is at-least-once; a late
+    // duplicate resume must land on a live hook (see DispatchedTurn).
+    const hook = createHookMock.mock.results[0]?.value as { dispose: ReturnType<typeof vi.fn> };
+    expect(hook.dispose).not.toHaveBeenCalled();
+    await turn.dispose();
+    expect(hook.dispose).toHaveBeenCalledOnce();
   });
 });
 

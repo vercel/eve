@@ -53,8 +53,8 @@ Resolve on `turn.started` so later turns in the same session see memories writte
 
 ```ts title="agent/instructions/memory.ts"
 import { defineDynamic, defineInstructions } from "eve/instructions";
-import { memoryStore } from "../lib/memory-store.js";
-import { requireTenantCaller } from "../lib/tenant.js";
+import { memoryStore } from "../lib/memory-store";
+import { requireTenantCaller } from "../lib/tenant";
 
 export default defineDynamic({
   events: {
@@ -88,8 +88,8 @@ The model chooses the memory key and value. The executor chooses the tenant and 
 ```ts title="agent/tools/remember.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { memoryStore } from "../lib/memory-store.js";
-import { requireTenantCaller } from "../lib/tenant.js";
+import { memoryStore } from "../lib/memory-store";
+import { requireTenantCaller } from "../lib/tenant";
 
 export default defineTool({
   description: "Remember one stable fact or preference for the current user.",
@@ -110,8 +110,8 @@ export default defineTool({
 ```ts title="agent/tools/list_memories.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { memoryStore } from "../lib/memory-store.js";
-import { requireTenantCaller } from "../lib/tenant.js";
+import { memoryStore } from "../lib/memory-store";
+import { requireTenantCaller } from "../lib/tenant";
 
 export default defineTool({
   description: "List long-term memories saved for the current user.",
@@ -126,8 +126,8 @@ export default defineTool({
 import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
-import { memoryStore } from "../lib/memory-store.js";
-import { requireTenantCaller } from "../lib/tenant.js";
+import { memoryStore } from "../lib/memory-store";
+import { requireTenantCaller } from "../lib/tenant";
 
 export default defineTool({
   description: "Delete one long-term memory belonging to the current user.",
@@ -165,7 +165,7 @@ export interface MemoryStore {
 }
 
 // Implement this with your application's PostgreSQL, KV, or vector-store client.
-export { memoryStore } from "../../lib/memory-store.js";
+export { memoryStore } from "../../lib/memory-store";
 ```
 
 Whatever backend you choose, preserve these invariants:

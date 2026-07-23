@@ -1,6 +1,10 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
-import { coalesceTurnInputs, resolveAssistantStepText } from "#harness/messages.js";
+import {
+  coalesceTurnInputs,
+  normalizeUserContent,
+  resolveAssistantStepText,
+} from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
 
 function textFilePart(overrides: {
@@ -113,13 +117,49 @@ describe("coalesceTurnInputs", () => {
     expect(merged[3]).toBe(second);
   });
 
-  it("drops an empty string when the other side is a UserContent array", () => {
+  it("drops blank text when coalescing structured content", () => {
     const attachment = textFilePart({ filename: "notes.txt", payload: "hi" });
-    const result = coalesceTurnInputs({ message: "" }, { message: [attachment] });
+    const result = coalesceTurnInputs(
+      { message: [{ text: " \n\t", type: "text" }, attachment] },
+      { message: " " },
+    );
 
-    const merged = result.message as UserContent;
-    expect(merged).toHaveLength(1);
-    expect(merged[0]).toBe(attachment);
+    expect(result.message).toEqual([attachment]);
+  });
+});
+
+describe("normalizeUserContent", () => {
+  it.each([
+    ["empty string", ""],
+    ["whitespace-only string", "   \n\t "],
+    ["empty content array", []],
+    ["structured empty text", [{ text: "", type: "text" }]],
+    ["structured whitespace-only text", [{ text: " \n\t", type: "text" }]],
+  ] satisfies ReadonlyArray<readonly [string, string | UserContent]>)(
+    "returns undefined for %s",
+    (_name, content) => {
+      expect(normalizeUserContent(content)).toBeUndefined();
+    },
+  );
+
+  it("preserves visible text", () => {
+    expect(normalizeUserContent("hello")).toBe("hello");
+  });
+
+  it("keeps file parts while removing blank text parts", () => {
+    const attachment = textFilePart({ filename: "notes.txt", payload: "contents" });
+
+    expect(
+      normalizeUserContent([{ text: "", type: "text" }, attachment, { text: "  ", type: "text" }]),
+    ).toEqual([attachment]);
+  });
+
+  it("removes a blank string coalesced with structured content", () => {
+    const attachment = textFilePart({ filename: "notes.txt", payload: "contents" });
+
+    expect(coalesceTurnInputs({ message: [attachment] }, { message: " " }).message).toEqual([
+      attachment,
+    ]);
   });
 });
 

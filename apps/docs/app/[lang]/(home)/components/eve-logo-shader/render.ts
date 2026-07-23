@@ -26,5 +26,21 @@ export {
   DEFAULT_PAINT_DIFFUSION_RATE,
   DEFAULT_PAINT_DT,
   imprintCellSizeForDevicePixelRatio,
+  imprintCellSizeForLogicalHeight,
+  imprintGridSizeForLogicalSize,
 } from "./render/constants";
-export type { Bounds, EnvLightConfig, EveMaterial, ImprintRenderOptions, MeshData, PaintPointerMapping, PaintPointerMappingInput, PaintPointerRect, PaintRenderOptions, PaintSeed, PaintStroke, RenderControls, StudioCubemap } from "./render/types";
+export type {
+  Bounds,
+  EnvLightConfig,
+  EveMaterial,
+  ImprintRenderOptions,
+  MeshData,
+  PaintPointerMapping,
+  PaintPointerMappingInput,
+  PaintPointerRect,
+  PaintRenderOptions,
+  PaintSeed,
+  PaintStroke,
+  RenderControls,
+  StudioCubemap,
+} from "./render/types";

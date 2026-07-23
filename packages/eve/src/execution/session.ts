@@ -66,9 +66,7 @@ export interface CreateSessionInput {
   readonly turnAgent: RuntimeTurnAgent;
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
-  readonly skillRoot?: string;
   readonly subagentDepth?: number;
-  readonly subagentMaxDepth?: number;
   readonly workflowMaxSubagents?: number;
 }
 
@@ -86,10 +84,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
         turnAgent.dynamicModel === undefined ? undefined : turnAgent.model,
       modelReference: turnAgent.model,
       reasoning: turnAgent.reasoning,
-      system: createSessionSystemPrompt({
-        skillRoot: input.skillRoot,
-        turnAgent,
-      }),
+      system: createSessionSystemPrompt({ turnAgent }),
       tools,
     },
     compaction: createCompactionConfig({
@@ -111,9 +106,6 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   if (input.subagentDepth !== undefined) {
     session.subagentDepth = input.subagentDepth;
   }
-  if (input.subagentMaxDepth !== undefined) {
-    session.subagentMaxDepth = input.subagentMaxDepth;
-  }
   if (input.workflowMaxSubagents !== undefined) {
     session.workflowMaxSubagents = input.workflowMaxSubagents;
   }
@@ -132,7 +124,6 @@ export function refreshSessionFromTurnAgent(input: {
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
   };
-  readonly skillRoot?: string;
 }): HarnessSession {
   return {
     ...input.session,
@@ -142,10 +133,7 @@ export function refreshSessionFromTurnAgent(input: {
         input.turnAgent.dynamicModel === undefined ? undefined : input.turnAgent.model,
       modelReference: input.turnAgent.model,
       reasoning: input.turnAgent.reasoning,
-      system: createSessionSystemPrompt({
-        skillRoot: input.skillRoot,
-        turnAgent: input.turnAgent,
-      }),
+      system: createSessionSystemPrompt({ turnAgent: input.turnAgent }),
       tools: createSessionToolDefinitions(input.turnAgent),
     },
     compaction: createCompactionConfig({
@@ -157,13 +145,8 @@ export function refreshSessionFromTurnAgent(input: {
   };
 }
 
-function createSessionSystemPrompt(input: {
-  readonly skillRoot?: string;
-  readonly turnAgent: RuntimeTurnAgent;
-}): string {
-  const skillSection = formatAvailableSkillsSection(input.turnAgent.availableSkills ?? [], {
-    skillRoot: input.skillRoot,
-  });
+function createSessionSystemPrompt(input: { readonly turnAgent: RuntimeTurnAgent }): string {
+  const skillSection = formatAvailableSkillsSection(input.turnAgent.availableSkills ?? []);
   const blocks =
     skillSection === null
       ? input.turnAgent.instructions
@@ -203,7 +186,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     sessionId: string;
     state?: HarnessSession["state"];
     subagentDepth?: number;
-    subagentMaxDepth?: number;
     workflowMaxSubagents?: number;
   } = {
     agent: { system: session.agent.system },
@@ -238,9 +220,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   }
   if (session.subagentDepth !== undefined) {
     durable.subagentDepth = session.subagentDepth;
-  }
-  if (session.subagentMaxDepth !== undefined) {
-    durable.subagentMaxDepth = session.subagentMaxDepth;
   }
   if (session.workflowMaxSubagents !== undefined) {
     durable.workflowMaxSubagents = session.workflowMaxSubagents;
@@ -306,9 +285,6 @@ export function hydrateDurableSession(input: {
   }
   if (durable.subagentDepth !== undefined) {
     session.subagentDepth = durable.subagentDepth;
-  }
-  if (durable.subagentMaxDepth !== undefined) {
-    session.subagentMaxDepth = durable.subagentMaxDepth;
   }
   if (durable.workflowMaxSubagents !== undefined) {
     session.workflowMaxSubagents = durable.workflowMaxSubagents;

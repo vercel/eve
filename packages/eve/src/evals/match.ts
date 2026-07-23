@@ -17,6 +17,12 @@ import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
  */
 export type EveEvalValueMatcher<T = JsonValue | undefined> = EveEvalDeepMatcher<T>;
 
+/**
+ * Constraint over an observed assertion count. A number requires an exact
+ * count; a predicate receives the observed count and returns its verdict.
+ */
+export type EveEvalCountMatcher = number | ((count: number) => boolean);
+
 type EveEvalDeepMatcher<T> =
   | RegExp
   | ((value: T) => boolean)
@@ -37,8 +43,8 @@ export interface EveEvalToolCallMatchOptions {
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalToolCall["status"];
-  /** Exact number of matching calls required. Defaults to "at least one". */
-  readonly count?: number;
+  /** Constraint over the matching call count. Defaults to "at least one". */
+  readonly count?: EveEvalCountMatcher;
 }
 
 /**
@@ -52,14 +58,18 @@ export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "in
  * Constraints applied to subagent calls by `t.calledSubagent`.
  */
 export interface EveEvalSubagentCallMatchOptions {
+  /** Matcher over the runtime-action call id. */
+  readonly callId?: EveEvalValueMatcher<string | undefined>;
+  /** Matcher over the durable child session id, when delegation started. */
+  readonly childSessionId?: EveEvalValueMatcher<string | undefined>;
   /** Matcher over the `subagent.called` remote URL. */
   readonly remoteUrl?: EveEvalValueMatcher<string | undefined>;
   /** Matcher over the `subagent.completed` output. */
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalSubagentCall["status"];
-  /** Exact number of matching delegations required. Defaults to "at least one". */
-  readonly count?: number;
+  /** Constraint over the matching delegation count. Defaults to "at least one". */
+  readonly count?: EveEvalCountMatcher;
 }
 
 /** Constraints accepted by `requireInputRequest`. */
@@ -89,8 +99,8 @@ export type EveEvalEventMatch<
           ? TData
           : never
       >;
-      /** Exact number of matching events required. Defaults to "at least one". */
-      readonly count?: number;
+      /** Constraint over the matching event count. Defaults to "at least one". */
+      readonly count?: EveEvalCountMatcher;
     }
   : never;
 
@@ -144,6 +154,15 @@ export function subagentCallMatches(
   call: EveEvalSubagentCall,
   options: EveEvalSubagentCallMatchOptions,
 ): boolean {
+  if (options.callId !== undefined && !matchesValue(options.callId, call.callId)) {
+    return false;
+  }
+  if (
+    options.childSessionId !== undefined &&
+    !matchesValue(options.childSessionId, call.childSessionId)
+  ) {
+    return false;
+  }
   if (options.remoteUrl !== undefined && !matchesValue(options.remoteUrl, call.remoteUrl)) {
     return false;
   }

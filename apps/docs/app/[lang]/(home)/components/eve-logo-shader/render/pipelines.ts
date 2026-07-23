@@ -181,5 +181,20 @@ export function createPipelines(device: Device, format: GPUTextureFormat) {
     },
     primitive: { topology: "triangle-list" },
   });
-  return { backMaterialPipeline, backDepthPipeline, frontMaterialPipeline, frontDisplayPipeline, opaquePipeline, wirePipeline, blurPipeline, compositePipeline, lightCompositePipeline, envBgPipeline, previewPipeline, paintDecayPipeline, paintDebugPipeline, voronoiNoisePipeline };
+  return {
+    backMaterialPipeline,
+    backDepthPipeline,
+    frontMaterialPipeline,
+    frontDisplayPipeline,
+    opaquePipeline,
+    wirePipeline,
+    blurPipeline,
+    compositePipeline,
+    lightCompositePipeline,
+    envBgPipeline,
+    previewPipeline,
+    paintDecayPipeline,
+    paintDebugPipeline,
+    voronoiNoisePipeline,
+  };
 }

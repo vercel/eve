@@ -32,6 +32,8 @@ describe("agent source manifest", () => {
         errors: 0,
         warnings: 0,
       },
+      extensions: [],
+      resolvedExtensions: [],
       hooks: [],
       instructions: [],
       lib: [],

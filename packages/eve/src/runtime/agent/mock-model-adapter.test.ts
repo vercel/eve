@@ -414,6 +414,37 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  it("builds empty input for an explicitly empty object schema", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: {},
+            type: "object",
+          },
+          name: "wait_for_cancel",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({}),
+        toolCallId: "call_wait_for_cancel",
+        toolName: "wait_for_cancel",
+        type: "tool-call",
+      },
+    ]);
+  });
+
   it("replies with exact fixture text from system context", async () => {
     const result = await generateWithPrompt([
       {
@@ -658,6 +689,39 @@ describe("createMockAuthoredRuntimeModel", () => {
         type: "text",
       },
     ]);
+  });
+
+  it("calls an explicit list of authored tools in parallel", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: [
+            "Call tools in parallel: local-sleeper, remote-sleeper",
+            'message: "Use wait-for-cancel."',
+          ].join("\n"),
+          role: "user",
+        },
+      ],
+      ["local-sleeper", "remote-sleeper"].map((name) => ({
+        inputSchema: {
+          properties: { message: { type: "string" } },
+          required: ["message"],
+          type: "object",
+        },
+        name,
+        type: "function",
+      })),
+    );
+
+    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
+    expect(result.content).toEqual(
+      ["local-sleeper", "remote-sleeper"].map((name) => ({
+        input: JSON.stringify({ message: "Use wait-for-cancel." }),
+        toolCallId: `call_${name.replaceAll("-", "_")}`,
+        toolName: name,
+        type: "tool-call",
+      })),
+    );
   });
 
   it("calls final_output with a schema-shaped sample when the tool is offered", async () => {

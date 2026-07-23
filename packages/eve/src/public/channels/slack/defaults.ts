@@ -1,6 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { describeActionRequests } from "#public/channels/slack/action-status.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -182,8 +183,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await channel.thread.startTyping(truncateTypingStatus(buffered));
       return;
     }
-    const labels = event.actions.map((a) => (a.kind === "tool-call" ? a.toolName : a.kind));
-    await channel.thread.startTyping(truncateTypingStatus(`Running ${labels.join(", ")}...`));
+    await channel.thread.startTyping(truncateTypingStatus(describeActionRequests(event.actions)));
   },
 
   async "message.completed"(event, channel, _ctx) {
@@ -288,11 +288,15 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "authorization.completed"(event, channel, _ctx) {
+    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+    if (event.outcome === "authorized") {
+      await channel.thread.startTyping(`Connected to ${displayName}. Resuming...`);
+    }
+
     const pending = channel.state.pendingAuthMessageTs ?? {};
     const ts = pending[event.name];
     if (ts === undefined) return;
 
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
     const text = buildAuthCompletedText({
       displayName,
       outcome: event.outcome as ConnectionAuthorizationOutcome,

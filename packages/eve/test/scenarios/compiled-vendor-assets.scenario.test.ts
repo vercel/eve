@@ -173,6 +173,16 @@ describe("compiled vendor assets", () => {
     expect(runtimeRunDts).toContain("from '../_workflow-serde.js'");
   });
 
+  it("vendors the Workflow world targets selected by generated Nitro plugins", async () => {
+    const [localWorld, vercelWorld] = await Promise.all([
+      readFile(join(COMPILED_VENDOR_ROOT, "@workflow/world-local/index.js"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@workflow/world-vercel/index.js"), "utf8"),
+    ]);
+
+    expect(localWorld).toContain("createWorld");
+    expect(vercelWorld).toContain("createWorld");
+  });
+
   it("copies the complete @vercel/sandbox declaration tree from the installed package", async () => {
     const [upstreamEntries, vendoredEntries] = await Promise.all([
       readdir(VERCEL_SANDBOX_DIST_ROOT, { recursive: true }),
@@ -229,6 +239,7 @@ describe("compiled vendor assets", () => {
         rewrites: {
           "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
           "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+          "zod/v4": "#compiled/zod/index.js",
         },
       },
       {

@@ -1,3 +1,5 @@
+import { z } from "#compiled/zod/index.js";
+
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
@@ -30,32 +32,39 @@ import {
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { DynamicToolEvents, DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
+import { toError } from "#shared/errors.js";
 import type { ModelMessage } from "ai";
 
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
 
-const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    connection: { type: "string" },
-    description: { type: "string" },
-    error: { type: "string" },
-    inputSchema: { type: "object" },
-    needsAuthorization: { type: "boolean" },
-    outputSchema: { type: "object" },
-    qualifiedName: { type: "string" },
-    tool: { type: "string" },
-  },
-  required: ["connection", "description"],
-  type: "object",
-};
+const CONNECTION_SEARCH_INPUT_SCHEMA = z.strictObject({
+  connection: z
+    .string()
+    .describe("Optional: limit search to a specific connection name.")
+    .optional(),
+  keywords: z
+    .string()
+    .describe(
+      "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
+    ),
+  limit: z.number().describe("Max results to return. Default 10.").optional(),
+});
 
-const CONNECTION_SEARCH_OUTPUT_SCHEMA: JsonObject = {
-  items: CONNECTION_SEARCH_RESULT_ITEM_SCHEMA,
-  type: "array",
-};
+const connectionSchema = z.looseObject({});
+const CONNECTION_SEARCH_RESULT_ITEM_SCHEMA = z.strictObject({
+  connection: z.string(),
+  description: z.string(),
+  error: z.string().optional(),
+  inputSchema: connectionSchema.optional(),
+  needsAuthorization: z.boolean().optional(),
+  outputSchema: connectionSchema.optional(),
+  qualifiedName: z.string().optional(),
+  tool: z.string().optional(),
+});
+
+const CONNECTION_SEARCH_OUTPUT_SCHEMA = z.array(CONNECTION_SEARCH_RESULT_ITEM_SCHEMA);
 
 /**
  * Durable context key for connection search results. Written by
@@ -183,6 +192,12 @@ async function executeConnectionSearch(
       ? registry.getConnections().filter((c) => c.connectionName === input.connection)
       : registry.getConnections();
 
+  if (input.connection && targetConnections.length === 0) {
+    throw new Error(
+      `Connection "${input.connection}" is not registered. Available connections: ${registry.getConnectionNames().join(", ")}.`,
+    );
+  }
+
   const authChallenges: AuthorizationChallenge[] = [];
 
   for (const conn of targetConnections) {
@@ -230,10 +245,17 @@ async function executeConnectionSearch(
                 resume,
               });
             } catch (startErr) {
+              const error = toError(startErr);
               logger.warn("startAuthorization failed", {
                 connection: conn.connectionName,
-                error: startErr instanceof Error ? startErr : new Error(String(startErr)),
+                error,
               });
+              failedConnections.push({
+                connection: conn.connectionName,
+                description: conn.description,
+                error: `Failed to start authorization for "${conn.connectionName}": ${error.message}`,
+              });
+              continue;
             }
           }
         }
@@ -260,15 +282,15 @@ async function executeConnectionSearch(
         continue;
       }
 
-      const message = err instanceof Error ? err.message : "unknown error";
+      const error = toError(err);
       logger.warn("failed to load connection tools", {
         connection: conn.connectionName,
-        error: err instanceof Error ? err : new Error(message),
+        error,
       });
       failedConnections.push({
         connection: conn.connectionName,
         description: conn.description,
-        error: `Failed to load tools for "${conn.connectionName}": ${message}`,
+        error: `Failed to load tools for "${conn.connectionName}": ${error.message}`,
       });
       continue;
     }
@@ -293,6 +315,14 @@ async function executeConnectionSearch(
 
   if (authChallenges.length > 0) {
     return requestAuthorization(authChallenges);
+  }
+
+  const terminalFailures = failedConnections.filter((failure) => failure.error !== undefined);
+  if (targetConnections.length > 0 && terminalFailures.length === targetConnections.length) {
+    // When every targeted connection reaches a terminal error, connection_search itself fails.
+    // AI SDK catches this rejection, emits a tool-error result, and preserves the failed call in
+    // agent-run observability. Partial failures stay in the successful result so usable tools remain discoverable.
+    throw new Error(terminalFailures.map((failure) => failure.error).join("\n"));
   }
 
   results.sort((a, b) => b.score - a.score);
@@ -395,26 +425,7 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           "Discovered tools become directly callable by their qualified name " +
           "(e.g. `linear__list_issues`) in your next response. " +
           `Available connections: ${connectionNames.join(", ")}.`,
-        inputSchema: {
-          type: "object" as const,
-          additionalProperties: false,
-          properties: {
-            keywords: {
-              description:
-                "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
-              type: "string",
-            },
-            connection: {
-              description: "Optional: limit search to a specific connection name.",
-              type: "string",
-            },
-            limit: {
-              description: "Max results to return. Default 10.",
-              type: "number",
-            },
-          },
-          required: ["keywords"],
-        },
+        inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
         async execute(input: ConnectionSearchInput) {
           return executeConnectionSearch(input);
         },

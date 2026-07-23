@@ -26,7 +26,7 @@ export const glossary = defineState<Glossary>("analytics.glossary", () => ({
 ```ts title="agent/tools/define_metric.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { glossary } from "../lib/glossary.js";
+import { glossary } from "../lib/glossary";
 
 export default defineTool({
   description: "Record the team's definition of a metric so it persists across turns.",
@@ -41,7 +41,7 @@ export default defineTool({
 ```ts title="agent/tools/recall_metrics.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { glossary } from "../lib/glossary.js";
+import { glossary } from "../lib/glossary";
 
 export default defineTool({
   description: "Read the team's recorded metric definitions.",

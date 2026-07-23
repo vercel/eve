@@ -9,6 +9,7 @@ import {
 import type { CompiledModuleMap } from "../src/compiler/module-map.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
 import { ResolveAgentError, resolveAgent } from "../src/runtime/resolve-agent.js";
+import { serializeInputSchema } from "../src/shared/tool-schema.js";
 
 describe("resolveAgent", () => {
   it("hydrates compiled authored metadata and attaches tool execute functions", async () => {
@@ -255,19 +256,19 @@ describe("resolveAgent", () => {
     expect(resolved.tools).toHaveLength(1);
     expect(resolved.tools[0]).toMatchObject({
       description: "Get the current weather for a city.",
-      inputSchema: {
-        properties: {
-          city: {
-            type: "string",
-          },
-        },
-        required: ["city"],
-        type: "object",
-      },
       logicalPath: "tools/get-weather.mjs",
       name: "get_weather",
       sourceId: "tools/get-weather.mjs",
       sourceKind: "module",
+    });
+    expect(serializeInputSchema(resolved.tools[0]!.inputSchema!)).toMatchObject({
+      properties: {
+        city: {
+          type: "string",
+        },
+      },
+      required: ["city"],
+      type: "object",
     });
     expect(
       resolved.tools[0]?.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
@@ -338,10 +339,10 @@ describe("resolveAgent", () => {
       manifest,
       moduleMap,
     });
-    const inputStandardSchema = resolved.tools[0]?.inputStandardSchema;
-    expect(inputStandardSchema).toBeDefined();
+    const inputSchema = resolved.tools[0]?.inputSchema;
+    expect(inputSchema).toBeDefined();
 
-    const sdkSchema = asSchema(inputStandardSchema);
+    const sdkSchema = asSchema(inputSchema!);
     const result = await sdkSchema.validate!({});
 
     expect(result).toEqual({

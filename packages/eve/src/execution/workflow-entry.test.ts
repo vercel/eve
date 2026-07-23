@@ -5,11 +5,15 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import type { HookPayload } from "#channel/types.js";
 import { ChannelRequestIdKey, SubagentDepthKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
+import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
+import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -44,9 +48,20 @@ vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => payloads[0]),
 }));
 
+vi.mock("./delegated-parent-notification.js", () => ({
+  notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("./workflow-steps.js", () => ({
   dispatchTurnStep: vi.fn().mockImplementation(async () => ({ runId: "turn-run" })),
+}));
+
+vi.mock("./terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("./settle-cancelled-turn-step.js", () => ({
+  settleCancelledTurnStep: vi.fn().mockResolvedValue(undefined),
 }));
 
 function createSessionStateForMock(
@@ -79,6 +94,11 @@ interface DeliveryHookConfig {
   readonly return?: () => Promise<IteratorResult<HookPayload>>;
   readonly token: string;
   readonly values?: readonly HookPayload[];
+}
+
+interface AuthHookConfig {
+  readonly dispose?: () => void;
+  readonly return?: () => Promise<IteratorResult<HookPayload>>;
 }
 
 describe("workflowEntry", () => {
@@ -229,7 +249,7 @@ describe("workflowEntry", () => {
     });
   });
 
-  it("passes delegated subagent depth options to session creation", async () => {
+  it("passes delegated subagent lineage and inherited limits to session creation", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
@@ -238,7 +258,7 @@ describe("workflowEntry", () => {
 
     await workflowEntry({
       input: { message: "hello there" },
-      limits: { maxSubagentDepth: 4 },
+      limits: { maxInputTokensPerSession: 4 },
       serializedContext: createSerializedContext({
         [SubagentDepthKey.name]: 3,
       }),
@@ -246,10 +266,57 @@ describe("workflowEntry", () => {
 
     expect(createSessionStep).toHaveBeenCalledWith(
       expect.objectContaining({
-        inheritedLimits: { maxSubagentDepth: 4 },
+        inheritedLimits: { maxInputTokensPerSession: 4 },
         subagentDepth: 3,
       }),
     );
+  });
+
+  it("notifies a delegated parent once when a turn fails terminally", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnControls: [
+        {
+          error: { message: "persistent recoverable failure", name: "Error" },
+          kind: "turn-error",
+        },
+      ],
+    });
+    const serializedContext = createSerializedContext({
+      "eve.channel": {
+        kind: "subagent",
+        state: {
+          callId: "call-1",
+          parentContinuationToken: "parent-token",
+          subagentName: "researcher",
+        },
+      },
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext,
+      }),
+    ).rejects.toThrow("persistent recoverable failure");
+
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledOnce();
+    expect(fireSessionCallbackStep).toHaveBeenCalledOnce();
+    expect(notifyDelegatedParentStep).toHaveBeenCalledOnce();
+    expect(notifyDelegatedParentStep).toHaveBeenCalledWith({
+      result: {
+        callId: "call-1",
+        isError: true,
+        kind: "subagent-result",
+        output: {
+          code: "SUBAGENT_EXECUTION_FAILED",
+          message: "persistent recoverable failure",
+        },
+        subagentName: "researcher",
+      },
+      serializedContext,
+    });
   });
 
   it("passes the resumed channel request id to the next turn", async () => {
@@ -415,6 +482,71 @@ describe("workflowEntry", () => {
       requestId: undefined,
     });
     expect(resumeHook).not.toHaveBeenCalled();
+  });
+
+  it("settles a cancelled turn in the driver and starts the next turn from the settled state", async () => {
+    const sessionState = createBaseSessionState();
+    const settledState = createBaseSessionState({
+      emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
+    });
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(settleCancelledTurnStep).mockResolvedValue({
+      serializedContext: { "eve.sessionId": "wrun_test_123", settled: true },
+      sessionState: settledState,
+    });
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [{ kind: "deliver", payloads: [{ message: "after cancel" }] }],
+        },
+      ],
+      turnControls: [
+        {
+          action: {
+            cancelled: true,
+            kind: "park",
+            serializedContext: { "eve.sessionId": "wrun_test_123" },
+            sessionState,
+          },
+          kind: "turn-result",
+        },
+        turnResult({ action: "done", output: "ok", sessionState: settledState }),
+      ],
+    });
+
+    const result = await workflowEntry({
+      input: { message: "hello" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(result).toEqual({ output: "ok" });
+    expect(settleCancelledTurnStep).toHaveBeenCalledExactlyOnceWith({
+      parentWritable: expect.any(WritableStream),
+      serializedContext: { "eve.sessionId": "wrun_test_123" },
+      sessionState,
+    });
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0]).toMatchObject({
+      serializedContext: { settled: true },
+      sessionState: settledState,
+    });
+  });
+
+  it("does not settle an ordinary park as cancelled", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test", values: [] }],
+      turnControls: [turnResult({ action: "park", sessionState })],
+    });
+
+    const result = await workflowEntry({
+      input: { message: "hello" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(result).toEqual({ output: "" });
+    expect(settleCancelledTurnStep).not.toHaveBeenCalled();
   });
 
   it("skips child routing when a turn completes without yielding to a delivery", async () => {
@@ -637,6 +769,28 @@ describe("workflowEntry", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(symbolDispose).not.toHaveBeenCalled();
   });
+
+  it("disposes the auth hook without closing its iterator", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+
+    const authDispose = vi.fn();
+    const authReturn = createIteratorReturn();
+    installHookMocks({
+      authHook: { dispose: authDispose, return: authReturn },
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "ok" });
+
+    expect(authDispose).toHaveBeenCalledOnce();
+    expect(authReturn).not.toHaveBeenCalled();
+  });
 });
 
 function createSerializedContext(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -690,6 +844,7 @@ function turnResult(input: {
 }
 
 function installHookMocks(input: {
+  readonly authHook?: AuthHookConfig;
   readonly deliveryHooks?: readonly DeliveryHookConfig[];
   readonly symbolDispose?: () => void;
   readonly turnControls: readonly TurnControlPayload[];
@@ -709,7 +864,12 @@ function installHookMocks(input: {
     }
 
     if (token.endsWith(":auth")) {
-      return createMockHook({ token, values: [] }) as never;
+      return createMockHook({
+        dispose: input.authHook?.dispose,
+        return: input.authHook?.return,
+        token,
+        values: [],
+      }) as never;
     }
 
     const config = deliveryHooks.shift() ?? { token, values: [] };

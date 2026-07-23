@@ -7,6 +7,7 @@ import {
   type EveAgentStoreStatus,
   type PrepareSend,
 } from "#client/eve-agent-store.js";
+import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
@@ -55,10 +56,17 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
  * values to `auth` or `headers`; the client resolves those before each request.
  */
 export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+  /**
+   * Named agent mounted by a framework integration such as `withEve({ agents })`.
+   *
+   * `agent: "support"` targets same-origin routes under
+   * `/eve/agents/support/eve/v1/...`. Do not combine with `host`.
+   */
+  readonly agent?: string;
   readonly auth?: ClientAuth;
   readonly headers?: HeadersValue;
   /**
-   * Base URL for eve client requests.
+   * Base URL for eve client requests. Do not combine with `agent`.
    *
    * Defaults to same-origin eve routes such as `/eve/v1/...`. Pass a same-origin
    * prefix such as `/api` for an app-owned proxy, or an absolute origin to talk
@@ -69,7 +77,6 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly host?: string;
   readonly initialEvents?: readonly HandleMessageStreamEvent[];
   readonly initialSession?: SessionState;
-  readonly maxReconnectAttempts?: number;
   /**
    * Project submitted user messages before eve confirms them with a
    * `message.received` stream event.
@@ -102,7 +109,7 @@ export function useEveAgent<TData>(
  * infer `TData`.
  *
  * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
- * `initialSession`, `auth`, `headers`, `maxReconnectAttempts`, `optimistic`) are
+ * `initialSession`, `auth`, `headers`, `optimistic`) are
  * read once when the store is created; remount to change them. Lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
  * refresh on every render.
@@ -117,10 +124,9 @@ export function useEveAgent<TData>(
     storeRef.current = new EveAgentStore({
       auth: options.auth,
       headers: options.headers,
-      host: options.host,
+      host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
       initialEvents: options.initialEvents,
       initialSession: options.initialSession,
-      maxReconnectAttempts: options.maxReconnectAttempts,
       optimistic: options.optimistic,
       reducer,
       session: options.session,

@@ -33,7 +33,7 @@ const BASE_VERSIONS = {
   aiPackageVersion: "7.0.0",
   connectPackageVersion: "0.2.2",
   evePackage: { version: "0.6.0", nodeEngine: ">=24" },
-  typescriptPackageVersion: "7.0.1-rc",
+  typescriptPackageVersion: "7.0.2",
   zodPackageVersion: "4.0.0",
 } as const;
 

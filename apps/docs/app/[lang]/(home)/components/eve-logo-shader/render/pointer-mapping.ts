@@ -2,11 +2,16 @@
 // INVARIANT: Pure move from render.ts; keep shader ABI, binding order, and pixel output unchanged.
 // Imported by render/renderer.ts and re-exported only through render.ts facade.
 
-import type { Bounds, PaintPointerMapping, PaintPointerMappingInput, RenderControls } from "./types";
+import type {
+  Bounds,
+  PaintPointerMapping,
+  PaintPointerMappingInput,
+  RenderControls,
+} from "./types";
 import {
   BLOOM_RADIUS,
   DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
-  imprintCellSizeForDevicePixelRatio,
+  imprintCellSizeForLogicalHeight,
 } from "./constants";
 import { meshOrbitTargetFromBounds } from "./camera";
 import { degreesToRadians, dot } from "./math";
@@ -62,7 +67,7 @@ export function paintMappingMetrics(
   logicalHeight: number,
   gridScaleMultiplier: number,
   paddingRadius: number,
-  devicePixelRatio?: number,
+  _devicePixelRatio?: number,
 ) {
   const padded = getPaddedRenderSize(logicalWidth, logicalHeight, paddingRadius);
   const fovRad = degreesToRadians(controls.fov);
@@ -73,7 +78,7 @@ export function paintMappingMetrics(
   const basis = cameraBasis(eye, orbitTarget);
   const distToFrontPlane = Math.max(0.001, -dot(eye, basis.forward));
   const pxPerModelUnit = padded.height / (2 * distToFrontPlane * Math.tan(fovEff * 0.5));
-  const cellSize = imprintCellSizeForDevicePixelRatio(devicePixelRatio);
+  const cellSize = imprintCellSizeForLogicalHeight(logicalHeight);
   const gridScale = (pxPerModelUnit / cellSize) * Math.max(0.001, gridScaleMultiplier);
   const normalizedBounds = normalizedMeshBounds(bounds);
   const originCell: [number, number] = [

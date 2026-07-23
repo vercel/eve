@@ -56,6 +56,7 @@ export async function resolveDynamicToolDefinition(
       eventNames: [...definition.eventNames],
       events: handlers as ResolvedDynamicToolResolver["events"],
       exportName: definition.exportName,
+      extensionNamespace: definition.extensionNamespace,
       logicalPath: definition.logicalPath,
       slug: definition.slug,
       sourceId: definition.sourceId,

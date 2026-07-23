@@ -8,9 +8,11 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach } from "vitest";
 
@@ -76,6 +78,13 @@ export interface ScenarioAppDescriptor {
    * us having to maintain a bespoke template-then-copy cache.
    */
   readonly installDependencies?: boolean;
+  /**
+   * Package manager used for {@link installDependencies}. Defaults to pnpm.
+   * npm and bun installs are slower but produce the hoisted real-directory
+   * `node_modules/` layout, which exercises dependency resolution paths that
+   * pnpm's symlinked store never hits.
+   */
+  readonly packageManager?: "bun" | "npm" | "pnpm";
 }
 
 /**
@@ -262,6 +271,32 @@ async function installScenarioDependencies(input: {
   readonly appRoot: string;
   readonly descriptor: ScenarioAppDescriptor;
 }): Promise<void> {
+  if (input.descriptor.packageManager === "npm") {
+    // A project .npmrc overrides any host-global release-age gate, which
+    // would otherwise reject the workspace's freshly published dependency
+    // versions and make the test outcome depend on host configuration.
+    await writeFile(join(input.appRoot, ".npmrc"), "min-release-age=0\n");
+    await runInstallCommand(input.appRoot, "npm", [
+      "install",
+      "--no-audit",
+      "--no-fund",
+      "--ignore-scripts",
+      "--prefer-offline",
+    ]);
+    return;
+  }
+  if (input.descriptor.packageManager === "bun") {
+    // A local bunfig overrides any host-global minimumReleaseAge gate, which
+    // would otherwise reject the workspace's freshly published dependency
+    // versions and make the test outcome depend on host configuration.
+    await writeFile(
+      join(input.appRoot, "bunfig.toml"),
+      ["[install]", "minimumReleaseAge = 0", ""].join("\n"),
+    );
+    await runInstallCommand(input.appRoot, "bun", ["install", "--ignore-scripts"]);
+    return;
+  }
+
   await runPnpmCommand({
     args: [
       "install",
@@ -273,6 +308,33 @@ async function installScenarioDependencies(input: {
     ],
     cwd: input.appRoot,
   });
+}
+
+const runFile = promisify(execFile);
+
+async function runInstallCommand(
+  appRoot: string,
+  command: "bun" | "npm",
+  args: readonly string[],
+): Promise<void> {
+  try {
+    await runFile(command, [...args], {
+      cwd: appRoot,
+      maxBuffer: 10 * 1024 * 1024,
+      shell: process.platform === "win32",
+    });
+  } catch (error) {
+    const failure = error as { readonly stderr?: unknown; readonly stdout?: unknown };
+    throw new Error(
+      [
+        `Command failed: ${command} ${args.join(" ")}`,
+        `cwd: ${appRoot}`,
+        `stdout:\n${typeof failure.stdout === "string" ? failure.stdout : ""}`,
+        `stderr:\n${typeof failure.stderr === "string" ? failure.stderr : ""}`,
+      ].join("\n\n"),
+      { cause: error },
+    );
+  }
 }
 
 const EVE_SCENARIO_EVE_TARBALL_PATH_ENV = "EVE_SCENARIO_EVE_TARBALL_PATH";

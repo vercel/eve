@@ -7,6 +7,7 @@ import {
   type EveAgentStoreStatus,
   type PrepareSend,
 } from "#client/eve-agent-store.js";
+import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
@@ -66,12 +67,19 @@ export interface UseEveAgentReturn<TData> {
  * every render.
  */
 export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+  /**
+   * Named agent mounted by a framework integration such as `withEve({ agents })`.
+   *
+   * `agent: "support"` targets same-origin routes under
+   * `/eve/agents/support/eve/v1/...`. Do not combine with `host`.
+   */
+  readonly agent?: string;
   /** Authentication configuration; a function value is resolved per request. */
   readonly auth?: ClientAuth;
   /** Custom headers; a function value is resolved per request. */
   readonly headers?: HeadersValue;
   /**
-   * Base URL used for eve client requests.
+   * Base URL used for eve client requests. Do not combine with `agent`.
    *
    * By default, requests target same-origin eve routes such as `/eve/v1/...`.
    * Pass a same-origin prefix such as `/api` to use an app-owned proxy, or an
@@ -84,8 +92,6 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly initialEvents?: readonly HandleMessageStreamEvent[];
   /** Prior session cursor to resume from on mount. */
   readonly initialSession?: SessionState;
-  /** Maximum SSE reconnection attempts per turn. @default 3 */
-  readonly maxReconnectAttempts?: number;
   /**
    * Project submitted user messages before eve confirms them with a
    * `message.received` stream event.
@@ -137,10 +143,9 @@ export function useEveAgent<TData>(
   const store = new EveAgentStore<TData>({
     auth: options.auth,
     headers: options.headers,
-    host: options.host,
+    host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
-    maxReconnectAttempts: options.maxReconnectAttempts,
     optimistic: options.optimistic,
     reducer,
     session: options.session,

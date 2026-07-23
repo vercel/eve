@@ -1,4 +1,5 @@
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -64,7 +65,7 @@ interface CliRuntimeDependencies {
     readonly appRoot: string;
     readonly serverUrl: string;
   }): Promise<boolean>;
-  buildHost(appRoot: string): Promise<string>;
+  buildHost: BuildHost;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
@@ -124,10 +125,6 @@ interface EvalCliOptions {
   timeout?: string;
   url?: string;
   verbose?: boolean;
-}
-
-async function loadBuildHost(): Promise<CliRuntimeDependencies["buildHost"]> {
-  return (await import("#internal/nitro/host.js")).buildApplication;
 }
 
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
@@ -305,6 +302,36 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       await runChannelsListCommand(logger, appRoot, options);
     });
 
+  const extension = program
+    .command("extension")
+    .description("Create and build reusable eve extension packages.");
+
+  extension
+    // Optional: a missing target scaffolds the current directory, matching
+    // `eve extension init .`.
+    .command("init [target]")
+    .description("Create a new eve extension package.")
+    .option("-y, --yes", "Accepted for compatibility; has no effect")
+    .action(async (target: string | undefined, options: { yes?: boolean }) => {
+      if (options.yes) {
+        logger.error("warning: --yes has no effect for eve extension init.");
+      }
+
+      const { runExtensionInitCommand } = await import("#cli/commands/extension-init.js");
+      await runExtensionInitCommand(logger, appRoot, target);
+    });
+
+  extension
+    .command("build")
+    .description("Build the current package as an eve extension.")
+    .action(async () => {
+      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+      loadDevelopmentEnvironmentFiles(appRoot);
+
+      const { runExtensionBuildCommand } = await import("#cli/commands/extension-build.js");
+      await runExtensionBuildCommand(logger, appRoot);
+    });
+
   program
     // Optional: a missing target scaffolds or updates the current directory,
     // matching `eve init .`.
@@ -330,24 +357,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
   registerProjectCommands({ program, logger, appRoot });
 
-  program
-    .command("build")
-    .description("Build the current eve application.")
-    .action(async () => {
-      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-
-      loadDevelopmentEnvironmentFiles(appRoot);
-
-      const buildHost = runtime.buildHost ?? (await loadBuildHost());
-      const outputDir = await buildHost(appRoot);
-      logger.log(
-        renderCliTaggedLine(theme, {
-          message: `built output at ${outputDir}`,
-          tag: "build",
-          tone: "success",
-        }),
-      );
-    });
+  registerBuildCommand({
+    appRoot,
+    buildHost: runtime.buildHost,
+    logger,
+    program,
+  });
 
   program
     .command("start")
@@ -568,6 +583,29 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         buildProgress?.stop();
         await closeServer();
       }
+    });
+
+  const logs = program
+    .command("logs")
+    .description("Inspect local `eve dev` diagnostic logs (.eve/logs).");
+
+  logs
+    .command("show [logid]", { isDefault: true })
+    .description("Print a diagnostic log (the most recent when logid is omitted).")
+    .option("--dump", "Prepend the log's environment dump (.dump sibling)")
+    .option("--events", "Interleave session events from the local workflow store")
+    .action(async (logId: string | undefined, options: { dump?: boolean; events?: boolean }) => {
+      const { runLogsShowCommand } = await import("#cli/commands/logs.js");
+      await runLogsShowCommand(logger, appRoot, logId, options);
+    });
+
+  logs
+    .command("ls")
+    .description("List diagnostic logs, most recent first.")
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean }) => {
+      const { runLogsListCommand } = await import("#cli/commands/logs.js");
+      await runLogsListCommand(logger, appRoot, options);
     });
 
   program

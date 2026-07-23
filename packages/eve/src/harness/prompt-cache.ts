@@ -11,15 +11,24 @@ export type PromptCachePath =
 /**
  * Cache marker injected on the Anthropic-direct path.
  *
- * The AI SDK Anthropic provider reads `providerOptions.anthropic.cacheControl`
- * from message, message-part, system-message, and tool objects. The same
- * namespace is used by `@ai-sdk/amazon-bedrock/anthropic` and
- * `@ai-sdk/google-vertex/anthropic`, which both implement the native
- * Anthropic Messages API.
+ * The marker carries two provider namespaces because Anthropic models are
+ * reachable through providers that read different provider-options keys:
+ *
+ * - `anthropic.cacheControl` — read by the AI SDK Anthropic provider and by
+ *   `@ai-sdk/amazon-bedrock/anthropic` and `@ai-sdk/google-vertex/anthropic`,
+ *   which implement the native Anthropic Messages API.
+ * - `bedrock.cachePoint` — read by the standard `@ai-sdk/amazon-bedrock`
+ *   Converse provider, which does not understand `anthropic.cacheControl`.
+ *
+ * A provider ignores namespaces it does not own, so carrying both is safe on
+ * every Anthropic-direct request regardless of which provider serves it.
  */
 export interface AnthropicCacheMarker {
   readonly anthropic: {
     readonly cacheControl: { readonly type: "ephemeral" };
+  };
+  readonly bedrock: {
+    readonly cachePoint: { readonly type: "default" };
   };
 }
 
@@ -30,6 +39,9 @@ export interface AnthropicCacheMarker {
 const ANTHROPIC_CACHE_MARKER: AnthropicCacheMarker = Object.freeze({
   anthropic: Object.freeze({
     cacheControl: Object.freeze({ type: "ephemeral" as const }),
+  }),
+  bedrock: Object.freeze({
+    cachePoint: Object.freeze({ type: "default" as const }),
   }),
 });
 
@@ -45,6 +57,15 @@ export function detectPromptCachePath(model: LanguageModel): PromptCachePath {
 
   const providerName = typeof model.provider === "string" ? model.provider.toLowerCase() : "";
   if (providerName.includes("anthropic")) {
+    return { kind: "anthropic-direct" };
+  }
+
+  // The standard `@ai-sdk/amazon-bedrock` Converse provider reports its
+  // provider as `amazon-bedrock` and carries the Anthropic identity in the
+  // model id (e.g. `anthropic.claude-3-5-sonnet-20241022-v2:0`), so it must be
+  // matched on the model id rather than the provider name.
+  const modelId = typeof model.modelId === "string" ? model.modelId.toLowerCase() : "";
+  if (providerName.includes("bedrock") && modelId.includes("anthropic")) {
     return { kind: "anthropic-direct" };
   }
 
@@ -157,17 +178,26 @@ export function applySystemCacheBreakpoint(
 }
 
 /**
- * Walks backward through `messages` and attaches the Anthropic cache marker
- * to the most recent `assistant` and most recent `user` message. Returns a
- * new array; does not mutate the input.
+ * Attaches the Anthropic cache marker to the last message in `messages`
+ * (whatever its role) and, as a stable mid-history anchor, to the most
+ * recent `assistant` message before it. Returns a new array; does not
+ * mutate the input.
  *
- * This implements the "automatic cache advancement" pattern: each turn the
- * breakpoints move forward, and the prior turn's breakpoints still warm the
- * cache prefix, so the new breakpoints just extend the cached region.
+ * The final breakpoint must sit on the very last message so that the
+ * newest content — typically a `tool` message carrying fresh tool
+ * results — is written to the cache in the same request that pays for
+ * it. Placing it any earlier (e.g. on the last assistant message) leaves
+ * the trailing tool results outside the cached region: they get billed
+ * as uncached input every turn and only enter the cache one request
+ * later, capping the effective hit rate near 50%. The AI SDK Anthropic
+ * provider maps a message-level marker on a `tool` message to its last
+ * tool-result content block.
  *
- * Tool-result messages (`role: "tool"`) are intentionally skipped — the
- * adjacent assistant message's cache marker already covers the prefix
- * through any preceding tool results.
+ * The assistant anchor implements "automatic cache advancement": it
+ * guarantees a breakpoint from the prior request survives into the next
+ * one, so cache lookups always find the previous prefix even when a step
+ * appends more content blocks than Anthropic's backward boundary scan
+ * covers.
  */
 export function applyConversationCacheControl(
   messages: readonly ModelMessage[],
@@ -178,33 +208,27 @@ export function applyConversationCacheControl(
   }
 
   const out = [...messages];
-  let foundAssistant = false;
-  let foundUser = false;
 
-  for (let i = out.length - 1; i >= 0 && (!foundAssistant || !foundUser); i--) {
-    const message = out[i];
+  const mark = (index: number): void => {
+    const message = out[index];
     if (message === undefined) {
-      continue;
+      return;
     }
+    out[index] = {
+      ...message,
+      providerOptions: {
+        ...message.providerOptions,
+        ...marker,
+      },
+    };
+  };
 
-    if (!foundAssistant && message.role === "assistant") {
-      out[i] = {
-        ...message,
-        providerOptions: {
-          ...message.providerOptions,
-          ...marker,
-        },
-      };
-      foundAssistant = true;
-    } else if (!foundUser && message.role === "user") {
-      out[i] = {
-        ...message,
-        providerOptions: {
-          ...message.providerOptions,
-          ...marker,
-        },
-      };
-      foundUser = true;
+  mark(out.length - 1);
+
+  for (let i = out.length - 2; i >= 0; i--) {
+    if (out[i]?.role === "assistant") {
+      mark(i);
+      break;
     }
   }
 

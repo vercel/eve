@@ -144,7 +144,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       firstStream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      firstStream.pushEvent(createSessionWaitingEvent());
+      firstStream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
     }, 0);
 
     const first = await firstPromise;
@@ -177,7 +177,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       secondStream.pushEvent(createTurnCompletedEvent({ sequence: 2, turnId: "turn_002" }));
-      secondStream.pushEvent(createSessionWaitingEvent());
+      secondStream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
     }, 0);
 
     const second = await secondPromise;
@@ -232,6 +232,7 @@ describe("sendDevelopmentMessage", () => {
       },
       {
         data: {
+          continuationToken: "http:session_001",
           wait: "next-user-message",
         },
         type: "session.waiting",
@@ -293,7 +294,7 @@ describe("sendDevelopmentMessage", () => {
         turnId: "turn_002",
       }),
       createTurnCompletedEvent({ sequence: 2, turnId: "turn_002" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent("eve:http:session_001"),
     ]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -338,7 +339,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       firstStream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      firstStream.pushEvent(createSessionWaitingEvent());
+      firstStream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
     }, 0);
 
     const first = await firstPromise;
@@ -433,6 +434,7 @@ describe("sendDevelopmentMessage", () => {
       },
       {
         data: {
+          continuationToken: "http:session_001",
           wait: "next-user-message",
         },
         type: "session.waiting",
@@ -497,7 +499,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       stream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
     }, 0);
 
     const result = await messagePromise;
@@ -561,7 +563,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       stream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
     }, 0);
 
     await messagePromise;

@@ -1,4 +1,5 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
 import { buildAgentInfoResponseFromManifest } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
 import {
   loadAgentInfoManifestData,
@@ -8,25 +9,15 @@ import type { GatewayCredentialPresence } from "#internal/resolve-model-endpoint
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
 
-type AgentInfoRouteMode = "development" | "production";
-
-export interface AgentInfoRouteInput extends NitroArtifactsConfig {
-  readonly mode?: AgentInfoRouteMode;
-}
-
-async function createAgentInfoPayload(input: AgentInfoRouteInput) {
+async function createAgentInfoPayload(input: NitroArtifactsConfig) {
   const data = await loadAgentInfoManifestData({
     compiledArtifactsSource: resolveAgentInfoCompiledArtifactsSource(input),
   });
 
   return buildAgentInfoResponseFromManifest(data, {
-    mode: input.mode ?? (input.dev === false ? "production" : "development"),
+    mode: input.kind,
     gatewayCredentials: await resolveGatewayCredentialPresence(data.manifest.config.model.routing),
   });
-}
-
-function hasEnvValue(value: string | undefined): boolean {
-  return value !== undefined && value.trim() !== "";
 }
 
 /**
@@ -54,7 +45,7 @@ async function resolveGatewayCredentialPresence(
 /**
  * Builds the package-owned JSON inspection response for the current agent.
  */
-export async function handleAgentInfoRequest(input: AgentInfoRouteInput): Promise<Response> {
+export async function handleAgentInfoRequest(input: NitroArtifactsConfig): Promise<Response> {
   return new Response(JSON.stringify(await createAgentInfoPayload(input)), {
     headers: {
       "cache-control": "no-store",

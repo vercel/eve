@@ -1,24 +1,24 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
-import type {
-  DeliverPayload,
-  SessionAuthContext,
-  SubagentInputRequestHookPayload,
-} from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
-import { AuthKey, CapabilitiesKey, ContinuationTokenKey, ModeKey } from "#context/keys.js";
+import { AuthKey, CapabilitiesKey, ModeKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { runStep, withContextScope } from "#context/run-step.js";
+import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
+import {
+  isSessionLimitDecline,
+  isTurnCancellation,
+  throwIfTurnAborted,
+} from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
   getRuntimeActionKeysFromWorkflowInterrupt,
   isWorkflowRuntimeActionInterrupt,
@@ -31,10 +31,8 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
-import { createLogger, formatError } from "#internal/logging.js";
 import {
   createAuthorizationCompletedEvent,
-  createSessionFailedEvent,
   encodeMessageStreamEvent,
   type HandleMessageStreamEvent,
   timestampHandleMessageStreamEvent,
@@ -60,14 +58,15 @@ import {
   type TurnWorkflowDispatchInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
-import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
+import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
-import { resolveSessionSkillRoot } from "#execution/workflow-skill-root.js";
 import {
   createWorkflowRuntime,
+  requestWorkflowTurnCancellation,
   startWorkflowPreferLatest,
   turnWorkflowReference,
 } from "#execution/workflow-runtime.js";
@@ -80,6 +79,10 @@ import { resumeHook } from "#internal/workflow/runtime.js";
  * `pendingRuntimeActionKeys` so the turn workflow can pick the right
  * {@link import("#execution/next-driver-action.js").NextDriverAction}
  * arm without re-reading the session.
+ *
+ * `cancelled` converts the harness's cancellation throw into a *returned*
+ * result so workflow-core never classifies the abort as a step failure or
+ * retries it; the epilogue runs in `settleCancelledTurnStep`.
  */
 export type DurableStepResult =
   | {
@@ -90,6 +93,11 @@ export type DurableStepResult =
       readonly sessionState: DurableSessionState;
       /** Session-total token usage; set on `done` when the session spent any. */
       readonly usage?: TokenUsage;
+    }
+  | {
+      readonly action: "cancelled";
+      readonly serializedContext: Record<string, unknown>;
+      readonly sessionState: DurableSessionState;
     }
   | {
       readonly action: "park";
@@ -301,66 +309,89 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   const mode = ctx.require(ModeKey);
 
-  let stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
-    const schemaSession = resolveEffectiveOutputSchema({
-      agentOutputSchema: bundle.turnAgent.outputSchema,
-      input: resolved,
-      mode,
-      session: enrichedSession,
+  let stepResult: StepResult;
+  try {
+    // A signal already aborted at entry (cancellation during an in-line
+    // runtime-action wait) must settle before the park-resume stages run,
+    // or the pending batch would re-park and later re-dispatch.
+    throwIfTurnAborted(input.abortSignal);
+    stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
+      const schemaSession = resolveEffectiveOutputSchema({
+        agentOutputSchema: bundle.turnAgent.outputSchema,
+        input: resolved,
+        mode,
+        session: enrichedSession,
+      });
+      if (completedAuths) {
+        const emissionState = getHarnessEmissionState(schemaSession.state);
+        for (const { name, authorization } of completedAuths) {
+          await handleEvent(
+            createAuthorizationCompletedEvent({
+              authorization,
+              name,
+              outcome: "authorized",
+              sequence: emissionState.sequence,
+              stepIndex: emissionState.stepIndex,
+              turnId: emissionState.turnId,
+            }),
+          );
+        }
+      }
+
+      const capabilities = ctx.get(CapabilitiesKey);
+
+      const runHarnessStep = async (
+        lifecycleSession: HarnessSession,
+        stepInput: StepInput | undefined,
+      ): Promise<StepResult> => {
+        const refreshedSession = refreshSessionFromTurnAgent({
+          compactionOverrides: {
+            thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+          },
+          session: lifecycleSession,
+          turnAgent: bundle.turnAgent,
+        });
+
+        const step = createExecutionNodeStep({
+          abortSignal: input.abortSignal,
+          capabilities,
+          createRuntime: createWorkflowRuntime,
+          handleEvent,
+          mode,
+          modelResolutionScope: {
+            moduleMap: bundle.moduleMap,
+            nodeId: bundle.nodeId,
+          },
+          node: bundle.graph.root,
+          workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
+        });
+        return step(refreshedSession, stepInput);
+      };
+
+      return runHarnessStep(schemaSession, resolved);
     });
-    if (completedAuths) {
-      const emissionState = getHarnessEmissionState(schemaSession.state);
-      for (const { name, authorization } of completedAuths) {
-        await handleEvent(
-          createAuthorizationCompletedEvent({
-            authorization,
-            name,
-            outcome: "authorized",
-            sequence: emissionState.sequence,
-            stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
-          }),
-        );
+  } catch (error) {
+    if (!isTurnCancellation(error)) throw error;
+    writer.releaseLock();
+    // A declined session-limit prompt stops the whole delegation tree: a
+    // delegated session cancels the root turn before settling itself, and
+    // the root's cancelled arm cascades back down to every descendant. Root
+    // sessions carry no parent lineage and need no upward call — their own
+    // cancelled park runs the cascade. Both `accepted` and `no_active_turn`
+    // are successful outcomes, and the cascade's redundant cancel back to
+    // this already-settling session is a benign no-op.
+    if (isSessionLimitDecline(error)) {
+      const rootSessionId = readRootSessionId(input.serializedContext);
+      if (rootSessionId !== undefined) {
+        await requestWorkflowTurnCancellation({ sessionId: rootSessionId });
       }
     }
-
-    const capabilities = ctx.get(CapabilitiesKey);
-
-    const runHarnessStep = async (
-      lifecycleSession: HarnessSession,
-      stepInput: StepInput | undefined,
-    ): Promise<StepResult> => {
-      const skillRoot = await resolveSessionSkillRoot({
-        ctx,
-        turnAgent: bundle.turnAgent,
-      });
-      const refreshedSession = refreshSessionFromTurnAgent({
-        compactionOverrides: {
-          thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
-        },
-        session: lifecycleSession,
-        skillRoot,
-        turnAgent: bundle.turnAgent,
-      });
-
-      const step = createExecutionNodeStep({
-        abortSignal: input.abortSignal,
-        capabilities,
-        createRuntime: createWorkflowRuntime,
-        handleEvent,
-        mode,
-        modelResolutionScope: {
-          moduleMap: bundle.moduleMap,
-          nodeId: bundle.nodeId,
-        },
-        node: bundle.graph.root,
-        workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
-      });
-      return step(refreshedSession, stepInput);
+    return {
+      action: "cancelled",
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
     };
-
-    return runHarnessStep(schemaSession, resolved);
-  });
+  }
 
   // Re-stamp the in-memory session's continuation token in case a
   // handler called `setContinuationToken(...)` (eg. Slack auto-anchor).
@@ -448,20 +479,6 @@ function derivePendingState(session: HarnessSession): {
 }
 
 /**
- * Re-stamps `session.continuationToken` from `ContinuationTokenKey`
- * after channels call `setContinuationToken(...)`. Idempotent when the
- * token is unchanged.
- */
-export function reconcileSessionContinuationToken(
-  ctx: Awaited<ReturnType<typeof deserializeContext>>,
-  session: HarnessSession,
-): HarnessSession {
-  const next = ctx.get(ContinuationTokenKey);
-  if (next === undefined || next === session.continuationToken) return session;
-  return { ...session, continuationToken: next };
-}
-
-/**
  * Resolves the single output schema in effect for this turn, decoupling schema
  * enforcement from {@link RunMode}: downstream the harness reads
  * `session.outputSchema` unconditionally and never re-derives it from mode.
@@ -490,146 +507,6 @@ export function resolveEffectiveOutputSchema(input: {
   }
 
   return session;
-}
-
-const log = createLogger("execution.workflow-entry");
-
-/** Emits a terminal `session.failed` to the adapter and durable stream. */
-export async function emitTerminalSessionFailureStep(input: {
-  readonly error: unknown;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-}): Promise<void> {
-  "use step";
-
-  const details = formatError(input.error);
-  const code = typeof details.name === "string" ? details.name : "WORKFLOW_EXECUTION_FAILED";
-  const message = typeof details.message === "string" ? details.message : String(input.error);
-  const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
-
-  log.error("workflow loop threw — emitting terminal session.failed", {
-    sessionId,
-    errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-    code,
-    message,
-    detail: typeof details.detail === "string" ? details.detail : undefined,
-  });
-
-  const event = createSessionFailedEvent({ code, details, message, sessionId });
-
-  // Best-effort: invoke the adapter handler so channels surface the
-  // failure. Errors are logged, never rethrown — the outer workflow
-  // throw must still reach the run handle.
-  try {
-    const ctx = await deserializeContext(input.serializedContext);
-    const adapter = ctx.get(ChannelKey);
-    if (adapter !== undefined) {
-      const adapterCtx = buildAdapterContext(adapter, ctx);
-      await callAdapterEventHandler(adapter, event, adapterCtx);
-    }
-  } catch (notificationError) {
-    log.error("adapter failed to handle terminal session.failed event", {
-      errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-      sessionId,
-      error: notificationError,
-    });
-  }
-
-  // Always write the event to the durable stream so downstream
-  // consumers see a canonical terminal event instead of an abrupt
-  // stream close.
-  try {
-    const writer = input.parentWritable.getWriter();
-    try {
-      await writer.write(encodeMessageStreamEvent(timestampHandleMessageStreamEvent(event)));
-    } finally {
-      writer.releaseLock();
-    }
-  } catch (writeError) {
-    log.error("failed to write terminal session.failed event to durable stream", {
-      errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-      sessionId,
-      error: writeError,
-    });
-  }
-}
-
-export interface ProxyInputRequestResult {
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
-
-/**
- * Emits a proxied `input.requested` event through the parent's adapter
- * and records the routing entries on the parent session.
- */
-export async function runProxyInputRequestStep(input: {
-  readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<ProxyInputRequestResult> {
-  "use step";
-
-  const durableSession = await readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.require(ChannelKey);
-  const adapterCtx = buildAdapterContext(adapter, ctx);
-  const mode = ctx.require(ModeKey);
-  const bundle = ctx.require(BundleKey);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: bundle.turnAgent,
-  });
-  const writer = input.parentWritable.getWriter();
-
-  let scopeResult: {
-    readonly result: readonly (readonly [requestId: string, childContinuationToken: string])[];
-    readonly session: HarnessSession;
-  };
-  try {
-    const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
-      const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-      await writer.write(encodeMessageStreamEvent(timestampHandleMessageStreamEvent(transformed)));
-    };
-
-    scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
-      const proxyResult = await emitProxiedInputRequest({
-        emit,
-        hookPayload: input.hookPayload,
-        mode,
-        session: enrichedSession,
-      });
-      return { result: proxyResult.entries, session: proxyResult.session };
-    });
-  } finally {
-    writer.releaseLock();
-  }
-
-  // Persist adapter-state mutations (e.g. Slack's `pendingRequests`
-  // cache populated by the `input.requested` handler) so the next
-  // `turnStep` observes them across the serialized context
-  // boundary. Without this the workflow runtime rehydrates a stale
-  // adapter and later text-reply deliveries miss the cached batch.
-  setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-
-  const nextSerializedContext = serializeContext(ctx);
-
-  const sessionWithProxyEntries = upsertProxyInputRequests({
-    entries: scopeResult.result,
-    forChildContinuationToken: input.hookPayload.childContinuationToken,
-    session: scopeResult.session,
-  });
-  const nextSession = reconcileSessionContinuationToken(ctx, sessionWithProxyEntries);
-  const nextState = createDurableSessionState({ session: nextSession });
-
-  return {
-    serializedContext: nextSerializedContext,
-    sessionState: nextState,
-  };
 }
 
 export interface RoutedDeliverResult {

@@ -14,6 +14,7 @@ import {
 } from "../project-resolution.js";
 import { hasVercelProject, requireProjectPath, type SetupState } from "../state.js";
 import type { SetupBox } from "../step.js";
+import { syncHostFrameworkPreset } from "../vercel-project-framework.js";
 
 const VERCEL_DEPLOY_ENV: Readonly<Record<string, string>> = {
   VERCEL_USE_EXPERIMENTAL_FRAMEWORKS: "1",
@@ -25,6 +26,7 @@ export interface DeployProjectDeps {
   detectPackageManager: typeof detectPackageManager;
   runPackageManagerInstall: typeof runPackageManagerInstall;
   detectDeployment: typeof detectDeployment;
+  syncHostFrameworkPreset: typeof syncHostFrameworkPreset;
 }
 
 export interface DeployProjectOptions {
@@ -67,13 +69,21 @@ export interface DeployProjectPayload {
 /**
  * THE DEPLOY BOX. Owns the post-channel `vercel deploy --prod` once channel
  * setup has marked deployment work pending: dependency install (once per
- * state), the production deploy, the env pull, and the deployment probe.
+ * state), aligning the Vercel Framework Preset with the host framework on disk,
+ * the production deploy, the env pull, and the deployment probe.
  *
  * The project was linked up front by the link box, so `perform` reuses
  * `state.project` and never triggers a second interactive `vercel link` (the
  * #1020 deadlock). When no resolution exists (no link box ran, e.g. the
  * `eve channels add` composition), it falls back to the interactive bare
  * `vercel link`, or throws {@link HumanActionRequiredError} headlessly.
+ *
+ * Once the project is linked, {@link syncHostFrameworkPreset} runs before the
+ * deploy so a project that gained a host framework (e.g. a web channel) builds
+ * the host app instead of the stale `eve` agent preset. It is a no-op for a
+ * plain agent (no host framework on disk) or an already-correct preset, so
+ * every deploy surface — `eve channels add`, the dev TUI `/deploy`, onboarding —
+ * gets the reconcile without composing a separate box.
  */
 export function deployProject(
   options: DeployProjectOptions,
@@ -83,6 +93,7 @@ export function deployProject(
     detectPackageManager,
     runPackageManagerInstall,
     detectDeployment,
+    syncHostFrameworkPreset,
   };
 
   return {
@@ -129,6 +140,18 @@ export function deployProject(
           throw new Error("Vercel project linking failed. Deployment did not start.");
         }
       }
+
+      // The directory is now linked, so align the project's Framework Preset with
+      // the host framework on disk before deploying — deploy is deliberately the
+      // only place this server-side setting is touched, so a local `/channels` add
+      // never mutates deployed settings unless the user is actively deploying.
+      // Best-effort and a no-op for a plain agent or an already-correct preset.
+      await deps.syncHostFrameworkPreset(
+        options.prompter,
+        projectPath,
+        onOutput,
+        signal ? { signal } : {},
+      );
 
       if (!state.deploymentDependenciesInstalled) {
         const packageManager = await deps.detectPackageManager(projectPath);

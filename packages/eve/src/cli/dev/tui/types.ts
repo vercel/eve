@@ -60,8 +60,8 @@ export type TuiDisplayOptions = {
   /**
    * The model context window size in tokens.
    *
-   * When provided, the terminal UI shows the current total token usage as a
-   * percentage of this context window.
+   * When provided, the end-of-turn stats line shows the context fill as a
+   * percentage of this window.
    */
   contextSize?: number;
 

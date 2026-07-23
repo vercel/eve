@@ -6,6 +6,20 @@ import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import type { RunMode } from "#shared/run-mode.js";
 
+/** One settled turn: its terminal driver action plus deferred hook cleanup. */
+export interface DispatchedTurn {
+  readonly action: NextDriverAction;
+  /**
+   * Disposes the turn's control hook. Deferred until the *next* turn
+   * settles (or the session ends): the turn run's final control send is
+   * at-least-once, and `sendTurnControlStep` does not treat
+   * `HookNotFoundError` as benign, so a late duplicate resume must land
+   * on a live hook. By the next settle, the previous run has completed
+   * and can no longer re-send.
+   */
+  dispose(): Promise<void>;
+}
+
 /** Dispatches one turn and services its private-inbox control protocol until it terminates. */
 export async function dispatchAndAwaitTurn(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
@@ -17,7 +31,7 @@ export async function dispatchAndAwaitTurn(input: {
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<NextDriverAction> {
+}): Promise<DispatchedTurn> {
   const control = new TurnControlReceiver({
     bufferedDeliveries: input.bufferedDeliveries,
     deliveryHook: input.deliveryHook,
@@ -35,8 +49,10 @@ export async function dispatchAndAwaitTurn(input: {
       sessionState: input.sessionState,
     });
 
-    return await control.waitForAction();
-  } finally {
+    const action = await control.waitForAction();
+    return { action, dispose: () => control.dispose() };
+  } catch (error) {
     await control.dispose();
+    throw error;
   }
 }

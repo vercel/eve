@@ -1,17 +1,34 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
+import { assertNoWorkflowDirectivePrologue } from "#internal/authored-directive-prologue.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
+import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
+import {
+  createExtensionScopePlugin,
+  createFixedNamespaceScopePlugin,
+} from "#internal/bundler/extension-scope-plugin.js";
+import {
+  CACHED_CHANNEL_PREFIX,
+  RESOLVE_EXTENSIONS,
+  createDistributionPackageBoundaryPlugin,
+  createGenerationPackageBoundaryPlugin,
+  createRuntimeLoaderPackageBoundaryPlugin,
+  isNodeModulesPath,
+  isPathImport,
+  normalizeExternalDependencies,
+  type RolldownResolveContext,
+} from "#internal/authored-package-boundary.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import {
+  buildSingleRolldownChunk,
   buildWithNitroRolldown,
-  getSingleRolldownChunk,
 } from "#internal/bundler/nitro-rolldown.js";
-import { SERVER_EXTERNAL_PACKAGES } from "#internal/nitro/host/server-external-packages.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
@@ -21,35 +38,16 @@ const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
   "eve",
   "authored-modules",
 );
-const RESOLVE_EXTENSIONS = [
-  ".ts",
-  ".tsx",
-  ".mts",
-  ".cts",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".json",
-] as const;
-
 const CHANNEL_MODULE_CACHE_KEY = "__eveChannelModuleCache__";
-const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
-
-type RolldownResolveResult = {
-  readonly id: string;
-};
-
-type RolldownResolveContext = {
-  resolve(
-    source: string,
-    importer: string | undefined,
-    options: { kind: string; skipSelf: boolean },
-  ): Promise<RolldownResolveResult | null>;
-};
 
 export interface AuthoredModuleLoadOptions {
   readonly externalDependencies?: readonly string[];
+  /**
+   * When set, the module being loaded is extension-owned: its
+   * `defineState`/`defineExtension` calls (and those of its same-package
+   * dependencies bundled with it) are scoped to this namespace at bundle time.
+   */
+  readonly extensionScopeNamespace?: string;
 }
 
 function getChannelModuleCache(): Map<string, unknown> | undefined {
@@ -139,14 +137,209 @@ function createFileImportSpecifier(modulePath: string): string {
   return normalizedPath;
 }
 
-async function loadBundledAuthoredModule(
+/**
+ * Bundles one authored entry for immediate dev/eval loading. Package dependencies
+ * remain external while relative authored source is inlined.
+ */
+export async function bundleAuthoredModuleCode(
+  modulePath: string,
+  options: AuthoredModuleLoadOptions = {},
+): Promise<string> {
+  return await buildAuthoredModuleBundle(modulePath, options, {
+    channelIdentity: true,
+    packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
+      externalDependencies: normalizeExternalDependencies(options.externalDependencies),
+      packageRoot: resolveAuthoredPackageRoot(modulePath),
+    }),
+    plugins: [],
+    sourcemap: "inline",
+  });
+}
+
+/**
+ * Bundles one authored entry for an immutable development generation. Ordinary
+ * package dependencies are inlined so the emitted code stays executable after
+ * the original workspace changes; framework runtime imports and explicitly
+ * configured external dependencies keep their normal runtime resolution.
+ */
+export async function bundleAuthoredModuleForGeneration(
+  modulePath: string,
+  options: AuthoredModuleLoadOptions = {},
+): Promise<string> {
+  const code = await buildAuthoredModuleBundle(modulePath, options, {
+    // Generation bundles must not reference process state: the channel
+    // identity plugin emits reads of a process-global cache keyed by live
+    // source paths, which an immutable retained artifact cannot depend on.
+    channelIdentity: false,
+    packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
+      externalDependencies: normalizeExternalDependencies(options.externalDependencies),
+      packageRoot: resolveAuthoredPackageRoot(modulePath),
+    }),
+    plugins: [createAuthoredDirectiveGuardPlugin()],
+    sourcemap: false,
+  });
+
+  return removeRolldownModuleRegionComments(code);
+}
+
+/** One path-preserving entry in an extension distribution graph. */
+export interface ExtensionDistributionGraphEntry {
+  /** Output path relative to `dist/`, without the `.mjs` extension. */
+  readonly name: string;
+  /** Absolute authored module path. */
+  readonly path: string;
+}
+
+/**
+ * Transforms an extension's authored modules as one code-split graph while
+ * preserving an entry for every agent-shaped source module. Package imports
+ * remain external for the consuming app and source maps are omitted.
+ */
+export async function bundleExtensionDistributionGraph(input: {
+  readonly entries: readonly ExtensionDistributionGraphEntry[];
+  readonly packageRoot: string;
+  readonly runtimeDependencies: readonly string[];
+}): Promise<ReadonlyMap<string, string>> {
+  const plugins = [
+    createAuthoredDirectiveGuardPlugin(),
+    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
+    createAuthoredAssetImportPlugin(),
+    createAuthoredPackageTsConfigPathsPlugin({
+      appPackageRoot: input.packageRoot,
+      extensions: RESOLVE_EXTENSIONS,
+    }),
+    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+    createDistributionPackageBoundaryPlugin({
+      packageRoot: input.packageRoot,
+      runtimeDependencies: input.runtimeDependencies,
+    }),
+  ];
+
+  try {
+    const result = await buildWithNitroRolldown({
+      cwd: input.packageRoot,
+      input: Object.fromEntries(input.entries.map((entry) => [entry.name, entry.path])),
+      platform: "node",
+      plugins,
+      resolve: {
+        extensions: [...RESOLVE_EXTENSIONS],
+      },
+      tsconfig: resolveAuthoredTsConfigPath(input.packageRoot),
+      write: false,
+      output: {
+        chunkFileNames: "_chunks/[name]-[hash].mjs",
+        codeSplitting: true,
+        comments: false,
+        entryFileNames: "[name].mjs",
+        format: "esm",
+        sourcemap: false,
+      },
+    });
+
+    const files = new Map<string, string>();
+    for (const item of result.output) {
+      if (item.type === "chunk") {
+        files.set(item.fileName, removeRolldownModuleRegionComments(item.code));
+      }
+    }
+    return files;
+  } catch (error) {
+    throw createAuthoredModuleBundleError(input.packageRoot, error);
+  }
+}
+
+/**
+ * Bundles every runtime-authored module in one immutable generation graph.
+ * Shared dependencies are parsed and emitted once instead of once per authored
+ * entry.
+ */
+export async function bundleAuthoredModuleMapForGeneration(input: {
+  readonly manifest: CompiledAgentManifest;
+  readonly moduleMapPath: string;
+}): Promise<string> {
+  const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
+  const externalDependencies = normalizeExternalDependencies(
+    [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
+      (node) => node.config.build?.externalDependencies ?? [],
+    ),
+  );
+  const moduleMapSource = createCompiledModuleMapSource({
+    manifest: input.manifest,
+    moduleMapPath: input.moduleMapPath,
+  });
+  const extensionScopePlugin = createExtensionScopePlugin(
+    input.manifest.extensionMounts.map((mount) => ({
+      packageNamespace: mount.packageNamespace,
+      sourceRoot: mount.sourceRoot,
+    })),
+  );
+  const plugins = [
+    createVirtualGenerationModuleMapPlugin({
+      id: input.moduleMapPath,
+      source: moduleMapSource,
+    }),
+    createAuthoredDirectiveGuardPlugin(),
+    extensionScopePlugin,
+    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
+    createAuthoredAssetImportPlugin(),
+    createAuthoredPackageTsConfigPathsPlugin({
+      appPackageRoot: packageRoot,
+      extensions: RESOLVE_EXTENSIONS,
+    }),
+    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
+    createGenerationPackageBoundaryPlugin({ externalDependencies, packageRoot }),
+  ].filter((plugin) => plugin !== null);
+
+  try {
+    const chunk = await buildSingleRolldownChunk("authored module map", {
+      cwd: packageRoot,
+      input: input.moduleMapPath,
+      platform: "node",
+      plugins,
+      resolve: {
+        extensions: [...RESOLVE_EXTENSIONS],
+      },
+      tsconfig: resolveAuthoredTsConfigPath(packageRoot),
+      output: {
+        comments: false,
+        format: "esm",
+        sourcemap: false,
+      },
+    });
+    return removeRolldownModuleRegionComments(chunk.code);
+  } catch (error) {
+    throw createAuthoredModuleBundleError(input.moduleMapPath, error);
+  }
+}
+
+function createVirtualGenerationModuleMapPlugin(input: {
+  readonly id: string;
+  readonly source: string;
+}): Record<string, unknown> {
+  return {
+    name: "eve-generation-module-map",
+    resolveId(id: string) {
+      return id === input.id ? id : undefined;
+    },
+    load(id: string) {
+      return id === input.id ? { code: input.source, moduleType: "js" as const } : undefined;
+    },
+  };
+}
+
+async function buildAuthoredModuleBundle(
   modulePath: string,
   options: AuthoredModuleLoadOptions,
-): Promise<unknown> {
-  const channelCache = getChannelModuleCache();
+  configuration: {
+    readonly channelIdentity: boolean;
+    readonly packageBoundaryPlugin: Record<string, unknown>;
+    readonly plugins: readonly Record<string, unknown>[];
+    readonly sourcemap: false | "inline";
+  },
+): Promise<string> {
+  const channelCache = configuration.channelIdentity ? getChannelModuleCache() : undefined;
   const packageRoot = resolveAuthoredPackageRoot(modulePath);
   const tsconfigPath = resolveAuthoredTsConfigPath(packageRoot);
-  const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
   const channelIdentityPlugin =
     channelCache && channelCache.size > 0
       ? {
@@ -196,6 +389,10 @@ async function loadBundledAuthoredModule(
       : null;
   const plugins = [
     channelIdentityPlugin,
+    ...configuration.plugins,
+    options.extensionScopeNamespace === undefined
+      ? null
+      : createFixedNamespaceScopePlugin(options.extensionScopeNamespace),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin(),
     createAuthoredPackageTsConfigPathsPlugin({
@@ -203,12 +400,11 @@ async function loadBundledAuthoredModule(
       extensions: RESOLVE_EXTENSIONS,
     }),
     createNodeEsmCompatBannerPlugin({ includeRequire: true }),
-    createPackageBoundaryPlugin(packageRoot, externalDependencies),
+    configuration.packageBoundaryPlugin,
   ].filter((plugin) => plugin !== null);
-  let outputFile: { readonly code: string };
 
   try {
-    const result = await buildWithNitroRolldown({
+    const chunk = await buildSingleRolldownChunk(`authored module for "${modulePath}"`, {
       cwd: packageRoot,
       input: modulePath,
       platform: "node",
@@ -217,34 +413,71 @@ async function loadBundledAuthoredModule(
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: tsconfigPath,
-      write: false,
       output: {
         comments: false,
         format: "esm",
-        sourcemap: "inline",
+        sourcemap: configuration.sourcemap,
       },
     });
-    outputFile = getSingleRolldownChunk(result, `authored module for "${modulePath}"`);
+    return chunk.code;
   } catch (error) {
     throw createAuthoredModuleBundleError(modulePath, error);
   }
+}
+
+function createAuthoredDirectiveGuardPlugin(): Record<string, unknown> {
+  return {
+    name: "eve-authored-directive-guard",
+    async transform(source: string, id: string) {
+      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(id) || isNodeModulesPath(id)) {
+        return undefined;
+      }
+
+      await assertNoWorkflowDirectivePrologue({ filePath: id, source });
+      return undefined;
+    },
+  };
+}
+
+function removeRolldownModuleRegionComments(code: string): string {
+  return code
+    .split("\n")
+    .filter((line) => !line.startsWith("//#region ") && line !== "//#endregion")
+    .join("\n");
+}
+
+async function loadBundledAuthoredModule(
+  modulePath: string,
+  options: AuthoredModuleLoadOptions,
+): Promise<unknown> {
+  const code = await bundleAuthoredModuleCode(modulePath, options);
+  const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
   const bundleHash = createHash("sha1")
     .update(modulePath)
     .update("\0")
     .update(externalDependencies.join("\0"))
     .update("\0")
-    .update(outputFile.code)
+    .update(options.extensionScopeNamespace ?? "")
+    .update("\0")
+    .update(code)
     .digest("hex");
-  const bundleDirectoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);
+  const bundleDirectoryPath = join(
+    resolveAuthoredPackageRoot(modulePath),
+    AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
+  );
   const bundlePath = join(bundleDirectoryPath, `${bundleHash}.mjs`);
 
   if (!existsSync(bundlePath)) {
     mkdirSync(bundleDirectoryPath, { recursive: true });
-    writeFileSync(bundlePath, outputFile.code);
+    writeFileSync(bundlePath, code);
   }
 
-  return await import(`${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`);
+  try {
+    return await import(`${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`);
+  } catch (error) {
+    throw createAuthoredModuleEvaluationError(modulePath, error);
+  }
 }
 
 function createAuthoredRelativeExtensionResolverPlugin(input: {
@@ -269,129 +502,26 @@ function createAuthoredRelativeExtensionResolverPlugin(input: {
         return undefined;
       }
 
-      return { id: resolvedPath };
+      // Standard resolvers realpath resolved modules, so a module reached
+      // through a node_modules symlink resolves its own dependencies from its
+      // real location — with pnpm's store layout they are store siblings that
+      // only exist there. Path imports probed here (the compiled module map
+      // reaches store-installed extension source through the consumer's
+      // node_modules symlink) must get the same treatment, and it keeps one
+      // canonical module identity per real file.
+      return {
+        id: isNodeModulesPath(resolvedPath) ? toRealModulePath(resolvedPath) : resolvedPath,
+      };
     },
   };
 }
 
-function createPackageBoundaryPlugin(
-  packageRoot: string,
-  externalDependencies: readonly string[],
-): Record<string, unknown> {
-  // The bundler reports importers by realpath while `packageRoot` keeps the
-  // caller's spelling (e.g. macOS `/var` vs `/private/var`); compare
-  // canonical paths or the app-authored branch is skipped silently.
-  const canonicalPackageRoot = toCanonicalPath(packageRoot);
-
-  return {
-    name: "eve-package-boundary",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
-      if (!isPackageImport(source)) {
-        return undefined;
-      }
-
-      if (isEveFrameworkImport(source)) {
-        return {
-          external: true,
-          id: source,
-        };
-      }
-
-      const configuredExternalDependency = resolveConfiguredExternalDependency(
-        source,
-        externalDependencies,
-      );
-
-      if (configuredExternalDependency !== undefined) {
-        if (source !== configuredExternalDependency) {
-          const resolved = await this.resolve(source, importer, {
-            kind: options.kind,
-            skipSelf: true,
-          });
-
-          if (resolved !== null && typeof resolved.id === "string") {
-            return {
-              external: true,
-              id: resolveExternalFilePath({
-                importer,
-                packageRoot,
-                resolvedId: resolved.id,
-                source,
-              }),
-            };
-          }
-
-          const resolvedSubpath = resolveExternalFilePath({
-            importer,
-            packageRoot,
-            source,
-          });
-
-          if (resolvedSubpath !== undefined) {
-            return {
-              external: true,
-              id: resolvedSubpath,
-            };
-          }
-        }
-
-        return {
-          external: true,
-          id: source,
-        };
-      }
-
-      const importerPath =
-        importer === undefined ||
-        importer.startsWith("\0") ||
-        importer.startsWith(CACHED_CHANNEL_PREFIX)
-          ? undefined
-          : resolve(importer);
-
-      // Keep package imports authored directly by the app external by
-      // default, but let symlinked/file workspace packages compile as
-      // source. Those packages often export `.ts` files and rely on the
-      // bundler's extension resolution for their own relative imports.
-      if (
-        importerPath !== undefined &&
-        isPathInsideOrEqual(toCanonicalPath(importerPath), canonicalPackageRoot)
-      ) {
-        const resolved = await this.resolve(source, importer, {
-          kind: options.kind,
-          skipSelf: true,
-        });
-
-        if (resolved === null || typeof resolved.id !== "string") {
-          // Failing here (instead of emitting the bare specifier as an
-          // external) is load-bearing: importing a bundle whose package is
-          // missing poisons Node's process-wide package-config cache with a
-          // negative entry, and once the package is installed the same
-          // long-running process keeps failing resolution until restart.
-          // The bundler's resolver is fresh on every rebuild, so failing at
-          // bundle time keeps the dev server able to recover after install.
-          throw new Error(
-            `Cannot resolve package "${source}" imported from "${importerPath}". ` +
-              `Install it with your package manager (e.g. \`pnpm install\`); ` +
-              `a running \`eve dev\` retries on the next rebuild.`,
-          );
-        }
-
-        if (isNodeModulesPath(resolved.id)) {
-          return {
-            external: true,
-            id: source,
-          };
-        }
-      }
-
-      return undefined;
-    },
-  };
+function toRealModulePath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 function createInFlightModuleLoadKey(
@@ -400,67 +530,7 @@ function createInFlightModuleLoadKey(
 ): string {
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
-  return `${modulePath}\0${externalDependencies.join("\0")}`;
-}
-
-function normalizeExternalDependencies(externalDependencies: readonly string[] = []): string[] {
-  return [...new Set([...SERVER_EXTERNAL_PACKAGES, ...externalDependencies])].sort();
-}
-
-function resolveConfiguredExternalDependency(
-  source: string,
-  externalDependencies: readonly string[],
-): string | undefined {
-  return externalDependencies.find(
-    (dependencyName) => source === dependencyName || source.startsWith(`${dependencyName}/`),
-  );
-}
-
-function resolveExternalFilePath(input: {
-  importer: string | undefined;
-  packageRoot: string;
-  resolvedId?: string;
-  source: string;
-}): string | undefined {
-  if (input.resolvedId !== undefined) {
-    const resolvedPath = resolveExistingExternalFilePath(input.resolvedId);
-
-    if (resolvedPath !== undefined) {
-      return resolvedPath;
-    }
-  }
-
-  const importerPath = normalizeImporterPath(input.importer);
-
-  if (importerPath !== undefined) {
-    try {
-      return createRequire(importerPath).resolve(input.source);
-    } catch {
-      // Fall back to the app package root below.
-    }
-  }
-
-  try {
-    return createRequire(join(input.packageRoot, "package.json")).resolve(input.source);
-  } catch {
-    return input.resolvedId;
-  }
-}
-
-function resolveExistingExternalFilePath(id: string): string | undefined {
-  if (existsSync(id)) {
-    return id;
-  }
-
-  for (const extension of RESOLVE_EXTENSIONS) {
-    const candidate = `${id}${extension}`;
-
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return undefined;
+  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extensionScopeNamespace ?? ""}`;
 }
 
 function resolveExistingImportPath(
@@ -496,63 +566,6 @@ function isFile(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-function normalizeImporterPath(importer: string | undefined): string | undefined {
-  if (
-    importer === undefined ||
-    importer.startsWith("\0") ||
-    importer.startsWith(CACHED_CHANNEL_PREFIX)
-  ) {
-    return undefined;
-  }
-
-  return resolve(importer);
-}
-
-function isPackageImport(source: string): boolean {
-  if (isPathImport(source)) {
-    return false;
-  }
-
-  if (/^(?:node|data|file):/.test(source)) {
-    return false;
-  }
-
-  if (source.startsWith("@/")) {
-    return false;
-  }
-
-  return !source.startsWith(CACHED_CHANNEL_PREFIX);
-}
-
-function isPathImport(source: string): boolean {
-  return source.startsWith(".") || source.startsWith("/") || /^[A-Za-z]:[\\/]/.test(source);
-}
-
-function isEveFrameworkImport(source: string): boolean {
-  return source === "eve" || source.startsWith("eve/");
-}
-
-function isNodeModulesPath(path: string): boolean {
-  return path.replaceAll("\\", "/").includes("/node_modules/");
-}
-
-function toCanonicalPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
 }
 
 function resolveAuthoredTsConfigPath(packageRoot: string): string | false {

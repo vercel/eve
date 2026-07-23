@@ -19,6 +19,7 @@ type TurnTerminalAction =
     }
   | {
       readonly authorizationNames?: readonly string[];
+      readonly cancelled?: true;
       readonly kind: "park";
     };
 
@@ -66,8 +67,9 @@ export class TurnExecutionCursor {
   }
 
   /** Builds the next atomic turn-step input from the cursor's current state. */
-  createStepInput(input: HookPayload | undefined): TurnStepInput {
+  createStepInput(input: HookPayload | undefined, abortSignal?: AbortSignal): TurnStepInput {
     return {
+      abortSignal,
       input,
       parentWritable: this.parentWritable,
       serializedContext: this.currentSerializedContext,

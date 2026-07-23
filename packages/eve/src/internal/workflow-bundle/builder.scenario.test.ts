@@ -117,13 +117,7 @@ describe("WorkflowBundleBuilder", () => {
       await Promise.all([
         writeFile(
           compiledArtifactsBootstrapPath,
-          [
-            "export async function __eveInstallCompiledArtifactsStep() {",
-            '  "use step";',
-            "  return null;",
-            "}",
-            "",
-          ].join("\n"),
+          "globalThis.__eveCompiledArtifactsInstalled = true;\n",
         ),
         writeFile(
           stepFilePath,
@@ -160,6 +154,9 @@ describe("WorkflowBundleBuilder", () => {
       expect(builder.workflowBundleCalls).toBe(1);
       expect(JSON.stringify(builder.capturedManifest)).toContain("ping");
       expect(JSON.stringify(builder.capturedManifest)).toContain("step//");
+      expect(JSON.stringify(builder.capturedManifest)).not.toContain(
+        "__eveInstallCompiledArtifactsStep",
+      );
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
@@ -394,6 +391,7 @@ describe("WorkflowBundleBuilder", () => {
             {
               environment: {
                 EVE_EXISTING_FLAG: "kept",
+                WORKFLOW_PRECONDITION_GUARD: "0",
               },
               handler: "index.js",
               launcherType: "Nodejs",
@@ -439,6 +437,7 @@ describe("WorkflowBundleBuilder", () => {
       expect(flowConfig.environment).toEqual({
         EVE_EXISTING_FLAG: "kept",
         NODE_OPTIONS: "--experimental-require-module",
+        WORKFLOW_PRECONDITION_GUARD: "1",
       });
       const generatedFlowFunctionSource = await readFile(
         join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func", "index.js"),

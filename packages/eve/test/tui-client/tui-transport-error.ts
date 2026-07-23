@@ -37,7 +37,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
 
     input.type("Trigger a transport failure.");
     input.enter();
@@ -47,7 +47,7 @@ void (async () => {
 
     // The runner must survive the failure and return to the prompt rather
     // than tear down.
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
     console.log(theme.muted("[tui-transport-error] runner returned to prompt"));
 
     input.ctrlC();

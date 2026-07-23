@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { BOOTSTRAP_MARKER_PATH, BOOTSTRAP_MARKER_TOKEN } from "./shared.js";
+import { BOOTSTRAP_MARKER_PATH, BOOTSTRAP_MARKER_TOKEN } from "./shared";
 
 // The prompt directs the model to run the backticked `bash` command; a
 // non-error result containing the marker token proves the bootstrap-written

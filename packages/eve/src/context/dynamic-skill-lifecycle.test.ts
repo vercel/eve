@@ -53,6 +53,7 @@ function createResolver(
     | Record<string, SkillPackageDefinition>
     | null
     | Promise<SkillPackageDefinition | Record<string, SkillPackageDefinition> | null>,
+  extensionNamespace?: string,
 ): ResolvedDynamicSkillResolver {
   return {
     eventNames: ["session.started"],
@@ -60,6 +61,7 @@ function createResolver(
       "session.started": handler,
     },
     exportName: "default",
+    extensionNamespace,
     logicalPath: `skills/${slug}.ts`,
     slug,
     sourceId: `skills/${slug}.ts`,
@@ -158,6 +160,30 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(PendingSkillAnnouncementKey)).toContain("talk-like-a-dog: Talk like a dog");
     expect(
       sandbox.writes.some((w) => w.path.includes("/home/agent/.agents/skills/talk-like-a-dog/")),
+    ).toBe(true);
+  });
+
+  it("prefixes map entries with the mount namespace for an extension resolver", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver(
+      "crm__playbooks",
+      () => ({ triage: makeSkill("Triage an account", "Triage.") }),
+      "crm",
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      crm__playbooks: [{ description: "Triage an account", name: "crm__triage" }],
+    });
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("crm__triage: Triage an account");
+    expect(
+      sandbox.writes.some((w) => w.path.includes("/home/agent/.agents/skills/crm__triage/")),
     ).toBe(true);
   });
 

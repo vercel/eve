@@ -1,12 +1,45 @@
 ---
 title: "GitHub"
-description: "Reach your agent from GitHub App webhooks, with @mention dispatch, PR diff context, and sandbox checkout."
+description: "Reach your agent from GitHub App webhooks, with @mention dispatch, PR diff context, sandbox checkout, and Vercel Connect credentials."
 type: integration
 ---
 
-The GitHub channel lets the agent work directly on a repository. Someone `@mentions` it in an issue, PR, or review comment, and the agent answers right there in the thread, with the PR diff already in context and the repo checked out into the sandbox. It takes GitHub App webhooks at `/eve/v1/github`, checks the signature, derives auth from whoever triggered the event, and replies on the native surface. See [Channels](./overview) for the contract this builds on.
+The GitHub channel lets the agent work directly on a repository. Someone `@mentions` it in an issue, PR, or review comment, and the agent answers right there in the thread, with the PR diff already in context and the repo checked out into the sandbox. It takes GitHub App webhooks at `/eve/v1/github`, checks the signature, derives auth from whoever triggered the event, and replies on the native surface. Credentials can run through [Vercel Connect](../guides/auth-and-route-protection), which manages the GitHub App, the installation token, and inbound webhook verification, so there's no app private key or webhook secret for you to hold. See [Channels](./overview) for the contract this builds on.
+
+## Set up Connect
+
+Create a GitHub Connect client and copy its UID (e.g. `github/my-agent`), then attach this project as the trigger destination at eve's GitHub route:
+
+```bash
+npm install -g vercel@latest
+vercel connect create github --triggers
+vercel connect detach <uid> --yes
+vercel connect attach <uid> --triggers --trigger-path /eve/v1/github --yes
+```
+
+The `create` step provisions the GitHub App and a trigger destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/github` re-points the trigger at the eve GitHub route, since eve does not serve the default Connect path. `--triggers` makes Connect receive the App's webhooks, verify them, and forward them to your deployment. During registration, subscribe to `issue_comment` and `pull_request_review_comment` for mention-driven turns — the managed App defaults to `pull_request` only — and add `issues`, `pull_request`, `check_suite`, `check_run`, or `workflow_run` if you wire up their opt-in hooks. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
 
 ## Add the channel
+
+```bash
+npm install @vercel/connect
+```
+
+```ts title="agent/channels/github.ts"
+import { connectGitHubCredentials } from "@vercel/connect/eve";
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  botName: "my-agent",
+  credentials: connectGitHubCredentials("github/my-agent"),
+});
+```
+
+`connectGitHubCredentials` returns `{ installationToken, webhookVerifier }`: eve uses the Connect-managed installation token directly for GitHub API calls, skipping its native App JWT exchange, and verifies Connect-forwarded webhooks by their Vercel OIDC signature instead of a GitHub webhook secret. Token rotation, refresh, and multi-installation tenancy stay inside Connect, so there is no `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, or `GITHUB_WEBHOOK_SECRET` to manage.
+
+### Bring your own GitHub App
+
+To run a GitHub App you manage yourself, pass its credentials directly instead:
 
 ```ts title="agent/channels/github.ts"
 import { githubChannel } from "eve/channels/github";

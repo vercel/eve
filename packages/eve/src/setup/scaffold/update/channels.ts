@@ -1,4 +1,4 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
@@ -36,14 +36,6 @@ const DEFAULT_TYPES_REACT_PACKAGE_VERSION = "__TYPES_REACT_VERSION__";
 const DEFAULT_TYPES_REACT_DOM_PACKAGE_VERSION = "__TYPES_REACT_DOM_VERSION__";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
-const VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES = [
-  "@sveltejs/kit",
-  NEXT_PACKAGE_NAME,
-  "nuxt",
-  "nuxt3",
-  "nuxt-edge",
-  "nuxt-nightly",
-] as const;
 const PACKAGE_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
 const USER_AUTHORED_CHANNEL_DIR = "agent/channels";
 const WEB_CHANNEL_PATH = "agent/channels/eve.ts";
@@ -59,19 +51,6 @@ const SUPPORTED_NEXT_CONFIG_PATHS = [
 const WEB_COMPETING_NEXT_CONFIG_PATHS = SUPPORTED_NEXT_CONFIG_PATHS.filter(
   (path) => path !== WEB_NEXT_CONFIG_PATH,
 );
-const WEB_DEFAULT_VERCEL_SERVICES = {
-  web: {
-    entrypoint: ".",
-    framework: "nextjs",
-    routePrefix: "/",
-  },
-  eve: {
-    buildCommand: "eve build",
-    entrypoint: ".",
-    framework: "eve",
-    routePrefix: "/_eve_internal/eve",
-  },
-} satisfies Record<string, Record<string, string>>;
 
 declare const slackConnectorSlugBrand: unique symbol;
 
@@ -141,12 +120,25 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Read and parse a project's `package.json` into a plain object, or `undefined`
+ * when it is missing or does not parse to a JSON object.
+ */
+async function readPackageJsonObject(
+  packageJsonPath: string,
+): Promise<Record<string, unknown> | undefined> {
+  if (!(await pathExists(packageJsonPath))) return undefined;
+
+  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  return isJsonObject(parsed) ? parsed : undefined;
+}
+
 async function readDependencyVersion(
   packageJsonPath: string,
   dependencyName: string,
 ): Promise<string | undefined> {
-  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
-  if (!isJsonObject(parsed) || !isJsonObject(parsed.dependencies)) return undefined;
+  const parsed = await readPackageJsonObject(packageJsonPath);
+  if (parsed === undefined || !isJsonObject(parsed.dependencies)) return undefined;
 
   const version = parsed.dependencies[dependencyName];
   return typeof version === "string" ? version : undefined;
@@ -169,22 +161,8 @@ async function hasPackageDependency(
   packageJsonPath: string,
   dependencyName: string,
 ): Promise<boolean> {
-  if (!(await pathExists(packageJsonPath))) return false;
-
-  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
-  return isJsonObject(parsed) && packageJsonHasDependency(parsed, dependencyName);
-}
-
-async function hasAnyPackageDependency(
-  packageJsonPath: string,
-  dependencyNames: readonly string[],
-): Promise<boolean> {
-  if (!(await pathExists(packageJsonPath))) return false;
-
-  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
-  if (!isJsonObject(parsed)) return false;
-
-  return dependencyNames.some((dependencyName) => packageJsonHasDependency(parsed, dependencyName));
+  const parsed = await readPackageJsonObject(packageJsonPath);
+  return parsed !== undefined && packageJsonHasDependency(parsed, dependencyName);
 }
 
 /**
@@ -200,15 +178,44 @@ export async function isNextJsProject(projectRoot: string): Promise<boolean> {
 }
 
 /**
+ * Host-framework dependency → the Vercel Framework Preset slug it must deploy
+ * under (so the framework owns the top-level build and eve runs as a sibling).
+ * Single source of truth for which dependencies mark a host framework;
+ * {@link hasVercelHostFramework} derives from it.
+ */
+const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
+  "@sveltejs/kit": "sveltekit",
+  [NEXT_PACKAGE_NAME]: "nextjs",
+  nuxt: "nuxtjs",
+  nuxt3: "nuxtjs",
+  "nuxt-edge": "nuxtjs",
+  "nuxt-nightly": "nuxtjs",
+};
+
+/**
+ * The Vercel Framework Preset slug for the host framework a project declares, or
+ * `undefined` when it declares none (a missing `package.json` reads as none).
+ */
+export async function resolveVercelHostFrameworkPreset(
+  projectRoot: string,
+): Promise<string | undefined> {
+  const parsed = await readPackageJsonObject(join(projectRoot, "package.json"));
+  if (parsed === undefined) return undefined;
+
+  for (const [dependencyName, preset] of Object.entries(VERCEL_HOST_FRAMEWORK_PRESETS)) {
+    if (packageJsonHasDependency(parsed, dependencyName)) return preset;
+  }
+  return undefined;
+}
+
+/**
  * Whether the root app declares a Vercel framework that should own the
  * top-level deployment while eve runs as a sibling service. These match Eve's
- * current framework integrations: Next.js, Nuxt, and SvelteKit.
+ * current framework integrations: Next.js, Nuxt, and SvelteKit. Derived from
+ * {@link resolveVercelHostFrameworkPreset} so the two share one dependency list.
  */
 export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
-  return hasAnyPackageDependency(
-    join(projectRoot, "package.json"),
-    VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES,
-  );
+  return (await resolveVercelHostFrameworkPreset(projectRoot)) !== undefined;
 }
 
 async function ensurePackageDependency(
@@ -391,58 +398,30 @@ function renderWebAppTemplate(content: string, appName: string): string {
     .replaceAll("__EVE_INIT_WITH_EVE_OPTIONS__", "");
 }
 
-function withWebVercelServices(source: string): string {
-  const parsed: unknown = JSON.parse(source);
-  if (!isJsonObject(parsed)) {
-    throw new Error(`${WEB_VERCEL_JSON_PATH} must contain a JSON object.`);
-  }
-
-  const existingServices = parsed.experimentalServices;
-  if (existingServices !== undefined && !isJsonObject(existingServices)) {
-    throw new Error(`${WEB_VERCEL_JSON_PATH} experimentalServices must contain a JSON object.`);
-  }
-
-  const next = {
-    ...parsed,
-    $schema: typeof parsed.$schema === "string" ? parsed.$schema : WEB_VERCEL_JSON_SCHEMA,
-    experimentalServices: {
-      ...existingServices,
-      web: existingServices?.web ?? WEB_DEFAULT_VERCEL_SERVICES.web,
-      eve: existingServices?.eve ?? WEB_DEFAULT_VERCEL_SERVICES.eve,
-    },
-  };
-
-  if (JSON.stringify(parsed) === JSON.stringify(next)) {
-    return source;
-  }
-
-  return `${JSON.stringify(next, null, 2)}\n`;
-}
-
-async function ensureWebVercelServices(filePath: string): Promise<"skipped" | "written"> {
-  if (!(await pathExists(filePath))) {
-    await writeTextFile(
-      filePath,
-      `${JSON.stringify(
-        {
-          $schema: WEB_VERCEL_JSON_SCHEMA,
-          experimentalServices: WEB_DEFAULT_VERCEL_SERVICES,
-        },
-        null,
-        2,
-      )}\n`,
-      { force: true },
-    );
-    return "written";
-  }
-
-  const current = await readFile(filePath, "utf8");
-  const next = withWebVercelServices(current);
-  if (next === current) {
+/**
+ * Ensure the Next.js web channel has a minimal `vercel.json`.
+ *
+ * The eve service and its `/eve/v1/*` routes are generated by `withEve()` into
+ * `.vercel/output/config.json` at build time — which reads `vercel.json`'s
+ * `services`, not a scaffolded block — so the scaffold intentionally writes no
+ * services entry. Emitting one only risks a `services` schema that today's
+ * Vercel platform rejects before the build ever runs.
+ *
+ * When a `vercel.json` already exists it is left untouched: `withEve()` owns the
+ * eve service, so the scaffold has nothing to add to a file the user manages.
+ */
+async function ensureWebVercelJson(filePath: string): Promise<"skipped" | "written"> {
+  if (await pathExists(filePath)) {
     return "skipped";
   }
 
-  await writeFile(filePath, next, "utf8");
+  await writeTextFile(
+    filePath,
+    `${JSON.stringify({ $schema: WEB_VERCEL_JSON_SCHEMA }, null, 2)}\n`,
+    {
+      force: true,
+    },
+  );
   return "written";
 }
 
@@ -535,7 +514,7 @@ async function ensureWebChannel(
 
   if (configureVercelServices) {
     const vercelJsonPath = join(options.projectRoot, WEB_VERCEL_JSON_PATH);
-    const vercelJsonResult = await ensureWebVercelServices(vercelJsonPath);
+    const vercelJsonResult = await ensureWebVercelJson(vercelJsonPath);
     if (vercelJsonResult === "written") {
       filesWritten.push(vercelJsonPath);
     } else {

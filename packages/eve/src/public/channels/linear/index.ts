@@ -24,10 +24,8 @@ export {
 export { LINEAR_CHANNEL_DEFAULT_ROUTE } from "#public/channels/linear/constants.js";
 export { defaultLinearAuth, defaultOnAgentSession } from "#public/channels/linear/defaults.js";
 export {
-  LINEAR_HITL_MARKER_PREFIX,
+  linearInputRequestSignal,
   renderLinearInputRequests,
-  resolveLinearPromptInputResponses,
-  stripLinearHitlMarker,
 } from "#public/channels/linear/hitl.js";
 export {
   formatLinearContextBlock,

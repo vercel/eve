@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildStatusLine } from "./status-line.js";
-import { stripAnsi, visibleLength } from "./terminal-text.js";
+import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 
@@ -50,30 +50,66 @@ describe("buildStatusLine", () => {
     expect(line).not.toContain("\x1b[7m\x1b[34m :3000 ");
   });
 
-  it("renders all segments in order with dot separators", () => {
+  it("renders all segments in order with whitespace separators", () => {
     const line = buildStatusLine({
       model: "anthropic/claude-sonnet-5",
-      tokens: "12,300 tokens 6%",
       endpoint: connected,
       vercel: { identity, pendingDeploy: true },
       theme: plain,
       width: 120,
     });
 
-    expect(line).toBe(
-      "anthropic/claude-sonnet-5 · 12,300 tokens 6% · AI Gateway (my-agent) · /deploy pending",
-    );
+    expect(line).toBe("anthropic/claude-sonnet-5 via ai-gateway(oidc:my-agent)  /deploy pending");
+  });
+
+  it("folds the reasoning level and Fast mode marker into the model segment", () => {
+    const line = buildStatusLine({
+      model: "xai/grok-4.5",
+      reasoning: "xhigh",
+      fastMode: true,
+      endpoint: connected,
+      vercel: { identity, pendingDeploy: false },
+      theme: plain,
+      width: 120,
+    });
+
+    expect(line).toBe("xai/grok-4.5@xhigh ↯ via ai-gateway(oidc:my-agent)");
+  });
+
+  it("dims the whole model segment, reasoning level and fast marker included", () => {
+    const line = buildStatusLine({
+      model: "xai/grok-4.5",
+      reasoning: "xhigh",
+      fastMode: true,
+      theme,
+      width: 120,
+    })!;
+
+    expect(line).toContain("\x1b[2mxai/grok-4.5@xhigh ↯\x1b[22m");
+  });
+
+  it("renders the fast marker with ASCII glyphs when unicode is unavailable", () => {
+    const line = buildStatusLine({
+      model: "xai/grok-4.5",
+      fastMode: true,
+      theme: ascii,
+      width: 120,
+    });
+
+    expect(line).toBe("xai/grok-4.5 >>");
   });
 
   it("strips terminal controls from a remote model id", () => {
     expect(
       buildStatusLine({
         model: "openai/gpt\x1b[31m-5\n",
+        reasoning: "high",
+        fastMode: true,
         remote: remote({ state: "ready", info: {} as never }),
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools  openai/gpt-5");
+    ).toBe(" ↗ vpoke.playground-vercel.tools  openai/gpt-5@high ↯");
   });
 
   it("dims every segment except the yellow pending-deploy marker", () => {
@@ -98,16 +134,16 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(withProject).toBe("m · AI Gateway (my-agent)");
+    expect(withProject).toBe("m via ai-gateway(oidc:my-agent)");
 
-    // Connected without a linked project (a raw key): bare "AI Gateway".
+    // OIDC without a resolved project name: bare scope.
     const noProject = buildStatusLine({
       model: "m",
       endpoint: connected,
       theme: plain,
       width: 120,
     });
-    expect(noProject).toBe("m · AI Gateway");
+    expect(noProject).toBe("m via ai-gateway(oidc)");
   });
 
   it("renders the pending marker even when no segment else resolved", () => {
@@ -123,14 +159,13 @@ describe("buildStatusLine", () => {
     const input = {
       logLevel: "sandbox",
       model: "anthropic/claude-sonnet-5",
-      tokens: "↑ 500 ↓ 300",
       endpoint: connected,
       vercel: { identity, pendingDeploy: true },
       theme: plain,
     } as const;
 
     const full = buildStatusLine({ ...input, width: 120 })!;
-    expect(full.startsWith("logs: sandbox · ")).toBe(true);
+    expect(full.startsWith("logs: sandbox  ")).toBe(true);
 
     // Narrow enough that only the leading hint survives.
     expect(buildStatusLine({ ...input, width: 13 })).toBe("logs: sandbox");
@@ -150,20 +185,19 @@ describe("buildStatusLine", () => {
   it("drops the endpoint, then the model, as the width narrows", () => {
     const input = {
       model: "anthropic/claude-sonnet-5",
-      tokens: "12,300 tokens",
       endpoint: connected,
       vercel: { identity, pendingDeploy: true },
       theme: plain,
     };
     const full = buildStatusLine({ ...input, width: 200 })!;
-    expect(full).toContain("AI Gateway (my-agent)");
+    expect(full).toContain("via ai-gateway(oidc:my-agent)");
 
     const noEndpoint = buildStatusLine({ ...input, width: visibleLength(full) - 1 })!;
-    expect(noEndpoint).not.toContain("AI Gateway");
+    expect(noEndpoint).not.toContain("ai-gateway");
     expect(noEndpoint).toContain("anthropic/claude-sonnet-5");
 
     const noModel = buildStatusLine({ ...input, width: visibleLength(noEndpoint) - 1 })!;
-    expect(noModel).toBe("12,300 tokens · /deploy pending");
+    expect(noModel).toBe("/deploy pending");
   });
 
   it("renders the three model-endpoint states", () => {
@@ -173,7 +207,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(external).toBe("anthropic/claude-sonnet-5 · External endpoint");
+    expect(external).toBe("anthropic/claude-sonnet-5 via anthropic⌝");
 
     const linked = buildStatusLine({
       model: "m",
@@ -182,7 +216,26 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(linked).toBe("m · AI Gateway (my-agent)");
+    expect(linked).toBe("m via ai-gateway(oidc:my-agent)");
+
+    const apiKey = buildStatusLine({
+      model: "m",
+      endpoint: { kind: "gateway", connected: true, credential: "api-key" },
+      // A linked project must NOT surface here: the key is what
+      // authenticates, and the bar reports the credential in use.
+      vercel: { identity, pendingDeploy: false },
+      theme: plain,
+      width: 120,
+    });
+    expect(apiKey).toBe("m via ai-gateway(api-key)");
+
+    const chatgpt = buildStatusLine({
+      model: "openai/gpt-5.6-sol",
+      endpoint: { kind: "external", provider: "codex" },
+      theme: plain,
+      width: 120,
+    });
+    expect(chatgpt).toBe("openai/gpt-5.6-sol via chatgpt-sub⌝");
 
     const notConnected = buildStatusLine({
       model: "m",
@@ -190,7 +243,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(notConnected).toBe("m · ⚠ AI Gateway");
+    expect(notConnected).toBe("m  ⚠ ai-gateway");
   });
 
   it("paints only the not-connected endpoint yellow", () => {
@@ -199,14 +252,28 @@ describe("buildStatusLine", () => {
       theme,
       width: 120,
     });
-    expect(notConnected).toContain("\x1b[33m⚠ AI Gateway\x1b[39m");
+    expect(notConnected).toContain("\x1b[33m⚠ ai-gateway\x1b[39m");
 
     const linked = buildStatusLine({
       endpoint: connected,
       theme,
       width: 120,
     });
-    expect(linked).toContain("\x1b[2mAI Gateway\x1b[22m");
+    // Only the gateway stands at the terminal's default foreground — no
+    // explicit white, no bold; via/scope stay dim around it.
+    expect(linked).toContain("\x1b[2mvia \x1b[22mai-gateway\x1b[2m(oidc)\x1b[22m");
+    expect(linked).not.toContain("\x1b[97m");
+    expect(linked).not.toContain("\x1b[1mai-gateway");
+
+    // External providers render quiet — no bright token — with only the
+    // authored-endpoint mark at the default foreground.
+    const external = buildStatusLine({
+      endpoint: { kind: "external", provider: "codex" },
+      theme,
+      width: 120,
+    });
+    expect(external).toContain("\x1b[2mvia chatgpt-sub\x1b[22m⌝");
+    expect(external).not.toContain("\x1b[1m");
   });
 
   it("renders ASCII glyphs when unicode is unavailable", () => {
@@ -216,7 +283,7 @@ describe("buildStatusLine", () => {
       theme: ascii,
       width: 120,
     });
-    expect(stripAnsi(line!)).toBe("m - ! AI Gateway");
+    expect(stripAnsi(line!)).toBe("m  ! ai-gateway");
   });
 
   it("renders the remote badge first and projects each authentication state", () => {
@@ -226,7 +293,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools · Checking access…");
+    ).toBe(" ↗ vpoke.playground-vercel.tools  Checking access…");
     expect(
       buildStatusLine({
         remote: remote({
@@ -236,7 +303,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools · Authenticate via OIDC");
+    ).toBe(" ↗ vpoke.playground-vercel.tools  Authenticate via OIDC");
     expect(
       buildStatusLine({
         remote: remote({
@@ -246,7 +313,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools · Authenticating via OIDC…");
+    ).toBe(" ↗ vpoke.playground-vercel.tools  Authenticating via OIDC…");
     expect(
       buildStatusLine({
         remote: remote({
@@ -256,7 +323,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools · Authentication failed");
+    ).toBe(" ↗ vpoke.playground-vercel.tools  Authentication failed");
     expect(
       buildStatusLine({
         remote: remote({
@@ -266,7 +333,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools · Remote unavailable");
+    ).toBe(" ↗ vpoke.playground-vercel.tools  Remote unavailable");
     expect(
       buildStatusLine({
         remote: deployedRemote({ state: "ready", info: {} as never }),
@@ -318,19 +385,17 @@ describe("buildStatusLine", () => {
     const line = buildStatusLine({
       remote: deployedRemote({ state: "ready", info: {} as never }),
       model: "openai/gpt-5.5",
-      tokens: "↑ 200 ↓ 100",
       endpoint: { kind: "gateway", connected: false },
       theme,
       width: 120,
     })!;
 
-    expect(stripAnsi(line)).not.toContain("AI Gateway");
+    expect(stripAnsi(line)).not.toContain("ai-gateway");
     expect(
       stripAnsi(
         buildStatusLine({
           remote: deployedRemote({ state: "ready", info: {} as never }),
           model: "openai/gpt-5.5",
-          tokens: "↑ 200 ↓ 100",
           theme: plain,
           width: 24,
         })!,
@@ -350,12 +415,12 @@ describe("buildStatusLine", () => {
     expect(stripAnsi(line ?? "")).toBe(" ↗ inbou");
   });
 
-  it("uses the ASCII separator when unicode is unavailable", () => {
+  it("keeps whitespace separators when unicode is unavailable", () => {
     const line = buildStatusLine({
       remote: remote({ state: "checking" }),
       theme: ascii,
       width: 120,
     });
-    expect(line).toBe(" -> vpoke.playground-vercel.tools - Checking access…");
+    expect(line).toBe(" -> vpoke.playground-vercel.tools  Checking access…");
   });
 });

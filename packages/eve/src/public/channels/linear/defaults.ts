@@ -3,7 +3,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
-import { renderLinearInputRequests } from "#public/channels/linear/hitl.js";
+import {
+  linearInputRequestSignal,
+  renderLinearInputRequests,
+} from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type {
   LinearChannelEvents,
@@ -128,10 +131,16 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     },
 
     async "input.requested"(event, channel, _ctx) {
-      await postActivity(channel, options, {
-        body: renderLinearInputRequests(event.requests),
-        type: "elicitation",
-      });
+      const signal = linearInputRequestSignal(event.requests);
+      await postActivity(
+        channel,
+        options,
+        {
+          body: renderLinearInputRequests(event.requests),
+          type: "elicitation",
+        },
+        signal,
+      );
     },
 
     async "message.completed"(event, channel, _ctx) {
@@ -185,6 +194,10 @@ function postActivity(
   content: Parameters<typeof createLinearAgentActivity>[0]["activity"]["content"],
   activityOptions: {
     readonly ephemeral?: boolean;
+    readonly signal?: Parameters<typeof createLinearAgentActivity>[0]["activity"]["signal"];
+    readonly signalMetadata?: Parameters<
+      typeof createLinearAgentActivity
+    >[0]["activity"]["signalMetadata"];
   } = {},
 ): Promise<{ readonly id: string; readonly success: boolean }> {
   return createLinearAgentActivity({
@@ -194,6 +207,8 @@ function postActivity(
       agentSessionId: requireAgentSessionId(channel.state.agentSessionId),
       content,
       ephemeral: activityOptions.ephemeral,
+      signal: activityOptions.signal,
+      signalMetadata: activityOptions.signalMetadata,
     },
   });
 }

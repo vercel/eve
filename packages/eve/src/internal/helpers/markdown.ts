@@ -1,5 +1,4 @@
-import grayMatter from "#compiled/gray-matter/index.js";
-
+import { parseFrontmatter, hasFrontmatter } from "#internal/helpers/gray-matter.js";
 import {
   normalizeScheduleDefinition,
   normalizeSkillDefinition,
@@ -11,27 +10,6 @@ import { defineSkill, type SkillDefinition } from "#public/definitions/skill.js"
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 
 const CLOSED_FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
-
-/**
- * gray-matter ships a built-in `javascript` frontmatter engine that runs
- * `eval()` on the frontmatter body, so a document whose opening fence is
- * `---javascript` (or `---js`) would execute arbitrary code the instant it is
- * parsed — before any of eve's validators run. Authored markdown (skills,
- * schedules, instructions) is treated as data, so we disable the code-capable
- * engines and pin the default language to YAML; a JavaScript frontmatter fence
- * now throws instead of evaluating.
- */
-function rejectJavaScriptFrontmatter(): never {
-  throw new Error("JavaScript frontmatter is not supported.");
-}
-
-const SAFE_GRAY_MATTER_OPTIONS = {
-  language: "yaml",
-  engines: {
-    javascript: rejectJavaScriptFrontmatter,
-    js: rejectJavaScriptFrontmatter,
-  },
-};
 
 /**
  * Parsed markdown document with optional YAML frontmatter.
@@ -56,7 +34,7 @@ interface ParsedMarkdownDocument {
  * Parses markdown with optional YAML frontmatter.
  */
 function parseMarkdownDocument(source: string): ParsedMarkdownDocument {
-  if (!grayMatter.test(source)) {
+  if (!hasFrontmatter(source)) {
     return {
       hasFrontmatter: false,
       frontmatter: {},
@@ -70,7 +48,7 @@ function parseMarkdownDocument(source: string): ParsedMarkdownDocument {
   };
 
   try {
-    document = grayMatter(source, SAFE_GRAY_MATTER_OPTIONS);
+    document = parseFrontmatter(source);
   } catch (error) {
     if (startsWithFrontmatterFence(source) && !hasClosedFrontmatterFence(source)) {
       throw new Error("Markdown frontmatter is missing a closing delimiter.");

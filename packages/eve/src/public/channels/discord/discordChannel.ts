@@ -11,6 +11,7 @@ import {
   createDiscordFollowupMessage,
   discordContinuationToken,
   editDiscordOriginalResponse,
+  resolveDiscordBotToken,
   sendDiscordChannelMessage,
   splitDiscordMessageContent,
   triggerDiscordTypingIndicator,
@@ -133,6 +134,7 @@ export interface DiscordChannelEvents {
   readonly "input.requested"?: DiscordEventHandler<"input.requested">;
   readonly "turn.failed"?: DiscordEventHandler<"turn.failed">;
   readonly "turn.completed"?: DiscordEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: DiscordEventHandler<"turn.cancelled">;
   readonly "session.failed"?: DiscordSessionFailedHandler;
   readonly "session.completed"?: DiscordEventHandler<"session.completed">;
   readonly "session.waiting"?: DiscordEventHandler<"session.waiting">;
@@ -674,7 +676,7 @@ function mergeCredentials(
 ): DiscordChannelCredentials {
   const merged: DiscordChannelCredentials = {
     applicationId: state.applicationId ?? credentials?.applicationId,
-    botToken: credentials?.botToken,
+    botToken: credentials?.botToken ?? (() => resolveDiscordBotToken()),
     publicKey: credentials?.publicKey,
     webhookVerifier: credentials?.webhookVerifier,
   };

@@ -21,7 +21,7 @@ A static prompt belongs in markdown (`agent/instructions.md`). Switch to a TypeS
 
 ```ts title="agent/instructions.ts"
 import { defineInstructions } from "eve/instructions";
-import { buildInstructionsPrompt } from "./lib/prompts.js";
+import { buildInstructionsPrompt } from "./lib/prompts";
 
 export default defineInstructions({
   markdown: buildInstructionsPrompt(),

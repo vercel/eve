@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
+import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
@@ -118,7 +118,7 @@ export async function compileAgentConfig(
   }
 
   if (definition.outputSchema !== undefined) {
-    compiledConfig.outputSchema = normalizeJsonSchemaDefinition(definition.outputSchema, "output");
+    compiledConfig.outputSchema = serializeOutputSchema(definition.outputSchema);
   }
 
   if (definition.reasoning !== undefined) {
@@ -127,8 +127,6 @@ export async function compileAgentConfig(
 
   if (definition.limits !== undefined) {
     compiledConfig.limits = {
-      maxSubagentDepth: definition.limits.maxSubagentDepth,
-      maxSubagents: definition.limits.maxSubagents,
       maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
     };

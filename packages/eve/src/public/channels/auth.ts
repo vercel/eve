@@ -58,8 +58,9 @@ export interface HttpBasicCredentials {
  * Verifies an HTTP Basic credential against the supplied username and
  * password. Returns `{ ok: true, sessionAuth }` on success or `{ ok: false }`
  * on a missing or mismatched credential. The password is compared with
- * constant-time hash equality so a timing side channel cannot leak it; the
- * username is compared directly.
+ * constant-time hash equality so a timing side channel cannot leak it. Both
+ * values are normalized to Unicode NFC before comparison, matching the
+ * `charset="UTF-8"` challenge advertised by {@link httpBasic}.
  */
 export function verifyHttpBasic(
   authorizationHeader: string | null,
@@ -496,10 +497,85 @@ export type AuthFn<TEvent = Request> = (
 ) => SessionAuthContext | null | undefined | Promise<SessionAuthContext | null | undefined>;
 
 /**
+ * Symbol-keyed property carrying the `www-authenticate` challenges an
+ * {@link AuthFn} would satisfy, attached via {@link withAuthChallenges}.
+ * Reading it back off the function (rather than widening `AuthFn`'s call
+ * signature) lets {@link routeAuth} discover the right challenge scheme(s)
+ * for a 401 without every strategy needing to change shape.
+ */
+const AUTH_CHALLENGES_SYMBOL = Symbol.for("eve.channels.auth.challenges");
+
+/**
+ * Attaches declared `www-authenticate` challenges to an {@link AuthFn}
+ * without changing its call signature or behavior. {@link routeAuth} reads
+ * the declared challenges back when every entry in the walk skips, so the
+ * resulting 401 advertises the scheme(s) the configured strategies actually
+ * accept (e.g. `Basic` for {@link httpBasic}) instead of a fixed default.
+ *
+ * Built-in strategies (`httpBasic`, `jwtHmac`, `jwtEcdsa`, `oidc`,
+ * `vercelOidc`) already declare their challenge. Use this directly when
+ * authoring a custom `AuthFn`:
+ *
+ * ```ts
+ * const apiKey = withAuthChallenges(
+ *   (request) => (isValidApiKey(request) ? sessionAuth : null),
+ *   [{ scheme: "Bearer" }],
+ * );
+ * ```
+ */
+export function withAuthChallenges<TEvent>(
+  fn: AuthFn<TEvent>,
+  challenges: readonly UnauthorizedChallenge[],
+): AuthFn<TEvent> {
+  const wrapped: AuthFn<TEvent> = (event) => fn(event);
+  Object.defineProperty(wrapped, AUTH_CHALLENGES_SYMBOL, {
+    value: challenges,
+  });
+  return wrapped;
+}
+
+/**
+ * Reads the challenges {@link withAuthChallenges} attached to `fn`, or
+ * `undefined` when `fn` declared none (e.g. {@link none}, {@link localDev},
+ * {@link placeholderAuth}, or a custom `AuthFn` that never opted in).
+ */
+function getDeclaredChallenges<TEvent>(
+  fn: AuthFn<TEvent>,
+): readonly UnauthorizedChallenge[] | undefined {
+  return (fn as Partial<Record<typeof AUTH_CHALLENGES_SYMBOL, readonly UnauthorizedChallenge[]>>)[
+    AUTH_CHALLENGES_SYMBOL
+  ];
+}
+
+/**
+ * Collects the deduped, ordered set of challenges declared across `list` via
+ * {@link withAuthChallenges}. Dedupes by the rendered `www-authenticate`
+ * string so e.g. two `jwtHmac()` entries only contribute one `Bearer`.
+ */
+function collectDeclaredChallenges(
+  list: readonly AuthFn<Request>[],
+): readonly UnauthorizedChallenge[] {
+  const seenRendered = new Set<string>();
+  const challenges: UnauthorizedChallenge[] = [];
+  for (const fn of list) {
+    for (const challenge of getDeclaredChallenges(fn) ?? []) {
+      const rendered = formatChallenge(challenge);
+      if (seenRendered.has(rendered)) continue;
+      seenRendered.add(rendered);
+      challenges.push(challenge);
+    }
+  }
+  return challenges;
+}
+
+/**
  * Walks an `AuthFn` (or array) in order against `request`. The first entry
  * returning a {@link SessionAuthContext} wins; entries returning `null` or
  * `undefined` are skipped. If the walk exhausts without a winner (including
- * the empty-array case), returns a 401 {@link createUnauthorizedResponse}.
+ * the empty-array case), returns a 401 {@link createUnauthorizedResponse}
+ * whose `www-authenticate` challenges are collected from the entries'
+ * declared schemes (see {@link withAuthChallenges}), falling back to
+ * `Bearer` when none declared any.
  *
  * Channel factories that share this resolution policy (e.g. `eveChannel`, or
  * a custom `defineChannel` route handler) should call `routeAuth` rather than
@@ -530,7 +606,10 @@ export async function routeAuth(
     throw error;
   }
 
-  return createUnauthorizedResponse({ challenges: [{ scheme: "Bearer" }] });
+  const declaredChallenges = collectDeclaredChallenges(list);
+  return createUnauthorizedResponse({
+    challenges: declaredChallenges.length > 0 ? declaredChallenges : [{ scheme: "Bearer" }],
+  });
 }
 
 /**
@@ -912,22 +991,26 @@ function assertVercelSubjectSegment(field: "teamSlug" | "projectName", value: st
 /**
  * Returns an HTTP route auth callback backed by Vercel OIDC. See
  * {@link verifyVercelOidc} for the always-on current-project bypass and how
- * `subjects` extends acceptance to other Vercel projects.
+ * `subjects` extends acceptance to other Vercel projects. Declares a
+ * `Bearer` {@link withAuthChallenges} challenge for {@link routeAuth}'s 401.
  */
 export function vercelOidc(opts: VerifyVercelOidcOptions = {}): AuthFn<Request> {
-  return async (request) => {
-    const token = extractBearerToken(request.headers.get("authorization"));
-    const currentVercelProject =
-      opts.currentVercelProject ??
-      (token !== null && isLocalDevelopmentVercelOidcRequest(request)
-        ? await resolveVercelOidcCurrentProject(request)
-        : undefined);
-    const result = await verifyVercelOidc(
-      token,
-      currentVercelProject === undefined ? opts : { ...opts, currentVercelProject },
-    );
-    return result.ok ? result.sessionAuth : null;
-  };
+  return withAuthChallenges(
+    async (request) => {
+      const token = extractBearerToken(request.headers.get("authorization"));
+      const currentVercelProject =
+        opts.currentVercelProject ??
+        (token !== null && isLocalDevelopmentVercelOidcRequest(request)
+          ? await resolveVercelOidcCurrentProject(request)
+          : undefined);
+      const result = await verifyVercelOidc(
+        token,
+        currentVercelProject === undefined ? opts : { ...opts, currentVercelProject },
+      );
+      return result.ok ? result.sessionAuth : null;
+    },
+    [{ scheme: "Bearer" }],
+  );
 }
 
 function isLocalDevelopmentVercelOidcRequest(request: Request): boolean {
@@ -938,44 +1021,95 @@ function isLocalDevelopmentVercelOidcRequest(request: Request): boolean {
   return isLoopbackRequest(request);
 }
 
-/** Returns an {@link AuthFn} that verifies HTTP Basic credentials via {@link verifyHttpBasic}. */
-export function httpBasic(credentials: HttpBasicCredentials): AuthFn<Request> {
-  return (request) => {
-    const result = verifyHttpBasic(request.headers.get("authorization"), credentials);
-    return result.ok ? result.sessionAuth : null;
-  };
+/**
+ * Options accepted by {@link httpBasic}.
+ */
+export interface HttpBasicAuthOptions {
+  /**
+   * Optional `realm` parameter advertised on the `WWW-Authenticate: Basic`
+   * challenge (e.g. browsers show it in the native login prompt). Defaults
+   * to `"eve"`.
+   */
+  readonly realm?: string;
 }
 
-/** Returns an {@link AuthFn} that verifies an HMAC-signed bearer JWT via {@link verifyJwtHmac}. */
+/**
+ * Returns an {@link AuthFn} that verifies HTTP Basic credentials via
+ * {@link verifyHttpBasic}. Declares a `Basic` {@link withAuthChallenges}
+ * challenge so a {@link routeAuth} 401 advertises `WWW-Authenticate: Basic`
+ * (with `realm` first, when given, then `charset="UTF-8"`) instead of the
+ * `Bearer` fallback.
+ */
+export function httpBasic(
+  credentials: HttpBasicCredentials,
+  options?: HttpBasicAuthOptions,
+): AuthFn<Request> {
+  const parameters: Record<string, string> = {
+    realm: options?.realm ?? "eve",
+    charset: "UTF-8",
+  };
+  return withAuthChallenges(
+    (request) => {
+      const result = verifyHttpBasic(request.headers.get("authorization"), credentials);
+      return result.ok ? result.sessionAuth : null;
+    },
+    [
+      {
+        parameters,
+        scheme: "Basic",
+      },
+    ],
+  );
+}
+
+/**
+ * Returns an {@link AuthFn} that verifies an HMAC-signed bearer JWT via
+ * {@link verifyJwtHmac}. Declares a `Bearer` {@link withAuthChallenges}
+ * challenge for {@link routeAuth}'s 401.
+ */
 export function jwtHmac(config: VerifyJwtHmacConfig): AuthFn<Request> {
-  return async (request) => {
-    const token = extractBearerToken(request.headers.get("authorization"));
-    const result = await verifyJwtHmac(token, config);
-    return result.ok ? result.sessionAuth : null;
-  };
+  return withAuthChallenges(
+    async (request) => {
+      const token = extractBearerToken(request.headers.get("authorization"));
+      const result = await verifyJwtHmac(token, config);
+      return result.ok ? result.sessionAuth : null;
+    },
+    [{ scheme: "Bearer" }],
+  );
 }
 
-/** Returns an {@link AuthFn} that verifies an ECDSA-signed bearer JWT via {@link verifyJwtEcdsa}. */
+/**
+ * Returns an {@link AuthFn} that verifies an ECDSA-signed bearer JWT via
+ * {@link verifyJwtEcdsa}. Declares a `Bearer` {@link withAuthChallenges}
+ * challenge for {@link routeAuth}'s 401.
+ */
 export function jwtEcdsa(config: VerifyJwtEcdsaConfig): AuthFn<Request> {
-  return async (request) => {
-    const token = extractBearerToken(request.headers.get("authorization"));
-    const result = await verifyJwtEcdsa(token, config);
-    return result.ok ? result.sessionAuth : null;
-  };
+  return withAuthChallenges(
+    async (request) => {
+      const token = extractBearerToken(request.headers.get("authorization"));
+      const result = await verifyJwtEcdsa(token, config);
+      return result.ok ? result.sessionAuth : null;
+    },
+    [{ scheme: "Bearer" }],
+  );
 }
 
 /**
  * Returns an {@link AuthFn} that verifies an OIDC bearer token on the inbound
  * request via {@link verifyOidc}. Use {@link vercelOidc} instead for
  * Vercel-issued tokens: it preconfigures the issuer, audience, and runtime
- * principal flag.
+ * principal flag. Declares a `Bearer` {@link withAuthChallenges} challenge
+ * for {@link routeAuth}'s 401.
  */
 export function oidc(config: VerifyOidcConfig): AuthFn<Request> {
-  return async (request) => {
-    const token = extractBearerToken(request.headers.get("authorization"));
-    const result = await verifyOidc(token, config);
-    return result.ok ? result.sessionAuth : null;
-  };
+  return withAuthChallenges(
+    async (request) => {
+      const token = extractBearerToken(request.headers.get("authorization"));
+      const result = await verifyOidc(token, config);
+      return result.ok ? result.sessionAuth : null;
+    },
+    [{ scheme: "Bearer" }],
+  );
 }
 
 // ---------------------------------------------------------------------------

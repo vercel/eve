@@ -1,6 +1,6 @@
 import { defineSchedule } from "eve/schedules";
 
-import quietSink from "../channels/quiet-sink.js";
+import quietSink from "../channels/quiet-sink";
 
 export default defineSchedule({
   cron: "* * * * *",

@@ -1,24 +1,39 @@
 "use client";
 
 import { App, Device, type VGPUAdapter } from "@vgpu/core";
+import { createDevicePixelRatio, prefersReducedMotion as prefersReducedMotionSync } from "phase";
+import {
+  useLoop,
+  useMediaQuery,
+  usePrefersReducedMotion,
+  useSize,
+  useStableCallback,
+  useSyncedRef,
+} from "phase/react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { preload } from "react-dom";
 import { meshAspect } from "./mesh";
 import {
   FallbackImage,
   FALLBACK_CONTAINER_ASPECT_RATIO,
   getFallbackImageProps,
 } from "./fallback-image";
-import { usePrefersReducedMotion, useResolvedTheme } from "./hooks";
-import { DEFAULT_LOGO_ASPECT, getLogicalRenderSize, resizeCanvas } from "./runtime/canvas-sizing";
-import { loadMesh } from "./runtime/load-mesh";
+import { useResolvedTheme } from "./hooks";
+import {
+  DEFAULT_LOGO_ASPECT,
+  getLogicalRenderSize,
+  resizeCanvas,
+  type CanvasLayout,
+} from "./runtime/canvas-sizing";
+import { loadMesh, MODEL_URL } from "./runtime/load-mesh";
 import {
   destroyTransitionDebugGui,
   setupTransitionDebugGui,
   type EveTransitionDebugGui,
   type EveTransitionDebugState,
 } from "./runtime/debug-gui";
-import { createDrawLoop } from "./runtime/frame-loop";
-import { createPointerController } from "./runtime/pointer-input";
+import { createDrawLoop, type DrawLoop } from "./runtime/frame-loop";
+import { createPointerController, syncPointerInteractionMode } from "./runtime/pointer-input";
 import type { HeroRuntimeState } from "./runtime/state";
 import {
   BLOOM_RADIUS,
@@ -58,12 +73,27 @@ const DEFAULT_CONTROLS: RenderControls = {
 };
 export const AGENTS_ENV_YAW_LERP_SPEED = 3;
 const LOGO_MODE_TRANSITION_DURATION_SECONDS = 0.45;
-const IMPRINT_GLYPH_SCALE = 1.35;
+const IMPRINT_GLYPH_SCALE = 1.27;
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const INITIAL_CANVAS_LAYOUT: CanvasLayout = { width: 1, height: 1 };
+
 export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudience }) {
-  const theme = useResolvedTheme();
+  preload(MODEL_URL, { as: "fetch", crossOrigin: "anonymous" });
+  const prefersDarkTheme = useMediaQuery("(prefers-color-scheme: dark)");
+  const theme = useResolvedTheme(prefersDarkTheme);
   const prefersReducedMotion = usePrefersReducedMotion();
+  const coarsePointer = useMediaQuery("(pointer: coarse)");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { size: containerSize } = useSize({ ref: containerRef });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const controlsRef = useRef<RenderControls>({ ...DEFAULT_CONTROLS });
+  const canvasLayoutRef = useRef<CanvasLayout>(INITIAL_CANVAS_LAYOUT);
+  const devicePixelRatioRef = useRef(1);
+  const coarsePointerRef = useSyncedRef(coarsePointer);
+  const stateRef = useRef<HeroRuntimeState | null>(null);
+  const drawLoopRef = useRef<DrawLoop | null>(null);
+  const loopPhaseRef = useRef("idle");
+  const invalidatePointerCanvasRectRef = useRef(() => {});
   const [logoAspect, setLogoAspect] = useState(DEFAULT_LOGO_ASPECT);
   const [revealed, setRevealed] = useState(false);
   const [showLightFallback, setShowLightFallback] = useState(false);
@@ -72,6 +102,47 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
   const agentsSelected = audience === "agents";
   targetAgentsEnvYawMixRef.current = agentsSelected ? 1 : 0;
   targetLogoModeProgressRef.current = agentsSelected ? 1 : 0;
+  const handleCanvasRevealed = useStableCallback(() => {
+    if (!stateRef.current?.cancelled) setRevealed(true);
+  });
+  const handleFallback = useStableCallback(() => {
+    setRevealed(false);
+    setShowLightFallback(true);
+  });
+  const fatalErrorRef = useRef<(() => void) | null>(null);
+  const handleFatalError = useStableCallback(() => {
+    fatalErrorRef.current?.();
+  });
+
+  const { phase: loopPhase } = useLoop({
+    ref: containerRef,
+    reducedMotion: "pause",
+    intersectionOptions: { threshold: 0 },
+    onTick: (frame) => {
+      drawLoopRef.current?.step(frame.time);
+    },
+  });
+
+  useEffect(() => {
+    loopPhaseRef.current = loopPhase;
+    const canvas = canvasRef.current;
+    if (!IS_PRODUCTION && canvas) {
+      canvas.dataset.heroPhase = loopPhase === "running" ? "active" : String(loopPhase);
+    }
+    if (loopPhase === "running") drawLoopRef.current?.start();
+    else drawLoopRef.current?.stop();
+  }, [loopPhase]);
+
+  useEffect(() => {
+    if (!containerSize) return;
+    canvasLayoutRef.current = containerSize;
+    invalidatePointerCanvasRectRef.current();
+  }, [containerSize]);
+
+  useEffect(() => {
+    const state = stateRef.current;
+    if (state) syncPointerInteractionMode(state, coarsePointer);
+  }, [coarsePointer]);
 
   useEffect(() => {
     const state: HeroRuntimeState = {
@@ -102,30 +173,63 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
       lastBrushMoveTime: Number.NEGATIVE_INFINITY,
       lastPointerClientX: undefined,
       lastPointerClientY: undefined,
-      isCoarsePointer: window.matchMedia("(pointer: coarse)").matches,
+      isCoarsePointer: coarsePointerRef.current,
     };
+    stateRef.current = state;
 
     const canvas = canvasRef.current;
     resetCanvasVisibility(canvas);
     setRevealed(false);
 
-    if (prefersReducedMotion !== false) {
+    const dprWatcher = createDevicePixelRatio({
+      onChange: (dpr) => {
+        devicePixelRatioRef.current = dpr;
+        invalidatePointerCanvasRectRef.current();
+      },
+    });
+    devicePixelRatioRef.current = dprWatcher.dpr;
+
+    const pointerController = createPointerController({
+      state,
+      controlsRef,
+      canvasRef,
+      coarsePointerRef,
+      canvasLayoutRef,
+      devicePixelRatioRef,
+    });
+    invalidatePointerCanvasRectRef.current = pointerController.invalidateCanvasRect;
+
+    const cleanupSetup = () => {
+      state.cancelled = true;
+      pointerController.detach();
+      dprWatcher.stop();
+      invalidatePointerCanvasRectRef.current = () => {};
+      state.cleanup = undefined;
+      stateRef.current = null;
+      drawLoopRef.current = null;
+      fatalErrorRef.current = null;
+      resetCanvasVisibility(canvasRef.current);
+    };
+
+    const resolvedPrefersReducedMotion = prefersReducedMotion || prefersReducedMotionSync();
+    if (resolvedPrefersReducedMotion) {
       // No WebGPU animation will run (reduced motion or the preference hasn't
       // resolved yet), so the canvas stays hidden. Show the static light
       // fallback to mirror the dark fallback, which is always visible until
       // the animation reveals. Otherwise light-theme users would see a blank hero.
       setShowLightFallback(true);
-      return;
+      return cleanupSetup;
     }
     setShowLightFallback(false);
 
-    const pointerController = createPointerController({ state, controlsRef, canvasRef });
+    let disposeRuntime: (() => void) | undefined;
 
     async function start() {
       const renderTheme = theme;
       const canvas = canvasRef.current;
+      const container = containerRef.current;
       const context = canvas?.getContext("webgpu");
-      if (!canvas || !context || !navigator.gpu) {
+      if (!canvas || !container || !context || !navigator.gpu) {
         setShowLightFallback(true);
         return;
       }
@@ -135,7 +239,7 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
       state.activeMesh = mesh;
       setLogoAspect(meshAspect(mesh));
       await nextFrame();
-      resizeCanvas(canvas);
+      resizeCanvas(canvas, canvasLayoutRef, devicePixelRatioRef);
 
       const app = await App.create({ adapter: new BrowserAdapter() });
       if (state.cancelled) {
@@ -154,7 +258,7 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
       const transitionDebug: EveTransitionDebugState = {
         overrideEnabled: false,
         progress: modeTransitionProgressRef.current,
-        gridScaleMultiplier: DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
+        gridScaleMultiplier: 1.31,
         glyphScale: IMPRINT_GLYPH_SCALE,
         durationSeconds: LOGO_MODE_TRANSITION_DURATION_SECONDS,
         paintDecayPerFrame120: DEFAULT_PAINT_DECAY_PER_FRAME_120,
@@ -179,6 +283,8 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
       const dispose = () => {
         if (disposed) return;
         disposed = true;
+        drawLoopRef.current = null;
+        fatalErrorRef.current = null;
         drawLoopDispose?.();
         resetCanvasVisibility(canvas);
         if (!state.cancelled) setRevealed(false);
@@ -186,11 +292,13 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
         transitionDebugGui = undefined;
         renderer.dispose();
         app.device.destroy();
+        disposeRuntime = undefined;
       };
+      disposeRuntime = dispose;
 
       app.device.gpu.lost
-        .then(() => {
-          if (state.cancelled) return;
+        .then((info) => {
+          if (state.cancelled || disposed || info?.reason === "destroyed") return;
           setRevealed(false);
           setShowLightFallback(true);
           state.cancelled = true;
@@ -211,17 +319,16 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
         targetLogoModeProgressRef,
         targetAgentsEnvYawMixRef,
         defaultMaterial: DEFAULT_CONTROLS.material,
-        onCanvasRevealed: () => {
-          if (!state.cancelled) setRevealed(true);
-        },
-        onFallback: () => {
-          setRevealed(false);
-          setShowLightFallback(true);
-        },
-        onFatalError: dispose,
+        canvasLayoutRef,
+        devicePixelRatioRef,
+        onCanvasRevealed: handleCanvasRevealed,
+        onFallback: handleFallback,
+        onFatalError: handleFatalError,
       });
       drawLoopDispose = drawLoop.dispose;
-      drawLoop.draw();
+      drawLoopRef.current = drawLoop;
+      fatalErrorRef.current = dispose;
+      if (loopPhaseRef.current === "running") drawLoop.start();
 
       return dispose;
     }
@@ -237,12 +344,10 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
 
     return () => {
       state.cancelled = true;
-      cancelAnimationFrame(state.animationFrame);
-      pointerController.detach();
-      state.cleanup?.();
-      resetCanvasVisibility(canvasRef.current);
+      cleanupSetup();
+      disposeRuntime?.();
     };
-  }, [theme, prefersReducedMotion]);
+  }, [theme, prefersReducedMotion, handleCanvasRevealed, handleFallback, handleFatalError]);
 
   const logicalSize = getLogicalRenderSize(logoAspect);
   const paddedWidth = logicalSize.width + BLOOM_RADIUS * 2;
@@ -251,6 +356,7 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
 
   return (
     <div
+      ref={containerRef}
       aria-hidden="true"
       className="pointer-events-none relative z-0 mb-8 aspect-[var(--eve-logo-mobile-aspect-ratio)] w-full md:absolute md:left-1/2 md:top-1/2 md:mb-0 md:h-[6.5em] md:w-auto md:max-w-none md:-translate-x-1/2 md:translate-y-[calc(-50%-0.42em)] md:aspect-[var(--eve-logo-desktop-aspect-ratio)]"
       style={

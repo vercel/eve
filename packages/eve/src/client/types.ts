@@ -2,6 +2,7 @@ import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -68,7 +69,8 @@ export type ClientRedirectPolicy = NonNullable<RequestInit["redirect"]>;
  */
 export interface ClientOptions {
   /**
-   * Base URL of the eve agent server.
+   * Base URL of the eve agent server. Query parameters are included on every
+   * request; request-specific parameters override parameters with the same name.
    */
   readonly host: string;
 
@@ -92,13 +94,6 @@ export interface ClientOptions {
    * redirect.
    */
   readonly redirect?: ClientRedirectPolicy;
-
-  /**
-   * Maximum number of stream reconnection attempts per message turn.
-   *
-   * @default 3
-   */
-  readonly maxReconnectAttempts?: number;
 
   /**
    * Keep a session's continuation token after a normal `session.completed`
@@ -158,6 +153,12 @@ export interface SendTurnPayload<TOutput = unknown> {
   readonly outputSchema?: StandardJSONSchemaV1<unknown, TOutput> | JsonObject;
 
   /**
+   * Reconnection policy for the response event stream. Omit to use the default
+   * policy, or pass `{ reconnect: false }` when the caller owns cursor recovery.
+   */
+  readonly streamReconnectPolicy?: StreamReconnectPolicy;
+
+  /**
    * Abort signal for cancelling the request.
    */
   readonly signal?: AbortSignal;
@@ -168,13 +169,47 @@ export interface SendTurnPayload<TOutput = unknown> {
   readonly headers?: Readonly<Record<string, string>>;
 }
 
+/** Retry and backoff settings for one kind of stream reconnection. */
+export interface StreamReconnectRetryPolicy {
+  /** Initial delay before retrying, in milliseconds. */
+  readonly baseDelayMs?: number;
+
+  /** Maximum number of attempts governed by this retry policy. */
+  readonly maxAttempts?: number;
+
+  /** Maximum delay between retries, in milliseconds. */
+  readonly maxDelayMs?: number;
+}
+
+/** Configurable policy used when automatic stream reconnection is enabled. */
+export interface ResolvedStreamReconnectPolicy {
+  /** Retry policy for opening an HTTP stream connection. */
+  readonly streamOpenReconnectPolicy?: StreamReconnectRetryPolicy;
+
+  /** Retry policy for reconnecting streams that make no progress. */
+  readonly streamIdleReconnectPolicy?: StreamReconnectRetryPolicy;
+
+  /** HTTP response statuses that may be retried while opening a stream. */
+  readonly retryableErrorStatuses?: readonly number[];
+}
+
+/** Automatic stream reconnection configuration. */
+export type StreamReconnectPolicy = ResolvedStreamReconnectPolicy | { readonly reconnect: false };
+
 /**
  * Options for {@link ClientSession.stream}.
  */
 export interface StreamOptions {
   /**
-   * Number of events already consumed. The server will skip events before
-   * this index.
+   * Reconnection policy for the event stream. Omit to use the default policy,
+   * or pass `{ reconnect: false }` when the caller owns cursor recovery.
+   */
+  readonly streamReconnectPolicy?: StreamReconnectPolicy;
+
+  /**
+   * Absolute event index to start from. Negative values read relative to the
+   * current tail (`-1` starts at the latest event). Relative-tail streams do
+   * not reconnect automatically because their absolute cursor is unknown.
    */
   readonly startIndex?: number;
 
@@ -182,6 +217,14 @@ export interface StreamOptions {
    * Abort signal for cancelling the stream.
    */
   readonly signal?: AbortSignal;
+}
+
+/** Result of requesting cancellation for a client session's active turn. */
+export interface CancelSessionResult {
+  /** Session whose active turn was targeted. */
+  readonly sessionId: string;
+  /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
+  readonly status: CancelTurnStatus;
 }
 
 /**

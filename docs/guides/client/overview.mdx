@@ -9,7 +9,7 @@ For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire
 
 ## Create a client
 
-A `Client` binds one host, auth policy, header policy, and stream reconnection budget:
+A `Client` binds one host, auth policy, and header policy:
 
 ```ts
 import { Client } from "eve/client";
@@ -19,7 +19,7 @@ const client = new Client({
 });
 ```
 
-`host` is the origin where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL.
+`host` is the URL where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL. Any query parameters on `host` are included on every request, including session POSTs and event streams. Request-specific parameters, such as a stream cursor, take precedence when names overlap.
 
 ## Check health
 

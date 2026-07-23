@@ -32,7 +32,7 @@ const log = createLogger("dynamic-skills");
 // ---------------------------------------------------------------------------
 
 function qualifyDynamicSkillNames(
-  slug: string,
+  resolver: { readonly slug: string; readonly extensionNamespace?: string },
   isSingle: boolean,
   entries: Readonly<Record<string, SkillPackageDefinition>>,
 ): Array<{ name: string; entryKey: string; entry: SkillPackageDefinition }> {
@@ -41,15 +41,20 @@ function qualifyDynamicSkillNames(
 
   if (keys.length === 0) return result;
 
-  // A single returned defineSkill is named after the file slug; a map names
-  // each entry by its bare key (authors namespace keys themselves if needed).
+  // A single returned defineSkill is named after the file slug (already
+  // namespaced for an extension). A map names each entry by its bare key.
   if (isSingle) {
-    result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
+    result.push({ name: resolver.slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
+  // Map entries from an extension resolver are prefixed with the mount
+  // namespace so extension-produced skills are namespaced like the extension's
+  // static skills; a non-extension resolver's keys stay bare.
+  const prefix =
+    resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
   for (const key of keys) {
-    result.push({ name: key, entryKey: key, entry: entries[key]! });
+    result.push({ name: `${prefix}${key}`, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -149,7 +154,7 @@ export async function dispatchDynamicSkillEvent(input: {
         isSingle = false;
       }
 
-      const named = qualifyDynamicSkillNames(resolver.slug, isSingle, entries);
+      const named = qualifyDynamicSkillNames(resolver, isSingle, entries);
       return { resolver, named } satisfies DynamicSkillResolution;
     }),
   );

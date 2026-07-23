@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { defineEval } from "eve/evals";
 
-import { METADATA_TOOL, PROMPT, startChannelSession } from "./shared.js";
+import { METADATA_TOOL, PROMPT, startChannelSession } from "./shared";
 
 // The anchored channel's metadata has no `topic`, so the resolver
 // returns null and no tool registers: the turn completes without a

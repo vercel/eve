@@ -47,7 +47,7 @@ async function snapshotForMode(mode: "all" | "stderr" | "sandbox" | "none"): Pro
     throw error;
   });
 
-  await screen.waitForText("❯", 5_000);
+  await screen.waitForIdlePrompt(5_000);
 
   // Foreign writes are captured synchronously, so the snapshot reflects
   // them immediately.

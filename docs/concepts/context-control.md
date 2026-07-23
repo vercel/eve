@@ -22,7 +22,7 @@ To build the instructions prompt from typed helpers, lib code, or environment-de
 
 ```ts title="agent/instructions.ts"
 import { defineInstructions } from "eve/instructions";
-import { buildInstructionsPrompt } from "./lib/prompts.js";
+import { buildInstructionsPrompt } from "./lib/prompts";
 
 export default defineInstructions({
   markdown: buildInstructionsPrompt(),

@@ -22,7 +22,7 @@ The current caller and initiating caller are both available on the session. This
 
 ```ts title="agent/lib/tenant-approval.ts"
 import type { ApprovalContext, ApprovalStatus } from "eve/tools";
-import { approvalPolicies } from "./approval-policies.js";
+import { approvalPolicies } from "./approval-policies";
 
 type Surface = "connection" | "tool";
 
@@ -77,8 +77,8 @@ Approval runs before `execute`. The executor must still derive and enforce tenan
 ```ts title="agent/tools/transfer_funds.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { transferFunds } from "../../lib/payments.js";
-import { decideTenantApproval } from "../lib/tenant-approval.js";
+import { transferFunds } from "../../lib/payments";
+import { decideTenantApproval } from "../lib/tenant-approval";
 
 export default defineTool({
   description: "Transfer funds from the current tenant's account.",
@@ -111,7 +111,7 @@ The same callback gates every generated operation. The qualified operation name 
 
 ```ts title="agent/connections/billing.ts"
 import { defineOpenAPIConnection } from "eve/connections";
-import { decideTenantApproval } from "../lib/tenant-approval.js";
+import { decideTenantApproval } from "../lib/tenant-approval";
 
 export default defineOpenAPIConnection({
   spec: "https://billing.example.com/openapi.json",
@@ -135,7 +135,7 @@ The allow-list limits what the model can discover. Approval independently decide
 
 ```ts title="agent/connections/support.ts"
 import { defineMcpClientConnection } from "eve/connections";
-import { decideTenantApproval } from "../lib/tenant-approval.js";
+import { decideTenantApproval } from "../lib/tenant-approval";
 
 export default defineMcpClientConnection({
   url: "https://support.example.com/mcp",
@@ -176,7 +176,7 @@ export interface ApprovalPolicyProvider {
   decide(request: ApprovalPolicyRequest): Promise<ApprovalPolicyDecision>;
 }
 
-export { approvalPolicies } from "../../lib/approval-policies.js";
+export { approvalPolicies } from "../../lib/approval-policies";
 ```
 
 Your provider decides the policy model. A common implementation checks active tenant membership, finds an exact resource rule before a connection-wide fallback, evaluates role and input thresholds, and defaults to deny. Keep those choices in application code rather than encoding a database design into the agent.

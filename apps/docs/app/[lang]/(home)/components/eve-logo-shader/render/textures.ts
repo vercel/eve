@@ -3,7 +3,14 @@
 // Imported by render/renderer.ts and re-exported only through render.ts facade.
 
 import { Device } from "@vgpu/core";
-import { BACK_DEPTH_FORMAT, BLOOM_RADIUS, PAINT_FORMAT, PAINT_STATIC_NOISE_FORMAT, SCENE_FORMAT, VORONOI_NOISE_FORMAT } from "./constants";
+import {
+  BACK_DEPTH_FORMAT,
+  BLOOM_RADIUS,
+  PAINT_FORMAT,
+  PAINT_STATIC_NOISE_FORMAT,
+  SCENE_FORMAT,
+  VORONOI_NOISE_FORMAT,
+} from "./constants";
 
 export function getPaddedRenderSize(width: number, height: number, paddingRadius = BLOOM_RADIUS) {
   const padding = Math.max(0, Math.round(paddingRadius)) * 2;
@@ -22,7 +29,12 @@ export function createBloomTexture(device: Device, label: string, width: number,
   });
 }
 
-export function createBackDepthTexture(device: Device, label: string, width: number, height: number) {
+export function createBackDepthTexture(
+  device: Device,
+  label: string,
+  width: number,
+  height: number,
+) {
   return device.gpu.createTexture({
     label,
     size: [width, height],
@@ -58,7 +70,12 @@ export function createPaintStaticNoiseTexture(
   });
 }
 
-export function createVoronoiNoiseTexture(device: Device, label: string, width: number, height: number) {
+export function createVoronoiNoiseTexture(
+  device: Device,
+  label: string,
+  width: number,
+  height: number,
+) {
   return device.gpu.createTexture({
     label,
     size: [width, height],
@@ -67,7 +84,12 @@ export function createVoronoiNoiseTexture(device: Device, label: string, width: 
   });
 }
 
-export function uploadStaticNoiseTexture(device: Device, texture: GPUTexture, width: number, height: number) {
+export function uploadStaticNoiseTexture(
+  device: Device,
+  texture: GPUTexture,
+  width: number,
+  height: number,
+) {
   const values = new Float32Array(width * height * 4);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {

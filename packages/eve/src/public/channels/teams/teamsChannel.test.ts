@@ -14,6 +14,11 @@ function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
 async function firePost(
   channel: unknown,
   body: Record<string, unknown>,
+  overrides: {
+    readonly resolveActiveSession?: (options: {
+      readonly continuationToken: string;
+    }) => Promise<{ readonly sessionId: string } | undefined>;
+  } = {},
 ): Promise<{
   readonly response: Response;
   readonly send: ReturnType<typeof vi.fn>;
@@ -27,6 +32,7 @@ async function firePost(
 
   const send = vi.fn(async (_input: unknown, _options: unknown) => ({
     continuationToken: "TOKEN",
+    cancel: async () => ({ status: "no_active_turn" as const }),
     getEventStream: async () => new ReadableStream(),
     id: "SESSION",
   }));
@@ -39,6 +45,8 @@ async function firePost(
     }),
     {
       getSession: vi.fn(),
+      resolveActiveSession: overrides.resolveActiveSession ?? vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn(),
       params: {},
       receive: vi.fn(),
       requestIp: null,
@@ -108,16 +116,91 @@ describe("teamsChannel", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("handles Adaptive Card invoke HITL responses", async () => {
+  it("default dispatch ignores bot-authored personal messages", async () => {
+    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
+    const raw = messageActivity({ conversationType: "personal" });
+    raw.from = { id: "OTHER_BOT", name: "Other bot", role: "bot" };
+
+    const { send } = await firePost(channel, raw);
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("exposes the subscription helper to onMessage", async () => {
+    const observed: boolean[] = [];
+    const resolveActiveSession = vi.fn().mockResolvedValue({ sessionId: "SESSION" });
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      async onMessage(ctx) {
+        observed.push(await ctx.isSubscribed());
+        return null;
+      },
+    });
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.entities = [];
+    raw.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+
+    await firePost(channel, raw, { resolveActiveSession });
+
+    expect(observed).toEqual([true]);
+    expect(resolveActiveSession).toHaveBeenCalledWith({
+      continuationToken: "TENANT:CONV:THREAD_ROOT",
+    });
+  });
+
+  it("allows a mention-or-subscription onMessage policy", async () => {
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      async onMessage(ctx, message) {
+        return message.isBotMentioned || (await ctx.isSubscribed()) ? { auth: null } : null;
+      },
+    });
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.entities = [];
+    raw.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+
+    const { send } = await firePost(channel, raw, {
+      resolveActiveSession: vi.fn().mockResolvedValue({ sessionId: "SESSION" }),
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes bot-authored messages to onMessage", async () => {
+    const onMessage = vi.fn((_ctx: unknown, _message: unknown) => null);
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      onMessage,
+    });
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.entities = [];
+    raw.from = { id: "OTHER_BOT", name: "Other bot", role: "bot" };
+
+    const { send } = await firePost(channel, raw);
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ from: expect.objectContaining({ id: "OTHER_BOT", role: "bot" }) }),
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("resumes invoke HITL responses with the clicker's auth and recorded thread", async () => {
     const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
     const { response, send } = await firePost(channel, {
       ...baseActivity({ conversationType: "channel" }),
+      from: { aadObjectId: "AAD_USER", id: "USER", name: "Ada" },
       name: "adaptiveCard/action",
       type: "invoke",
       value: {
         action: {
           data: {
-            eve_input: { requestId: "REQ", optionId: "approve" },
+            eve_input: {
+              replyToActivityId: "THREAD_ROOT",
+              requestId: "REQ",
+              optionId: "approve",
+            },
           },
         },
       },
@@ -127,10 +210,104 @@ describe("teamsChannel", () => {
     expect(send).toHaveBeenCalledWith(
       { inputResponses: [{ optionId: "approve", requestId: "REQ" }] },
       expect.objectContaining({
-        auth: null,
-        continuationToken: "TENANT:CONV:ACTIVITY_1",
+        auth: expect.objectContaining({ subject: "AAD_USER" }),
+        continuationToken: "TENANT:CONV:THREAD_ROOT",
       }),
     );
+  });
+
+  it("handles unmentioned message-form HITL responses before the mention gate", async () => {
+    const onMessage = vi.fn(() => null);
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.entities = [];
+    raw.text = "";
+    raw.value = {
+      eve_input: {
+        replyToActivityId: "THREAD_ROOT",
+        requestId: "REQ",
+        optionId: "deny",
+      },
+    };
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      onInputResponse: () => ({ auth: null }),
+      onMessage,
+    });
+
+    const { send } = await firePost(channel, raw);
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(
+      { inputResponses: [{ optionId: "deny", requestId: "REQ" }] },
+      expect.objectContaining({ continuationToken: "TENANT:CONV:THREAD_ROOT" }),
+    );
+  });
+
+  it("rejects HITL responses when a custom message gate has no input gate", async () => {
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      onMessage: () => ({ auth: null }),
+    });
+    const { send } = await firePost(channel, {
+      ...baseActivity({ conversationType: "channel" }),
+      name: "adaptiveCard/action",
+      type: "invoke",
+      value: {
+        action: {
+          data: {
+            eve_input: {
+              replyToActivityId: "THREAD_ROOT",
+              requestId: "REQ",
+              optionId: "approve",
+            },
+          },
+        },
+      },
+    });
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("normalizes suffixed channel conversation ids", async () => {
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      onMessage: () => ({ auth: null }),
+    });
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+    raw.replyToId = "VOLATILE_ACTIVITY";
+
+    const { send } = await firePost(channel, raw);
+
+    expect(send.mock.calls[0]![1]).toMatchObject({
+      continuationToken: "TENANT:CONV:THREAD_ROOT",
+      state: { replyToActivityId: "THREAD_ROOT" },
+    });
+  });
+
+  it("keeps a channel thread token stable when follow-ups omit replyToId", async () => {
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      onMessage: () => ({ auth: null }),
+    });
+    const initial = messageActivity({ conversationType: "channel" });
+    initial.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+    initial.id = "THREAD_ROOT";
+    const followUp = messageActivity({ conversationType: "channel" });
+    followUp.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+    followUp.id = "FOLLOW_UP_ACTIVITY";
+
+    const initialRequest = await firePost(channel, initial);
+    const followUpRequest = await firePost(channel, followUp);
+    const initialOptions = initialRequest.send.mock.calls[0]![1] as {
+      readonly continuationToken: string;
+    };
+
+    expect(followUpRequest.send.mock.calls[0]![1]).toMatchObject({
+      continuationToken: initialOptions.continuationToken,
+      state: { replyToActivityId: "THREAD_ROOT" },
+    });
+    expect(initialOptions.continuationToken).toBe("TENANT:CONV:THREAD_ROOT");
   });
 
   it("receive starts proactive sessions and anchors initial channel messages", async () => {
@@ -149,6 +326,7 @@ describe("teamsChannel", () => {
     });
     const send = vi.fn(async (_input: unknown, _options: unknown) => ({
       continuationToken: "TOKEN",
+      cancel: async () => ({ status: "no_active_turn" as const }),
       getEventStream: async () => new ReadableStream(),
       id: "SESSION",
     }));

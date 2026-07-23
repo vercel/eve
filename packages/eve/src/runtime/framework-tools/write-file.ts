@@ -1,9 +1,10 @@
+import { z } from "#compiled/zod/index.js";
+
 import {
   executeWriteFileOnSandbox,
   type WriteFileInput,
 } from "#execution/sandbox/write-file-tool.js";
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
@@ -15,35 +16,21 @@ import type { ToolExecuteOptions } from "#shared/tool-definition.js";
  * `WRITE_FILE_TOOL_DEFINITION` use the exact same schema object — keeping
  * model input contracts in sync without duplication.
  */
-export const WRITE_FILE_INPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    content: {
-      description: "Complete replacement file contents.",
-      type: "string",
-    },
-    filePath: {
-      description: "The absolute path to the file to write (must be absolute, not relative).",
-      type: "string",
-    },
-  },
-  required: ["filePath", "content"],
-  type: "object",
-};
+export const WRITE_FILE_INPUT_SCHEMA = z.strictObject({
+  content: z.string().describe("Complete replacement file contents."),
+  filePath: z
+    .string()
+    .describe("The absolute path to the file to write (must be absolute, not relative)."),
+});
 
 /**
  * Shared output schema used by the framework `write_file` tool and any author
  * tool constructed via {@link defineWriteFileTool}.
  */
-export const WRITE_FILE_OUTPUT_SCHEMA: JsonObject = {
-  additionalProperties: false,
-  properties: {
-    existed: { type: "boolean" },
-    path: { type: "string" },
-  },
-  required: ["existed", "path"],
-  type: "object",
-};
+export const WRITE_FILE_OUTPUT_SCHEMA = z.strictObject({
+  existed: z.boolean(),
+  path: z.string(),
+});
 
 /**
  * Framework-owned executor that delegates to the default sandbox.

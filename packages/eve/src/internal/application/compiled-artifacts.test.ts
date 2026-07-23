@@ -1,66 +1,77 @@
 import { describe, expect, it } from "vitest";
 
-import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
-import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
-import { createCompiledArtifactsBootstrapSource } from "#internal/application/compiled-artifacts.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import {
+  createDevelopmentWorkflowWorldPluginSource,
+  createWorkflowWorldPluginSource,
+} from "#internal/application/compiled-artifacts.js";
 
-describe("createCompiledArtifactsBootstrapSource", () => {
-  it("generates static Workflow world bootstrap imports from compiled config", async () => {
-    const source = await createCompiledArtifactsBootstrapSource({
-      compileResult: {
-        manifest: createCompiledAgentManifest({
-          agentRoot: "/app/agent",
-          appRoot: "/app",
-          config: {
-            model: {
-              id: "openai/gpt-5.5",
-              routing: classifyModelRouting("openai/gpt-5.5"),
-            },
-            name: "app",
-            experimental: {
-              workflow: {
-                world: "@acme/eve-world",
-              },
-            },
-          },
-        }),
-        metadata: {
-          compile: { moduleMap: { path: "module-map.mjs", sha256: "0" } },
-          discovery: {
-            diagnostics: { path: "diagnostics.json", sha256: "0" },
-            manifest: { path: "manifest.json", sha256: "0" },
-            sourceGraphHash: "0",
-            summary: { errors: 0, warnings: 0 },
-          },
-          generator: { name: "eve", version: "0.0.0-test" },
-          kind: COMPILE_METADATA_KIND,
-          status: "ready",
-          version: COMPILE_METADATA_VERSION,
-        },
-      } as CompileAgentResult,
-      installModulePath: "/eve/src/runtime/loaders/bundled-artifacts.ts",
-      metadata: {
-        compile: { moduleMap: { path: "module-map.mjs", sha256: "0" } },
-        discovery: {
-          diagnostics: { path: "diagnostics.json", sha256: "0" },
-          manifest: { path: "manifest.json", sha256: "0" },
-          sourceGraphHash: "0",
-          summary: { errors: 0, warnings: 0 },
-        },
-        generator: { name: "eve", version: "0.0.0-test" },
-        kind: COMPILE_METADATA_KIND,
-        status: "ready",
-        version: COMPILE_METADATA_VERSION,
-      },
-      moduleMapPath: "/app/.eve/compile/compiled-artifacts-bootstrap.mjs",
+describe("createWorkflowWorldPluginSource", () => {
+  it("imports a configured world package and delegates its construction to Workflow", () => {
+    const source = createWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/compile/compiled-artifacts-bootstrap.mjs",
+      configuredWorld: "@acme/eve-world",
+      defaultWorld: "vercel",
+    });
+
+    expect(source).toContain('import "/app/.eve/compile/compiled-artifacts-bootstrap.mjs";');
+    expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
+    expect(source).toContain("import { validateWorkflowWorld } from ");
+    expect(source).toContain(
+      "const workflowWorld = await createWorldFromModule(workflowWorldModule);",
+    );
+    expect(source).toContain(
+      'validateWorkflowWorld({ packageName: "@acme/eve-world", world: workflowWorld });',
+    );
+    expect(source).not.toContain("resolveLocalWorkflowWorldDataDirectory");
+    expect(source).toContain("setWorld(workflowWorld);");
+    expect(source).toContain("await getWorld();");
+    expect(source).toContain("await workflowWorld.start?.();");
+  });
+
+  it("configures the vendored local World with eve's app-local data resolver", () => {
+    const source = createWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/compile/bootstrap.mjs",
+      configuredWorld: undefined,
+      defaultWorld: "local",
+    });
+
+    expect(source).toContain("/compiled/@workflow/world-local/index.js");
+    expect(source).toContain("resolveLocalWorkflowWorldDataDirectory(process.cwd())");
+    expect(source).not.toContain("createWorldFromModule(workflowWorldModule)");
+  });
+
+  it("selects the vendored Vercel World with Workflow's selector", () => {
+    const source = createWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/compile/bootstrap.mjs",
+      configuredWorld: undefined,
+      defaultWorld: "vercel",
+    });
+
+    expect(source).toContain("/compiled/@workflow/world-vercel/index.js");
+    expect(source).toMatch(/headers: \{ "User-Agent": "eve\/.+" \}/);
+  });
+});
+
+describe("createDevelopmentWorkflowWorldPluginSource", () => {
+  it("installs the parent-backed World without starting a local World in the worker", () => {
+    const source = createDevelopmentWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/host/bootstrap.mjs",
+      configuredWorld: undefined,
+    });
+
+    expect(source).toContain("createDevelopmentWorkflowWorld");
+    expect(source).toContain("setWorld(createDevelopmentWorkflowWorld());");
+    expect(source).not.toContain("@workflow/world-local");
+    expect(source).not.toContain("workflowWorld.start");
+  });
+
+  it("keeps explicitly configured remote Worlds inside the worker", () => {
+    const source = createDevelopmentWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/host/bootstrap.mjs",
+      configuredWorld: "@acme/eve-world",
     });
 
     expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
-    expect(source).toContain('installEveWorkflowQueueNamespace("app");');
-    expect(source).toContain(
-      'await installConfiguredWorkflowWorld({ module: workflowWorldModule, packageName: "@acme/eve-world" });',
-    );
+    expect(source).toContain("await workflowWorld.start?.();");
   });
 });

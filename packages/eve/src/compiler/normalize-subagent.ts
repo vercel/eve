@@ -20,7 +20,7 @@ import {
   expectString,
 } from "#internal/authored-module.js";
 import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
-import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
+import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -229,7 +229,7 @@ function compileRemoteAgent(input: {
     `Expected the remote agent config export "${configModule.exportName ?? "default"}" from "${moduleSource.logicalPath}" to match the public eve shape.`,
   );
 
-  return {
+  const node = {
     ...moduleSource,
     description: definition.description,
     entryPath: input.source.entryPath,
@@ -238,8 +238,10 @@ function compileRemoteAgent(input: {
     outputSchema: definition.outputSchema,
     path: definition.path,
     rootPath: input.source.rootPath,
-    url: definition.url,
   };
+
+  // A function `url` is deferred, so the compiled node omits it entirely.
+  return definition.url === undefined ? node : { ...node, url: definition.url };
 }
 
 function createSubagentConfigModuleSourceRef(
@@ -288,7 +290,7 @@ function normalizeRemoteAgentDefinition(
   readonly description: string;
   readonly outputSchema?: JsonObject;
   readonly path: string;
-  readonly url: string;
+  readonly url?: string;
 } {
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
@@ -303,15 +305,13 @@ function normalizeRemoteAgentDefinition(
 
   return {
     description: expectString(record.description, message),
-    outputSchema:
-      record.outputSchema === undefined
-        ? undefined
-        : normalizeJsonSchemaDefinition(record.outputSchema, "output"),
+    outputSchema: serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined),
     path:
       record.path === undefined
         ? EVE_CREATE_SESSION_ROUTE_PATH
         : expectString(record.path, message),
-    url: expectString(record.url, message),
+    // A function `url` is resolved at runtime, not baked into the manifest.
+    url: typeof record.url === "function" ? undefined : expectString(record.url, message),
   };
 }
 

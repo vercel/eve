@@ -171,6 +171,8 @@ async function firePost(
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
+    cancel: vi.fn(),
+    resolveActiveSession: async () => undefined,
     getSession: vi.fn() as any,
     params: {},
     receive: vi.fn() as any,

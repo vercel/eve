@@ -1,5 +1,5 @@
 import {
-  imprintCellSizeForDevicePixelRatio,
+  imprintGridSizeForLogicalSize,
   type PaintRenderOptions,
   type PaintSeed,
 } from "../../app/[lang]/(home)/components/eve-logo-shader/render";
@@ -20,9 +20,11 @@ export function paintRequested() {
 
 export function buildPaintSeed(config: RenderConfig): PaintSeed | undefined {
   if (!paintRequested()) return undefined;
-  const cellSize = imprintCellSizeForDevicePixelRatio(config.dpr);
-  const width = Math.max(1, Math.ceil(config.logicalWidth / cellSize));
-  const height = Math.max(1, Math.ceil(config.logicalHeight / cellSize));
+  const { cols: width, rows: height } = imprintGridSizeForLogicalSize(
+    config.logicalWidth,
+    config.logicalHeight,
+    config.imprintGridScaleMultiplier,
+  );
   const values = new Float32Array(width * height);
   const pattern = process.env.EVE_LOGO_PAINT_PATTERN;
   if (pattern) {
