@@ -204,6 +204,50 @@ describe("renderBlockLines", () => {
     expect(lines).toEqual(["  ※ subagent(self:4)"]);
   });
 
+  it("marks steered and queued user messages with a gutter arrow", () => {
+    const steered = render({
+      kind: "user",
+      body: "need to be\n\nsuper accurate",
+      promptOrigin: "steer",
+    });
+    expect(steered).toEqual(["↑", "│ need to be", "│ ", "│ super accurate"]);
+
+    const queued = render({ kind: "user", body: "later then", promptOrigin: "queue" });
+    expect(queued).toEqual(["│ later then", "↑"]);
+
+    // An ordinary typed prompt keeps its bare bar.
+    expect(render({ kind: "user", body: "hello" })).toEqual(["│ hello"]);
+  });
+
+  it("colors the provenance arrow with the user bar's accent", () => {
+    const colorTheme = createTheme({ color: true, unicode: true });
+    const rows = renderBlockLines(
+      { kind: "user", body: "go", promptOrigin: "steer" },
+      80,
+      colorTheme,
+      { activityPulse: "▪" },
+    );
+    // Same cyan as the `│` gutter bar.
+    expect(rows[0]).toBe("\x1b[36m↑\x1b[39m");
+    expect(rows[1]).toContain("\x1b[36m│\x1b[39m");
+  });
+
+  it("pulses the in-progress subagent mark by intensity, with a quiet label", () => {
+    const colorTheme = createTheme({ color: true, unicode: true });
+    const running = { kind: "subagent", title: "echo-marker", live: true } as const;
+    const onBeat = renderBlockLines(running, 80, colorTheme, { activityPulse: "▪" })[0] ?? "";
+    const offBeat = renderBlockLines(running, 80, colorTheme, { activityPulse: " " })[0] ?? "";
+
+    // The mark rides the shared beat: orange on, dim off — the glyph never
+    // blanks, so the section keeps its anchor.
+    expect(onBeat).toContain("\x1b[38;5;208m※");
+    expect(offBeat).toContain("\x1b[2m※");
+    expect(stripAnsi(offBeat)).toBe("  ※ subagent(echo-marker)");
+
+    // The label stays quiet — no bold anywhere in the header.
+    expect(onBeat).not.toContain("\x1b[1m");
+  });
+
   it("collapses a child message to its first line inside the section", () => {
     const lines = render({
       kind: "subagent-step",

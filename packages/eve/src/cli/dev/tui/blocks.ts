@@ -71,6 +71,13 @@ export interface Block {
   subtitle?: string;
   /** Main multi-line content (markdown for prose, plain for logs). */
   body?: string;
+  /**
+   * User blocks only: how a mid-turn message reached the transcript. A
+   * steered message (Esc pop, displacing the running turn) marks itself
+   * with the accent arrow above its bar; a queued one (drained at the turn
+   * boundary) carries the arrow below. Absent for ordinary typed prompts.
+   */
+  promptOrigin?: "steer" | "queue";
   /** Reasoning trace shown above `body` (subagent steps). */
   reasoning?: string;
   /** One-line summarized result shown after a tool resolves. */
@@ -239,7 +246,7 @@ function renderBody(
     case "log":
       return renderLog(block, width, theme);
     case "subagent":
-      return renderSubagentHeader(block, width, theme);
+      return renderSubagentHeader(block, width, theme, context);
     case "subagent-close": {
       // Closes the section's rail. A completed section's corner carries
       // the collapsed activity footnote instead of railed children.
@@ -262,7 +269,14 @@ function renderBody(
 function renderUser(block: Block, width: number, theme: Theme): string[] {
   const bar = theme.colors.cyan(theme.glyph.user);
   const lines = wrap(block.body ?? "", width - 2);
-  return lines.map((line) => `${bar} ${line}`);
+  const rows = lines.map((line) => `${bar} ${line}`);
+  // Mid-turn provenance rides the gutter in the bar's own accent: a steered
+  // message pushed itself ahead of the running turn (arrow above), a queued
+  // one waited for the boundary (arrow below).
+  const arrow = theme.colors.cyan(theme.glyph.arrowUp);
+  if (block.promptOrigin === "steer") return [arrow, ...rows];
+  if (block.promptOrigin === "queue") return [...rows, arrow];
+  return rows;
 }
 
 function renderProse(block: Block, width: number, theme: Theme): string[] {
@@ -564,7 +578,12 @@ function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
   return [theme.colors.dim(truncatePlain(line, Math.max(1, width)))];
 }
 
-function renderSubagentHeader(block: Block, width: number, theme: Theme): string[] {
+function renderSubagentHeader(
+  block: Block,
+  width: number,
+  theme: Theme,
+  context: RenderBlockContext,
+): string[] {
   // `subagent(<name>)`; the generic self-delegation tool (literally named
   // `agent`) reads as `subagent(self)`. Only the `※` mark carries orange —
   // lead, rails, and name stay quiet around it.
@@ -574,14 +593,18 @@ function renderSubagentHeader(block: Block, width: number, theme: Theme): string
   const lead = TOOL_COLUMN_LEAD;
   // The ordinal rides inside the parens (`subagent(self:4)`) in every
   // state. Completion reports on the closing corner (`└ Done…`); the
-  // header only flips its mark from working orange to done green.
+  // header only settles its mark: an in-progress section pulses the `※`
+  // on the shared activity beat — by intensity (orange ↔ dim), so the
+  // glyph keeps anchoring the section — and a done one holds green.
   const isOrdinal = block.subtitle !== undefined && block.subtitle.startsWith("#");
   const ordinal = isOrdinal ? `:${block.subtitle!.slice(1)}` : "";
   const mark =
     block.status === "done"
       ? theme.colors.green(theme.glyph.subagent)
-      : theme.colors.orange(theme.glyph.subagent);
-  let header = `${lead}${mark} ${theme.colors.bold(`subagent(${name}${ordinal})`)}`;
+      : context.activityPulse.trim().length > 0
+        ? theme.colors.orange(theme.glyph.subagent)
+        : theme.colors.dim(theme.glyph.subagent);
+  let header = `${lead}${mark} subagent(${name}${ordinal})`;
   if (!isOrdinal && block.subtitle !== undefined && block.subtitle.length > 0) {
     header += ` ${theme.colors.dim(block.subtitle)}`;
   }
