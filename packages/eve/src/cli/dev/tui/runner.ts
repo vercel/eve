@@ -763,11 +763,15 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "new") {
-          this.#startNewSession();
+          if (!(await this.#resetCurrentSession())) {
+            pendingInputResponses = undefined;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
-          this.#renderer.reset?.();
           continue;
         }
 
@@ -984,6 +988,20 @@ export class EveTUIRunner {
       this.#session = this.#client.session();
     }
     this.#runtimeArtifacts?.clear();
+  }
+
+  /** Resets the durable owner before clearing the local conversation view. */
+  async #resetCurrentSession(): Promise<boolean> {
+    try {
+      await this.#session.reset();
+    } catch (error) {
+      this.#renderer.renderNotice?.(`Couldn't reset the session: ${toErrorMessage(error)}`);
+      return false;
+    }
+
+    this.#startNewSession();
+    this.#renderer.reset?.();
+    return true;
   }
 
   async #readPromptWithIdleRefresh(options: AgentTUISessionOptions): Promise<string | undefined> {

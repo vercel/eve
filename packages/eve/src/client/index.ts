@@ -49,6 +49,7 @@ export type {
   HeadersValue,
   HealthResult,
   MessageResult,
+  ResetSessionResult,
   ResolvedStreamReconnectPolicy,
   SendTurnInput,
   SendTurnPayload,

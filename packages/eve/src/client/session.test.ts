@@ -131,6 +131,80 @@ describe("ClientSession", () => {
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
   });
 
+  it("resets the continuation owner and clears the local session state", async () => {
+    let headerResolution = 0;
+    const requests: Array<{ headers: Headers; method: string; url: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push({
+        body: typeof init?.body === "string" ? init.body : undefined,
+        headers: new Headers(init?.headers),
+        method: init?.method ?? "GET",
+        url,
+      });
+      return Response.json({
+        ok: true,
+        previousSessionId: "session_1",
+        status: "reset",
+      });
+    });
+    const session = createSession(
+      { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 },
+      {
+        redirect: "error",
+        resolveHeaders: async () => {
+          headerResolution += 1;
+          return new Headers({ authorization: `Bearer token-${headerResolution}` });
+        },
+      },
+    );
+
+    await expect(session.reset()).resolves.toEqual({
+      previousSessionId: "session_1",
+      status: "reset",
+    });
+
+    expect(session.state).toEqual({ streamIndex: 0 });
+    expect(requests).toHaveLength(1);
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/reset");
+    expect(requests[0]!.method).toBe("POST");
+    expect(requests[0]!.headers.get("authorization")).toBe("Bearer token-1");
+    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({ continuationToken: "eve:test" });
+  });
+
+  it("treats a never-started session as already reset", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const session = createSession();
+
+    await expect(session.reset()).resolves.toEqual({ status: "no_active_session" });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(session.state).toEqual({ streamIndex: 0 });
+  });
+
+  it("refuses to discard a session that has no continuation token", async () => {
+    const session = createSession({ sessionId: "session_1", streamIndex: 4 });
+
+    await expect(session.reset()).rejects.toThrow("Consume its event stream before resetting");
+    expect(session.state).toEqual({ sessionId: "session_1", streamIndex: 4 });
+  });
+
+  it("preserves the local session when the reset response names another owner", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ok: true,
+        previousSessionId: "another-session",
+        status: "reset",
+      }),
+    );
+    const state = { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 };
+    const session = createSession(state);
+
+    await expect(session.reset()).rejects.toThrow("Reset route returned an invalid response");
+    expect(session.state).toEqual(state);
+  });
+
   it("serializes clientContext when sending a create-session message", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession();

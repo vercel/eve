@@ -180,6 +180,46 @@ function cancelRequest(body?: unknown): Request {
   });
 }
 
+/** Creates a POST handler test harness for the continuation-addressed reset route. */
+function createEveResetHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const resetRoute = channel.routes.find(
+    (r) => r.method === "POST" && r.path === "/eve/v1/session/reset",
+  );
+  if (!resetRoute) throw new Error("No session reset POST route found");
+
+  const resetSession = vi.fn().mockResolvedValue({
+    previousSessionId: "test-session-id",
+    status: "reset",
+  });
+
+  return {
+    resetSession,
+    async fetch(req: Request) {
+      const args: RouteHandlerArgs = {
+        send: vi.fn(),
+        resolveActiveSession: async () => undefined,
+        cancel: vi.fn(),
+        resetSession,
+        getSession: vi.fn(),
+        receive: vi.fn() as any,
+        params: {},
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      };
+      return (resetRoute as any).handler(req, args);
+    },
+  };
+}
+
+function resetRequest(body: unknown): Request {
+  return new Request("https://example.com/eve/v1/session/reset", {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+}
+
 /** Creates a GET handler test harness for the durable session stream route. */
 function createEveStreamHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
@@ -1397,6 +1437,71 @@ describe("eveChannel — cancel turn", () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({
       error: "Failed to cancel the turn.",
+      ok: false,
+    });
+  });
+});
+
+describe("eveChannel — reset session", () => {
+  it("retires the owner of the supplied channel-local continuation token", async () => {
+    const handler = createEveResetHandler({ auth: none() });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      previousSessionId: "test-session-id",
+      status: "reset",
+    });
+    expect(handler.resetSession).toHaveBeenCalledWith({
+      continuationToken: "eve:token",
+      reason: "Client requested session reset",
+    });
+  });
+
+  it("reports a token that is already free as a successful no-op", async () => {
+    const handler = createEveResetHandler({ auth: none() });
+    handler.resetSession.mockResolvedValue({ status: "no_active_session" });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
+  });
+
+  it("rejects unauthenticated reset requests", async () => {
+    const handler = createEveResetHandler({ auth: [] });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(401);
+    expect(handler.resetSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an empty token", { continuationToken: "" }],
+    ["a non-string token", { continuationToken: 7 }],
+    ["a non-object body", ["eve:token"]],
+  ])("rejects %s with 400", async (_description, body) => {
+    const handler = createEveResetHandler({ auth: none() });
+
+    const response = await handler.fetch(resetRequest(body));
+
+    expect(response.status).toBe(400);
+    expect(handler.resetSession).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when reset fails unexpectedly", async () => {
+    const handler = createEveResetHandler({ auth: none() });
+    handler.resetSession.mockRejectedValue(new Error("backing store outage"));
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Failed to reset the session.",
       ok: false,
     });
   });
