@@ -326,6 +326,107 @@ export default defineDynamic({
     });
   });
 
+  it("captures computed keys and defaults inside binding patterns", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => {
+      const fallback = "missing";
+      const field = "value";
+      return {
+        tool: defineTool({
+          description: "T",
+          inputSchema: { type: "object" },
+          execute(input) {
+            const { [field]: value = fallback } = input;
+            return value;
+          },
+        }),
+      };
+    },
+  },
+});
+`;
+
+    const { callHandler } = await transformAndEval("tools/binding-patterns.ts", source);
+    const tools = await callHandler();
+    const tool = tools.tool as Record<string, unknown>;
+    const execute = tool.execute as Function;
+
+    expect(tool.__closureVars).toEqual({
+      fallback: "missing",
+      field: "value",
+    });
+    expect(execute({})).toBe("missing");
+    expect(execute({ value: "present" })).toBe("present");
+  });
+
+  it("captures a direct identifier in an arrow expression body", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => {
+      const result = "captured";
+      return {
+        tool: defineTool({
+          description: "T",
+          inputSchema: { type: "object" },
+          execute: () => result,
+        }),
+      };
+    },
+  },
+});
+`;
+
+    const { callHandler } = await transformAndEval("tools/identifier-expression.ts", source);
+    const tools = await callHandler();
+    const tool = tools.tool as Record<string, unknown>;
+
+    expect(tool.__closureVars).toEqual({ result: "captured" });
+    expect((tool.execute as Function)()).toBe("captured");
+  });
+
+  it("captures runtime references inside TypeScript expressions", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => {
+      const TypeName = "type-only";
+      const asserted = "asserted";
+      const nonNull = "non-null";
+      const satisfied = "satisfied";
+      return {
+        tool: defineTool({
+          description: "T",
+          inputSchema: { type: "object" },
+          execute() {
+            return [
+              asserted as TypeName,
+              nonNull!,
+              satisfied satisfies TypeName,
+            ];
+          },
+        }),
+      };
+    },
+  },
+});
+`;
+
+    const result = await transformDynamicToolExecute("tools/typescript-expressions.ts", source);
+
+    expect(result).not.toBeNull();
+    expect(result!.code).toContain("const { asserted, nonNull, satisfied } = __vars");
+    expect(result!.code).not.toContain("const { TypeName, asserted, nonNull, satisfied } = __vars");
+  });
+
   it("async execute preserves await semantics", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";

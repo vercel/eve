@@ -28,107 +28,136 @@ export type DynamicToolAstNode = {
   value?: DynamicToolAstNode | unknown;
 };
 
+type IdentifierContext = "binding" | "reference";
+
 /**
  * Collects identifiers used as runtime references in a function body AST.
  */
 export function collectReferencedIdentifierNames(node: DynamicToolAstNode): Set<string> {
   const names = new Set<string>();
 
-  const visit = (
-    current: DynamicToolAstNode,
-    parent: DynamicToolAstNode | undefined,
-    parentKey: string | undefined,
-    ancestors: readonly DynamicToolAstNode[],
-  ): void => {
-    if (
-      current.type === "Identifier" &&
-      current.name &&
-      isIdentifierReference(parent, parentKey, ancestors)
-    ) {
+  const visit = (current: DynamicToolAstNode, context: IdentifierContext): void => {
+    if (current.type?.startsWith("TS")) {
+      if (isRuntimeTypeScriptExpression(current) && current.expression) {
+        visit(current.expression, "reference");
+      }
+      return;
+    }
+
+    if (current.type === "Identifier" && current.name && context === "reference") {
       names.add(current.name);
     }
 
-    const nextAncestors = [...ancestors, current];
     for (const [key, value] of Object.entries(current)) {
+      const childContext = getChildContext(current, key, context);
+      if (!childContext) continue;
+
       if (Array.isArray(value)) {
         for (const child of value) {
           if (isAstNode(child)) {
-            visit(child, current, key, nextAncestors);
+            visit(child, childContext);
           }
         }
       } else if (isAstNode(value)) {
-        visit(value, current, key, nextAncestors);
+        visit(value, childContext);
       }
     }
   };
 
-  visit(node, undefined, undefined, []);
+  visit(node, "reference");
   return names;
 }
 
-function isIdentifierReference(
-  parent: DynamicToolAstNode | undefined,
-  parentKey: string | undefined,
-  ancestors: readonly DynamicToolAstNode[],
-): boolean {
-  if (!parent || !parentKey) return false;
-
+function getChildContext(
+  parent: DynamicToolAstNode,
+  parentKey: string,
+  context: IdentifierContext,
+): IdentifierContext | null {
   if (
     parentKey === "typeAnnotation" ||
     parentKey === "returnType" ||
     parentKey === "typeParameters" ||
-    parentKey === "typeArguments" ||
-    ancestors.some((ancestor) => ancestor.type?.startsWith("TS"))
+    parentKey === "typeArguments"
   ) {
-    return false;
+    return null;
+  }
+
+  if (parent.type === "VariableDeclarator" && parentKey === "id") {
+    return "binding";
   }
 
   if (
-    (parent.type === "MemberExpression" ||
-      parent.type === "OptionalMemberExpression" ||
-      parent.type === "Property" ||
-      parent.type === "MethodDefinition" ||
-      parent.type === "PropertyDefinition") &&
-    parentKey === "key"
+    (parent.type === "FunctionExpression" ||
+      parent.type === "ArrowFunctionExpression" ||
+      parent.type === "FunctionDeclaration") &&
+    (parentKey === "id" || parentKey === "params")
   ) {
-    return parent.computed === true;
+    return "binding";
+  }
+
+  if (
+    (parent.type === "CatchClause" && parentKey === "param") ||
+    ((parent.type === "ClassDeclaration" || parent.type === "ClassExpression") &&
+      parentKey === "id")
+  ) {
+    return "binding";
+  }
+
+  if (parent.type === "Property" && parentKey === "key") {
+    return parent.computed === true ? "reference" : null;
+  }
+
+  if (parent.type === "Property" && parentKey === "value") {
+    return context;
+  }
+
+  if (parent.type === "AssignmentPattern") {
+    return parentKey === "right" ? "reference" : context;
+  }
+
+  if (
+    (parent.type === "ObjectPattern" ||
+      parent.type === "ArrayPattern" ||
+      parent.type === "RestElement") &&
+    (parentKey === "properties" || parentKey === "elements" || parentKey === "argument")
+  ) {
+    return context;
   }
 
   if (
     (parent.type === "MemberExpression" || parent.type === "OptionalMemberExpression") &&
     parentKey === "property"
   ) {
-    return parent.computed === true;
+    return parent.computed === true ? "reference" : null;
   }
 
   if (
-    (parent.type === "VariableDeclarator" && parentKey === "id") ||
-    ((parent.type === "FunctionExpression" ||
-      parent.type === "ArrowFunctionExpression" ||
-      parent.type === "FunctionDeclaration") &&
-      (parentKey === "id" || parentKey === "params")) ||
-    (parent.type === "CatchClause" && parentKey === "param") ||
-    ((parent.type === "ClassDeclaration" || parent.type === "ClassExpression") &&
-      parentKey === "id") ||
-    ((parent.type === "LabeledStatement" ||
+    (parent.type === "MethodDefinition" || parent.type === "PropertyDefinition") &&
+    parentKey === "key"
+  ) {
+    return parent.computed === true ? "reference" : null;
+  }
+
+  if (
+    (parent.type === "LabeledStatement" ||
       parent.type === "BreakStatement" ||
       parent.type === "ContinueStatement") &&
-      parentKey === "label")
+    parentKey === "label"
   ) {
-    return false;
+    return null;
   }
 
-  if (
-    parent.type === "ObjectPattern" ||
-    parent.type === "ArrayPattern" ||
-    ancestors.some(
-      (ancestor) => ancestor.type === "ObjectPattern" || ancestor.type === "ArrayPattern",
-    )
-  ) {
-    return false;
-  }
+  return "reference";
+}
 
-  return true;
+function isRuntimeTypeScriptExpression(node: DynamicToolAstNode): boolean {
+  return (
+    node.type === "TSAsExpression" ||
+    node.type === "TSInstantiationExpression" ||
+    node.type === "TSNonNullExpression" ||
+    node.type === "TSSatisfiesExpression" ||
+    node.type === "TSTypeAssertion"
+  );
 }
 
 function isAstNode(value: unknown): value is DynamicToolAstNode {
