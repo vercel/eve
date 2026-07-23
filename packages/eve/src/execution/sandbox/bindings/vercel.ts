@@ -320,6 +320,8 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
     createVercelNetworkPolicySetter(sandbox),
   );
 
+  await writeSandboxSeedFiles(templateSession, input.seedFiles);
+
   if (input.bootstrap !== undefined) {
     input.log?.("running sandbox bootstrap");
     await input.bootstrap({
@@ -334,8 +336,6 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
       },
     });
   }
-
-  await writeSandboxSeedFiles(templateSession, input.seedFiles);
 
   const snapshot = await sandbox.snapshot();
   return {

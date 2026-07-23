@@ -244,6 +244,39 @@ describe("prewarmMicrosandboxTemplate", () => {
     );
     expect(result).toEqual({ reused: false });
   });
+
+  it("writes seed files before bootstrap and snapshots bootstrap outputs", async () => {
+    const vm = createFakeMicrosandboxVm("template");
+    runtimeMocks.createPreparedMicrosandbox.mockResolvedValue(vm);
+
+    await prewarmMicrosandboxTemplate({
+      backendName: "microsandbox",
+      options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+      optionsHash: "options-hash",
+      prewarmInput: {
+        bootstrap: async ({ use }) => {
+          const sandbox = await use();
+          await expect(sandbox.readTextFile({ path: "/workspace/seed.txt" })).resolves.toBe(
+            "authored seed",
+          );
+          await sandbox.writeTextFile({
+            content: "bootstrap output",
+            path: "/workspace/bootstrap.txt",
+          });
+        },
+        runtimeContext: { appRoot: "/tmp/eve-app" },
+        seedFiles: [{ content: "authored seed", path: "/workspace/seed.txt" }],
+        templateKey: "template-key",
+      },
+    });
+
+    await expect(vm.readFileBytes("/workspace/bootstrap.txt")).resolves.toEqual(
+      Buffer.from("bootstrap output"),
+    );
+    expect(vm.writeFiles.mock.invocationCallOrder[1]).toBeLessThan(
+      vm.stopAndSnapshot.mock.invocationCallOrder[0]!,
+    );
+  });
 });
 
 function createFakeMicrosandboxVm(sessionKey: string) {
@@ -271,14 +304,14 @@ function createFakeMicrosandboxVm(sessionKey: string) {
     async spawn() {
       throw new Error("spawn is not used by this test.");
     },
-    async stopAndSnapshot() {},
-    async writeFiles(
-      nextFiles: ReadonlyArray<{ readonly content: Uint8Array; readonly path: string }>,
-    ) {
-      for (const file of nextFiles) {
-        files.set(file.path, Buffer.from(file.content));
-      }
-    },
+    stopAndSnapshot: vi.fn(async () => {}),
+    writeFiles: vi.fn(
+      async (nextFiles: ReadonlyArray<{ readonly content: Uint8Array; readonly path: string }>) => {
+        for (const file of nextFiles) {
+          files.set(file.path, Buffer.from(file.content));
+        }
+      },
+    ),
     async writeMetadata() {},
   };
 }
