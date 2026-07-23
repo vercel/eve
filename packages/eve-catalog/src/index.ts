@@ -229,9 +229,10 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   },
   {
     slug: "kernel",
-    name: "Kernel",
+    name: "KERNEL",
     kind: "extension",
-    tagline: "Add a Kernel cloud browser and browser automation skills to an eve agent.",
+    tagline:
+      "Let your eve agent use the Internet with KERNEL browser infra, o11y, and stealth. Integrated natively with Vercel Connect and AI Gateway.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
