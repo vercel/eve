@@ -100,7 +100,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
  * Builds a {@link RuntimeIdentity} from the resolved runtime agent node
  * and the current eve package installation.
  */
-function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIdentity {
+export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIdentity {
   const packageInfo = resolveInstalledPackageInfo();
 
   const identity: RuntimeIdentity = {

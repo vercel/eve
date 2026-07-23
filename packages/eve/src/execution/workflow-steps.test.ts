@@ -4,7 +4,14 @@ import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js"
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationTokenKey,
+  ModeKey,
+  SessionDynamicToolMetadataKey,
+  SessionDynamicToolRuntimeRevisionKey,
+  SessionIdKey,
+} from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -25,6 +32,7 @@ import {
 import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
+import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
@@ -101,6 +109,11 @@ function createTestWritable(
 }
 
 vi.mock("./node-step.js", () => ({
+  buildRuntimeIdentity: vi.fn(() => ({
+    agentId: "test-agent",
+    eveVersion: "0.0.0-test",
+    modelId: "test-model",
+  })),
   createExecutionNodeStep: vi.fn(),
 }));
 
@@ -980,6 +993,115 @@ describe("turnStep", () => {
         }),
       }),
     });
+  });
+
+  it("refreshes session-scoped dynamic tools from the current deployment", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
+    const handler = vi.fn(() => ({
+      current_tool: defineTool({
+        description: "Current deployment tool",
+        inputSchema: { type: "object" },
+        execute: async () => ({ ok: true }),
+      }),
+    }));
+    const dynamicToolResolver = {
+      eventNames: ["session.started"],
+      events: { "session.started": handler },
+      logicalPath: "agent/tools/current.ts",
+      slug: "current",
+      sourceId: "test:current",
+      sourceKind: "module",
+    } as never;
+    const compiledArtifactsSource = { kind: "bundled" } as const;
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: {},
+        dynamicToolResolvers: [dynamicToolResolver],
+      },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => ({
+        next: { done: true, output: "ok" },
+        session,
+      });
+    });
+
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:thread-context");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
+    ctx.set(SessionDynamicToolMetadataKey, [
+      {
+        closureVars: {},
+        description: "Stale deployment tool",
+        entryKey: "old_tool",
+        executeStepFnName: "eve:dynamic-tool//old",
+        inputSchema: { type: "object" },
+        name: "old_tool",
+        resolverSlug: "old",
+      },
+    ]);
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "follow up" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState({
+        emissionState: {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      }),
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(result.serializedContext[SessionDynamicToolRuntimeRevisionKey.name]).toBe(
+      "deployment:dpl_new",
+    );
+    expect(result.serializedContext[SessionDynamicToolMetadataKey.name]).toEqual([
+      expect.objectContaining({
+        name: "current_tool",
+        resolverSlug: "current",
+      }),
+    ]);
   });
 
   it("clears pending authorization after a matching callback resumes the turn", async () => {
