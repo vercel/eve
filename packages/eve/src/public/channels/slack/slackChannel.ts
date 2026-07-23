@@ -780,6 +780,8 @@ async function handleEventPost(input: {
   }
 
   if (envelope === null) return new Response("ok");
+  const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
+  const botUserId = slackEventBotUserId(envelope);
 
   // Handler precedence, in fall-through order:
   // 1) an authored mention/DM handler for its own event kind,
@@ -791,10 +793,12 @@ async function handleEventPost(input: {
   if (payload.kind === "app_mention" || payload.kind === "direct_message") {
     const kind = payload.kind;
     const message = slackMessageFromWebhookPayload(payload);
-    if (message !== null && !isSelfAuthoredSlackMessage(envelope, message)) {
+    if (message !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, message)) {
       const dispatchMessageWith =
         (handler: NonNullable<SlackChannelConfig["onAppMention"]>) => () =>
           dispatchInboundMessage({
+            appId,
+            botUserId,
             credentials: config.credentials,
             handler,
             kind,
@@ -808,7 +812,8 @@ async function handleEventPost(input: {
       if (handler !== undefined) {
         dispatch = () =>
           dispatchSlackMessage({
-            botUserId: slackEventBotUserId(envelope),
+            appId,
+            botUserId,
             credentials: config.credentials,
             handler,
             kind,
@@ -828,13 +833,13 @@ async function handleEventPost(input: {
 
   if (dispatch === null && config.onMessage !== undefined) {
     const message = parseMessageEvent(envelope);
-    if (message !== null && !isSelfAuthoredSlackMessage(envelope, message)) {
-      const botUserId = slackEventBotUserId(envelope);
+    if (message !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, message)) {
       // Slack also emits message.channels for an app mention. The app_mention
       // callback owns that user action so the generic message is not duplicated.
       if (botUserId === undefined || !message.text.includes(`<@${botUserId}`)) {
         dispatch = () =>
           dispatchSlackMessage({
+            appId,
             botUserId,
             credentials: config.credentials,
             handler: config.onMessage!,
@@ -884,19 +889,21 @@ async function handleEventPost(input: {
   return new Response("ok");
 }
 
-function isSelfAuthoredSlackMessage(envelope: SlackEventEnvelope, message: SlackMessage): boolean {
-  const botUserId = slackEventBotUserId(envelope);
-  if (botUserId !== undefined && message.author?.userId === botUserId) {
+function isSelfAuthoredSlackMessage(
+  identity: { readonly appId: string | undefined; readonly botUserId: string | undefined },
+  message: SlackMessage,
+): boolean {
+  if (identity.botUserId !== undefined && message.author?.userId === identity.botUserId) {
     return true;
   }
 
   // App-authored message events can omit `user`, so match Slack's app identity
   // as a fallback. Other bots keep flowing to authored onMessage handlers.
-  const apiAppId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
-  return apiAppId !== undefined && message.raw.app_id === apiAppId;
+  return identity.appId !== undefined && message.raw.app_id === identity.appId;
 }
 
 async function dispatchSlackMessage(input: {
+  readonly appId: string | undefined;
   readonly botUserId: string | undefined;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handler: NonNullable<SlackChannelConfig["onMessage"]>;
@@ -910,7 +917,9 @@ async function dispatchSlackMessage(input: {
   readonly uploadPolicy: UploadPolicy;
 }): Promise<void> {
   const { thread, slack } = buildSlackBinding({
+    appId: input.appId,
     botToken: input.credentials?.botToken,
+    botUserId: input.botUserId,
     channelId: input.message.channelId,
     threadTs: input.message.threadTs,
     teamId: input.message.teamId,
@@ -1030,6 +1039,8 @@ async function verifyInbound(
  * handler never crashes the webhook ACK.
  */
 async function dispatchInboundMessage(input: {
+  readonly appId: string | undefined;
+  readonly botUserId: string | undefined;
   readonly kind: "app_mention" | "direct_message";
   readonly message: SlackMessage;
   readonly handler:
@@ -1042,7 +1053,9 @@ async function dispatchInboundMessage(input: {
 }): Promise<void> {
   const { message, kind } = input;
   const { thread, slack } = buildSlackBinding({
+    appId: input.appId,
     botToken: input.credentials?.botToken,
+    botUserId: input.botUserId,
     channelId: message.channelId,
     threadTs: message.threadTs,
     teamId: message.teamId,
