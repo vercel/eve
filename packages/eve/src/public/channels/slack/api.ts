@@ -195,7 +195,13 @@ export interface SlackThreadMessage {
   readonly botId: string | undefined;
   readonly ts: string;
   readonly threadTs: string;
-  /** Whether this message was authored by the Slack app bound to the thread. */
+  /**
+   * Whether this message was authored by the Slack app bound to the thread.
+   * Classification requires the binding to carry the app identity (bot user
+   * id or app id). Inbound event bindings do; bindings rebuilt from session
+   * state or interaction payloads currently do not and mark every message
+   * `false`.
+   */
   readonly isMe: boolean;
   readonly raw: Record<string, unknown>;
 }
