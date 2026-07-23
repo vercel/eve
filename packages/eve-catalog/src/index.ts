@@ -179,6 +179,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "browserbase",
+    name: "Browserbase",
+    kind: "extension",
+    tagline: "Search, fetch, and automate the web with Browserbase and Stagehand.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "kernel",
     name: "Kernel",
     kind: "extension",

@@ -32,6 +32,17 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve channels add slack");
   });
 
+  it("renders the Browserbase extension setup", () => {
+    const browserbase = getIntegration("browserbase");
+    expect(browserbase).toBeDefined();
+
+    const markdown = integrationMarkdown(browserbase!);
+    expect(markdown).toContain("npm install @browserbasehq/eve");
+    expect(markdown).toContain('import browserbase from "@browserbasehq/eve"');
+    expect(markdown).toContain("BROWSERBASE_API_KEY");
+    expect(integrationSearchText(browserbase!)).toContain("Stagehand");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();

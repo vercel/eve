@@ -494,6 +494,59 @@ Credentials come from the \`createMessengerAdapter\` config or the adapter's env
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
+  browserbase: {
+    logo: "browserbase",
+    docsHref: "https://www.npmjs.com/package/@browserbasehq/eve",
+    keywords: [
+      "browser",
+      "browser automation",
+      "cloud browser",
+      "stagehand",
+      "search",
+      "fetch",
+      "web automation",
+    ],
+    install: `Install the Browserbase extension for eve:
+
+\`\`\`bash
+npm install @browserbasehq/eve
+\`\`\`
+
+The extension requires Node.js 24 or later. A Browserbase API key covers both cloud browser sessions and Stagehand inference through Browserbase Model Gateway, so you do not need a separate model-provider key.`,
+    quickStart: `Add your Browserbase API key to the agent's environment:
+
+\`\`\`bash title=".env.local"
+BROWSERBASE_API_KEY=bb_live_...
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/browserbase.ts"
+import browserbase from "@browserbasehq/eve";
+
+export default browserbase({
+  apiKey: process.env.BROWSERBASE_API_KEY!,
+});
+\`\`\`
+
+The filename supplies the \`browserbase\` namespace. The extension adds \`browserbase__search\`, \`browserbase__fetch\`, and persistent browser tools for creating sessions, navigating, observing, acting, extracting structured data, and running autonomous Stagehand tasks.`,
+    configure: `Use Search → Fetch → browser as an escalation path: search for sources first, fetch straightforward content without starting a session, and create a browser only when a page requires JavaScript or interaction.
+
+You can configure the Stagehand model, session timeout, and proxies:
+
+\`\`\`ts title="agent/extensions/browserbase.ts"
+import browserbase from "@browserbasehq/eve";
+
+export default browserbase({
+  apiKey: process.env.BROWSERBASE_API_KEY!,
+  model: "openai/gpt-5.4-mini",
+  sessionTimeoutSeconds: 900,
+  proxies: false,
+});
+\`\`\`
+
+Browserbase uses keep-alive sessions and eve's durable per-session state to reconnect across workflow steps and function invocations. Call \`browserbase__stop_session\` when the task finishes to release billable browser time. Keep API keys out of prompts, and add approval gates around sensitive or irreversible browser actions. See the [Browserbase extension package](https://www.npmjs.com/package/@browserbasehq/eve) for the complete tool and configuration reference.`,
+  },
   kernel: {
     logo: "kernel",
     docsHref: "https://www.kernel.sh/docs/integrations/vercel/eve-extension",

@@ -324,6 +324,20 @@ export const messengerLogo = (props: LogoProps) => <SiMessenger color="default" 
 
 export const xLogo = (props: LogoProps) => <SiX {...props} />;
 
+export const browserbaseLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect fill="white" height="124" width="134" x="30" y="36" />
+    <path d="M111.168 116.901H83.168V109.901H111.168V116.901Z" fill="#FF4500" />
+    <path d="M111.168 86.208H83.168V79.208H111.168V86.208Z" fill="#FF4500" />
+    <path
+      clipRule="evenodd"
+      d="M200 200H0V0H200V200ZM55.4453 147.815H128.678L145.259 131.234V111.891L131.441 98.0723L142.495 87.0186V69.0557L125.914 52.4756H55.4453V147.815Z"
+      fill="#FF4500"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
 export const agentBrowserLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
     <rect height="16" rx="2" stroke="currentColor" strokeWidth="1.5" width="20" x="2" y="4" />
@@ -393,6 +407,7 @@ export const logos = {
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
   x: xLogo,
+  browserbase: browserbaseLogo,
   "agent-browser": agentBrowserLogo,
 } as const;
 

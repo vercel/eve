@@ -67,6 +67,11 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("kernel")?.connection).toBeUndefined();
   });
 
+  it("exposes Browserbase as an extension", () => {
+    expect(getIntegrationEntry("browserbase")?.kind).toBe("extension");
+    expect(getIntegrationEntry("browserbase")?.connection).toBeUndefined();
+  });
+
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
       "https://api.browser-use.com/v3/mcp",
