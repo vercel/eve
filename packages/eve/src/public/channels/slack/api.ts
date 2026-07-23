@@ -363,7 +363,7 @@ export function buildSlackBinding(input: {
   readonly onThreadTsChanged?: (ts: string) => void;
 }): SlackBinding {
   const request = createSlackRequester(input.botToken);
-  const messages: SlackThreadMessage[] = [];
+  let messages: readonly SlackThreadMessage[] = [];
   let currentThreadTs = input.threadTs;
   let refreshInFlight: Promise<void> | undefined;
 
@@ -389,7 +389,7 @@ export function buildSlackBinding(input: {
 
   async function refreshMessages(): Promise<void> {
     if (!input.channelId || !currentThreadTs) {
-      messages.length = 0;
+      messages = [];
       return;
     }
     try {
@@ -402,7 +402,7 @@ export function buildSlackBinding(input: {
       const refreshed = (response.messages as Record<string, unknown>[]).map((raw) =>
         parseThreadMessage(raw, currentThreadTs),
       );
-      messages.splice(0, messages.length, ...refreshed);
+      messages = refreshed;
     } catch (error) {
       logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
     }
@@ -420,7 +420,9 @@ export function buildSlackBinding(input: {
   }
 
   const thread: SlackThread = {
-    recentMessages: messages,
+    get recentMessages() {
+      return messages;
+    },
     async post(rawMessage) {
       const message = normalizePostInput(rawMessage);
       const files = message.files ?? [];

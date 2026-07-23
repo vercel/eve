@@ -498,11 +498,14 @@ describe("SlackThread.refresh", () => {
     });
 
     await thread.refresh();
+    const firstSnapshot = thread.recentMessages;
     await thread.refresh();
 
     expect(
       mock.calls.filter((call) => call.url === "https://slack.com/api/conversations.replies"),
     ).toHaveLength(2);
+    expect(thread.recentMessages).not.toBe(firstSnapshot);
+    expect(firstSnapshot).toHaveLength(2);
   });
 
   it("preserves loaded messages when a later refresh fails", async () => {
