@@ -23,7 +23,7 @@ describe("handleDevRuntimeArtifactsRequest", () => {
     const { handleDevRuntimeArtifactsRequest } =
       await import("#internal/nitro/routes/dev-runtime-artifacts.js");
     mocks.readDevelopmentRuntimeArtifactsRevision.mockReturnValueOnce({
-      revision: "/tmp/app/.eve/dev-runtime/snapshots/current",
+      revision: "opaque-revision",
     });
 
     const response = handleDevRuntimeArtifactsRequest({ appRoot: "/tmp/app" });
@@ -31,7 +31,7 @@ describe("handleDevRuntimeArtifactsRequest", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
-      revision: "/tmp/app/.eve/dev-runtime/snapshots/current",
+      revision: "opaque-revision",
     });
     expect(mocks.readDevelopmentRuntimeArtifactsRevision).toHaveBeenCalledWith("/tmp/app");
   });

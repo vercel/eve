@@ -328,10 +328,10 @@ export function eveNitro(options: EveNitroOptions = {}): EveNitroPlugin {
         },
         async rebuild(changedPaths) {
           const result = await coordinator.rebuild({ changedPaths });
+          lifecycle.preparedHost = result.host;
           if (embeddedLifecycleClosing) {
             return;
           }
-          lifecycle.preparedHost = result.host;
           if (result.kind !== "structural") {
             watcher.updateWatchPaths(await resolveAuthoredWatchPaths(result.host));
           }

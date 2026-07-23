@@ -155,18 +155,19 @@ describe("development runtime artifact snapshots", () => {
         resolveDevelopmentRuntimeArtifactsPointerPath(appRoot),
       ),
     ).toBeUndefined();
-    expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
-      revision: appRoot,
-    });
+    const initialRevision = readDevelopmentRuntimeArtifactsRevision(appRoot).revision;
+    expect(initialRevision).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(initialRevision).not.toContain(appRoot);
     expect(
       JSON.parse(await readFile(join(snapshot.snapshotRoot, "generation.json"), "utf8")),
     ).toEqual({ runtimeAppRoot: snapshot.runtimeAppRoot });
 
     await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
 
-    expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
-      revision: snapshot.runtimeAppRoot,
-    });
+    const activeRevision = readDevelopmentRuntimeArtifactsRevision(appRoot).revision;
+    expect(activeRevision).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(activeRevision).not.toContain(snapshot.runtimeAppRoot);
+    expect(activeRevision).not.toBe(initialRevision);
   });
 
   it("restores the prior runtime pointer when activation is rolled back", async () => {
@@ -187,15 +188,17 @@ describe("development runtime artifact snapshots", () => {
     const first = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
     const second = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
     await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot: first });
+    const firstRevision = readDevelopmentRuntimeArtifactsRevision(appRoot).revision;
 
     const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
       appRoot,
       snapshot: second,
     });
-    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(second.runtimeAppRoot);
+    const secondRevision = readDevelopmentRuntimeArtifactsRevision(appRoot).revision;
+    expect(secondRevision).not.toBe(firstRevision);
     await activation.rollback();
 
-    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(first.runtimeAppRoot);
+    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(firstRevision);
     expect(existsSync(join(second.snapshotRoot, "activated"))).toBe(false);
   });
 

@@ -367,6 +367,68 @@ describe("eveNitro", () => {
     expect(mocks.removeDevelopmentWorkspace).toHaveBeenCalledOnce();
   });
 
+  it("cleans the generation activated by a rebuild that finishes during host close", async () => {
+    const { nitro, runHook } = createNitro({ dev: true });
+    const plugin = eveNitro() as EveNitroPlugin & {
+      configureServer(server: {
+        close(): Promise<void>;
+        restart(): Promise<void>;
+        watcher: { add(): void; off(): void; on(): void };
+      }): Promise<void>;
+    };
+    const rebuiltHost = Object.assign({} as PreparedDevelopmentApplicationHost, {
+      generation: { snapshotRoot: "/host/.eve/rebuilt-generation" },
+      workspace: { rootDir: "/host/.eve/rebuilt-dev-host" },
+    });
+    let finishRebuild:
+      | ((result: { host: PreparedDevelopmentApplicationHost; kind: "runtime" }) => void)
+      | undefined;
+    const coordinatorRebuild = vi.fn(
+      async () =>
+        await new Promise<{
+          host: PreparedDevelopmentApplicationHost;
+          kind: "runtime";
+        }>((resolveRebuild) => {
+          finishRebuild = resolveRebuild;
+        }),
+    );
+    mocks.createEmbeddedCoordinator.mockResolvedValueOnce({ rebuild: coordinatorRebuild });
+    let activeRebuild: Promise<void> | undefined;
+    const watcherHandle = {
+      close: vi.fn(async () => await activeRebuild),
+      stop: vi.fn(),
+      updateWatchPaths: vi.fn(),
+    };
+    mocks.startViteWatcher.mockResolvedValueOnce(watcherHandle);
+    const server = {
+      close: vi.fn(async () => undefined),
+      restart: vi.fn(async () => undefined),
+      watcher: { add: vi.fn(), off: vi.fn(), on: vi.fn() },
+    };
+
+    await plugin.nitro.setup(nitro);
+    await runHook("build:before");
+    await plugin.configureServer(server);
+
+    const rebuild = mocks.startViteWatcher.mock.calls[0]?.[0].rebuild as (
+      changedPaths: readonly string[],
+    ) => Promise<void>;
+    activeRebuild = rebuild(["/host/agent/agent.ts"]);
+    await Promise.resolve();
+    const closing = server.close();
+    await Promise.resolve();
+
+    finishRebuild?.({ host: rebuiltHost, kind: "runtime" });
+    await activeRebuild;
+    await closing;
+
+    expect(mocks.discardGeneration).toHaveBeenCalledWith(rebuiltHost.generation);
+    expect(mocks.discardGeneration).not.toHaveBeenCalledWith(developmentHost.generation);
+    expect(mocks.removeDevelopmentWorkspace).toHaveBeenCalledWith(rebuiltHost.workspace);
+    expect(mocks.removeDevelopmentWorkspace).not.toHaveBeenCalledWith(developmentHost.workspace);
+    expect(watcherHandle.updateWatchPaths).not.toHaveBeenCalled();
+  });
+
   it("rejects a Vite restart that resolves without replacing the server", async () => {
     const { close, nitro, runHook } = createNitro({ dev: true });
     const plugin = eveNitro() as EveNitroPlugin & {

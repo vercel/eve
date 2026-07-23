@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
@@ -249,7 +249,9 @@ export function readDevelopmentRuntimeArtifactsRevision(
     resolveDevelopmentRuntimeArtifactsPointerPath(appRoot),
   );
   return {
-    revision: snapshotRoot ?? appRoot,
+    revision: createHash("sha256")
+      .update(snapshotRoot ?? appRoot)
+      .digest("base64url"),
   };
 }
 
