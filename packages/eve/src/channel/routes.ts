@@ -77,6 +77,12 @@ type BaseSendOptions = {
   auth: SessionAuthContext | null;
   callback?: SessionCallback;
   continuationToken: string;
+  /**
+   * Whether a failed continuation may start a new session. Defaults to `true`.
+   * Disable this when the caller requires the continuation token to retain its
+   * existing session identity.
+   */
+  fallbackToNewSession?: boolean;
   mode?: RunMode;
   /**
    * Human-readable title for a newly started workflow session. Defaults to

@@ -50,6 +50,22 @@ describe("createSendFn", () => {
     warn.mockRestore();
   });
 
+  it("rejects instead of starting a session when fallback is disabled", async () => {
+    const noSession = new RuntimeNoActiveSessionError("test:token");
+    const runtime = createRuntime(noSession);
+    const send = createSendFn(runtime, ADAPTER, "test");
+
+    await expect(
+      send("hello", {
+        auth: null,
+        continuationToken: "token",
+        fallbackToNewSession: false,
+      }),
+    ).rejects.toBe(noSession);
+    expect(runtime.deliver).toHaveBeenCalledTimes(1);
+    expect(runtime.run).not.toHaveBeenCalled();
+  });
+
   it("warns and falls back to a new session when delivery fails unexpectedly", async () => {
     const runtime = createRuntime(new Error("boom"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

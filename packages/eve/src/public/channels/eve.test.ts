@@ -20,6 +20,7 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -1123,6 +1124,28 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload.message).toBe("yes please");
     expect(payload.inputResponses).toEqual([{ requestId: "req-1", optionId: "approve" }]);
+  });
+
+  it("returns a conflict instead of forking an inactive continuation", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+    handler.send.mockRejectedValue(new RuntimeNoActiveSessionError("eve:missing"));
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        continuationToken: "missing",
+        message: "continue this session",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Session is no longer active.",
+      ok: false,
+    });
+    expect(handler.send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ fallbackToNewSession: false }),
+    );
   });
 
   it("converts clientContext on continue-session requests", async () => {

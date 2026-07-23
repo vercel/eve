@@ -9,6 +9,7 @@ import {
   readAgentInfoRouteResponse,
   readRouteAgent,
 } from "#internal/nitro/routes/channel-route-context.js";
+import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -291,18 +292,30 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           dispatchAuth = messageResult.auth;
         }
 
-        const session = await send(
-          {
-            inputResponses: body.inputResponses,
-            message: body.message,
-            context,
-            outputSchema: body.outputSchema,
-          },
-          {
-            auth: dispatchAuth,
-            continuationToken: body.continuationToken,
-          },
-        );
+        let session;
+        try {
+          session = await send(
+            {
+              inputResponses: body.inputResponses,
+              message: body.message,
+              context,
+              outputSchema: body.outputSchema,
+            },
+            {
+              auth: dispatchAuth,
+              continuationToken: body.continuationToken,
+              fallbackToNewSession: false,
+            },
+          );
+        } catch (error) {
+          if (!isRuntimeNoActiveSessionError(error)) {
+            throw error;
+          }
+          return Response.json(
+            { error: "Session is no longer active.", ok: false },
+            { status: 409 },
+          );
+        }
 
         return Response.json(
           {
