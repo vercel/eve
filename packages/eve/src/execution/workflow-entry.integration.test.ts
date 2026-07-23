@@ -337,7 +337,9 @@ describe("workflowEntry integration", () => {
             (event) => event.type === "message.completed" || event.type === "turn.started",
           ),
         ).toBe(false);
-        await expect(contender.returnValue).rejects.toThrow(/Hook token/);
+        await expect(contender.returnValue).rejects.toThrow(
+          /Agent workflow failed\. Inspect the private session trace for details\./,
+        );
 
         await resumeHook(continuationToken, {
           kind: "deliver",
