@@ -281,7 +281,7 @@ async function installScenarioDependencies(input: {
       "--no-audit",
       "--no-fund",
       "--ignore-scripts",
-      "--prefer-offline",
+      "--prefer-online",
     ]);
     return;
   }

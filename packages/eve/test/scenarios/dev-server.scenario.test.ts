@@ -8,6 +8,10 @@ import { describe, expect, it } from "vitest";
 
 import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
 import {
+  DEVELOPMENT_CONTROL_TOKEN_HEADER,
+  readDevelopmentControlToken,
+} from "../../src/internal/nitro/dev-control-auth.js";
+import {
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   resolveDevelopmentRuntimeArtifactsPointerPath,
 } from "../../src/internal/nitro/dev-runtime-artifacts.js";
@@ -992,7 +996,20 @@ describe("eve dev server", () => {
       const server = await startEveDev(app.appRoot);
 
       try {
-        const response = await fetch(new URL("/eve/v1/dev/schedules/heartbeat", server.url), {
+        const scheduleUrl = new URL("/eve/v1/dev/schedules/heartbeat", server.url);
+        const unauthorized = await fetch(scheduleUrl, {
+          method: "POST",
+        });
+        expect(unauthorized.status).toBe(401);
+
+        const developmentControlToken = await readDevelopmentControlToken({
+          appRoot: app.appRoot,
+          serverUrl: server.url,
+        });
+        expect(developmentControlToken).toBeDefined();
+
+        const response = await fetch(scheduleUrl, {
+          headers: { [DEVELOPMENT_CONTROL_TOKEN_HEADER]: developmentControlToken! },
           method: "POST",
         });
         const body = (await response.json()) as {
@@ -1011,6 +1028,7 @@ describe("eve dev server", () => {
         expect(body.sessionIds).toHaveLength(1);
 
         const unknown = await fetch(new URL("/eve/v1/dev/schedules/missing", server.url), {
+          headers: { [DEVELOPMENT_CONTROL_TOKEN_HEADER]: developmentControlToken! },
           method: "POST",
         });
         expect(unknown.status).toBe(404);

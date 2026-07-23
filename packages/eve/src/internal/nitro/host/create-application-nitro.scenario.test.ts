@@ -324,13 +324,17 @@ describe("application Nitro creation", () => {
       await hook(nitroStub.nitro, config);
     }
 
-    const external = config.external as (id: string) => boolean | null | undefined;
+    const external = config.external as (
+      id: string,
+      importer?: string,
+      isResolved?: boolean,
+    ) => boolean | null | undefined;
     expect(external(`${preparedHost.workflowBuildDir}/workflows.mjs`)).toBe(true);
     expect(external("/tmp/weather-agent/.nitro/workflow/workflows.mjs")).toBeUndefined();
     expect(external(`${preparedHost.workflowBuildDir}/steps.mjs`)).toBeUndefined();
     expect(external("/tmp/weather-agent/.nitro/workflow/steps.mjs")).toBeUndefined();
-    expect(external("/tmp/keep-external")).toBe(false);
-    expect(existingExternal).toHaveBeenCalledWith("/tmp/keep-external");
+    expect(external("/tmp/keep-external", "/tmp/importer.mjs", true)).toBe(false);
+    expect(existingExternal).toHaveBeenCalledWith("/tmp/keep-external", "/tmp/importer.mjs", true);
   });
 
   it("limits step-surface scan directories to the package execution directory", async () => {
