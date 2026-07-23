@@ -249,10 +249,10 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
-    slug: "chat-sdk-matrix",
-    name: "Matrix",
+    slug: "chat-sdk-beeper",
+    name: "Beeper",
     kind: "channel",
-    tagline: "Matrix rooms and Beeper-bridged networks via the Chat SDK.",
+    tagline: "Matrix rooms and bridged messaging networks through Beeper.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
