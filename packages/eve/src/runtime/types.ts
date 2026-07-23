@@ -283,6 +283,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
     Node & {
       auth?: OutboundAuthFn;
       description: string;
+      forwardAuth?: boolean;
       headers?: HeadersValue;
       kind: "remote";
       name: string;

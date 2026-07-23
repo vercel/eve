@@ -22,6 +22,20 @@ export interface RemoteAgentDefinition {
    * The parent agent reads this as the lowered subagent tool's description.
    */
   readonly description: string;
+  /**
+   * Forwards the dispatching turn's session principal to the remote
+   * deployment as the `forwardedAuth` create-session body field, so the
+   * remote session runs as the same end user as the parent (per-user
+   * Connect, local subagents, and further remote hops all see that
+   * principal). Defaults to `false` — forwarding identity to another
+   * deployment is an explicit decision, never ambient.
+   *
+   * Only principal metadata crosses the wire, never tokens or credentials.
+   * The receiver must opt in with `eveChannel({ acceptForwardedAuth })` and
+   * acknowledge acceptance; a missing acknowledgment fails the dispatch
+   * instead of silently running the session as the calling service.
+   */
+  readonly forwardAuth?: boolean;
   readonly headers?: HeadersValue;
   readonly kind: "remote";
   /**
