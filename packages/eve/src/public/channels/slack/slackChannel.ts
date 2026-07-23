@@ -69,9 +69,9 @@ type EventData<T extends HandleMessageStreamEvent["type"]> =
  * `onInteraction`. These hooks run on the inbound webhook side before the
  * runtime hydrates session state, so `state` is absent here.
  * {@link thread} owns thread-scoped operations (`post`, `postEphemeral`,
- * `startTyping`, `refresh`, `recentMessages`, `mentionUser`); {@link slack}
- * owns Slack identity (`channelId`, `threadTs`, `teamId`) plus the raw-API
- * escape hatch (`request`, `uploadFiles`).
+ * `startTyping`, `refresh`, `listParticipants`, `recentMessages`,
+ * `mentionUser`); {@link slack} owns Slack identity (`channelId`, `threadTs`,
+ * `teamId`) plus the raw-API escape hatch (`request`, `uploadFiles`).
  */
 export interface SlackContext {
   readonly thread: SlackThread;
@@ -793,7 +793,7 @@ async function handleEventPost(input: {
   if (payload.kind === "app_mention" || payload.kind === "direct_message") {
     const kind = payload.kind;
     const message = slackMessageFromWebhookPayload(payload);
-    if (message !== null) {
+    if (message !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, message)) {
       const dispatchMessageWith =
         (handler: NonNullable<SlackChannelConfig["onAppMention"]>) => () =>
           dispatchInboundMessage({
@@ -833,7 +833,7 @@ async function handleEventPost(input: {
 
   if (dispatch === null && config.onMessage !== undefined) {
     const message = parseMessageEvent(envelope);
-    if (message !== null) {
+    if (message !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, message)) {
       // Slack also emits message.channels for an app mention. The app_mention
       // callback owns that user action so the generic message is not duplicated.
       if (botUserId === undefined || !message.text.includes(`<@${botUserId}`)) {
@@ -855,7 +855,7 @@ async function handleEventPost(input: {
   }
 
   // Specialized handlers retain their bot/subtype filters. onMessage receives
-  // every structurally valid message event; onEvent remains the raw fallback.
+  // structurally valid messages except this app's own; onEvent is the raw fallback.
   const onEvent = config.onEvent;
   if (dispatch === null && onEvent !== undefined) {
     dispatch = () =>
@@ -887,6 +887,19 @@ async function handleEventPost(input: {
 
   input.waitUntil(dispatch());
   return new Response("ok");
+}
+
+function isSelfAuthoredSlackMessage(
+  identity: { readonly appId: string | undefined; readonly botUserId: string | undefined },
+  message: SlackMessage,
+): boolean {
+  if (identity.botUserId !== undefined && message.author?.userId === identity.botUserId) {
+    return true;
+  }
+
+  // App-authored message events can omit `user`, so match Slack's app identity
+  // as a fallback. Other bots keep flowing to authored onMessage handlers.
+  return identity.appId !== undefined && message.raw.app_id === identity.appId;
 }
 
 async function dispatchSlackMessage(input: {

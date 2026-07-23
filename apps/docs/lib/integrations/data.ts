@@ -491,6 +491,117 @@ export default channel;
 Credentials come from the \`createMessengerAdapter\` config or the adapter's environment variables; see the [Messenger adapter docs](https://chat-sdk.dev/adapters/official/messenger).`,
     configure: `The adapter mounts its webhook at \`/eve/v1/messenger\`. Point your Messenger webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
   },
+  "chat-sdk-zernio": {
+    logo: "zernio",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: [
+      "chat sdk",
+      "zernio",
+      "instagram",
+      "facebook",
+      "x",
+      "twitter",
+      "telegram",
+      "whatsapp",
+      "bluesky",
+      "reddit",
+    ],
+    install: `Install eve, Chat SDK, the Zernio adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @zernio/chat-sdk-adapter @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Zernio.`,
+    quickStart: `Create \`agent/channels/zernio.ts\`:
+
+\`\`\`ts
+// agent/channels/zernio.ts
+import { createZernioAdapter } from "@zernio/chat-sdk-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    zernio: createZernioAdapter(),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [Zernio adapter documentation](https://chat-sdk.dev/adapters/vendor-official/zernio) for supported events, capabilities, and credentials.`,
+    configure: `Set \`ZERNIO_API_KEY\` and \`ZERNIO_WEBHOOK_SECRET\`, then point Zernio webhooks at \`/eve/v1/zernio\`. Zernio provides one adapter for Instagram, Facebook, X, Telegram, WhatsApp, Bluesky, and Reddit. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
+  "chat-sdk-velt": {
+    logo: "velt",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: [
+      "chat sdk",
+      "velt",
+      "comments",
+      "collaboration",
+      "documents",
+      "canvas",
+      "pdf",
+      "video",
+    ],
+    install: `Install eve, Chat SDK, the Velt adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @veltdev/chat-sdk-adapter @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Velt.`,
+    quickStart: `Create \`agent/channels/velt.ts\`:
+
+\`\`\`ts
+// agent/channels/velt.ts
+import { createVeltAdapter } from "@veltdev/chat-sdk-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    velt: createVeltAdapter({
+      apiKey: process.env.VELT_API_KEY!,
+      webhookSecret: process.env.VELT_WEBHOOK_SECRET!,
+      botUserId: "my-agent",
+      botUserName: "My Agent",
+    }),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [Velt adapter documentation](https://chat-sdk.dev/adapters/vendor-official/velt) for supported events, capabilities, and credentials.`,
+    configure: `Create a Velt bot user and webhook, set \`VELT_API_KEY\` and \`VELT_WEBHOOK_SECRET\`, then send comment events to \`/eve/v1/velt\`. The adapter maps documents to channels, annotations to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
@@ -589,6 +700,127 @@ export { default } from "@onkernel/eve-extension";
 \`\`\`
 
 The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
+  },
+  jetty: {
+    logo: "jetty",
+    docsHref: "https://github.com/jettyio/jetty-sdk/tree/main/packages/eve#readme",
+    keywords: [
+      "evals",
+      "evaluation",
+      "grading",
+      "experiments",
+      "observability",
+      "trajectories",
+      "bandit",
+      "a/b testing",
+    ],
+    install: `Install the Jetty extension for eve:
+
+\`\`\`bash
+npm install @jetty/eve
+\`\`\`
+
+The extension requires Node.js 24 or later and eve 0.25 or later. It can ingest every completed turn as a durable Jetty trajectory, grade turns inline, steer experiments from their grades, and report native \`eve eval\` results.`,
+    quickStart: `Add your Jetty credentials and collection to the agent's environment:
+
+\`\`\`bash title=".env.local"
+JETTY_API_TOKEN=your_token
+JETTY_COLLECTION=your_collection
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/jetty.ts"
+import jetty from "@jetty/eve";
+
+export default jetty({
+  collection: process.env.JETTY_COLLECTION ?? "",
+  task: "triage-live",
+  judgeMode: "simple_judge",
+  arms: {
+    warm: "Write a warm, specific response.",
+    terse: "Write a concise, direct response.",
+  },
+});
+\`\`\`
+
+The filename supplies the \`jetty\` namespace. The extension contributes a turn-ingestion hook, dynamic instructions that select an experiment arm, and \`jetty__experiment\`, which reports per-arm results and the current leader. Create the \`simple_judge\` task in Jetty before using inline grading; use the default \`ingest\` mode when a separate grader will score trajectories later.`,
+    configure: `The package also includes a reporter for eve's native eval runner:
+
+\`\`\`ts title="evals/evals.config.ts"
+import { Jetty } from "@jetty/eve/reporter";
+import { defineEvalConfig } from "eve/evals";
+
+export default defineEvalConfig({
+  reporters: [Jetty()],
+});
+\`\`\`
+
+The reporter reads \`JETTY_API_TOKEN\` and \`JETTY_COLLECTION\`, sends each eval result to Jetty, and warns rather than failing the eval when Jetty is unavailable. The extension no-ops when its collection is empty, so the same agent can run without Jetty credentials.
+
+Jetty trajectories persist agent inputs and outputs. Redact PII before grading, put sensitive grader parameters in Jetty's \`secretParams\` rather than \`initParams\`, and treat trajectory storage like any other logging surface. See the [Jetty eve extension documentation](https://github.com/jettyio/jetty-sdk/tree/main/packages/eve#readme) for all experiment settings and the [worked example](https://github.com/jettyio/jetty-sdk/tree/main/examples/eve-jetty) for the complete grading loop.`,
+  },
+  "github-tools": {
+    logo: "github",
+    docsHref: "https://github-tools.com/frameworks/eve#eve-extension",
+    keywords: [
+      "github",
+      "repositories",
+      "pull requests",
+      "issues",
+      "code review",
+      "ci",
+      "vercel connect",
+      "approval",
+    ],
+    install: `Install the GitHub Tools extension and Vercel Connect client:
+
+\`\`\`bash
+npm install @github-tools/eve-extension @vercel/connect
+\`\`\`
+
+The extension provides the GitHub toolset as a versioned eve package. Use a Vercel Connect connector for short-lived, scoped GitHub tokens, or omit \`@vercel/connect\` and authenticate with a GitHub token.`,
+    quickStart: `Create and attach a GitHub connector to the Vercel project that runs your agent:
+
+\`\`\`bash
+vercel link
+vercel connect create github --name my-connector
+vercel connect attach github/my-connector --yes
+vercel env pull
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/github.ts"
+import githubExtension from "@github-tools/eve-extension";
+
+export default githubExtension({
+  connector: "github/my-connector",
+  preset: "maintainer",
+  requireApproval: {
+    mergePullRequest: true,
+  },
+});
+\`\`\`
+
+The filename supplies the \`github\` namespace, so tools appear as \`github__listPullRequests\`, \`github__createIssue\`, and \`github__addPullRequestComment\`. The preset automatically limits the connector token to the scopes its tools need.`,
+    configure: `Choose one or more presets to limit the available tools: \`code-review\`, \`issue-triage\`, \`repo-explorer\`, \`ci-ops\`, or \`maintainer\`. Every write tool requires approval by default, while read tools do not. Use \`requireApproval\` to apply \`always\`, \`once\`, or an input-dependent policy to individual tools:
+
+\`\`\`ts title="agent/extensions/github.ts"
+import githubExtension from "@github-tools/eve-extension";
+
+export default githubExtension({
+  connector: "github/my-connector",
+  preset: ["code-review", "issue-triage"],
+  requireApproval: {
+    addPullRequestComment: "once",
+    mergePullRequest: true,
+    createIssue: ({ toolInput }) => toolInput?.owner !== "my-org",
+  },
+});
+\`\`\`
+
+For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
   },
   "agent-browser": {
     logo: "agent-browser",

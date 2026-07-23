@@ -43,6 +43,30 @@ describe("integration discovery", () => {
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
   });
 
+  it("renders the Jetty extension and eval reporter setup", () => {
+    const jetty = getIntegration("jetty");
+    expect(jetty).toBeDefined();
+
+    const markdown = integrationMarkdown(jetty!);
+    expect(markdown).toContain("npm install @jetty/eve");
+    expect(markdown).toContain('import jetty from "@jetty/eve"');
+    expect(markdown).toContain('import { Jetty } from "@jetty/eve/reporter"');
+    expect(markdown).toContain("JETTY_API_TOKEN");
+    expect(integrationSearchText(jetty!)).toContain("grading");
+  });
+
+  it("renders the GitHub Tools extension setup", () => {
+    const githubTools = getIntegration("github-tools");
+    expect(githubTools).toBeDefined();
+
+    const markdown = integrationMarkdown(githubTools!);
+    expect(markdown).toContain("npm install @github-tools/eve-extension");
+    expect(markdown).toContain('connector: "github/my-connector"');
+    expect(markdown).toContain('preset: "maintainer"');
+    expect(markdown).toContain("github__addPullRequestComment");
+    expect(integrationSearchText(githubTools!)).toContain("code review");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();

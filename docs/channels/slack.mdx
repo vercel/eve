@@ -54,7 +54,7 @@ VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1 vercel deploy --prod
 
 Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
 
-- `onMessage(ctx, message)` handles Slack `message` events. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies; check `message.author?.isBot` when bot messages should be ignored.
+- `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.
 - `onDirectMessage(ctx, message)` handles only DMs and takes precedence over `onMessage`. Bot-authored messages and edits are filtered first; Slack requires `message.im` and `im:history`.
 
@@ -87,6 +87,22 @@ export default slackChannel({
 ```
 
 `isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
+
+Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:
+
+```ts
+async onMessage(ctx, message) {
+  if (!message.author || message.author.isBot) return null;
+
+  const participants = await ctx.thread.listParticipants();
+  const isGroupFollowUpFromStarter =
+    participants.length > 1 && participants[0] === message.author.userId;
+
+  return isGroupFollowUpFromStarter ? { auth: null } : null;
+}
+```
+
+Like `threadContext`, this helper calls `conversations.replies` and requires the matching Slack history scope. It observes at most the first 50 messages of the thread, and a failed fetch is logged and swallowed, so the returned list may be empty or stale — treat an unexpected empty list as "don't route" rather than "no participants".
 
 ### Other Events API callbacks
 

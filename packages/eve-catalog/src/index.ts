@@ -172,6 +172,20 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-zernio",
+    name: "Zernio",
+    kind: "channel",
+    tagline: "Reach seven social and messaging platforms through one Zernio integration.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-velt",
+    name: "Velt",
+    kind: "channel",
+    tagline: "Add agents to anchored comments across documents, canvases, PDFs, and video.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
@@ -183,6 +197,20 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Browserbase",
     kind: "extension",
     tagline: "Search, fetch, and automate the web with Browserbase and Stagehand.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "github-tools",
+    name: "GitHub Tools",
+    kind: "extension",
+    tagline: "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "jetty",
+    name: "Jetty",
+    kind: "extension",
+    tagline: "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
