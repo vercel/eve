@@ -74,6 +74,36 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it("preserves a prefixed remote base path on create-session requests", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: {
+        ...createRemoteAgent(),
+        url: "https://remote.example.com/eve/agents/researcher",
+      },
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/eve/agents/researcher/eve/v1/session",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("sends a declared outputSchema on the remote create-session request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), {
@@ -228,6 +258,33 @@ describe("cancelRemoteAgentTurn", () => {
       authorization: "Bearer second",
       "x-static": "yes",
     });
+  });
+
+  it("preserves a prefixed remote base path on cancel-turn requests", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, sessionId: "remote/session id", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      cancelRemoteAgentTurn({
+        remote: {
+          ...createRemoteAgent(),
+          url: "https://remote.example.com/eve/agents/researcher/",
+        },
+        sessionId: "remote/session id",
+      }),
+    ).resolves.toEqual({ status: "accepted" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/eve/agents/researcher/eve/v1/session/remote%2Fsession%20id/cancel",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("rejects responses for a different session", async () => {

@@ -139,17 +139,18 @@ export function resolveRemoteAgentForAction(input: {
 }
 
 function createRemoteAgentSessionUrl(remote: ResolvedRuntimeRemoteAgentNode): string {
-  return new URL(remote.path, `${trimTrailingSlash(remote.url)}/`).toString();
+  return createRemoteAgentRouteUrl(remote.url, remote.path);
 }
 
 function createRemoteAgentCancelTurnUrl(
   remote: ResolvedRuntimeRemoteAgentNode,
   sessionId: string,
 ): string {
-  return new URL(
-    createEveCancelTurnRoutePath(sessionId),
-    `${trimTrailingSlash(remote.url)}/`,
-  ).toString();
+  return createRemoteAgentRouteUrl(remote.url, createEveCancelTurnRoutePath(sessionId));
+}
+
+function createRemoteAgentRouteUrl(baseUrl: string, routePath: string): string {
+  return new URL(routePath.replace(/^\/+/, ""), `${trimTrailingSlash(baseUrl)}/`).toString();
 }
 
 function isRetryableRemoteCancelStatus(status: number): boolean {
