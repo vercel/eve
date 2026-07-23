@@ -449,6 +449,83 @@ describe("SlackThread.refresh", () => {
     expect("metadata" in firstMessage).toBe(false);
   });
 
+  it("shares one conversations.replies request across overlapping refreshes", async () => {
+    let resolveReplies!: (response: Response) => void;
+    const replies = new Promise<Response>((resolve) => {
+      resolveReplies = resolve;
+    });
+    mock.fetch.mockImplementation(async (input: string | URL | Request) => {
+      if (String(input) === "https://slack.com/api/conversations.replies") {
+        return replies;
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    const first = thread.refresh();
+    const second = thread.refresh();
+
+    expect(second).toBe(first);
+    await vi.waitFor(() => {
+      expect(mock.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    resolveReplies(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          messages: [{ text: "loaded once", ts: "1.0", user: "U01" }],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    await Promise.all([first, second]);
+
+    expect(thread.recentMessages).toHaveLength(1);
+  });
+
+  it("starts a new request after the previous refresh completes", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.refresh();
+    const firstSnapshot = thread.recentMessages;
+    await thread.refresh();
+
+    expect(
+      mock.calls.filter((call) => call.url === "https://slack.com/api/conversations.replies"),
+    ).toHaveLength(2);
+    expect(thread.recentMessages).not.toBe(firstSnapshot);
+    expect(firstSnapshot).toHaveLength(2);
+  });
+
+  it("preserves loaded messages when a later refresh fails", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+    await thread.refresh();
+    const loadedMessages = [...thread.recentMessages];
+    mock.fetch.mockRejectedValueOnce(new Error("Slack unavailable"));
+
+    await thread.refresh();
+
+    expect(thread.recentMessages).toEqual(loadedMessages);
+  });
+
   it("marks only replies from the bound Slack app as mine", async () => {
     mock.fetch.mockImplementation(async (input: string | URL | Request) => {
       if (String(input) === "https://slack.com/api/conversations.replies") {

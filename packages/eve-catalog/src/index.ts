@@ -193,6 +193,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-novu",
+    name: "Novu",
+    kind: "channel",
+    tagline: "Reach Slack, Teams, WhatsApp, Telegram, and email through Novu.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",

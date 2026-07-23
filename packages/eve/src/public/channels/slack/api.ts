@@ -277,8 +277,9 @@ export interface SlackThread {
 
   /**
    * Fetch the latest replies in this thread into {@link recentMessages}
-   * via `conversations.replies` (50-message cap). Failures are logged and
-   * swallowed, leaving `recentMessages` empty.
+   * via `conversations.replies` (50-message cap). Overlapping calls share
+   * one request. Failures are logged and swallowed without discarding the
+   * most recently loaded messages.
    */
   refresh(): Promise<void>;
 
@@ -386,8 +387,9 @@ export function buildSlackBinding(input: {
   readonly onThreadTsChanged?: (ts: string) => void;
 }): SlackBinding {
   const request = createSlackRequester(input.botToken);
-  const messages: SlackThreadMessage[] = [];
+  let messages: readonly SlackThreadMessage[] = [];
   let currentThreadTs = input.threadTs;
+  let refreshInFlight: Promise<void> | undefined;
 
   function handleMessageTs(ts: string): void {
     if (currentThreadTs || ts === currentThreadTs) return;
@@ -409,8 +411,47 @@ export function buildSlackBinding(input: {
     });
   }
 
+  function refreshMessages(): Promise<void> {
+    if (refreshInFlight !== undefined) return refreshInFlight;
+
+    // Scoped inside the coalescing check so no caller can start an
+    // uncoalesced fetch.
+    async function fetchAndReplace(): Promise<void> {
+      if (!input.channelId || !currentThreadTs) {
+        messages = [];
+        return;
+      }
+      try {
+        const response = await fetchSlackThreadReplies({
+          ...createSlackApiOptions(input.botToken),
+          channel: input.channelId,
+          limit: 50,
+          ts: currentThreadTs,
+        });
+        messages = (response.messages as Record<string, unknown>[]).map((raw) =>
+          parseThreadMessage(raw, currentThreadTs, {
+            appId: input.appId,
+            botUserId: input.botUserId,
+          }),
+        );
+      } catch (error) {
+        logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
+      }
+    }
+
+    const refresh = fetchAndReplace().finally(() => {
+      if (refreshInFlight === refresh) {
+        refreshInFlight = undefined;
+      }
+    });
+    refreshInFlight = refresh;
+    return refresh;
+  }
+
   const thread: SlackThread = {
-    recentMessages: messages,
+    get recentMessages() {
+      return messages;
+    },
     async listParticipants() {
       await thread.refresh();
       const participants = new Set<string>();
@@ -499,27 +540,8 @@ export function buildSlackBinding(input: {
         logError(log, "startTyping threw — swallowed", error, { channelId: input.channelId });
       }
     },
-    async refresh() {
-      messages.length = 0;
-      if (!input.channelId || !currentThreadTs) return;
-      try {
-        const response = await fetchSlackThreadReplies({
-          ...createSlackApiOptions(input.botToken),
-          channel: input.channelId,
-          limit: 50,
-          ts: currentThreadTs,
-        });
-        for (const raw of response.messages as Record<string, unknown>[]) {
-          messages.push(
-            parseThreadMessage(raw, currentThreadTs, {
-              appId: input.appId,
-              botUserId: input.botUserId,
-            }),
-          );
-        }
-      } catch (error) {
-        logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
-      }
+    refresh() {
+      return refreshMessages();
     },
     mentionUser(userId) {
       return `<@${userId}>`;
