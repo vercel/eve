@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "jetty",
+  "title": "Jetty",
+  "description": "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
+  "dependencies": ["@jetty/eve"],
+  "files": [
+    {
+      "path": "registry/extensions/jetty.ts",
+      "content": "import jetty from \"@jetty/eve\";\n\nexport default jetty({\n  collection: process.env.JETTY_COLLECTION ?? \"\",\n});\n",
+      "type": "registry:file",
+      "target": "agent/extensions/jetty.ts"
+    }
+  ],
+  "type": "registry:item"
+}
