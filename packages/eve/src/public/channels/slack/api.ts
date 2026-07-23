@@ -195,6 +195,7 @@ export interface SlackThreadMessage {
   readonly botId: string | undefined;
   readonly ts: string;
   readonly threadTs: string;
+  /** Whether this message was authored by the Slack app bound to the thread. */
   readonly isMe: boolean;
   readonly raw: Record<string, unknown>;
 }
@@ -355,7 +356,11 @@ interface SlackBinding {
  * anchor.
  */
 export function buildSlackBinding(input: {
+  /** Slack app id used to identify this app's fetched thread replies. */
+  readonly appId?: string;
   readonly botToken: SlackBotToken | undefined;
+  /** Slack bot user id used to identify this app's fetched thread replies. */
+  readonly botUserId?: string;
   readonly channelId: string;
   readonly threadTs: string;
   readonly teamId: string | undefined;
@@ -476,7 +481,12 @@ export function buildSlackBinding(input: {
           ts: currentThreadTs,
         });
         for (const raw of response.messages as Record<string, unknown>[]) {
-          messages.push(parseThreadMessage(raw, currentThreadTs));
+          messages.push(
+            parseThreadMessage(raw, currentThreadTs, {
+              appId: input.appId,
+              botUserId: input.botUserId,
+            }),
+          );
         }
       } catch (error) {
         logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
@@ -580,12 +590,20 @@ function normalizeFileData(data: FileUpload["data"]): SlackFileUpload["data"] {
 function parseThreadMessage(
   raw: Record<string, unknown>,
   threadRootTs: string,
+  identity: {
+    readonly appId: string | undefined;
+    readonly botUserId: string | undefined;
+  },
 ): SlackThreadMessage {
   const text = typeof raw.text === "string" ? raw.text : "";
   const ts = typeof raw.ts === "string" ? raw.ts : "";
   const threadTs = typeof raw.thread_ts === "string" ? raw.thread_ts : threadRootTs;
   const user = typeof raw.user === "string" ? raw.user : undefined;
   const botId = typeof raw.bot_id === "string" ? raw.bot_id : undefined;
+  const appId = typeof raw.app_id === "string" ? raw.app_id : undefined;
+  const isMe =
+    (identity.botUserId !== undefined && user === identity.botUserId) ||
+    (identity.appId !== undefined && appId === identity.appId);
   return {
     text,
     markdown: slackMrkdwnToGfm(text),
@@ -593,7 +611,7 @@ function parseThreadMessage(
     botId,
     ts,
     threadTs,
-    isMe: botId !== undefined,
+    isMe,
     raw,
   };
 }

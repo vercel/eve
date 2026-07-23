@@ -1206,9 +1206,9 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(options.title).toBe("hello");
   });
 
-  it("adds one ID-attributed thread transcript without extra profile lookups", async () => {
+  it("uses only this app's reply as the incremental thread context boundary", async () => {
     const threadTs = "1700000000.000001";
-    const currentTs = "1700000000.000005";
+    const currentTs = "1700000000.000006";
     fetchMock.mockImplementation(async (request: string | URL | Request) => {
       const url = String(request);
       if (url.includes("conversations.replies")) {
@@ -1218,10 +1218,12 @@ describe("slackChannel() inbound mention pipeline", () => {
             messages: [
               { user: "U_ROOT", text: "root", ts: threadTs, thread_ts: threadTs },
               {
+                app_id: "A01",
                 bot_id: "B_AGENT",
                 text: "What changed?",
                 ts: "1700000000.000002",
                 thread_ts: threadTs,
+                user: "U_BOT",
               },
               {
                 user: "U_BACKEND",
@@ -1230,9 +1232,17 @@ describe("slackChannel() inbound mention pipeline", () => {
                 thread_ts: threadTs,
               },
               {
+                app_id: "A_OTHER",
+                bot_id: "B_OTHER",
+                text: "Other bot follow-up.",
+                ts: "1700000000.000004",
+                thread_ts: threadTs,
+                user: "U_OTHER_BOT",
+              },
+              {
                 user: "U_FRONTEND",
                 text: "I changed the UI.",
-                ts: "1700000000.000004",
+                ts: "1700000000.000005",
                 thread_ts: threadTs,
               },
               {
@@ -1255,18 +1265,25 @@ describe("slackChannel() inbound mention pipeline", () => {
       onAppMention: () => ({ auth: null }),
       threadContext: { since: "last-agent-reply" },
     });
-    const { body } = buildMentionBody({
-      threadTs,
-      ts: currentTs,
-      text: "Summarize ownership.",
-      user: "U_CURRENT",
-    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        event_ts: currentTs,
+        text: "Summarize ownership.",
+        thread_ts: threadTs,
+        ts: currentTs,
+        type: "app_mention",
+        user: "U_CURRENT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
 
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     const [{ message }] = send.mock.calls[0]! as [{ message: string }];
     expect(message).toContain("<slack_thread_context>");
     expect(message).toContain("sender_id: U_BACKEND");
+    expect(message).toContain("sender_id: U_OTHER_BOT");
     expect(message).toContain("sender_id: U_FRONTEND");
     expect(message).toContain("sender_id: U_CURRENT");
     expect(message).not.toContain("sender_id: U_ROOT");

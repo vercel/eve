@@ -437,7 +437,7 @@ describe("SlackThread.refresh", () => {
       botId: "B01",
       ts: "1700000001.000000",
       threadTs: "1700000000.000001",
-      isMe: true,
+      isMe: false,
     });
 
     const firstMessage = thread.recentMessages[0]!;
@@ -445,6 +445,56 @@ describe("SlackThread.refresh", () => {
     expect("attachments" in firstMessage).toBe(false);
     expect("author" in firstMessage).toBe(false);
     expect("metadata" in firstMessage).toBe(false);
+  });
+
+  it("marks only replies from the bound Slack app as mine", async () => {
+    mock.fetch.mockImplementation(async (input: string | URL | Request) => {
+      if (String(input) === "https://slack.com/api/conversations.replies") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            messages: [
+              {
+                app_id: "A_SELF",
+                bot_id: "B_SELF",
+                text: "own user-attributed reply",
+                ts: "1.1",
+                user: "U_SELF",
+              },
+              {
+                app_id: "A_OTHER",
+                bot_id: "B_OTHER",
+                text: "other bot reply",
+                ts: "1.2",
+                user: "U_OTHER",
+              },
+              {
+                app_id: "A_SELF",
+                bot_id: "B_SELF",
+                text: "own app-attributed reply",
+                ts: "1.3",
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const { thread } = buildSlackBinding({
+      appId: "A_SELF",
+      botToken: "xoxb-test",
+      botUserId: "U_SELF",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.refresh();
+
+    expect(thread.recentMessages.map((message) => message.isMe)).toEqual([true, false, true]);
   });
 });
 
