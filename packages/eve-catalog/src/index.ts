@@ -172,6 +172,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-zernio",
+    name: "Zernio",
+    kind: "channel",
+    tagline: "Reach seven social and messaging platforms through one Zernio integration.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
@@ -179,16 +186,32 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "browserbase",
+    name: "Browserbase",
+    kind: "extension",
+    tagline: "Search, fetch, and automate the web with Browserbase and Stagehand.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "github-tools",
+    name: "GitHub Tools",
+    kind: "extension",
+    tagline: "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "jetty",
+    name: "Jetty",
+    kind: "extension",
+    tagline: "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "kernel",
     name: "Kernel",
-    kind: "connection",
-    tagline: "Launch cloud browsers and automate web interactions through Kernel's MCP server.",
+    kind: "extension",
+    tagline: "Add a Kernel cloud browser and browser automation skills to an eve agent.",
     surfaces: { scaffoldable: false, gallery: true },
-    connection: {
-      description:
-        "Kernel: launch and automate cloud browsers, run Playwright, and inspect replays.",
-      mcp: { url: "https://mcp.onkernel.com/mcp" },
-    },
   },
   {
     slug: "browser-use",
@@ -200,6 +223,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       description:
         "Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.",
       mcp: { url: "https://api.browser-use.com/v3/mcp" },
+    },
+  },
+  {
+    slug: "vercel",
+    name: "Vercel",
+    kind: "connection",
+    tagline: "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Vercel: manage projects and deployments, inspect logs, and search documentation.",
+      mcp: { url: "https://mcp.vercel.com" },
     },
   },
   {

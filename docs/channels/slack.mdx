@@ -36,7 +36,11 @@ export default slackChannel({
 });
 ```
 
-`connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code. Deploy once the trigger destination and channel file are ready:
+`connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
+
+### Deploy
+
+Deploy once the trigger destination and channel file are ready:
 
 ```bash
 VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1 vercel deploy --prod
@@ -46,16 +50,43 @@ VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1 vercel deploy --prod
 
 ## How the channel handles inbound events
 
-### Dispatch
+### Message hooks
 
-The message hooks decide whether to dispatch a turn and with what `auth`. Return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
+Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
 
-- `onAppMention(ctx, message)` handles `app_mention` events. The default derives workspace-scoped auth and posts a `Thinking…` indicator.
-- `onDirectMessage(ctx, message)` handles `message.im` events (needs `im:history` scope). Bot-authored messages and edits are filtered out first.
+- `onMessage(ctx, message)` handles Slack `message` events. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies; check `message.author?.isBot` when bot messages should be ignored.
+- `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.
+- `onDirectMessage(ctx, message)` handles only DMs and takes precedence over `onMessage`. Bot-authored messages and edits are filtered first; Slack requires `message.im` and `im:history`.
 
-`onInteraction(action, ctx)` separately handles `block_actions` callbacks not consumed by HITL.
+| Incoming event         | Handler order                                                       |
+| ---------------------- | ------------------------------------------------------------------- |
+| App mention            | `onAppMention` → `onMessage` → `onEvent` → built-in mention default |
+| Direct message         | `onDirectMessage` → `onMessage` → `onEvent` → built-in DM default   |
+| Other Slack message    | `onMessage` → `onEvent` → ignore                                    |
+| Other Events API event | `onEvent` → ignore                                                  |
 
-eve attaches the triggering Slack user id to the same model message as the message text. This keeps speaker attribution intact when several people use one thread without making profile lookup requests.
+Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
+
+`onInteraction(action, ctx)` separately handles `block_actions` callbacks not consumed by HITL. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
+
+#### Continue conversations without repeated mentions
+
+Use `onMessage` to handle explicit mentions and continue replies in threads with an active eve session:
+
+```ts title="agent/channels/slack.ts"
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  async onMessage(ctx, message) {
+    if (message.author?.isBot) return null;
+    const isDirectMessage = message.raw.channel_type === "im";
+    return isDirectMessage || ctx.isBotMentioned() || (await ctx.isSubscribed())
+      ? { auth: null }
+      : null;
+  },
+});
+```
+
+`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
 
 ### Other Events API callbacks
 
@@ -87,7 +118,7 @@ export default slackChannel({
 
 The webhook invocation already keeps an awaited `onEvent` handler alive. Use `ctx.waitUntil(promise)` for deliberately detached work, matching a handler-form schedule. `ctx.slack.request(operation, body)` provides workspace-scoped Slack Web API access, while `ctx.envelope` carries delivery metadata such as `team_id`, `event_id`, and `event_time`. Calls to `ctx.receive` automatically seed the callback's team id into Slack session state.
 
-Authored specific handlers take precedence. If both `onAppMention` and `onEvent` are present, an `app_mention` runs only `onAppMention`; the same rule applies to `onDirectMessage`. When `onEvent` is present without the matching specific handler, it receives that event instead of the built-in mention or DM default. Bot-authored and subtype DMs rejected by `onDirectMessage` can still reach `onEvent`. When `onEvent` is omitted, the existing mention and DM defaults remain unchanged and other events are acknowledged and ignored.
+`onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 
 `onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration; eve can only handle events Slack sends.
 

@@ -131,6 +131,10 @@ interface SlackMessageEvent {
 export interface SlackEventCallback {
   readonly type: "event_callback";
   readonly team_id?: string;
+  readonly authorizations?: readonly {
+    readonly is_bot?: boolean;
+    readonly user_id?: string;
+  }[];
   readonly event?: { readonly type?: string } & Record<string, unknown>;
   readonly event_id?: string;
   readonly event_time?: number;
@@ -187,6 +191,22 @@ export function parseAppMentionEvent(envelope: SlackEventCallback): SlackMessage
  * - the message was posted by a bot (`bot_id` set) — this prevents the
  *   bot's own DM replies from re-triggering the handler.
  */
+/** Returns the bot user id attached to a Slack event authorization. */
+export function slackEventBotUserId(envelope: SlackEventCallback): string | undefined {
+  const authorization = envelope.authorizations?.find(
+    (entry) => entry.is_bot === true && typeof entry.user_id === "string",
+  );
+  return authorization?.user_id;
+}
+
+/** Parses a Slack message event without applying bot or subtype policy. */
+export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
+  if (envelope.type !== "event_callback") return null;
+  const event = envelope.event;
+  if (!event || event.type !== "message") return null;
+  return buildSlackMessage(event as SlackMessageEvent, envelope.team_id);
+}
+
 export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
@@ -194,16 +214,20 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
 
   const message = event as SlackMessageEvent;
   if (message.channel_type !== "im") return null;
+  if (!isHumanMessage(message)) return null;
+
+  return buildSlackMessage(message, envelope.team_id);
+}
+
+function isHumanMessage(message: SlackMessageEvent): boolean {
   if (
     typeof message.subtype === "string" &&
     message.subtype.length > 0 &&
     message.subtype !== "file_share"
   ) {
-    return null;
+    return false;
   }
-  if (typeof message.bot_id === "string" && message.bot_id.length > 0) return null;
-
-  return buildSlackMessage(message, envelope.team_id);
+  return !(typeof message.bot_id === "string" && message.bot_id.length > 0);
 }
 
 export function slackMessageFromWebhookPayload(

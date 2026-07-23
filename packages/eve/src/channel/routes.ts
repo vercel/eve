@@ -20,6 +20,11 @@ type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Recor
  */
 export interface RouteHandlerArgs<TState = undefined> {
   send: SendFn<TState>;
+  /**
+   * Resolves the session currently owning a channel-local continuation token.
+   * This point-in-time lookup does not reserve the continuation.
+   */
+  resolveActiveSession: ResolveActiveSessionFn;
   cancel: CancelFn;
   getSession: GetSessionFn;
   /**
@@ -62,6 +67,11 @@ export type SendFn<TState = undefined> = (
   input: string | UserContent | SendPayload,
   options: SendOptions<TState>,
 ) => Promise<Session>;
+
+/** Resolves the active owner of a channel-local continuation token. */
+export type ResolveActiveSessionFn = (options: {
+  readonly continuationToken: string;
+}) => Promise<{ readonly sessionId: string } | undefined>;
 
 type BaseSendOptions = {
   auth: SessionAuthContext | null;

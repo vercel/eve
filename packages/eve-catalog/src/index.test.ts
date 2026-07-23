@@ -54,14 +54,33 @@ describe("integration catalog", () => {
     expect(connectionProtocols(getIntegrationEntry("linear")!.connection!)).toEqual(["mcp"]);
   });
 
+  it("uses Vercel's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("vercel")!.connection!.mcp!.url).toBe("https://mcp.vercel.com");
+  });
+
   it("uses Linear's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
 
-  it("uses Kernel's streamable HTTP MCP endpoint", () => {
-    expect(getIntegrationEntry("kernel")!.connection!.mcp!.url).toBe(
-      "https://mcp.onkernel.com/mcp",
-    );
+  it("exposes Kernel as an extension", () => {
+    expect(getIntegrationEntry("kernel")?.kind).toBe("extension");
+    expect(getIntegrationEntry("kernel")?.connection).toBeUndefined();
+  });
+
+  it("exposes Browserbase as an extension", () => {
+    expect(getIntegrationEntry("browserbase")?.kind).toBe("extension");
+    expect(getIntegrationEntry("browserbase")?.connection).toBeUndefined();
+  });
+
+  it("exposes Jetty as an extension", () => {
+    expect(getIntegrationEntry("jetty")?.kind).toBe("extension");
+    expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
+  });
+
+  it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
+    expect(getIntegrationEntry("github")?.kind).toBe("channel");
+    expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");
+    expect(getIntegrationEntry("github-tools")?.connection).toBeUndefined();
   });
 
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {

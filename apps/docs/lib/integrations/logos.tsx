@@ -153,6 +153,12 @@ export const twilioLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const vercelLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M12 3 23 21H1L12 3Z" fill="currentColor" />
+  </svg>
+);
+
 export const linearLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -310,6 +316,16 @@ export const ticketTailorLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const zernioLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect width="1000" height="1000" fill="#eb3514" rx="161.29" />
+    <path
+      fill="#fff"
+      d="M253.803 294.019V478.63l287.132-75.382c35.782-9.394 68.263 23.575 58.337 59.212l-80.068 287.458h183.083l37.941-186.23a47.92 47.92 0 0 0-12.635-43.011L483.105 269.754a47.92 47.92 0 0 0-43.893-13.514z"
+    />
+  </svg>
+);
+
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
 export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {...props} />;
@@ -317,6 +333,69 @@ export const whatsappLogo = (props: LogoProps) => <SiWhatsapp color="default" {.
 export const messengerLogo = (props: LogoProps) => <SiMessenger color="default" {...props} />;
 
 export const xLogo = (props: LogoProps) => <SiX {...props} />;
+
+export const browserbaseLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect fill="white" height="124" width="134" x="30" y="36" />
+    <path d="M111.168 116.901H83.168V109.901H111.168V116.901Z" fill="#FF4500" />
+    <path d="M111.168 86.208H83.168V79.208H111.168V86.208Z" fill="#FF4500" />
+    <path
+      clipRule="evenodd"
+      d="M200 200H0V0H200V200ZM55.4453 147.815H128.678L145.259 131.234V111.891L131.441 98.0723L142.495 87.0186V69.0557L125.914 52.4756H55.4453V147.815Z"
+      fill="#FF4500"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const jettyLogo = (props: LogoProps) => (
+  <svg
+    aria-label="Jetty"
+    fill="none"
+    viewBox="0 0 900 900"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <g transform="matrix(0.13333,0,0,-0.13333,0,946)">
+      <path
+        d="M3374.59 7095.52c1862.48 0 3374.58-1512.1 3374.58-3374.59C6749.17 1858.45 5237.07 346.352 3374.59 346.352 1512.1 346.352 0 1858.45 0 3720.93c0 1862.49 1512.1 3374.59 3374.59 3374.59"
+        fill="#151933"
+        fillRule="evenodd"
+      />
+      <path d="m2870.87 2439.95 69.2-802.33-170.19-14.68-69.2 802.34z" fill="#f8bb36" />
+      <path
+        d="m2702.08 2424.03 169.89 15.92 10.62-143.35s-15.89-10.48-56.2-21.58c-40.33-11.12-108.39-15.58-108.39-15.58z"
+        fill="#f8a00e"
+      />
+      <path d="m2452.96 2421.66 69.2-802.34-170.19-14.67-69.2 802.33z" fill="#f8bb36" />
+      <path
+        d="M3546.25 1549.75h-1191.9l-16.37 218.33s587.06-50.44 943.73-50.44c218.47 0 264.54-106.18 264.54-167.89"
+        fill="#f8bb36"
+      />
+      <path
+        d="M3506.75 1572.34h-1070.9s214.19 64.56 355.13 88.21c170.82 28.67 205.03 32.24 442.4 32.24 218.08 0 273.37-58.59 273.37-120.45"
+        fill="#f8a00e"
+      />
+      <path
+        d="m2282.77 2406.91 170.18 14.68 17.98-215.67s-44.59-12.82-91.63-7.33c-47.03 5.51-80.64 22.61-80.64 22.61z"
+        fill="#f8a00e"
+      />
+      <path
+        d="M2910.38 3739.5c-206.99 39.52-517.87 421.32-81.09 872.27 493.78 509.8 306.58 1404.21-272.23 1350.39-296.04-27.53-367.11-295.4-367.11-295.4s-235.43 180.73-543.28 50.79c-307.84-129.94-231.39-608.05-231.39-608.05s-136.72-4.6-200.07-27.65c-479.608-174.49-523.382-1127.46 75.07-1839.58 502.93-598.43 980.58-796.96 1779.56-501.06 644.32 238.63 921.43 667.41 1302.22 1134.2 282.41 346.18 686.17 820.96 442.89 1086.28-243.29 265.33-554.46 113.74-859.36-277.19-460.23-590.07-575.66-1034.64-1045.21-945"
+        fill="#fff"
+      />
+      <path
+        d="M5217.87 1299.56c-491.39 162.94-1138.35 498.94-1286.04 737.22-235.58 380.04-260.65 807.33 120.84 1251.3 196.04 228.17 231.57 285.98 378.94 475.76 147.36 189.77 473.4 685.65 473.4 685.65-63.49-97.88-4.7-353.78 153.95-1478.96 108.96-772.82 230.41-1576.34 230.41-1576.34s-185.23-339.03-527.18 2379.13c-9.94 79.03 3.77 225.22-73.75-9.28-77.53-234.48 89.2-1219.53 225.32-1791.02 136.67-573.88 344.41-686.81 304.11-673.46"
+        fill="#f8a00e"
+      />
+      <path
+        d="M4449.27 4691.1c47.13 0 85.39-38.27 85.39-85.4 0-47.12-38.26-85.39-85.39-85.39s-85.39 38.27-85.39 85.39c0 47.13 38.26 85.4 85.39 85.4"
+        fill="#151933"
+        fillRule="evenodd"
+      />
+    </g>
+  </svg>
+);
 
 export const agentBrowserLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -343,6 +422,7 @@ export const logos = {
   teams: teamsLogo,
   telegram: telegramLogo,
   twilio: twilioLogo,
+  vercel: vercelLogo,
   linear: linearLogo,
   notion: notionLogo,
   datadog: datadogLogo,
@@ -382,10 +462,13 @@ export const logos = {
   zapier: zapierLogo,
   zomato: zomatoLogo,
 
+  zernio: zernioLogo,
   googlechat: googlechatLogo,
   whatsapp: whatsappLogo,
   messenger: messengerLogo,
   x: xLogo,
+  browserbase: browserbaseLogo,
+  jetty: jettyLogo,
   "agent-browser": agentBrowserLogo,
 } as const;
 

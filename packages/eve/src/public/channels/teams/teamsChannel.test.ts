@@ -14,6 +14,11 @@ function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
 async function firePost(
   channel: unknown,
   body: Record<string, unknown>,
+  overrides: {
+    readonly resolveActiveSession?: (options: {
+      readonly continuationToken: string;
+    }) => Promise<{ readonly sessionId: string } | undefined>;
+  } = {},
 ): Promise<{
   readonly response: Response;
   readonly send: ReturnType<typeof vi.fn>;
@@ -40,6 +45,7 @@ async function firePost(
     }),
     {
       getSession: vi.fn(),
+      resolveActiveSession: overrides.resolveActiveSession ?? vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn(),
       params: {},
       receive: vi.fn(),
@@ -107,6 +113,76 @@ describe("teamsChannel", () => {
     raw.entities = [];
 
     const { send } = await firePost(channel, raw);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("default dispatch ignores bot-authored personal messages", async () => {
+    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
+    const raw = messageActivity({ conversationType: "personal" });
+    raw.from = { id: "OTHER_BOT", name: "Other bot", role: "bot" };
+
+    const { send } = await firePost(channel, raw);
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("exposes the subscription helper to onMessage", async () => {
+    const observed: boolean[] = [];
+    const resolveActiveSession = vi.fn().mockResolvedValue({ sessionId: "SESSION" });
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      async onMessage(ctx) {
+        observed.push(await ctx.isSubscribed());
+        return null;
+      },
+    });
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.entities = [];
+    raw.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+
+    await firePost(channel, raw, { resolveActiveSession });
+
+    expect(observed).toEqual([true]);
+    expect(resolveActiveSession).toHaveBeenCalledWith({
+      continuationToken: "TENANT:CONV:THREAD_ROOT",
+    });
+  });
+
+  it("allows a mention-or-subscription onMessage policy", async () => {
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      async onMessage(ctx, message) {
+        return message.isBotMentioned || (await ctx.isSubscribed()) ? { auth: null } : null;
+      },
+    });
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.entities = [];
+    raw.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
+
+    const { send } = await firePost(channel, raw, {
+      resolveActiveSession: vi.fn().mockResolvedValue({ sessionId: "SESSION" }),
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes bot-authored messages to onMessage", async () => {
+    const onMessage = vi.fn((_ctx: unknown, _message: unknown) => null);
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      onMessage,
+    });
+    const raw = messageActivity({ conversationType: "channel" });
+    raw.entities = [];
+    raw.from = { id: "OTHER_BOT", name: "Other bot", role: "bot" };
+
+    const { send } = await firePost(channel, raw);
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ from: expect.objectContaining({ id: "OTHER_BOT", role: "bot" }) }),
+    );
     expect(send).not.toHaveBeenCalled();
   });
 

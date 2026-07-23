@@ -227,11 +227,17 @@ function buildDirectMessageBody(overrides?: {
 
 function buildEventBody(
   event: Record<string, unknown>,
-  overrides?: { eventId?: string; eventTime?: number; teamId?: string },
+  overrides?: {
+    authorizations?: readonly Record<string, unknown>[];
+    eventId?: string;
+    eventTime?: number;
+    teamId?: string;
+  },
 ): string {
   mentionCounter += 1;
   return JSON.stringify({
     api_app_id: "A01",
+    authorizations: overrides?.authorizations,
     event,
     event_id: overrides?.eventId ?? `Ev${mentionCounter}`,
     event_time: overrides?.eventTime ?? 1_700_000_000,
@@ -243,6 +249,7 @@ function buildEventBody(
 async function firePost(
   channel: unknown,
   request: Request,
+  overrides: { readonly resolveActiveSession?: ReturnType<typeof vi.fn> } = {},
 ): Promise<{
   response: Response;
   send: ReturnType<typeof vi.fn>;
@@ -258,6 +265,8 @@ async function firePost(
 
   const response = await post.handler(request, {
     send,
+    resolveActiveSession:
+      overrides.resolveActiveSession ?? vi.fn().mockResolvedValue({ sessionId: "s1" }),
     waitUntil,
     getSession: vi.fn() as any,
     params: {},
@@ -1345,6 +1354,110 @@ describe("slackChannel() inbound mention pipeline", () => {
 
     expect(onAppMention).toHaveBeenCalledTimes(1);
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("slackChannel() onMessage", () => {
+  it("exposes mention and subscription helpers", async () => {
+    const observed: Array<{ mentioned: boolean; subscribed: boolean }> = [];
+    const onMessage = vi.fn(async (ctx) => {
+      observed.push({
+        mentioned: ctx.isBotMentioned(),
+        subscribed: await ctx.isSubscribed(),
+      });
+      return null;
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onMessage,
+    });
+
+    const mention = buildMentionBody({ text: "<@U_BOT> help" });
+    await firePost(channel, buildSignedRequest({ body: mention.body }));
+
+    const reply = buildEventBody(
+      {
+        channel: "C01",
+        channel_type: "channel",
+        text: "continue",
+        thread_ts: "1700000000.000100",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U01",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+    await firePost(channel, buildSignedRequest({ body: reply }));
+
+    expect(observed).toEqual([
+      { mentioned: true, subscribed: true },
+      { mentioned: false, subscribed: true },
+    ]);
+  });
+
+  it("allows a simple mention-or-subscription policy", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      async onMessage(ctx) {
+        return ctx.isBotMentioned() || (await ctx.isSubscribed()) ? { auth: null } : null;
+      },
+    });
+    const reply = buildEventBody(
+      {
+        channel: "C01",
+        channel_type: "channel",
+        text: "continue",
+        thread_ts: "1700000000.000100",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U01",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body: reply }));
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.any(String) }),
+      expect.objectContaining({ continuationToken: "C01:1700000000.000100" }),
+    );
+  });
+
+  it("passes bot-authored messages to onMessage", async () => {
+    const onMessage = vi.fn((_ctx, _message: { author?: { isBot: boolean } }) => null);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onMessage,
+    });
+    const body = buildEventBody({
+      bot_id: "B01",
+      channel: "C01",
+      text: "automated",
+      ts: "1700000000.000200",
+      type: "message",
+      user: "U_BOT",
+    });
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage.mock.calls[0]![1].author?.isBot).toBe(true);
+  });
+
+  it("gives specialized message hooks precedence", async () => {
+    const onAppMention = vi.fn(() => null);
+    const onMessage = vi.fn(() => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention,
+      onMessage,
+    });
+    const { body } = buildMentionBody();
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onAppMention).toHaveBeenCalledTimes(1);
+    expect(onMessage).not.toHaveBeenCalled();
   });
 });
 
