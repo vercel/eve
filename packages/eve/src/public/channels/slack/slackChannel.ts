@@ -69,9 +69,9 @@ type EventData<T extends HandleMessageStreamEvent["type"]> =
  * `onInteraction`. These hooks run on the inbound webhook side before the
  * runtime hydrates session state, so `state` is absent here.
  * {@link thread} owns thread-scoped operations (`post`, `postEphemeral`,
- * `startTyping`, `refresh`, `recentMessages`, `mentionUser`); {@link slack}
- * owns Slack identity (`channelId`, `threadTs`, `teamId`) plus the raw-API
- * escape hatch (`request`, `uploadFiles`).
+ * `startTyping`, `refresh`, `listParticipants`, `recentMessages`,
+ * `mentionUser`); {@link slack} owns Slack identity (`channelId`, `threadTs`,
+ * `teamId`) plus the raw-API escape hatch (`request`, `uploadFiles`).
  */
 export interface SlackContext {
   readonly thread: SlackThread;
