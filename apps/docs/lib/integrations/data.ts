@@ -590,6 +590,65 @@ export { default } from "@onkernel/eve-extension";
 
 The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
   },
+  jetty: {
+    logo: "jetty",
+    docsHref: "https://github.com/jettyio/jetty-sdk/tree/main/packages/eve#readme",
+    keywords: [
+      "evals",
+      "evaluation",
+      "grading",
+      "experiments",
+      "observability",
+      "trajectories",
+      "bandit",
+      "a/b testing",
+    ],
+    install: `Install the Jetty extension for eve:
+
+\`\`\`bash
+npm install @jetty/eve
+\`\`\`
+
+The extension requires Node.js 24 or later and eve 0.25 or later. It can ingest every completed turn as a durable Jetty trajectory, grade turns inline, steer experiments from their grades, and report native \`eve eval\` results.`,
+    quickStart: `Add your Jetty credentials and collection to the agent's environment:
+
+\`\`\`bash title=".env.local"
+JETTY_API_TOKEN=your_token
+JETTY_COLLECTION=your_collection
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/jetty.ts"
+import jetty from "@jetty/eve";
+
+export default jetty({
+  collection: process.env.JETTY_COLLECTION ?? "",
+  task: "triage-live",
+  judgeMode: "simple_judge",
+  arms: {
+    warm: "Write a warm, specific response.",
+    terse: "Write a concise, direct response.",
+  },
+});
+\`\`\`
+
+The filename supplies the \`jetty\` namespace. The extension contributes a turn-ingestion hook, dynamic instructions that select an experiment arm, and \`jetty__experiment\`, which reports per-arm results and the current leader. Create the \`simple_judge\` task in Jetty before using inline grading; use the default \`ingest\` mode when a separate grader will score trajectories later.`,
+    configure: `The package also includes a reporter for eve's native eval runner:
+
+\`\`\`ts title="evals/evals.config.ts"
+import { Jetty } from "@jetty/eve/reporter";
+import { defineEvalConfig } from "eve/evals";
+
+export default defineEvalConfig({
+  reporters: [Jetty()],
+});
+\`\`\`
+
+The reporter reads \`JETTY_API_TOKEN\` and \`JETTY_COLLECTION\`, sends each eval result to Jetty, and warns rather than failing the eval when Jetty is unavailable. The extension no-ops when its collection is empty, so the same agent can run without Jetty credentials.
+
+Jetty trajectories persist agent inputs and outputs. Redact PII before grading, put sensitive grader parameters in Jetty's \`secretParams\` rather than \`initParams\`, and treat trajectory storage like any other logging surface. See the [Jetty eve extension documentation](https://github.com/jettyio/jetty-sdk/tree/main/packages/eve#readme) for all experiment settings and the [worked example](https://github.com/jettyio/jetty-sdk/tree/main/examples/eve-jetty) for the complete grading loop.`,
+  },
   "agent-browser": {
     logo: "agent-browser",
     docsHref:

@@ -72,6 +72,11 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("browserbase")?.connection).toBeUndefined();
   });
 
+  it("exposes Jetty as an extension", () => {
+    expect(getIntegrationEntry("jetty")?.kind).toBe("extension");
+    expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
+  });
+
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
       "https://api.browser-use.com/v3/mcp",

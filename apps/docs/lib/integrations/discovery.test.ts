@@ -43,6 +43,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
   });
 
+  it("renders the Jetty extension and eval reporter setup", () => {
+    const jetty = getIntegration("jetty");
+    expect(jetty).toBeDefined();
+
+    const markdown = integrationMarkdown(jetty!);
+    expect(markdown).toContain("npm install @jetty/eve");
+    expect(markdown).toContain('import jetty from "@jetty/eve"');
+    expect(markdown).toContain('import { Jetty } from "@jetty/eve/reporter"');
+    expect(markdown).toContain("JETTY_API_TOKEN");
+    expect(integrationSearchText(jetty!)).toContain("grading");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();

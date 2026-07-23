@@ -186,6 +186,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "jetty",
+    name: "Jetty",
+    kind: "extension",
+    tagline: "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "kernel",
     name: "Kernel",
     kind: "extension",
