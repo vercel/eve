@@ -26,32 +26,10 @@
  */
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
-
-type AstNode = {
-  argument?: AstNode | null;
-  arguments?: AstNode[];
-  async?: boolean;
-  body?: AstNode | AstNode[] | { body?: AstNode[]; type?: string; start?: number; end?: number };
-  callee?: AstNode;
-  computed?: boolean;
-  declaration?: AstNode | null;
-  declarations?: AstNode[];
-  end?: number;
-  expression?: AstNode | null;
-  id?: { name?: string; start?: number; end?: number } | null;
-  init?: AstNode | null;
-  key?: AstNode | null;
-  kind?: string;
-  left?: AstNode | null;
-  method?: boolean;
-  name?: string;
-  params?: AstNode[];
-  properties?: AstNode[];
-  right?: AstNode | null;
-  start?: number;
-  type?: string;
-  value?: AstNode | unknown;
-};
+import {
+  collectReferencedIdentifierNames,
+  type DynamicToolAstNode as AstNode,
+} from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 interface HandlerInfo {
   /** The handler function AST node */
@@ -618,110 +596,6 @@ function findProperty(obj: AstNode, name: string): AstNode | undefined {
     (p) =>
       p.type === "Property" && !p.computed && p.key?.type === "Identifier" && p.key.name === name,
   );
-}
-
-function collectReferencedIdentifierNames(node: AstNode): Set<string> {
-  const names = new Set<string>();
-
-  const visit = (
-    current: AstNode,
-    parent: AstNode | undefined,
-    parentKey: string | undefined,
-    ancestors: readonly AstNode[],
-  ): void => {
-    if (
-      current.type === "Identifier" &&
-      current.name &&
-      isIdentifierReference(parent, parentKey, ancestors)
-    ) {
-      names.add(current.name);
-    }
-
-    const nextAncestors = [...ancestors, current];
-    for (const [key, value] of Object.entries(current)) {
-      if (Array.isArray(value)) {
-        for (const child of value) {
-          if (isAstNode(child)) {
-            visit(child, current, key, nextAncestors);
-          }
-        }
-      } else if (isAstNode(value)) {
-        visit(value, current, key, nextAncestors);
-      }
-    }
-  };
-
-  visit(node, undefined, undefined, []);
-  return names;
-}
-
-function isIdentifierReference(
-  parent: AstNode | undefined,
-  parentKey: string | undefined,
-  ancestors: readonly AstNode[],
-): boolean {
-  if (!parent || !parentKey) return false;
-
-  if (
-    parentKey === "typeAnnotation" ||
-    parentKey === "returnType" ||
-    parentKey === "typeParameters" ||
-    parentKey === "typeArguments" ||
-    ancestors.some((ancestor) => ancestor.type?.startsWith("TS"))
-  ) {
-    return false;
-  }
-
-  if (
-    (parent.type === "MemberExpression" ||
-      parent.type === "OptionalMemberExpression" ||
-      parent.type === "Property" ||
-      parent.type === "MethodDefinition" ||
-      parent.type === "PropertyDefinition") &&
-    parentKey === "key"
-  ) {
-    return parent.computed === true;
-  }
-
-  if (
-    (parent.type === "MemberExpression" || parent.type === "OptionalMemberExpression") &&
-    parentKey === "property"
-  ) {
-    return parent.computed === true;
-  }
-
-  if (
-    (parent.type === "VariableDeclarator" && parentKey === "id") ||
-    ((parent.type === "FunctionExpression" ||
-      parent.type === "ArrowFunctionExpression" ||
-      parent.type === "FunctionDeclaration") &&
-      (parentKey === "id" || parentKey === "params")) ||
-    (parent.type === "CatchClause" && parentKey === "param") ||
-    ((parent.type === "ClassDeclaration" || parent.type === "ClassExpression") &&
-      parentKey === "id") ||
-    ((parent.type === "LabeledStatement" ||
-      parent.type === "BreakStatement" ||
-      parent.type === "ContinueStatement") &&
-      parentKey === "label")
-  ) {
-    return false;
-  }
-
-  if (
-    parent.type === "ObjectPattern" ||
-    parent.type === "ArrayPattern" ||
-    ancestors.some(
-      (ancestor) => ancestor.type === "ObjectPattern" || ancestor.type === "ArrayPattern",
-    )
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function isAstNode(value: unknown): value is AstNode {
-  return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
 }
 
 /**
