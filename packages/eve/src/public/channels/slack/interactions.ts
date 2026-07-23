@@ -49,11 +49,11 @@ import {
 import type {
   SlackChannelConfig,
   SlackChannelState,
-  SlackContext,
   SlackInteractionAction,
+  SlackInteractionContext,
   SlackInteractionUser,
 } from "#public/channels/slack/slackChannel.js";
-import type { SendFn } from "#public/definitions/channel.js";
+import type { CancelFn, SendFn } from "#public/definitions/channel.js";
 
 const log = createLogger("slack.interactions");
 
@@ -339,6 +339,7 @@ export interface InteractionHandlerDeps {
 export async function handleInteractionPost(
   rawBody: string,
   ctx: {
+    cancel: CancelFn;
     send: SendFn<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
@@ -423,7 +424,15 @@ export async function handleInteractionPost(
         threadTs: interaction.threadTs,
         teamId: interaction.teamId,
       });
-      const slackCtx: SlackContext = { thread, slack };
+      const slackCtx: SlackInteractionContext = {
+        cancel: (options = {}) =>
+          ctx.cancel({
+            continuationToken,
+            turnId: options.turnId,
+          }),
+        thread,
+        slack,
+      };
       for (const action of customActions) {
         ctx.waitUntil(
           Promise.resolve(onInteraction(action, slackCtx)).catch((error: unknown) => {

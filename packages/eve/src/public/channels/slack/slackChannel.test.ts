@@ -249,8 +249,12 @@ function buildEventBody(
 async function firePost(
   channel: unknown,
   request: Request,
-  overrides: { readonly resolveActiveSession?: ReturnType<typeof vi.fn> } = {},
+  overrides: {
+    readonly cancel?: ReturnType<typeof vi.fn>;
+    readonly resolveActiveSession?: ReturnType<typeof vi.fn>;
+  } = {},
 ): Promise<{
+  cancel: ReturnType<typeof vi.fn>;
   response: Response;
   send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
@@ -260,10 +264,12 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected slack channel to define a POST route.");
   }
+  const cancel = overrides.cancel ?? vi.fn().mockResolvedValue({ status: "accepted" });
   const send = vi.fn().mockResolvedValue({ id: "s1", continuationToken: "ct" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
+    cancel,
     send,
     resolveActiveSession:
       overrides.resolveActiveSession ?? vi.fn().mockResolvedValue({ sessionId: "s1" }),
@@ -280,7 +286,7 @@ async function firePost(
     await Promise.allSettled(pending);
   }
 
-  return { response, send, waitUntil };
+  return { cancel, response, send, waitUntil };
 }
 
 describe("slackChannel() default event handlers", () => {
@@ -1078,6 +1084,29 @@ describe("slackChannel() inbound mention pipeline", () => {
     });
   });
 
+  it("lets onAppMention cancel the active turn before dispatching its replacement", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.cancel({ turnId: "turn_observed" });
+        return { auth: null };
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_STEER",
+      threadTs: "1700000000.000100",
+    });
+
+    const { cancel, send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).toHaveBeenCalledWith({
+      continuationToken: "C_STEER:1700000000.000100",
+      turnId: "turn_observed",
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
+  });
+
   it("drops Slack http_timeout retries without dispatching", async () => {
     const onAppMention = vi.fn().mockReturnValue({ auth: null });
     const channel = slackChannel({
@@ -1604,6 +1633,27 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(String(fetchMock.mock.calls[0]![0])).toBe("https://slack.com/api/reactions.get");
   });
 
+  it("cancels a targeted Slack thread from onEvent", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.cancel({
+          channelId: "C01",
+          threadTs: "1700000000.000001",
+          turnId: "turn_observed",
+        });
+      },
+    });
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+
+    const { cancel } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      turnId: "turn_observed",
+    });
+  });
+
   it("can start multiple turns through the pre-bound receive function", async () => {
     const auth = {
       attributes: { source: "reaction" },
@@ -1974,6 +2024,38 @@ describe("slackChannel() HITL interaction pipeline", () => {
     } else {
       process.env.SLACK_BOT_TOKEN = ORIGINAL_BOT_TOKEN;
     }
+  });
+
+  it("cancels the interaction's Slack thread from onInteraction", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onInteraction(action, ctx) {
+        expect(action.actionId).toBe("stop");
+        await ctx.cancel({ turnId: "turn_observed" });
+      },
+    });
+
+    const { cancel, send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada" },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [],
+        },
+        actions: [{ action_id: "stop", text: { type: "plain_text", text: "Stop" } }],
+      }),
+    );
+
+    expect(cancel).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      turnId: "turn_observed",
+    });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("resumes HITL button answers with the approving Slack user auth", async () => {

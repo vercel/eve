@@ -104,6 +104,25 @@ async onMessage(ctx, message) {
 
 Like `threadContext`, this helper calls `conversations.replies` and requires the matching Slack history scope. It observes at most the first 50 messages of the thread, and a failed fetch is logged and swallowed, so the returned list may be empty or stale — treat an unexpected empty list as "don't route" rather than "no participants".
 
+#### Cancel and replace in-flight work
+
+Message hooks (`onMessage`, `onAppMention`, and `onDirectMessage`) receive a thread-bound `ctx.cancel({ turnId? })` helper. Call it before returning `{ auth }` to stop the current turn and queue the new Slack message as replacement input, producing a debounce-like experience:
+
+```ts title="agent/channels/slack.ts"
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  async onMessage(ctx, message) {
+    const shouldHandle = ctx.isBotMentioned() || (await ctx.isSubscribed());
+    if (!shouldHandle || message.author?.isBot) return null;
+
+    await ctx.cancel();
+    return { auth: null };
+  },
+});
+```
+
+`"accepted"` means the cancellation request was consumed; `"no_active_turn"` means the thread had no cancellable turn. Both are successful outcomes, so the hook can still return `{ auth }` to deliver the replacement message. Cancellation never sends input itself. A custom `onInteraction` handler receives the same bound helper, which is useful for a Stop button that should cancel without replacement input.
+
 ### Other Events API callbacks
 
 Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. `ctx.receive(options)` is the current Slack channel's pre-bound form of the schedule API's `receive(slack, options)`: call it zero, one, or many times to start turns. Each call accepts `message`, `target`, and `auth`, and returns the resulting session.
@@ -133,6 +152,8 @@ export default slackChannel({
 ```
 
 The webhook invocation already keeps an awaited `onEvent` handler alive. Use `ctx.waitUntil(promise)` for deliberately detached work, matching a handler-form schedule. `ctx.slack.request(operation, body)` provides workspace-scoped Slack Web API access, while `ctx.envelope` carries delivery metadata such as `team_id`, `event_id`, and `event_time`. Calls to `ctx.receive` automatically seed the callback's team id into Slack session state.
+
+Because a generic event is not necessarily tied to one thread, its cancellation helper takes the target explicitly: `ctx.cancel({ channelId, threadTs, turnId? })`. Pair it with `ctx.receive(...)` when an event should replace in-flight work, or call it alone to stop the turn.
 
 `onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 
