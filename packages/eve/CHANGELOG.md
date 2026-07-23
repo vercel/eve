@@ -1,5 +1,21 @@
 # eve
 
+## 0.27.3
+
+### Patch Changes
+
+- 8168518: Fix connector-auth and remote-subagent callback URLs returning 404 in multi-agent mode. Generated per-agent Vercel services now bake the agent's public route prefix (`/eve/agents/<name>`) into their workflow function environment via `EVE_PUBLIC_ROUTE_PREFIX`, framework-minted callback URLs prepend it, and the session-callback validator accepts callback URLs mounted behind a route prefix so OAuth redirects and remote-subagent session callbacks reach the deployed agent.
+- fecdaf3: Attach authenticated `uploads.linear.app` images from inbound Linear Agent Session markdown as multimodal file parts while preserving the text fallback for untrusted, failed, or non-image URLs.
+- 25c12d3: Prevent bundler-suffixed CommonJS compatibility variables from suppressing the Node ESM globals that eve bundles need at startup.
+- 1bd0aa4: Preserve underscores in connection tool names shown by Slack typing status indicators.
+- 4d3748d: Keep raw outer workflow failure details in the private session trace instead of copying them into provider logs and Workflow telemetry.
+- 4803dbe: Scope authored resolver hooks to relevant import specifiers and reuse filesystem probes for one build. Repeated extensionless misses now perform at most 19 stats once per plugin instance instead of on every resolution.
+- d76f76b: Refresh session-scoped dynamic tools when an existing production session moves to a new Vercel deployment, so added, removed, and reordered tools use the current build.
+- 45ad5d0: Analyze dynamic tool closure references from the syntax tree so object keys and string contents cannot become invalid runtime captures.
+- fc53a9f: Show the number of discovered authored tools in the human-readable `eve info` output.
+- 1c3123c: Write authored sandbox workspace seed files before running bootstrap across the Vercel, Docker, microsandbox, and just-bash backends, so bootstrap can consume canonical workspace inputs and its outputs remain in the captured template.
+- 7094b4a: Load up to 100 Vercel teams per page and use the authenticated API continuation that matches Vercel's emitted cursor, avoiding repeated-page loops for accounts with many teams. When an outdated CLI lacks the required list options, the TUI can upgrade it with the native upgrader and now retains a concise error if that upgrade fails.
+
 ## 0.27.2
 
 ### Patch Changes
