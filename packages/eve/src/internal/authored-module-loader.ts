@@ -7,6 +7,7 @@ import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { assertNoWorkflowDirectivePrologue } from "#internal/authored-directive-prologue.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
+import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import {
   createExtensionScopePlugin,
@@ -472,7 +473,11 @@ async function loadBundledAuthoredModule(
     writeFileSync(bundlePath, code);
   }
 
-  return await import(`${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`);
+  try {
+    return await import(`${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`);
+  } catch (error) {
+    throw createAuthoredModuleEvaluationError(modulePath, error);
+  }
 }
 
 function createAuthoredRelativeExtensionResolverPlugin(input: {
