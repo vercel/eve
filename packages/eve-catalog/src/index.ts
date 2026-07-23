@@ -186,6 +186,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "github-tools",
+    name: "GitHub Tools",
+    kind: "extension",
+    tagline: "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "jetty",
     name: "Jetty",
     kind: "extension",

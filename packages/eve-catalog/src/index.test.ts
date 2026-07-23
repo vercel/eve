@@ -77,6 +77,12 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
   });
 
+  it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
+    expect(getIntegrationEntry("github")?.kind).toBe("channel");
+    expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");
+    expect(getIntegrationEntry("github-tools")?.connection).toBeUndefined();
+  });
+
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
       "https://api.browser-use.com/v3/mcp",

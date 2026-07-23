@@ -649,6 +649,68 @@ The reporter reads \`JETTY_API_TOKEN\` and \`JETTY_COLLECTION\`, sends each eval
 
 Jetty trajectories persist agent inputs and outputs. Redact PII before grading, put sensitive grader parameters in Jetty's \`secretParams\` rather than \`initParams\`, and treat trajectory storage like any other logging surface. See the [Jetty eve extension documentation](https://github.com/jettyio/jetty-sdk/tree/main/packages/eve#readme) for all experiment settings and the [worked example](https://github.com/jettyio/jetty-sdk/tree/main/examples/eve-jetty) for the complete grading loop.`,
   },
+  "github-tools": {
+    logo: "github",
+    docsHref: "https://github-tools.com/frameworks/eve#eve-extension",
+    keywords: [
+      "github",
+      "repositories",
+      "pull requests",
+      "issues",
+      "code review",
+      "ci",
+      "vercel connect",
+      "approval",
+    ],
+    install: `Install the GitHub Tools extension and Vercel Connect client:
+
+\`\`\`bash
+npm install @github-tools/eve-extension @vercel/connect
+\`\`\`
+
+The extension provides the GitHub toolset as a versioned eve package. Use a Vercel Connect connector for short-lived, scoped GitHub tokens, or omit \`@vercel/connect\` and authenticate with a GitHub token.`,
+    quickStart: `Create and attach a GitHub connector to the Vercel project that runs your agent:
+
+\`\`\`bash
+vercel link
+vercel connect create github --name my-connector
+vercel connect attach github/my-connector --yes
+vercel env pull
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/github.ts"
+import githubExtension from "@github-tools/eve-extension";
+
+export default githubExtension({
+  connector: "github/my-connector",
+  preset: "maintainer",
+  requireApproval: {
+    mergePullRequest: true,
+  },
+});
+\`\`\`
+
+The filename supplies the \`github\` namespace, so tools appear as \`github__listPullRequests\`, \`github__createIssue\`, and \`github__addPullRequestComment\`. The preset automatically limits the connector token to the scopes its tools need.`,
+    configure: `Choose one or more presets to limit the available tools: \`code-review\`, \`issue-triage\`, \`repo-explorer\`, \`ci-ops\`, or \`maintainer\`. Every write tool requires approval by default, while read tools do not. Use \`requireApproval\` to apply \`always\`, \`once\`, or an input-dependent policy to individual tools:
+
+\`\`\`ts title="agent/extensions/github.ts"
+import githubExtension from "@github-tools/eve-extension";
+
+export default githubExtension({
+  connector: "github/my-connector",
+  preset: ["code-review", "issue-triage"],
+  requireApproval: {
+    addPullRequestComment: "once",
+    mergePullRequest: true,
+    createIssue: ({ toolInput }) => toolInput?.owner !== "my-org",
+  },
+});
+\`\`\`
+
+For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
+  },
   "agent-browser": {
     logo: "agent-browser",
     docsHref:

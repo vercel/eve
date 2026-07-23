@@ -55,6 +55,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(jetty!)).toContain("grading");
   });
 
+  it("renders the GitHub Tools extension setup", () => {
+    const githubTools = getIntegration("github-tools");
+    expect(githubTools).toBeDefined();
+
+    const markdown = integrationMarkdown(githubTools!);
+    expect(markdown).toContain("npm install @github-tools/eve-extension");
+    expect(markdown).toContain('connector: "github/my-connector"');
+    expect(markdown).toContain('preset: "maintainer"');
+    expect(markdown).toContain("github__addPullRequestComment");
+    expect(integrationSearchText(githubTools!)).toContain("code review");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();
