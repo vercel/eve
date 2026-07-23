@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/604
-status: proposed
-last_updated: "2026-07-08"
+status: implemented
+last_updated: "2026-07-23"
 ---
 
 # Forwarding end-user identity across remote agent hops
@@ -11,10 +11,9 @@ last_updated: "2026-07-08"
 A `defineRemoteAgent` hop drops the caller principal. Local subagent dispatch threads `auth` and
 `initiatorAuth` onto the child `RunInput` (`execution/subagent-tool.ts`), so a child session sees
 the same end user as its parent. The remote branch sends only
-`{ callback, message, mode, outputSchema }` (`execution/remote-agent-dispatch.ts`), and
-`OutboundAuthFn` is a zero-arg header factory, so the only identity that can cross the hop is
-deployment-level trust. The receiving deployment authenticates the _calling app_
-(`principalType: "runtime"` / `"service"`), never the end user.
+`{ callback, message, mode, outputSchema }` (`execution/remote-agent-dispatch.ts`), so the only
+identity that can cross the hop is deployment-level trust. The receiving deployment authenticates
+the _calling app_ (`principalType: "runtime"` / `"service"`), never the end user.
 
 This breaks per-user workloads split across deployments — most directly per-user Vercel Connect:
 `resolveConnectionPrincipal` requires `session.auth.current.principalType === "user"` and fails
@@ -24,8 +23,8 @@ has OAuthed their own Datadog / GitHub / Vercel connection.
 
 This plan adds explicit, opt-in auth forwarding on both sides of the hop. Only principal
 _metadata_ (`SessionAuthContext`) crosses the wire — never tokens or credentials. The trust model
-is "trusted forwarder": the transport auth (e.g. Vercel OIDC) authenticates the asserting
-deployment, and the receiver names exactly which callers it trusts to assert a principal — the
+is "trusted forwarder": the route's `auth` authenticates the asserting deployment as usual, and
+the receiver authorizes forwarding with a predicate over that verified transport principal — the
 same shape as `X-Forwarded-*` behind a trusted proxy, without token-exchange machinery.
 
 ```text
@@ -34,8 +33,8 @@ Slack user U ── router deployment ──────────────
                                      headers: OIDC (router app identity)
                                      body.forwardedAuth: { current: U, initiator: U }
                                                     │
-                                     eveChannel auth:          verifies router app
-                                     eveChannel forwardedAuth: router app may forward
+                                     eveChannel auth:               verifies router app
+                                     acceptForwardedAuth(caller):   router app may forward
                                                     │
                                      session.auth.current = U ──► per-user Connect,
                                                                   local subagents,
@@ -64,48 +63,25 @@ export default defineRemoteAgent({
 - When `true`, dispatch serializes the parent turn's `AuthKey` / `InitiatorAuthKey` (already in
   scope in `dispatch-runtime-actions-step.ts`) into a `forwardedAuth` field on the create-session
   body: `{ current: SessionAuthContext, initiator?: SessionAuthContext }`.
-- If the parent turn has no auth (anonymous), the field is omitted, the call proceeds on
-  transport trust alone, and no acceptance acknowledgment (below) is required.
+- The field is omitted only when `AuthKey` is `null` (the request was accepted with no
+  credentials); the call then proceeds on transport trust alone and no acceptance acknowledgment
+  (below) is required. Any non-null context is forwarded as-is — including anonymous
+  (`principalType: "anonymous"` from `none()`), schedule (`SCHEDULE_APP_AUTH`), and service
+  principals — exact parity with how local subagent dispatch threads `auth`. Non-user principals
+  still fail `principal_required` at Connect on the receiver, which is the correct outcome.
 - When the field is sent, the sender requires the receiver's response to acknowledge acceptance
-  (`forwardedAuth: "accepted"` on the create-session response). A missing acknowledgment fails the
-  dispatch inline, like any other failed remote start. Without this, a pre-forwarding eve receiver
-  would silently ignore the unknown body field and run the session as the calling service — the
-  exact silent downgrade this design rejects, reintroduced by version skew.
+  (`forwardedAuth: "accepted"` on the create-session response). Without this, a pre-forwarding eve
+  receiver would silently ignore the unknown body field (the create body parser picks known fields
+  and drops the rest) and run the session as the calling service — the exact silent downgrade this
+  design rejects, reintroduced by version skew.
+- On a missing acknowledgment, the receiver has already started the child session as the transport
+  principal, so the sender best-effort cancels it via the existing
+  `cancelRemoteAgentTurn` path (the child `sessionId` is in hand from the response), then fails
+  the dispatch inline like any other failed remote start.
 - The flag rides the module-backed runtime definition next to `auth` and `headers`; the compiled
   manifest node is unchanged.
 
-### Sender: context-aware `OutboundAuthFn`
-
-For schemes that mint a per-user credential at dispatch time (custom JWTs, token exchange),
-`OutboundAuthFn` gains a context argument:
-
-```ts
-// eve/agents/auth
-export interface OutboundAuthContext {
-  /** Session principals of the dispatching turn. */
-  readonly auth: {
-    readonly current: SessionAuthContext | null;
-    readonly initiator: SessionAuthContext | null;
-  };
-}
-
-export type OutboundAuthFn = (ctx: OutboundAuthContext) => Promise<{
-  readonly headers: Readonly<Record<string, string>>;
-}>;
-```
-
-```ts
-auth: async ({ auth }) => ({
-  headers: { authorization: `Bearer ${await mintUserJwt(auth.current)}` },
-}),
-```
-
-Pre-1.0 breaking type change; the built-ins (`vercelOidc`, `bearer`, `basic`) ignore the argument
-and keep working, so only custom implementations touch their signature. `forwardAuth` is the
-recommended path; a context-aware `auth` is the escape hatch for non-eve receivers or bespoke
-credential schemes.
-
-### Receiver: `forwardedAuth` on `eveChannel`
+### Receiver: `acceptForwardedAuth` on `eveChannel`
 
 ```ts
 // agent/channels/eve.ts  (site-ops deployment)
@@ -114,21 +90,29 @@ import { eveChannel, vercelOidc, vercelSubject } from "eve";
 export default eveChannel({
   auth: [vercelOidc()],
   // Only the router deployment may assert a forwarded principal.
-  forwardedAuth: [vercelOidc({ subjects: [vercelSubject({ project: "router" })] })],
+  acceptForwardedAuth: ({ subject }) =>
+    subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
 });
 ```
 
-- `forwardedAuth?: AuthFn<Request> | readonly AuthFn<Request>[]`. Same primitive and `routeAuth`
-  walk as `auth`, so trusted forwarders are expressed with the exact vocabulary already used for
-  route protection — no new predicate or policy type.
-- Semantics: the gate authenticates the _transport request_ (who is asserting), not the forwarded
-  identity (what is asserted). The forwarded `SessionAuthContext` values are validated against a
-  strict zod schema, mirroring how `callback` is validated today.
-- The gate runs in **strict mode**: the Vercel OIDC always-on current-project bypass does not
-  apply inside `forwardedAuth`, so only explicit `subjects` matches (or other explicit strategies)
-  pass. Route `auth` keeps the bypass for convenience; impersonation authority does not — without
-  this, any same-project caller, including preview deployments of the receiving project, could
-  assert arbitrary principals against production Connect grants.
+- `acceptForwardedAuth?: (caller: SessionAuthContext) => boolean | Promise<boolean>`. The
+  predicate authorizes the _verified transport principal_ (who is asserting), not the forwarded
+  identity (what is asserted). The route's `auth` walk has already authenticated the request; the
+  forwarding decision is authorization over its result, so there is no second token verification
+  and no new auth machinery.
+- A predicate — rather than a second `AuthFn` walk — makes the Vercel OIDC always-on
+  current-project bypass structurally irrelevant: the bypass lives inside `vercelOidc()` closures
+  and cannot be disabled from the outside, and with a predicate the author must write an explicit
+  match against the verified principal. Same-project callers (including preview deployments of
+  the receiving project) get a transport principal whose `subject` simply does not match the named
+  forwarder. `vercelSubject()` already produces the exact `sub` string to compare.
+- The forwarded `SessionAuthContext` values are validated against a strict wire schema in a new
+  `channel/forwarded-auth.ts`, mirroring how `callback` is validated today
+  (`channel/session-callback.ts`). The schema is strict on keys but **must keep `authenticator`
+  and `principalType` as open non-empty strings** (matching the public `SessionAuthContext`
+  interface) with attribute values `string | string[]`. It must not mirror the private runtime
+  schema in `runtime/sessions/auth.ts`, whose enums (`"http-basic" | "jwt-hmac" | ...`) would
+  reject the flagship use case — a Slack-authenticated user has `authenticator: "slack-webhook"`.
 
 ## Semantics
 
@@ -143,66 +127,76 @@ export default eveChannel({
   overwriting any sender-supplied value — a forwarder must not be able to falsify the trail. On
   multi-hop chains (A→B→C) the attribute names the most recent hop only. Attributes do not affect
   Connect token-cache keying (`principalKey` uses issuer + id only).
-- **`onMessage` still runs last.** `EveHandle.caller` is the forwarded principal once accepted;
-  `defaultEveAuth` passes it through, and a custom `onMessage` can still override or drop, same as
-  today.
+- **`onMessage` still runs last, after stamping.** `eve:forwarded-by` is written before
+  `onMessage` runs. `EveHandle.caller` is the forwarded principal once accepted, so
+  `caller.attributes["eve:forwarded-by"]` is the window a custom `onMessage` has onto the
+  transport caller; `defaultEveAuth` passes the forwarded principal through, and a custom
+  `onMessage` can still override or drop, same as today.
 - **Fail loud, never fall back silently.** A body carrying `forwardedAuth` when the channel has no
-  `forwardedAuth` option → 403 ("this deployment does not accept forwarded auth"). Gate configured
-  but the transport request fails it → 401/403 from `routeAuth`. Malformed `forwardedAuth`
-  payload → 400. On acceptance, the 202 response carries `forwardedAuth: "accepted"`, which the
-  sender requires (see the sender section) — covering the remaining silent path, an old receiver
-  that ignores the field. Silently downgrading to the transport principal would surface later as
-  an opaque `principal_required` deep inside a Connect call; a mismatch between the two
-  deployments is a configuration error and should fail at the hop.
+  `acceptForwardedAuth` option → 403 ("this deployment does not accept forwarded auth"). Predicate
+  returns `false` → 403. Malformed `forwardedAuth` payload → 400. On acceptance, the 202 response
+  carries `forwardedAuth: "accepted"`, which the sender requires (see the sender section) —
+  covering the remaining silent path, an old receiver that ignores the field. Silently downgrading
+  to the transport principal would surface later as an opaque `principal_required` deep inside a
+  Connect call; a mismatch between the two deployments is a configuration error and should fail at
+  the hop.
 - **What never crosses the wire:** tokens, credentials, claims. Only the `SessionAuthContext`
   shape (`attributes`, `authenticator`, `issuer`, `principalId`, `principalType`, `subject`).
   Per-user provider credentials always live on the receiving deployment via its own Connect
   authorizations.
 - **Events unchanged.** `subagent.called` and callbacks are untouched; forwarding is invisible to
-  the parent stream.
+  the parent stream. The cancel path is untouched: it authenticates with the definition's existing
+  `auth` / `headers` and carries no forwarded identity.
 
 ## Boundaries and surfaces
 
-| Surface                                                                    | Change                                                                                                |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `public/agents/auth.ts`                                                    | `OutboundAuthContext`; `OutboundAuthFn` takes it                                                      |
-| `public/definitions/remote-agent.ts`                                       | `forwardAuth?: boolean`                                                                               |
-| `execution/dispatch-runtime-actions-step.ts`                               | pass `auth` / `initiatorAuth` (already in scope) to remote dispatch                                   |
-| `execution/remote-agent-dispatch.ts`                                       | build `forwardedAuth` body field; require the acceptance ack; call `remote.auth(ctx)` with context    |
-| `channel/forwarded-auth.ts` (new)                                          | strict wire schema for `{ current, initiator? }`, beside `session-callback.ts`                        |
-| `public/channels/eve.ts`                                                   | `forwardedAuth` option; gate (strict mode) + principal replacement + response ack on the create route |
-| `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md` | forwarding section on each side + trust-model warning                                                 |
+| Surface                                                                    | Change                                                                                                                  |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `public/definitions/remote-agent.ts`                                       | `forwardAuth?: boolean`                                                                                                 |
+| `execution/dispatch-runtime-actions-step.ts`                               | pass `auth` / `initiatorAuth` (already in scope) to remote dispatch                                                     |
+| `execution/remote-agent-dispatch.ts`                                       | build `forwardedAuth` body field; require the acceptance ack; best-effort cancel the child on missing ack               |
+| `channel/forwarded-auth.ts` (new)                                          | strict wire schema for `{ current, initiator? }` (open `authenticator` / `principalType`), beside `session-callback.ts` |
+| `public/channels/eve.ts`                                                   | `acceptForwardedAuth` option; predicate check + principal replacement + response ack on the create route                |
+| `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md` | forwarding section on each side + trust-model warning                                                                   |
 
-Docs must carry the security guidance explicitly: scope `forwardedAuth` to named subjects (e.g.
-`vercelSubject({ project })`); never include `none()` or a broad accept-all in the forwarder gate,
-since any caller passing it can assert any principal.
+Docs must carry the security guidance explicitly: match the transport principal precisely (e.g.
+`subject === vercelSubject({ teamSlug, projectName })`); a permissive predicate (`() => true`)
+lets any authenticated caller assert any principal. Docs must also note that the framework default
+channel has no `acceptForwardedAuth`, so a receiving deployment must author its own
+`agent/channels/eve.ts` to accept forwarded identity — forwarded bodies 403 until it does.
 
 ## Out of scope
 
 - Token exchange, delegation tokens, or forwarding credentials of any kind — the receiver mints
   its own per-user credentials via Connect.
-- Forwarding to non-eve receivers (covered by the context-aware `OutboundAuthFn` escape hatch).
+- A context-aware `OutboundAuthFn` (passing the dispatching turn's principals so custom schemes
+  can mint per-user credentials for non-eve receivers). Adding a parameter to the function type
+  later is fully non-breaking — zero-arg implementations remain assignable and eve is the only
+  caller — so this waits for a concrete need. It would also have to define what context the
+  cancel path passes, since `cancelRemoteAgentTurn` resolves headers through the same
+  `resolveRemoteAgentRequestHeaders`.
 - Per-call forwarding decisions (the flag is per remote-agent definition).
 - Reduced-scope or transformed principals (an `onMessage` override on the receiver already covers
   reshaping).
 - Forwarding on the deliver route (`POST /eve/v1/session/:sessionId`). Remote dispatch is
-  create-only today, so nothing in eve would send it; the same field + gate can extend to deliver
-  if external eve clients need multi-turn forwarding later.
+  create-only today, so nothing in eve would send it; the same field + predicate can extend to
+  deliver if external eve clients need multi-turn forwarding later.
 
 ## Delivery and verification
 
-Single PR with a **minor** changeset: the `OutboundAuthFn` signature change is a public API break
-(zero-arg implementations remain assignable, but the exported type changes).
+Single PR with a **patch** changeset: both options are additive; no public API breaks.
 
-- Unit: wire schema (strict, malformed rejection), dispatch body construction with/without
-  `forwardAuth` and with null auth, missing-ack dispatch failure, `OutboundAuthFn` receives the
-  dispatching principals, receiver gate matrix (field without option → 403, gate failure →
-  401/403, current-project bypass rejected in strict mode, accepted → principal replaced +
-  `forwardedAuth: "accepted"` in the response, sender-supplied `eve:forwarded-by` overwritten).
+- Unit: wire schema (strict on keys, open `authenticator` / `principalType`, channel-produced
+  contexts like `slack-webhook` accepted, malformed rejection), dispatch body construction with
+  and without `forwardAuth` and with null auth (field omitted, no ack required), missing-ack
+  dispatch failure including the best-effort child cancel, receiver matrix (field without option →
+  403, predicate false → 403, predicate true → principal replaced + `forwardedAuth: "accepted"`
+  in the response, `eve:forwarded-by` stamped from the verified transport principal and
+  sender-supplied values overwritten, stamping visible to `onMessage`).
 - Integration: create route end-to-end in memory — forwarded principal becomes
   `session.auth.current` / `.initiator` and reaches `resolveConnectionPrincipal` as a `user`
   principal.
 - Scenario: two in-process eve servers over real HTTP — router with `forwardAuth: true` dispatches
-  to a receiver whose `forwardedAuth` gate accepts it, asserting the child session principal; plus
-  the 403 mismatch path. (No remote-agent e2e fixture exists today; a scenario with a real HTTP
-  boundary covers the hop without requiring a second CI deployment.)
+  to a receiver whose `acceptForwardedAuth` predicate accepts it, asserting the child session
+  principal; plus the 403 mismatch path. (No remote-agent e2e fixture exists today; a scenario
+  with a real HTTP boundary covers the hop without requiring a second CI deployment.)
