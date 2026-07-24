@@ -251,10 +251,12 @@ async function firePost(
   request: Request,
   overrides: {
     readonly cancel?: ReturnType<typeof vi.fn>;
+    readonly reset?: ReturnType<typeof vi.fn>;
     readonly resolveActiveSession?: ReturnType<typeof vi.fn>;
   } = {},
 ): Promise<{
   cancel: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
   response: Response;
   send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
@@ -265,11 +267,15 @@ async function firePost(
     throw new Error("Expected slack channel to define a POST route.");
   }
   const cancel = overrides.cancel ?? vi.fn().mockResolvedValue({ status: "accepted" });
+  const reset =
+    overrides.reset ??
+    vi.fn().mockResolvedValue({ status: "reset", previousSessionId: "session_previous" });
   const send = vi.fn().mockResolvedValue({ id: "s1", continuationToken: "ct" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
     cancel,
+    reset,
     send,
     resolveActiveSession:
       overrides.resolveActiveSession ?? vi.fn().mockResolvedValue({ sessionId: "s1" }),
@@ -286,7 +292,7 @@ async function firePost(
     await Promise.allSettled(pending);
   }
 
-  return { cancel, response, send, waitUntil };
+  return { cancel, reset, response, send, waitUntil };
 }
 
 describe("slackChannel() default event handlers", () => {
@@ -1107,6 +1113,29 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
   });
 
+  it("lets onAppMention reset the thread session before starting a fresh replacement", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.reset({ reason: "Slack user requested a fresh conversation" });
+        return { auth: null };
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_RESET",
+      threadTs: "1700000000.000200",
+    });
+
+    const { reset, send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(reset).toHaveBeenCalledWith({
+      continuationToken: "C_RESET:1700000000.000200",
+      reason: "Slack user requested a fresh conversation",
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(reset.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
+  });
+
   it("drops Slack http_timeout retries without dispatching", async () => {
     const onAppMention = vi.fn().mockReturnValue({ auth: null });
     const channel = slackChannel({
@@ -1654,6 +1683,27 @@ describe("slackChannel() generic Events API pipeline", () => {
     });
   });
 
+  it("resets a targeted Slack thread from onEvent", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.reset({
+          channelId: "C01",
+          threadTs: "1700000000.000001",
+          reason: "Reaction requested a fresh conversation",
+        });
+      },
+    });
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+
+    const { reset } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(reset).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      reason: "Reaction requested a fresh conversation",
+    });
+  });
+
   it("can start multiple turns through the pre-bound receive function", async () => {
     const auth = {
       attributes: { source: "reaction" },
@@ -2054,6 +2104,43 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(cancel).toHaveBeenCalledWith({
       continuationToken: "C01:1700000000.000001",
       turnId: "turn_observed",
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("resets the interaction's Slack thread from onInteraction", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onInteraction(action, ctx) {
+        expect(action.actionId).toBe("new-conversation");
+        await ctx.reset({ reason: "New conversation button clicked" });
+      },
+    });
+
+    const { reset, send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada" },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [],
+        },
+        actions: [
+          {
+            action_id: "new-conversation",
+            text: { type: "plain_text", text: "New conversation" },
+          },
+        ],
+      }),
+    );
+
+    expect(reset).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      reason: "New conversation button clicked",
     });
     expect(send).not.toHaveBeenCalled();
   });
