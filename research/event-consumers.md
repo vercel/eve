@@ -169,9 +169,12 @@ CALLER   POST /eve/v1/callback/:token {status:"notification", event}
                        └─► append subagent.event ──► durable stream ──► followers
 ```
 
-The session's entry workflow starts one consumer run, handing it the stream
-writable — the same cross-run handoff turns get — and the serialized
-channel context. The consumer awaits `<sessionId>:events`, a hook whose
+The consumer is a **sidecar run**: an auxiliary workflow run deployed 1:1
+with the session — started by the entry, disposed when the session ends,
+pinned to the entry's deployment — that takes a cross-cutting concern
+(event consumption) off the primary run's path, with its own journal. The
+session's entry workflow starts it, handing it the stream writable — the
+same cross-run handoff turns get — and the serialized channel context. The consumer awaits `<sessionId>:events`, a hook whose
 token is stable for the session's lifetime — producers stop chasing the
 rotating turn token, and the engine's own hook buffering applies; each
 delivery is one journaled **write step** (`event-consumer-write-step` — the run owns
@@ -208,6 +211,18 @@ the caller's own deployment — the local world in dev, the workflow backend
 on Vercel. Started plainly, without latest-deployment routing: it holds the
 entry's stream writable and channel context, so it must live and die with
 the entry's deployment.
+
+### Why a sidecar and not the entry
+
+Waking a workflow run replays that run's journal, under the engine's
+per-invocation replay budget. The entry's journal grows with the session —
+every turn dispatch, step, and hook it ever awaited — so consuming events
+on the entry (or on a concurrent branch inside it, which shares the same
+journal) makes a rendering-only notification's wake cost proportional to
+the whole conversation, unboundedly. The sidecar's journal holds only its
+own deliveries, so its per-wake replay is bounded by notification volume
+regardless of session length. The extra run is not organizational — it is
+the replay-cost firewall between event consumption and session history.
 
 ## Callee side: deferred direct forwarding
 
