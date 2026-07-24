@@ -122,6 +122,14 @@ history, fixtures, report integrity, and assignment of every public authoring
 export to a capability. Reports and fixtures cover structural compatibility;
 behavior changes still need focused compatibility tests.
 
+## Adding an extension to the registry
+
+The registry and integrations gallery list reviewed, published extensions. Open an issue and get maintainer agreement before submitting a registry addition. The package must be publicly installable from npm, work with the current released `eve` version, and include documentation for its configuration, authentication, and any security-sensitive behavior.
+
+In the PR, add the package as an `apps/docs` dev dependency, add its package to the reviewed exceptions in `pnpm-workspace.yaml`, and add a mount example under [`apps/docs/registry/extensions/`](./apps/docs/registry/extensions/). Register that example, its dependencies, title, and description in [`apps/docs/registry.json`](./apps/docs/registry.json).
+
+Also add the extension identity to [`packages/eve-catalog/src/index.ts`](./packages/eve-catalog/src/index.ts), its gallery presentation and setup instructions to [`apps/docs/lib/integrations/data.ts`](./apps/docs/lib/integrations/data.ts), and a logo in [`apps/docs/lib/integrations/logos.tsx`](./apps/docs/lib/integrations/logos.tsx). Add or update focused tests for the integration page. Run `pnpm --filter eve-docs registry:check`; it generates the files under `apps/docs/public/r/`, so do not edit those generated files by hand.
+
 ## Documentation
 
 User-facing docs live in [`docs/`](./docs) and are published with the `eve` npm package and rendered by the docs site in [`apps/docs`](./apps/docs). If your change alters public behavior, update the relevant doc in the same PR and run `pnpm docs:check`.
