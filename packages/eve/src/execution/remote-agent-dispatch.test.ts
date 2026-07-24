@@ -108,6 +108,72 @@ describe("startRemoteAgentSession", () => {
     expect(body.mode).toBe("task");
   });
 
+  it("drops a model-supplied empty outputSchema instead of forwarding it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), {
+        headers: { "x-eve-session-id": "remote-session-header" },
+        status: 202,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: {
+        ...createAction(),
+        input: { message: "find the marker", outputSchema: {} },
+      },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect("outputSchema" in body).toBe(false);
+  });
+
+  it("falls back to the declared outputSchema when the model sends an empty one", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), {
+        headers: { "x-eve-session-id": "remote-session-header" },
+        status: 202,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outputSchema = {
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+      type: "object",
+    } as const;
+
+    await startRemoteAgentSession({
+      action: {
+        ...createAction(),
+        input: { message: "find the marker", outputSchema: {} },
+      },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: { ...createRemoteAgent(), outputSchema },
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.outputSchema).toEqual(outputSchema);
+  });
+
   it("targets an active turn inbox when a callback token is supplied", async () => {
     const fetchMock = vi
       .fn()

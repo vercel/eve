@@ -1,4 +1,5 @@
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#protocol/routes.js";
 import type { CancelTurnResult } from "#channel/types.js";
@@ -49,7 +50,7 @@ export async function startRemoteAgentSession(input: {
       message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),
       mode: "task",
       outputSchema:
-        (input.action.input.outputSchema as object | undefined) ?? input.remote.outputSchema,
+        requestedRemoteOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
     }),
     headers: {
       "content-type": "application/json",
@@ -183,6 +184,16 @@ function formatRemoteAgentCallInputMessage(input: {
     name: input.action.remoteAgentName,
     type: "remote",
   }).message;
+}
+
+/**
+ * A model-supplied per-call schema only counts when it is a non-empty JSON
+ * object — models routinely emit `outputSchema: {}` for the optional param.
+ * Mirrors the local-delegation filter in `subagent-tool.ts`, so an empty
+ * object never forces the remote into structured-output task completion.
+ */
+function requestedRemoteOutputSchema(value: JsonValue | undefined): object | undefined {
+  return isJsonObjectValue(value) && Object.keys(value).length > 0 ? value : undefined;
 }
 
 function trimTrailingSlash(value: string): string {
