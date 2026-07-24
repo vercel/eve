@@ -4,7 +4,7 @@
   "homepage": "https://eve.dev",
   "items": [
     {
-      "name": "agent-browser",
+      "name": "extension/agent-browser",
       "type": "registry:item",
       "title": "agent-browser",
       "description": "Add browser automation tools backed by agent-browser to an eve agent.",
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "name": "browserbase",
+      "name": "extension/browserbase",
       "type": "registry:item",
       "title": "Browserbase",
       "description": "Search, fetch, and automate the web with Browserbase and Stagehand.",
@@ -32,7 +32,7 @@
       ]
     },
     {
-      "name": "github-tools",
+      "name": "extension/github-tools",
       "type": "registry:item",
       "title": "GitHub Tools",
       "description": "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
@@ -46,7 +46,7 @@
       ]
     },
     {
-      "name": "jetty",
+      "name": "extension/jetty",
       "type": "registry:item",
       "title": "Jetty",
       "description": "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
@@ -60,7 +60,7 @@
       ]
     },
     {
-      "name": "kernel",
+      "name": "extension/kernel",
       "type": "registry:item",
       "title": "KERNEL",
       "description": "Let your eve agent use the Internet with KERNEL browser infrastructure, observability, and stealth.",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry-item.json",
-  "name": "jetty",
+  "name": "extension/jetty",
   "title": "Jetty",
   "description": "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
   "dependencies": ["@jetty/eve"],

@@ -1,6 +1,6 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry-item.json",
-  "name": "kernel",
+  "name": "extension/kernel",
   "title": "KERNEL",
   "description": "Let your eve agent use the Internet with KERNEL browser infrastructure, observability, and stealth.",
   "dependencies": ["@onkernel/eve-extension"],

@@ -1,6 +1,6 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry-item.json",
-  "name": "agent-browser",
+  "name": "extension/agent-browser",
   "title": "agent-browser",
   "description": "Add browser automation tools backed by agent-browser to an eve agent.",
   "dependencies": ["@agent-browser/eve"],

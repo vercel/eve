@@ -1,6 +1,6 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry-item.json",
-  "name": "browserbase",
+  "name": "extension/browserbase",
   "title": "Browserbase",
   "description": "Search, fetch, and automate the web with Browserbase and Stagehand.",
   "dependencies": ["@browserbasehq/eve"],
