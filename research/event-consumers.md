@@ -39,11 +39,19 @@ baseline that carries the mechanism:
   ([session-callback-post.ts:31](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/session-callback-post.ts#L31)),
   and the callee logs and moves on
   ([session-callback-notification.ts:61](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/session-callback-notification.ts#L61)).
-  Concretely: a child's `authorization.completed` and its terminal
-  callback are independent POSTs; once termination resolves the call — or
-  the caller parks for input — the inbox token is dead and the event is
-  gone. One curl verifies the window: POST a well-formed notification to a
-  session's callback URL while it isn't parked at the inbox and read back
+  The window matters because these events are how a person gets
+  unblocked. Expected path: a remote child parks on sign-in, the forwarded
+  `authorization.required` becomes the sign-in prompt in the caller's
+  channel, the person clicks, the child resumes. Now let the caller's turn
+  be parked for input at that moment — it also holds a pending approval,
+  the exact shape the #1167 hitl-collision eval constructs — and the same
+  POST answers 404, the callee drops it, and the only person who can
+  unblock the child is never asked. The completion side has the same
+  window: `authorization.completed` races the terminal callback as an
+  independent POST, so a sign-in card that did render can stay frozen on
+  "waiting" after the child already finished. One curl verifies the
+  window: POST a well-formed notification to a session's callback URL
+  while it isn't parked at the inbox and read back
   `{"error":"Session callback not pending."}`.
 - **Nothing redelivers.** Producers do emit from journaled steps, but a
   delivery failure never reaches the journal — deliberately, so an
