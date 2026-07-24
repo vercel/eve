@@ -313,12 +313,19 @@ async function raceAttemptAgainstChoice(input: {
  * flow. Existing connectors are verified through their team-scoped detail
  * payload before attachment.
  */
+export type SlackConnectorSelection = SlackConnectorRef | "create";
+
 export interface ProvisionSlackbotOptions {
   /**
    * Cancels the caller's whole operation. The promise rejects after attempting
    * cleanup; only the explicit interactive Cancel action returns `cancelled`.
    */
   signal?: AbortSignal;
+  /** Chooses a project-attached connector or requests a new one. */
+  selectConnector?: (
+    connectors: readonly SlackConnectorRef[],
+    preferred: SlackConnectorRef | undefined,
+  ) => Promise<SlackConnectorSelection>;
   /** Concurrent retry/cancel controls supplied by an interactive prompter. */
   awaitChoice?: ChannelSetupAwaitChoice;
 }
@@ -607,7 +614,14 @@ export async function provisionSlackbot(
   }
 
   if (existing.state === "found") {
-    return runExistingConnector({ state: "existing", ref: existing.connector });
+    const selection =
+      options.selectConnector === undefined
+        ? (existing.preferred ?? existing.connectors[0]!)
+        : await options.selectConnector(existing.connectors, existing.preferred);
+    options.signal?.throwIfAborted();
+    if (selection !== "create") {
+      return runExistingConnector({ state: "existing", ref: selection });
+    }
   }
 
   let source: NewAttemptSource = {

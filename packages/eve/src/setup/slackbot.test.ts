@@ -10,6 +10,7 @@ import {
   pickSlackConnector,
   provisionSlackbot,
   reconcileSlackUid,
+  type SlackConnectorSelection,
 } from "./slackbot.js";
 
 vi.mock("#setup/primitives/run-vercel.js", () => ({
@@ -331,6 +332,110 @@ describe("provisionSlackbot", () => {
     );
 
     expect(mockedRunVercelCaptureStdout).not.toHaveBeenCalled();
+  });
+
+  it("lets interactive setup choose among project connectors or create a new one", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce({
+        ok: true,
+        stdout: JSON.stringify({
+          connectors: [
+            {
+              uid: "slack/other",
+              id: "scl_other",
+              type: "slack",
+              createdAt: 2,
+              projects: [{ id: "prj_demo" }],
+            },
+            {
+              uid: "slack/my-agent",
+              id: "scl_expected",
+              type: "slack",
+              createdAt: 1,
+              projects: [{ id: "prj_demo" }],
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        stdout: connectedSlackConnectorJson("slack/other", "scl_other"),
+      });
+    mockedRunVercel.mockResolvedValue(true);
+    const selectConnector = vi.fn<
+      (
+        connectors: readonly { uid: string; id: string }[],
+        preferred: { uid: string; id: string } | undefined,
+      ) => Promise<SlackConnectorSelection>
+    >(async (connectors, preferred) => {
+      expect(connectors.map((connector) => connector.uid)).toEqual([
+        "slack/other",
+        "slack/my-agent",
+      ]);
+      expect(preferred?.uid).toBe("slack/my-agent");
+      return connectors[0]!;
+    });
+
+    await expect(
+      provisionSlackbot(
+        createTestLog(),
+        "/tmp/eve-agent",
+        "my-agent",
+        {
+          captureVercel: mockedCaptureVercel,
+          runVercel: mockedRunVercel,
+          runVercelCaptureStdout: mockedRunVercelCaptureStdout,
+          readProjectLink: async () => ({ projectId: "prj_demo", orgId: "team_demo" }),
+        },
+        { selectConnector },
+      ),
+    ).resolves.toMatchObject({ state: "attached", connectorUid: "slack/other" });
+    expect(selectConnector).toHaveBeenCalledOnce();
+    expect(mockedRunVercelCaptureStdout).not.toHaveBeenCalled();
+  });
+
+  it("creates a new connector when interactive setup requests one", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce({
+        ok: true,
+        stdout: JSON.stringify({
+          connectors: [
+            {
+              uid: "slack/existing",
+              id: "scl_existing",
+              type: "slack",
+              createdAt: 1,
+              projects: [{ id: "prj_demo" }],
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        stdout: connectedSlackConnectorJson("slack/my-agent", "scl_new"),
+      });
+    mockedRunVercelCaptureStdout.mockResolvedValue({
+      ok: true,
+      stdout: createSlackConnectorJson("slack/my-agent", "scl_new"),
+    });
+    mockedRunVercel.mockResolvedValue(true);
+
+    await expect(
+      provisionSlackbot(
+        createTestLog(),
+        "/tmp/eve-agent",
+        "my-agent",
+        {
+          captureVercel: mockedCaptureVercel,
+          runVercel: mockedRunVercel,
+          runVercelCaptureStdout: mockedRunVercelCaptureStdout,
+          readProjectLink: async () => ({ projectId: "prj_demo", orgId: "team_demo" }),
+          delay: async () => {},
+        },
+        { selectConnector: async () => "create" },
+      ),
+    ).resolves.toMatchObject({ state: "attached", connectorUid: "slack/my-agent" });
+    expect(mockedRunVercelCaptureStdout).toHaveBeenCalled();
   });
 
   it("recognizes Slack workspace metadata from the connector detail payload", async () => {

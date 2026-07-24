@@ -20,7 +20,7 @@ import {
   projectResolutionFromDeployment,
   type ProjectResolution,
 } from "../project-resolution.js";
-import { confirm, SkippedSignal, type Asker } from "../ask.js";
+import type { Asker } from "../ask.js";
 import type { Prompter } from "../prompter.js";
 import {
   provisionSlackbot,
@@ -152,14 +152,16 @@ export interface AddChannelsOptions {
    * every package value comes from the build-stamped defaults.
    */
   evePackage?: EvePackageContract;
-  /** Skip the "Create slackbot?" prompt and use this answer. */
+  /** Reuse the preferred existing Slack connector without prompting. */
   presetCreateSlackbot?: boolean;
   /** Overwrite existing channel files (`eve channels add --force`). */
   force?: boolean;
+  /** Credential source for Slack. Defaults to Vercel Connect. */
+  slackCredentials?: "vercel-connect" | "environment";
   /**
-   * Override for the web scaffold's Vercel services config. Defaults to
-   * `hasVercelProject(state)`; `eve channels add` pins it to true so an
-   * unlinked directory still gets the config, matching the dissolved engine.
+   * Override for the web scaffold's Vercel services config. The explicit
+   * environment plan takes precedence; otherwise this defaults to
+   * `hasVercelProject(state)`.
    */
   configureVercelServices?: boolean;
   /**
@@ -181,8 +183,7 @@ export interface AddChannelsOptions {
 }
 
 /**
- * What the user (or the preset) decided before `perform` runs effects.
- * `createSlackbot` is only consulted when Slack is in the channel selection.
+ * Inputs resolved before `perform` runs channel effects.
  */
 export interface AddChannelsInput {
   headless: boolean;
@@ -214,6 +215,7 @@ export interface AddChannelsPayload {
    * channels were recorded (nothing ran) and when the install failed; only a
    * success lets `apply` mark the deploy-time install as already done.
    */
+  dependenciesChanged: boolean;
   dependenciesInstalled: boolean;
   project: ProjectResolution;
   slackbot?: AddChannelsSlackbotFacts;
@@ -278,6 +280,7 @@ export function addChannels(
         slackConnectorSlug: slug,
         force: options.force,
       });
+      payload.dependenciesChanged ||= result.packageJsonUpdated.length > 0;
       warnOverwrittenFiles(log, result.filesOverwritten);
       if (result.action === "created" || result.action === "overwritten") {
         log.success("Scaffolded channel: slack");
@@ -356,6 +359,7 @@ export function addChannels(
       ensureWebOptions.webPackageVersions = { evePackage: options.evePackage };
     }
     const result = await deps.ensureChannel(ensureWebOptions);
+    payload.dependenciesChanged ||= result.packageJsonUpdated.length > 0;
     signal?.throwIfAborted();
     warnOverwrittenFiles(log, result.filesOverwritten);
     if (
@@ -395,11 +399,27 @@ export function addChannels(
     slug: SlackConnectorSlug,
     signal?: AbortSignal,
   ): Promise<ProvisionSlackbotResult> {
-    if (signal === undefined && options.prompter.awaitChoice === undefined) {
-      return deps.provisionSlackbot(log, projectPath, slug);
-    }
-
-    const provisionOptions: ProvisionSlackbotOptions = {};
+    const provisionOptions: ProvisionSlackbotOptions = {
+      selectConnector: async (connectors, preferred) => {
+        if (options.presetCreateSlackbot === true) return preferred ?? connectors[0]!;
+        const choices = connectors.map((connector) => {
+          const choice: { value: string; label: string; hint?: string } = {
+            value: connector.uid,
+            label: `Use ${connector.uid}`,
+          };
+          if (connector.uid === preferred?.uid) choice.hint = "Matches this agent";
+          return choice;
+        });
+        const request = {
+          message: "Which Slack app would you like to use?",
+          options: [...choices, { value: "create", label: "Create a new Slack app" }],
+          initialValue: preferred?.uid,
+        };
+        const selected = await options.prompter.select<string>(request);
+        if (selected === "create") return "create";
+        return connectors.find((connector) => connector.uid === selected)!;
+      },
+    };
     if (signal !== undefined) provisionOptions.signal = signal;
     if (options.prompter.awaitChoice !== undefined) {
       provisionOptions.awaitChoice = options.prompter.awaitChoice;
@@ -440,9 +460,31 @@ export function addChannels(
     signal?: AbortSignal,
   ): Promise<void> {
     if (!state.channelSelection.includes("slack")) return;
-    assertSlackProjectReady(state);
 
     const slug = await deps.deriveSlackConnectorSlug(projectPath, state.agentName);
+    if (options.slackCredentials === "environment") {
+      if (!state.slackScaffolded) {
+        const result = await deps.ensureChannel({
+          projectRoot: projectPath,
+          kind: "slack",
+          slackConnectorSlug: slug,
+          slackCredentials: "environment",
+          force: options.force,
+        });
+        payload.dependenciesChanged ||= result.packageJsonUpdated.length > 0;
+        warnOverwrittenFiles(log, result.filesOverwritten);
+        if (result.action === "created" || result.action === "overwritten") {
+          log.success("Scaffolded channel: slack");
+        } else {
+          log.info('Channel "slack" already exists. Skipping file creation.');
+        }
+        payload.slackScaffolded = true;
+      }
+      payload.channelsAdded.push("slack");
+      return;
+    }
+
+    assertSlackProjectReady(state);
     if (state.slackbotCreated) {
       // Rerun with a provisioned slackbot: never create a second connector.
       if (!state.slackbotAttached) throw new Error(SLACKBOT_NOT_ATTACHED_ERROR);
@@ -456,11 +498,6 @@ export function addChannels(
         state: "attached",
         connectorUid,
       });
-      return;
-    }
-
-    if (input.createSlackbot !== true) {
-      log.info("Slack channel was not added because Slackbot setup was skipped.");
       return;
     }
 
@@ -509,7 +546,7 @@ export function addChannels(
     payload: AddChannelsPayload,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (payload.channelsAdded.length === 0) return;
+    if (!payload.dependenciesChanged) return;
     const installed = await withPhase(
       log,
       `Installing channel dependencies (${packageManager} install)...`,
@@ -543,6 +580,7 @@ export function addChannels(
       channelsAdded: [],
       webScaffolded: state.webScaffolded,
       slackScaffolded: state.slackScaffolded,
+      dependenciesChanged: false,
       dependenciesInstalled: false,
       project: state.project,
     };
@@ -561,37 +599,16 @@ export function addChannels(
 
     async gather({ state }): Promise<AddChannelsInput> {
       const headless = options.headless ?? false;
-      // A deliberately plain Error, not HumanActionRequiredError: there is no
-      // single command a human can run to finish this; the guided flow owns it.
-      // A presetCreateSlackbot does not rescue headless Slack either.
-      if (headless && state.channelSelection.includes("slack")) {
+      // Connect opens a browser and remains interactive. Environment-backed
+      // Slack has no provisioning effect, so headless setup can scaffold it.
+      if (
+        headless &&
+        state.channelSelection.includes("slack") &&
+        options.slackCredentials !== "environment"
+      ) {
         throw new Error(SLACK_HEADLESS_ERROR);
       }
-      // The preset short-circuits the question, exactly as the dual-face box did,
-      // so it stays a factory option rather than a withAnswers rung.
-      if (
-        !state.channelSelection.includes("slack") ||
-        options.presetCreateSlackbot !== undefined ||
-        state.slackbotCreated
-      ) {
-        return { headless, createSlackbot: options.presetCreateSlackbot };
-      }
-      try {
-        const createSlackbot = await options.asker.ask(
-          confirm({
-            key: "create-slackbot",
-            message: "Do you want to create your slackbot?",
-          }),
-        );
-        return { headless, createSlackbot };
-      } catch (error) {
-        // The question is not required: a headless/assume skip means "do not
-        // create", preserving the dual-face box's "false when unset" behavior.
-        if (error instanceof SkippedSignal) {
-          return { headless, createSlackbot: false };
-        }
-        throw error;
-      }
+      return { headless, createSlackbot: options.presetCreateSlackbot };
     },
 
     async perform({ state, input, signal }): Promise<AddChannelsPayload> {
@@ -620,13 +637,10 @@ export function addChannels(
         webScaffolded: payload.webScaffolded,
         slackScaffolded: payload.slackScaffolded,
         deploymentPending: state.deploymentPending || payload.channelsAdded.length > 0,
-        // Recorded channels touched the manifest, so the deploy-time install
-        // gate must reflect this run's install outcome — an earlier success is
-        // stale the moment new dependencies land in package.json.
-        deploymentDependenciesInstalled:
-          payload.channelsAdded.length > 0
-            ? payload.dependenciesInstalled
-            : state.deploymentDependenciesInstalled,
+        // Only manifest mutations invalidate an earlier dependency install.
+        deploymentDependenciesInstalled: payload.dependenciesChanged
+          ? payload.dependenciesInstalled
+          : state.deploymentDependenciesInstalled,
         project: mergeProjectResolution(state.project, payload.project),
       };
       if (payload.slackbot === undefined) {
