@@ -1159,7 +1159,7 @@ const extensionPresentations: Record<string, ExtensionPresentation> = {
     install: `Install the Browserbase extension for eve:
 
 \`\`\`bash
-eve add browserbase
+eve add extension/browserbase
 \`\`\`
 
 The extension requires Node.js 24 or later. A Browserbase API key covers both cloud browser sessions and Stagehand inference through Browserbase Model Gateway, so you do not need a separate model-provider key.`,
@@ -1212,7 +1212,7 @@ Browserbase uses keep-alive sessions and eve's durable per-session state to reco
     install: `Install the Kernel extension for eve:
 
 \`\`\`bash
-eve add kernel
+eve add extension/kernel
 \`\`\`
 
 The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kernel's hosted MCP browser tools and a \`browse\` skill without requiring you to maintain browser tool code.`,
@@ -1318,7 +1318,7 @@ For multi-tenant agents, set \`userId\` to a stable tenant-scoped value or deriv
     install: `Install the Jetty extension for eve:
 
 \`\`\`bash
-eve add jetty
+eve add extension/jetty
 \`\`\`
 
 The extension requires Node.js 24 or later and eve 0.25 or later. It can ingest every completed turn as a durable Jetty trajectory, grade turns inline, steer experiments from their grades, and report native \`eve eval\` results.`,
@@ -1377,7 +1377,7 @@ Jetty trajectories persist agent inputs and outputs. Redact PII before grading, 
     install: `Install the GitHub Tools extension and Vercel Connect client:
 
 \`\`\`bash
-eve add github-tools
+eve add extension/github-tools
 \`\`\`
 
 The extension provides the GitHub toolset as a versioned eve package. Use a Vercel Connect connector for short-lived, scoped GitHub tokens, or omit \`@vercel/connect\` and authenticate with a GitHub token.`,
@@ -1442,7 +1442,7 @@ For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`
     install: `Install the agent-browser extension for eve:
 
 \`\`\`bash
-eve add agent-browser
+eve add extension/agent-browser
 \`\`\`
 
 The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox, Docker, or microsandbox.`,

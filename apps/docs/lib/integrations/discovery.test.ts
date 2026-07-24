@@ -37,7 +37,7 @@ describe("integration discovery", () => {
     expect(browserbase).toBeDefined();
 
     const markdown = integrationMarkdown(browserbase!);
-    expect(markdown).toContain("eve add browserbase");
+    expect(markdown).toContain("eve add extension/browserbase");
     expect(markdown).toContain('import browserbase from "@browserbasehq/eve"');
     expect(markdown).toContain("BROWSERBASE_API_KEY");
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
@@ -48,7 +48,7 @@ describe("integration discovery", () => {
     expect(jetty).toBeDefined();
 
     const markdown = integrationMarkdown(jetty!);
-    expect(markdown).toContain("eve add jetty");
+    expect(markdown).toContain("eve add extension/jetty");
     expect(markdown).toContain('import jetty from "@jetty/eve"');
     expect(markdown).toContain('import { Jetty } from "@jetty/eve/reporter"');
     expect(markdown).toContain("JETTY_API_TOKEN");
@@ -73,7 +73,7 @@ describe("integration discovery", () => {
     expect(githubTools).toBeDefined();
 
     const markdown = integrationMarkdown(githubTools!);
-    expect(markdown).toContain("eve add github-tools");
+    expect(markdown).toContain("eve add extension/github-tools");
     expect(markdown).toContain('connector: "github/my-connector"');
     expect(markdown).toContain('preset: "maintainer"');
     expect(markdown).toContain("github__addPullRequestComment");

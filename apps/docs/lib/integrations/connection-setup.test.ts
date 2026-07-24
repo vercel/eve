@@ -34,7 +34,7 @@ describe("Kernel extension setup", () => {
     const integration = getIntegration("kernel")!;
 
     expect(integration.type).toBe("extension");
-    expect(integration.install).toContain("eve add kernel");
+    expect(integration.install).toContain("eve add extension/kernel");
     expect(integration.quickStart).toContain(
       'kernel({ connect: "mcp.onkernel.com/eve-extension" })',
     );
