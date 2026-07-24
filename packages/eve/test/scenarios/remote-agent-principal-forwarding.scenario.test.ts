@@ -88,8 +88,8 @@ describe("remote agent auth forwarding", () => {
 
       try {
         // Accepted: the trusted transport principal asserts a forwarded user.
-        // The receiver acknowledges, and its onMessage (which throws on any
-        // other caller) proves the principal replacement happened.
+        // The receiver's onMessage (which throws on any other caller) proves
+        // the principal replacement happened.
         const childSessionId = await startRemoteAgentSession({
           action: createAction(),
           auth: FORWARDED_USER,
@@ -99,25 +99,6 @@ describe("remote agent auth forwarding", () => {
           session: createParentSession(),
         });
         expect(childSessionId.length).toBeGreaterThan(0);
-
-        // The 202 response carries the acceptance acknowledgment.
-        const rawResponse = await fetch(new URL("/eve/v1/session", receiver.url), {
-          body: JSON.stringify({
-            forwardedPrincipal: { current: FORWARDED_USER },
-            message: "raw forwarded create",
-            mode: "task",
-          }),
-          headers: {
-            authorization: `Bearer ${ROUTER_TOKEN}`,
-            "content-type": "application/json",
-          },
-          method: "POST",
-        });
-        expect(rawResponse.status).toBe(202);
-        await expect(rawResponse.json()).resolves.toMatchObject({
-          forwardedPrincipal: "accepted",
-          ok: true,
-        });
 
         // Mismatch: an authenticated caller outside the forwarder allow-list
         // fails loud at the hop instead of downgrading to service identity.

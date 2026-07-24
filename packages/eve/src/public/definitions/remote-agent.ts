@@ -32,9 +32,9 @@ export interface RemoteAgentDefinition {
    *
    * Only principal metadata crosses the wire, never tokens or credentials —
    * {@link auth} keeps authenticating *this* deployment to the remote. The
-   * receiver must opt in with `eveChannel({ acceptForwardedPrincipalFrom })`
-   * and acknowledge acceptance; a missing acknowledgment fails the dispatch
-   * instead of silently running the session as the calling service.
+   * receiver must opt in with `eveChannel({ acceptForwardedPrincipalFrom })`;
+   * a receiver that refuses the forwarder (or accepts no forwarded principal
+   * at all) rejects with 403 and the dispatch fails.
    */
   readonly forwardPrincipal?: boolean;
   readonly headers?: HeadersValue;

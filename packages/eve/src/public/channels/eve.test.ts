@@ -1475,9 +1475,10 @@ describe("eveChannel — forwarded principal", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
-  it("replaces the session principal and acknowledges acceptance", async () => {
+  it("replaces the session principal when the forwarder is accepted", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom: (caller) => caller.principalId === ROUTER_CALLER.principalId,
+      acceptForwardedPrincipalFrom: (forwarder) =>
+        forwarder.principalId === ROUTER_CALLER.principalId,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1487,7 +1488,6 @@ describe("eveChannel — forwarded principal", () => {
 
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({
-      forwardedPrincipal: "accepted",
       ok: true,
       sessionId: "test-session-id",
     });
@@ -1561,7 +1561,7 @@ describe("eveChannel — forwarded principal", () => {
     expect(options.auth?.principalId).toBe(FORWARDED_CURRENT.principalId);
   });
 
-  it("omits the acknowledgment and initiatorAuth without a forwarded body", async () => {
+  it("keeps the transport principal and omits initiatorAuth without a forwarded body", async () => {
     const handler = createEveCreateHandler({
       acceptForwardedPrincipalFrom: () => true,
       auth: () => ROUTER_CALLER,
@@ -1570,7 +1570,6 @@ describe("eveChannel — forwarded principal", () => {
     const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
 
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.not.toHaveProperty("forwardedPrincipal");
     const options = handler.send.mock.calls[0]?.[1] as SendOptions;
     expect(options.auth).toEqual(ROUTER_CALLER);
     expect(options).not.toHaveProperty("initiatorAuth");

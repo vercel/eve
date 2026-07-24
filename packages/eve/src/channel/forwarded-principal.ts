@@ -48,7 +48,7 @@ export type ForwardedPrincipalParseResult =
  * The create route's effective session principals after the forwarded
  * principal gate: the transport principal untouched when the body carries no
  * assertion, or the stamped forwarded contexts once a trusted forwarder's
- * assertion is accepted (which the 202 response must acknowledge).
+ * assertion is accepted.
  */
 export type ResolvedForwardedPrincipal =
   | {

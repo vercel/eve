@@ -260,30 +260,20 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
         const session = await send(createSendPayload(body, context), sendOptions);
 
-        const createResponse: {
-          continuationToken: string;
-          forwardedPrincipal?: "accepted";
-          ok: boolean;
-          sessionId: string;
-        } = {
-          continuationToken: session.continuationToken,
-          ok: true,
-          sessionId: session.id,
-        };
-        if (forwarded.accepted) {
-          // The acceptance acknowledgment the forwarding sender requires;
-          // its absence tells the sender a pre-forwarding receiver silently
-          // dropped the field.
-          createResponse.forwardedPrincipal = "accepted";
-        }
-
-        return Response.json(createResponse, {
-          headers: {
-            "cache-control": "no-store",
-            [EVE_SESSION_ID_HEADER]: session.id,
+        return Response.json(
+          {
+            continuationToken: session.continuationToken,
+            ok: true,
+            sessionId: session.id,
           },
-          status: 202,
-        });
+          {
+            headers: {
+              "cache-control": "no-store",
+              [EVE_SESSION_ID_HEADER]: session.id,
+            },
+            status: 202,
+          },
+        );
       }),
 
       POST("/eve/v1/session/:sessionId", async (req, { send, getSession, params }) => {

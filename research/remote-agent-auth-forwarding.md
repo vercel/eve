@@ -64,20 +64,10 @@ export default defineRemoteAgent({
   scope in `dispatch-runtime-actions-step.ts`) into a `forwardedPrincipal` field on the create-session
   body: `{ current: SessionAuthContext, initiator?: SessionAuthContext }`.
 - The field is omitted only when `AuthKey` is `null` (the request was accepted with no
-  credentials); the call then proceeds on transport trust alone and no acceptance acknowledgment
-  (below) is required. Any non-null context is forwarded as-is — including anonymous
+  credentials); the call then proceeds on transport trust alone. Any non-null context is forwarded as-is — including anonymous
   (`principalType: "anonymous"` from `none()`), schedule (`SCHEDULE_APP_AUTH`), and service
   principals — exact parity with how local subagent dispatch threads `auth`. Non-user principals
   still fail `principal_required` at Connect on the receiver, which is the correct outcome.
-- When the field is sent, the sender requires the receiver's response to acknowledge acceptance
-  (`forwardedPrincipal: "accepted"` on the create-session response). Without this, a pre-forwarding eve
-  receiver would silently ignore the unknown body field (the create body parser picks known fields
-  and drops the rest) and run the session as the calling service — the exact silent downgrade this
-  design rejects, reintroduced by version skew.
-- On a missing acknowledgment, the receiver has already started the child session as the transport
-  principal, so the sender best-effort cancels it via the existing
-  `cancelRemoteAgentTurn` path (the child `sessionId` is in hand from the response), then fails
-  the dispatch inline like any other failed remote start.
 - The flag rides the module-backed runtime definition next to `auth` and `headers`; the compiled
   manifest node is unchanged.
 
@@ -132,14 +122,13 @@ export default eveChannel({
   `caller.attributes["eve:forwarded-by"]` is the window a custom `onMessage` has onto the
   transport caller; `defaultEveAuth` passes the forwarded principal through, and a custom
   `onMessage` can still override or drop, same as today.
-- **Fail loud, never fall back silently.** A body carrying `forwardedPrincipal` when the channel has no
-  `acceptForwardedPrincipalFrom` option → 403 ("this deployment does not accept forwarded principal"). Predicate
-  returns `false` → 403. Malformed `forwardedPrincipal` payload → 400. On acceptance, the 202 response
-  carries `forwardedPrincipal: "accepted"`, which the sender requires (see the sender section) —
-  covering the remaining silent path, an old receiver that ignores the field. Silently downgrading
-  to the transport principal would surface later as an opaque `principal_required` deep inside a
-  Connect call; a mismatch between the two deployments is a configuration error and should fail at
-  the hop.
+- **Rejections fail loud.** A body carrying `forwardedPrincipal` when the channel has no
+  `acceptForwardedPrincipalFrom` option → 403 ("this deployment does not accept a forwarded
+  principal"). Predicate returns `false` → 403. Malformed `forwardedPrincipal` payload → 400. Each
+  fails the sender's dispatch inline. The one case that does not fail at the hop is a receiver on
+  an eve version that predates forwarding: it drops the unknown field and runs the session as the
+  transport principal, surfacing as `principal_required` at per-user Connect (see the
+  acknowledgment note under Out of scope).
 - **What never crosses the wire:** tokens, credentials, claims. Only the `SessionAuthContext`
   shape (`attributes`, `authenticator`, `issuer`, `principalId`, `principalType`, `subject`).
   Per-user provider credentials always live on the receiving deployment via its own Connect
@@ -154,9 +143,9 @@ export default eveChannel({
 | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `public/definitions/remote-agent.ts`                                       | `forwardPrincipal?: boolean`                                                                                            |
 | `execution/dispatch-runtime-actions-step.ts`                               | pass `auth` / `initiatorAuth` (already in scope) to remote dispatch                                                     |
-| `execution/remote-agent-dispatch.ts`                                       | build `forwardedPrincipal` body field; require the acceptance ack; best-effort cancel the child on missing ack          |
+| `execution/remote-agent-dispatch.ts`                                       | build `forwardedPrincipal` body field                                                                                   |
 | `channel/forwarded-principal.ts` (new)                                     | strict wire schema for `{ current, initiator? }` (open `authenticator` / `principalType`), beside `session-callback.ts` |
-| `public/channels/eve.ts`                                                   | `acceptForwardedPrincipalFrom` option; predicate check + principal replacement + response ack on the create route       |
+| `public/channels/eve.ts`                                                   | `acceptForwardedPrincipalFrom` option; forwarded-principal gate + principal replacement on the create route             |
 | `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md` | forwarding section on each side + trust-model warning                                                                   |
 
 Docs must carry the security guidance explicitly: match the transport principal precisely (e.g.
@@ -181,6 +170,13 @@ channel has no `acceptForwardedPrincipalFrom`, so a receiving deployment must au
 - Forwarding on the deliver route (`POST /eve/v1/session/:sessionId`). Remote dispatch is
   create-only today, so nothing in eve would send it; the same field + predicate can extend to
   deliver if external eve clients need multi-turn forwarding later.
+- A response acknowledgment (`forwardedPrincipal: "accepted"` on the 202) letting the sender
+  detect a pre-forwarding receiver that silently drops the unknown body field. Considered and
+  dropped: forwarding only ever works after the receiver's author adds
+  `acceptForwardedPrincipalFrom` — which requires a forwarding-aware eve — so a stale receiver is
+  always an incomplete setup, caught during enablement when per-user Connect fails
+  `principal_required`. Permanent wire surface (plus best-effort orphan-session cancellation on a
+  missing ack) was not justified by a transitional, pre-1.0 skew window.
 
 ## Delivery and verification
 
@@ -188,11 +184,10 @@ Single PR with a **patch** changeset: both options are additive; no public API b
 
 - Unit: wire schema (strict on keys, open `authenticator` / `principalType`, channel-produced
   contexts like `slack-webhook` accepted, malformed rejection), dispatch body construction with
-  and without `forwardPrincipal` and with null auth (field omitted, no ack required), missing-ack
-  dispatch failure including the best-effort child cancel, receiver matrix (field without option →
-  403, predicate false → 403, predicate true → principal replaced + `forwardedPrincipal: "accepted"`
-  in the response, `eve:forwarded-by` stamped from the verified transport principal and
-  sender-supplied values overwritten, stamping visible to `onMessage`).
+  and without `forwardPrincipal` and with null auth (field omitted), receiver matrix (field
+  without option → 403, predicate false → 403, predicate true → principal replaced,
+  `eve:forwarded-by` stamped from the verified transport principal and sender-supplied values
+  overwritten, stamping visible to `onMessage`).
 - Integration: create route end-to-end in memory — forwarded principal becomes
   `session.auth.current` / `.initiator` and reaches `resolveConnectionPrincipal` as a `user`
   principal.

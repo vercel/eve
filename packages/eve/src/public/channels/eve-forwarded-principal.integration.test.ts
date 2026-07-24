@@ -105,7 +105,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     );
 
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toMatchObject({ forwardedPrincipal: "accepted" });
+    await expect(response.json()).resolves.toMatchObject({ ok: true });
 
     const options = handler.send.mock.calls[0]?.[1] as SendOptions;
     const run: RunInput = {

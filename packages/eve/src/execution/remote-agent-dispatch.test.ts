@@ -202,11 +202,10 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     subject: "U999",
   };
 
-  function acceptedResponse(): Response {
-    return new Response(
-      JSON.stringify({ forwardedPrincipal: "accepted", ok: true, sessionId: "remote-session" }),
-      { status: 202 },
-    );
+  function createSessionResponse(): Response {
+    return new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), {
+      status: 202,
+    });
   }
 
   function createSession() {
@@ -220,7 +219,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
   }
 
   it("forwards the current and initiator principals when forwardPrincipal is set", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(acceptedResponse());
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -241,7 +240,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
   });
 
   it("omits the initiator when the dispatching turn has none", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(acceptedResponse());
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     await startRemoteAgentSession({
@@ -258,7 +257,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     });
   });
 
-  it("omits the field and skips the ack when the turn has no auth", async () => {
+  it("omits the field when the turn has no auth", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
@@ -304,57 +303,6 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
       "forwardedPrincipal",
     );
-  });
-
-  it("fails the dispatch and cancels the orphan when the ack is missing", async () => {
-    // A pre-forwarding receiver ignores the unknown field, starts the session
-    // as the calling service, and responds without the acknowledgment.
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: true, sessionId: "orphan-session" }), { status: 202 }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({ ok: true, sessionId: "orphan-session", status: "accepted" }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      startRemoteAgentSession({
-        action: createAction(),
-        auth: CURRENT_AUTH,
-        callbackBaseUrl: "https://caller.example.com",
-        initiatorAuth: INITIATOR_AUTH,
-        remote: { ...createRemoteAgent(), forwardPrincipal: true },
-        session: createSession(),
-      }),
-    ).rejects.toThrow(/did not acknowledge the forwarded principal/);
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "https://remote.example.com/eve/v1/session/orphan-session/cancel",
-    );
-  });
-
-  it("fails the dispatch even when the orphan cancel fails", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: true, sessionId: "orphan-session" }), { status: 202 }),
-      )
-      .mockRejectedValueOnce(new TypeError("network unavailable"));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      startRemoteAgentSession({
-        action: createAction(),
-        auth: CURRENT_AUTH,
-        callbackBaseUrl: "https://caller.example.com",
-        initiatorAuth: null,
-        remote: { ...createRemoteAgent(), forwardPrincipal: true },
-        session: createSession(),
-      }),
-    ).rejects.toThrow(/did not acknowledge the forwarded principal/);
   });
 });
 
