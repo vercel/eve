@@ -18,6 +18,7 @@ import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
+import { listenForShutdownSignal, waitForShutdownSignal } from "#cli/shutdown-signal.js";
 import { createLogger } from "#internal/logging.js";
 import type {
   DevelopmentServer,
@@ -156,30 +157,6 @@ function shouldPrintCliBootBanner(actionCommand: Command): boolean {
     actionCommand.name() === "dev" ||
     actionCommand.name() === "init"
   );
-}
-
-async function waitForShutdownSignal(input: { close(): Promise<void> }): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-
-    const cleanup = () => {
-      process.off("SIGINT", handleSignal);
-      process.off("SIGTERM", handleSignal);
-    };
-
-    const handleSignal = () => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      cleanup();
-      void input.close().then(resolve, reject);
-    };
-
-    process.once("SIGINT", handleSignal);
-    process.once("SIGTERM", handleSignal);
-  });
 }
 
 async function waitForProductionServer(input: ProductionServerHandle): Promise<void> {
@@ -521,7 +498,15 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       // Print spacing before the live row; a later write would strand the row.
       if (mode === "tui") logger.log("");
       const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
-      const onBootProgress = createDevBootProgressReporter(buildProgress);
+      const reportBootProgress = createDevBootProgressReporter(buildProgress);
+      let shutdownSignal: ReturnType<typeof listenForShutdownSignal> | undefined;
+      const onBootProgress: DevBootProgressReporter = (event) => {
+        reportBootProgress(event);
+        if (event.type === "before-first-paint") {
+          shutdownSignal?.dispose();
+          shutdownSignal?.signal.throwIfAborted();
+        }
+      };
       buildProgress?.update("Building your agent");
 
       let closed = false;
@@ -538,13 +523,20 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
       try {
         const startHost = runtime.startHost ?? (await loadStartHost());
+        shutdownSignal = listenForShutdownSignal();
         server = startHost(appRoot, {
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
           onBootProgress,
           port: options.port,
         });
-        const handle = await server.start();
+        const handle = await Promise.race([
+          server.start(),
+          shutdownSignal.received.then(() => undefined),
+        ]);
+        if (handle === undefined) {
+          return;
+        }
 
         // The terminal UI's header already shows the server URL, and startup
         // no longer clears the screen, so the line would linger as noise.
@@ -573,13 +565,22 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             );
           }
 
-          return await waitForShutdownSignal({
-            close: closeServer,
-          });
+          await shutdownSignal.received;
+          return;
         }
 
-        await runInteractiveUi({ appRoot: handle.appRoot, serverUrl: handle.url }, onBootProgress);
+        try {
+          await runInteractiveUi(
+            { appRoot: handle.appRoot, serverUrl: handle.url },
+            onBootProgress,
+          );
+        } catch (error) {
+          if (!shutdownSignal.signal.aborted || error !== shutdownSignal.signal.reason) {
+            throw error;
+          }
+        }
       } finally {
+        shutdownSignal?.dispose();
         buildProgress?.stop();
         await closeServer();
       }

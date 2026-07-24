@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
 import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
-import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
+import type {
+  DevelopmentServerOptions,
+  StartedDevelopmentServer,
+} from "#internal/nitro/host/types.js";
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
@@ -378,6 +381,105 @@ describe("eve dev boot progress", () => {
 });
 
 describe("eve dev local server ownership", () => {
+  it("closes a server when SIGINT interrupts startup", async () => {
+    const initialSignalListeners = new Set(process.listeners("SIGINT"));
+    let resolveStart: ((handle: StartedDevelopmentServer) => void) | undefined;
+    const started = new Promise<StartedDevelopmentServer>((resolve) => {
+      resolveStart = resolve;
+    });
+    const close = vi.fn(async () => {
+      await started;
+    });
+    const start = vi.fn(() => started);
+    const runDevelopmentTui = vi.fn(async () => {});
+    const running = withInteractiveTerminal(() =>
+      runCli(
+        ["dev"],
+        { error: () => {}, log: () => {} },
+        {
+          runDevelopmentTui,
+          startHost: () => ({ close, start }),
+        },
+      ),
+    );
+
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    const shutdownListener = process
+      .listeners("SIGINT")
+      .find((listener) => !initialSignalListeners.has(listener));
+    let shutdownListenerPresentForLaterHandlers = false;
+    process.once("SIGINT", () => {
+      shutdownListenerPresentForLaterHandlers =
+        shutdownListener !== undefined && process.listeners("SIGINT").includes(shutdownListener);
+    });
+    process.emit("SIGINT");
+    await new Promise((resolve) => setImmediate(resolve));
+    const closeStartedBeforeStartupFinished = close.mock.calls.length > 0;
+
+    if (resolveStart === undefined) {
+      throw new Error("Expected the development server to start.");
+    }
+    resolveStart({
+      kind: "started",
+      appRoot: "/canonical/app",
+      url: "http://127.0.0.1:4321/",
+    });
+    await running;
+
+    expect(closeStartedBeforeStartupFinished).toBe(true);
+    expect(shutdownListenerPresentForLaterHandlers).toBe(true);
+    expect(close).toHaveBeenCalledOnce();
+    expect(runDevelopmentTui).not.toHaveBeenCalled();
+  });
+
+  it("stops before the first TUI paint when SIGINT interrupts connection", async () => {
+    const close = vi.fn(async () => {});
+    let continueTui: (() => void) | undefined;
+    let painted = false;
+    const runDevelopmentTui = vi.fn(
+      (input: RunDevelopmentTuiInput) =>
+        new Promise<void>((resolve, reject) => {
+          continueTui = () => {
+            try {
+              input.onBootProgress?.({ type: "before-first-paint" });
+              painted = true;
+              resolve();
+            } catch (error) {
+              reject(error);
+            }
+          };
+        }),
+    );
+    const running = withInteractiveTerminal(() =>
+      runCli(
+        ["dev"],
+        { error: () => {}, log: () => {} },
+        {
+          runDevelopmentTui,
+          startHost: () => ({
+            close,
+            start: async () => ({
+              kind: "started" as const,
+              appRoot: "/canonical/app",
+              url: "http://127.0.0.1:4321/",
+            }),
+          }),
+        },
+      ),
+    );
+
+    await vi.waitFor(() => expect(runDevelopmentTui).toHaveBeenCalledOnce());
+    process.emit("SIGINT");
+    if (continueTui === undefined) {
+      throw new Error("Expected the terminal UI to begin connecting.");
+    }
+    continueTui();
+    await running;
+
+    expect(painted).toBe(false);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("uses the host's canonical root and leaves an attached server running", async () => {
     const startHost = vi.fn(() => ({
       start: async () => ({
