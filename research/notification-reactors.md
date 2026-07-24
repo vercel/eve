@@ -87,25 +87,34 @@ v1 does not put one there.
 CALLER   POST /eve/v1/callback/:token {status:"notification", event}
            └─► resumeHook(<sessionId>:notify)
                  └─► [queue] ──wake──► reactor run (no session hydration)
-                       ├─► append subagent.event ──► durable stream ──► followers
-                       │                                      (TUI, web, evals)
-                       └─► channel.notification(event, ctx) ──► e.g. Slack API
+                       ├─► existing adapter event handler ──► e.g. Slack API
+                       └─► append subagent.event ──► durable stream ──► followers
+                                                           (TUI, web, evals)
 ```
 
 The session's entry workflow starts one reactor run, handing it the
 session's stream writable — the same cross-run handoff the entry already
 performs for turn workflows — and the serialized channel context. The
 reactor parks on `<sessionId>:notify` and loops: for each delivered
-notification, one journaled step appends the wrapped event to the stream
-and invokes the channel's `notification` member.
+notification, one journaled step runs the channel's **existing** adapter
+event handler against the curated child event — the same handler the
+session workflow's proxy step invokes for these events today, so channels
+render with zero changes — and appends the wrapped `subagent.event` to the
+stream.
+
+There is no new channel API. Adapters keep receiving `authorization.*`
+through the handler contract they already implement; the only thing that
+changes is which run invokes them. Followers see the namespaced
+`subagent.event` wrapper on the stream.
 
 The engine supplies every delivery property: per-hook ordering,
 at-least-once via queue retry, exactly-once side effects via step
-journaling, duplicate-run safety via hook ownership claims. Because the
-reactor is a durable run with a single consumer, it may keep reactor-local
-state across events — e.g. the Slack message `ts` posted for
-`authorization.required`, edited in place when `authorization.completed`
-arrives. Session state remains read-only to it.
+journaling, duplicate-run safety via hook ownership claims. Adapter state
+mutations made while handling a notification persist in the reactor's own
+run state — the notification lane's adapter state lives with its single
+consumer (e.g. the Slack message `ts` posted for `authorization.required`,
+edited in place when `authorization.completed` arrives). Session state
+remains read-only to the reactor.
 
 Producers are one fire-and-forget call and know nothing about consumers:
 
@@ -148,34 +157,16 @@ coalescing in place: the reactor catches up over a cursor on wake, so N
 events during one invocation cost one wake, not N. Until a type meets that
 bar, it does not enter the lane.
 
-## Public authoring API
+## No new public API
 
-The only new public surface is one optional channel member:
-
-```ts
-export default defineChannel({
-  // Existing members omitted.
-  async notification(event, ctx) {
-    // event: SubagentChildEventStreamEvent
-    // ctx.state: read-only snapshot of this channel's persisted state
-    if (event.data.event.type !== "authorization.required") return;
-    await postSignInMessage({
-      channel: ctx.state.slackChannelId,
-      url: event.data.event.data.authorization?.url,
-      correlationKey: event.data.callId,
-    });
-  },
-});
-```
-
-- `ctx.state` is a read-only snapshot of the channel's persisted session
-  state (e.g. which Slack thread this session lives in). There is no state
-  write-back to the session.
-- Errors are logged and retried by the engine's step policy, and never
-  affect the session.
-- The member is optional; channels without it simply don't render
-  notifications. Stream followers (TUI, web frontends, eval clients) need
-  no member — they see the reactor's stream append directly.
+Nothing changes for channel authors. Adapters keep implementing the same
+event-handler contract; `authorization.*` events reach them exactly as
+today, invoked by the reactor run instead of the session workflow. The
+wrapped `subagent.event` is the stream representation only — followers and
+clients see it; adapters are handed the curated child event their handlers
+already understand. The whole design is internal plumbing plus one
+protocol-level producer for the existing (currently producer-less)
+`subagent.event` type.
 
 ## Out of scope
 
@@ -184,17 +175,17 @@ export default defineChannel({
 - Migrating the existing emit-coupled consumers (adapter transforms, hooks,
   dynamic resolvers) to reactors. They converge consumer-by-consumer later;
   this document only moves notification-class events.
-- Public reactor registration. The channel `notification` member is the
-  whole authoring surface until a second consumer class needs more.
+- Any public reactor or channel surface. Reactor registration, if it ever
+  becomes public, is future work driven by a second consumer class.
 - Proxied HITL (`input_required`) and progress (`working`) forwarding. The
   lane is shaped for them; they are not in v1.
 
 ## Open questions
 
-- **Adapter transform audit.** Channel adapters can rewrite events pre-write
-  today. Nothing load-bearing is known to depend on mutating authorization
-  events before persistence, but this must be verified before the local
-  proxy lane switches to reactor delivery.
+- **Adapter state divergence.** Notification-lane adapter state lives in the
+  reactor run; the session workflow keeps its own copy for the events it
+  emits. Audit which adapters mutate state on notification-class events and
+  whether the two copies can disagree in a way that matters for rendering.
 - **Deferral primitive on the callee.** `waitUntil` semantics differ across
   the local dev host and Vercel functions; pick the mechanism that
   guarantees the deferred POST survives the step's response without
