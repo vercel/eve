@@ -6,26 +6,42 @@ last_updated: "2026-07-24"
 
 # Notification consumers
 
-## Summary
+## What this proposes
 
-eve's durable session stream is the natural propagation backbone: producers
-append, consumers derive — independently, at their own pace, without
-producers knowing them. Followers (TUI, web clients, evals) already work
-this way. Everything else is welded to the producer's call stack: the emit
-path invokes the channel adapter and the remote-callback forwarder inline,
-so those consumers only run while the producer's compute is awake.
+Normalize event consumption. Today the flow an event takes depends on who
+consumes it. Followers (TUI, web clients, evals) derive from the durable
+session stream: producers append, consumers read independently, at their
+own pace. Channels and the remote-callback forwarder instead run inline in
+the producer's emit path, so they only run while the producer's compute is
+awake.
+
+The proposal inverts that split. The harness funnels every event a single
+way, and every consumer — channels included — consumes from a durable
+delivery step. Once a delivery is accepted, it survives crashes and
+redelivers until consumed (queue retry, journaled side effects) instead of
+existing only for the duration of the producer's call stack. The price is
+one extra hop per event; the [wake accounting](#wake-accounting) below
+scopes v1 so that hop replaces a wake the caller already pays.
+
+## Why
 
 For notification-class events — a child's
 `authorization.required`/`authorization.completed` surfaced on the caller's
-stream — the weld fails concretely:
+stream — the inline weld fails concretely:
 
-- Delivery works only while the caller's turn is parked at its inbox;
-  otherwise `resumeHook` throws and the event is silently dropped.
-- One rendering-only event resumes the session workflow: context
-  deserialization, session hydration, a journaled step.
-- Local and remote children take different paths; channels render twice.
-- Adapter state lives in the session workflow's cursor, so nothing else can
-  safely invoke a channel.
+- **Events are dropped.** Delivery works only while the caller's turn is
+  parked at its inbox; parked-for-input or between turns, `resumeHook`
+  throws and the event is silently gone.
+- **Nothing redelivers.** A failed or refused delivery is logged and
+  dropped on the producer; there is no durable step to redeliver from.
+- **Delivery is heavyweight.** One rendering-only event resumes the full
+  session workflow: context deserialization, session hydration, a journaled
+  step.
+- **Consumption forks by producer.** Local and remote children take
+  different paths; channels implement the same rendering twice.
+- **Channels are locked to the workflow.** Adapter state lives in the
+  session workflow's cursor, so nothing outside it can safely invoke a
+  channel.
 
 v1 moves these events to a per-session **consumer** run. It adds **no new
 queue wakes** and **no public API**, and it is the on-ramp for every event
@@ -33,6 +49,19 @@ class that should propagate without waking a session.
 
 Vocabulary: the **caller** hosts the parent session; the **callee** is the
 remote deployment running a delegated task.
+
+## Comparison artifacts
+
+Two runnable artifacts frame the decision:
+
+- [#1167](https://github.com/vercel/eve/pull/1167) (reopened) — the
+  baseline: notification events piped through today's continuation entry
+  point, `resumeHook` into the session workflow's turn inbox. It shows the
+  mechanism working end to end and hits every failure above. To keep it a
+  clean baseline for the delivery path alone, it sheds its `eve/tools`
+  authorization API exposure.
+- A prototype of this proposal — the per-session consumer run described
+  below, exercised against the same fixture evals.
 
 ## The notification event
 
