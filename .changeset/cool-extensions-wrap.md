@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add `eve extensions` commands for installing extensions and managing shadcn registries from an eve project.
+Add `eve add` and `eve registry` commands for installing official and configured shadcn registry items from an eve project.
