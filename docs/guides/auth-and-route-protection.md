@@ -71,13 +71,17 @@ Put your own providers ahead of the catch-all helpers. `localDev()` is the final
 To reject with a precise status instead of skipping, throw:
 
 ```ts
-import { ForbiddenError, UnauthenticatedError } from "eve/channels/auth";
+import { ForbiddenError, SessionNotReadyError, UnauthenticatedError } from "eve/channels/auth";
 
 throw new UnauthenticatedError({
   code: "authentication_required",
   message: "Sign in to continue.",
 }); // 401
 throw new ForbiddenError({ message: "Not allowed on this workspace." }); // 403
+throw new SessionNotReadyError({
+  message: "Session projection is still catching up.",
+  retryAfterSeconds: 1,
+}); // 425 — native clients retry this status
 ```
 
 Any other thrown error follows the normal channel failure path. When building a custom channel on `defineChannel`, call `routeAuth(request, auth)` from `eve/channels/auth` to reuse the same walk semantics.
@@ -195,7 +199,7 @@ export default defineChannel({
 });
 ```
 
-`UnauthenticatedError` and `ForbiddenError` wrap this builder (status `401` / `403`). Throw those from an `AuthFn` that `routeAuth` walks. Call `createUnauthorizedResponse` directly only when you're returning a `Response` from a hand-rolled route.
+`UnauthenticatedError`, `ForbiddenError`, and `SessionNotReadyError` wrap the framework response builders (`401` / `403` / `425`). Throw those from an `AuthFn` that `routeAuth` walks. Call `createUnauthorizedResponse` or `createReadinessResponse` directly only when you're returning a `Response` from a hand-rolled route.
 
 ## Network policy
 

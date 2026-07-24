@@ -403,6 +403,53 @@ export interface UnauthorizedResponseOptions {
 }
 
 /**
+ * Options accepted by {@link createReadinessResponse}.
+ */
+export interface ReadinessResponseOptions {
+  /**
+   * Machine-readable error code returned in the JSON body. Defaults to
+   * `"session_not_ready"`.
+   */
+  readonly code?: string;
+  /**
+   * Human-readable error message returned in the JSON body.
+   */
+  readonly message?: string;
+  /**
+   * Optional bounded `Retry-After` hint in seconds for callers that retry
+   * readiness failures.
+   */
+  readonly retryAfterSeconds?: number;
+}
+
+/**
+ * Builds a JSON readiness failure response for authenticated callers whose
+ * route dependency is not queryable yet: HTTP `425`, `cache-control: no-store`,
+ * and a `{ ok: false, code, error }` body.
+ */
+export function createReadinessResponse(opts: ReadinessResponseOptions = {}): Response {
+  const code = opts.code ?? "session_not_ready";
+  const message = opts.message ?? "The requested session is not ready yet.";
+  const headers = new Headers({ "cache-control": "no-store" });
+
+  if (opts.retryAfterSeconds !== undefined) {
+    headers.set("retry-after", String(opts.retryAfterSeconds));
+  }
+
+  return Response.json(
+    {
+      code,
+      error: message,
+      ok: false,
+    },
+    {
+      headers,
+      status: 425,
+    },
+  );
+}
+
+/**
  * Builds a JSON failure response shaped like the framework's other auth
  * failures: `cache-control: no-store`, one `www-authenticate` header per
  * challenge, and a `{ ok: false, code, error }` body.
@@ -482,6 +529,26 @@ export class ForbiddenError extends Error {
 }
 
 /**
+ * Options accepted by {@link SessionNotReadyError}.
+ */
+export type SessionNotReadyErrorOptions = ReadinessResponseOptions;
+
+/**
+ * Error thrown by auth callbacks when the caller is authenticated but a route
+ * dependency is not queryable yet. `routeAuth` catches it and returns its
+ * `425` response so native clients can perform their bounded retry.
+ */
+export class SessionNotReadyError extends Error {
+  readonly response: Response;
+
+  constructor(opts: SessionNotReadyErrorOptions = {}) {
+    super(opts.message ?? "The requested session is not ready yet.");
+    this.name = "SessionNotReadyError";
+    this.response = createReadinessResponse(opts);
+  }
+}
+
+/**
  * Route auth callback. Returned value semantics inside {@link routeAuth}:
  *
  * - A {@link SessionAuthContext} accepts the request and halts the walk.
@@ -489,8 +556,9 @@ export class ForbiddenError extends Error {
  *
  * If every entry skips (including the empty `[]` case), the walker returns a
  * 401. To reject with a specific response, throw an
- * {@link UnauthenticatedError} or {@link ForbiddenError}. To accept anonymous
- * traffic, include {@link none} as the final entry.
+ * {@link UnauthenticatedError}, {@link ForbiddenError}, or
+ * {@link SessionNotReadyError}. To accept anonymous traffic, include
+ * {@link none} as the final entry.
  */
 export type AuthFn<TEvent = Request> = (
   event: TEvent,

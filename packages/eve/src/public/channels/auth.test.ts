@@ -7,6 +7,7 @@ import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-o
 import {
   type AuthFn,
   createIpAllowList,
+  createReadinessResponse,
   createUnauthorizedResponse,
   extractBearerToken,
   ForbiddenError,
@@ -17,6 +18,7 @@ import {
   none,
   placeholderAuth,
   routeAuth,
+  SessionNotReadyError,
   type UnauthorizedChallenge,
   UnauthenticatedError,
   vercelOidc,
@@ -271,6 +273,55 @@ describe("createUnauthorizedResponse", () => {
   });
 });
 
+describe("createReadinessResponse", () => {
+  it("emits a default 425 with cache-control: no-store", async () => {
+    const response = createReadinessResponse();
+
+    expect(response.status).toBe(425);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.has("retry-after")).toBe(false);
+    await expect(response.json()).resolves.toEqual({
+      code: "session_not_ready",
+      error: "The requested session is not ready yet.",
+      ok: false,
+    });
+  });
+
+  it("emits a bounded Retry-After hint when requested", async () => {
+    const response = createReadinessResponse({
+      message: "Session projection is still catching up.",
+      retryAfterSeconds: 1,
+    });
+
+    expect(response.status).toBe(425);
+    expect(response.headers.get("retry-after")).toBe("1");
+    await expect(response.json()).resolves.toEqual({
+      code: "session_not_ready",
+      error: "Session projection is still catching up.",
+      ok: false,
+    });
+  });
+});
+
+describe("SessionNotReadyError", () => {
+  it("carries a structured 425 readiness response", async () => {
+    const error = new SessionNotReadyError({
+      message: "Session projection is still catching up.",
+      retryAfterSeconds: 1,
+    });
+
+    expect(error.message).toBe("Session projection is still catching up.");
+    expect(error.response.status).toBe(425);
+    expect(error.response.headers.get("cache-control")).toBe("no-store");
+    expect(error.response.headers.get("retry-after")).toBe("1");
+    await expect(error.response.json()).resolves.toEqual({
+      code: "session_not_ready",
+      error: "Session projection is still catching up.",
+      ok: false,
+    });
+  });
+});
+
 describe("UnauthenticatedError", () => {
   it("carries a structured 401 auth response", async () => {
     const error = new UnauthenticatedError({ message: "Sign in." });
@@ -482,6 +533,33 @@ describe("routeAuth", () => {
       await expect(result.json()).resolves.toEqual({
         code: "forbidden",
         error: "custom auth rejection",
+        ok: false,
+      });
+    }
+    expect(never).not.toHaveBeenCalled();
+  });
+
+  it("returns a session-not-ready response immediately and stops the walk", async () => {
+    const never = vi.fn(() => SAMPLE_CONTEXT);
+
+    const result = await routeAuth(makeRequest(), [
+      () => {
+        throw new SessionNotReadyError({
+          message: "Session projection is still catching up.",
+          retryAfterSeconds: 1,
+        });
+      },
+      never,
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.status).toBe(425);
+      expect(result.headers.get("cache-control")).toBe("no-store");
+      expect(result.headers.get("retry-after")).toBe("1");
+      await expect(result.json()).resolves.toEqual({
+        code: "session_not_ready",
+        error: "Session projection is still catching up.",
         ok: false,
       });
     }
