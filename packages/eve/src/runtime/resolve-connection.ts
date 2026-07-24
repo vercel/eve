@@ -117,6 +117,18 @@ export async function resolveConnectionDefinition(
       result.spec = resolvedRecord.spec as ResolvedConnectionDefinition["spec"];
     }
 
+    // PROTOTYPE (issue #1170): prefer the live module's `baseUrl` over the
+    // compile-time copy. The compiled manifest bakes the value evaluated
+    // during `eve build`, where a deployment's own origin (dev-server port,
+    // VERCEL_URL) may not exist yet; the re-imported module evaluates with
+    // runtime ambient state, consistent with `auth`/`spec`/`tools` above.
+    if (definition.protocol === "openapi") {
+      const liveBaseUrl = resolvedRecord.baseUrl;
+      if (typeof liveBaseUrl === "string" && liveBaseUrl.trim().length > 0) {
+        result.url = liveBaseUrl;
+      }
+    }
+
     if (typeof resolvedRecord.approval === "function") {
       result.approval = resolvedRecord.approval as ResolvedConnectionDefinition["approval"];
     }
