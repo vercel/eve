@@ -9,6 +9,7 @@ import { ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { forwardSessionCallbackNotification } from "#execution/session-callback-notification.js";
 import {
   createDurableSessionState,
   type DurableSession,
@@ -84,6 +85,9 @@ export async function emitProxiedSubagentEvent(input: {
     const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
       const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
       await writer.write(encodeMessageStreamEvent(timestampHandleMessageStreamEvent(transformed)));
+      // A parent that is itself a remote callee relays proxied child
+      // events one more hop up its own callback URL.
+      await forwardSessionCallbackNotification({ ctx, event: transformed });
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {

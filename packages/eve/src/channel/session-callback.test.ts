@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSessionCallback } from "#channel/session-callback.js";
+import { parseCallbackMetadata } from "#channel/session-callback.js";
 
 function createCallback(url: string, token = "tok123"): Record<string, unknown> {
   return {
@@ -11,16 +11,16 @@ function createCallback(url: string, token = "tok123"): Record<string, unknown> 
   };
 }
 
-describe("parseSessionCallback callback-URL token extraction", () => {
+describe("parseCallbackMetadata callback-URL token extraction", () => {
   it("accepts a callback URL mounted at the origin root", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/tok123")),
+      parseCallbackMetadata(createCallback("https://agent.example.com/eve/v1/callback/tok123")),
     ).toMatchObject({ ok: true });
   });
 
   it("accepts a callback URL mounted behind a public route prefix", () => {
     expect(
-      parseSessionCallback(
+      parseCallbackMetadata(
         createCallback("https://agent.example.com/eve/agents/support/eve/v1/callback/tok123"),
       ),
     ).toMatchObject({ ok: true });
@@ -28,7 +28,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
 
   it("reads the token from the last callback route segment", () => {
     expect(
-      parseSessionCallback(
+      parseCallbackMetadata(
         createCallback("https://agent.example.com/eve/v1/callback/x/eve/v1/callback/tok123"),
       ),
     ).toMatchObject({ ok: true });
@@ -36,7 +36,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
 
   it("decodes the encoded token segment before comparing", () => {
     expect(
-      parseSessionCallback(
+      parseCallbackMetadata(
         createCallback(
           "https://agent.example.com/eve/agents/support/eve/v1/callback/eve%3Aparent-token",
           "eve:parent-token",
@@ -47,7 +47,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
 
   it("rejects a URL without the callback route", () => {
     expect(
-      parseSessionCallback(
+      parseCallbackMetadata(
         createCallback("https://agent.example.com/eve/agents/support/eve/v1/session"),
       ),
     ).toMatchObject({
@@ -58,7 +58,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
 
   it("rejects a URL whose token segment does not match the token field", () => {
     expect(
-      parseSessionCallback(
+      parseCallbackMetadata(
         createCallback("https://agent.example.com/eve/agents/support/eve/v1/callback/other-token"),
       ),
     ).toMatchObject({ ok: false });
@@ -66,19 +66,21 @@ describe("parseSessionCallback callback-URL token extraction", () => {
 
   it("rejects an empty token segment", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/")),
+      parseCallbackMetadata(createCallback("https://agent.example.com/eve/v1/callback/")),
     ).toMatchObject({ ok: false });
   });
 
   it("rejects extra path segments after the token", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/tok123/more")),
+      parseCallbackMetadata(
+        createCallback("https://agent.example.com/eve/v1/callback/tok123/more"),
+      ),
     ).toMatchObject({ ok: false });
   });
 
   it("rejects a token segment with invalid percent-encoding", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/%E0%A4%A")),
+      parseCallbackMetadata(createCallback("https://agent.example.com/eve/v1/callback/%E0%A4%A")),
     ).toMatchObject({ ok: false });
   });
 });

@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { parseSessionCallback } from "#channel/session-callback.js";
+import { parseCallbackMetadata } from "#channel/session-callback.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
@@ -35,7 +35,7 @@ import type { HarnessSession } from "#harness/types.js";
  *    remote-subagent session callback (`startRemoteAgentSession`) and the
  *    connection hook URL (`getHookUrl`);
  * 3. the remote side validates the callback metadata with the real
- *    create-session parser (`parseSessionCallback`) and posts the terminal
+ *    create-session parser (`parseCallbackMetadata`) and posts the terminal
  *    result with the real durable step (`fireSessionCallbackStep`);
  * 4. each parent service only serves its own prefix-stripped `/eve/v1/*`
  *    callback routes — anything else 404s, matching production.
@@ -313,7 +313,7 @@ describe("multi-agent callback routing", () => {
 
       // Remote-side create-session validation (public/channels/eve.ts):
       // the prefixed URL must parse, or the remote rejects with HTTP 400.
-      expect(parseSessionCallback(callback)).toMatchObject({ ok: true });
+      expect(parseCallbackMetadata(callback)).toMatchObject({ ok: true });
 
       // Remote-side terminal POST (the step that failed with HTTP 404 in
       // production) must reach the parent service through the deployment

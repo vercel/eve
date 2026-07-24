@@ -2,7 +2,7 @@ import { type FilePart, type TextPart, type UserContent } from "ai";
 
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
-import { parseSessionCallback } from "#channel/session-callback.js";
+import { parseCallbackMetadata } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
@@ -672,7 +672,7 @@ function parseOutputSchemaField(value: unknown): JsonObject | Response | undefin
 
 function parseCallbackField(value: unknown): SessionCallback | Response | undefined {
   if (value === undefined) return undefined;
-  const parsed = parseSessionCallback(value);
+  const parsed = parseCallbackMetadata(value);
   if (parsed.ok) return parsed.callback;
 
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });

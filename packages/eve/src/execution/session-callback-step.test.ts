@@ -53,8 +53,11 @@ describe("fireSessionCallbackStep", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://caller.example.com/eve/v1/callback/tok123", {
       body: JSON.stringify({
         callId: "call-1",
-        kind: "session.completed",
-        output: "done",
+        event: {
+          kind: "session.completed",
+          output: "done",
+          status: "termination",
+        },
         sessionId: "remote-session",
         subagentName: "research",
       }),
@@ -80,8 +83,11 @@ describe("fireSessionCallbackStep", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://caller.example.com/eve/v1/callback/tok123", {
       body: JSON.stringify({
         callId: "call-1",
-        kind: "session.completed",
-        output: "",
+        event: {
+          kind: "session.completed",
+          output: "",
+          status: "termination",
+        },
         sessionId: "remote-session",
         subagentName: "research",
       }),
@@ -108,11 +114,14 @@ describe("fireSessionCallbackStep", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://caller.example.com/eve/v1/callback/tok123", {
       body: JSON.stringify({
         callId: "call-1",
-        kind: "session.completed",
-        output: "done",
+        event: {
+          kind: "session.completed",
+          output: "done",
+          status: "termination",
+          usage: USAGE,
+        },
         sessionId: "remote-session",
         subagentName: "research",
-        usage: USAGE,
       }),
       headers: {
         "content-type": "application/json",
@@ -134,7 +143,7 @@ describe("fireSessionCallbackStep", () => {
       status: "completed",
     });
 
-    expect(parsePostedBody(fetchMock).usage).toBeUndefined();
+    expect(parsePostedBody(fetchMock).event.usage).toBeUndefined();
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
@@ -149,7 +158,7 @@ describe("fireSessionCallbackStep", () => {
       usage: USAGE,
     });
 
-    expect(parsePostedBody(fetchMock).usage).toBeUndefined();
+    expect(parsePostedBody(fetchMock).event.usage).toBeUndefined();
   });
 
   it("posts the failed callback with the normalized error message", async () => {
@@ -165,11 +174,14 @@ describe("fireSessionCallbackStep", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://caller.example.com/eve/v1/callback/tok123", {
       body: JSON.stringify({
         callId: "call-1",
-        error: {
-          code: "SESSION_FAILED",
-          message: "remote exploded",
+        event: {
+          error: {
+            code: "SESSION_FAILED",
+            message: "remote exploded",
+          },
+          kind: "session.failed",
+          status: "termination",
         },
-        kind: "session.failed",
         sessionId: "remote-session",
         subagentName: "research",
       }),
@@ -298,12 +310,14 @@ describe("fireSessionCallbackStep", () => {
   });
 });
 
-function parsePostedBody(fetchMock: ReturnType<typeof vi.fn>): { usage?: unknown } {
+function parsePostedBody(fetchMock: ReturnType<typeof vi.fn>): {
+  event: { usage?: unknown };
+} {
   const call = fetchMock.mock.calls[0];
   if (call === undefined) {
     throw new Error("expected fetch to have been called");
   }
-  return JSON.parse((call[1] as { body: string }).body) as { usage?: unknown };
+  return JSON.parse((call[1] as { body: string }).body) as { event: { usage?: unknown } };
 }
 
 function createSerializedContext(): Record<string, unknown> {

@@ -1,11 +1,16 @@
 import type { SessionCallback } from "#channel/types.js";
-import { parseSessionCallback } from "#channel/session-callback.js";
+import type {
+  SessionCallbackPayload,
+  SessionCallbackTerminationEvent,
+} from "#channel/session-callback.js";
+import { parseCallbackMetadata } from "#channel/session-callback.js";
 import { SessionCallbackKey } from "#context/keys.js";
+import { postSessionCallback } from "#execution/session-callback-post.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
 const log = createLogger("execution.session-callback");
 
 /**
@@ -39,41 +44,10 @@ export async function fireSessionCallbackStep(input: {
 
   try {
     const callback = parseSerializedSessionCallback(value);
-    const body =
-      input.status === "completed"
-        ? buildCompletedCallbackBody({
-            callback,
-            output: input.output,
-            sessionId,
-            usage: input.usage,
-          })
-        : {
-            callId: callback.callId,
-            error: {
-              code: "SESSION_FAILED",
-              message: toErrorMessage(input.error),
-            },
-            kind: "session.failed" as const,
-            sessionId,
-            subagentName: callback.subagentName,
-          };
-
-    const response = await fetch(callback.url, {
-      body: JSON.stringify(body),
-      headers: {
-        "content-type": "application/json",
-      },
-      method: "POST",
-      // Do not follow redirects: a validated callback host could otherwise
-      // 3xx-bounce the framework to an internal/metadata address after the
-      // path/token check has already passed.
-      redirect: "error",
-      signal: AbortSignal.timeout(SESSION_CALLBACK_TIMEOUT_MS),
+    await postSessionCallback({
+      payload: toPayload({ callback, input, sessionId }),
+      url: callback.url,
     });
-
-    if (!response.ok) {
-      throw new Error(`Session callback failed with HTTP ${response.status}.`);
-    }
   } catch (error) {
     log.error("failed to post session callback", {
       error,
@@ -83,24 +57,49 @@ export async function fireSessionCallbackStep(input: {
   }
 }
 
-function buildCompletedCallbackBody(input: {
+function toPayload(args: {
   readonly callback: SessionCallback;
-  readonly output: unknown;
+  readonly input: {
+    readonly error?: unknown;
+    readonly output?: unknown;
+    readonly status: "completed" | "failed";
+    readonly usage?: TokenUsage;
+  };
   readonly sessionId: string;
+}): SessionCallbackPayload {
+  const { callback, input, sessionId } = args;
+  return {
+    callId: callback.callId,
+    event:
+      input.status === "completed"
+        ? buildCompletedTerminationEvent({ output: input.output, usage: input.usage })
+        : {
+            error: {
+              code: "SESSION_FAILED",
+              message: toErrorMessage(input.error),
+            },
+            kind: "session.failed",
+            status: "termination",
+          },
+    sessionId,
+    subagentName: callback.subagentName,
+  };
+}
+
+function buildCompletedTerminationEvent(input: {
+  readonly output: unknown;
   readonly usage: TokenUsage | undefined;
-}): Record<string, unknown> {
+}): SessionCallbackTerminationEvent {
   const base = {
-    callId: input.callback.callId,
     kind: "session.completed" as const,
-    output: input.output ?? "",
-    sessionId: input.sessionId,
-    subagentName: input.callback.subagentName,
+    output: parseJsonValue(input.output ?? ""),
+    status: "termination" as const,
   };
   return input.usage === undefined ? base : { ...base, usage: input.usage };
 }
 
 function parseSerializedSessionCallback(value: unknown): SessionCallback {
-  const parsed = parseSessionCallback(value);
+  const parsed = parseCallbackMetadata(value);
   if (!parsed.ok) {
     throw new Error("Serialized session callback is invalid.", {
       cause: parsed.cause,

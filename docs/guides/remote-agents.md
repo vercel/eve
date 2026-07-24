@@ -70,6 +70,13 @@ A local subagent runs inline. A remote one runs in its own deployment, so dispat
 
 The parent stream carries the same `subagent.called`, `action.result`, and `subagent.completed` events as local delegation. For a remote call, `subagent.called.data.remote.url` records the target.
 
+Each callback POST carries one event, classed by `event.status`:
+
+- `"termination"` — the remote completed or failed. Exactly one termination event ends every remote call; this is the callback that resumes the parked parent with the result.
+- `"notification"` — an informational event the parent surfaces without resolving the call. The remote forwards its `authorization.required` and `authorization.completed` events this way, so when a remote needs a connection authorized mid-run, the caller's channel shows the authorization prompt the same way it does for a local subagent. Notification delivery is best-effort: an unreachable caller is logged on the remote and never fails its turn.
+
+`"working"` and `"input_required"` are reserved statuses for progress and proxied human-input events; they are not yet emitted, and callers reject them.
+
 Cancelling the parent while a remote call is active sends an authenticated `POST /eve/v1/session/:childSessionId/cancel` to the remote and waits for that request to be accepted before the parent settles. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 Both failure paths surface to the parent as a failed tool result, so the caller can explain or recover within the same session. A failed _start_ returns the error inline. A remote that starts and then fails posts a terminal failure callback, which the parent receives as an errored subagent result carrying the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.

@@ -25,6 +25,7 @@ import {
   throwIfTurnAborted,
 } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { forwardSessionCallbackNotification } from "#execution/session-callback-notification.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
@@ -294,6 +295,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     await writer.write(encodeMessageStreamEvent(timestampHandleMessageStreamEvent(toEmit)));
+    await forwardSessionCallbackNotification({ ctx, event: toEmit });
     return toEmit;
   };
 
