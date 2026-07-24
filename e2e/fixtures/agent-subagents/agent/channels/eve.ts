@@ -1,4 +1,6 @@
+import type { AuthFn } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
+import type { SessionAuthContext } from "eve/context";
 
 /**
  * Authored eve channel for the remote principal-forwarding eval. Three
@@ -17,36 +19,35 @@ import { eveChannel } from "eve/channels/eve";
 const ROUTER_AUTHORIZATION = "Bearer e2e-principal-forwarding-router";
 const SECOND_USER_AUTHORIZATION = "Bearer e2e-principal-forwarding-second-user";
 
+function createFixtureUserPrincipal(principalId: string): SessionAuthContext {
+  return {
+    attributes: {},
+    authenticator: "e2e-fixture",
+    issuer: "e2e",
+    principalId,
+    principalType: "user",
+    subject: principalId,
+  };
+}
+
+const authenticateRouter: AuthFn<Request> = (request) => {
+  if (request.headers.get("authorization") !== ROUTER_AUTHORIZATION) return null;
+  return {
+    attributes: {},
+    authenticator: "e2e-bearer",
+    principalId: "router-app",
+    principalType: "service",
+  };
+};
+
+const authenticateSecondUser: AuthFn<Request> = (request) => {
+  if (request.headers.get("authorization") !== SECOND_USER_AUTHORIZATION) return null;
+  return createFixtureUserPrincipal("e2e-user-2");
+};
+
+const authenticateDefaultUser: AuthFn<Request> = () => createFixtureUserPrincipal("e2e-user");
+
 export default eveChannel({
-  auth: [
-    (request) =>
-      request.headers.get("authorization") === ROUTER_AUTHORIZATION
-        ? {
-            attributes: {},
-            authenticator: "e2e-bearer",
-            principalId: "router-app",
-            principalType: "service",
-          }
-        : null,
-    (request) =>
-      request.headers.get("authorization") === SECOND_USER_AUTHORIZATION
-        ? {
-            attributes: {},
-            authenticator: "e2e-bearer",
-            issuer: "e2e",
-            principalId: "e2e-user-2",
-            principalType: "user",
-            subject: "e2e-user-2",
-          }
-        : null,
-    () => ({
-      attributes: {},
-      authenticator: "e2e-fixture",
-      issuer: "e2e",
-      principalId: "e2e-user",
-      principalType: "user",
-      subject: "e2e-user",
-    }),
-  ],
+  auth: [authenticateRouter, authenticateSecondUser, authenticateDefaultUser],
   trustedForwarders: (forwarder) => forwarder.principalId === "router-app",
 });
