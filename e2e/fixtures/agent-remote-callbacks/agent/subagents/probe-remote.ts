@@ -1,5 +1,5 @@
 import { defineRemoteAgent } from "eve";
-import { type OutboundAuthFn, vercelOidc } from "eve/agents/auth";
+import { bearer } from "eve/agents/auth";
 
 /**
  * Self-referential remote agent: the fixture calls its own deployment so the
@@ -20,13 +20,15 @@ function selfBaseUrl(): string {
   throw new Error("agent-remote-callbacks: cannot resolve the deployment's own base URL.");
 }
 
-const oidc = vercelOidc();
-
-/** OIDC on Vercel (route auth accepts same-project tokens); anonymous over loopback locally. */
-const selfAuth: OutboundAuthFn = async () => (process.env.VERCEL ? oidc() : { headers: {} });
+/**
+ * Fixture bearer the `agent/channels/eve.ts` auth walk projects into a user
+ * principal (same constant there) — interactive connection authorization on
+ * the callee requires one.
+ */
+const E2E_USER_BEARER = "agent-remote-callbacks-e2e-user";
 
 export default defineRemoteAgent({
   url: () => selfBaseUrl(),
   description: "Delegate probe tasks to the remote probe agent. Pass the full task in the message.",
-  auth: selfAuth,
+  auth: bearer(E2E_USER_BEARER),
 });

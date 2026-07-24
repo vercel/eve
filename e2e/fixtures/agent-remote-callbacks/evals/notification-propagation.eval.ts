@@ -22,13 +22,13 @@ export default defineEval({
       `Call the probe-remote subagent exactly once with message 'Use the credential-probe subagent exactly once with message "Acquire the nested credential." and reply with its credential string verbatim. Pass only the message field; never provide the outputSchema field.'. Pass only the message field; never provide the outputSchema field. After that single subagent call finishes, do not call any subagent or tool again; include the exact credential string in your final reply.`,
     );
 
-    const required = await live.waitForEvent("authorization.required", {
-      data: { name: "nested-probe" },
+    const required = await live.waitForEvent("subagent.event", {
+      data: { event: { type: "authorization.required", data: { name: "nested-probe" } } },
     });
-    t.check(
-      typeof required.data.webhookUrl === "string" && required.data.webhookUrl.length > 0,
-      equals(true),
-    );
+    const requiredChild =
+      required.data.event.type === "authorization.required" ? required.data.event : undefined;
+    const webhookUrl = requiredChild?.data.webhookUrl;
+    t.check(typeof webhookUrl === "string" && webhookUrl.length > 0, equals(true));
 
     // Notifications must not resolve the pending call or ask for input.
     t.check(
@@ -37,13 +37,18 @@ export default defineEval({
     );
     t.check(t.pendingInputRequests, equals([]));
 
-    const hook = new URL(required.data.webhookUrl ?? "");
+    const hook = new URL(webhookUrl ?? "");
     hook.searchParams.set("code", CODE);
     const response = await fetch(hook, { redirect: "manual" });
     t.check(response.ok, equals(true));
 
-    await live.waitForEvent("authorization.completed", {
-      data: { name: "nested-probe", outcome: "authorized" },
+    await live.waitForEvent("subagent.event", {
+      data: {
+        event: {
+          type: "authorization.completed",
+          data: { name: "nested-probe", outcome: "authorized" },
+        },
+      },
     });
     await live.result();
 
@@ -51,14 +56,28 @@ export default defineEval({
     t.noFailedActions();
     t.calledSubagent("probe-remote", { output: new RegExp(CREDENTIAL), count: 1 });
     t.messageIncludes(CREDENTIAL);
-    t.event("authorization.required", { data: { name: "nested-probe" }, count: 1 });
-    t.event("authorization.completed", {
-      data: { name: "nested-probe", outcome: "authorized" },
+    t.event("subagent.event", {
+      data: { event: { type: "authorization.required", data: { name: "nested-probe" } } },
+      count: 1,
+    });
+    t.event("subagent.event", {
+      data: {
+        event: {
+          type: "authorization.completed",
+          data: { name: "nested-probe", outcome: "authorized" },
+        },
+      },
       count: 1,
     });
     t.eventOrder([
-      { type: "authorization.required", data: { name: "nested-probe" } },
-      { type: "authorization.completed", data: { name: "nested-probe" } },
+      {
+        type: "subagent.event",
+        data: { event: { type: "authorization.required", data: { name: "nested-probe" } } },
+      },
+      {
+        type: "subagent.event",
+        data: { event: { type: "authorization.completed", data: { name: "nested-probe" } } },
+      },
       { type: "subagent.completed" },
     ]);
     t.check(t.pendingInputRequests, equals([]));
