@@ -61,6 +61,8 @@ import {
   POST,
   type CancelFn,
   type Channel,
+  type ResetFn,
+  type ResetResult,
   type SendFn,
 } from "#public/definitions/channel.js";
 import { markEventHandled } from "./utils.js";
@@ -295,11 +297,20 @@ export interface SlackCancelOptions {
   readonly turnId?: string;
 }
 
+/** Options for resetting the session bound to a message or interaction context. */
+export interface SlackResetOptions {
+  /** Human-readable terminal reason. Do not include credentials or message contents. */
+  readonly reason?: string;
+}
+
 /**
  * Target and optional stale-turn guard accepted by `onEvent`'s cancellation
  * helper.
  */
 export interface SlackEventCancelOptions extends SlackSessionTarget, SlackCancelOptions {}
+
+/** Target and optional terminal reason accepted by `onEvent`'s reset helper. */
+export interface SlackEventResetOptions extends SlackSessionTarget, SlackResetOptions {}
 
 /**
  * Imperative surface handed to `slackChannel({ onEvent })`. Generic Events API
@@ -321,6 +332,11 @@ export interface SlackInboundEventContext {
   readonly resolveActiveSession: (
     target: SlackSessionTarget,
   ) => Promise<{ readonly sessionId: string } | undefined>;
+  /**
+   * Terminally retires the session for a Slack thread so its next message starts
+   * a fresh session.
+   */
+  readonly reset: (options: SlackEventResetOptions) => Promise<ResetResult>;
   /** Workspace-scoped Slack identity and raw Web API escape hatch. */
   readonly slack: SlackWorkspaceHandle;
   /** Keeps detached handler work alive after the Slack webhook is acknowledged. */
@@ -341,6 +357,11 @@ export interface SlackInboundMessageContext extends SlackContext {
   isSubscribed(): Promise<boolean>;
   /** Returns whether the inbound event explicitly mentions this bot. */
   isBotMentioned(): boolean;
+  /**
+   * Terminally retires this thread's session so its next delivered message
+   * starts with fresh history and state.
+   */
+  reset(options?: SlackResetOptions): Promise<ResetResult>;
 }
 
 /** Interaction-scoped context handed to `slackChannel({ onInteraction })`. */
@@ -350,6 +371,11 @@ export interface SlackInteractionContext extends SlackContext {
    * `"no_active_turn"` are successful outcomes.
    */
   cancel(options?: SlackCancelOptions): Promise<CancelTurnResult>;
+  /**
+   * Terminally retires this thread's session so the continuation token can
+   * start a fresh session.
+   */
+  reset(options?: SlackResetOptions): Promise<ResetResult>;
 }
 
 export interface SlackInteractionAction {
@@ -678,7 +704,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     routes: [
       POST<SlackChannelState>(
         config.route ?? SLACK_CHANNEL_DEFAULT_ROUTE,
-        async (req, { cancel, resolveActiveSession, send, waitUntil }) => {
+        async (req, { cancel, reset, resolveActiveSession, send, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -688,11 +714,12 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
           const contentType = req.headers.get("content-type") ?? "";
           if (contentType.includes("application/x-www-form-urlencoded")) {
-            return handleInteractionPost(body, { cancel, send, waitUntil }, { config });
+            return handleInteractionPost(body, { cancel, reset, send, waitUntil }, { config });
           }
           return handleEventPost({
             body,
             cancel,
+            reset,
             send,
             resolveActiveSession,
             waitUntil,
@@ -810,6 +837,7 @@ function shouldDropSlackHttpTimeoutRetry(headers: Headers): boolean {
 async function handleEventPost(input: {
   readonly body: string;
   readonly cancel: CancelFn;
+  readonly reset: ResetFn;
   readonly headers: Headers;
   readonly send: SendFn<SlackChannelState>;
   readonly resolveActiveSession: (options: {
@@ -864,6 +892,7 @@ async function handleEventPost(input: {
             kind,
             message,
             resolveActiveSession: input.resolveActiveSession,
+            reset: input.reset,
             send: input.send,
             threadContext: config.threadContext,
             uploadPolicy: input.uploadPolicy,
@@ -881,6 +910,7 @@ async function handleEventPost(input: {
             kind,
             message,
             resolveActiveSession: input.resolveActiveSession,
+            reset: input.reset,
             send: input.send,
             threadContext: config.threadContext,
             uploadPolicy: input.uploadPolicy,
@@ -909,6 +939,7 @@ async function handleEventPost(input: {
             kind: "channel_message",
             message,
             resolveActiveSession: input.resolveActiveSession,
+            reset: input.reset,
             send: input.send,
             threadContext: config.threadContext,
             uploadPolicy: input.uploadPolicy,
@@ -928,6 +959,7 @@ async function handleEventPost(input: {
         envelope,
         handler: onEvent,
         resolveActiveSession: input.resolveActiveSession,
+        reset: input.reset,
         send: input.send,
       });
   }
@@ -977,6 +1009,7 @@ async function dispatchSlackMessage(input: {
   readonly resolveActiveSession: (options: {
     readonly continuationToken: string;
   }) => Promise<{ readonly sessionId: string } | undefined>;
+  readonly reset: ResetFn;
   readonly send: SendFn<SlackChannelState>;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
@@ -1003,6 +1036,11 @@ async function dispatchSlackMessage(input: {
       (await input.resolveActiveSession({
         continuationToken,
       })) !== undefined,
+    reset: (options = {}) =>
+      input.reset({
+        continuationToken,
+        reason: options.reason,
+      }),
     slack,
     thread,
   };
@@ -1039,6 +1077,7 @@ async function dispatchSlackEvent(input: {
   readonly resolveActiveSession: (options: {
     readonly continuationToken: string;
   }) => Promise<{ readonly sessionId: string } | undefined>;
+  readonly reset: ResetFn;
   readonly send: SendFn<SlackChannelState>;
 }): Promise<void> {
   const eventTeamId = input.envelope.event.team_id;
@@ -1065,6 +1104,11 @@ async function dispatchSlackEvent(input: {
     resolveActiveSession: ({ channelId, threadTs }) =>
       input.resolveActiveSession({
         continuationToken: slackContinuationToken(channelId, threadTs),
+      }),
+    reset: ({ channelId, threadTs, reason }) =>
+      input.reset({
+        continuationToken: slackContinuationToken(channelId, threadTs),
+        reason,
       }),
     slack: buildSlackWorkspaceHandle({
       botToken: input.credentials?.botToken,
