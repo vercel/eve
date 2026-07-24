@@ -952,6 +952,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInput: coordinated.stepInput,
     });
     if (pending.outcome === "unresolved") {
+      // The runtime-action batch owns the assistant messages. Once that batch
+      // resolves, commit its results before the still-pending HITL batch parks.
+      let parkedSession =
+        resolvedRuntimeActions.outcome === "resolved"
+          ? {
+              ...pending.session,
+              history: [...resolvedRuntimeActions.messages],
+            }
+          : pending.session;
+
       if (
         emit &&
         config.mode === "conversation" &&
@@ -979,8 +989,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
         return {
           next: null,
-          session: setHarnessEmissionState(pending.session, emissionState),
+          session: setHarnessEmissionState(parkedSession, emissionState),
         };
+      }
+
+      if (resolvedRuntimeActions.outcome === "resolved") {
+        if (emit && config.mode === "conversation") {
+          emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+          parkedSession = setHarnessEmissionState(parkedSession, emissionState);
+        }
+        return { next: null, session: parkedSession };
       }
 
       return { next: null, session: pending.session };
@@ -2445,21 +2463,62 @@ async function handleStepResult(input: {
     // parked session carries the default emission state (turnId ""),
     // because the post-preamble `setHarnessEmissionState` is dropped by
     // the later `session = pending.session` / `maybeCompact` rebinds.
+    if (inputRequests.length === 0) {
+      return {
+        next: null,
+        session: setHarnessEmissionState(
+          setPendingRuntimeActionBatch({
+            actions: pendingRuntimeActions,
+            event: {
+              sequence: emissionState.sequence,
+              stepIndex: emissionState.stepIndex,
+              turnId: emissionState.turnId,
+            },
+            responseMessages,
+            session: { ...baseSession, history: [...promptMessages] },
+          }),
+          advanceStep(emissionState),
+        ),
+      };
+    }
+
+    let parkedSession = setPendingRuntimeActionBatch({
+      actions: pendingRuntimeActions,
+      event: {
+        sequence: emissionState.sequence,
+        stepIndex: emissionState.stepIndex,
+        turnId: emissionState.turnId,
+      },
+      responseMessages,
+      session: { ...baseSession, history: [...promptMessages] },
+    });
+
+    // The runtime-action batch already owns the shared assistant response.
+    parkedSession = appendPendingInputBatch({
+      event: {
+        sequence: emissionState.sequence,
+        stepIndex: emissionState.stepIndex,
+        turnId: emissionState.turnId,
+      },
+      requests: inputRequests,
+      responseMessages: [],
+      session: parkedSession,
+    });
+
+    if (emit) {
+      await emit(
+        createInputRequestedEvent({
+          requests: inputRequests,
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
+        }),
+      );
+    }
+
     return {
       next: null,
-      session: setHarnessEmissionState(
-        setPendingRuntimeActionBatch({
-          actions: pendingRuntimeActions,
-          event: {
-            sequence: emissionState.sequence,
-            stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
-          },
-          responseMessages,
-          session: { ...baseSession, history: [...promptMessages] },
-        }),
-        advanceStep(emissionState),
-      ),
+      session: setHarnessEmissionState(parkedSession, advanceStep(emissionState)),
     };
   }
 
