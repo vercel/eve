@@ -585,6 +585,29 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         };
       }
 
+      // A step that parked on both runtime actions and input requests
+      // resumes here with the action results resolved into `messages` but
+      // the input batch still unanswered. Commit the resolved messages
+      // before re-parking — parking on the untouched session would drop
+      // the action results from history — and close the turn like the
+      // plain input park does, so clients see the waiting boundary.
+      if (resolvedRuntimeActions.outcome === "resolved") {
+        let parkedSession: HarnessSession = {
+          ...pending.session,
+          history: [...resolvedRuntimeActions.messages],
+        };
+        if (emit && config.mode === "conversation") {
+          emissionState = await emitTurnEpilogue(
+            emit,
+            emissionState,
+            config.mode,
+            parkedSession.continuationToken,
+          );
+          parkedSession = setHarnessEmissionState(parkedSession, emissionState);
+        }
+        return { next: null, session: parkedSession };
+      }
+
       return { next: null, session: pending.session };
     }
 
@@ -1905,21 +1928,50 @@ async function handleStepResult(input: {
     // parked session carries the default emission state (turnId ""),
     // because the post-preamble `setHarnessEmissionState` is dropped by
     // the later `session = pending.session` / `maybeCompact` rebinds.
-    return {
-      next: null,
-      session: setHarnessEmissionState(
-        setPendingRuntimeActionBatch({
-          actions: pendingRuntimeActions,
-          event: {
+    let parkedSession = setPendingRuntimeActionBatch({
+      actions: pendingRuntimeActions,
+      event: {
+        sequence: emissionState.sequence,
+        stepIndex: emissionState.stepIndex,
+        turnId: emissionState.turnId,
+      },
+      responseMessages,
+      session: { ...baseSession, history: [...promptMessages] },
+    });
+
+    // The same step may also carry approval or question requests. Persist
+    // them alongside the runtime-action batch — with empty
+    // `responseMessages`, since the action batch owns the step's assistant
+    // messages — and surface them now so channels collect the answer while
+    // the actions run. The resumed step resolves the action results first,
+    // then re-parks on this batch (see `executeStepBody`).
+    if (inputRequests.length > 0) {
+      parkedSession = setPendingInputBatch({
+        event: {
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
+        },
+        requests: inputRequests,
+        responseMessages: [],
+        session: parkedSession,
+      });
+
+      if (emit) {
+        await emit(
+          createInputRequestedEvent({
+            requests: inputRequests,
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
             turnId: emissionState.turnId,
-          },
-          responseMessages,
-          session: { ...baseSession, history: [...promptMessages] },
-        }),
-        emissionState,
-      ),
+          }),
+        );
+      }
+    }
+
+    return {
+      next: null,
+      session: setHarnessEmissionState(parkedSession, emissionState),
     };
   }
 

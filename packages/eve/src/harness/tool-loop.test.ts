@@ -913,6 +913,80 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("parks on both batches when one step carries a runtime action and an approval", async () => {
+    const gateToolCall = {
+      input: { action: "run" },
+      toolCallId: "gate-1",
+      toolName: "add",
+      type: "tool-call" as const,
+    };
+    const delegateToolCall = {
+      input: { message: "probe" },
+      toolCallId: "delegate-1",
+      toolName: "delegate",
+      type: "tool-call" as const,
+    };
+    setupMockAgent({
+      content: [
+        gateToolCall,
+        { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
+        delegateToolCall,
+      ],
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              gateToolCall,
+              { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
+              delegateToolCall,
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [gateToolCall, delegateToolCall],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
+    );
+
+    const parked = await runStep(createTestSession(), { message: "Gate and delegate." });
+
+    expect(parked.next).toBeNull();
+    expect(getPendingRuntimeActionBatch(parked.session.state)?.actions).toEqual([
+      expect.objectContaining({ callId: "delegate-1", kind: "subagent-call" }),
+    ]);
+    expect(hasPendingInputBatch(parked.session.state)).toBe(true);
+    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
+
+    // Runtime action results resume the step; the unanswered approval must
+    // re-park with the resolved results committed to history — not reach the
+    // model with a dangling `gate-1` tool call.
+    const reparked = await runStep(parked.session, {
+      runtimeActionResults: [
+        {
+          callId: "delegate-1",
+          kind: "subagent-result",
+          output: "delegated-done",
+          subagentName: "worker",
+        },
+      ],
+    });
+
+    expect(reparked.next).toBeNull();
+    expect(getPendingRuntimeActionBatch(reparked.session.state)).toBeUndefined();
+    expect(hasPendingInputBatch(reparked.session.state)).toBe(true);
+    const toolMessages = reparked.session.history.filter((message) => message.role === "tool");
+    expect(JSON.stringify(toolMessages)).toContain("delegated-done");
+    expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
+    expect(events.at(-1)?.type).toBe("session.waiting");
+  });
+
   it("publishes declared subagent calls from deeply nested sessions", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
