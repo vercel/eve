@@ -53,15 +53,52 @@ type ChatToolChoice =
   | "required"
   | { readonly type: "function"; readonly function: { readonly name: string } };
 
-export function createAutoevalsClient(config: AutoevalsClientConfig): AutoevalsClient {
-  const adapter: unknown = {
-    chat: {
-      completions: {
-        create: (params: ChatParams) => createChatCompletion(params, config),
-      },
-    },
+/**
+ * OpenAI-shaped bridge for bundled autoevals graders.
+ *
+ * Must be a real constructor (not a plain object): when Braintrust is loaded it
+ * sets `globalThis.__inherited_braintrust_wrap_openai`, and autoevals
+ * `isWrapped` probes clients with
+ * `new (Object.getPrototypeOf(client).constructor)({ apiKey: "dummy" })` then
+ * reads `.chat.completions.create`. A plain `{}` reconstructs to
+ * `{ apiKey: "dummy" }` and throws (vercel/eve#858 / autoevals#205).
+ */
+class AutoevalsOpenAIBridgeClient {
+  readonly chat: {
+    readonly completions: {
+      readonly create: (params: ChatParams) => Promise<{ readonly choices: readonly unknown[] }>;
+    };
   };
-  return adapter as AutoevalsClient;
+
+  constructor(
+    configOrProbe?:
+      | AutoevalsClientConfig
+      | { readonly apiKey?: string; readonly dangerouslyAllowBrowser?: unknown },
+  ) {
+    if (isAutoevalsClientConfig(configOrProbe)) {
+      this.chat = {
+        completions: {
+          create: (params) => createChatCompletion(params, configOrProbe),
+        },
+      };
+      return;
+    }
+
+    // Probe-only stub for autoevals `isWrapped` reconstruction — not used for grading.
+    this.chat = {
+      completions: {
+        create: async () => ({ choices: [] }),
+      },
+    };
+  }
+}
+
+function isAutoevalsClientConfig(value: unknown): value is AutoevalsClientConfig {
+  return typeof value === "object" && value !== null && "languageModel" in value;
+}
+
+export function createAutoevalsClient(config: AutoevalsClientConfig): AutoevalsClient {
+  return new AutoevalsOpenAIBridgeClient(config) as AutoevalsClient;
 }
 
 async function createChatCompletion(
