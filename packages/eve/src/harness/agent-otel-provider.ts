@@ -152,13 +152,22 @@ export function createAgentOtelProvider(
   };
 
   const onSessionTransition = (event: InstrumentationSessionTransitionEvent): void => {
-    if (event.turnId === undefined) return;
-    const key = turnKey(event.sessionId, event.turnId);
-    const turn = turns.get(key);
-    if (turn === undefined) return;
-    turn.span.addEvent(event.type);
-    turn.span.end();
-    turns.delete(key);
+    if (event.turnId !== undefined) {
+      const key = turnKey(event.sessionId, event.turnId);
+      const turn = turns.get(key);
+      if (turn !== undefined) {
+        turn.span.addEvent(event.type);
+        turn.span.end();
+        turns.delete(key);
+      }
+    }
+    // `session.waiting` is not terminal — the session may resume with a new
+    // turn that still needs its metadata — so only release session-scoped
+    // state on terminal transitions.
+    if (event.type === "session.completed" || event.type === "session.failed") {
+      sessionMetadata.delete(event.sessionId);
+      pendingSessionStarted.delete(event.sessionId);
+    }
   };
 
   const beforeModelCall = (event: InstrumentationModelCallStartedEvent): SpanState | undefined => {
