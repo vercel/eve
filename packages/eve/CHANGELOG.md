@@ -1,5 +1,14 @@
 # eve
 
+## 0.27.4
+
+### Patch Changes
+
+- 5d961f3: Request Vercel CLI's maximum 100-team page instead of following its broken default pagination path.
+- 04d5814: `eve dev` no longer fails at boot with `UNRESOLVED_IMPORT` when a mounted extension (or any dependency) resolves through a `node_modules` above the app root — npm/yarn workspace hoisting, intermediate monorepo levels, and bare `withEve` agent directories whose host app owns the install now materialize in the dev-runtime snapshot.
+- bbba073: The dev TUI supports queueing, steering, and cooperative turn cancellation. Pressing Enter while a turn is running queues the message (up to 5) in a pinned panel directly above the input — one line per message — and the queue coalesces into the next turn's message when the turn ends. Esc steers: it pops the oldest queued message, cancels the running turn cooperatively (`turn.cancelled` → `session.waiting`, keeping the session's context), and submits the popped message as the replacement turn. With nothing queued, Esc twice cancels the turn. Cancellation requests retry while the turn is live, so an Esc that lands in the turn-dispatch window (before the server has armed the turn's cancel hook) is no longer silently lost. Cancelling a turn mid-delegation settles its subagent sections and stops their child streams, so stale subagent output cannot paint into the steered turn. Messages still queued when a turn is interrupted or fails restore into the next prompt's input, and a turn cancelled from outside the prompt (a stale cancel or another client's `/cancel`) restores its submitted message the same way. On exit, the parting line names the server session id (`☰eve  v0.27.0 · session ses_…`) so the conversation can be found again.
+- dfd360f: Custom channel routes can now call `reset()` and `ClientSession` can reset the session that owns a stable continuation token. The next `send()` starts a fresh workflow session and lazily initializes a new session-scoped sandbox instead of reusing prior history or workspace state, and the `eve dev` TUI's `/new` performs that durable reset before clearing its transcript.
+
 ## 0.27.3
 
 ### Patch Changes
