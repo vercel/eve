@@ -34,7 +34,7 @@ Slack user U ── router deployment ──────────────
                                      body.forwardedPrincipal: { current: U, initiator: U }
                                                     │
                                      eveChannel auth:               verifies router app
-                                     acceptPrincipalFrom(caller):   router app may forward
+                                     trustedForwarders(caller):   router app may forward
                                                     │
                                      session.auth.current = U ──► per-user Connect,
                                                                   local subagents,
@@ -71,7 +71,7 @@ export default defineRemoteAgent({
 - The flag rides the module-backed runtime definition next to `auth` and `headers`; the compiled
   manifest node is unchanged.
 
-### Receiver: `acceptPrincipalFrom` on `eveChannel`
+### Receiver: `trustedForwarders` on `eveChannel`
 
 ```ts
 // agent/channels/eve.ts  (site-ops deployment)
@@ -80,12 +80,12 @@ import { eveChannel, vercelOidc, vercelSubject } from "eve";
 export default eveChannel({
   auth: [vercelOidc()],
   // Only the router deployment may assert a forwarded principal.
-  acceptPrincipalFrom: (forwarder) =>
+  trustedForwarders: (forwarder) =>
     forwarder.subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
 });
 ```
 
-- `acceptPrincipalFrom?: (caller: SessionAuthContext) => boolean | Promise<boolean>`. The
+- `trustedForwarders?: (caller: SessionAuthContext) => boolean | Promise<boolean>`. The
   predicate authorizes the _verified transport principal_ (who is asserting), not the forwarded
   identity (what is asserted). The route's `auth` walk has already authenticated the request; the
   forwarding decision is authorization over its result, so there is no second token verification
@@ -123,7 +123,7 @@ export default eveChannel({
   transport caller; `defaultEveAuth` passes the forwarded principal through, and a custom
   `onMessage` can still override or drop, same as today.
 - **Rejections fail loud.** A body carrying `forwardedPrincipal` when the channel has no
-  `acceptPrincipalFrom` option → 403 ("this deployment does not accept a forwarded
+  `trustedForwarders` option → 403 ("this deployment does not accept a forwarded
   principal"). Predicate returns `false` → 403. Malformed `forwardedPrincipal` payload → 400. Each
   fails the sender's dispatch inline. The one case that does not fail at the hop is a receiver on
   an eve version that predates forwarding: it drops the unknown field and runs the session as the
@@ -145,13 +145,13 @@ export default eveChannel({
 | `execution/dispatch-runtime-actions-step.ts`                               | pass `auth` / `initiatorAuth` (already in scope) to remote dispatch                                                     |
 | `execution/remote-agent-dispatch.ts`                                       | build `forwardedPrincipal` body field                                                                                   |
 | `channel/forwarded-principal.ts` (new)                                     | strict wire schema for `{ current, initiator? }` (open `authenticator` / `principalType`), beside `session-callback.ts` |
-| `public/channels/eve.ts`                                                   | `acceptPrincipalFrom` option; forwarded-principal gate + principal replacement on the create route                      |
+| `public/channels/eve.ts`                                                   | `trustedForwarders` option; forwarded-principal gate + principal replacement on the create route                        |
 | `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md` | forwarding section on each side + trust-model warning                                                                   |
 
 Docs must carry the security guidance explicitly: match the transport principal precisely (e.g.
 `subject === vercelSubject({ teamSlug, projectName })`); a permissive predicate (`() => true`)
 lets any authenticated caller assert any principal. Docs must also note that the framework default
-channel has no `acceptPrincipalFrom`, so a receiving deployment must author its own
+channel has no `trustedForwarders`, so a receiving deployment must author its own
 `agent/channels/eve.ts` to accept forwarded identity — forwarded bodies 403 until it does.
 
 ## Out of scope
@@ -173,7 +173,7 @@ channel has no `acceptPrincipalFrom`, so a receiving deployment must author its 
 - A response acknowledgment (`forwardedPrincipal: "accepted"` on the 202) letting the sender
   detect a pre-forwarding receiver that silently drops the unknown body field. Considered and
   dropped: forwarding only ever works after the receiver's author adds
-  `acceptPrincipalFrom` — which requires a forwarding-aware eve — so a stale receiver is
+  `trustedForwarders` — which requires a forwarding-aware eve — so a stale receiver is
   always an incomplete setup, caught during enablement when per-user Connect fails
   `principal_required`. Permanent wire surface (plus best-effort orphan-session cancellation on a
   missing ack) was not justified by a transitional, pre-1.0 skew window.
@@ -192,6 +192,6 @@ Single PR with a **patch** changeset: both options are additive; no public API b
   `session.auth.current` / `.initiator` and reaches `resolveConnectionPrincipal` as a `user`
   principal.
 - Scenario: two in-process eve servers over real HTTP — router with `forwardPrincipal: true` dispatches
-  to a receiver whose `acceptPrincipalFrom` predicate accepts it, asserting the child session
+  to a receiver whose `trustedForwarders` predicate accepts it, asserting the child session
   principal; plus the 403 mismatch path. (No remote-agent e2e fixture exists today; a scenario
   with a real HTTP boundary covers the hop without requiring a second CI deployment.)

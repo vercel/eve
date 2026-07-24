@@ -29,7 +29,7 @@ export interface ForwardedPrincipal {
  * principal. Receives the *verified* route-auth principal (who is asserting),
  * never the forwarded identity (what is asserted).
  */
-export type AcceptPrincipalFrom = (forwarder: SessionAuthContext) => boolean | Promise<boolean>;
+export type TrustedForwarders = (forwarder: SessionAuthContext) => boolean | Promise<boolean>;
 
 export type ForwardedPrincipalParseResult =
   | {
@@ -94,14 +94,14 @@ const forwardedPrincipalSchema = z
  * `onMessage` always sees the transport forwarder on the replaced principal.
  */
 export async function resolveForwardedPrincipal(input: {
-  readonly accept: AcceptPrincipalFrom | undefined;
+  readonly trustedForwarders: TrustedForwarders | undefined;
   readonly forwarder: SessionAuthContext;
   readonly payload: Record<string, unknown>;
 }): Promise<ResolvedForwardedPrincipal | Response> {
   const value = input.payload.forwardedPrincipal;
   if (value === undefined) return { accepted: false, auth: input.forwarder };
 
-  if (input.accept === undefined) {
+  if (input.trustedForwarders === undefined) {
     return Response.json(
       { error: "This deployment does not accept a forwarded principal.", ok: false },
       { status: 403 },
@@ -115,13 +115,13 @@ export async function resolveForwardedPrincipal(input: {
 
   let accepted: boolean;
   try {
-    accepted = await input.accept(input.forwarder);
+    accepted = await input.trustedForwarders(input.forwarder);
   } catch (error) {
-    const errorId = logError(log, "acceptPrincipalFrom handler failed", error, {
+    const errorId = logError(log, "trustedForwarders handler failed", error, {
       forwarder: input.forwarder.principalId,
     });
     return Response.json(
-      { error: "acceptPrincipalFrom handler failed.", errorId, ok: false },
+      { error: "trustedForwarders handler failed.", errorId, ok: false },
       { status: 500 },
     );
   }

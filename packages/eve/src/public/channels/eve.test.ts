@@ -1539,7 +1539,7 @@ describe("eveChannel — forwarded principal", () => {
     return createJsonMessageRequest({ forwardedPrincipal, message: "hi", mode: "task" });
   }
 
-  it("rejects a forwarded body when the channel has no acceptPrincipalFrom", async () => {
+  it("rejects a forwarded body when the channel has no trustedForwarders", async () => {
     const handler = createEveCreateHandler({ auth: () => ROUTER_CALLER });
 
     const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
@@ -1553,18 +1553,18 @@ describe("eveChannel — forwarded principal", () => {
   });
 
   it("rejects a caller the predicate refuses", async () => {
-    const acceptPrincipalFrom = vi.fn(
+    const trustedForwarders = vi.fn(
       (caller: SessionAuthContext) => caller.principalId === "someone-else",
     );
     const handler = createEveCreateHandler({
-      acceptPrincipalFrom,
+      trustedForwarders,
       auth: () => ROUTER_CALLER,
     });
 
     const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
 
     expect(response.status).toBe(403);
-    expect(acceptPrincipalFrom).toHaveBeenCalledWith(ROUTER_CALLER);
+    expect(trustedForwarders).toHaveBeenCalledWith(ROUTER_CALLER);
     expect(handler.send).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: "Caller is not authorized to assert a forwarded principal.",
@@ -1574,7 +1574,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("rejects a malformed forwarded payload with 400", async () => {
     const handler = createEveCreateHandler({
-      acceptPrincipalFrom: () => true,
+      trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1592,7 +1592,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("returns 500 when the authored predicate throws", async () => {
     const handler = createEveCreateHandler({
-      acceptPrincipalFrom: () => {
+      trustedForwarders: () => {
         throw new Error("boom");
       },
       auth: () => ROUTER_CALLER,
@@ -1606,7 +1606,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("replaces the session principal when the forwarder is accepted", async () => {
     const handler = createEveCreateHandler({
-      acceptPrincipalFrom: (forwarder) => forwarder.principalId === ROUTER_CALLER.principalId,
+      trustedForwarders: (forwarder) => forwarder.principalId === ROUTER_CALLER.principalId,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1640,7 +1640,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("defaults the initiator to the forwarded current principal", async () => {
     const handler = createEveCreateHandler({
-      acceptPrincipalFrom: () => true,
+      trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1652,7 +1652,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("overwrites a sender-supplied eve:forwarded-by attribute", async () => {
     const handler = createEveCreateHandler({
-      acceptPrincipalFrom: () => true,
+      trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1676,7 +1676,7 @@ describe("eveChannel — forwarded principal", () => {
       return { auth: defaultEveAuth(ctx) };
     });
     const handler = createEveCreateHandler({
-      acceptPrincipalFrom: () => true,
+      trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
       onMessage,
     });
@@ -1691,7 +1691,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("keeps the transport principal and omits initiatorAuth without a forwarded body", async () => {
     const handler = createEveCreateHandler({
-      acceptPrincipalFrom: () => true,
+      trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1705,7 +1705,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("rejects forwarded principal on the continue route", async () => {
     const handler = createEveContinueHandler({
-      acceptPrincipalFrom: () => true,
+      trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
     });
 

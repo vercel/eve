@@ -4,10 +4,7 @@ import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#cha
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import type { SendOptions } from "#channel/routes.js";
-import {
-  resolveForwardedPrincipal,
-  type AcceptPrincipalFrom,
-} from "#channel/forwarded-principal.js";
+import { resolveForwardedPrincipal, type TrustedForwarders } from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -133,23 +130,24 @@ export interface EveChannelInput {
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
-   * Authorizes which forwarders — transport-authenticated callers — may
+   * The trusted-forwarders policy: which transport-authenticated callers may
    * assert a forwarded principal on the create-session route (the
    * `forwardedPrincipal` body field a `defineRemoteAgent({ forwardPrincipal:
    * true })` sender emits). The predicate receives the *verified* route-auth
    * principal of the forwarder — who is asserting, never what is asserted —
    * and must match it precisely (for example
-   * `({ subject }) => subject === vercelSubject({ teamSlug, projectName })`).
+   * `(forwarder) => forwarder.subject === vercelSubject({ teamSlug, projectName })`).
    * A permissive predicate lets any authenticated forwarder assert any
    * principal.
    *
-   * When accepted, the forwarded principal replaces the session principal
-   * (`session.auth.current` / `session.auth.initiator`) exactly as if that
-   * user had called this deployment directly, and the forwarder is recorded
-   * on the accepted contexts as the `eve:forwarded-by` attribute. Omit the
-   * option to reject every forwarded assertion with 403.
+   * When a trusted forwarder's assertion is accepted, the forwarded
+   * principal replaces the session principal (`session.auth.current` /
+   * `session.auth.initiator`) exactly as if that user had called this
+   * deployment directly, and the forwarder is recorded on the accepted
+   * contexts as the `eve:forwarded-by` attribute. Omit the option to reject
+   * every forwarded assertion with 403.
    */
-  readonly acceptPrincipalFrom?: AcceptPrincipalFrom;
+  readonly trustedForwarders?: TrustedForwarders;
   /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
    * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).
@@ -230,7 +228,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         const forwarded = await resolveForwardedPrincipal({
-          accept: input.acceptPrincipalFrom,
+          trustedForwarders: input.trustedForwarders,
           forwarder: sessionAuth,
           payload: payload as Record<string, unknown>,
         });

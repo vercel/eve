@@ -32,5 +32,5 @@ export default eveChannel({
       subject: "e2e-user",
     }),
   ],
-  acceptPrincipalFrom: (forwarder) => forwarder.principalId === "router-app",
+  trustedForwarders: (forwarder) => forwarder.principalId === "router-app",
 });

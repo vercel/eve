@@ -5,7 +5,7 @@ import { defineEval } from "eve/evals";
  * fixture deployment plays both sides: `remote-loopback` is a
  * `defineRemoteAgent({ forwardPrincipal: true })` pointing back at this
  * deployment, whose authored eve channel accepts principals only from the
- * hop's `router-app` bearer (`acceptPrincipalFrom`).
+ * hop's `router-app` bearer (`trustedForwarders`).
  *
  * The eval driver's session runs as the fixed `user:e2e-user` principal (the
  * channel's catch-all auth entry). The child session's `whoami` marker can
