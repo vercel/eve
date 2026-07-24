@@ -47,6 +47,21 @@ export const templateEntries: TemplateEntry[] = [
     files: templateSourceFiles["eve-chat-template"],
   },
   {
+    slug: "eve-design-template",
+    title: "Design",
+    setupPrompt:
+      "Set up the eve design agent template in my current workspace using https://github.com/vercel-labs/eve-design-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README and BOOTSTRAP.md to configure it. Preserve the existing project if the workspace is not empty, tell me about any required environment variables or manual setup steps, and do not approve or publish the design corpus for me.",
+    description:
+      "A Slack design collaborator that answers from a reviewed, versioned corpus of your organization's approved design guidance.",
+    sourceHref: "https://github.com/vercel-labs/eve-design-template/tree/main",
+    sourceRevision: "7f8e5a62b02cb3407e063fc98c56c83dabbd95f4",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-4.6",
+    integrations: ["Slack"],
+    source: "Vercel Templates",
+    files: templateSourceFiles["eve-design-template"],
+  },
+  {
     slug: "eve-slack-agent",
     title: "Slack",
     setupPrompt:
