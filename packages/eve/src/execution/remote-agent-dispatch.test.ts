@@ -109,6 +109,37 @@ describe("startRemoteAgentSession", () => {
     expect(body.mode).toBe("task");
   });
 
+  it("ignores an empty model-passed outputSchema instead of forwarding it", async () => {
+    // Models routinely pass `outputSchema: {}` despite the tool schema saying
+    // to omit it. An empty schema constrains nothing, but forwarding it flips
+    // the remote child into structured-output mode and discards its text
+    // reply — local subagent dispatch already drops it; remote must match.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), {
+        status: 202,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const action = createAction();
+    await startRemoteAgentSession({
+      action: { ...action, input: { ...action.input, outputSchema: {} } },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body).not.toHaveProperty("outputSchema");
+  });
+
   it("targets an active turn inbox when a callback token is supplied", async () => {
     const fetchMock = vi
       .fn()

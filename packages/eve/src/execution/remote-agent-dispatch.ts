@@ -4,7 +4,10 @@ import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#proto
 import type { CancelTurnResult, SessionAuthContext } from "#channel/types.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
-import { formatSubagentInput } from "#execution/subagent-invocation.js";
+import {
+  formatSubagentInput,
+  normalizeRequestedOutputSchema,
+} from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -64,7 +67,7 @@ export async function startRemoteAgentSession(input: {
     message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),
     mode: "task",
     outputSchema:
-      (input.action.input.outputSchema as object | undefined) ?? input.remote.outputSchema,
+      normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
   };
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
