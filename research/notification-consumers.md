@@ -8,12 +8,22 @@ last_updated: "2026-07-24"
 
 ## Summary
 
-Event delivery is currently welded to the producer's call stack: the emit
-path inside a workflow step synchronously invokes the channel adapter and
-the remote-callback forwarder before writing the durable stream. Consumers
-only run while the producer's compute is awake. For notification-class
-events — a child's `authorization.required`/`authorization.completed`
-surfaced on the caller's stream — this causes real failures:
+The session's durable stream is eve's natural event-propagation backbone:
+producers append, and everything downstream — channel rendering, clients,
+cross-deployment forwarding — can derive from it independently, each at its
+own pace, without producers knowing consumers exist. Followers already work
+this way. This document moves the first non-follower consumers onto that
+model and establishes the pattern the remaining event propagation can
+converge on: producers just write; consumption is a separately scheduled
+concern.
+
+Today, non-follower delivery is instead welded to the producer's call
+stack: the emit path inside a workflow step synchronously invokes the
+channel adapter and the remote-callback forwarder before writing the
+stream, so those consumers only run while the producer's compute is awake.
+For notification-class events — a child's
+`authorization.required`/`authorization.completed` surfaced on the
+caller's stream — the coupling causes real failures:
 
 - A notification callback lands only while the caller's turn is parked at
   its inbox; parked-for-input or between turns, `resumeHook` throws and the
@@ -25,12 +35,15 @@ surfaced on the caller's stream — this causes real failures:
 - Adapter state persists through the session workflow's cursor, so nothing
   outside it can safely invoke a channel.
 
-The fix is a producer/consumer split built from existing engine primitives,
-scoped so that v1 adds **no new queue wakes**: the deployment that hosts the
-parent session gets one **consumer** — a small companion workflow run parked
-on a notify hook — and it replaces a wake that already happens today. The
-outbound side keeps its direct per-event POST, moved off the emitting
-step's critical path.
+The split is built from existing engine primitives and scoped so that v1
+adds **no new queue wakes**: the deployment that hosts the parent session
+gets one **consumer** — a small companion workflow run parked on a notify
+hook — and it replaces a wake that already happens today. The outbound side
+keeps its direct per-event POST, moved off the emitting step's critical
+path. Beyond fixing notifications, the lane is the on-ramp for every event
+class that should propagate without waking a session: progress
+(`"working"`) and proxied HITL join it under the frequency admission rule,
+and the emit-coupled consumers converge onto it one at a time.
 
 Vocabulary: the **caller** is the deployment where the parent session lives
 (the one the user watches); the **callee** is the remote deployment running
