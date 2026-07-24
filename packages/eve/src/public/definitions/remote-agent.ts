@@ -32,7 +32,7 @@ export interface RemoteAgentDefinition {
    *
    * Only principal metadata crosses the wire, never tokens or credentials —
    * {@link auth} keeps authenticating *this* deployment to the remote. The
-   * receiver must opt in with `eveChannel({ acceptForwardedPrincipalFrom })`;
+   * receiver must opt in with `eveChannel({ acceptPrincipalFrom })`;
    * a receiver that refuses the forwarder (or accepts no forwarded principal
    * at all) rejects with 403 and the dispatch fails.
    */

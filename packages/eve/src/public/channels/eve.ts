@@ -5,7 +5,7 @@ import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { SendOptions } from "#channel/routes.js";
 import {
   resolveForwardedPrincipal,
-  type AcceptForwardedPrincipalFrom,
+  type AcceptPrincipalFrom,
 } from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
@@ -144,7 +144,7 @@ export interface EveChannelInput {
    * on the accepted contexts as the `eve:forwarded-by` attribute. Omit the
    * option to reject every forwarded assertion with 403.
    */
-  readonly acceptForwardedPrincipalFrom?: AcceptForwardedPrincipalFrom;
+  readonly acceptPrincipalFrom?: AcceptPrincipalFrom;
   /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
    * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).
@@ -225,7 +225,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         const forwarded = await resolveForwardedPrincipal({
-          accept: input.acceptForwardedPrincipalFrom,
+          accept: input.acceptPrincipalFrom,
           forwarder: sessionAuth,
           payload: payload as Record<string, unknown>,
         });

@@ -14,7 +14,7 @@ import { startEveDev } from "./dev-server-harness.js";
  * Locks the remote-agent principal-forwarding hop over a real HTTP boundary: the
  * test process plays the router deployment (driving the real sender dispatch
  * function) against a receiver dev server whose `eveChannel` configures
- * `acceptForwardedPrincipalFrom`. The receiver's `onMessage` asserts that the
+ * `acceptPrincipalFrom`. The receiver's `onMessage` asserts that the
  * forwarded principal — not the transport caller — became the effective
  * session caller, with the `eve:forwarded-by` audit attribute stamped from
  * the verified transport principal.
@@ -50,7 +50,7 @@ export default eveChannel({
       principalType: "service",
     };
   },
-  acceptForwardedPrincipalFrom: (caller) => caller.principalId === "router-app",
+  acceptPrincipalFrom: (caller) => caller.principalId === "router-app",
   onMessage(ctx) {
     const caller = ctx.eve.caller;
     if (

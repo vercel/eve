@@ -1410,7 +1410,7 @@ describe("eveChannel — forwarded principal", () => {
     return createJsonMessageRequest({ forwardedPrincipal, message: "hi", mode: "task" });
   }
 
-  it("rejects a forwarded body when the channel has no acceptForwardedPrincipalFrom", async () => {
+  it("rejects a forwarded body when the channel has no acceptPrincipalFrom", async () => {
     const handler = createEveCreateHandler({ auth: () => ROUTER_CALLER });
 
     const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
@@ -1424,18 +1424,18 @@ describe("eveChannel — forwarded principal", () => {
   });
 
   it("rejects a caller the predicate refuses", async () => {
-    const acceptForwardedPrincipalFrom = vi.fn(
+    const acceptPrincipalFrom = vi.fn(
       (caller: SessionAuthContext) => caller.principalId === "someone-else",
     );
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom,
+      acceptPrincipalFrom,
       auth: () => ROUTER_CALLER,
     });
 
     const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
 
     expect(response.status).toBe(403);
-    expect(acceptForwardedPrincipalFrom).toHaveBeenCalledWith(ROUTER_CALLER);
+    expect(acceptPrincipalFrom).toHaveBeenCalledWith(ROUTER_CALLER);
     expect(handler.send).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: "Caller is not authorized to assert a forwarded principal.",
@@ -1445,7 +1445,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("rejects a malformed forwarded payload with 400", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom: () => true,
+      acceptPrincipalFrom: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1463,7 +1463,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("returns 500 when the authored predicate throws", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom: () => {
+      acceptPrincipalFrom: () => {
         throw new Error("boom");
       },
       auth: () => ROUTER_CALLER,
@@ -1477,8 +1477,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("replaces the session principal when the forwarder is accepted", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom: (forwarder) =>
-        forwarder.principalId === ROUTER_CALLER.principalId,
+      acceptPrincipalFrom: (forwarder) => forwarder.principalId === ROUTER_CALLER.principalId,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1512,7 +1511,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("defaults the initiator to the forwarded current principal", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom: () => true,
+      acceptPrincipalFrom: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1524,7 +1523,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("overwrites a sender-supplied eve:forwarded-by attribute", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom: () => true,
+      acceptPrincipalFrom: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1548,7 +1547,7 @@ describe("eveChannel — forwarded principal", () => {
       return { auth: defaultEveAuth(ctx) };
     });
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom: () => true,
+      acceptPrincipalFrom: () => true,
       auth: () => ROUTER_CALLER,
       onMessage,
     });
@@ -1563,7 +1562,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("keeps the transport principal and omits initiatorAuth without a forwarded body", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedPrincipalFrom: () => true,
+      acceptPrincipalFrom: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -1577,7 +1576,7 @@ describe("eveChannel — forwarded principal", () => {
 
   it("rejects forwarded principal on the continue route", async () => {
     const handler = createEveContinueHandler({
-      acceptForwardedPrincipalFrom: () => true,
+      acceptPrincipalFrom: () => true,
       auth: () => ROUTER_CALLER,
     });
 

@@ -29,9 +29,7 @@ export interface ForwardedPrincipal {
  * principal. Receives the *verified* route-auth principal (who is asserting),
  * never the forwarded identity (what is asserted).
  */
-export type AcceptForwardedPrincipalFrom = (
-  forwarder: SessionAuthContext,
-) => boolean | Promise<boolean>;
+export type AcceptPrincipalFrom = (forwarder: SessionAuthContext) => boolean | Promise<boolean>;
 
 export type ForwardedPrincipalParseResult =
   | {
@@ -96,7 +94,7 @@ const forwardedPrincipalSchema = z
  * `onMessage` always sees the transport forwarder on the replaced principal.
  */
 export async function resolveForwardedPrincipal(input: {
-  readonly accept: AcceptForwardedPrincipalFrom | undefined;
+  readonly accept: AcceptPrincipalFrom | undefined;
   readonly forwarder: SessionAuthContext;
   readonly payload: Record<string, unknown>;
 }): Promise<ResolvedForwardedPrincipal | Response> {
@@ -119,11 +117,11 @@ export async function resolveForwardedPrincipal(input: {
   try {
     accepted = await input.accept(input.forwarder);
   } catch (error) {
-    const errorId = logError(log, "acceptForwardedPrincipalFrom handler failed", error, {
+    const errorId = logError(log, "acceptPrincipalFrom handler failed", error, {
       forwarder: input.forwarder.principalId,
     });
     return Response.json(
-      { error: "acceptForwardedPrincipalFrom handler failed.", errorId, ok: false },
+      { error: "acceptPrincipalFrom handler failed.", errorId, ok: false },
       { status: 500 },
     );
   }

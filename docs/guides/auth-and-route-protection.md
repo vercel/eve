@@ -222,7 +222,7 @@ Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment va
 
 ## Accepting forwarded identity from another deployment
 
-A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on the create-session request as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `acceptForwardedPrincipalFrom` on `eveChannel`:
+A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on the create-session request as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `acceptPrincipalFrom` on `eveChannel`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -231,14 +231,14 @@ import { vercelOidc, vercelSubject } from "eve/channels/auth";
 export default eveChannel({
   auth: [vercelOidc()],
   // Only the router deployment may assert a forwarded principal.
-  acceptForwardedPrincipalFrom: (forwarder) =>
+  acceptPrincipalFrom: (forwarder) =>
     forwarder.subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
 });
 ```
 
-The predicate authorizes the _forwarder_ (the verified route-auth principal — who is asserting), not the forwarded principal (what is asserted). Match it precisely: a permissive predicate like `() => true` lets any caller that passes route auth assert any principal, including preview deployments of your own project when `vercelOidc()` is in the walk. `acceptForwardedPrincipalFrom` exists only on your authored channel — the framework default channel never accepts a forwarded principal, so a receiving deployment must author `agent/channels/eve.ts`.
+The predicate authorizes the _forwarder_ (the verified route-auth principal — who is asserting), not the forwarded principal (what is asserted). Match it precisely: a permissive predicate like `() => true` lets any caller that passes route auth assert any principal, including preview deployments of your own project when `vercelOidc()` is in the walk. `acceptPrincipalFrom` exists only on your authored channel — the framework default channel never accepts a forwarded principal, so a receiving deployment must author `agent/channels/eve.ts`.
 
-When the predicate accepts, the forwarded principal replaces the session principal: `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly, so user-scoped connections, local subagents, and further `forwardPrincipal` hops all see that user. The forwarder is recorded on the accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Rejections fail loud: a forwarded body without `acceptForwardedPrincipalFrom` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+When the predicate accepts, the forwarded principal replaces the session principal: `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly, so user-scoped connections, local subagents, and further `forwardPrincipal` hops all see that user. The forwarder is recorded on the accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Rejections fail loud: a forwarded body without `acceptPrincipalFrom` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
 
 ## What reaches `ctx.session.auth`
 
