@@ -31,28 +31,37 @@ stream — show the inline weld failing concretely. Receipts are pinned to
 [#1167's head, `413ce48d`](https://github.com/vercel/eve/pull/1167), the
 baseline that carries the mechanism:
 
-- **Events are dropped.** The callback route can hand an event only to a
-  turn parked at its inbox: otherwise `resumeHook` throws and the route
-  answers 404
-  ([session-callback-route.ts:67](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/runtime/session-callback-route.ts#L67)),
-  `postSessionCallback` turns any non-2xx into an error
-  ([session-callback-post.ts:31](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/session-callback-post.ts#L31)),
+- **Deliveries are addressed to a park, not to the session.** The engine
+  itself buffers: `resumeHook` durably appends a `hook_received` event to
+  the owning run's log and re-queues the run — nothing needs to be
+  awaiting, and it throws only for a missing or disposed hook or a
+  terminal run (`@workflow/core@5.0.0-beta.36`,
+  `dist/runtime/resume-hook.js`). What defeats that buffering is the
+  address: the callee's callback URL embeds the caller's continuation
+  token as of dispatch
+  ([remote-agent-dispatch.ts:30](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/remote-agent-dispatch.ts#L30)),
+  the session rekeys to a fresh token at every park
+  ([workflow-entry.ts:251](https://github.com/vercel/eve/blob/0a8b63c53569776ac09602a0027e7913616e239f/packages/eve/src/execution/workflow-entry.ts#L251-L253)),
+  and retired hooks are disposed immediately, so a late delivery gets
+  `HookNotFoundError`
+  ([session-delivery-hook.ts:37](https://github.com/vercel/eve/blob/0a8b63c53569776ac09602a0027e7913616e239f/packages/eve/src/execution/session-delivery-hook.ts#L37-L41)).
+  The route surfaces that as a 404
+  ([session-callback-route.ts:67](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/runtime/session-callback-route.ts#L67))
   and the callee logs and moves on
   ([session-callback-notification.ts:61](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/session-callback-notification.ts#L61)).
-  The window matters because these events are how a person gets
-  unblocked. Expected path: a remote child parks on sign-in, the forwarded
+  Why it matters: these events are how a person gets unblocked. Expected
+  path: a remote child parks on sign-in, the forwarded
   `authorization.required` becomes the sign-in prompt in the caller's
-  channel, the person clicks, the child resumes. Now let the caller's turn
-  be parked for input at that moment — it also holds a pending approval,
-  the exact shape the #1167 hitl-collision eval constructs — and the same
-  POST answers 404, the callee drops it, and the only person who can
-  unblock the child is never asked. The completion side has the same
-  window: `authorization.completed` races the terminal callback as an
-  independent POST, so a sign-in card that did render can stay frozen on
-  "waiting" after the child already finished. One curl verifies the
-  window: POST a well-formed notification to a session's callback URL
-  while it isn't parked at the inbox and read back
-  `{"error":"Session callback not pending."}`.
+  channel, the person clicks, the child resumes. Divergence: the caller's
+  turn also holds a pending approval — the #1167 hitl-collision shape —
+  so the approval park rotated the token and disposed the hook the
+  child's callback URL still points at; the prompt 404s, and the only
+  person who can unblock the child is never asked. Same failure on the
+  way out: once the terminal callback resolves the call and the turn
+  parks or ends, the racing `authorization.completed` hits a retired
+  token, and a card that did render stays frozen on "waiting". One curl
+  verifies it: POST a well-formed notification to a retired callback
+  token and read back `{"error":"Session callback not pending."}`.
 - **Nothing redelivers.** Producers do emit from journaled steps, but a
   delivery failure never reaches the journal — deliberately, so an
   unreachable caller cannot fail the producing step: the remote POST
@@ -61,10 +70,11 @@ baseline that carries the mechanism:
   and a throwing local forward is swallowed by `callAdapterEventHandler`
   ("adapter event handler threw — event swallowed",
   [adapter.ts:246](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/channel/adapter.ts#L246)).
-  Retrying the producer's step would not help anyway: "not pending" stays
-  true for as long as the parent isn't parked, and a retry re-runs the
-  step's other side effects. The child's own stream write is durable; the
-  delivery isn't.
+  Retrying the producer's step would not help anyway: the POST is
+  addressed to a retired token and rotation is one-way, so the address
+  never becomes valid again — while the retry re-runs the step's other
+  side effects. The child's own stream write is durable; the delivery
+  isn't.
 - **Delivery is heavyweight.** A rendering-only event — one whose entire
   effect is presentation, e.g. a child's `authorization.required` becoming
   the channel's sign-in prompt, never touching model history or session
@@ -158,8 +168,10 @@ CALLER   POST /eve/v1/callback/:token {status:"notification", event}
 
 The session's entry workflow starts one consumer run, handing it the stream
 writable — the same cross-run handoff turns get — and the serialized
-channel context. The consumer parks on `<sessionId>:events`; each delivery
-is one journaled **write step** (`event-consumer-write-step` — the run owns
+channel context. The consumer parks on `<sessionId>:events` — a stable
+address for the session's lifetime, so producers never chase a rotating
+park token and the engine's own hook buffering finally applies; each
+delivery is one journaled **write step** (`event-consumer-write-step` — the run owns
 receiving, the step owns the delivery's durable effects): run the channel's
 **existing** adapter event handler (the same one the proxy step invokes
 today, so channels change nothing) and append the wrapped event to the
