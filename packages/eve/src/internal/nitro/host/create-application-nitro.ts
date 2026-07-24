@@ -36,6 +36,7 @@ import type {
   PreparedDevelopmentApplicationHost,
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
+import { createExternalDependencyTracePlugin } from "#internal/nitro/host/external-dependency-trace-plugin.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
@@ -109,30 +110,47 @@ function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
   );
 }
 
-function collectHostedTraceDependencies(
-  preparedHost: PreparedApplicationHost,
-  configuredOptionalEnginePackages: readonly string[],
-): string[] {
+function collectConfiguredExternalDependencies(preparedHost: PreparedApplicationHost): string[] {
   const agentNodes = [
     preparedHost.compileResult.manifest,
     ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
   ];
-  const configuredExternalDependencies = agentNodes.flatMap(
-    (node) => node.config.build?.externalDependencies ?? [],
+  return [
+    ...new Set(
+      agentNodes
+        .flatMap((node) => node.config.build?.externalDependencies ?? [])
+        .filter((dependencyName) => dependencyName !== EVE_PACKAGE_NAME),
+    ),
+  ];
+}
+
+function collectHostedTraceDependencies(
+  configuredExternalDependencies: readonly string[],
+  configuredOptionalEnginePackages: readonly string[],
+): string[] {
+  // Nitro's trailing `*` selector fully traces each configured package after
+  // createExternalDependencyTracePlugin registers it as a trace root.
+  const configuredFullTraceDependencies = configuredExternalDependencies.map(
+    (dependencyName) => `${dependencyName}*`,
   );
+  const configuredExternalDependencySet = new Set(configuredExternalDependencies);
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
   const merged = new Set<string>([
-    ...FRAMEWORK_HOSTED_EXTERNAL_PACKAGES,
+    ...FRAMEWORK_HOSTED_EXTERNAL_PACKAGES.filter(
+      (dependencyName) => !configuredExternalDependencySet.has(dependencyName),
+    ),
     // Optional engine packages (just-bash, microsandbox) join the
     // externalize-and-trace path only when the compiled sandbox config
     // selects their backend — the app's opt-in. Otherwise
     // createOptionalEngineDependencyPlugin pins them as plain externals
     // so a resolvable-but-unrequested install adds nothing to hosted
     // output.
-    ...configuredOptionalEnginePackages,
-    ...configuredExternalDependencies,
+    ...configuredOptionalEnginePackages.filter(
+      (dependencyName) => !configuredExternalDependencySet.has(dependencyName),
+    ),
+    ...configuredFullTraceDependencies,
   ]);
   return [...merged].filter((dependencyName) => dependencyName !== EVE_PACKAGE_NAME);
 }
@@ -653,15 +671,17 @@ function createApplicationNitroBundlerConfiguration(
       packageNamespace: mount.packageNamespace,
     })),
   );
+  const configuredExternalDependencies = collectConfiguredExternalDependencies(preparedHost);
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
+    createExternalDependencyTracePlugin(preparedHost.appRoot, configuredExternalDependencies),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const tracedAppDependencies = collectHostedTraceDependencies(
-    preparedHost,
+    configuredExternalDependencies,
     configuredOptionalEnginePackages,
   );
 

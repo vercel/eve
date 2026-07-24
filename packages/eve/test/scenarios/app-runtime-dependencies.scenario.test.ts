@@ -443,7 +443,7 @@ describe("app runtime dependency tracing", () => {
     expect(existsSync(join(justBashOutputDir, "server", "node_modules", "just-bash"))).toBe(true);
   }, 120_000);
 
-  it("traces additional hosted build dependencies configured in agent.ts", async () => {
+  it("fully traces hosted dependencies accessed only through runtime resolution", async () => {
     const appRoot = await createScratchDirectory("eve-app-build-trace-dep-build-");
 
     await mkdir(join(appRoot, "agent", "tools"), {
@@ -482,12 +482,14 @@ describe("app runtime dependency tracing", () => {
     await writeFile(
       join(appRoot, "agent", "tools", "use_fixture_dep.ts"),
       [
-        'import fixtureTraceOnlyDep from "fixture-trace-only-dep";',
+        'import { createRequire } from "node:module";',
+        "",
+        "const require = createRequire(import.meta.url);",
         "",
         "export default {",
         '  description: "Use the fixture runtime dependency.",',
         "  execute() {",
-        "    return fixtureTraceOnlyDep;",
+        '    return require.resolve("fixture-trace-only-dep/entry");',
         "  },",
         "};",
         "",
@@ -504,7 +506,7 @@ describe("app runtime dependency tracing", () => {
       JSON.stringify(
         {
           exports: {
-            ".": "./index.js",
+            "./entry": "./index.js",
           },
           name: "fixture-trace-only-dep",
           type: "module",
@@ -524,6 +526,10 @@ describe("app runtime dependency tracing", () => {
         "",
       ].join("\n"),
     );
+    await mkdir(join(packageRoot, "assets"), {
+      recursive: true,
+    });
+    await writeFile(join(packageRoot, "assets", "fixture.txt"), "runtime-only asset\n");
 
     const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverModuleDirectory = join(outputDir, "server");
@@ -544,6 +550,19 @@ describe("app runtime dependency tracing", () => {
         "utf8",
       ),
     ).resolves.toContain('"name": "fixture-trace-only-dep"');
+    await expect(
+      readFile(
+        join(
+          outputDir,
+          "server",
+          "node_modules",
+          "fixture-trace-only-dep",
+          "assets",
+          "fixture.txt",
+        ),
+        "utf8",
+      ),
+    ).resolves.toBe("runtime-only asset\n");
     expect(serverModuleSource).toContain('"fixture-trace-only-dep"');
     expect(serverModuleSource).not.toContain('export const label = "fixture-trace-only-dep";');
   }, 30_000);

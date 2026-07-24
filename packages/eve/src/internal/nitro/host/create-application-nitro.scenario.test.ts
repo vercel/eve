@@ -547,12 +547,12 @@ describe("application Nitro creation", () => {
     for (const call of createNitroMock.mock.calls.slice(0, 3)) {
       const traceDeps = call[0].traceDeps;
       expect(traceDeps).toEqual(
-        expect.arrayContaining(["@napi-rs/keyring", "sharp", "fixture-external"]),
+        expect.arrayContaining(["@napi-rs/keyring", "sharp*", "fixture-external*"]),
       );
-      expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
-        1,
-      );
-      expect(traceDeps).not.toContain("eve");
+      expect(
+        traceDeps.filter((dependencyName: string) => dependencyName === "sharp*"),
+      ).toHaveLength(1);
+      expect(traceDeps).not.toContain("eve*");
     }
   });
 
@@ -595,8 +595,8 @@ describe("application Nitro creation", () => {
     );
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
-    expect(traceDeps).toEqual(expect.arrayContaining(["subagent-external", "sharp"]));
-    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
+    expect(traceDeps).toEqual(expect.arrayContaining(["subagent-external*", "sharp*"]));
+    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp*")).toHaveLength(
       1,
     );
   });
@@ -695,12 +695,12 @@ describe("application Nitro creation", () => {
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
     expect(traceDeps).toEqual(
-      expect.arrayContaining(["@napi-rs/keyring", "sharp", "fixture-external"]),
+      expect.arrayContaining(["@napi-rs/keyring*", "sharp*", "fixture-external*"]),
     );
     expect(
-      traceDeps.filter((dependencyName: string) => dependencyName === "@napi-rs/keyring"),
+      traceDeps.filter((dependencyName: string) => dependencyName === "@napi-rs/keyring*"),
     ).toHaveLength(1);
-    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
+    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp*")).toHaveLength(
       1,
     );
   });
