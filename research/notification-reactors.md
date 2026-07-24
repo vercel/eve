@@ -129,6 +129,24 @@ The driver owns the lifecycle: the reactor starts with the session and is
 disposed when the session completes. If per-session start cost matters, the
 lever is lazy start — the first delivery creates the run.
 
+### Where reactor runs execute
+
+The reactor is a framework-registered workflow function — a sibling of the
+session entry and turn workflows, registered under a stable id
+(`workflow//eve//notificationReactor`) in the same compiled workflow bundle
+at build time. It therefore executes wherever the session's other runs
+execute: on the caller's own deployment, as ordinary queue-driven workflow
+invocations — the local world in `eve dev`, function invocations of the
+deployment via the workflow backend on Vercel. There is no new compute
+surface, host, or process; a reactor invocation is indistinguishable from
+a turn-workflow invocation at the infrastructure level.
+
+Deployment pinning: the entry run starts the reactor plainly (no
+latest-deployment routing), pinning it to the entry's own deployment. The
+reactor holds the entry's stream writable and channel context, so it must
+live and die with the entry — routing it to a newer deployment mid-session
+would separate it from the handles it owns.
+
 ## Callee side: deferred direct forwarding
 
 ```
