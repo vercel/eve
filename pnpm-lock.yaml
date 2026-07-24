@@ -1173,6 +1173,9 @@ importers:
       '@nuxt/kit':
         specifier: ^4.0.0
         version: 4.4.6(magicast@0.5.3)
+      '@opentelemetry/sdk-trace-base':
+        specifier: ^2.6.1
+        version: 2.6.1(@opentelemetry/api@1.9.1)
       '@standard-schema/spec':
         specifier: 1.1.0
         version: 1.1.0

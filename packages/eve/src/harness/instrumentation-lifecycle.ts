@@ -9,6 +9,7 @@ export interface InstrumentationAttemptScope {
   readonly attemptId: string;
   readonly attemptIndex: number;
   readonly functionId?: string;
+  readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -19,6 +20,42 @@ export interface InstrumentationAttemptStartedEvent {
   readonly scope: InstrumentationAttemptScope;
   readonly operation: TelemetryEvent<"onStart">;
   readonly step: TelemetryEvent<"onStepStart">;
+}
+
+export interface InstrumentationSessionStartedEvent {
+  readonly type: "session.started";
+  readonly agentName?: string;
+  readonly channelKind?: string;
+  readonly rootSessionId: string;
+  readonly sessionId: string;
+}
+
+export interface InstrumentationSessionTransitionEvent {
+  readonly type: "session.completed" | "session.failed" | "session.waiting";
+  readonly error?: unknown;
+  readonly sessionId: string;
+  readonly turnId?: string;
+}
+
+export interface InstrumentationTurnStartedEvent {
+  readonly type: "turn.started";
+  readonly rootSessionId: string;
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly turnId: string;
+}
+
+export interface InstrumentationTurnTerminalEvent {
+  readonly type: "turn.cancelled" | "turn.completed" | "turn.failed";
+  readonly error?: unknown;
+  readonly sessionId: string;
+  readonly turnId: string;
+}
+
+export interface InstrumentationAttemptTerminalEvent {
+  readonly type: "attempt.completed" | "attempt.failed";
+  readonly error?: unknown;
+  readonly scope: InstrumentationAttemptScope;
 }
 
 export interface InstrumentationModelCallStartedEvent {
@@ -86,10 +123,36 @@ export interface InstrumentationProviderDefinition {
     readonly "attempt.started"?: (
       event: InstrumentationAttemptStartedEvent,
     ) => void | PromiseLike<void>;
+    readonly "attempt.completed"?: (
+      event: InstrumentationAttemptTerminalEvent,
+    ) => void | PromiseLike<void>;
+    readonly "attempt.failed"?: (
+      event: InstrumentationAttemptTerminalEvent,
+    ) => void | PromiseLike<void>;
+    readonly "session.completed"?: (
+      event: InstrumentationSessionTransitionEvent,
+    ) => void | PromiseLike<void>;
+    readonly "session.failed"?: (
+      event: InstrumentationSessionTransitionEvent,
+    ) => void | PromiseLike<void>;
+    readonly "session.started"?: (
+      event: InstrumentationSessionStartedEvent,
+    ) => void | PromiseLike<void>;
+    readonly "session.waiting"?: (
+      event: InstrumentationSessionTransitionEvent,
+    ) => void | PromiseLike<void>;
     readonly "tool.call"?: RelatedLifecycleHook<
       InstrumentationToolCallStartedEvent,
       InstrumentationToolCallTerminalEvent
     >;
+    readonly "turn.cancelled"?: (
+      event: InstrumentationTurnTerminalEvent,
+    ) => void | PromiseLike<void>;
+    readonly "turn.completed"?: (
+      event: InstrumentationTurnTerminalEvent,
+    ) => void | PromiseLike<void>;
+    readonly "turn.failed"?: (event: InstrumentationTurnTerminalEvent) => void | PromiseLike<void>;
+    readonly "turn.started"?: (event: InstrumentationTurnStartedEvent) => void | PromiseLike<void>;
   };
 }
 
@@ -106,7 +169,13 @@ export interface InstrumentationRelatedEventMap {
 
 export type InstrumentationRelatedEventName = keyof InstrumentationRelatedEventMap;
 
-export type InstrumentationPointEvent = InstrumentationAttemptStartedEvent;
+export type InstrumentationPointEvent =
+  | InstrumentationAttemptStartedEvent
+  | InstrumentationAttemptTerminalEvent
+  | InstrumentationSessionStartedEvent
+  | InstrumentationSessionTransitionEvent
+  | InstrumentationTurnStartedEvent
+  | InstrumentationTurnTerminalEvent;
 
 /** Trusted framework operation for activating context around AI SDK execution. */
 export type InstrumentationContextRunner = <T>(
