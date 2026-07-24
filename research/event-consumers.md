@@ -4,7 +4,7 @@ status: proposed
 last_updated: "2026-07-24"
 ---
 
-# Notification consumers
+# Event consumers
 
 ## What this proposes
 
@@ -25,9 +25,9 @@ scopes v1 so that hop replaces a wake the caller already pays.
 
 ## Why
 
-For notification-class events — a child's
+The first events to need this — a child's
 `authorization.required`/`authorization.completed` surfaced on the caller's
-stream — the inline weld fails concretely:
+stream — show the inline weld failing concretely:
 
 - **Events are dropped.** Delivery works only while the caller's turn is
   parked at its inbox; parked-for-input or between turns, `resumeHook`
@@ -55,15 +55,15 @@ remote deployment running a delegated task.
 Two runnable artifacts frame the decision:
 
 - [#1167](https://github.com/vercel/eve/pull/1167) (reopened) — the
-  baseline: notification events piped through today's continuation entry
-  point, `resumeHook` into the session workflow's turn inbox. It shows the
-  mechanism working end to end and hits every failure above. To keep it a
-  clean baseline for the delivery path alone, it sheds its `eve/tools`
-  authorization API exposure.
+  baseline: child authorization events piped through today's continuation
+  entry point, `resumeHook` into the session workflow's turn inbox. It
+  shows the mechanism working end to end and hits every failure above. To
+  keep it a clean baseline for the delivery path alone, it sheds its
+  `eve/tools` authorization API exposure.
 - A prototype of this proposal — the per-session consumer run described
   below, exercised against the same fixture evals.
 
-## The notification event
+## The propagated event
 
 Rendering-only child telemetry, wrapped on the parent stream as the
 existing (currently producer-less) `subagent.event`, which restores the
@@ -81,8 +81,8 @@ interface SubagentChildEventStreamEvent {
 }
 ```
 
-Local and remote children surface identically. Invariants: notification
-events never enter model history or session state, never resume the session
+Local and remote children surface identically. Invariants: events on this
+lane never enter model history or session state, never resume the session
 workflow, and never produce an input request. The framework curates the
 propagated types (`authorization.*` in v1).
 
@@ -96,15 +96,15 @@ Per event, today vs v1:
 | caller receiving remote event | queue wake of the **session workflow**        | queue wake of the **consumer** (light) |
 | local child event surfacing   | queue wake of the session workflow            | queue wake of the consumer             |
 
-The caller already pays a wake per notification; v1 redirects it at a run
-that hydrates nothing but channel context. A callee-side consumer would be
-the only genuinely new wake, so v1 has none.
+The caller already pays a wake per event; v1 redirects it at a run that
+hydrates nothing but channel context. A callee-side consumer would be the
+only genuinely new wake, so v1 has none.
 
 ## Caller side: the consumer run
 
 ```
 CALLER   POST /eve/v1/callback/:token {status:"notification", event}
-           └─► resumeHook(<sessionId>:notify)
+           └─► resumeHook(<sessionId>:events)
                  └─► [queue] ──wake──► consumer run (no session hydration)
                        ├─► existing adapter event handler ──► e.g. Slack API
                        └─► append subagent.event ──► durable stream ──► followers
@@ -112,7 +112,7 @@ CALLER   POST /eve/v1/callback/:token {status:"notification", event}
 
 The session's entry workflow starts one consumer run, handing it the stream
 writable — the same cross-run handoff turns get — and the serialized
-channel context. The consumer parks on `<sessionId>:notify`; each delivery
+channel context. The consumer parks on `<sessionId>:events`; each delivery
 is one journaled step: run the channel's **existing** adapter event handler
 (the same one the proxy step invokes today, so channels change nothing) and
 append the wrapped event to the stream.
@@ -125,10 +125,11 @@ on `completed`. Session state is read-only to it.
 
 Producers are one fire-and-forget call:
 
-- The callback route validates against the closed notification schema,
-  wraps, rings, returns 202 — always, once well-formed. A disposed consumer
-  (session over) throws at the producer, which logs and drops. Nothing
-  anywhere retries a notification.
+- The callback route validates against the closed schema of admitted
+  events — on the wire they arrive as #1167's `status: "notification"`
+  envelope class — wraps, rings, returns 202: always, once well-formed. A
+  disposed consumer (session over) throws at the producer, which logs and
+  drops. Producers never retry.
 - The local subagent proxy rings the same hook instead of resuming the
   session workflow.
 
@@ -138,12 +139,12 @@ matters.
 
 ### Where consumer runs execute
 
-Registered as `workflow//eve//notificationConsumer` beside the entry and
-turn workflows in the compiled bundle; executes as queue-driven invocations
-of the caller's own deployment — the local world in dev, the workflow
-backend on Vercel. Started plainly, without latest-deployment routing: it
-holds the entry's stream writable and channel context, so it must live and
-die with the entry's deployment.
+Registered as `workflow//eve//eventConsumer` beside the entry and turn
+workflows in the compiled bundle; executes as queue-driven invocations of
+the caller's own deployment — the local world in dev, the workflow backend
+on Vercel. Started plainly, without latest-deployment routing: it holds the
+entry's stream writable and channel context, so it must live and die with
+the entry's deployment.
 
 ## Callee side: deferred direct forwarding
 
@@ -184,7 +185,7 @@ as today.
 ## Open questions
 
 - **Adapter-state divergence.** The consumer and the session workflow each
-  hold a copy. Audit what adapters mutate on notification-class events and
+  hold a copy. Audit what adapters mutate on events taking this lane and
   whether divergence can matter for rendering.
 - **Callee deferral primitive.** `waitUntil` semantics differ between the
   dev host and Vercel functions.
