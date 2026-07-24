@@ -38,7 +38,7 @@ async function runRegistryCommand(
   }
 }
 
-/** Installs a registry item, using eve's official registry for a bare slug. */
+/** Installs a registry item from eve's official registry or an explicit source. */
 export async function runAddCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
@@ -48,13 +48,13 @@ export async function runAddCommand(
   await runRegistryCommand(logger, appRoot, ["add", itemAddress(item), ...flags]);
 }
 
-/** Forwards project registry configuration to shadcn. */
-export async function runRegistryConfigurationCommand(
+/** Adds registry sources to the project's shadcn configuration. */
+export async function runRegistryAddCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
-  args: readonly string[],
+  registries: readonly string[],
 ): Promise<void> {
-  await runRegistryCommand(logger, appRoot, ["registry", ...args]);
+  await runRegistryCommand(logger, appRoot, ["registry", "add", ...registries]);
 }
 
 /** Lists, searches, or views one registry catalog through shadcn. */

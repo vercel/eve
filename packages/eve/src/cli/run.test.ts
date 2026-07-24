@@ -56,6 +56,24 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("setup");
   });
 
+  it("registers only supported shadcn registry commands", async () => {
+    const output: string[] = [];
+    const logger = {
+      error: (message: string) => output.push(message),
+      log: (message: string) => output.push(message),
+    };
+
+    await runCli(["registry", "--help"], logger).catch(() => {});
+
+    const help = output.join("\n");
+    expect(help).toContain("add [registries...]");
+    expect(help).toContain("list [arguments...]");
+    expect(help).toContain("search [arguments...]");
+    expect(help).toContain("view [arguments...]");
+    expect(help).not.toContain("remove [arguments...]");
+    expect(help).not.toContain("sources [arguments...]");
+  });
+
   it("registers the diagnostic logs commands", async () => {
     const output: string[] = [];
     const logger = {

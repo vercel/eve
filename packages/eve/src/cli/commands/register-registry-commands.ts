@@ -15,7 +15,7 @@ export function registerRegistryCommands(input: {
 
   program
     .command("add <item> [flags...]")
-    .description("Install a registry item; bare slugs use the official eve registry.")
+    .description("Install a registry item; relative paths use the official eve registry.")
     .allowUnknownOption(true)
     .allowExcessArguments(true)
     .action(async (item: string, flags: string[]) => {
@@ -27,17 +27,22 @@ export function registerRegistryCommands(input: {
     .command("registry")
     .description("Browse extension and agent registry catalogs.");
 
-  for (const command of ["add", "remove", "sources", "list", "search", "view"] as const) {
+  registry
+    .command("add [registries...]")
+    .description("Add shadcn registry sources to the project.")
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .action(async (registries: string[]) => {
+      const { runRegistryAddCommand } = await import("./extensions.js");
+      await runRegistryAddCommand(logger, appRoot, registries);
+    });
+
+  for (const command of ["list", "search", "view"] as const) {
     registry
       .command(`${command} [arguments...]`)
       .allowUnknownOption(true)
       .allowExcessArguments(true)
       .action(async (arguments_: string[]) => {
-        if (command === "add" || command === "remove" || command === "sources") {
-          const { runRegistryConfigurationCommand } = await import("./extensions.js");
-          await runRegistryConfigurationCommand(logger, appRoot, [command, ...arguments_]);
-          return;
-        }
         const { runRegistryBrowseCommand } = await import("./extensions.js");
         await runRegistryBrowseCommand(logger, appRoot, command, arguments_);
       });

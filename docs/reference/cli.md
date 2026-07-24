@@ -25,7 +25,7 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve extension init [target]` | Create a new extension package                                                                                                                        |
 | `eve extension build`         | Build the current package as an extension                                                                                                             |
 | `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                                     |
-| `eve registry <command>`      | Manage sources and list, search, or view registry catalog items                                                                                       |
+| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                                          |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
@@ -81,10 +81,10 @@ Builds the complete agent-shaped extension tree into its configured dist root, e
 
 ## Registry items
 
-Commands for installing and discovering [shadcn registry](https://ui.shadcn.com/docs/registry) items. Bare item slugs use eve's official registry; URLs and configured registry addresses pass through to shadcn unchanged.
+Commands for installing and discovering [shadcn registry](https://ui.shadcn.com/docs/registry) items. Official registry items use a kind and slug (for example, `extension/agent-browser`); URLs and configured registry addresses pass through to shadcn unchanged.
 
 ```bash
-eve add agent-browser --yes
+eve add extension/agent-browser --yes
 eve add https://example.com/r/my-extension.json --overwrite
 eve registry add @acme=https://example.com/r/{name}.json
 eve registry search browser
@@ -92,7 +92,7 @@ eve registry view @acme/my-extension
 eve add @acme/my-extension --yes
 ```
 
-`eve registry add`, `remove`, and `sources` manage configured sources. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. The wrapped shadcn CLI still requires its project configuration, including `components.json`.
+`eve registry add` adds configured sources. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. The wrapped shadcn CLI still requires its project configuration, including `components.json`.
 
 ## `eve info`
 
