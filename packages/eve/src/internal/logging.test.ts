@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createErrorId, createLogger, formatError, logError } from "#internal/logging.js";
+import {
+  createErrorId,
+  createLogger,
+  formatError,
+  logError,
+  setLogRecordSubscriber,
+  type LogRecord,
+} from "#internal/logging.js";
 
 // ---------------------------------------------------------------------------
 // createErrorId
@@ -101,6 +108,46 @@ describe("createLogger", () => {
     logger.error("an error");
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers structured records to the registered subscriber instead of the console", () => {
+    const records: LogRecord[] = [];
+    setLogRecordSubscriber((record) => records.push(record));
+    try {
+      const logger = createLogger("harness.tool-loop");
+      const cause = Object.assign(new Error("upstream"), { statusCode: 429 });
+      logger.error("tool execution failed", { toolName: "always_fail", error: cause });
+
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        level: "error",
+        namespace: "harness.tool-loop",
+        message: "tool execution failed",
+        fields: {
+          toolName: "always_fail",
+          error: { message: expect.stringContaining("upstream") as string },
+        },
+      });
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      setLogRecordSubscriber(undefined);
+    }
+
+    const logger = createLogger("harness.tool-loop");
+    logger.error("after unsubscribe");
+    expect(errorSpy).toHaveBeenCalledWith("[eve:harness.tool-loop] after unsubscribe");
+  });
+
+  it("falls back to the console when the subscriber throws", () => {
+    setLogRecordSubscriber(() => {
+      throw new Error("subscriber broke");
+    });
+    try {
+      createLogger("cli").error("still visible");
+      expect(errorSpy).toHaveBeenCalledWith("[eve:cli] still visible");
+    } finally {
+      setLogRecordSubscriber(undefined);
+    }
   });
 
   it("renders Error fields through formatError so cause chain flows through", () => {

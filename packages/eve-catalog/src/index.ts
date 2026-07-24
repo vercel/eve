@@ -1,7 +1,7 @@
 /**
  * Shared identity for eve integrations. This package is the single source of
- * truth for *which* integrations exist (channels and connections) and how a
- * connection is wired (transport + model-facing description).
+ * truth for *which* integrations exist (channels, connections, and extensions)
+ * and how a connection is wired (transport + model-facing description).
  *
  * Surface-specific concerns live with their consumer, keyed by {@link
  * IntegrationEntry.slug}: the scaffolder (eve) overlays the
@@ -18,7 +18,7 @@
  */
 
 /** Surface an integration targets. Extend as new kinds are catalogued. */
-export type IntegrationKind = "channel" | "connection";
+export type IntegrationKind = "channel" | "connection" | "extension";
 
 /** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
@@ -82,7 +82,7 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
  *
  * `surfaces.scaffoldable` reflects what the CLI can scaffold today: Slack and
- * eve Web Chat for channels, and every curated connection. The remaining
+ * Web Chat for channels, and every curated connection. The remaining
  * channels are runtime modules that are still configured by hand, so they
  * appear in the gallery but not the CLI picker.
  */
@@ -119,7 +119,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "twilio",
     name: "Twilio",
     kind: "channel",
-    tagline: "Reach users over SMS and WhatsApp through Twilio.",
+    tagline: "Put your agent on a phone number: SMS and speech-transcribed calls.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -138,10 +138,189 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   },
   {
     slug: "eve",
-    name: "eve Web Chat",
+    name: "Web Chat",
     kind: "channel",
     tagline: "Embed a first-party web chat UI backed by your agent.",
     surfaces: { scaffoldable: true, gallery: true },
+  },
+  {
+    slug: "chat-sdk-gchat",
+    name: "Google Chat",
+    kind: "channel",
+    tagline: "Google Chat spaces and DMs via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-whatsapp",
+    name: "WhatsApp",
+    kind: "channel",
+    tagline: "Customer messaging through WhatsApp Business Cloud via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-x",
+    name: "X",
+    kind: "channel",
+    tagline: "Public mentions and DMs on X via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-messenger",
+    name: "Messenger",
+    kind: "channel",
+    tagline: "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-zernio",
+    name: "Zernio",
+    kind: "channel",
+    tagline: "Reach seven social and messaging platforms through one Zernio integration.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-velt",
+    name: "Velt",
+    kind: "channel",
+    tagline: "Add agents to anchored comments across documents, canvases, PDFs, and video.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-sendblue",
+    name: "Sendblue",
+    kind: "channel",
+    tagline: "Send and receive iMessage, SMS, and RCS through Sendblue.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-novu",
+    name: "Novu",
+    kind: "channel",
+    tagline: "Reach Slack, Teams, WhatsApp, Telegram, and email through Novu.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-liveblocks",
+    name: "Liveblocks",
+    kind: "channel",
+    tagline: "Bring your agent into Liveblocks comment threads, mentions, and reactions.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-linq",
+    name: "Linq",
+    kind: "channel",
+    tagline: "iMessage and SMS conversations, media, and tapbacks through Linq.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-kapso",
+    name: "Kapso",
+    kind: "channel",
+    tagline: "Managed WhatsApp conversations, media, buttons, and history through Kapso.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-photon",
+    name: "Photon",
+    kind: "channel",
+    tagline: "Cloud, self-hosted, and local iMessage messaging through Photon.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-dial",
+    name: "Dial",
+    kind: "channel",
+    tagline: "Give your agent a phone number for SMS, MMS, iMessage, and voice transcripts.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-agentphone",
+    name: "AgentPhone",
+    kind: "channel",
+    tagline: "SMS, MMS, iMessage, and voice conversations through AgentPhone.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-lark",
+    name: "Lark / Feishu",
+    kind: "channel",
+    tagline: "Lark and Feishu chats with native card streaming via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-beeper",
+    name: "Beeper",
+    kind: "channel",
+    tagline: "Matrix rooms and bridged messaging networks through Beeper.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-resend",
+    name: "Resend",
+    kind: "channel",
+    tagline: "Send and receive threaded email through Resend via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "agent-browser",
+    name: "agent-browser",
+    kind: "extension",
+    tagline: "Add browser automation tools backed by agent-browser to an eve agent.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "browserbase",
+    name: "Browserbase",
+    kind: "extension",
+    tagline: "Search, fetch, and automate the web with Browserbase and Stagehand.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "github-tools",
+    name: "GitHub Tools",
+    kind: "extension",
+    tagline: "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "jetty",
+    name: "Jetty",
+    kind: "extension",
+    tagline: "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "kernel",
+    name: "KERNEL",
+    kind: "extension",
+    tagline:
+      "Let your eve agent use the Internet with KERNEL browser infra, o11y, and stealth. Integrated natively with Vercel Connect and AI Gateway.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "browser-use",
+    name: "Browser Use",
+    kind: "connection",
+    tagline: "Run managed browser automation tasks through Browser Use's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.",
+      mcp: { url: "https://api.browser-use.com/v3/mcp" },
+    },
+  },
+  {
+    slug: "vercel",
+    name: "Vercel",
+    kind: "connection",
+    tagline: "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Vercel: manage projects and deployments, inspect logs, and search documentation.",
+      mcp: { url: "https://mcp.vercel.com" },
+    },
   },
   {
     slug: "linear",
@@ -577,4 +756,9 @@ export function connectionEntries(): IntegrationEntry[] {
 /** All channel entries, in catalog order. */
 export function channelEntries(): IntegrationEntry[] {
   return integrationsByKind("channel");
+}
+
+/** All extension entries, in catalog order. */
+export function extensionEntries(): IntegrationEntry[] {
+  return integrationsByKind("extension");
 }

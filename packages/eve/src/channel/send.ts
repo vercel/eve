@@ -6,9 +6,6 @@ import { createSession, type Session } from "#channel/session.js";
 import type { SendFn, SendOptions, SendPayload } from "#channel/routes.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
-import { createLogger } from "#internal/logging.js";
-
-const log = createLogger("channel.send");
 
 export function createSendFn<TState = undefined>(
   runtime: Runtime,
@@ -47,12 +44,8 @@ export function createSendFn<TState = undefined>(
 
       return createSession(sessionId, rawToken, runtime);
     } catch (error) {
-      // No-active-session is the expected resume-or-start signal. The
-      // failure itself is logged in `deliver`; this only records the fallback.
       if (!isRuntimeNoActiveSessionError(error)) {
-        log.warn("deliver failed, falling back to starting a new session", {
-          continuationToken,
-        });
+        throw error;
       }
     }
 

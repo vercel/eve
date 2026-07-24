@@ -14,7 +14,7 @@
   "dependencies": {
     "@auth/core": "0.41.2",
     "@vercel/connect": "catalog:",
-    "@vercel/oidc": "3.4.1",
+    "@vercel/oidc": "3.8.0",
     "ai": "catalog:",
     "eve": "workspace:*",
     "next": "catalog:",

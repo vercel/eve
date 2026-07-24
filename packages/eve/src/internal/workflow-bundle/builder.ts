@@ -52,6 +52,7 @@ export class WorkflowBundleBuilder {
   readonly #agentName: string;
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
+  readonly #publicRoutePrefix?: string;
   readonly #queueNamespace: string;
   protected readonly config: WorkflowBundleBuilderConfig;
   readonly #discoveredEntries = new WeakMap<readonly string[], WorkflowBundleDiscoveredEntries>();
@@ -74,6 +75,7 @@ export class WorkflowBundleBuilder {
     this.#agentName = options.agentName;
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
+    this.#publicRoutePrefix = options.publicRoutePrefix;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
   }
 
@@ -458,7 +460,10 @@ export class WorkflowBundleBuilder {
     const nextConfig: Record<string, unknown> = {
       ...baseConfig,
     };
-    nextConfig.environment = createWorkflowFunctionEnvironment(baseConfig.environment);
+    nextConfig.environment = createWorkflowFunctionEnvironment({
+      environment: baseConfig.environment,
+      publicRoutePrefix: this.#publicRoutePrefix,
+    });
 
     if (patch.runtime !== null) {
       nextConfig.runtime = patch.runtime;

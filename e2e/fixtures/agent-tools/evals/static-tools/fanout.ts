@@ -51,33 +51,22 @@ export function fanoutRequestsUseExpectedLabels(input: {
   );
 }
 
-/**
- * The fixture tool holds each invocation open. Requiring every interval to
- * overlap rules out a serialized executor without relying on a clock-skew
- * threshold.
- */
-export function authoredFanoutExecutionsOverlap(input: {
+/** A serialized executor cannot release the fixture tool's concurrency barrier. */
+export function fanoutExecutionsReachBarrier(input: {
   readonly events: readonly HandleMessageStreamEvent[];
   readonly toolName: string;
 }): boolean {
-  const intervals: Array<{ readonly completedAt: number; readonly startedAt: number }> = [];
+  const concurrentCallsAtRelease = input.events.flatMap((event) => {
+    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
+    if (event.data.result.toolName !== input.toolName) return [];
 
-  for (const event of input.events) {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") continue;
-    if (event.data.result.toolName !== input.toolName) continue;
-
-    const startedAt = readFiniteNumberField(event.data.result.output, "executionStartedAt");
-    const completedAt = readFiniteNumberField(event.data.result.output, "executionCompletedAt");
-    if (startedAt === undefined || completedAt === undefined || startedAt >= completedAt) {
-      return false;
-    }
-    intervals.push({ completedAt, startedAt });
-  }
+    const count = readFiniteNumberField(event.data.result.output, "concurrentCallsAtRelease");
+    return count === undefined ? [] : [count];
+  });
 
   return (
-    intervals.length === FANOUT_SIZE &&
-    Math.max(...intervals.map((interval) => interval.startedAt)) <
-      Math.min(...intervals.map((interval) => interval.completedAt))
+    concurrentCallsAtRelease.length === FANOUT_SIZE &&
+    concurrentCallsAtRelease.every((count) => count === FANOUT_SIZE)
   );
 }
 

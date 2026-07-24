@@ -3,6 +3,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
+import type { ResetStatus } from "#protocol/reset-session.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -96,13 +97,6 @@ export interface ClientOptions {
   readonly redirect?: ClientRedirectPolicy;
 
   /**
-   * Maximum number of stream reconnection attempts per message turn.
-   *
-   * @default 3
-   */
-  readonly maxReconnectAttempts?: number;
-
-  /**
    * Keep a session's continuation token after a normal `session.completed`
    * boundary.
    *
@@ -160,6 +154,12 @@ export interface SendTurnPayload<TOutput = unknown> {
   readonly outputSchema?: StandardJSONSchemaV1<unknown, TOutput> | JsonObject;
 
   /**
+   * Reconnection policy for the response event stream. Omit to use the default
+   * policy, or pass `{ reconnect: false }` when the caller owns cursor recovery.
+   */
+  readonly streamReconnectPolicy?: StreamReconnectPolicy;
+
+  /**
    * Abort signal for cancelling the request.
    */
   readonly signal?: AbortSignal;
@@ -170,10 +170,43 @@ export interface SendTurnPayload<TOutput = unknown> {
   readonly headers?: Readonly<Record<string, string>>;
 }
 
+/** Retry and backoff settings for one kind of stream reconnection. */
+export interface StreamReconnectRetryPolicy {
+  /** Initial delay before retrying, in milliseconds. */
+  readonly baseDelayMs?: number;
+
+  /** Maximum number of attempts governed by this retry policy. */
+  readonly maxAttempts?: number;
+
+  /** Maximum delay between retries, in milliseconds. */
+  readonly maxDelayMs?: number;
+}
+
+/** Configurable policy used when automatic stream reconnection is enabled. */
+export interface ResolvedStreamReconnectPolicy {
+  /** Retry policy for opening an HTTP stream connection. */
+  readonly streamOpenReconnectPolicy?: StreamReconnectRetryPolicy;
+
+  /** Retry policy for reconnecting streams that make no progress. */
+  readonly streamIdleReconnectPolicy?: StreamReconnectRetryPolicy;
+
+  /** HTTP response statuses that may be retried while opening a stream. */
+  readonly retryableErrorStatuses?: readonly number[];
+}
+
+/** Automatic stream reconnection configuration. */
+export type StreamReconnectPolicy = ResolvedStreamReconnectPolicy | { readonly reconnect: false };
+
 /**
  * Options for {@link ClientSession.stream}.
  */
 export interface StreamOptions {
+  /**
+   * Reconnection policy for the event stream. Omit to use the default policy,
+   * or pass `{ reconnect: false }` when the caller owns cursor recovery.
+   */
+  readonly streamReconnectPolicy?: StreamReconnectPolicy;
+
   /**
    * Absolute event index to start from. Negative values read relative to the
    * current tail (`-1` starts at the latest event). Relative-tail streams do
@@ -194,6 +227,18 @@ export interface CancelSessionResult {
   /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
   readonly status: CancelTurnStatus;
 }
+
+/** Result of terminally resetting a client session. */
+export type ResetResult =
+  | {
+      /** The prior session was retired and its continuation token released. */
+      readonly previousSessionId: string;
+      readonly status: Extract<ResetStatus, "reset">;
+    }
+  | {
+      /** The client had no continuation token or the token was already free. */
+      readonly status: Extract<ResetStatus, "no_active_session">;
+    };
 
 /**
  * Aggregated result of one message turn, returned by

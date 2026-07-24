@@ -95,12 +95,6 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   /** Seed session identity and stream cursor for resuming a prior conversation. */
   readonly initialSession?: SessionState;
   /**
-   * Maximum number of stream reconnection attempts per turn.
-   *
-   * @default 3
-   */
-  readonly maxReconnectAttempts?: number;
-  /**
    * Project submitted user messages before eve confirms them with a
    * `message.received` stream event. Optimistic events are reducer-facing
    * projection only and never appear in `events`, which stays the
@@ -209,7 +203,6 @@ export function useEveAgent<TData>(
     host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
-    maxReconnectAttempts: options.maxReconnectAttempts,
     optimistic: options.optimistic,
     reducer,
     session: options.session,

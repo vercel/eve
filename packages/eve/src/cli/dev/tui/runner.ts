@@ -18,7 +18,6 @@ import {
   type SubagentCompletedStreamEvent,
   Client,
   ClientSession,
-  isCurrentTurnBoundaryEvent,
 } from "#client/index.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
@@ -27,17 +26,23 @@ import {
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
+export type {
+  SubagentRun,
+  SubagentStepUpdate,
+  SubagentToolUpdate,
+  SubagentView,
+} from "./subagent-pump.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 
 import {
   type FailureStreamEvent,
   failureKey,
   formatFailureDetail,
+  formatFailureHint,
   formatFailureMessage,
-  formatGatewayAuthFailureNotice,
-  isAbortLikeError,
-  isGatewayAuthFailure,
   isInterruptedError,
+  localFailureHint,
 } from "./errors.js";
 
 import { pickAgentHeaderTip } from "./agent-header.js";
@@ -92,15 +97,39 @@ import {
 } from "./mcp-connection-status.js";
 import type { detectProjectIdentity } from "#setup/project-resolution.js";
 import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
+import type { DevDiagnostics } from "../diagnostics.js";
 
 export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
+/**
+ * Cooperative-cancel retry cadence: 8 × 250ms covers the turn-dispatch
+ * window (locally the cancel hook is claimed well under a second after the
+ * send is accepted) without hammering the cancel route.
+ */
+const turnCancelRetryDelayMs = 250;
+const turnCancelAttempts = 8;
+
+async function delayMs(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
 
 export type AgentTUIStreamResult = {
   events: AsyncIterable<AgentTUIStreamEvent> | ReadableStream<AgentTUIStreamEvent>;
   abort?: () => void;
+  /**
+   * Requests cooperative server-side cancellation of the streaming turn
+   * (Esc Esc, or an Esc steer pop). Unlike {@link abort} — which drops the
+   * client stream and forces a fresh session — the server settles the turn
+   * as `turn.cancelled` → `session.waiting`, so the stream reaches its
+   * boundary normally and the session keeps its context. Best-effort and
+   * idempotent; scoped to the turn the user observed when its id is known.
+   */
+  cancel?: () => void;
   turnState?: AgentTUITurnState;
 };
 
@@ -116,18 +145,26 @@ export type AgentTUIStreamEvent =
   | { type: "assistant-complete"; id: string; text?: string | null }
   | { type: "reasoning-delta"; id: string; delta: string }
   | { type: "reasoning-complete"; id: string }
+  | { type: "tool-call-preparing"; toolCallId: string; toolName: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
   | { type: "tool-result"; toolCallId: string; output: unknown }
   | { type: "tool-error"; toolCallId: string; errorText: string }
-  | { type: "error"; errorText: string; detail?: string }
+  | { type: "tool-rejected"; toolCallId: string; reason: string }
+  | { type: "error"; errorText: string; hint?: string; detail?: string }
+  | { type: "turn-cancelled" }
   | { type: "finish"; usage?: AgentTUIStreamUsage };
 
 export type AgentTUITurnState = {
+  aborted?: boolean;
   boundaryEvent?: "session.completed" | "session.failed" | "session.waiting";
   pendingApprovals: AgentTUIToolApprovalRequest[];
   pendingQuestions: InputRequest[];
   sawSessionFailure: boolean;
+  /** Id of the streaming turn, once `turn.started` names it. Scopes cancels. */
+  turnId?: string;
+  /** True while a cooperative-cancel request loop is running for this turn. */
+  cancelInFlight?: boolean;
 };
 
 export type AgentTUISessionOptions = {
@@ -202,6 +239,12 @@ export type AgentTUIRenderer = {
    */
   renderNotice?(text: string): void;
   /**
+   * Commits the session boundary (`┌── Session restarted, clear context.`)
+   * when a dead session is replaced mid-conversation. Optional; renderers
+   * without it get the plain notice.
+   */
+  renderSessionBoundary?(): void;
+  /**
    * Commits one development sandbox lifecycle line to the transcript.
    * Optional so non-terminal renderers can ignore local prewarm progress.
    */
@@ -214,6 +257,24 @@ export type AgentTUIRenderer = {
   renderCommandResult?(text: string): void;
   readonly setupFlow?: SetupFlowRenderer;
   readPrompt?(options?: AgentTUISessionOptions): Promise<string | undefined>;
+  /**
+   * Consumes the next prompt produced by mid-turn input: the Esc-popped
+   * steering message when one is staged, otherwise every message queued
+   * during the turn coalesced into one. The runner calls this at a clean
+   * turn boundary and submits the result as the next turn without reading
+   * the prompt. Optional — renderers without mid-turn input never queue.
+   */
+  takeQueuedPrompt?(): string | undefined;
+  /**
+   * Reports the server session id backing the conversation — pushed by the
+   * runner once a send is accepted, and overwritten when a later session's
+   * turn is accepted. Deliberately sticky across `/new` and interrupt
+   * recovery: the terminal renderer echoes the LAST session this TUI talked
+   * to in the parting line on exit, so an interrupted conversation (whose
+   * replacement session never ran a turn) can still be found again
+   * (`eve logs`, the session store). Optional.
+   */
+  setSessionId?(sessionId: string): void;
   readToolApproval?(
     request: AgentTUIToolApprovalRequest,
     options?: AgentTUISessionOptions,
@@ -224,22 +285,13 @@ export type AgentTUIRenderer = {
   ): Promise<AgentTUIInputQuestionResponse | undefined>;
   renderStream(result: AgentTUIStreamResult, options?: AgentTUISessionOptions): Promise<void>;
   /**
-   * Out-of-band update for one child step (reasoning + message text) of a
-   * subagent dispatch. Called by the runner as child-session stream events
-   * arrive. The renderer renders this as a body section colored by the
-   * subagent palette.
+   * The renderer's whole subagent surface — sections, nested steps and
+   * tools, ghost sweeps, completion. One optional capability with required
+   * members: a renderer either has a subagent view or it doesn't, and a
+   * type-legal partial implementation (which would ghost placeholders or
+   * duplicate parent tool rows) cannot exist.
    */
-  upsertSubagentStep?(update: SubagentStepUpdate): void;
-  /**
-   * Out-of-band update for one child tool call of a subagent dispatch.
-   */
-  upsertSubagentTool?(update: SubagentToolUpdate): void;
-  /**
-   * Registers a tool call id as originating from a subagent's child
-   * session. The renderer must skip or remove parent-level tool blocks for
-   * these ids — they are surfaced via {@link upsertSubagentTool} instead.
-   */
-  markChildToolCallId?(callId: string): void;
+  readonly subagents?: SubagentView;
   /**
    * Out-of-band update for one MCP connection authorization lifecycle.
    * Called by the runner as `authorization.*` events arrive.
@@ -382,6 +434,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
   onBootProgress?: DevBootProgressReporter;
+  /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
+  diagnostics?: DevDiagnostics;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -458,13 +512,12 @@ export class EveTUIRunner {
    * Each run holds per-step text accumulators (so reasoning + message land
    * in the same section per child step) and per-tool state.
    */
-  readonly #subagentRuns = new Map<string, SubagentRun>();
+  readonly #subagentPump: SubagentPump;
   /**
    * callId → AbortController for the parallel child-session stream pump
    * launched on `subagent.called`. Cancelled on `subagent.completed`, when
    * the session resets, or when the runner shuts down.
    */
-  readonly #subagentChildPumps = new Map<string, AbortController>();
   /**
    * name → latest known state for one MCP connection
    * authorization lifecycle. Persists across turns because a turn that
@@ -494,6 +547,10 @@ export class EveTUIRunner {
     this.#session = options.session;
     if (options.client !== undefined) this.#client = options.client;
     this.#renderer = createRenderer(options);
+    const pumpOptions: SubagentPumpOptions = { formatActionResultError };
+    if (this.#client !== undefined) pumpOptions.client = this.#client;
+    if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
+    this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
@@ -614,7 +671,7 @@ export class EveTUIRunner {
     } finally {
       this.#disposed = true;
       this.#authProbeAbort.abort();
-      this.#abortSubagentChildPumps();
+      this.#subagentPump.abortAll();
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#unsubscribeDevelopmentSandboxLogs?.();
       this.#unsubscribeDevelopmentSandboxLogs = undefined;
@@ -706,11 +763,15 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "new") {
-          this.#startNewSession();
+          if (!(await this.#resetCurrentSession())) {
+            pendingInputResponses = undefined;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
-          this.#renderer.reset?.();
           continue;
         }
 
@@ -754,6 +815,12 @@ export class EveTUIRunner {
         prompt: streamWithoutPrompt ? undefined : prompt,
         inputResponses: pendingInputResponses,
       });
+      // The session id becomes known once the send is accepted; keep the
+      // renderer's copy fresh so the parting line can name the session.
+      const acceptedSessionId = this.#session.state.sessionId;
+      if (acceptedSessionId !== undefined) {
+        this.#renderer.setSessionId?.(acceptedSessionId);
+      }
       let submittedPrompt = prompt;
       let respondedToInputRequest = false;
 
@@ -815,6 +882,15 @@ export class EveTUIRunner {
               }
             }
 
+            if (responses.length === 0) {
+              // Every pending question was dismissed without an answer. Fall
+              // back to the prompt rather than resuming with an empty
+              // response set: the turn stays parked, and the user's next
+              // message resumes it with the unanswered requests recorded as
+              // `ignored` (the server's continued-without-responding path).
+              break;
+            }
+
             streamWithoutPrompt = true;
             pendingInputResponses = responses;
             prompt = undefined;
@@ -829,7 +905,16 @@ export class EveTUIRunner {
           }
 
           if (result.turnState && result.turnState.boundaryEvent === undefined) {
-            this.#sessionFailed = true;
+            if (result.turnState.aborted) {
+              this.#sessionFailed = true;
+            } else {
+              const strandedSessionId = this.#session.state.sessionId;
+              this.#renderer.renderNotice?.(
+                strandedSessionId
+                  ? `Lost the event stream — the turn may still be running on the server (session ${strandedSessionId}). Your next message resumes this session; use /cancel to stop the turn.`
+                  : "Lost the connection to the running turn.",
+              );
+            }
           }
           break;
         }
@@ -849,16 +934,39 @@ export class EveTUIRunner {
       pendingInputResponses = undefined;
       prompt = undefined;
 
-      // The active session died terminally this turn (session.failed or a
-      // dead-socket transport error). Replace it with a fresh one so the next
-      // prompt isn't sent into a dead session, but keep the transcript on
-      // screen. Server-side context is gone with the old session.
+      // A staged Esc steer message, or messages queued during the turn,
+      // submit immediately as the next turn — but only across a clean turn
+      // boundary. A failed session or a lost stream keeps them; the renderer
+      // restores them into the next prompt's editable buffer instead of
+      // firing them into a session whose state the user hasn't seen.
+      const boundaryEvent = result.turnState?.boundaryEvent;
+      if (
+        !this.#sessionFailed &&
+        (boundaryEvent === "session.waiting" || boundaryEvent === "session.completed")
+      ) {
+        prompt = this.#renderer.takeQueuedPrompt?.();
+      }
+
+      // The session ended terminally this turn (session.failed, a dispatch
+      // failure, or a user interrupt). Replace it with a fresh one so the
+      // next prompt isn't sent into a dead session, but keep the transcript
+      // on screen. Server-side context is gone with the old session.
       if (this.#sessionFailed) {
         this.#sessionFailed = false;
         this.#startNewSession();
-        this.#renderer.renderNotice?.(
-          "Session ended — started a new session. Earlier context was cleared.",
-        );
+        // An aborted turn keeps its explicit notice — the boundary line alone
+        // would hide that the interrupted turn may still run on the server.
+        if (result.turnState?.aborted) {
+          this.#renderer.renderNotice?.(
+            "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
+          );
+        } else if (this.#renderer.renderSessionBoundary !== undefined) {
+          this.#renderer.renderSessionBoundary();
+        } else {
+          this.#renderer.renderNotice?.(
+            "Session ended — started a new session. Earlier context was cleared.",
+          );
+        }
       }
     }
   }
@@ -870,8 +978,7 @@ export class EveTUIRunner {
    * In-flight subagent child-session streams are aborted.
    */
   #startNewSession(): void {
-    this.#abortSubagentChildPumps();
-    this.#subagentRuns.clear();
+    this.#subagentPump.abortAll();
     this.#pendingInputRequests.clear();
     this.#connectionAuthRuns.clear();
     this.#pendingConnectionAuths.clear();
@@ -883,11 +990,18 @@ export class EveTUIRunner {
     this.#runtimeArtifacts?.clear();
   }
 
-  #abortSubagentChildPumps(): void {
-    for (const controller of this.#subagentChildPumps.values()) {
-      controller.abort();
+  /** Resets the durable owner before clearing the local conversation view. */
+  async #resetCurrentSession(): Promise<boolean> {
+    try {
+      await this.#session.reset();
+    } catch (error) {
+      this.#renderer.renderNotice?.(`Couldn't reset the session: ${toErrorMessage(error)}`);
+      return false;
     }
-    this.#subagentChildPumps.clear();
+
+    this.#startNewSession();
+    this.#renderer.reset?.();
+    return true;
   }
 
   async #readPromptWithIdleRefresh(options: AgentTUISessionOptions): Promise<string | undefined> {
@@ -1001,6 +1115,49 @@ export class EveTUIRunner {
   }
 
   /**
+   * Requests cooperative cancellation of the streaming turn and retries
+   * while the turn stays live. An Esc that lands in the dispatch window —
+   * after the turn was sent but before the turn workflow claims its cancel
+   * hook (i.e. before `turn.started` reaches the client) — resolves as a
+   * benign `no_active_turn` and would otherwise be silently lost, leaving
+   * the TUI showing "Cancelling…" while the turn runs to completion.
+   * Retrying until the stream reaches its boundary closes that window.
+   *
+   * Once `turn.started` names the turn, each retry carries its id, so a
+   * GUARDED retry that outlives the boundary is a benign no-op. An
+   * UNGUARDED attempt (turnId not yet known) has a residual race: if this
+   * turn's boundary, the queue drain, and the next turn's dispatch all
+   * complete while the request is in flight, the cancel can land on the
+   * next turn. Closing it needs turn-scoped cancel admission server-side
+   * (the #867 ledger); until then the renderer backstops it — a
+   * `turn.cancelled` arriving without an Esc in that stream restores the
+   * submitted message into the prompt instead of losing it.
+   * Single-flight per turn: repeated Esc presses join the running loop.
+   */
+  async #requestTurnCancellation(turnState: AgentTUITurnState): Promise<void> {
+    if (turnState.cancelInFlight === true) return;
+    turnState.cancelInFlight = true;
+    try {
+      for (let attempt = 0; attempt < turnCancelAttempts; attempt += 1) {
+        if (turnState.boundaryEvent !== undefined || turnState.aborted === true) return;
+        const turnId = turnState.turnId;
+        try {
+          const result = await this.#session.cancel(turnId === undefined ? undefined : { turnId });
+          // Accepted means the turn's cancellation hook consumed the
+          // request; the turn settles at its next safe boundary.
+          if (result.status === "accepted") return;
+        } catch {
+          // No accepted session yet or a transport failure — retry below;
+          // Ctrl+C remains the hard client-side interrupt.
+        }
+        await delayMs(turnCancelRetryDelayMs);
+      }
+    } finally {
+      turnState.cancelInFlight = false;
+    }
+  }
+
+  /**
    * Follows the same session after an interactive authorization callback.
    * `send()` stops at the parked `session.waiting` boundary; the callback's
    * completion events arrive in the next durable turn on `session.stream()`.
@@ -1019,24 +1176,29 @@ export class EveTUIRunner {
   ): AgentTUIStreamResult {
     const turnState = createTurnState();
     return {
-      abort,
+      abort: () => {
+        turnState.aborted = true;
+        abort();
+      },
+      cancel: () => {
+        void this.#requestTurnCancellation(turnState);
+      },
       events: eveEventsToTUIStream({
         events,
         pendingInputRequests: this.#pendingInputRequests,
-        subagentRuns: this.#subagentRuns,
         turnState,
-        onSubagentCalled: (called) => this.#startSubagentChildPump(called),
-        onSubagentCompleted: (callId) => this.#stopSubagentChildPump(callId),
+        onSubagentCalled: (called) => this.#subagentPump.begin(called),
+        onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
+        // A cancelled turn cancels its pending descendants server-side;
+        // settle their sections and stop their child streams so stale
+        // subagent output cannot paint into the next (steered) turn.
+        onTurnCancelled: () => this.#subagentPump.settleAll(),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
         onTerminalFailure: () => {
           this.#sessionFailed = true;
         },
-        failureOverride:
-          this.#appRoot === undefined
-            ? undefined
-            : (event) =>
-                isGatewayAuthFailure(event) ? formatGatewayAuthFailureNotice(event) : undefined,
+        failureHintOverride: this.#appRoot === undefined ? undefined : localFailureHint,
       }),
       turnState,
     };
@@ -1416,268 +1578,6 @@ export class EveTUIRunner {
     if (run.reason !== undefined) update.reason = run.reason;
     this.#renderer.upsertConnectionAuth?.(update);
   }
-
-  /**
-   * Opens a parallel stream over the child session and folds its events into
-   * nested subagent blocks.
-   *
-   * Pumps are fire-and-forget and must never be awaited at a turn boundary:
-   * a subagent dispatched in `task` mode that parks for HITL never emits a
-   * turn-boundary event on its own stream (`harness/tool-loop.ts` gates
-   * `emitTurnEpilogue` on `mode === "conversation"`), so blocking on a child
-   * stream would stall the prompt until the subagent's serverless function
-   * times out. Pumps stay open across HITL prompts and resume rendering when
-   * the subagent unparks; they end on the child's own boundary or via abort.
-   */
-  #startSubagentChildPump(called: SubagentCalledStreamEvent) {
-    const callId = called.data.callId;
-    if (this.#subagentChildPumps.has(callId)) return;
-    const client = this.#client;
-    if (!client) return;
-
-    const controller = new AbortController();
-    this.#subagentChildPumps.set(callId, controller);
-
-    void (async () => {
-      try {
-        const childSession = client.session({
-          sessionId: called.data.childSessionId,
-          streamIndex: 0,
-        });
-        const stream = childSession.stream({ signal: controller.signal });
-        for await (const event of stream) {
-          if (controller.signal.aborted) break;
-          this.#applyChildEvent(callId, event);
-          if (isCurrentTurnBoundaryEvent(event)) {
-            // Child completed its turn — close the parallel stream
-            // gracefully. The parent's `subagent.completed` is a separate
-            // signal that arrives independently and is handled by
-            // `#stopSubagentChildPump`.
-            break;
-          }
-        }
-      } catch (error) {
-        if (!isAbortLikeError(error)) {
-          const errorText = toErrorMessage(error);
-          const run = this.#subagentRuns.get(callId);
-          if (run) {
-            const { key, step } = openCurrentSubagentSection(run);
-            step.message = step.message
-              ? `${step.message}\n\nstream error: ${errorText}`
-              : `stream error: ${errorText}`;
-            step.finalized = true;
-            run.currentSectionKey = null;
-            this.#renderer.upsertSubagentStep?.({
-              callId,
-              subagentName: run.name,
-              sectionKey: key,
-              reasoning: step.reasoning,
-              message: step.message,
-              finalized: true,
-            });
-          }
-        }
-      } finally {
-        this.#subagentChildPumps.delete(callId);
-      }
-    })();
-  }
-
-  #registerChildTool(
-    callId: string,
-    run: SubagentRun,
-    request: {
-      childCallId: string;
-      toolName: string;
-      input: unknown;
-      status: SubagentToolState["status"];
-    },
-  ): void {
-    const existing = run.tools.get(request.childCallId);
-    const tool: SubagentToolState = existing ?? {
-      toolName: request.toolName,
-      input: request.input,
-      status: request.status,
-    };
-    if (existing) {
-      // Promote status only when the new status is "stronger" — e.g.
-      // approval-requested → executing once the parent approves, but
-      // never demote from done/failed back to executing.
-      const priority: Record<SubagentToolState["status"], number> = {
-        "approval-requested": 0,
-        executing: 1,
-        done: 2,
-        failed: 2,
-      };
-      if (priority[request.status] > priority[existing.status]) {
-        existing.status = request.status;
-      }
-      existing.input = request.input;
-    } else {
-      run.tools.set(request.childCallId, tool);
-    }
-    this.#renderer.markChildToolCallId?.(request.childCallId);
-    this.#renderer.upsertSubagentTool?.({
-      callId,
-      subagentName: run.name,
-      childCallId: request.childCallId,
-      toolName: tool.toolName,
-      input: tool.input,
-      status: tool.status,
-    });
-  }
-
-  #stopSubagentChildPump(callId: string) {
-    // Parent reports subagent.completed. The child stream pump terminates
-    // itself on the child's own turn boundary; we do NOT abort here,
-    // because the child's `message.completed` event may still be in flight
-    // (the parent and child streams are independent HTTP connections).
-    // Re-emit a finalized snapshot for any sections that are still
-    // streaming so their right-title flips off `streaming` even if the
-    // child's boundary event hasn't arrived yet.
-    const run = this.#subagentRuns.get(callId);
-    if (!run) return;
-    for (const [sectionKey, step] of run.steps) {
-      if (!step.finalized) {
-        step.finalized = true;
-        this.#renderer.upsertSubagentStep?.({
-          callId,
-          subagentName: run.name,
-          sectionKey,
-          reasoning: step.reasoning,
-          message: step.message,
-          finalized: true,
-        });
-      }
-    }
-    run.currentSectionKey = null;
-  }
-
-  #applyChildEvent(callId: string, event: HandleMessageStreamEvent) {
-    const run = this.#subagentRuns.get(callId);
-    if (!run) return;
-    const renderer = this.#renderer;
-
-    const emit = (key: number, step: SubagentChildStep) => {
-      renderer.upsertSubagentStep?.({
-        callId,
-        subagentName: run.name,
-        sectionKey: key,
-        reasoning: step.reasoning,
-        message: step.message,
-        finalized: step.finalized,
-      });
-    };
-
-    const finalizeCurrent = () => {
-      if (run.currentSectionKey === null) return;
-      const step = run.steps.get(run.currentSectionKey);
-      if (step) {
-        step.finalized = true;
-        emit(run.currentSectionKey, step);
-      }
-      run.currentSectionKey = null;
-    };
-
-    switch (event.type) {
-      case "reasoning.appended": {
-        const { key, step } = openCurrentSubagentSection(run);
-        step.reasoning = step.reasoning + event.data.reasoningDelta;
-        emit(key, step);
-        break;
-      }
-      case "reasoning.completed":
-        // Reasoning closes within a section but does not close the section
-        // itself — a following `message.appended` should land in the same
-        // box. The section closes on `message.completed` or
-        // `step.completed`.
-        break;
-      case "message.appended": {
-        const { key, step } = openCurrentSubagentSection(run);
-        step.message = step.message + event.data.messageDelta;
-        emit(key, step);
-        break;
-      }
-      case "message.completed": {
-        const { key, step } = openCurrentSubagentSection(run);
-        if (event.data.message !== null && step.message.length === 0) {
-          // Some channels emit only `message.completed` without per-delta
-          // `message.appended` events. Capture the full text in that case.
-          step.message = event.data.message;
-        }
-        step.finalized = true;
-        emit(key, step);
-        run.currentSectionKey = null;
-        break;
-      }
-      case "step.completed":
-        finalizeCurrent();
-        break;
-      case "actions.requested": {
-        // Close any pending text section before the tool call so the
-        // tool box renders below it — and the next post-tool message
-        // opens a fresh section.
-        finalizeCurrent();
-        for (const action of event.data.actions) {
-          if (action.kind !== "tool-call") continue;
-          this.#registerChildTool(callId, run, {
-            childCallId: action.callId,
-            toolName: action.toolName,
-            input: action.input,
-            status: "executing",
-          });
-        }
-        break;
-      }
-      case "input.requested": {
-        // Tools that need approval skip `actions.requested` and arrive
-        // here as `input.requested` with the action embedded. Register
-        // the tool section the same way (status: "approval-requested")
-        // so the parent's stale tool box can be suppressed and the
-        // child tool appears under the subagent flow.
-        finalizeCurrent();
-        for (const request of event.data.requests) {
-          if (request.action.kind !== "tool-call") continue;
-          this.#registerChildTool(callId, run, {
-            childCallId: request.action.callId,
-            toolName: request.action.toolName,
-            input: request.action.input,
-            status: "approval-requested",
-          });
-        }
-        break;
-      }
-      case "action.result": {
-        const result = event.data.result;
-        if (result.kind !== "tool-result") break;
-        const tool = run.tools.get(result.callId);
-        if (!tool) break;
-        if (event.data.status === "failed") {
-          tool.status = "failed";
-          tool.errorText = formatActionResultError(event);
-        } else {
-          tool.status = "done";
-          tool.output = result.output;
-        }
-        const update: SubagentToolUpdate = {
-          callId,
-          subagentName: run.name,
-          childCallId: result.callId,
-          toolName: tool.toolName,
-          input: tool.input,
-          status: tool.status,
-        };
-        if (tool.output !== undefined) update.output = tool.output;
-        if (tool.errorText !== undefined) update.errorText = tool.errorText;
-        renderer.upsertSubagentTool?.(update);
-        break;
-      }
-      default:
-        // Other events (session.*, turn.*, step.started, etc.) carry no
-        // visible text — ignore.
-        break;
-    }
-  }
 }
 
 function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
@@ -1699,6 +1599,7 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     availablePromptCommands: options.availablePromptCommands,
     input: options.userInput,
     output: options.screen,
+    diagnostics: options.diagnostics,
   });
 }
 
@@ -1719,14 +1620,19 @@ function formatAgentUpdateNotice(
 type EveStreamTranslatorInput = {
   events: AsyncIterable<HandleMessageStreamEvent>;
   pendingInputRequests: Map<string, InputRequest>;
-  subagentRuns: Map<string, SubagentRun>;
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
   onSubagentCompleted?: (callId: string) => void;
+  onTurnCancelled?: () => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
   onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
-  failureOverride?: (event: FailureStreamEvent) => string | undefined;
+  /**
+   * Replaces a failure's structured hint with a surface-local one (the
+   * local TUI swaps gateway-auth remediation for the in-session `/model`
+   * fix). Returning `undefined` keeps the hint the harness attached.
+   */
+  failureHintOverride?: (event: FailureStreamEvent) => string | undefined;
 };
 
 /**
@@ -1740,14 +1646,14 @@ async function* eveEventsToTUIStream(
   const {
     events,
     pendingInputRequests,
-    subagentRuns,
     turnState,
     onSubagentCalled,
     onSubagentCompleted,
+    onTurnCancelled,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
     onTerminalFailure,
-    failureOverride,
+    failureHintOverride,
   } = input;
   const textParts = new Map<string, StreamPartState>();
   const reasoningParts = new Map<string, StreamPartState>();
@@ -1774,9 +1680,15 @@ async function* eveEventsToTUIStream(
 
     switch (event.type) {
       case "session.started":
-      case "turn.started":
       case "message.received":
         // Boundary / metadata events with no direct UI surface.
+        break;
+
+      case "turn.started":
+        // Recorded so Esc-driven cancellation can scope its request to the
+        // turn the user is watching; a cancel that arrives after the
+        // boundary then no-ops instead of hitting the next turn.
+        turnState.turnId = event.data.turnId;
         break;
 
       case "step.started":
@@ -1991,25 +1903,35 @@ async function* eveEventsToTUIStream(
           // have no tool block to attach to.
           break;
         }
-        if (resultEvent.data.status === "failed") {
-          yield {
-            type: "tool-error",
-            toolCallId: callId,
-            errorText: formatActionResultError(resultEvent),
-          };
-        } else {
-          yield {
-            type: "tool-result",
-            toolCallId: callId,
-            output: resultEvent.data.result.output,
-          };
+        switch (resultEvent.data.status) {
+          case "completed":
+            yield {
+              type: "tool-result",
+              toolCallId: callId,
+              output: resultEvent.data.result.output,
+            };
+            break;
+          case "failed":
+            yield {
+              type: "tool-error",
+              toolCallId: callId,
+              errorText: formatActionResultError(resultEvent),
+            };
+            break;
+          case "rejected":
+            yield {
+              type: "tool-rejected",
+              toolCallId: callId,
+              reason: formatActionResultError(resultEvent),
+            };
+            break;
         }
         break;
       }
 
       case "step.failed":
       case "turn.failed": {
-        const failure = toFailureEvent(event, emittedFailures, failureOverride);
+        const failure = toFailureEvent(event, emittedFailures, failureHintOverride);
         if (failure) yield failure;
         break;
       }
@@ -2019,7 +1941,7 @@ async function* eveEventsToTUIStream(
         // recover onto a fresh session before the next prompt.
         turnState.sawSessionFailure = true;
         onTerminalFailure?.(event as SessionFailedStreamEvent);
-        const failure = toFailureEvent(event, emittedFailures, failureOverride);
+        const failure = toFailureEvent(event, emittedFailures, failureHintOverride);
         if (failure) yield failure;
         turnState.boundaryEvent = event.type;
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
@@ -2050,22 +1972,19 @@ async function* eveEventsToTUIStream(
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
         break;
 
+      case "turn.cancelled":
+        // A cooperative cancel (Esc Esc or an Esc steer) — not a failure.
+        // `session.waiting` follows and finishes the stream normally.
+        onTurnCancelled?.();
+        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
+        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
+        yield { type: "turn-cancelled" };
+        break;
+
       case "subagent.called": {
-        const called = event as SubagentCalledStreamEvent;
-        if (!subagentRuns.has(called.data.callId)) {
-          subagentRuns.set(called.data.callId, {
-            name: called.data.name,
-            steps: new Map(),
-            currentSectionKey: null,
-            nextSectionKey: 0,
-            tools: new Map(),
-          });
-        } else {
-          // Idempotent re-entry (e.g. SSE resume): just refresh the name.
-          const run = subagentRuns.get(called.data.callId);
-          if (run) run.name = called.data.name;
-        }
-        onSubagentCalled?.(called);
+        // Run creation (idempotent for SSE-resume re-entries) lives in the
+        // pump's begin().
+        onSubagentCalled?.(event as SubagentCalledStreamEvent);
         break;
       }
 
@@ -2119,6 +2038,7 @@ async function* errorOnlyTUIStream(input: {
 
 function createTurnState(): AgentTUITurnState {
   return {
+    aborted: false,
     pendingApprovals: [],
     pendingQuestions: [],
     sawSessionFailure: false,
@@ -2250,24 +2170,26 @@ function formatActionResultError(event: ActionResultStreamEvent): string {
 /**
  * Projects one failure event into a renderable `error` stream event, or
  * `undefined` when the same underlying failure was already emitted earlier in
- * the cascade. Attaches the diagnostic dump (stack trace) when the failure
- * carries one — i.e. for unrecognized errors escaping user code.
+ * the cascade. Carries the failure as a structured entity: headline, the
+ * catalog's remediation hint (surface overrides win), and the diagnostic
+ * dump when the failure carries one — i.e. for unrecognized errors escaping
+ * user code.
  */
 function toFailureEvent(
   event: FailureStreamEvent,
   emittedFailures: Set<string>,
-  failureOverride?: (event: FailureStreamEvent) => string | undefined,
+  failureHintOverride?: (event: FailureStreamEvent) => string | undefined,
 ): AgentTUIStreamEvent | undefined {
   const key = failureKey(event);
   if (emittedFailures.has(key)) return undefined;
   emittedFailures.add(key);
 
-  const override = failureOverride?.(event);
   const failure: AgentTUIStreamEvent = {
     type: "error",
-    errorText: override ?? formatFailureMessage(event),
+    errorText: formatFailureMessage(event),
   };
-  if (override !== undefined) return failure;
+  const hint = failureHintOverride?.(event) ?? formatFailureHint(event);
+  if (hint !== undefined) failure.hint = hint;
   const detail = formatFailureDetail(event);
   if (detail !== undefined) failure.detail = detail;
   return failure;
@@ -2311,61 +2233,6 @@ function toAgentTUIInputQuestion(request: InputRequest): AgentTUIInputQuestion {
   return question;
 }
 
-type SubagentChildStep = {
-  reasoning: string;
-  message: string;
-  finalized: boolean;
-};
-
-type SubagentToolState = {
-  toolName: string;
-  input: unknown;
-  status: "approval-requested" | "executing" | "done" | "failed";
-  output?: unknown;
-  errorText?: string;
-};
-
-export type SubagentRun = {
-  name: string;
-  /**
-   * One entry per logical "child message" — independent of the child's
-   * `stepIndex` field, which the harness can reuse across multiple
-   * assistant messages within a turn (e.g. a message before a tool call
-   * and another message after the tool result both arrive under
-   * `stepIndex: 0`). The key is a monotonic counter so each
-   * `message.completed` opens a new box on the next inbound delta.
-   */
-  steps: Map<number, SubagentChildStep>;
-  /**
-   * Section currently accepting reasoning/message deltas. `null` means
-   * the next delta opens a new section.
-   */
-  currentSectionKey: number | null;
-  /** Monotonic counter for new section keys. */
-  nextSectionKey: number;
-  tools: Map<string, SubagentToolState>;
-};
-
-export type SubagentStepUpdate = {
-  callId: string;
-  subagentName: string;
-  sectionKey: number;
-  reasoning: string;
-  message: string;
-  finalized: boolean;
-};
-
-export type SubagentToolUpdate = {
-  callId: string;
-  subagentName: string;
-  childCallId: string;
-  toolName: string;
-  input: unknown;
-  status: "approval-requested" | "executing" | "done" | "failed";
-  output?: unknown;
-  errorText?: string;
-};
-
 export type ConnectionAuthChallenge = {
   url?: string;
   userCode?: string;
@@ -2391,18 +2258,3 @@ type ConnectionAuthRun = {
   webhookUrl?: string;
   reason?: string;
 };
-
-function openCurrentSubagentSection(run: SubagentRun): {
-  key: number;
-  step: SubagentChildStep;
-} {
-  if (run.currentSectionKey === null) {
-    run.currentSectionKey = run.nextSectionKey++;
-    run.steps.set(run.currentSectionKey, { reasoning: "", message: "", finalized: false });
-  }
-  const step = run.steps.get(run.currentSectionKey);
-  if (!step) {
-    throw new Error("invariant: subagent section state missing for current key");
-  }
-  return { key: run.currentSectionKey, step };
-}

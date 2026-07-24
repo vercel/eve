@@ -37,9 +37,10 @@ export const SETUP_FLOW_CONFIG = {
 
 /** The prompter surface plus the working-state interrupt trap a command races against. */
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "readProviderPicker" | "waitForInterrupt">;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor" | "waitForInterrupt">;
 
-type MuteableSetupRenderer = TuiPrompterRenderer & Pick<SetupFlowRenderer, "readProviderPicker">;
+type MuteableSetupRenderer = TuiPrompterRenderer &
+  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor">;
 
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
@@ -90,6 +91,8 @@ function muteableRenderer(
       isMuted() ? Promise.resolve(undefined) : renderer.readEditableSelect(options),
     readProviderPicker: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readProviderPicker(options),
+    readModelEditor: (options) =>
+      isMuted() ? Promise.resolve(undefined) : renderer.readModelEditor(options),
     readText: (options) => (isMuted() ? Promise.resolve(undefined) : renderer.readText(options)),
     readAcknowledge: (options) =>
       isMuted() ? Promise.resolve() : renderer.readAcknowledge(options),
@@ -184,6 +187,7 @@ async function executeSetupCommand(
           prompter,
           signal,
           deps: {
+            pickModelSettings: (request) => renderer.readModelEditor(request),
             runProviderFlow: (providerInput) =>
               runProviderFlow({ ...providerInput, picker: pickProvider }),
           },
@@ -193,7 +197,13 @@ async function executeSetupCommand(
         }
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
-          return { message: "/model cancelled.", preserveFlowDiagnostics: false };
+          return {
+            message:
+              result.discardedDraft === true
+                ? "/model dismissed. Drafted changes were discarded; Done commits them."
+                : "/model dismissed.",
+            preserveFlowDiagnostics: false,
+          };
         }
         // One line per completed menu action: the apply line (it already
         // distinguishes success from a rejected slug), then the provider
@@ -226,7 +236,7 @@ async function executeSetupCommand(
               `Channel files changed, but /channels failed: ${result.message}`,
             );
           case "cancelled":
-            return { message: "/channels cancelled.", preserveFlowDiagnostics: true };
+            return { message: "/channels dismissed.", preserveFlowDiagnostics: true };
           case "deploy-and-chat":
             return await runDeployAndChat(flows, { appRoot, prompter, signal }, result.chat);
           case "done":
@@ -250,7 +260,7 @@ async function executeSetupCommand(
         switch (result.kind) {
           case "cancelled":
             return {
-              message: "/connect cancelled.",
+              message: "/connect dismissed.",
               preserveFlowDiagnostics: true,
               effect: { kind: "model-access-changed" },
             };
@@ -283,7 +293,7 @@ async function executeSetupCommand(
       case "deploy": {
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
         if (result.kind === "cancelled") {
-          return { message: "/deploy cancelled.", preserveFlowDiagnostics: true };
+          return { message: "/deploy dismissed.", preserveFlowDiagnostics: true };
         }
         if (result.kind === "needs-link") {
           return {
@@ -302,10 +312,16 @@ async function executeSetupCommand(
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       return {
-        message: `/${command} cancelled.`,
+        message: `/${command} dismissed.`,
         preserveFlowDiagnostics: command !== "model",
       };
     }
+    const upgrade = await vercelCliUpgradeOutcome(error, command, flows, {
+      appRoot,
+      prompter,
+      signal,
+    });
+    if (upgrade !== undefined) return upgrade;
     // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
     // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
     // dumping the raw "Human action required" message.
@@ -319,12 +335,102 @@ async function executeSetupCommand(
 }
 
 /**
+ * Offers to upgrade an old Vercel CLI when setup reports an unsupported
+ * capability. This prompt is intentionally at the TUI boundary: shared setup
+ * callers retain the structured human action, while an interactive command can
+ * perform the recovery in place after the user opts in.
+ */
+async function vercelCliUpgradeOutcome(
+  error: unknown,
+  command: string,
+  flows: TuiSetupFlows,
+  input: { appRoot: string; prompter: Prompter; signal: AbortSignal },
+): Promise<TuiSetupCommandResult | undefined> {
+  if (!(error instanceof HumanActionRequiredError) || error.action.kind !== "vercel-cli-upgrade") {
+    return undefined;
+  }
+
+  let choice: "upgrade" | "later";
+  try {
+    choice = await input.prompter.select({
+      message: "Your Vercel CLI needs an update to list your teams. Upgrade now?",
+      options: [
+        {
+          value: "upgrade",
+          label: "Upgrade Vercel CLI",
+          description: "Run the Vercel CLI's native upgrader",
+        },
+        { value: "later", label: "Not now" },
+      ],
+      initialValue: "upgrade",
+    });
+  } catch {
+    choice = "later";
+  }
+
+  if (choice === "later") {
+    return {
+      message: `The Vercel CLI needs an update — run \`vercel upgrade\`, then retry /${command}.`,
+      preserveFlowDiagnostics: true,
+    };
+  }
+
+  let result: InstallVercelCliResult;
+  try {
+    result = await flows.runInstallVercelCliFlow({
+      appRoot: input.appRoot,
+      prompter: input.prompter,
+      signal: input.signal,
+      upgrade: true,
+    });
+  } catch (error) {
+    return {
+      message: vercelCliUpgradeFailureMessage(command, errorMessage(error)),
+      preserveFlowDiagnostics: true,
+    };
+  }
+  switch (result.kind) {
+    case "installed":
+      return {
+        message: `Upgraded the Vercel CLI. Retry /${command}.`,
+        preserveFlowDiagnostics: false,
+      };
+    case "failed":
+      return {
+        message: vercelCliUpgradeFailureMessage(command, result.reason),
+        preserveFlowDiagnostics: true,
+      };
+    case "cancelled":
+      return {
+        message: `Vercel CLI upgrade cancelled — run \`vercel upgrade\`, then retry /${command}.`,
+        preserveFlowDiagnostics: true,
+      };
+    case "already":
+      return {
+        message: `The Vercel CLI is already up to date. Retry /${command}.`,
+        preserveFlowDiagnostics: false,
+      };
+  }
+}
+
+function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const compact = message.replace(/\s+/gu, " ").trim();
+  return compact.length <= 240 ? compact : `${compact.slice(0, 239)}…`;
+}
+
+function vercelCliUpgradeFailureMessage(command: string, reason?: string): string {
+  const detail = reason === undefined || reason === "" ? "" : ` (${reason})`;
+  return `Couldn't upgrade the Vercel CLI${detail} — run \`vercel upgrade\`, then retry /${command}.`;
+}
+
+/**
  * Translates a Vercel {@link HumanActionRequiredError} into the in-TUI routing
  * message, or `undefined` for anything else. One translator so every path that
  * can surface a provisioning action — the command catch, the `/channels`
  * partial-success result, and the deploy-and-chat continuation — routes
- * `vercel-login`, `vercel-forbidden`, and `vercel-cli-missing` the same way
- * rather than leaking the raw error text.
+ * login, forbidden-scope, and CLI recovery actions the same way rather than
+ * leaking the raw error text.
  */
 function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandResult | undefined {
   if (!(error instanceof HumanActionRequiredError)) return undefined;
@@ -341,6 +447,8 @@ function vercelActionMessage(kind: string, command: string): string | undefined 
       return `Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
     case "vercel-cli-missing":
       return `The Vercel CLI isn't installed — run /vc:install to install it, then retry /${command}.`;
+    case "vercel-cli-upgrade":
+      return `The Vercel CLI needs an update — run \`vercel upgrade\`, then retry /${command}.`;
     default:
       return undefined;
   }
@@ -363,7 +471,7 @@ async function runDeployAndChat(
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       return pendingChannelsResult(
-        "Channels added, but /deploy was cancelled. Run /deploy to ship them.",
+        "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
       );
     }
     const routed = vercelActionOutcome(error, "deploy");
@@ -373,7 +481,7 @@ async function runDeployAndChat(
   }
   if (result.kind === "cancelled") {
     return pendingChannelsResult(
-      "Channels added, but /deploy was cancelled. Run /deploy to ship them.",
+      "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
     );
   }
   if (result.kind === "needs-link") {
@@ -404,7 +512,7 @@ async function runDeployAndChat(
 function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetupCommandResult {
   switch (result.kind) {
     case "cancelled":
-      return { message: "/vc:install cancelled.", preserveFlowDiagnostics: false };
+      return { message: "/vc:install dismissed.", preserveFlowDiagnostics: false };
     case "already":
       return { message: "The Vercel CLI is already installed.", preserveFlowDiagnostics: false };
     case "failed":
@@ -427,7 +535,7 @@ function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetup
 function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
   switch (result.kind) {
     case "cancelled":
-      return { message: "/vc:login cancelled.", preserveFlowDiagnostics: false };
+      return { message: "/vc:login dismissed.", preserveFlowDiagnostics: false };
     case "already":
       return { message: "You're already logged in to Vercel.", preserveFlowDiagnostics: false };
     case "cli-missing":
@@ -474,14 +582,33 @@ function pendingChannelsResult(message: string): TuiSetupCommandResult {
  * without linking anything.
  */
 function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
-  const { credential, status } = outcome;
+  const { resolution, status } = outcome;
   if (status.kind === "gateway-project") {
-    return credential === undefined
-      ? "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local."
-      : `Project linked. Connected to AI Gateway via ${credential}.`;
+    if (resolution === undefined) {
+      return "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local.";
+    }
+    if (resolution.credential === "oidc") {
+      return "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.";
+    }
+    // A gateway key outranks the project's OIDC token at runtime — claiming
+    // the OIDC connection while the key authenticates every call would split
+    // this message from the status bar and the actual resolution.
+    if (resolution.shadowedOidc !== undefined) {
+      const from = resolution.source.kind === "shell" ? "shell" : resolution.source.path;
+      const remove =
+        resolution.source.kind === "shell"
+          ? "unset it in your shell"
+          : `remove it from ${resolution.source.path}`;
+      return (
+        `Project linked. AI_GATEWAY_API_KEY (${from}) outranks the project's ` +
+        `VERCEL_OIDC_TOKEN and stays the active credential — ${remove} to run on the project.`
+      );
+    }
+    return "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.";
   }
   if (status.kind === "gateway-key") {
-    return `Connected to AI Gateway via ${status.envKey} in ${status.envFile}.`;
+    const where = status.source.kind === "shell" ? "your shell" : status.source.path;
+    return `Connected to AI Gateway via ${status.envKey} in ${where}.`;
   }
   return "Provider updated — no gateway credential detected; set AI_GATEWAY_API_KEY in .env.local.";
 }

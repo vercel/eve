@@ -5,17 +5,10 @@ import type {
   PublicToolOutputSchema,
   ToolModelOutput,
 } from "#shared/tool-definition.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { Approval } from "#public/definitions/approval.js";
+import type { ToolContext } from "#public/definitions/tool.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-
-type ToolContext = SessionContext & {
-  /** Aborts when the active turn is cancelled. */
-  readonly abortSignal: AbortSignal;
-  /** Final runtime name of the current tool. */
-  readonly toolName: string;
-};
 
 /**
  * Stream event types allowed for dynamic tool resolvers. Dispatch

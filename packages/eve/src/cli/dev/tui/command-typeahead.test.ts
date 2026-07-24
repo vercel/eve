@@ -11,7 +11,7 @@ import {
   typeaheadFor,
 } from "./command-typeahead.js";
 import { PROMPT_COMMANDS, type PromptCommandSpec } from "./prompt-commands.js";
-import { stripAnsi } from "./terminal-text.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const theme = createTheme({ color: false, unicode: true });

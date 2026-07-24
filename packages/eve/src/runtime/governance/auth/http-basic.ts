@@ -20,13 +20,18 @@ export function authenticateHttpBasicStrategy(input: {
     };
   }
 
-  if (credentials.username !== input.strategy.username) {
+  if (normalizeCredential(credentials.username) !== normalizeCredential(input.strategy.username)) {
     return {
       kind: "not-authenticated",
     };
   }
 
-  if (!timingSafeStringEquals(credentials.password, input.strategy.password)) {
+  if (
+    !timingSafeStringEquals(
+      normalizeCredential(credentials.password),
+      normalizeCredential(input.strategy.password),
+    )
+  ) {
     return {
       kind: "not-authenticated",
     };
@@ -78,6 +83,10 @@ function parseBasicAuthorizationHeader(value: string): {
     password: decoded.slice(separatorIndex + 1),
     username: decoded.slice(0, separatorIndex),
   };
+}
+
+function normalizeCredential(value: string): string {
+  return value.normalize("NFC");
 }
 
 function timingSafeStringEquals(left: string, right: string): boolean {

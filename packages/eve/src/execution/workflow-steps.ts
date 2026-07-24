@@ -5,13 +5,25 @@ import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
-import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
-import { AuthKey, CapabilitiesKey, ModeKey } from "#context/keys.js";
+import {
+  dispatchDynamicToolEvent,
+  refreshDynamicSessionToolsForRuntimeRevision,
+} from "#context/dynamic-tool-lifecycle.js";
+import {
+  AuthKey,
+  CapabilitiesKey,
+  ModeKey,
+  SessionDynamicToolRuntimeRevisionKey,
+} from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
-import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import {
+  isSessionLimitDecline,
+  isTurnCancellation,
+  throwIfTurnAborted,
+} from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -29,6 +41,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
   createAuthorizationCompletedEvent,
+  createSessionStartedEvent,
   encodeMessageStreamEvent,
   type HandleMessageStreamEvent,
   timestampHandleMessageStreamEvent,
@@ -53,16 +66,17 @@ import {
   type TurnStepInput,
   type TurnWorkflowDispatchInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
-import { createExecutionNodeStep } from "#execution/node-step.js";
+import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
-import { resolveSessionSkillRoot } from "#execution/workflow-skill-root.js";
+import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import {
   createWorkflowRuntime,
+  requestWorkflowTurnCancellation,
   startWorkflowPreferLatest,
   turnWorkflowReference,
 } from "#execution/workflow-runtime.js";
@@ -251,11 +265,30 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     };
   }
 
-  const writer = input.parentWritable.getWriter();
   const hookRegistry = bundle.hookRegistry;
   const dynamicInstructionsResolvers = bundle.resolvedAgent.dynamicInstructionsResolvers ?? [];
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
+  const runtimeIdentity = buildRuntimeIdentity(bundle.graph.root);
+  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+  const dynamicToolRuntimeRevision = deploymentId
+    ? `deployment:${deploymentId}`
+    : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
+  const sessionStarted = getHarnessEmissionState(initialSession.state).sessionStarted;
+
+  if (!sessionStarted) {
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicToolRuntimeRevision);
+  } else {
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: dynamicToolResolvers,
+      event: createSessionStartedEvent({ runtime: runtimeIdentity }),
+      messages: initialSession.history,
+      runtimeRevision: dynamicToolRuntimeRevision,
+    });
+  }
+
+  const writer = input.parentWritable.getWriter();
 
   const emit = async (event: HandleMessageStreamEvent): Promise<HandleMessageStreamEvent> => {
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
@@ -340,16 +373,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         lifecycleSession: HarnessSession,
         stepInput: StepInput | undefined,
       ): Promise<StepResult> => {
-        const skillRoot = await resolveSessionSkillRoot({
-          ctx,
-          turnAgent: bundle.turnAgent,
-        });
         const refreshedSession = refreshSessionFromTurnAgent({
           compactionOverrides: {
             thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
           },
           session: lifecycleSession,
-          skillRoot,
           turnAgent: bundle.turnAgent,
         });
 
@@ -374,6 +402,19 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   } catch (error) {
     if (!isTurnCancellation(error)) throw error;
     writer.releaseLock();
+    // A declined session-limit prompt stops the whole delegation tree: a
+    // delegated session cancels the root turn before settling itself, and
+    // the root's cancelled arm cascades back down to every descendant. Root
+    // sessions carry no parent lineage and need no upward call — their own
+    // cancelled park runs the cascade. Both `accepted` and `no_active_turn`
+    // are successful outcomes, and the cascade's redundant cancel back to
+    // this already-settling session is a benign no-op.
+    if (isSessionLimitDecline(error)) {
+      const rootSessionId = readRootSessionId(input.serializedContext);
+      if (rootSessionId !== undefined) {
+        await requestWorkflowTurnCancellation({ sessionId: rootSessionId });
+      }
+    }
     return {
       action: "cancelled",
       serializedContext: input.serializedContext,

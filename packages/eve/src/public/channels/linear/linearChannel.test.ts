@@ -7,7 +7,6 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import { renderLinearInputRequests } from "#public/channels/linear/hitl.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -128,6 +127,8 @@ async function firePost(
 
   const response = await post.handler(request, {
     cancel: vi.fn(),
+    reset: vi.fn(),
+    resolveActiveSession: async () => undefined,
     getSession: vi.fn() as any,
     params: {},
     receive: vi.fn() as any,
@@ -181,41 +182,8 @@ describe("linearChannel inbound Agent Session events", () => {
     });
   });
 
-  it("resolves prompted events into input responses when the latest elicitation has eve metadata", async () => {
-    const elicitation = renderLinearInputRequests([
-      makeRequest({
-        options: [
-          { id: "approve", label: "Approve" },
-          { id: "deny", label: "Deny" },
-        ],
-      }),
-    ]);
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        data: {
-          agentSession: {
-            activities: {
-              nodes: [
-                {
-                  content: {
-                    __typename: "AgentActivityElicitationContent",
-                    body: elicitation,
-                    type: "elicitation",
-                  },
-                  id: "activity_1",
-                  updatedAt: "2026-06-08T12:00:00.000Z",
-                },
-              ],
-            },
-          },
-        },
-      }),
-    );
-    const channel = linearChannel({
-      api: { apiBaseUrl: "https://linear.test/graphql", fetch: fetchMock },
-      credentials: { accessToken: "linear-token", webhookSecret: SECRET },
-    });
-
+  it("delivers prompted values as messages for the harness to resolve", async () => {
+    const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
     const { send } = await firePost(
       channel,
       signedRequest(
@@ -233,8 +201,46 @@ describe("linearChannel inbound Agent Session events", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     const [payload] = send.mock.calls[0]!;
-    expect(payload.inputResponses).toEqual([{ optionId: "approve", requestId: "call_1" }]);
+    expect(payload.inputResponses).toBeUndefined();
     expect(payload.message).toBe("approve");
+  });
+
+  it("attaches authenticated Linear upload images to prompted messages", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "image/webp" },
+      }),
+    );
+    const channel = linearChannel({
+      api: { fetch: fetchMock },
+      credentials: { accessToken: "linear-token", webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        sessionPayload({
+          action: "prompted",
+          agentActivity: {
+            content: {
+              body: "Inspect ![screenshot](https://uploads.linear.app/acme/image.webp).",
+              type: "prompt",
+            },
+            id: "activity_prompt",
+            user: { id: "user_1" },
+            userId: "user_1",
+          },
+        }),
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer linear-token",
+    );
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.message[0]).toEqual({ text: "Inspect screenshot.", type: "text" });
+    expect(payload.message[1]).toMatchObject({ mediaType: "image/webp", type: "file" });
+    expect(payload.message[1].data).toEqual(Buffer.from([1, 2, 3]));
   });
 
   it("acks generic data webhooks without dispatch when no hook is configured", async () => {
@@ -264,6 +270,65 @@ describe("linearChannel inbound Agent Session events", () => {
 });
 
 describe("linearChannel default event handlers", () => {
+  it("posts input requests with native Linear select metadata and no visible marker", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          agentActivityCreate: {
+            agentActivity: { id: "activity_1" },
+            success: true,
+          },
+        },
+      }),
+    );
+    const adapter = withState(
+      getAdapter(
+        linearChannel({
+          api: { apiBaseUrl: "https://linear.test/graphql", fetch: fetchMock },
+          credentials: { accessToken: "linear-token", webhookSecret: SECRET },
+        }),
+      ),
+      { agentSessionId: "agent_session_1" },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          makeRequest({
+            allowFreeform: true,
+            options: [
+              { id: "alpha", label: "Alpha" },
+              { id: "beta", label: "Beta" },
+            ],
+          }),
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const input = (requestBody(fetchMock.mock.calls[0]?.[1]).variables as any).input;
+    expect(input).toMatchObject({
+      agentSessionId: "agent_session_1",
+      content: {
+        body: "Approve deployment?\n\n1. Alpha\n2. Beta\n\nYou can also reply with a custom answer.",
+        type: "elicitation",
+      },
+      signal: "select",
+      signalMetadata: {
+        options: [
+          { label: "Alpha", value: "alpha" },
+          { label: "Beta", value: "beta" },
+        ],
+      },
+    });
+    expect(input.content.body).not.toContain("eve-input");
+  });
+
   it("posts completed messages as Linear response activities", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({

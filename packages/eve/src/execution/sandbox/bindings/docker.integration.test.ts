@@ -221,6 +221,61 @@ describe("createDockerSandboxBackend prewarm", () => {
     expect(cleanup?.args.at(-1)).toBe(buildContainerName);
   });
 
+  it("writes seed files before bootstrap and commits bootstrap outputs", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    let seedWritten = false;
+    const { calls, cli } = createFakeDockerCli((args) => {
+      const command = args.at(-1) ?? "";
+      if (isImageInspect(args, TEMPLATE_IMAGE)) {
+        return { exitCode: 1, stderr: "No such image" };
+      }
+      if (args[0] === "exec" && args[1] === "-i" && command.includes("/workspace/seed.txt")) {
+        seedWritten = true;
+      }
+      if (
+        args[0] === "exec" &&
+        command.includes("if [ -e") &&
+        command.includes("/workspace/seed.txt")
+      ) {
+        return seedWritten ? { exitCode: 0, stdout: "authored seed" } : { exitCode: 43 };
+      }
+      return undefined;
+    });
+
+    await createEngine({ cli }).prewarm({
+      bootstrap: async ({ use }) => {
+        const sandbox = await use();
+        await expect(sandbox.readTextFile({ path: "/workspace/seed.txt" })).resolves.toBe(
+          "authored seed",
+        );
+        await sandbox.writeTextFile({
+          content: "bootstrap output",
+          path: "/workspace/bootstrap.txt",
+        });
+      },
+      runtimeContext: { appRoot },
+      seedFiles: [{ content: "authored seed", path: "/workspace/seed.txt" }],
+      templateKey: TEMPLATE_KEY,
+    });
+
+    const seedWriteIndex = calls.findIndex(
+      ({ args }) =>
+        args[0] === "exec" &&
+        args[1] === "-i" &&
+        (args.at(-1) ?? "").includes("/workspace/seed.txt"),
+    );
+    const bootstrapWriteIndex = calls.findIndex(
+      ({ args }) =>
+        args[0] === "exec" &&
+        args[1] === "-i" &&
+        (args.at(-1) ?? "").includes("/workspace/bootstrap.txt"),
+    );
+    const commitIndex = calls.findIndex(({ args }) => args[0] === "commit");
+    expect(seedWriteIndex).toBeGreaterThanOrEqual(0);
+    expect(seedWriteIndex).toBeLessThan(bootstrapWriteIndex);
+    expect(bootstrapWriteIndex).toBeLessThan(commitIndex);
+  });
+
   it("fails with an actionable error when the daemon is unreachable", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
     const { cli } = createFakeDockerCli((args) => {

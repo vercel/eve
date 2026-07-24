@@ -82,6 +82,9 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async getEventStream() {
       return new ReadableStream<HandleMessageStreamEvent>();
     },
+    async terminateSession() {
+      throw new Error("terminateSession should not be called in this scenario");
+    },
   };
 }
 

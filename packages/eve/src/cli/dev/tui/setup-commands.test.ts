@@ -29,6 +29,7 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
     readSelect: vi.fn(async () => []),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
+    readModelEditor: vi.fn(async () => undefined),
     readText: vi.fn(async () => ""),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -79,8 +80,12 @@ function run(input: {
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
+  upgradeChoice?: "upgrade" | "later";
 }) {
-  const fake = createFakePrompter({});
+  const { upgradeChoice } = input;
+  const fake = createFakePrompter(
+    upgradeChoice === undefined ? {} : { single: () => upgradeChoice },
+  );
   const commandInput: TuiSetupCommandInput = {
     command: input.command,
     appRoot: APP_ROOT,
@@ -140,7 +145,10 @@ describe("runTuiSetupCommand", () => {
         kind: "done",
         modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
         providerOutcome: {
-          credential: "AI_GATEWAY_API_KEY",
+          resolution: {
+            credential: "api-key",
+            source: { kind: "env-file", path: ".env.local" },
+          },
           status: { kind: "gateway-project", projectName: "my-agent" },
         },
       })),
@@ -159,7 +167,7 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         providerOutcome: {
-          credential: "VERCEL_OIDC_TOKEN",
+          resolution: { credential: "oidc", file: ".env.local" },
           status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
         },
       })),
@@ -171,13 +179,44 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
+  it("names the shadow when a gateway key outranks the freshly linked OIDC token", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
+        kind: "done",
+        providerOutcome: {
+          resolution: {
+            credential: "api-key",
+            source: { kind: "shell" },
+            shadowedOidc: {},
+          },
+          status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
+        },
+      })),
+    });
+    await expect(run({ command: "model", flows })).resolves.toEqual({
+      message:
+        "Project linked. AI_GATEWAY_API_KEY (shell) outranks the project's " +
+        "VERCEL_OIDC_TOKEN and stays the active credential — unset it in your shell to run " +
+        "on the project.",
+      preserveFlowDiagnostics: false,
+      effect: { kind: "model-access-changed" },
+    });
+  });
+
   it("does not claim a link for a pasted key — the outcome names the env file", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         providerOutcome: {
-          credential: "AI_GATEWAY_API_KEY",
-          status: { kind: "gateway-key", envKey: "AI_GATEWAY_API_KEY", envFile: ".env.local" },
+          resolution: {
+            credential: "api-key",
+            source: { kind: "env-file", path: ".env.local" },
+          },
+          status: {
+            kind: "gateway-key",
+            envKey: "AI_GATEWAY_API_KEY",
+            source: { kind: "env-file", path: ".env.local" },
+          },
         },
       })),
     });
@@ -193,8 +232,95 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({ kind: "cancelled" })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "/model cancelled.",
+      message: "/model dismissed.",
       preserveFlowDiagnostics: false,
+    });
+  });
+
+  it("prompts to upgrade an old Vercel CLI when setup reports it unsupported", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The installed Vercel CLI does not support the required team-list options.",
+        });
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
+        kind: "installed",
+      })),
+    });
+
+    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message: "Upgraded the Vercel CLI. Retry /model.",
+      preserveFlowDiagnostics: false,
+    });
+    expect(flows.runInstallVercelCliFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot: APP_ROOT,
+        upgrade: true,
+      }),
+    );
+  });
+
+  it("gives the manual upgrade command when the old-CLI prompt is declined", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The installed Vercel CLI does not support the required team-list options.",
+        });
+      }),
+    });
+
+    await expect(run({ command: "model", flows, upgradeChoice: "later" })).resolves.toEqual({
+      message: "The Vercel CLI needs an update — run `vercel upgrade`, then retry /model.",
+      preserveFlowDiagnostics: true,
+    });
+    expect(flows.runInstallVercelCliFlow).not.toHaveBeenCalled();
+  });
+
+  it("prints a thrown upgrade error with the manual command", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The installed Vercel CLI does not support the required team-list options.",
+        });
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => {
+        throw new Error("package manager failed");
+      }),
+    });
+
+    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message:
+        "Couldn't upgrade the Vercel CLI (package manager failed) — run `vercel upgrade`, then retry /model.",
+      preserveFlowDiagnostics: true,
+    });
+  });
+
+  it("prints the native CLI failure reason with the manual command", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The installed Vercel CLI does not support the required team-list options.",
+        });
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
+        kind: "failed",
+        reason: "ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory",
+      })),
+    });
+
+    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message:
+        "Couldn't upgrade the Vercel CLI (ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory) — run `vercel upgrade`, then retry /model.",
+      preserveFlowDiagnostics: true,
     });
   });
 
@@ -274,7 +400,7 @@ describe("runTuiSetupCommand", () => {
     });
 
     await expect(run({ command: "channels", flows })).resolves.toEqual({
-      message: "Channels added, but /deploy was cancelled. Run /deploy to ship them.",
+      message: "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
       preserveFlowDiagnostics: true,
       effect: { kind: "channels-added" },
     });
@@ -339,7 +465,7 @@ describe("runTuiSetupCommand", () => {
       "No connections added.",
       { kind: "model-access-changed" },
     ],
-    ["cancelled", { kind: "cancelled" }, "/connect cancelled.", { kind: "model-access-changed" }],
+    ["cancelled", { kind: "cancelled" }, "/connect dismissed.", { kind: "model-access-changed" }],
     [
       "partially failed",
       { kind: "failed", addedConnections: ["linear"], message: "install failed" },
@@ -410,7 +536,7 @@ describe("runTuiSetupCommand", () => {
       }),
     });
     await expect(run({ command: "deploy", flows: cancelling })).resolves.toEqual({
-      message: "/deploy cancelled.",
+      message: "/deploy dismissed.",
       preserveFlowDiagnostics: true,
     });
   });
@@ -501,11 +627,14 @@ describe("runTuiSetupCommand", () => {
                 resolve({
                   kind: "done",
                   providerOutcome: {
-                    credential: "AI_GATEWAY_API_KEY",
+                    resolution: {
+                      credential: "api-key",
+                      source: { kind: "env-file", path: ".env.local" },
+                    },
                     status: {
                       kind: "gateway-key",
                       envKey: "AI_GATEWAY_API_KEY",
-                      envFile: ".env.local",
+                      source: { kind: "env-file", path: ".env.local" },
                     },
                   },
                 }),

@@ -41,6 +41,12 @@ const VercelProjectReferenceSchema = z.object({
 export interface PickProjectOptions extends VercelProjectOperationOptions {
   /** Whether an empty project list may fall back to entering a name to create. */
   allowCreateWhenEmpty?: boolean;
+  /**
+   * Searches the team for a project with this name before the list opens and
+   * suggests the best match: floated to the top, cursor on it, marked
+   * "suggested". Best-effort — a failed lookup falls back to the plain list.
+   */
+  suggestedName?: string;
 }
 
 export interface PickTeamOptions extends VercelProjectOperationOptions {
@@ -390,6 +396,29 @@ async function findProjectSearchResults(
   return await searchProjects(projectRoot, team, search, { ...options, next });
 }
 
+/**
+ * Finds the project to suggest for `name`: an exact hit in the already-listed
+ * recents, or the team's best name-search match. Best-effort — failures mean
+ * "no suggestion", never an aborted picker.
+ */
+async function findSuggestedProject(
+  projectRoot: string,
+  team: string,
+  name: string,
+  recents: readonly VercelProjectListEntry[],
+  options: VercelProjectOperationOptions,
+): Promise<VercelProjectListEntry | undefined> {
+  const inRecents = recents.find((project) => project.name === name);
+  if (inRecents !== undefined) return inRecents;
+  try {
+    const found = await findProjectSearchResults(projectRoot, team, name, options);
+    return rankProjectSearchResults(found.projects, name)[0];
+  } catch {
+    options.signal?.throwIfAborted();
+    return undefined;
+  }
+}
+
 /** Picks an existing project under a team, or a name to create when none exist. */
 export async function pickProject(
   prompter: Prompter,
@@ -397,13 +426,31 @@ export async function pickProject(
   team: string,
   options: PickProjectOptions = {},
 ): Promise<ResolvedVercelProjectSpec> {
-  let projects = await withSpinner(prompter, whimsyFor("projects", team), () =>
-    listRecentProjects(projectRoot, team, options),
-  );
+  const suggestedName = options.suggestedName?.trim();
+  const listed = await withSpinner(prompter, whimsyFor("projects", team), async () => {
+    const recents = await listRecentProjects(projectRoot, team, options);
+    const suggested =
+      suggestedName === undefined || suggestedName.length === 0
+        ? undefined
+        : await findSuggestedProject(projectRoot, team, suggestedName, recents, options);
+    return { recents, suggested };
+  });
+  const suggestedId = listed.suggested?.id;
+  let projects =
+    listed.suggested === undefined
+      ? listed.recents
+      : prioritizeSearchResults(listed.recents, [listed.suggested]);
   let searchResults: readonly VercelProjectListEntry[] = [];
   let searchContinuation: ProjectSearchContinuation | undefined;
   const projectOptions = () => {
-    const result = projects.map((project) => ({ value: project.id, label: project.name }));
+    const result = projects.map((project) => {
+      const option: { value: string; label: string; hint?: string } = {
+        value: project.id,
+        label: project.name,
+      };
+      if (project.id === suggestedId) option.hint = "suggested";
+      return option;
+    });
     if (searchContinuation !== undefined) {
       result.push({
         value: searchMoreProjectsValue(searchContinuation),
@@ -454,7 +501,7 @@ export async function pickProject(
         },
       },
       options: projectOptions(),
-      initialValue: projects[0]?.id,
+      initialValue: suggestedId ?? projects[0]?.id,
     });
     const continuation = searchContinuation;
     if (continuation !== undefined && selected === searchMoreProjectsValue(continuation)) {

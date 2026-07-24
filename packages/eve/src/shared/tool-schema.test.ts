@@ -46,8 +46,64 @@ describe("ToolSchema", () => {
     });
   });
 
-  it("rejects malformed serialized schemas at the runtime boundary", () => {
-    expect(() => toInputSchema({ type: "not-a-json-schema-type" })).toThrow();
+  it("rehydrates draft 2020-12 $defs references with real validation", async () => {
+    const schema = toInputSchema({
+      $defs: { item: { type: "string" } },
+      properties: { item: { $ref: "#/$defs/item" } },
+      required: ["item"],
+      type: "object",
+    });
+    const validate = asSchema(schema).validate;
+
+    await expect(validate?.({ item: 42 })).resolves.toMatchObject({ success: false });
+    await expect(validate?.({ item: "ok" })).resolves.toMatchObject({ success: true });
+  });
+
+  it("degrades schemas outside zod's conversion subset to validation-free passthrough", async () => {
+    // Valid JSON Schema with an inline JSON Pointer $ref that zod's converter
+    // rejects (it only resolves #, #/definitions/*, and #/$defs/*).
+    const source = {
+      properties: {
+        filters: {
+          anyOf: [
+            { properties: { source: { type: "string" } }, type: "object" },
+            {
+              properties: {
+                source: { $ref: "#/properties/filters/anyOf/0/properties/source" },
+              },
+              type: "object",
+            },
+          ],
+        },
+      },
+      type: "object",
+    };
+    const schema = toInputSchema(source);
+
+    expect(isToolSchema(schema)).toBe(true);
+    // The source JSON Schema is advertised verbatim.
+    expect(serializeInputSchema(schema)).toEqual(source);
+    // Validation accepts any input — the tool's executor validates instead.
+    await expect(asSchema(schema).validate?.({ filters: { source: 42 } })).resolves.toEqual({
+      success: true,
+      value: { filters: { source: 42 } },
+    });
+  });
+
+  it("emits fresh copies from a passthrough schema so consumers cannot mutate the source", () => {
+    const source = { properties: { x: { $ref: "#/properties/y" } }, type: "object" };
+    const schema = toInputSchema(source);
+
+    // asSchema's standardSchema path mutates the emitted JSON Schema in place.
+    const emitted = asSchema(schema).jsonSchema as { additionalProperties?: boolean };
+
+    expect(emitted.additionalProperties).toBe(false);
+    expect(source).toEqual({ properties: { x: { $ref: "#/properties/y" } }, type: "object" });
+    expect(serializeInputSchema(schema)).toEqual(source);
+  });
+
+  it("degrades malformed serialized schemas instead of failing the boundary", () => {
+    expect(isToolSchema(toInputSchema({ type: "not-a-json-schema-type" }))).toBe(true);
   });
 
   it("preserves a live validated schema", () => {

@@ -74,7 +74,9 @@ function createEveCreateHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
         send: mockSend,
+        resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        reset: vi.fn(),
         getSession: vi.fn(),
         receive: vi.fn() as any,
         params: {},
@@ -116,7 +118,9 @@ function createEveContinueHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
         send: mockSend,
+        resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        reset: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
         params: { sessionId: "test-session-id" },
@@ -148,7 +152,9 @@ function createEveCancelHandler(input: EveChannelInput) {
       const args = attachRouteAgent(
         {
           send: vi.fn(),
+          resolveActiveSession: async () => undefined,
           cancel: vi.fn(),
+          reset: vi.fn(),
           getSession: vi.fn(),
           receive: vi.fn() as any,
           params: { sessionId: "test-session-id" },
@@ -174,6 +180,46 @@ function cancelRequest(body?: unknown): Request {
   });
 }
 
+/** Creates a POST handler test harness for the continuation-addressed reset route. */
+function createEveResetHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const resetRoute = channel.routes.find(
+    (r) => r.method === "POST" && r.path === "/eve/v1/session/reset",
+  );
+  if (!resetRoute) throw new Error("No session reset POST route found");
+
+  const reset = vi.fn().mockResolvedValue({
+    previousSessionId: "test-session-id",
+    status: "reset",
+  });
+
+  return {
+    reset,
+    async fetch(req: Request) {
+      const args: RouteHandlerArgs = {
+        send: vi.fn(),
+        resolveActiveSession: async () => undefined,
+        cancel: vi.fn(),
+        reset,
+        getSession: vi.fn(),
+        receive: vi.fn() as any,
+        params: {},
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      };
+      return (resetRoute as any).handler(req, args);
+    },
+  };
+}
+
+function resetRequest(body: unknown): Request {
+  return new Request("https://example.com/eve/v1/session/reset", {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+}
+
 /** Creates a GET handler test harness for the durable session stream route. */
 function createEveStreamHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
@@ -195,7 +241,9 @@ function createEveStreamHandler(input: EveChannelInput) {
     async fetch(url: string) {
       const args: RouteHandlerArgs = {
         send: vi.fn(),
+        resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        reset: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
         params: { sessionId: "test-session-id" },
@@ -369,6 +417,22 @@ describe("eveChannel — events", () => {
 });
 
 describe("eveChannel — stream cursor", () => {
+  it("establishes the NDJSON body before the first durable event", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+    const reader = response.body!.getReader();
+
+    const firstChunk = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out waiting for the NDJSON response body")), 25),
+      ),
+    ]);
+    await reader.cancel();
+
+    expect(new TextDecoder().decode(firstChunk.value)).toBe("\n");
+  });
+
   it("forwards negative tail-relative start indices", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
@@ -609,6 +673,26 @@ describe("eveChannel — create session (text)", () => {
       },
       mode: "task",
     });
+  });
+
+  it("accepts callback metadata whose URL is mounted behind a public route prefix", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        callback: {
+          callId: "call-1",
+          subagentName: "research",
+          token: "tok123",
+          url: "https://caller.example.com/eve/agents/support/eve/v1/callback/tok123",
+        },
+        message: "hi",
+        mode: "task",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send).toHaveBeenCalledTimes(1);
   });
 
   it("rejects callback metadata without a call id", async () => {
@@ -1353,6 +1437,71 @@ describe("eveChannel — cancel turn", () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({
       error: "Failed to cancel the turn.",
+      ok: false,
+    });
+  });
+});
+
+describe("eveChannel — reset session", () => {
+  it("retires the owner of the supplied channel-local continuation token", async () => {
+    const handler = createEveResetHandler({ auth: none() });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      previousSessionId: "test-session-id",
+      status: "reset",
+    });
+    expect(handler.reset).toHaveBeenCalledWith({
+      continuationToken: "eve:token",
+      reason: "Client requested session reset",
+    });
+  });
+
+  it("reports a token that is already free as a successful no-op", async () => {
+    const handler = createEveResetHandler({ auth: none() });
+    handler.reset.mockResolvedValue({ status: "no_active_session" });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
+  });
+
+  it("rejects unauthenticated reset requests", async () => {
+    const handler = createEveResetHandler({ auth: [] });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(401);
+    expect(handler.reset).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an empty token", { continuationToken: "" }],
+    ["a non-string token", { continuationToken: 7 }],
+    ["a non-object body", ["eve:token"]],
+  ])("rejects %s with 400", async (_description, body) => {
+    const handler = createEveResetHandler({ auth: none() });
+
+    const response = await handler.fetch(resetRequest(body));
+
+    expect(response.status).toBe(400);
+    expect(handler.reset).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when reset fails unexpectedly", async () => {
+    const handler = createEveResetHandler({ auth: none() });
+    handler.reset.mockRejectedValue(new Error("backing store outage"));
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Failed to reset the session.",
       ok: false,
     });
   });

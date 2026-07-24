@@ -17,14 +17,16 @@ import { theme } from "./lib/theme.ts";
  * landing under `stepIndex: 0` and collapsing into one box.
  *
  * Pass conditions:
- *   1. A `◆ stock-price subagent` region header exists.
+ *   1. A `※ subagent(stock-price…)` region header exists.
  *   2. The child's `get_stock_price` tool row renders nested inside the
  *      subagent's `│` rule gutter (proves the child tool surfaces under
  *      the subagent flow).
  *   3. NO parent-level `get_stock_price` tool row exists (proves the
  *      parent-tool suppression for child tool calls removes the stale
  *      block, not just blocks future renders).
- *   4. The price (178.92) appears inside the nested subagent region.
+ *   4. The price (178.92) appears inside the nested subagent region —
+ *      or the section already settled to its `└ Done` footnote (a
+ *      completed subagent collapses, so nested rows are transient).
  *   5. The parent's final assistant reply (a top-level `▲` section)
  *      also contains the price.
  */
@@ -61,7 +63,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
     throw error;
   });
 
-  await screen.waitForText("❯", 5_000);
+  await screen.waitForIdlePrompt(5_000);
 
   // Delegate explicitly. An implicit prompt ("what is the value of GOOG?")
   // leaves the choice to the model, which may answer directly instead of
@@ -73,7 +75,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   input.enter();
 
   // The subagent region header should appear once the parent delegates.
-  await waitForCondition(() => screen.snapshot().includes("stock-price subagent"), {
+  await waitForCondition(() => screen.snapshot().includes("※ subagent(stock-price"), {
     timeoutMs: 120_000,
     label: "subagent region header",
     onTimeout: () => screen.snapshot(),
@@ -105,29 +107,49 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   });
   console.log(theme.muted(`[tui-weather] price ${PRICE} landed in body`));
 
-  // The child's tool row renders nested inside the subagent's `│`
-  // rule gutter — the line carries both the rule glyph and the tool name.
-  await waitForCondition(() => /│.*get_stock_price/u.test(screen.snapshot()), {
-    timeoutMs: 60_000,
-    label: "nested subagent tool row",
-  });
-  console.log(theme.muted("[tui-weather] nested subagent tool row rendered"));
+  // The child's tool row renders nested inside the subagent's `│` rule
+  // gutter — unless the section already settled and collapsed past it.
+  await waitForCondition(
+    () =>
+      /│.*get_stock_price/u.test(screen.snapshot()) ||
+      screen
+        .snapshot()
+        .split("\n")
+        .some((line) => line.includes("└") && line.includes("Done")),
+    {
+      timeoutMs: 60_000,
+      label: "nested subagent tool row (or the section settled)",
+      onTimeout: () => screen.snapshot(),
+    },
+  );
+  console.log(theme.muted("[tui-weather] nested subagent tool row rendered (or settled)"));
 
-  // The price must render inside the nested subagent region (tool result
-  // or post-tool message), proving child output reaches the parent TUI.
+  // The price renders inside the nested subagent region (tool result or
+  // post-tool message) while the child is still live — but a settled child
+  // collapses its section to the `└ Done…` footnote, so losing that race
+  // must not fail the smoke. Child-side delivery was already proven by the
+  // body wait above; the parent-echo wait below proves the full round trip.
   await waitForCondition(
     () =>
       screen
         .snapshot()
         .split("\n")
-        .some((line) => line.includes("│") && line.includes(PRICE)),
+        .some(
+          // The nested price row can carry either rail glyph — the `└`
+          // corner when it is the section's last row (the rail closes on
+          // the newest child), `│` otherwise — and a fully settled
+          // section shows the `└ Done…` footnote instead.
+          (line) =>
+            ((line.includes("│") || line.includes("└")) && line.includes(PRICE)) ||
+            (line.includes("└") && line.includes("Done")),
+        ),
     {
       timeoutMs: 120_000,
-      label: `price ${PRICE} inside the nested subagent region`,
+      label: `price ${PRICE} inside the nested subagent region (or the section settled)`,
       onTimeout: () => screen.snapshot(),
     },
   );
-  console.log(theme.muted("[tui-weather] price rendered inside the subagent region"));
+  console.log(theme.muted("[tui-weather] subagent region carried the price or settled to Done"));
 
   // Wait for the parent's follow-up assistant section (top-level `▲`
   // prose, not nested under the rule gutter) to echo the price.
@@ -140,11 +162,11 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   const finalSnapshot = screen.snapshot();
 
   // No parent-level tool row for the child's call should remain: a tool
-  // row at the parent level starts with a status glyph at column 0
-  // (e.g. `✓ get_stock_price`), while the legitimate one is prefixed by
-  // the subagent's `│` rule. Assistant prose lines start with `▲ ` or
-  // indentation, so they cannot false-positive here.
-  const parentToolRowRegex = /^[^\s│▲▌] get_stock_price/mu;
+  // row at the parent level is a status glyph in the indented header cell
+  // (e.g. `  ▪ get_stock_price`), while the legitimate one is prefixed by
+  // the subagent's `│` rule. Assistant prose lines start with `▲ `, so
+  // they cannot false-positive here.
+  const parentToolRowRegex = /^ {0,2}[^\s│▲] get_stock_price/mu;
   if (parentToolRowRegex.test(finalSnapshot)) {
     throw new Error(
       `Final screen still contains a parent-level tool row for the child's get_stock_price call. The nested subagent region should be the only place it appears.\n\n${finalSnapshot}`,
@@ -159,7 +181,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   // The turn is complete; wait until the runner is back at the prompt so
   // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
   // turn and returns to the prompt (Claude Code's two-step exit).
-  await screen.waitForText("❯", 30_000);
+  await screen.waitForIdlePrompt(30_000);
   input.ctrlC();
   await runPromise;
 });

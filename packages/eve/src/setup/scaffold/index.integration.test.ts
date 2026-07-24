@@ -314,6 +314,31 @@ describe("ensureChannel", () => {
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
   });
 
+  test("scaffolds a Web Chat Stop button that cancels the active durable turn", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const agentChatSource = await readFile(
+      join(projectRoot, "app/_components/agent-chat.tsx"),
+      "utf8",
+    );
+    expect(agentChatSource).toContain("preserveCompletedSessions: true");
+    expect(agentChatSource).toContain("session.cancel({ turnId })");
+    expect(agentChatSource).toContain("cancellation.sentTurnId === turnId");
+    expect(agentChatSource).not.toContain("onStop={agent.stop}");
+  });
+
   test("writes npm dist-tags for Web Chat without semver range decoration", async () => {
     const projectRoot = await createTempDir();
     await writeFile(
@@ -764,7 +789,7 @@ describe("scaffoldExtensionProject", () => {
       },
       engines: { node: "24.x" },
     });
-    expect(packageJson.devDependencies?.eve).toBe("^0.25.0");
+    expect(packageJson.devDependencies?.eve).toBe("0.25.0");
     expect(packageJson.peerDependenciesMeta).toBeUndefined();
     expect(packageJson.devDependencies?.typescript).toBe("7.0.2");
     expect(packageJson.dependencies?.ai).toBeUndefined();
@@ -788,6 +813,7 @@ describe("scaffoldExtensionProject", () => {
     const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
     expect(agentsMd).toContain("eve extension");
     expect(agentsMd).toContain("extensions.md");
+    expect(agentsMd).toContain("development dependency pinned exactly");
     expect(agentsMd).toContain("cannot declare");
   });
 });

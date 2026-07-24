@@ -12,6 +12,7 @@ function createRuntime(): Runtime {
     getEventStream: vi.fn(),
     resolveSession: vi.fn(),
     run: vi.fn(),
+    terminateSession: vi.fn(),
   };
 }
 

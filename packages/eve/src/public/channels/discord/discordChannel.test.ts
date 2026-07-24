@@ -367,7 +367,7 @@ describe("discordChannel() inbound route", () => {
 });
 
 describe("discordChannel() default event handlers", () => {
-  it("posts best-effort typing indicators for turn and action progress", async () => {
+  it("posts best-effort typing indicators for turn, authorization, and action progress", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
     const adapter = withState(
@@ -382,6 +382,17 @@ describe("discordChannel() default event handlers", () => {
     await callEvent(adapter, makeEvent("turn.started", {}), ctx);
     await callEvent(
       adapter,
+      makeEvent("authorization.completed", {
+        name: "notion",
+        outcome: "authorized",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await callEvent(
+      adapter,
       makeEvent("actions.requested", {
         actions: [{ kind: "tool-call", toolName: "search" }],
         sequence: 0,
@@ -390,7 +401,7 @@ describe("discordChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const [url, init] of fetchMock.mock.calls) {
       expect(String(url)).toBe("https://discord.com/api/v10/channels/C01/typing");
       expect(new Headers((init as RequestInit).headers).get("authorization")).toBe("Bot bot-token");

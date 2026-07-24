@@ -1,9 +1,10 @@
+import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import type { ApprovalContext } from "#public/definitions/approval.js";
-import { defineTool } from "#public/definitions/tool.js";
+import { defineTool, type ToolContext } from "#public/definitions/tool.js";
 import { serializeOutputSchema, type ToolSchema } from "#shared/tool-schema.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
@@ -13,18 +14,22 @@ vi.mock("#context/build-callback-context.js", () => ({
 }));
 
 // Import after mock so the module picks up the mock
-const { replayDynamicSessionTools, dispatchDynamicToolEvent } =
-  await import("#context/dynamic-tool-lifecycle.js");
+const {
+  replayDynamicSessionTools,
+  dispatchDynamicToolEvent,
+  refreshDynamicSessionToolsForRuntimeRevision,
+} = await import("#context/dynamic-tool-lifecycle.js");
 const { buildDynamicTools } = await import("#context/build-dynamic-tools.js");
 
 import { ContextContainer } from "#context/container.js";
 import {
   SessionIdKey,
   SessionDynamicToolMetadataKey,
+  SessionDynamicToolRuntimeRevisionKey,
   TurnDynamicToolMetadataKey,
 } from "#context/keys.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { createSessionStartedEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
 
 // Re-implement the naming logic here to test it independently
 // (the production function is unexported — testing via the public behavior)
@@ -498,6 +503,138 @@ function createReplayableTool(
 }
 
 describe("dispatchDynamicToolEvent", () => {
+  it("replaces session tools with the current deployment's resolver output", async () => {
+    const ctx = createCtx();
+    const oldResolver = createResolver("old", ["session.started"], () => ({
+      old_tool: createReplayableTool("old deployment"),
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [oldResolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
+
+    expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["old_tool"]);
+
+    const newResolver = createResolver("new", ["session.started"], () => ({
+      new_tool: createReplayableTool("new deployment"),
+    }));
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [newResolver],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_new",
+    });
+
+    expect(ctx.get(SessionDynamicToolRuntimeRevisionKey)).toBe("deployment:dpl_new");
+    expect(ctx.get(SessionDynamicToolMetadataKey)?.map((tool) => tool.name)).toEqual(["new_tool"]);
+    expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["new_tool"]);
+  });
+
+  it("does not re-run session resolvers within the same deployment", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => ({
+      current_tool: createReplayableTool(),
+    }));
+    const resolver = createResolver("current", ["session.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_current",
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("clears removed session resolvers on a new runtime revision", async () => {
+    const ctx = createCtx();
+    const oldResolver = createResolver("old", ["session.started"], () => ({
+      old_tool: createReplayableTool(),
+    }));
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [oldResolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_new",
+    });
+
+    expect(ctx.get(SessionDynamicToolMetadataKey)).toEqual([]);
+    expect(ctx.get(SessionDynamicToolRuntimeRevisionKey)).toBe("deployment:dpl_new");
+  });
+
+  it("leaves unsupported connection input schemas for the MCP server to validate", async () => {
+    const ctx = createCtx();
+    const inputSchema = {
+      properties: {
+        filters: {
+          anyOf: [
+            { properties: { source: { type: "string" } }, type: "object" },
+            {
+              properties: {
+                source: { $ref: "#/properties/filters/anyOf/0/properties/source" },
+              },
+              type: "object",
+            },
+          ],
+        },
+      },
+      type: "object",
+    };
+    const resolver = createResolver("connection", ["step.started"], () => ({
+      remote: {
+        description: "remote tool",
+        inputSchema,
+        execute: async (): Promise<unknown> => ({ ok: true }),
+      },
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    const tools = buildDynamicTools(ctx);
+    expect(tools).toHaveLength(1);
+
+    // The advertised schema preserves the source verbatim, including the
+    // inline JSON Pointer $ref that zod cannot rehydrate.
+    const schema = asSchema(tools[0]!.inputSchema);
+    expect(schema.jsonSchema).toMatchObject(inputSchema);
+
+    // Local validation is a passthrough — the MCP server stays responsible.
+    await expect(schema.validate?.({ filters: { source: "octolens" } })).resolves.toEqual({
+      success: true,
+      value: { filters: { source: "octolens" } },
+    });
+  });
+
   it("resolves tools for matching event and stores on scoped durable key", async () => {
     const ctx = createCtx();
     const resolver = createResolver("weather", ["session.started"], () => ({
@@ -561,6 +698,33 @@ describe("dispatchDynamicToolEvent", () => {
     await expect(tool.execute!({}, executeOptions)).resolves.toEqual({
       toolName: "warehouse__query",
     });
+  });
+
+  it("provides inline auth to a step-scoped tool", async () => {
+    const ctx = createCtx();
+    const getToken = vi.fn(async () => ({ token: "step-token" }));
+    const auth = { getToken, principalType: "app" as const };
+    const resolver = createResolver("oauth", ["step.started"], () => ({
+      probe: defineTool({
+        description: "resolve auth",
+        inputSchema: { type: "object" },
+        execute: async (_input, toolCtx) => {
+          const { token } = await toolCtx.getToken(auth);
+          return { token };
+        },
+      }),
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    const tool = buildDynamicTools(ctx)[0]!;
+    await expect(tool.execute!({}, executeOptions)).resolves.toEqual({ token: "step-token" });
+    expect(getToken).toHaveBeenCalledOnce();
   });
 
   it("replaces tools from the same resolver slug (last write wins)", async () => {
@@ -724,10 +888,55 @@ describe("dispatchDynamicToolEvent", () => {
       const tools = buildDynamicTools(ctx);
       expect(tools).toHaveLength(1);
       expect(tools[0]!.name).toBe("query");
-      expect(tools[0]!.execute!({}, executeOptions)).toEqual({
+      await expect(tools[0]!.execute!({}, executeOptions)).resolves.toEqual({
         input: {},
         toolName: "query",
       });
+    } finally {
+      registry.delete(stepId);
+    }
+  });
+
+  it("provides inline auth to a replayed session-scoped tool", async () => {
+    const ctx = createCtx();
+    const stepId = "eve:dynamic-tool//__eve_dispatch_auth_rehydrate_test";
+    const getToken = vi.fn(async () => ({ token: "replayed-token" }));
+    const auth = { getToken, principalType: "app" as const };
+    const stepFn = vi.fn(async (_vars: unknown, _input: unknown, toolCtx: unknown) => {
+      const { token } = await (toolCtx as ToolContext).getToken(auth);
+      return { token };
+    });
+    const registrySym = Symbol.for("@workflow/core//registeredSteps");
+    const registry = getOrCreateStepRegistry(registrySym);
+    registry.set(stepId, stepFn);
+
+    try {
+      const resolver = createResolver("oauth", ["session.started"], () => {
+        const entry = defineTool({
+          description: "resolve replayed auth",
+          inputSchema: { type: "object" },
+          execute: async () => ({ ok: true }),
+        });
+        Object.assign(entry, {
+          __executeStepFn: { stepId },
+          __closureVars: {},
+        });
+        return { probe: entry };
+      });
+
+      await dispatchDynamicToolEvent({
+        ctx,
+        resolvers: [resolver],
+        messages: [],
+        event: makeEvent("session.started"),
+      });
+      ctx.clearVirtualContext();
+
+      const tool = buildDynamicTools(ctx)[0]!;
+      await expect(tool.execute!({}, executeOptions)).resolves.toEqual({
+        token: "replayed-token",
+      });
+      expect(getToken).toHaveBeenCalledOnce();
     } finally {
       registry.delete(stepId);
     }

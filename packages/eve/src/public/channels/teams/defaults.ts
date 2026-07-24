@@ -51,6 +51,7 @@ export async function defaultOnMessage(
   ctx: TeamsContext,
   message: TeamsMessageActivity,
 ): Promise<TeamsInboundResult> {
+  if (message.from.role === "bot" || message.from.id === message.recipient.id) return null;
   if (message.scope !== "personal" && !message.isBotMentioned) return null;
   await ctx.thread.startTyping();
   return { auth: defaultTeamsAuth(message) };
@@ -159,6 +160,10 @@ export const defaultEvents: TeamsChannelEvents = {
   },
 
   async "authorization.completed"(event, channel, _ctx) {
+    if (event.outcome === "authorized") {
+      await channel.thread.startTyping();
+    }
+
     const activityId = channel.state.pendingAuthActivityId;
     if (!activityId) return;
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);

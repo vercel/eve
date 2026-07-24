@@ -19,6 +19,7 @@ import {
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { resolveProviderHeaders } from "#internal/gateway.js";
 import {
   createErrorId,
   createLogger,
@@ -53,7 +54,10 @@ import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
-import { buildWorkflowHostTools } from "#harness/workflow-sandbox.js";
+import {
+  buildWorkflowHostTools,
+  resolveWorkflowSandboxBridgeRequestLimit,
+} from "#harness/workflow-sandbox.js";
 import {
   getWorkflowContinuationSecurity,
   readWorkflowContinuationSecurity,
@@ -107,9 +111,12 @@ import {
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
-import { convertStaleResponsesToUserMessage } from "#harness/stale-input-responses.js";
+import {
+  convertStaleResponsesToUserMessage,
+  dropStaleSessionLimitContinuationResponses,
+} from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
-import { resolveAssistantStepText } from "#harness/messages.js";
+import { normalizeUserContent, resolveAssistantStepText } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
@@ -124,10 +131,10 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
-  type ModelCallConfigErrorSummary,
-  summarizeKnownModelCallConfigError,
-  summarizeKnownModelCallRequestError,
+  type UpstreamRejectionSummary,
+  extractUpstreamRejectionMessage,
 } from "#harness/model-call-error.js";
+import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import {
@@ -293,27 +300,21 @@ function mergeSystemInstructions(
 /**
  * Builds AI Gateway app attribution headers when the model is gateway-routed.
  *
- * Gateway routing is detected by `typeof model === "string"` — the same
- * condition used for the `gateway-auto` cache path. Returns `undefined`
- * for non-gateway models or when no meaningful attribution is available.
+ * Bare model ids and `gateway.*` model instances route through AI Gateway.
+ * Direct-provider model instances receive no Gateway-specific headers.
  */
 function buildGatewayAttributionHeaders(
   model: LanguageModel,
   runtimeIdentity: ToolLoopHarnessConfig["runtimeIdentity"],
 ): Record<string, string> | undefined {
-  if (typeof model !== "string") {
-    return undefined;
-  }
+  const providerHeaders = resolveProviderHeaders(model);
+  if (providerHeaders === undefined) return undefined;
 
   const title = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
   const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
   const referer = deploymentHost ? `https://${deploymentHost}` : undefined;
 
-  if (!title && !referer) {
-    return undefined;
-  }
-
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...providerHeaders };
   if (title) headers["x-title"] = title;
   if (referer) headers["http-referer"] = referer;
   return headers;
@@ -540,10 +541,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = resolvedRuntimeActions.session;
 
+    // Stale-response handling is two passes: drop what must never reach the
+    // model (session-limit continuation answers), then convert what should
+    // reach it as plain text.
+    const pendingRequestIds = getPendingInputRequestIds(session.state);
     const staleConversion = convertStaleResponsesToUserMessage({
       history: resolvedRuntimeActions.messages,
-      pendingRequestIds: getPendingInputRequestIds(session.state),
-      stepInput: stepInput.input,
+      pendingRequestIds,
+      stepInput: dropStaleSessionLimitContinuationResponses({
+        pendingRequestIds,
+        stepInput: stepInput.input,
+      }),
     });
     const effectiveStepInput = staleConversion.stepInput;
     const preambleStepInput =
@@ -637,17 +645,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    if (
-      effectiveStepInput?.message !== undefined &&
-      !pending.deferredMessage &&
-      !pending.consumedMessage
-    ) {
+    const userContent = normalizeUserContent(effectiveStepInput?.message);
+    if (userContent !== undefined && !pending.deferredMessage && !pending.consumedMessage) {
       // Staging writes FilePart bytes into the sandbox and replaces
       // each part's `data` with a compact `eve-sandbox:` URL. The
       // `messages` array — and everything that flows into
       // `session.history` from it — therefore never carries raw
       // attachment bytes across step boundaries.
-      const content = await stageAttachmentsToSandbox(effectiveStepInput.message);
+      const content = await stageAttachmentsToSandbox(userContent);
       messages.push({ content, role: "user" });
     }
 
@@ -687,11 +692,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       abortSignal: config.abortSignal,
       emit,
       emissionState,
-      headers: attributionHeaders,
       messages,
       model,
       onCompaction: config.onCompaction,
       resolveModel: config.resolveModel,
+      runtimeIdentity: config.runtimeIdentity,
       session,
       telemetry: enrichTelemetry(telemetryConfig, agentName) ?? undefined,
     }));
@@ -892,7 +897,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           // the fix, and the terminal-failure path logs the one-line summary
           // and emits the structured step.failed. Unrecognized errors keep
           // the full dump so they stay loud.
-          if (summarizeKnownModelCallConfigError(event.error) !== null) return;
+          if (summarizeKnownError(event.error)?.tags.includes("config") === true) return;
           logError(log, "tool-loop stream error", event.error);
         },
         onStepFinish: hooks.onStepFinish,
@@ -1125,42 +1130,49 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
         const classification = classifyModelCallError(finalError);
         const errorId = createErrorId();
-        const configSummary =
-          classification === "terminal" ? summarizeKnownModelCallConfigError(finalError) : null;
-        const requestSummary =
-          configSummary === null ? summarizeKnownModelCallRequestError(finalError) : null;
+        const catalogSummary = summarizeKnownError(finalError);
+        const upstreamRejection =
+          catalogSummary === null ? extractUpstreamRejectionMessage(finalError) : null;
         const errorMessage =
-          configSummary?.message ?? requestSummary?.message ?? toErrorMessage(finalError);
+          catalogSummary?.message ?? upstreamRejection?.message ?? toErrorMessage(finalError);
+        // Task failures surface as the parent agent's tool-result text, so
+        // the remediation rides along in prose — the parent can act on it
+        // or relay it. Event payloads keep hint structured in details.
+        const taskFailureOutput =
+          catalogSummary?.hint === undefined
+            ? errorMessage
+            : `${errorMessage} ${catalogSummary.hint}`;
         const modelCallDetails = extractModelCallErrorDetails(finalError);
         const details = buildModelCallFailureDetails({
-          configSummary,
+          catalogSummary,
           error: finalError,
           errorId,
           modelCallDetails,
-          requestSummary,
+          upstreamRejection,
         });
         const modelCallLogFields = buildModelCallFailureLogFields({
           error: finalError,
           errorId,
           modelCallDetails,
-          requestSummary,
+          recognized: catalogSummary !== null || upstreamRejection !== null,
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         });
 
         if (classification === "terminal") {
-          if (configSummary !== null) {
+          if (catalogSummary !== null) {
             // Recognized configuration failure: log a concise single line
             // and skip the structured SDK dump so the user sees an
             // actionable hint instead of a wall of inspector output.
-            log.error(`${configSummary.name}: ${configSummary.message}`, {
+            log.error(`${catalogSummary.name}: ${catalogSummary.message}`, {
               errorId,
+              hint: catalogSummary.hint,
               sessionId: session.sessionId,
               turnId: emissionState.turnId,
             });
           } else {
             log.error(
-              requestSummary?.message ?? "model call failed terminally",
+              upstreamRejection?.message ?? "model call failed terminally",
               modelCallLogFields,
             );
           }
@@ -1177,7 +1189,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           return {
             next:
               config.mode === "task"
-                ? { done: true, isError: true, output: errorMessage }
+                ? { done: true, isError: true, output: taskFailureOutput }
                 : { done: true, output: "" },
             session,
           };
@@ -1193,7 +1205,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             // that did not already consume the in-process transient budget or
             // the dedicated empty-response reissue.
             log.warn(
-              requestSummary?.message ??
+              upstreamRejection?.message ??
                 "model call failed recoverably in task mode — rethrowing for durable step retry",
               modelCallLogFields,
             );
@@ -1205,7 +1217,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           // here only after their bounded in-process retries are exhausted;
           // empty responses already received their specialized reissue.
           log.error(
-            requestSummary?.message ?? "model call failed; failing the task run",
+            upstreamRejection?.message ?? "model call failed; failing the task run",
             modelCallLogFields,
           );
           await emitFailedStep(emit, emissionState, {
@@ -1215,13 +1227,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             sessionId: session.sessionId,
           });
           return {
-            next: { done: true, isError: true, output: errorMessage },
+            next: { done: true, isError: true, output: taskFailureOutput },
             session,
           };
         }
 
         log.error(
-          requestSummary?.message ?? "model call failed — parking session for retry by the user",
+          upstreamRejection?.message ?? "model call failed — parking session for retry by the user",
           modelCallLogFields,
         );
         emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
@@ -1338,10 +1350,11 @@ function readGatewayMetadata(
  * Projects a model-call failure into the `step.failed` / `turn.failed`
  * `details` payload. Three mutually exclusive branches:
  *
- * 1. Config summary (known terminal: missing key, gateway auth)  → friendly
- *    `name` + `message`, no SDK inspector dump.
- * 2. Request summary (ambiguous gateway 4xx that we recover from) → raw
- *    error `message`, friendly `name`, no inspector dump.
+ * 1. Catalog match → the rule's curated `name`/`message`/`hint` plus its
+ *    registered `semanticErrorId`, no SDK inspector dump.
+ * 2. Upstream rejection → raw error `message` with the extracted upstream
+ *    identity, no inspector dump. No `semanticErrorId`: the message is
+ *    arbitrary provider prose, not a registered failure shape.
  * 3. Fallback → full {@link formatError} projection (cause chain via
  *    `util.inspect`) so unrecognized failures still carry the upstream
  *    stack to log aggregators.
@@ -1351,28 +1364,31 @@ function readGatewayMetadata(
  * `responseBodySnippet`, ...) always show up next to the message.
  */
 function buildModelCallFailureDetails(input: {
-  readonly configSummary: ModelCallConfigErrorSummary | null;
+  readonly catalogSummary: SemanticErrorSummary | null;
   readonly error: unknown;
   readonly errorId: string;
   readonly modelCallDetails: JsonObject;
-  readonly requestSummary: ModelCallConfigErrorSummary | null;
+  readonly upstreamRejection: UpstreamRejectionSummary | null;
 }): JsonObject {
-  const { configSummary, error, errorId, modelCallDetails, requestSummary } = input;
+  const { catalogSummary, error, errorId, modelCallDetails, upstreamRejection } = input;
 
-  if (configSummary !== null) {
-    return {
+  if (catalogSummary !== null) {
+    const details: Record<string, JsonValue> = {
       errorId,
-      message: configSummary.message,
-      name: configSummary.name,
+      message: catalogSummary.message,
+      name: catalogSummary.name,
+      semanticErrorId: catalogSummary.id,
       ...modelCallDetails,
     };
+    if (catalogSummary.hint !== undefined) details.hint = catalogSummary.hint;
+    return details;
   }
 
-  if (requestSummary !== null) {
+  if (upstreamRejection !== null) {
     return {
       errorId,
       message: toErrorMessage(error),
-      name: requestSummary.name,
+      name: upstreamRejection.name,
       ...modelCallDetails,
     };
   }
@@ -1381,18 +1397,19 @@ function buildModelCallFailureDetails(input: {
 }
 
 /**
- * Builds the structured log fields for a model-call failure. When we
- * recognized the failure as an ambiguous gateway request rejection, attach
- * the compact `details` payload and *omit* the raw `error` so the logger's
- * `util.inspect` of the cause chain (which would render `[object Object]`
- * for upstream `APICallError` shapes) is bypassed. Otherwise fall back to
- * the raw error so unrecognized failures keep their full stack in logs.
+ * Builds the structured log fields for a model-call failure. When the
+ * failure was recognized (catalog match or extracted upstream rejection),
+ * attach the compact `details` payload and *omit* the raw `error` so the
+ * logger's `util.inspect` of the cause chain (which would render
+ * `[object Object]` for upstream `APICallError` shapes) is bypassed.
+ * Otherwise fall back to the raw error so unrecognized failures keep
+ * their full stack in logs.
  */
 function buildModelCallFailureLogFields(input: {
   readonly error: unknown;
   readonly errorId: string;
   readonly modelCallDetails: JsonObject;
-  readonly requestSummary: ModelCallConfigErrorSummary | null;
+  readonly recognized: boolean;
   readonly sessionId: string;
   readonly turnId: string;
 }): Record<string, unknown> {
@@ -1401,7 +1418,7 @@ function buildModelCallFailureLogFields(input: {
     sessionId: input.sessionId,
     turnId: input.turnId,
   };
-  if (input.requestSummary !== null) {
+  if (input.recognized) {
     return { ...base, details: input.modelCallDetails };
   }
   return { ...base, error: input.error };
@@ -2241,6 +2258,9 @@ async function continuePendingWorkflowInterrupt(input: {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       continuationOutput = await continueWorkflowSandboxInterrupt({
+        bridgeRequestLimit: resolveWorkflowSandboxBridgeRequestLimit(
+          input.config.workflowMaxSubagents,
+        ),
         continuationSecurity,
         interrupt: currentInterrupt,
         lifecycle,
@@ -2388,11 +2408,11 @@ async function maybeCompact(input: {
   readonly abortSignal?: AbortSignal;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly headers?: Record<string, string>;
   readonly messages: ModelMessage[];
   readonly model: LanguageModel;
   readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
+  readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
 }): Promise<{ readonly messages: ModelMessage[]; readonly session: HarnessSession }> {
@@ -2429,7 +2449,7 @@ async function maybeCompact(input: {
     session.compaction,
     compaction.providerOptions,
     input.telemetry,
-    input.headers,
+    buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
     input.abortSignal,
   );
 

@@ -46,9 +46,24 @@ export async function copyHostMiddlewareFunctions(input: {
   readonly hostOutputDirectory: string;
   readonly serviceOutputDirectory: string;
 }): Promise<void> {
-  const config: unknown = JSON.parse(
-    await readFile(join(input.hostOutputDirectory, "config.json"), "utf8"),
-  );
+  let configContents: string;
+  try {
+    configContents = await readFile(join(input.hostOutputDirectory, "config.json"), "utf8");
+  } catch (error) {
+    // The host Build Output config need not exist when a generated service
+    // builds. A host that writes its config only at the end of its own build
+    // (e.g. the Nuxt web service, whose Nitro Vercel preset emits config.json
+    // last) may not have produced it when Vercel builds the generated service
+    // independently. There is no host middleware to preserve in that case, so
+    // skip the copy rather than failing the service build.
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  const config: unknown = JSON.parse(configContents);
 
   if (!isRecord(config)) {
     return;
