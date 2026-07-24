@@ -1,5 +1,11 @@
 # eve
 
+## 0.27.5
+
+### Patch Changes
+
+- 1987e12: Add thread-bound session reset helpers to Slack message and interaction contexts, plus targeted reset support for generic Slack event handlers.
+
 ## 0.27.4
 
 ### Patch Changes
