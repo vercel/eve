@@ -49,6 +49,7 @@ import {
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
+const NOTIFICATION_CONSUMER_WORKFLOW_NAME = "notificationConsumer";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
@@ -67,6 +68,7 @@ export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
 export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
+  NOTIFICATION_CONSUMER_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -96,6 +98,16 @@ export const workflowEntryReference = {
  */
 export const turnWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TURN_WORKFLOW_NAME}`,
+};
+
+/**
+ * PROTOTYPE (issue #1170): stable reference for the per-session
+ * notification consumer run. Started plainly (never latest-routed): the
+ * consumer holds the entry's stream writable and channel context, so it
+ * must stay on the entry's deployment.
+ */
+export const notificationConsumerReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${NOTIFICATION_CONSUMER_WORKFLOW_NAME}`,
 };
 
 /**

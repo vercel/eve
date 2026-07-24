@@ -60,6 +60,11 @@ vi.mock("./terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("./notification-consumer-dispatch.js", () => ({
+  disposeNotificationConsumerStep: vi.fn().mockResolvedValue(undefined),
+  startNotificationConsumerStep: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("./settle-cancelled-turn-step.js", () => ({
   settleCancelledTurnStep: vi.fn().mockResolvedValue(undefined),
 }));

@@ -132,6 +132,7 @@ export type SessionCallbackParseResult =
 const sessionCallbackSchema = z
   .object({
     callId: z.string().min(1),
+    notifyUrl: z.string().min(1).optional(),
     subagentName: z.string().min(1),
     token: z.string().min(1),
     url: z.string().min(1),
@@ -167,6 +168,30 @@ const sessionCallbackSchema = z
         message: "Callback url host must not be a private or reserved address.",
         path: ["url"],
       });
+    }
+
+    // PROTOTYPE (issue #1170): the notify URL targets a different hook
+    // token (the caller's consumer), so it gets the absolute-URL and SSRF
+    // checks but not the token match.
+    if (callback.notifyUrl !== undefined) {
+      let notifyUrl: URL;
+      try {
+        notifyUrl = new URL(callback.notifyUrl);
+      } catch {
+        ctx.addIssue({
+          code: "custom",
+          message: "Callback notifyUrl must be absolute.",
+          path: ["notifyUrl"],
+        });
+        return;
+      }
+      if (isReservedIpAddress(notifyUrl.hostname)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Callback notifyUrl host must not be a private or reserved address.",
+          path: ["notifyUrl"],
+        });
+      }
     }
   });
 

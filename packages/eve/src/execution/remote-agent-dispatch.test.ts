@@ -57,6 +57,7 @@ describe("startRemoteAgentSession", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
       callback: {
         callId: "call-remote",
+        notifyUrl: "https://caller.example.com/eve/v1/callback/parent-session%3Anotify",
         subagentName: "research",
         token: "eve:parent-token",
         url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token",
@@ -198,6 +199,7 @@ describe("startRemoteAgentSession", () => {
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback).toEqual({
       callId: "call-remote",
+      notifyUrl: "https://caller.example.com/eve/v1/callback/parent-session%3Anotify",
       subagentName: "research",
       token: "turn-inbox",
       url: "https://caller.example.com/eve/v1/callback/turn-inbox",

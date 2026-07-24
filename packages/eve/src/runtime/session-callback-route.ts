@@ -1,5 +1,7 @@
+import { createLogger, logError } from "#internal/logging.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
+import type { NotificationConsumerDelivery } from "#execution/notification-consumer-workflow.js";
 import { sessionCallbackNotificationEventSchema } from "#channel/session-callback.js";
 import type {
   SessionCallbackPayload,
@@ -12,6 +14,8 @@ import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.j
 import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
+
+const log = createLogger("runtime.session-callback-route");
 
 const HANDLED_METHODS: readonly ChannelMethod[] = ["POST"];
 
@@ -56,6 +60,19 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
+  // PROTOTYPE (issue #1170): notifications addressed to the session's
+  // notification consumer ring it fire-and-forget. Once the payload is
+  // well-formed the response is always 202 — a disposed consumer (session
+  // over) is logged and the event dropped; nothing retries a notification.
+  if (token.endsWith(NOTIFICATION_CONSUMER_TOKEN_SUFFIX)) {
+    const delivery = projectNotificationConsumerDelivery(body);
+    if (delivery instanceof Response) {
+      return delivery;
+    }
+    await ringNotificationConsumer(token, delivery);
+    return Response.json({ ok: true }, { status: 202 });
+  }
+
   const hookPayload = projectSessionCallbackHookPayload(body);
   if (hookPayload instanceof Response) {
     return hookPayload;
@@ -68,6 +85,76 @@ export async function handleSessionCallbackRequest(
   }
 
   return Response.json({ ok: true }, { status: 202 });
+}
+
+const NOTIFICATION_CONSUMER_TOKEN_SUFFIX = ":notify";
+
+/**
+ * PROTOTYPE (issue #1170): the consumer creates its hook on its first
+ * queue-driven invocation, so a notification arriving in the session's
+ * opening seconds can race it. Retry `HookNotFoundError` briefly; every
+ * other failure — and exhaustion — logs and drops, since notifications are
+ * fire-once best-effort.
+ */
+async function ringNotificationConsumer(token: string, delivery: unknown): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      await resumeHook(token, delivery);
+      return;
+    } catch (error) {
+      const notFound =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "HookNotFoundError";
+      if (!notFound || attempt === 9) {
+        logError(log, "notification consumer ring failed; event dropped", error, { token });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
+/**
+ * PROTOTYPE (issue #1170): projects one notification POST into a
+ * {@link NotificationConsumerDelivery} for the session's consumer run.
+ */
+function projectNotificationConsumerDelivery(
+  value: unknown,
+): NotificationConsumerDelivery | Response {
+  if (value === null || typeof value !== "object") {
+    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
+  }
+
+  const payload = value as Partial<SessionCallbackPayload>;
+  if (typeof payload.callId !== "string" || payload.callId.length === 0) {
+    return Response.json({ error: "Missing callback callId.", ok: false }, { status: 400 });
+  }
+  if (typeof payload.subagentName !== "string" || payload.subagentName.length === 0) {
+    return Response.json({ error: "Missing callback subagentName.", ok: false }, { status: 400 });
+  }
+
+  const parsed = sessionCallbackNotificationEventSchema.safeParse(payload.event);
+  if (!parsed.success) {
+    return Response.json(
+      { error: "Invalid notification callback event.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  const event: SubagentAuthorizationEvent =
+    parsed.data.type === "authorization.required"
+      ? { data: parsed.data.data, type: "authorization.required" }
+      : { data: parsed.data.data, type: "authorization.completed" };
+
+  return {
+    callId: payload.callId,
+    childSessionId: typeof payload.sessionId === "string" ? payload.sessionId : "",
+    event,
+    kind: "notification",
+    subagentName: payload.subagentName,
+  };
 }
 
 function projectSessionCallbackHookPayload(value: unknown): HookPayload | Response {

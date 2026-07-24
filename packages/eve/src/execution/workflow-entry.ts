@@ -27,6 +27,10 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { disposeHook } from "#execution/hook-ownership.js";
 import {
+  disposeNotificationConsumerStep,
+  startNotificationConsumerStep,
+} from "#execution/notification-consumer-dispatch.js";
+import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
 } from "#execution/session-delivery-hook.js";
@@ -167,6 +171,16 @@ async function runDriverLoop(input: {
     token: `${input.sessionState.sessionId}:auth`,
   });
   const authIterator: AsyncIterator<HookPayload> = authHook[Symbol.asyncIterator]();
+
+  // PROTOTYPE (issue #1170): companion run consuming notification-class
+  // events; producers ring `<sessionId>:notify` instead of resuming this
+  // workflow. Holds the driver's stream writable, so it is pinned to this
+  // deployment and disposed in this loop's finally.
+  await startNotificationConsumerStep({
+    parentWritable: input.driverWritable,
+    serializedContext: input.serializedContext,
+    sessionId: input.sessionState.sessionId,
+  });
   // Fast descendant resumes can start the next turn before the prior
   // control hook disposal is persisted by the Workflow SDK, so each
   // turn needs its own session-scoped token.
@@ -314,6 +328,7 @@ async function runDriverLoop(input: {
     // awaiting authorization can leave a durable read in flight, and an
     // async iterator only honors `return()` after that read settles.
     await disposeHook(authHook);
+    await disposeNotificationConsumerStep({ sessionId: input.sessionState.sessionId });
   }
 }
 

@@ -213,6 +213,13 @@ export type HookPayload =
  */
 export interface SessionCallback {
   readonly callId: string;
+  /**
+   * PROTOTYPE (issue #1170): caller URL for `status: "notification"`
+   * events, targeting the caller's notification consumer hook. Absent when
+   * the caller predates the consumer; the callee then posts notifications
+   * to `url` (the legacy in-workflow path).
+   */
+  readonly notifyUrl?: string;
   readonly subagentName: string;
   readonly token: string;
   readonly url: string;

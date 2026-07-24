@@ -281,6 +281,8 @@ export interface SubagentStartedStreamEvent {
 export interface SubagentChildEventStreamEvent {
   data: {
     callId: string;
+    /** Durable session id of the child that produced `event`. */
+    childSessionId?: string;
     event: HandleMessageStreamEvent;
     subagentName: string;
   };

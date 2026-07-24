@@ -1,5 +1,6 @@
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
+import { notificationConsumerHookToken } from "#execution/notification-consumer-workflow.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#protocol/routes.js";
 import type { CancelTurnResult } from "#channel/types.js";
@@ -40,6 +41,12 @@ export async function startRemoteAgentSession(input: {
     body: JSON.stringify({
       callback: {
         callId: input.action.callId,
+        // PROTOTYPE (issue #1170): notifications ring the caller's
+        // notification consumer instead of resuming the session workflow.
+        notifyUrl: createWorkflowCallbackUrl(
+          input.callbackBaseUrl,
+          createEveCallbackRoutePath(notificationConsumerHookToken(input.session.sessionId)),
+        ),
         subagentName: input.action.remoteAgentName,
         token: callbackToken,
         url: createWorkflowCallbackUrl(

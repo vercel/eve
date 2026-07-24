@@ -55,7 +55,10 @@ export async function forwardSessionCallbackNotification(input: {
         sessionId,
         subagentName: parsed.callback.subagentName,
       },
-      url: parsed.callback.url,
+      // PROTOTYPE (issue #1170): ring the caller's notification consumer
+      // when the caller advertised one; older callers keep the legacy
+      // session-workflow path via the terminal callback URL.
+      url: parsed.callback.notifyUrl ?? parsed.callback.url,
     });
   } catch (error) {
     log.warn("failed to post session callback notification", {
