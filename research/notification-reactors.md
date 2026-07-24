@@ -25,12 +25,17 @@ surfaced on the caller's stream — this causes real failures:
 - Adapter state persists through the session workflow's cursor, so nothing
   outside it can safely invoke a channel.
 
-The fix is a producer/consumer split built entirely from existing engine
-primitives. Each session gets one **reactor**: a small companion workflow
-run, started with the session, parked on its own hook. Producers deliver a
-notification with one fire-and-forget `resumeHook` to that hook; the
-reactor appends the event to the session stream and performs the side
-effects. The session workflow is never woken for notifications.
+The fix is a producer/consumer split built from existing engine primitives,
+scoped so that v1 adds **no new queue wakes**: the deployment that hosts the
+parent session gets one **reactor** — a small companion workflow run parked
+on a notify hook — and it replaces a wake that already happens today. The
+outbound side keeps its direct per-event POST, moved off the emitting
+step's critical path.
+
+Vocabulary: the **caller** is the deployment where the parent session lives
+(the one the user watches); the **callee** is the remote deployment running
+a delegated task. A child's authorization event is born on the callee and
+must reach the caller's stream and channel.
 
 ## The notification event
 
@@ -50,74 +55,98 @@ interface SubagentChildEventStreamEvent {
 }
 ```
 
-One path: local and remote children both surface as `subagent.event`. The
-local proxy step delivers to the reactor instead of re-emitting the raw
-child event through the adapter; the remote lane arrives via the callback
-route. Channel authors and clients handle exactly one shape.
+One path: local and remote children both surface as `subagent.event`
+delivered through the caller's reactor. Channel authors and clients handle
+exactly one shape.
 
 Invariants:
 
 - Notification events never enter model history or session state, never
   resume the session workflow, and never produce an input request.
 - The framework curates which child event types propagate
-  (`authorization.required`, `authorization.completed` in v1). The reserved
-  `"working"` and `"input_required"` callback statuses are future tenants of
-  the same lane.
+  (`authorization.required`, `authorization.completed` in v1).
 
-## The reactor run
+## Wake accounting
 
-The session's entry workflow starts one reactor run per session, handing it
-the session's stream writable — the same cross-run handoff the entry
-already performs for turn workflows — and the serialized channel context.
-The reactor parks on a notify hook derived from the session
-(`<sessionId>:notify`) and loops:
+The design is shaped by what each lane costs today, per event:
+
+| lane                          | today                                         | v1                                    |
+| ----------------------------- | --------------------------------------------- | ------------------------------------- |
+| callee → caller forwarding    | inline `await fetch` inside the emitting step | same POST, deferred off the step      |
+| caller receiving remote event | queue wake of the **session workflow**        | queue wake of the **reactor** (light) |
+| local child event surfacing   | queue wake of the session workflow            | queue wake of the reactor             |
+
+The caller side already pays a wake per notification; v1 redirects it at a
+run that hydrates nothing but channel context. The callee side is the only
+lane where a reactor would introduce a wake that does not exist today, so
+v1 does not put one there.
+
+## Caller side: the reactor run
 
 ```
-for await (const notification of notifyHook) {
-  "use step":
-    1. append wrapped subagent.event to the session stream
-    2. channel.notification(event, ctx)        // render (e.g. Slack)
-    3. forward to callback URL                 // callee sessions only
-}
+CALLER   POST /eve/v1/callback/:token {status:"notification", event}
+           └─► resumeHook(<sessionId>:notify)
+                 └─► [queue] ──wake──► reactor run (no session hydration)
+                       ├─► append subagent.event ──► durable stream ──► followers
+                       │                                      (TUI, web, evals)
+                       └─► channel.notification(event, ctx) ──► e.g. Slack API
 ```
 
-The engine supplies every delivery property for free: per-hook ordering,
+The session's entry workflow starts one reactor run, handing it the
+session's stream writable — the same cross-run handoff the entry already
+performs for turn workflows — and the serialized channel context. The
+reactor parks on `<sessionId>:notify` and loops: for each delivered
+notification, one journaled step appends the wrapped event to the stream
+and invokes the channel's `notification` member.
+
+The engine supplies every delivery property: per-hook ordering,
 at-least-once via queue retry, exactly-once side effects via step
-journaling, and duplicate-run safety via hook ownership claims. Because the
+journaling, duplicate-run safety via hook ownership claims. Because the
 reactor is a durable run with a single consumer, it may keep reactor-local
 state across events — e.g. the Slack message `ts` posted for
 `authorization.required`, edited in place when `authorization.completed`
 arrives. Session state remains read-only to it.
 
+Producers are one fire-and-forget call and know nothing about consumers:
+
+- The callback route validates a notification against the closed schema,
+  wraps it, rings the reactor, and returns 202 — always, once the payload
+  is well-formed. A disposed reactor (session over) throws at the producer,
+  which logs and drops. Nothing anywhere retries a notification.
+- The local subagent proxy delivers curated child events to the same
+  reactor instead of resuming the session workflow to re-emit them.
+
 The driver owns the lifecycle: the reactor starts with the session and is
-disposed when the session completes. After disposal the notify hook is
-gone; a late delivery throws at the producer, which logs and drops.
+disposed when the session completes. If per-session start cost matters, the
+lever is lazy start — the first delivery creates the run.
 
-## Producers just notify
-
-Producers know that a notification lane exists — never who consumes it.
-
-**Remote lane.** The caller-side callback route stops calling `resumeHook`
-on the session workflow for notifications. It validates the payload against
-the closed notification schema, wraps it, and delivers it to the reactor:
+## Callee side: deferred direct forwarding
 
 ```
-POST /eve/v1/callback/:token  { status: "notification", event, callId, ... }
-  → validate → wrap → resumeHook(reactorToken, wrapped) → 202
+CALLEE   turn step (compute already awake)
+           emit(authorization.required)
+             ├─► write own durable stream
+             └─► waitUntil(fetch(caller callback URL))   ← fire, don't await
 ```
 
-Always 202 once the payload is well-formed. The handler has no lifecycle
-awareness: a disposed reactor means the session is over and nobody is
-rendering — the delivery is dropped and logged. Nothing anywhere retries a
-notification.
+No reactor, no new wake. The only change from today is that the POST no
+longer rides the emitting step's critical path: currently the caller's
+round-trip latency is awaited inside the emit, taxing the callee's step per
+event. Delivery remains best-effort exactly as today — an unreachable
+caller is logged and never fails the turn.
 
-**Local lane.** The local subagent proxy step and the callee's own emit
-path deliver curated child events to the reactor with the same
-fire-and-forget call, replacing the in-line adapter re-emit and
-`forwardSessionCallbackNotification` respectively.
+The termination lane is untouched on both sides: terminal callbacks still
+resume the parked turn through the turn inbox with durable, exactly-once
+semantics.
 
-The termination lane is untouched: terminal callbacks still resume the
-parked turn through the turn inbox with durable, exactly-once semantics.
+## Frequency admission rule
+
+v1's curated set (`authorization.*`) fires a handful of times per session,
+gated by human sign-ins. Higher-frequency event types — the reserved
+`"working"` progress status, proxied HITL — may join the lane only with
+coalescing in place: the reactor catches up over a cursor on wake, so N
+events during one invocation cost one wake, not N. Until a type meets that
+bar, it does not enter the lane.
 
 ## Public authoring API
 
@@ -148,30 +177,10 @@ export default defineChannel({
   notifications. Stream followers (TUI, web frontends, eval clients) need
   no member — they see the reactor's stream append directly.
 
-## Data flow
-
-```
-callee deployment                      caller deployment
-─────────────────                      ─────────────────
-turn emits authorization.*
-      │ resumeHook (fire-and-forget)
-      ▼
-[callee reactor] ── append ──► durable stream (callee)
-      │ POST {status:"notification", ...}
-      ▼
-                        /eve/v1/callback/:token
-                              │ validate → wrap → resumeHook
-                              ▼
-                        [caller reactor]
-                          │           │
-                    append to      channel.notification
-                    durable stream    (Slack API)
-                          │
-                      followers (TUI, clients, evals)
-```
-
 ## Out of scope
 
+- A callee-side reactor. Deferred until an event type passes the frequency
+  admission rule and makes the extra wake worth buying.
 - Migrating the existing emit-coupled consumers (adapter transforms, hooks,
   dynamic resolvers) to reactors. They converge consumer-by-consumer later;
   this document only moves notification-class events.
@@ -186,7 +195,9 @@ turn emits authorization.*
   today. Nothing load-bearing is known to depend on mutating authorization
   events before persistence, but this must be verified before the local
   proxy lane switches to reactor delivery.
-- **Reactor start cost.** One extra parked run per session. Parked runs are
-  the engine's resting state, but sessions that never produce a
-  notification still pay the start; measure, and if it matters, start the
-  reactor lazily on first delivery.
+- **Deferral primitive on the callee.** `waitUntil` semantics differ across
+  the local dev host and Vercel functions; pick the mechanism that
+  guarantees the deferred POST survives the step's response without
+  re-blocking it.
+- **Reactor start cost.** One extra parked run per session, or lazy start on
+  first delivery. Measure before choosing.
