@@ -4,7 +4,10 @@ import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#cha
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import type { SendOptions } from "#channel/routes.js";
-import { parseForwardedAuth, stampForwardedBy } from "#channel/forwarded-auth.js";
+import {
+  resolveForwardedPrincipal,
+  type AcceptPrincipalFrom,
+} from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -130,22 +133,23 @@ export interface EveChannelInput {
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
-   * Authorizes which transport-authenticated callers may assert a forwarded
-   * principal on the create-session route (the `forwardedAuth` body field a
-   * `defineRemoteAgent({ forwardAuth: true })` sender emits). The predicate
-   * receives the *verified* route-auth caller — who is asserting, not what is
-   * asserted — and must match it precisely (for example
+   * Authorizes which forwarders — transport-authenticated callers — may
+   * assert a forwarded principal on the create-session route (the
+   * `forwardedPrincipal` body field a `defineRemoteAgent({ forwardPrincipal:
+   * true })` sender emits). The predicate receives the *verified* route-auth
+   * principal of the forwarder — who is asserting, never what is asserted —
+   * and must match it precisely (for example
    * `({ subject }) => subject === vercelSubject({ teamSlug, projectName })`).
-   * A permissive predicate lets any authenticated caller assert any
+   * A permissive predicate lets any authenticated forwarder assert any
    * principal.
    *
-   * When accepted, the forwarded identity replaces the session principal
+   * When accepted, the forwarded principal replaces the session principal
    * (`session.auth.current` / `session.auth.initiator`) exactly as if that
-   * user had called this deployment directly, and the transport caller is
-   * recorded on the accepted contexts as the `eve:forwarded-by` attribute.
-   * Omit the option to reject every forwarded assertion with 403.
+   * user had called this deployment directly, and the forwarder is recorded
+   * on the accepted contexts as the `eve:forwarded-by` attribute. Omit the
+   * option to reject every forwarded assertion with 403.
    */
-  readonly acceptForwardedAuth?: (caller: SessionAuthContext) => boolean | Promise<boolean>;
+  readonly acceptPrincipalFrom?: AcceptPrincipalFrom;
   /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
    * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).
@@ -225,9 +229,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
         }
 
-        const forwarded = await resolveForwardedAuth({
-          caller: sessionAuth,
-          config: input,
+        const forwarded = await resolveForwardedPrincipal({
+          accept: input.acceptPrincipalFrom,
+          forwarder: sessionAuth,
           payload: payload as Record<string, unknown>,
         });
         if (forwarded instanceof Response) return forwarded;
@@ -239,7 +243,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (policyRejection !== null) return policyRejection;
 
         const messageResult = await resolveOnMessage({
-          auth: forwarded === undefined ? sessionAuth : forwarded.current,
+          auth: forwarded.auth,
           config: input,
           message: body.message,
           request: req,
@@ -256,35 +260,25 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           continuationToken: token,
           mode: body.mode,
         };
-        if (forwarded !== undefined) {
-          sendOptions.initiatorAuth = forwarded.initiator;
+        if (forwarded.accepted) {
+          sendOptions.initiatorAuth = forwarded.initiatorAuth;
         }
         const session = await send(createSendPayload(body, context), sendOptions);
 
-        const createResponse: {
-          continuationToken: string;
-          forwardedAuth?: "accepted";
-          ok: boolean;
-          sessionId: string;
-        } = {
-          continuationToken: session.continuationToken,
-          ok: true,
-          sessionId: session.id,
-        };
-        if (forwarded !== undefined) {
-          // The acceptance acknowledgment the forwarding sender requires;
-          // its absence tells the sender a pre-forwarding receiver silently
-          // dropped the field.
-          createResponse.forwardedAuth = "accepted";
-        }
-
-        return Response.json(createResponse, {
-          headers: {
-            "cache-control": "no-store",
-            [EVE_SESSION_ID_HEADER]: session.id,
+        return Response.json(
+          {
+            continuationToken: session.continuationToken,
+            ok: true,
+            sessionId: session.id,
           },
-          status: 202,
-        });
+          {
+            headers: {
+              "cache-control": "no-store",
+              [EVE_SESSION_ID_HEADER]: session.id,
+            },
+            status: 202,
+          },
+        );
       }),
 
       POST(EVE_RESET_SESSION_ROUTE_PATH, async (req, { reset }) => {
@@ -342,15 +336,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         if (payload === null || typeof payload !== "object") {
           return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
-        }
-
-        // Fail loud instead of silently running the delivery as the transport
-        // principal: forwarding is create-only today.
-        if ((payload as Record<string, unknown>).forwardedAuth !== undefined) {
-          return Response.json(
-            { error: "Forwarded auth is only accepted on session creation.", ok: false },
-            { status: 400 },
-          );
         }
 
         const body = parseContinueBody(payload as Record<string, unknown>);
@@ -588,67 +573,6 @@ function defaultOnMessage(ctx: EveMessageContext): Exclude<EveMessageResult, nul
   return { auth: defaultEveAuth(ctx) };
 }
 
-interface AcceptedForwardedAuth {
-  readonly current: SessionAuthContext;
-  readonly initiator: SessionAuthContext;
-}
-
-/**
- * Gates the create-session `forwardedAuth` body field. Returns `undefined`
- * when the body carries no forwarded auth, the stamped accepted contexts when
- * the transport caller may assert them, or the failure `Response` (403 when
- * the channel or predicate rejects the caller, 400 on a malformed payload,
- * 500 when the authored predicate throws).
- */
-async function resolveForwardedAuth(input: {
-  readonly caller: SessionAuthContext;
-  readonly config: EveChannelInput;
-  readonly payload: Record<string, unknown>;
-}): Promise<AcceptedForwardedAuth | undefined | Response> {
-  const value = input.payload.forwardedAuth;
-  if (value === undefined) return undefined;
-
-  if (input.config.acceptForwardedAuth === undefined) {
-    return Response.json(
-      { error: "This deployment does not accept forwarded auth.", ok: false },
-      { status: 403 },
-    );
-  }
-
-  const parsed = parseForwardedAuth(value);
-  if (!parsed.ok) {
-    return Response.json({ error: parsed.message, ok: false }, { status: 400 });
-  }
-
-  let accepted: boolean;
-  try {
-    accepted = await input.config.acceptForwardedAuth(input.caller);
-  } catch (error) {
-    const errorId = logError(log, "acceptForwardedAuth handler failed", error, {
-      caller: input.caller.principalId,
-    });
-    return Response.json(
-      { error: "acceptForwardedAuth handler failed.", errorId, ok: false },
-      { status: 500 },
-    );
-  }
-  if (!accepted) {
-    return Response.json(
-      { error: "Caller is not authorized to assert forwarded auth.", ok: false },
-      { status: 403 },
-    );
-  }
-
-  // Stamp before `onMessage` runs: the attribute is the only window a custom
-  // `onMessage` has onto the transport caller once `caller` is replaced.
-  const current = stampForwardedBy(parsed.forwardedAuth.current, input.caller.principalId);
-  const initiator =
-    parsed.forwardedAuth.initiator === undefined
-      ? current
-      : stampForwardedBy(parsed.forwardedAuth.initiator, input.caller.principalId);
-  return { current, initiator };
-}
-
 function droppedMessageResponse(): Response {
   return new Response(null, {
     headers: { "cache-control": "no-store" },
@@ -699,6 +623,15 @@ interface ParsedContinueBody {
 }
 
 function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody | Response {
+  // Fail loud instead of silently running the delivery as the transport
+  // principal: principal forwarding is create-only today.
+  if (payload.forwardedPrincipal !== undefined) {
+    return Response.json(
+      { error: "A forwarded principal is only accepted on session creation.", ok: false },
+      { status: 400 },
+    );
+  }
+
   const continuationToken =
     typeof payload.continuationToken === "string" && payload.continuationToken.length > 0
       ? payload.continuationToken

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 /**
- * Integration coverage for forwarded auth across the create route and the
- * runtime: an accepted `forwardedAuth` body becomes the run's session
+ * Integration coverage for forwarded principal across the create route and the
+ * runtime: an accepted `forwardedPrincipal` body becomes the run's session
  * principal (`AuthKey` / `InitiatorAuthKey`, projected as
  * `session.auth.current` / `.initiator`) and reaches
  * `resolveConnectionPrincipal` as a `user` principal — the seam per-user
@@ -85,17 +85,17 @@ function createEveCreateHandler(input: EveChannelInput) {
   };
 }
 
-describe("eveChannel forwarded auth → runtime principal", () => {
+describe("eveChannel forwarded principal → runtime principal", () => {
   it("seeds the forwarded principal into the run context and resolves a user Connect principal", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedAuth: (caller) => caller.principalId === ROUTER_CALLER.principalId,
+      acceptPrincipalFrom: (caller) => caller.principalId === ROUTER_CALLER.principalId,
       auth: () => ROUTER_CALLER,
     });
 
     const response = await handler.fetch(
       new Request("https://receiver.example.com/eve/v1/session", {
         body: JSON.stringify({
-          forwardedAuth: { current: FORWARDED_CURRENT, initiator: FORWARDED_INITIATOR },
+          forwardedPrincipal: { current: FORWARDED_CURRENT, initiator: FORWARDED_INITIATOR },
           message: "check my dashboards",
           mode: "task",
         }),
@@ -105,7 +105,7 @@ describe("eveChannel forwarded auth → runtime principal", () => {
     );
 
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toMatchObject({ forwardedAuth: "accepted" });
+    await expect(response.json()).resolves.toMatchObject({ ok: true });
 
     const options = handler.send.mock.calls[0]?.[1] as SendOptions;
     const run: RunInput = {
@@ -151,7 +151,7 @@ describe("eveChannel forwarded auth → runtime principal", () => {
 
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {
     const handler = createEveCreateHandler({
-      acceptForwardedAuth: () => true,
+      acceptPrincipalFrom: () => true,
       auth: () => ROUTER_CALLER,
     });
 
