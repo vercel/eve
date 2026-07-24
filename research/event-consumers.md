@@ -27,21 +27,59 @@ scopes v1 so that hop replaces a wake the caller already pays.
 
 The first events to need this — a child's
 `authorization.required`/`authorization.completed` surfaced on the caller's
-stream — show the inline weld failing concretely:
+stream — show the inline weld failing concretely. Receipts are pinned to
+[#1167's head, `413ce48d`](https://github.com/vercel/eve/pull/1167), the
+baseline that carries the mechanism:
 
-- **Events are dropped.** Delivery works only while the caller's turn is
-  parked at its inbox; parked-for-input or between turns, `resumeHook`
-  throws and the event is silently gone.
-- **Nothing redelivers.** A failed or refused delivery is logged and
-  dropped on the producer; there is no durable step to redeliver from.
-- **Delivery is heavyweight.** One rendering-only event resumes the full
-  session workflow: context deserialization, session hydration, a journaled
-  step.
-- **Consumption forks by producer.** Local and remote children take
-  different paths; channels implement the same rendering twice.
-- **Channels are locked to the workflow.** Adapter state lives in the
-  session workflow's cursor, so nothing outside it can safely invoke a
-  channel.
+- **Events are dropped.** The callback route can hand an event only to a
+  turn parked at its inbox: otherwise `resumeHook` throws and the route
+  answers 404
+  ([session-callback-route.ts:67](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/runtime/session-callback-route.ts#L67)),
+  `postSessionCallback` turns any non-2xx into an error
+  ([session-callback-post.ts:31](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/session-callback-post.ts#L31)),
+  and the callee logs and moves on
+  ([session-callback-notification.ts:61](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/session-callback-notification.ts#L61)).
+  Concretely: a child's `authorization.completed` and its terminal
+  callback are independent POSTs; once termination resolves the call — or
+  the caller parks for input — the inbox token is dead and the event is
+  gone. One curl verifies the window: POST a well-formed notification to a
+  session's callback URL while it isn't parked at the inbox and read back
+  `{"error":"Session callback not pending."}`.
+- **Nothing redelivers.** Producers do emit from journaled steps, but a
+  delivery failure never reaches the journal — deliberately, so an
+  unreachable caller cannot fail the producing step: the remote POST
+  failure is swallowed in the forwarder
+  ([session-callback-notification.ts:61](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/session-callback-notification.ts#L61)),
+  and a throwing local forward is swallowed by `callAdapterEventHandler`
+  ("adapter event handler threw — event swallowed",
+  [adapter.ts:246](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/channel/adapter.ts#L246)).
+  Retrying the producer's step would not help anyway: "not pending" stays
+  true for as long as the parent isn't parked, and a retry re-runs the
+  step's other side effects. The child's own stream write is durable; the
+  delivery isn't.
+- **Delivery is heavyweight.** A rendering-only event — one whose entire
+  effect is presentation, e.g. a child's `authorization.required` becoming
+  the channel's sign-in prompt, never touching model history or session
+  state — costs a queue wake of the parked turn workflow
+  ([turn-workflow.ts:297](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/turn-workflow.ts#L297))
+  plus a journaled step that re-reads the durable session and
+  deserializes the full context
+  ([subagent-event-proxy-step.ts:51](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/subagent-event-proxy-step.ts#L51))
+  to invoke one adapter handler and write one stream event.
+- **The same forwarding is implemented twice.** Local children forward
+  through the subagent adapter's journaled hook step
+  ([subagent-adapter.ts:140](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/subagent-adapter.ts#L140)),
+  remote callees through the callback POST plus route projection
+  ([session-callback-notification.ts:14](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/session-callback-notification.ts#L14)
+  — self-described as "the callback-URL analog" of the former). Two
+  transports, two implementations to keep in sync, divergent failure
+  semantics (the local step rethrows, the remote swallows), converging
+  only at the caller's inbox
+  ([turn-workflow.ts:297](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/turn-workflow.ts#L297)).
+- **Channels are locked to the workflow.** Adapter state rides the
+  workflow step's serialized context
+  ([subagent-event-proxy-step.ts:113](https://github.com/vercel/eve/blob/413ce48dff6d336a1e5e488ca51b6a918cb12e29/packages/eve/src/execution/subagent-event-proxy-step.ts#L113)),
+  so nothing outside the session workflow can safely invoke a channel.
 
 v1 moves these events to a per-session **consumer** run. It adds **no new
 queue wakes** and **no public API**, and it is the on-ramp for every event
@@ -190,3 +228,10 @@ as today.
 - **Callee deferral primitive.** `waitUntil` semantics differ between the
   dev host and Vercel functions.
 - **Consumer start cost.** Eager vs lazy — measure first.
+- **Event indexing.** A consumer with a cursor is an indexer, so this lane
+  is the natural attachment point for one. v1 helps — accepted events
+  reach the parent stream via a journaled append, with provenance restored
+  by `subagent.event` — but the callee→caller wire stays best-effort, so
+  an index over the parent stream alone cannot claim cross-deployment
+  completeness. Decide whether that needs child-stream indexing or a
+  durable cursor pull before public consumer registration.
