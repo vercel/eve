@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { lstat, readlink, realpath } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -172,7 +172,10 @@ export function resolveDevelopmentSourceRoot(appRoot: string): string {
 
   while (true) {
     if (
-      SOURCE_ROOT_MARKER_NAMES.some((markerName) => existsSync(join(currentDirectory, markerName)))
+      SOURCE_ROOT_MARKER_NAMES.some((markerName) =>
+        existsSync(join(currentDirectory, markerName)),
+      ) ||
+      isWorkspaceManifestRoot(currentDirectory)
     ) {
       return currentDirectory;
     }
@@ -224,13 +227,93 @@ async function addDependencyMountsForRoot(
   state: SnapshotPlanState,
   packageRoot: string,
 ): Promise<void> {
-  const dependencyNames = await readPackageDependencyNames(packageRoot);
+  const declarationRoot = resolveDependencyDeclarationRoot(packageRoot, state.sourceRoot);
+  const dependencyNames = await readPackageDependencyNames(declarationRoot);
 
   for (const dependencyName of dependencyNames) {
-    for (const nodeModulesRoot of [packageRoot, state.sourceRoot]) {
+    for (const nodeModulesRoot of listAncestorNodeModulesRoots(packageRoot, state.sourceRoot)) {
       const mountPath = joinNodeModulesPackagePath(nodeModulesRoot, dependencyName);
       await addDependencyMount(state, mountPath);
     }
+  }
+}
+
+/**
+ * An app root without its own `package.json` (a bare `withEve` agent
+ * directory) resolves imports through the nearest owning package. Its
+ * dependency declarations live there, not at the app root (vercel/eve#1151).
+ */
+function resolveDependencyDeclarationRoot(packageRoot: string, sourceRoot: string): string {
+  let currentDirectory = resolve(packageRoot);
+  const boundary = resolve(sourceRoot);
+
+  while (isPathInsideOrEqual(currentDirectory, boundary)) {
+    if (existsSync(join(currentDirectory, "package.json"))) {
+      return currentDirectory;
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      break;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+
+  return packageRoot;
+}
+
+/**
+ * Node resolution walks every ancestor `node_modules`. Mirror that walk up to
+ * the source boundary so hoisted installs — npm/yarn workspaces and
+ * intermediate monorepo levels — are materialized in the snapshot instead of
+ * only the package's own and the source root's `node_modules`
+ * (vercel/eve#1151).
+ */
+function listAncestorNodeModulesRoots(packageRoot: string, sourceRoot: string): string[] {
+  const boundary = resolve(sourceRoot);
+  const roots = new Set<string>();
+  let currentDirectory = resolve(packageRoot);
+
+  while (isPathInsideOrEqual(currentDirectory, boundary)) {
+    roots.add(currentDirectory);
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      break;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+
+  // A package root outside the boundary keeps the pre-existing two-point
+  // behavior: its own node_modules plus the source root's.
+  roots.add(resolve(packageRoot));
+  roots.add(boundary);
+
+  return [...roots];
+}
+
+/**
+ * npm and Yarn mark the workspace root only in `package.json` (`workspaces`),
+ * unlike pnpm's `pnpm-workspace.yaml`. Without recognizing it, a gitless npm
+ * workspace collapses the source root to the app root and hides the hoisted
+ * `node_modules` level from the snapshot (vercel/eve#1151).
+ */
+function isWorkspaceManifestRoot(directory: string): boolean {
+  const packageJsonPath = join(directory, "package.json");
+
+  if (!existsSync(packageJsonPath)) {
+    return false;
+  }
+
+  try {
+    const packageJson: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    return isObjectRecord(packageJson) && packageJson["workspaces"] !== undefined;
+  } catch {
+    return false;
   }
 }
 
