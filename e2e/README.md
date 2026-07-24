@@ -88,7 +88,7 @@ adding a matrix entry runs every discovered fixture against that model.
 `@ai-sdk/anthropic` model instance instead of a gateway model id: its eval
 asserts the harness's Anthropic cache-breakpoint placement, which only runs on
 that path. It uses the matrix model when it is an Anthropic model and otherwise
-falls back to `anthropic/claude-opus-4.8`. The instance points at the AI
+falls back to `anthropic/claude-opus-5`. The instance points at the AI
 Gateway's Anthropic-compatible Messages endpoint so it uses the same
 `AI_GATEWAY_API_KEY` credential as every other fixture.
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
@@ -117,7 +117,7 @@ then runs one fixture directory. Its matrix crosses every discovered fixture
 with these model entries:
 
 - `openai-sol` → `openai/gpt-5.6-sol`
-- `anthropic-opus` → `anthropic/claude-opus-4.8`
+- `anthropic-opus` → `anthropic/claude-opus-5`
 
 The short name is the stable Actions check identifier; the full id selects the
 provider model. Updating a model version does not rename required checks.
