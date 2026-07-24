@@ -1,0 +1,99 @@
+---
+title: "Registry"
+description: "Discover, install, configure, and maintain extensions from eve and third-party registries."
+contentType: "How-to"
+---
+
+eve registries use the [shadcn registry format](https://ui.shadcn.com/docs/registry). Install an official eve item, add a third-party source, or install an item from its URL.
+
+## Install an official extension
+
+Run `eve add` from an eve agent project. This installs the item dependencies and writes its declared files into your project.
+
+```bash
+eve add extension/agent-browser
+```
+
+The item may create an extension mount under `agent/extensions/`. Configure that mount and any required environment variables before running your agent.
+
+## Find an item
+
+Browse the [Integrations directory](/integrations) to see the official extensions available from the eve registry.
+
+List every official item and configured third-party source:
+
+```bash
+eve registry list
+```
+
+Search the catalog when you know what capability you need:
+
+```bash
+eve registry search browser
+```
+
+Inspect an item before you install it:
+
+```bash
+eve registry view extension/agent-browser
+```
+
+`list` and `search` include the official eve catalog and every source you add to the project.
+
+## Add a third-party source
+
+Give a registry a namespace and an item URL template:
+
+```bash
+eve registry add @acme=https://registry.acme.com/r/{name}.json
+```
+
+The `{name}` placeholder becomes the item name. `@acme/analytics` resolves to `https://registry.acme.com/r/analytics.json`.
+
+Install an item from that source:
+
+```bash
+eve add @acme/analytics
+```
+
+You can also install a known item URL without configuring a namespace:
+
+```bash
+eve add https://registry.acme.com/r/analytics.json
+```
+
+## Configure generated files
+
+Registry items add project files. Read the generated mount before you run the agent, then add the configuration the extension requires.
+
+For an extension, this usually means setting environment variables and editing the file under `agent/extensions/`. See [Extensions](./extensions) for mount configuration, namespacing, and overrides.
+
+Provider-specific setup lives in the [Integrations directory](/integrations). Follow that guidance for credentials, approval policies, and service-specific options.
+
+## Update an installed item
+
+Treat generated files as project code. Commit or review local changes before you install the item again.
+
+Run the same command when the registry publisher provides an updated scaffold:
+
+```bash
+eve add extension/agent-browser
+```
+
+Pass `--overwrite` only when you intend to replace an existing generated file:
+
+```bash
+eve add extension/agent-browser --overwrite
+```
+
+Update the installed package with your package manager. Check the publisher's release notes before changing the generated mount or package version.
+
+## Choose trusted sources
+
+Registry items can add dependencies and write files. Add sources you trust, inspect an item with `eve registry view`, and review the resulting project diff before you run the agent.
+
+## What to read next
+
+- [Extensions](./extensions): configure and override installed extension mounts
+- [Integrations directory](/integrations): provider-specific setup and security guidance
+- [shadcn registry documentation](https://ui.shadcn.com/docs/registry): publish a compatible third-party registry
