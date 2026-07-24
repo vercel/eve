@@ -36,6 +36,9 @@ export const config = defineConfig({
   logo: <Logo />,
   github,
   nav,
+  // `nav` already links to GitHub; the built-in button would render a second
+  // "GitHub" entry in the mobile menu.
+  navbarGithub: { enabled: false },
   navbarOssProducts,
   basePath,
   siteId,
