@@ -151,9 +151,11 @@ CALLER   POST /eve/v1/callback/:token {status:"notification", event}
 The session's entry workflow starts one consumer run, handing it the stream
 writable — the same cross-run handoff turns get — and the serialized
 channel context. The consumer parks on `<sessionId>:events`; each delivery
-is one journaled step: run the channel's **existing** adapter event handler
-(the same one the proxy step invokes today, so channels change nothing) and
-append the wrapped event to the stream.
+is one journaled **write step** (`event-consumer-write-step` — the run owns
+receiving, the step owns the delivery's durable effects): run the channel's
+**existing** adapter event handler (the same one the proxy step invokes
+today, so channels change nothing) and append the wrapped event to the
+stream.
 
 The engine supplies the delivery properties: ordering (hook), at-least-once
 (queue retry), exactly-once side effects (step journal), duplicate-run
