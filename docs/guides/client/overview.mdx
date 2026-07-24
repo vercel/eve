@@ -108,6 +108,8 @@ const response = await session.send({
 await response.result();
 ```
 
+Per-request headers override client-level values with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` continues to send the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
+
 ## Sessions
 
 Create a `ClientSession` for each conversation:
