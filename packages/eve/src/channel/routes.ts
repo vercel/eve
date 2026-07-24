@@ -13,7 +13,8 @@ type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Recor
 /**
  * Second argument passed to every route handler. `send` starts or continues a
  * session on this channel; `cancel` stops the active turn on a session
- * addressed by continuation token; `getSession` looks one up by id; `receive`
+ * addressed by continuation token; `reset` retires a session so its
+ * token can start a fresh session; `getSession` looks one up by id; `receive`
  * hands inbound work to a different channel; `params` contains the matched
  * path parameters; `waitUntil` keeps background work alive past the response;
  * `requestIp` is the client IP, or `null` when the host cannot provide it.
@@ -26,6 +27,7 @@ export interface RouteHandlerArgs<TState = undefined> {
    */
   resolveActiveSession: ResolveActiveSessionFn;
   cancel: CancelFn;
+  reset: ResetFn;
   getSession: GetSessionFn;
   /**
    * Starts a session on a different channel to hand off inbound work (e.g. an
@@ -122,6 +124,27 @@ export interface CancelOptions {
  * on the event stream.
  */
 export type CancelFn = (options: CancelOptions) => Promise<CancelTurnResult>;
+
+/** Options for {@link ResetFn}. */
+export interface ResetOptions {
+  /** Channel-local raw token, in the same format accepted by {@link SendFn}. */
+  readonly continuationToken: string;
+  /** Human-readable terminal reason. Do not include credentials or message contents. */
+  readonly reason?: string;
+}
+
+/** Result of resetting the session that owned a continuation token. */
+export type ResetResult =
+  | { readonly status: "reset"; readonly previousSessionId: string }
+  | { readonly status: "no_active_session" };
+
+/**
+ * Terminally retires the session currently owning a continuation token.
+ * The token is available for the next {@link SendFn} after this resolves;
+ * that send starts with fresh history and state, and initializes a new
+ * session-scoped sandbox on first sandbox use.
+ */
+export type ResetFn = (options: ResetOptions) => Promise<ResetResult>;
 
 export type RouteHandler<TState = undefined> = (
   req: Request,

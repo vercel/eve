@@ -22,6 +22,12 @@ export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 export const EVE_CREATE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
 
 /**
+ * Stable framework-owned route for retiring the session that owns a client
+ * continuation token. The request body supplies the channel-local token.
+ */
+export const EVE_RESET_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/reset`;
+
+/**
  * Stable framework-owned route pattern for sending a message to an existing
  * session.
  */

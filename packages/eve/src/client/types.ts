@@ -3,6 +3,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
+import type { ResetStatus } from "#protocol/reset-session.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -226,6 +227,18 @@ export interface CancelSessionResult {
   /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
   readonly status: CancelTurnStatus;
 }
+
+/** Result of terminally resetting a client session. */
+export type ResetResult =
+  | {
+      /** The prior session was retired and its continuation token released. */
+      readonly previousSessionId: string;
+      readonly status: Extract<ResetStatus, "reset">;
+    }
+  | {
+      /** The client had no continuation token or the token was already free. */
+      readonly status: Extract<ResetStatus, "no_active_session">;
+    };
 
 /**
  * Aggregated result of one message turn, returned by

@@ -65,6 +65,21 @@ describe("buildNodeEsmCompatBanner", () => {
     expect(banner).not.toContain("const require");
   });
 
+  it("does not treat bundler-suffixed bindings as compatibility globals", () => {
+    const chunk = [
+      "const __filename$1 = '/x/file.js';",
+      "const __dirname$1 = '/x';",
+      "const require$1 = () => {};",
+      'export const value = "noop";',
+    ].join("\n");
+
+    const banner = buildNodeEsmCompatBanner(chunk, { includeRequire: true });
+
+    expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
+    expect(banner).toContain("const __dirname = __eveDirname(__filename);");
+    expect(banner).toContain("const require = __eveCreateRequire(import.meta.url);");
+  });
+
   it("ignores nested declarations inside functions", () => {
     const chunk = [
       "function inner() {",

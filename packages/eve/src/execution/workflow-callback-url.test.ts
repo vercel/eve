@@ -77,4 +77,60 @@ describe("resolveWorkflowCallbackBaseUrl", () => {
       "https://agent.example.com",
     );
   });
+
+  it("appends the configured public route prefix to the resolved base", () => {
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/eve/agents/support");
+
+    expect(resolveWorkflowCallbackBaseUrl("https://deployment.example.com/")).toBe(
+      "https://deployment.example.com/eve/agents/support",
+    );
+  });
+
+  it("appends the public route prefix to the stable Vercel production URL", () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "eve/agents/support/");
+
+    expect(resolveWorkflowCallbackBaseUrl("https://deployment.example.com")).toBe(
+      "https://agent.example.com/eve/agents/support",
+    );
+  });
+
+  it("ignores a public route prefix resolving to the root route", () => {
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/");
+
+    expect(resolveWorkflowCallbackBaseUrl("http://localhost:3000")).toBe("http://localhost:3000");
+  });
+});
+
+describe("createWorkflowCallbackUrl", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("preserves a public route prefix carried by the base URL", () => {
+    expect(
+      createWorkflowCallbackUrl(
+        "https://agent.example.com/eve/agents/support",
+        "/eve/v1/callback/eve%3Aparent-token",
+      ),
+    ).toBe("https://agent.example.com/eve/agents/support/eve/v1/callback/eve%3Aparent-token");
+  });
+
+  it("preserves the prefix when adding the Vercel bypass query param", () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret");
+
+    expect(
+      createWorkflowCallbackUrl(
+        "https://agent.example.com/eve/agents/support",
+        "/eve/v1/connections/linear/callback/tok123?code=abc",
+      ),
+    ).toBe(
+      "https://agent.example.com/eve/agents/support/eve/v1/connections/linear/callback/tok123?code=abc&x-vercel-protection-bypass=secret",
+    );
+  });
 });

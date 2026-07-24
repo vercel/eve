@@ -33,6 +33,18 @@ describe("truncateTypingStatus", () => {
     );
   });
 
+  it("preserves underscores within tool names", () => {
+    expect(truncateTypingStatus("kernel_browser_manage_browsers")).toBe(
+      "kernel_browser_manage_browsers",
+    );
+    expect(truncateTypingStatus("kernel__browser__manage_browsers")).toBe(
+      "kernel__browser__manage_browsers",
+    );
+    expect(truncateTypingStatus("Running kernel_browser_manage_browsers now")).toBe(
+      "Running kernel_browser_manage_browsers now",
+    );
+  });
+
   it("caps at the typing-status limit with a trailing ellipsis", () => {
     const long = "a".repeat(SLACK_TYPING_STATUS_MAX_LENGTH + 20);
     const result = truncateTypingStatus(long);

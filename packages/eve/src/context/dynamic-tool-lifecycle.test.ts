@@ -14,18 +14,22 @@ vi.mock("#context/build-callback-context.js", () => ({
 }));
 
 // Import after mock so the module picks up the mock
-const { replayDynamicSessionTools, dispatchDynamicToolEvent } =
-  await import("#context/dynamic-tool-lifecycle.js");
+const {
+  replayDynamicSessionTools,
+  dispatchDynamicToolEvent,
+  refreshDynamicSessionToolsForRuntimeRevision,
+} = await import("#context/dynamic-tool-lifecycle.js");
 const { buildDynamicTools } = await import("#context/build-dynamic-tools.js");
 
 import { ContextContainer } from "#context/container.js";
 import {
   SessionIdKey,
   SessionDynamicToolMetadataKey,
+  SessionDynamicToolRuntimeRevisionKey,
   TurnDynamicToolMetadataKey,
 } from "#context/keys.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { createSessionStartedEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
 
 // Re-implement the naming logic here to test it independently
 // (the production function is unexported — testing via the public behavior)
@@ -499,6 +503,90 @@ function createReplayableTool(
 }
 
 describe("dispatchDynamicToolEvent", () => {
+  it("replaces session tools with the current deployment's resolver output", async () => {
+    const ctx = createCtx();
+    const oldResolver = createResolver("old", ["session.started"], () => ({
+      old_tool: createReplayableTool("old deployment"),
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [oldResolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
+
+    expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["old_tool"]);
+
+    const newResolver = createResolver("new", ["session.started"], () => ({
+      new_tool: createReplayableTool("new deployment"),
+    }));
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [newResolver],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_new",
+    });
+
+    expect(ctx.get(SessionDynamicToolRuntimeRevisionKey)).toBe("deployment:dpl_new");
+    expect(ctx.get(SessionDynamicToolMetadataKey)?.map((tool) => tool.name)).toEqual(["new_tool"]);
+    expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["new_tool"]);
+  });
+
+  it("does not re-run session resolvers within the same deployment", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => ({
+      current_tool: createReplayableTool(),
+    }));
+    const resolver = createResolver("current", ["session.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_current",
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("clears removed session resolvers on a new runtime revision", async () => {
+    const ctx = createCtx();
+    const oldResolver = createResolver("old", ["session.started"], () => ({
+      old_tool: createReplayableTool(),
+    }));
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [oldResolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_new",
+    });
+
+    expect(ctx.get(SessionDynamicToolMetadataKey)).toEqual([]);
+    expect(ctx.get(SessionDynamicToolRuntimeRevisionKey)).toBe("deployment:dpl_new");
+  });
+
   it("leaves unsupported connection input schemas for the MCP server to validate", async () => {
     const ctx = createCtx();
     const inputSchema = {

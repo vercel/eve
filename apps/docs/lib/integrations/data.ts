@@ -846,8 +846,303 @@ export default channel;
 See the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-official/kapso) for supported events, capabilities, and credentials.`,
     configure: `Connect a WhatsApp number in Kapso, set \`KAPSO_API_KEY\`, \`KAPSO_PHONE_NUMBER_ID\`, and \`KAPSO_WEBHOOK_SECRET\`, then point the Kapso webhook at \`/eve/v1/kapso\`. Use this provider-managed option when you do not want to integrate directly with the WhatsApp Cloud API. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
-};
+  "chat-sdk-photon": {
+    logo: "photon",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: [
+      "chat sdk",
+      "imessage",
+      "apple messages",
+      "sms",
+      "mms",
+      "rcs",
+      "photon",
+      "sendblue",
+      "linq",
+      "agentphone",
+      "dial",
+    ],
+    install: `Install eve, Chat SDK, the Photon adapter, and a state adapter:
 
+\`\`\`bash
+npm install eve@latest chat @photon-ai/chat-adapter-imessage @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+    quickStart: `Create \`agent/channels/imessage.ts\`:
+
+\`\`\`ts
+// agent/channels/imessage.ts
+import { createiMessageAdapter } from "@photon-ai/chat-adapter-imessage";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    imessage: createiMessageAdapter({
+      local: false,
+      projectId: process.env.IMESSAGE_PROJECT_ID,
+      projectSecret: process.env.IMESSAGE_PROJECT_SECRET,
+    }),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [Photon adapter documentation](https://chat-sdk.dev/adapters/vendor-official/photon) for all supported events and credentials.`,
+    configure: `Set \`IMESSAGE_PROJECT_ID\` and \`IMESSAGE_PROJECT_SECRET\`, then point Photon’s signed webhook at \`/eve/v1/imessage\`. Photon supports cloud, self-hosted, and local macOS deployments. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
+  "chat-sdk-dial": {
+    logo: "dial",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: ["chat sdk", "dial", "sms", "mms", "imessage", "voice", "phone", "calls"],
+    install: `Install eve, Chat SDK, the Dial adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @getdial/chat-sdk-adapter @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Dial.`,
+    quickStart: `Create \`agent/channels/dial.ts\`:
+
+\`\`\`ts
+// agent/channels/dial.ts
+import { createDialAdapter } from "@getdial/chat-sdk-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    dial: createDialAdapter({
+      apiKey: process.env.DIAL_API_KEY!,
+      fromNumberId: process.env.DIAL_FROM_NUMBER_ID!,
+      webhookSecret: process.env.DIAL_WEBHOOK_SECRET!,
+    }),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [Dial adapter documentation](https://chat-sdk.dev/adapters/vendor-official/dial) for supported events, capabilities, and credentials.`,
+    configure: `Create a Dial number, set \`DIAL_API_KEY\`, \`DIAL_FROM_NUMBER_ID\`, and \`DIAL_WEBHOOK_SECRET\`, then point its webhook at \`/eve/v1/dial\`. Dial maps each phone-number pair to a thread and delivers SMS, MMS, iMessage, and voice transcripts. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
+  "chat-sdk-agentphone": {
+    logo: "agentphone",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: ["chat sdk", "agentphone", "sms", "mms", "imessage", "voice", "phone", "calls"],
+    install: `Install eve, Chat SDK, the AgentPhone adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @agentphone/chat-sdk-adapter @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by AgentPhone.`,
+    quickStart: `Create \`agent/channels/agentphone.ts\`:
+
+\`\`\`ts
+// agent/channels/agentphone.ts
+import { createAgentPhoneAdapter } from "@agentphone/chat-sdk-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    agentphone: createAgentPhoneAdapter({
+      apiKey: process.env.AGENTPHONE_API_KEY!,
+      agentId: process.env.AGENTPHONE_AGENT_ID!,
+      webhookSecret: process.env.AGENTPHONE_WEBHOOK_SECRET!,
+    }),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [AgentPhone adapter documentation](https://chat-sdk.dev/adapters/vendor-official/agentphone) for supported events, capabilities, and credentials.`,
+    configure: `Create an AgentPhone agent, set \`AGENTPHONE_API_KEY\`, \`AGENTPHONE_AGENT_ID\`, and \`AGENTPHONE_WEBHOOK_SECRET\`, then point its webhook at \`/eve/v1/agentphone\`. The adapter handles SMS, MMS, iMessage, and completed voice-call transcripts. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
+  "chat-sdk-lark": {
+    logo: "lark",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: ["chat sdk", "lark", "feishu", "bytedance", "cardkit", "messaging"],
+    install: `Install eve, Chat SDK, the Lark / Feishu adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @larksuite/vercel-chat-adapter @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+    quickStart: `Create \`agent/channels/lark.ts\`:
+
+\`\`\`ts
+// agent/channels/lark.ts
+import { createLarkAdapter } from "@larksuite/vercel-chat-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    lark: createLarkAdapter(),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+await bot.initialize();
+
+export default channel;
+\`\`\`
+
+See the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vendor-official/lark) for all supported events and credentials.`,
+    configure: `Create a Lark or Feishu app and set \`LARK_APP_ID\` and \`LARK_APP_SECRET\`. The adapter uses Lark’s WebSocket long connection rather than an HTTP webhook, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. This is a vendor-official Chat SDK adapter built on the official Lark Node SDK. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
+  "chat-sdk-beeper": {
+    logo: "beeper",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: ["chat sdk", "matrix", "beeper", "encrypted chat", "e2ee", "signal", "instagram"],
+    install: `Install eve, Chat SDK, the Beeper Matrix adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @beeper/chat-adapter-matrix @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+    quickStart: `Create \`agent/channels/matrix.ts\`:
+
+\`\`\`ts
+// agent/channels/matrix.ts
+import { createMatrixAdapter } from "@beeper/chat-adapter-matrix";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    matrix: createMatrixAdapter(),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+await bot.initialize();
+
+export default channel;
+\`\`\`
+
+See the [Beeper Matrix adapter documentation](https://chat-sdk.dev/adapters/vendor-official/matrix) for all supported events and credentials.`,
+    configure: `Set the Matrix homeserver, access token, and bot identity environment variables documented by Beeper. This adapter consumes Matrix sync rather than webhooks, so call \`bot.initialize()\` and run eve in a long-lived Node.js process. It requires Node.js 22 or newer and a durable state adapter in production. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
+  "chat-sdk-resend": {
+    logo: "resend",
+    docsHref: "/docs/channels/chat-sdk",
+    badge: "Provider official",
+    keywords: [
+      "chat sdk",
+      "email",
+      "resend",
+      "inbound email",
+      "transactional email",
+      "attachments",
+    ],
+    install: `Install eve, Chat SDK, the Email (Resend) adapter, and a state adapter:
+
+\`\`\`bash
+npm install eve@latest chat @resend/chat-sdk-adapter @chat-adapter/state-memory
+\`\`\`
+
+The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+    quickStart: `Create \`agent/channels/resend.ts\`:
+
+\`\`\`ts
+// agent/channels/resend.ts
+import { createResendAdapter } from "@resend/chat-sdk-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "My Agent",
+  adapters: {
+    resend: createResendAdapter({
+      fromAddress: process.env.RESEND_FROM_ADDRESS!,
+      fromName: "My Agent",
+    }),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+\`\`\`
+
+See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/vendor-official/resend) for all supported events and credentials.`,
+    configure: `Verify a sending domain in Resend, set \`RESEND_API_KEY\`, \`RESEND_WEBHOOK_SECRET\`, and \`RESEND_FROM_ADDRESS\`, then point the Resend inbound webhook at \`/eve/v1/resend\`. This is a vendor-official Chat SDK adapter. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+  },
+};
 const extensionPresentations: Record<string, ExtensionPresentation> = {
   browserbase: {
     logo: "browserbase",
@@ -864,7 +1159,7 @@ const extensionPresentations: Record<string, ExtensionPresentation> = {
     install: `Install the Browserbase extension for eve:
 
 \`\`\`bash
-npm install @browserbasehq/eve
+pnpm add @browserbasehq/eve
 \`\`\`
 
 The extension requires Node.js 24 or later. A Browserbase API key covers both cloud browser sessions and Stagehand inference through Browserbase Model Gateway, so you do not need a separate model-provider key.`,
@@ -917,7 +1212,7 @@ Browserbase uses keep-alive sessions and eve's durable per-session state to reco
     install: `Install the Kernel extension for eve:
 
 \`\`\`bash
-npm install @onkernel/eve-extension
+pnpm add @onkernel/eve-extension
 \`\`\`
 
 The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kernel's hosted MCP browser tools and a \`browse\` skill without requiring you to maintain browser tool code.`,
@@ -961,7 +1256,7 @@ The default mount can execute JavaScript in the browser VM and reuse authenticat
     install: `Install the Jetty extension for eve:
 
 \`\`\`bash
-npm install @jetty/eve
+pnpm add @jetty/eve
 \`\`\`
 
 The extension requires Node.js 24 or later and eve 0.25 or later. It can ingest every completed turn as a durable Jetty trajectory, grade turns inline, steer experiments from their grades, and report native \`eve eval\` results.`,
@@ -1020,7 +1315,7 @@ Jetty trajectories persist agent inputs and outputs. Redact PII before grading, 
     install: `Install the GitHub Tools extension and Vercel Connect client:
 
 \`\`\`bash
-npm install @github-tools/eve-extension @vercel/connect
+pnpm add @github-tools/eve-extension @vercel/connect
 \`\`\`
 
 The extension provides the GitHub toolset as a versioned eve package. Use a Vercel Connect connector for short-lived, scoped GitHub tokens, or omit \`@vercel/connect\` and authenticate with a GitHub token.`,
@@ -1085,7 +1380,7 @@ For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`
     install: `Install the agent-browser extension for eve:
 
 \`\`\`bash
-npm install @agent-browser/eve
+pnpm add @agent-browser/eve
 \`\`\`
 
 The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox, Docker, or microsandbox.`,

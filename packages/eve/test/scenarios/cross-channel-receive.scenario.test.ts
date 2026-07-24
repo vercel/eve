@@ -9,6 +9,7 @@ import {
 } from "../../src/channel/cross-channel-receive.js";
 import type { Runtime } from "../../src/channel/types.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
+import { RuntimeNoActiveSessionError } from "../../src/execution/runtime-errors.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "../../src/runtime/sessions/compiled-agent-cache.js";
 import {
@@ -98,11 +99,14 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
         sessionId: "sess_scenario",
       };
     },
-    async deliver() {
-      throw new Error("deliver should not be called in this scenario");
+    async deliver(input) {
+      throw new RuntimeNoActiveSessionError(input.continuationToken);
     },
     async getEventStream() {
       return new ReadableStream();
+    },
+    async terminateSession() {
+      throw new Error("terminateSession should not be called in this scenario");
     },
   };
 }
@@ -177,6 +181,9 @@ describe("cross-channel receive end-to-end", () => {
           },
           cancel: async () => {
             throw new Error("webhook should not cancel turns");
+          },
+          reset: async () => {
+            throw new Error("webhook should not reset sessions");
           },
           getSession: () => {
             throw new Error("webhook should not read sessions directly");

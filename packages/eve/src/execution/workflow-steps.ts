@@ -5,8 +5,16 @@ import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
-import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
-import { AuthKey, CapabilitiesKey, ModeKey } from "#context/keys.js";
+import {
+  dispatchDynamicToolEvent,
+  refreshDynamicSessionToolsForRuntimeRevision,
+} from "#context/dynamic-tool-lifecycle.js";
+import {
+  AuthKey,
+  CapabilitiesKey,
+  ModeKey,
+  SessionDynamicToolRuntimeRevisionKey,
+} from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -33,6 +41,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
   createAuthorizationCompletedEvent,
+  createSessionStartedEvent,
   encodeMessageStreamEvent,
   type HandleMessageStreamEvent,
   timestampHandleMessageStreamEvent,
@@ -57,13 +66,14 @@ import {
   type TurnStepInput,
   type TurnWorkflowDispatchInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
-import { createExecutionNodeStep } from "#execution/node-step.js";
+import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
+import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import {
   createWorkflowRuntime,
   requestWorkflowTurnCancellation,
@@ -255,11 +265,30 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     };
   }
 
-  const writer = input.parentWritable.getWriter();
   const hookRegistry = bundle.hookRegistry;
   const dynamicInstructionsResolvers = bundle.resolvedAgent.dynamicInstructionsResolvers ?? [];
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
+  const runtimeIdentity = buildRuntimeIdentity(bundle.graph.root);
+  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+  const dynamicToolRuntimeRevision = deploymentId
+    ? `deployment:${deploymentId}`
+    : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
+  const sessionStarted = getHarnessEmissionState(initialSession.state).sessionStarted;
+
+  if (!sessionStarted) {
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicToolRuntimeRevision);
+  } else {
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: dynamicToolResolvers,
+      event: createSessionStartedEvent({ runtime: runtimeIdentity }),
+      messages: initialSession.history,
+      runtimeRevision: dynamicToolRuntimeRevision,
+    });
+  }
+
+  const writer = input.parentWritable.getWriter();
 
   const emit = async (event: HandleMessageStreamEvent): Promise<HandleMessageStreamEvent> => {
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);

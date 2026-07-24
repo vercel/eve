@@ -221,6 +221,48 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "chat-sdk-photon",
+    name: "Photon",
+    kind: "channel",
+    tagline: "Cloud, self-hosted, and local iMessage messaging through Photon.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-dial",
+    name: "Dial",
+    kind: "channel",
+    tagline: "Give your agent a phone number for SMS, MMS, iMessage, and voice transcripts.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-agentphone",
+    name: "AgentPhone",
+    kind: "channel",
+    tagline: "SMS, MMS, iMessage, and voice conversations through AgentPhone.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-lark",
+    name: "Lark / Feishu",
+    kind: "channel",
+    tagline: "Lark and Feishu chats with native card streaming via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-beeper",
+    name: "Beeper",
+    kind: "channel",
+    tagline: "Matrix rooms and bridged messaging networks through Beeper.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "chat-sdk-resend",
+    name: "Resend",
+    kind: "channel",
+    tagline: "Send and receive threaded email through Resend via the Chat SDK.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
@@ -250,9 +292,10 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   },
   {
     slug: "kernel",
-    name: "Kernel",
+    name: "KERNEL",
     kind: "extension",
-    tagline: "Add a Kernel cloud browser and browser automation skills to an eve agent.",
+    tagline:
+      "Let your eve agent use the Internet with KERNEL browser infra, o11y, and stealth. Integrated natively with Vercel Connect and AI Gateway.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {

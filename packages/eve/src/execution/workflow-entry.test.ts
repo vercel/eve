@@ -182,11 +182,19 @@ describe("workflowEntry", () => {
         serializedContext: createSerializedContext(),
       }),
     ).rejects.toMatchObject({
-      conflictingRunId: "wrun_owner",
-      name: "HookConflictError",
-      token: "http:test",
+      message: "Agent workflow failed. Inspect the private session trace for details.",
+      name: "EveWorkflowFailure",
     });
 
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          conflictingRunId: "wrun_owner",
+          name: "HookConflictError",
+          token: "http:test",
+        }),
+      }),
+    );
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });
@@ -218,12 +226,19 @@ describe("workflowEntry", () => {
         serializedContext: createSerializedContext(),
       }),
     ).rejects.toMatchObject({
-      conflictingRunId: undefined,
-      message: 'Hook token "http:test" is already in use',
-      name: "HookConflictError",
-      token: "http:test",
+      message: "Agent workflow failed. Inspect the private session trace for details.",
+      name: "EveWorkflowFailure",
     });
 
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: 'Hook token "http:test" is already in use',
+          name: "HookConflictError",
+          token: "http:test",
+        }),
+      }),
+    );
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });
@@ -299,9 +314,16 @@ describe("workflowEntry", () => {
         input: { message: "delegate" },
         serializedContext,
       }),
-    ).rejects.toThrow("persistent recoverable failure");
+    ).rejects.toMatchObject({
+      message: "Agent workflow failed. Inspect the private session trace for details.",
+      name: "EveWorkflowFailure",
+    });
 
-    expect(emitTerminalSessionFailureStep).toHaveBeenCalledOnce();
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ message: "persistent recoverable failure" }),
+      }),
+    );
     expect(fireSessionCallbackStep).toHaveBeenCalledOnce();
     expect(notifyDelegatedParentStep).toHaveBeenCalledOnce();
     expect(notifyDelegatedParentStep).toHaveBeenCalledWith({

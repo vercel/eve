@@ -2,6 +2,7 @@ import { type FilePart, type TextPart, type UserContent } from "ai";
 
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
+import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -17,7 +18,11 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
-import { EVE_CANCEL_TURN_ROUTE_PATTERN, EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
+import {
+  EVE_CANCEL_TURN_ROUTE_PATTERN,
+  EVE_INFO_ROUTE_PATH,
+  EVE_RESET_SESSION_ROUTE_PATH,
+} from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
@@ -158,8 +163,8 @@ export interface EveChannel extends Channel {}
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
  * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session, POST
- * delivers a follow-up, POST cancels the in-flight turn, GET streams a session's
- * NDJSON event feed). Every route
+ * delivers a follow-up, POST cancels an active turn or retires a session, GET
+ * streams a session's NDJSON event feed). Every route
  * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
@@ -240,6 +245,36 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             status: 202,
           },
         );
+      }),
+
+      POST(EVE_RESET_SESSION_ROUTE_PATH, async (req, { reset }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const body = await parseResetSessionBody(req);
+        if (body instanceof Response) return body;
+
+        let result: Awaited<ReturnType<typeof reset>>;
+        try {
+          result = await reset({
+            continuationToken: body.continuationToken,
+            reason: "Client requested session reset",
+          });
+        } catch (error) {
+          const errorId = logError(log, "session-reset request failed", error);
+          return Response.json(
+            { error: "Failed to reset the session.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+
+        const response: ResetResponse =
+          result.status === "reset"
+            ? { ok: true, previousSessionId: result.previousSessionId, status: "reset" }
+            : { ok: true, status: "no_active_session" };
+        return Response.json(response, {
+          headers: { "cache-control": "no-store" },
+        });
       }),
 
       POST("/eve/v1/session/:sessionId", async (req, { send, getSession, params }) => {
@@ -593,6 +628,33 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
 
 interface ParsedCancelTurnBody {
   turnId?: string;
+}
+
+interface ParsedResetSessionBody {
+  readonly continuationToken: string;
+}
+
+async function parseResetSessionBody(req: Request): Promise<ParsedResetSessionBody | Response> {
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
+  }
+
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
+  }
+
+  const continuationToken = (payload as { continuationToken?: unknown }).continuationToken;
+  if (typeof continuationToken !== "string" || continuationToken.length === 0) {
+    return Response.json(
+      { error: "Expected 'continuationToken' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  return { continuationToken };
 }
 
 async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody | Response> {

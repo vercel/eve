@@ -48,6 +48,7 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 
 - `send(message, { auth, continuationToken, state?, title? })` starts or resumes a session. `title` overrides the new workflow session's display title without changing the model message. Returns a `Session`.
 - `cancel({ continuationToken, turnId? })` requests cancellation of the active turn on the session that owns the token. See [Cancel a turn](#cancel-a-turn).
+- `reset({ continuationToken, reason? })` retires the session that owns the token so the next `send()` starts a fresh session. See [Reset a session](#reset-a-session).
 - `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming and `cancel({ turnId? })` for session-id-addressed cancellation.
 - `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
 - `params` holds route parameters extracted from the path pattern.
@@ -84,6 +85,40 @@ Semantics:
 - The route owns authentication of the inbound stop request, exactly as for `send()`.
 
 When you already hold a `Session` — returned by `send()` or `getSession(sessionId)` — call `session.cancel({ turnId? })` to request the same cancellation addressed by session id.
+
+## Reset a session
+
+Identity-addressed channels can consume commands such as `/new` in their route, without sending the command to the model. Call `reset` with the same channel-local continuation token used by `send()`:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/messages", async (request, { reset, send }) => {
+      const body = await request.json();
+
+      if (body.message.trim().toLowerCase() === "/new") {
+        await reset({
+          continuationToken: body.conversationId,
+          reason: "User requested /new",
+        });
+        return Response.json({ message: "Started a new conversation." });
+      }
+
+      const session = await send(body.message, {
+        auth: null,
+        continuationToken: body.conversationId,
+      });
+      return Response.json({ sessionId: session.id });
+    }),
+  ],
+});
+```
+
+`reset` returns `{ status: "reset", previousSessionId }` when it observed an owner, or `{ status: "no_active_session" }` when the token was already free. Both outcomes are successful. It terminally cancels the observed workflow run and waits until its non-retained continuation hook no longer blocks reuse, so the next `send()` using the same token creates a new session with fresh history and state.
+
+The replacement session owns a new session-scoped sandbox. eve initializes it lazily on that session's first sandbox use, so it never reuses the prior session's workspace or sandbox state. Resetting does not clear history in place, roll back tool calls, or delete the previous run or its sandbox; normal retention and backend cleanup policies still apply. Side effects or partial output that were already committed remain committed. Authenticate and deduplicate inbound command webhooks before calling this helper: a delayed duplicate `/new` can otherwise reset a newer session that has already reclaimed the same token.
 
 ## CORS
 
@@ -125,7 +160,7 @@ export default defineChannel({
 });
 ```
 
-`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `cancel`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
+`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `cancel`, `reset`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
 
 ### Node upgrade server escape hatch
 
@@ -244,6 +279,8 @@ twilioContinuationToken("+15551234567", "+15557654321"); // "+15551234567:+15557
 Custom channels write their own function that joins the identity fields. The framework derives nothing for you; the channel owns its token format.
 
 When the identity that should address a session is not known until later, the channel can re-key the parked session by calling `session.setContinuationToken(...)`. Pass the channel-local raw token; the runtime preserves the current channel namespace.
+
+Re-keying changes the address of the current session. `reset` is different: it terminally retires the current session and makes its existing address available to a later `send()`. `cancel` is narrower still: it stops only the active turn and leaves the session, history, and continuation-token ownership intact.
 
 The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelSessionOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the session later. State mutations made through the returned context are written back to adapter state.
 

@@ -22,6 +22,13 @@ type PackageTsConfigPaths = {
   }[];
 };
 
+type FileStat = {
+  isFile(): boolean;
+};
+
+type CachedStatProbe = (path: string) => Promise<FileStat | undefined>;
+
+const NON_PACKAGE_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/]|node:|data:|file:)/;
 const packageTsConfigPathsCache = new Map<string, Promise<PackageTsConfigPaths | undefined>>();
 const nearestPackageRootCache = new Map<string, Promise<string | undefined>>();
 
@@ -34,54 +41,63 @@ export function createAuthoredPackageTsConfigPathsPlugin(input: {
   appPackageRoot: string;
   extensions: readonly string[];
 }): Record<string, unknown> {
+  const probeStat = createCachedStatProbe();
+
   return {
     name: "eve-package-tsconfig-paths",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
-      if (importer === undefined || !isPackageImport(source)) {
-        return undefined;
-      }
-
-      const importerPath = resolve(importer);
-
-      if (isPathInsideOrEqual(importerPath, input.appPackageRoot)) {
-        return undefined;
-      }
-
-      const packageRoot = await resolveNearestPackageRoot(importerPath);
-
-      if (packageRoot === undefined || isPathInsideOrEqual(packageRoot, input.appPackageRoot)) {
-        return undefined;
-      }
-
-      const config = await loadPackageTsConfigPaths(packageRoot);
-
-      if (config === undefined) {
-        return undefined;
-      }
-
-      for (const candidate of createTsConfigPathCandidates(source, config)) {
-        const resolved = await this.resolve(candidate, importer, {
-          kind: options.kind,
-          skipSelf: true,
-        });
-
-        if (resolved !== null) {
-          return resolved;
+    resolveId: {
+      filter: {
+        id: {
+          exclude: NON_PACKAGE_IMPORT_FILTER,
+        },
+      },
+      async handler(
+        this: RolldownResolveContext,
+        source: string,
+        importer: string | undefined,
+        options: { kind: string },
+      ) {
+        if (importer === undefined || !isPackageImport(source)) {
+          return undefined;
         }
 
-        const existingPath = await resolveExistingPath(candidate, input.extensions);
+        const importerPath = resolve(importer);
 
-        if (existingPath !== undefined) {
-          return { id: existingPath };
+        if (isPathInsideOrEqual(importerPath, input.appPackageRoot)) {
+          return undefined;
         }
-      }
 
-      return undefined;
+        const packageRoot = await resolveNearestPackageRoot(importerPath, probeStat);
+
+        if (packageRoot === undefined || isPathInsideOrEqual(packageRoot, input.appPackageRoot)) {
+          return undefined;
+        }
+
+        const config = await loadPackageTsConfigPaths(packageRoot);
+
+        if (config === undefined) {
+          return undefined;
+        }
+
+        for (const candidate of createTsConfigPathCandidates(source, config)) {
+          const resolved = await this.resolve(candidate, importer, {
+            kind: options.kind,
+            skipSelf: true,
+          });
+
+          if (resolved !== null) {
+            return resolved;
+          }
+
+          const existingPath = await resolveExistingPath(candidate, input.extensions, probeStat);
+
+          if (existingPath !== undefined) {
+            return { id: existingPath };
+          }
+        }
+
+        return undefined;
+      },
     },
   };
 }
@@ -204,15 +220,16 @@ function matchTsConfigPathPattern(source: string, pattern: string): string | und
 async function resolveExistingPath(
   path: string,
   extensions: readonly string[],
+  probeStat: CachedStatProbe,
 ): Promise<string | undefined> {
-  if (await existsAsFile(path)) {
+  if (await existsAsFile(path, probeStat)) {
     return path;
   }
 
   for (const extension of extensions) {
     const candidate = `${path}${extension}`;
 
-    if (await existsAsFile(candidate)) {
+    if (await existsAsFile(candidate, probeStat)) {
       return candidate;
     }
   }
@@ -220,7 +237,7 @@ async function resolveExistingPath(
   for (const extension of extensions) {
     const candidate = join(path, `index${extension}`);
 
-    if (await existsAsFile(candidate)) {
+    if (await existsAsFile(candidate, probeStat)) {
       return candidate;
     }
   }
@@ -228,15 +245,14 @@ async function resolveExistingPath(
   return undefined;
 }
 
-async function existsAsFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
+async function existsAsFile(path: string, probeStat: CachedStatProbe): Promise<boolean> {
+  return (await probeStat(path))?.isFile() ?? false;
 }
 
-function resolveNearestPackageRoot(path: string): Promise<string | undefined> {
+function resolveNearestPackageRoot(
+  path: string,
+  probeStat: CachedStatProbe,
+): Promise<string | undefined> {
   const startDirectory = dirname(path);
   const cached = nearestPackageRootCache.get(startDirectory);
 
@@ -244,16 +260,19 @@ function resolveNearestPackageRoot(path: string): Promise<string | undefined> {
     return cached;
   }
 
-  const promise = findNearestPackageRoot(startDirectory);
+  const promise = findNearestPackageRoot(startDirectory, probeStat);
   nearestPackageRootCache.set(startDirectory, promise);
   return promise;
 }
 
-async function findNearestPackageRoot(startDirectory: string): Promise<string | undefined> {
+async function findNearestPackageRoot(
+  startDirectory: string,
+  probeStat: CachedStatProbe,
+): Promise<string | undefined> {
   let currentDirectory = startDirectory;
 
   while (true) {
-    if (await pathExists(join(currentDirectory, "package.json"))) {
+    if (await pathExists(join(currentDirectory, "package.json"), probeStat)) {
       return currentDirectory;
     }
 
@@ -267,13 +286,24 @@ async function findNearestPackageRoot(startDirectory: string): Promise<string | 
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
+async function pathExists(path: string, probeStat: CachedStatProbe): Promise<boolean> {
+  return (await probeStat(path)) !== undefined;
+}
+
+function createCachedStatProbe(): CachedStatProbe {
+  const cache = new Map<string, Promise<FileStat | undefined>>();
+
+  return (path) => {
+    const cached = cache.get(path);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const result = stat(path).catch(() => undefined);
+    cache.set(path, result);
+    return result;
+  };
 }
 
 function isPathNotFoundError(error: unknown): boolean {

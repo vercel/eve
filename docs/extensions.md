@@ -1,13 +1,13 @@
 ---
 title: "Extensions"
-description: "Publish reusable eve capabilities as an npm package, then install and mount them in an agent."
+description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-Extensions package eve tools, connections, skills, instruction fragments, and hooks. A publisher builds and distributes a package; a consumer installs it and mounts it in an agent.
+Extensions package eve tools, connections, skills, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a registry or kept private inside a monorepo workspace.
 
 This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A memory extension could use hooks to capture context and tools to recall it. A self-improving extension could pair hooks with dynamic instructions.
 
-## Publisher: create and publish an extension
+## Author: create an extension
 
 ### Create the package
 
@@ -42,7 +42,7 @@ Keep agent configuration, sandboxes, schedules, and nested extensions in the con
 
 ### Add configuration and contributions
 
-The publisher's `extension/extension.ts` default-exports a `defineExtension` handle. Give it a [Standard Schema](https://standardschema.dev) when consumers need to provide settings:
+The author's `extension/extension.ts` default-exports a `defineExtension` handle. Give it a [Standard Schema](https://standardschema.dev) when consumers need to provide settings:
 
 ```ts title="extension/extension.ts"
 import { defineExtension } from "eve/extension";
@@ -76,9 +76,9 @@ export default defineTool({
 
 If no configuration is needed, export `defineExtension()` and let consumers re-export it directly. Config schemas must validate synchronously.
 
-`defineState` is automatically scoped to the publisher's package, so the same state name does not collide with the consumer or another extension.
+`defineState` is automatically scoped to the extension package, so the same state name does not collide with the consumer or another extension.
 
-### Build and publish
+### Build and optionally publish
 
 The scaffold's `package.json` declares separate source and distribution roots:
 
@@ -134,29 +134,29 @@ Build the package with `eve extension build`:
 eve extension build
 ```
 
-`eve extension build` writes an agent-shaped `dist/extension` tree, copies skill assets, emits declarations, and records compatibility metadata. It also manages the package exports for the mount factory (`@acme/crm`) and tool definitions (`@acme/crm/tools`). Publish `dist/`; consumers do not need the publisher's TypeScript source.
+`eve extension build` writes an agent-shaped `dist/extension` tree, copies skill assets, emits declarations, and records compatibility metadata. It also manages the package exports for the mount factory (`@acme/crm`) and tool definitions (`@acme/crm/tools`). Publish `dist/`; consumers do not need the author's TypeScript source.
 
-The exact `eve` development pin controls the publisher's authoring API and build tooling. The wildcard peer lets the consumer provide the runtime copy of eve. At consumption time, eve checks generated metadata, not the npm peer range. Do not add eve to regular `dependencies`.
+The exact `eve` development pin controls the extension authoring API and build tooling. The wildcard peer lets the consumer provide the runtime copy of eve. At consumption time, eve checks generated metadata, not the npm peer range. Do not add eve to regular `dependencies`.
 
 Put runtime packages such as `zod` or an SDK in `dependencies`. If a dependency cannot be bundled, such as a native addon, tell consumers to add it to `build.externalDependencies` in `agent.ts`.
 
-Consumers can now add the built package to an agent.
+Consumers can now add the built package to an agent. A workspace-only extension uses the same package contract but does not need to be published; see [Use an extension in a workspace](#use-an-extension-in-a-workspace).
 
 ## Consumer: install and mount an extension
 
-A mount gives the publisher's contributions a namespace. Updating the package updates the mounted extension; nothing is copied into the consumer's agent.
+A mount gives the extension's contributions a namespace. Updating the package updates the mounted extension; nothing is copied into the consumer's agent.
 
 ### Install the package
 
-Install the extension in the consumer's agent project:
+Install the extension with the package manager already used by the consumer's agent project. Fresh eve projects use pnpm:
 
 ```bash
-npm install @acme/crm
+pnpm add @acme/crm
 ```
 
 ### Mount it
 
-Create a file under `agent/extensions/`. Its filename becomes the mount namespace. Call the publisher's default export when the extension needs configuration:
+Create a file under `agent/extensions/`. Its filename becomes the mount namespace. Call the extension's default export when it needs configuration:
 
 ```ts title="agent/extensions/crm.ts"
 import crm from "@acme/crm";
@@ -168,7 +168,7 @@ Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local 
 
 The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, and `connections/api.ts` becomes `crm__api`.
 
-For a publisher with no configuration, mount its default export directly:
+For an extension with no configuration, mount its default export directly:
 
 ```ts title="agent/extensions/gizmo.ts"
 export { default } from "@acme/gizmo";
@@ -176,9 +176,89 @@ export { default } from "@acme/gizmo";
 
 The same mount shape works with an npm package, a workspace dependency, or a linked local package.
 
+### Use an extension in a workspace
+
+A workspace extension is a regular extension package kept in the same monorepo as its consumers. It is useful when several agents need the same capabilities, or when a private capability should evolve alongside the agents that use it.
+
+For example, a pnpm workspace can keep one extension next to two independently deployable agents:
+
+```text
+acme-agents/
+├── pnpm-workspace.yaml
+├── packages/
+│   └── shared-capabilities/
+│       ├── package.json
+│       └── extension/
+│           ├── extension.ts
+│           ├── tools/
+│           ├── skills/
+│           └── hooks/
+└── agents/
+    ├── support/
+    │   ├── package.json
+    │   └── agent/extensions/shared.ts
+    └── operations/
+        ├── package.json
+        └── agent/extensions/shared.ts
+```
+
+Make both the extension and agent directories workspace members:
+
+```yaml title="pnpm-workspace.yaml"
+packages:
+  - "agents/*"
+  - "packages/*"
+```
+
+You can scaffold the extension from a directory already covered by the workspace configuration:
+
+```bash
+cd packages
+npx eve@latest extension init shared-capabilities
+```
+
+Give the generated package the name consumers will import. Add `"private": true` if it should never be published:
+
+```jsonc title="packages/shared-capabilities/package.json"
+{
+  "name": "@acme/shared-capabilities",
+  "private": true,
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension",
+    },
+  },
+}
+```
+
+Each consuming agent declares its own workspace dependency:
+
+```jsonc title="agents/support/package.json"
+{
+  "dependencies": {
+    "@acme/shared-capabilities": "workspace:*",
+  },
+}
+```
+
+Then each agent mounts the package:
+
+```ts title="agents/support/agent/extensions/shared.ts"
+export { default } from "@acme/shared-capabilities";
+```
+
+The mount is intentionally per agent. Each consumer chooses its own mount namespace and, for a configured extension, passes its own configuration. For example, `shared.ts` contributes `shared__search`, while mounting the same package as `company.ts` in another agent contributes `company__search`.
+
+#### Develop from source
+
+When `eve dev` starts a consuming agent, it builds mounted, source-backed extensions found inside the same workspace before compiling the agent. It watches the extension source and relevant package and TypeScript configuration, then rebuilds only the affected extension. If an extension edit fails to build, the previous successful development generation keeps running.
+
+Production `eve build` expects the extension distribution to exist already. Keep `eve extension build` in the extension package's `build` and `prepare` scripts, as the scaffold does, and run workspace builds in dependency order so extensions build before their consuming agents.
+
 ### Override a contribution
 
-Use a directory mount to replace or remove a publisher contribution. Put the mount declaration in `extension.ts` and add overrides beside it:
+Use a directory mount to replace or remove an extension contribution. Put the mount declaration in `extension.ts` and add overrides beside it:
 
 ```
 agent/extensions/crm/
@@ -192,7 +272,7 @@ import crm from "@acme/crm";
 export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-A same-named consumer tool, connection, or skill wins. To adjust a publisher tool, import it from the package's `./tools` export and define it again:
+A same-named consumer tool, connection, or skill wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { search } from "@acme/crm/tools";
@@ -202,7 +282,7 @@ import { always } from "eve/tools/approval";
 export default defineTool({ ...search, approval: always() });
 ```
 
-To remove a publisher tool, use `disableTool()` in its matching slot:
+To remove an extension tool, use `disableTool()` in its matching slot:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { disableTool } from "eve/tools";
@@ -214,9 +294,9 @@ Hooks and instruction fragments are additive, so they cannot be replaced. To rep
 
 The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, or another agent-root slot.
 
-### Use a publisher tool result in a hook
+### Use an extension tool result in a hook
 
-To retain a publisher tool's result type in a consumer hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/guides/hooks#narrowing-tool-results):
+To retain an extension tool's result type in a consumer hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/guides/hooks#narrowing-tool-results):
 
 ```ts title="agent/hooks/narrow-crm.ts"
 import { defineHook } from "eve/hooks";
@@ -237,7 +317,7 @@ export default defineHook({
 
 ### Compatibility
 
-At build time, eve checks the publisher's generated capability metadata. If the extension needs an unsupported capability contract, upgrade eve or install a compatible extension release.
+At build time, eve checks the extension's generated capability metadata. If the extension needs an unsupported capability contract, upgrade eve or install a compatible extension release.
 
 ## What to read next
 

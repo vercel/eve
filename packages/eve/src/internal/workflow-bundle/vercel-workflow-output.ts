@@ -18,6 +18,10 @@ import {
   isEveVercelFunctionPath,
   normalizeEveVercelRoutes,
 } from "#internal/workflow-bundle/eve-service-route-output.js";
+import {
+  EVE_PUBLIC_ROUTE_PREFIX_ENV,
+  normalizePublicRoutePrefix,
+} from "#shared/public-route-prefix.js";
 
 // just-bash and microsandbox are optional peer dependencies (the
 // opt-in local sandbox engines) loaded lazily from the application's
@@ -44,12 +48,24 @@ const WORKFLOW_PRECONDITION_GUARD_ENABLED = "1";
 
 /**
  * Builds the environment block every generated Vercel workflow function needs.
+ *
+ * When the build input carries the agent's resolved public route prefix, it
+ * is baked into the function environment under
+ * {@link EVE_PUBLIC_ROUTE_PREFIX_ENV} so callback-URL minting inside the
+ * deployed workflow functions knows the agent's public mount.
  */
-export function createWorkflowFunctionEnvironment(environment?: unknown): Record<string, unknown> {
+export function createWorkflowFunctionEnvironment(
+  input: { environment?: unknown; publicRoutePrefix?: string } = {},
+): Record<string, unknown> {
   const nextEnvironment: Record<string, unknown> = {};
 
-  if (isRecord(environment)) {
-    Object.assign(nextEnvironment, environment);
+  if (isRecord(input.environment)) {
+    Object.assign(nextEnvironment, input.environment);
+  }
+
+  const publicRoutePrefix = normalizePublicRoutePrefix(input.publicRoutePrefix);
+  if (publicRoutePrefix !== undefined) {
+    nextEnvironment[EVE_PUBLIC_ROUTE_PREFIX_ENV] = publicRoutePrefix;
   }
 
   // Reject replay decisions made from an event log that missed a concurrent wake.
@@ -299,6 +315,7 @@ function normalizeVercelOutputPath(path: string): string {
 export async function emitBundledWorkflowFunctionDirectory(input: {
   bundlePath: string;
   pluginPaths?: readonly string[];
+  publicRoutePrefix?: string;
   targetPath: string;
 }): Promise<void> {
   await prepareVercelFunctionDirectory(input.targetPath);
@@ -342,7 +359,9 @@ export async function emitBundledWorkflowFunctionDirectory(input: {
       join(input.targetPath, ".vc-config.json"),
       `${JSON.stringify(
         {
-          environment: createWorkflowFunctionEnvironment(),
+          environment: createWorkflowFunctionEnvironment({
+            publicRoutePrefix: input.publicRoutePrefix,
+          }),
           handler: "index.js",
           launcherType: "Nodejs",
           supportsResponseStreaming: true,

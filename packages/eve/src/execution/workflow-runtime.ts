@@ -14,6 +14,8 @@ import type {
   RunHandle,
   RunInput,
   Runtime,
+  TerminateSessionInput,
+  TerminateSessionResult,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -25,8 +27,10 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  cancelRun,
   getHookByToken,
   getRun,
+  getWorld,
   resumeHook,
   start,
   type Run,
@@ -42,6 +46,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import { walkCauseChain } from "#shared/errors.js";
 import {
   sessionCancelHookToken,
   type TurnCancelPayload,
@@ -174,6 +179,20 @@ export function createWorkflowRuntime(config: {
       return await requestWorkflowTurnCancellation(input);
     },
 
+    async terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult> {
+      try {
+        await cancelRun(await getWorld(), input.sessionId, {
+          cancelReason: input.reason ?? "Session reset by channel",
+        });
+        return { status: "terminated" };
+      } catch (error) {
+        if (isAlreadyTerminalSessionError(error)) {
+          return { status: "already_terminal" };
+        }
+        throw error;
+      }
+    },
+
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
       const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
@@ -247,6 +266,19 @@ function isInactiveCancelTarget(error: unknown): boolean {
     RunExpiredError.is(error) ||
     EntityConflictError.is(error)
   );
+}
+
+function isAlreadyTerminalSessionError(error: unknown): boolean {
+  for (const candidate of walkCauseChain(error)) {
+    if (
+      WorkflowRunNotFoundError.is(candidate) ||
+      RunExpiredError.is(candidate) ||
+      EntityConflictError.is(candidate)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

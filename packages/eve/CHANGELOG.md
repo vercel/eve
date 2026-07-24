@@ -1,5 +1,49 @@
 # eve
 
+## 0.27.5
+
+### Patch Changes
+
+- 1987e12: Add thread-bound session reset helpers to Slack message and interaction contexts, plus targeted reset support for generic Slack event handlers.
+
+## 0.27.4
+
+### Patch Changes
+
+- 5d961f3: Request Vercel CLI's maximum 100-team page instead of following its broken default pagination path.
+- 04d5814: `eve dev` no longer fails at boot with `UNRESOLVED_IMPORT` when a mounted extension (or any dependency) resolves through a `node_modules` above the app root — npm/yarn workspace hoisting, intermediate monorepo levels, and bare `withEve` agent directories whose host app owns the install now materialize in the dev-runtime snapshot.
+- bbba073: The dev TUI supports queueing, steering, and cooperative turn cancellation. Pressing Enter while a turn is running queues the message (up to 5) in a pinned panel directly above the input — one line per message — and the queue coalesces into the next turn's message when the turn ends. Esc steers: it pops the oldest queued message, cancels the running turn cooperatively (`turn.cancelled` → `session.waiting`, keeping the session's context), and submits the popped message as the replacement turn. With nothing queued, Esc twice cancels the turn. Cancellation requests retry while the turn is live, so an Esc that lands in the turn-dispatch window (before the server has armed the turn's cancel hook) is no longer silently lost. Cancelling a turn mid-delegation settles its subagent sections and stops their child streams, so stale subagent output cannot paint into the steered turn. Messages still queued when a turn is interrupted or fails restore into the next prompt's input, and a turn cancelled from outside the prompt (a stale cancel or another client's `/cancel`) restores its submitted message the same way. On exit, the parting line names the server session id (`☰eve  v0.27.0 · session ses_…`) so the conversation can be found again.
+- dfd360f: Custom channel routes can now call `reset()` and `ClientSession` can reset the session that owns a stable continuation token. The next `send()` starts a fresh workflow session and lazily initializes a new session-scoped sandbox instead of reusing prior history or workspace state, and the `eve dev` TUI's `/new` performs that durable reset before clearing its transcript.
+
+## 0.27.3
+
+### Patch Changes
+
+- 8168518: Fix connector-auth and remote-subagent callback URLs returning 404 in multi-agent mode. Generated per-agent Vercel services now bake the agent's public route prefix (`/eve/agents/<name>`) into their workflow function environment via `EVE_PUBLIC_ROUTE_PREFIX`, framework-minted callback URLs prepend it, and the session-callback validator accepts callback URLs mounted behind a route prefix so OAuth redirects and remote-subagent session callbacks reach the deployed agent.
+- fecdaf3: Attach authenticated `uploads.linear.app` images from inbound Linear Agent Session markdown as multimodal file parts while preserving the text fallback for untrusted, failed, or non-image URLs.
+- 25c12d3: Prevent bundler-suffixed CommonJS compatibility variables from suppressing the Node ESM globals that eve bundles need at startup.
+- 1bd0aa4: Preserve underscores in connection tool names shown by Slack typing status indicators.
+- 4d3748d: Keep raw outer workflow failure details in the private session trace instead of copying them into provider logs and Workflow telemetry.
+- 4803dbe: Scope authored resolver hooks to relevant import specifiers and reuse filesystem probes for one build. Repeated extensionless misses now perform at most 19 stats once per plugin instance instead of on every resolution.
+- d76f76b: Refresh session-scoped dynamic tools when an existing production session moves to a new Vercel deployment, so added, removed, and reordered tools use the current build.
+- 45ad5d0: Analyze dynamic tool closure references from the syntax tree so object keys and string contents cannot become invalid runtime captures.
+- fc53a9f: Show the number of discovered authored tools in the human-readable `eve info` output.
+- 1c3123c: Write authored sandbox workspace seed files before running bootstrap across the Vercel, Docker, microsandbox, and just-bash backends, so bootstrap can consume canonical workspace inputs and its outputs remain in the captured template.
+- 7094b4a: Load up to 100 Vercel teams per page and use the authenticated API continuation that matches Vercel's emitted cursor, avoiding repeated-page loops for accounts with many teams. When an outdated CLI lacks the required list options, the TUI can upgrade it with the native upgrader and now retains a concise error if that upgrade fails.
+
+## 0.27.2
+
+### Patch Changes
+
+- 6c433f4: Expose thread-scoped cancellation in Slack message and interaction contexts, plus target-addressed cancellation in `onEvent`, so authored Slack handlers can stop or replace in-flight turns.
+- 835f076: Emit an initial NDJSON whitespace byte when opening a session event stream so clients and proxies receive the response body before the first durable event.
+- f36f143: Added `thread.listParticipants()` for Slack thread routing based on the unique human participants in first-appearance order.
+- eb92ee3: Allow `session.send()` and `session.stream()` callers to disable automatic stream reconnection with `streamReconnectPolicy: { reconnect: false }`, so relays and proxies can own cursor recovery and retry policy.
+- 4133ffc: Slack thread helpers now reuse messages loaded within the same inbound handler, while overlapping `thread.refresh()` calls share one request and failed refreshes preserve the last successful snapshot.
+- ee72db8: Messages posted by the installed Slack app are now ignored before reaching message hooks to prevent self-reply loops.
+- bd4397b: Fixed Slack `threadContext` with `since: "last-agent-reply"` so only replies from the installed app move the context boundary. Replies from other bots remain part of the incremental thread context, are labeled `bot` instead of `agent` in the injected transcript, and their file uploads are now eligible for mention attachment lookback.
+- 64dbe2b: Add actionable authored-module evaluation errors that identify installed packages and distinguish extensionless ESM from missing package output while preserving the original failure as the cause.
+
 ## 0.27.1
 
 ### Patch Changes

@@ -168,6 +168,30 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(idle.screen.snapshot()).not.toContain("☰eve");
   });
 
+  it("names the session in the parting line once the runner reports it", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.setSessionId("ses_0123456789");
+    const prompt = renderer.readPrompt();
+    input.ctrlC();
+    await expect(prompt).rejects.toThrow("Interrupted");
+    renderer.shutdown();
+
+    const lines = screen.snapshot().trimEnd().split("\n");
+    expect(lines.at(-1)).toMatch(/^☰eve {2}v\d+\.\d+\.\d+ · session ses_0123456789$/u);
+
+    // Repeated reports keep the latest id; a renderer that never received
+    // one prints the bare tag.
+    const latest = makeRenderer();
+    latest.renderer.setSessionId("ses_first");
+    latest.renderer.setSessionId("ses_second");
+    const latestPrompt = latest.renderer.readPrompt();
+    latest.input.ctrlC();
+    await expect(latestPrompt).rejects.toThrow("Interrupted");
+    latest.renderer.shutdown();
+    expect(latest.screen.snapshot()).toContain("session ses_second");
+    expect(latest.screen.snapshot()).not.toContain("ses_first");
+  });
+
   it("renders the brand line with the agent name and a tip", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({
@@ -1652,7 +1676,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     }
   });
 
-  it("keeps the prompt in place during a turn with Enter inert, carrying the draft", async () => {
+  it("queues a mid-turn Enter into the pinned panel and drains it as the next prompt", async () => {
     const { screen, input, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const rendering = renderer.renderStream(
@@ -1672,20 +1696,344 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toContain("›");
     });
     input.type("follow-up question");
-    // Enter is inert mid-turn — nothing submits, the draft stays.
+    // Enter mid-turn queues the draft into the panel and clears the buffer.
     input.enter();
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯ follow-up question");
+      expect(screen.snapshot()).toContain("Queue 1/5");
+      expect(screen.snapshot()).toContain("└ follow-up question");
     });
 
     streamController?.close();
     await rendering;
 
-    // The draft seeds the next prompt instead of being lost.
-    const prompt = renderer.readPrompt();
-    expect(screen.snapshot()).toContain("❯ follow-up question");
+    // The runner drains the queue as the next turn's prompt.
+    expect(renderer.takeQueuedPrompt()).toBe("follow-up question");
+    expect(renderer.takeQueuedPrompt()).toBeUndefined();
+    renderer.shutdown();
+  });
+
+  it("pops the oldest queued message on Esc, cancels the turn, and stages the steer prompt", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const escape = async () => {
+      input.send("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    };
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const cancel = vi.fn();
+    const rendering = renderer.renderStream(
+      {
+        cancel,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+    input.type("go north");
     input.enter();
-    expect(await prompt).toBe("follow-up question");
+    input.type("go south");
+    input.enter();
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("Queue 2/5");
+    });
+
+    await escape();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(screen.snapshot()).toContain("Steering — cancelling the running turn…");
+    expect(screen.snapshot()).toContain("1/5 still queued");
+
+    // The server settles the cancelled turn and the stream reaches its boundary.
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
+    await rendering;
+    expect(screen.snapshot()).toContain("Cancelled");
+
+    // The popped message steers; the remaining one stays queued behind it.
+    expect(renderer.takeQueuedPrompt()).toBe("go north");
+    expect(renderer.takeQueuedPrompt()).toBe("go south");
+    renderer.shutdown();
+  });
+
+  it("arms on the first empty-queue Esc and cancels the turn on the second", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const escape = async () => {
+      input.send("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    };
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const cancel = vi.fn();
+    const rendering = renderer.renderStream(
+      {
+        cancel,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+
+    await escape();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(screen.snapshot()).toContain("Press esc again to cancel the turn");
+
+    // Any other key backs out of the armed state.
+    input.left();
+    await escape();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(screen.snapshot()).toContain("Press esc again to cancel the turn");
+
+    await escape();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(screen.snapshot()).toContain("Cancelling turn…");
+
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
+    await rendering;
+    expect(screen.snapshot()).toContain("Cancelled");
+    renderer.shutdown();
+  });
+
+  it("restores the submitted message when the turn is cancelled without an Esc", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "go north", continueSession: true },
+    );
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("│ go north");
+    });
+
+    // A stale cancel from a previous turn (or /cancel from another client)
+    // lands on this turn — no Esc was pressed in this stream.
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
+    await rendering;
+
+    expect(screen.snapshot()).toContain("cancelled from outside this prompt");
+    const prompt = renderer.readPrompt();
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("❯ go north");
+    });
+    input.enter();
+    expect(await prompt).toBe("go north");
+    renderer.shutdown();
+  });
+
+  it("does not restore the message when the user's own Esc cancelled the turn", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const escape = async () => {
+      input.send("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    };
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        cancel: vi.fn(),
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "go north", continueSession: true },
+    );
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("│ go north");
+    });
+
+    await escape();
+    await escape();
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
+    await rendering;
+
+    expect(screen.snapshot()).not.toContain("cancelled from outside this prompt");
+    renderer.shutdown();
+  });
+
+  it("marks drained prompts with the provenance arrow — above for steer, below for queue", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const escape = async () => {
+      input.send("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    };
+    const closedStream = () =>
+      new ReadableStream<AgentTUIStreamEvent>({
+        start(controller) {
+          controller.close();
+        },
+      });
+
+    // Steer: queue a message mid-turn and pop it with Esc.
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const first = renderer.renderStream(
+      {
+        cancel: vi.fn(),
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+    input.type("go north");
+    input.enter();
+    await escape();
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
+    await first;
+
+    const steered = renderer.takeQueuedPrompt();
+    expect(steered).toBe("go north");
+    await renderer.renderStream(
+      { events: closedStream() },
+      { submittedPrompt: steered, continueSession: true },
+    );
+    let lines = screen.snapshot().split("\n");
+    const steerIndex = lines.findIndex((line) => line.includes("│ go north"));
+    expect(lines[steerIndex - 1]?.trim()).toBe("↑");
+
+    // Queue: a message that waited for the natural boundary.
+    let secondController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const second = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            secondController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "another task", continueSession: true },
+    );
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("Working for");
+    });
+    input.type("go south");
+    input.enter();
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("Queue 1/5");
+    });
+    secondController?.close();
+    await second;
+
+    const queued = renderer.takeQueuedPrompt();
+    expect(queued).toBe("go south");
+    await renderer.renderStream(
+      { events: closedStream() },
+      { submittedPrompt: queued, continueSession: true },
+    );
+    lines = screen.snapshot().split("\n");
+    const queueIndex = lines.findIndex((line) => line.includes("│ go south"));
+    expect(lines[queueIndex + 1]?.trim()).toBe("↑");
+
+    // The ordinary typed prompts carry no arrow.
+    const typedIndex = lines.findIndex((line) => line.includes("│ long task"));
+    expect(lines[typedIndex - 1]?.trim()).not.toBe("↑");
+    expect(lines[typedIndex + 1]?.trim()).not.toBe("↑");
+    renderer.shutdown();
+  });
+
+  it("keeps the draft in place when the queue is full", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+
+    for (let index = 1; index <= 5; index += 1) {
+      input.type(`message ${index}`);
+      input.enter();
+    }
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("Queue 5/5");
+      expect(screen.snapshot()).toContain("queue full");
+    });
+
+    input.type("overflow");
+    input.enter();
+    // The sixth message is refused, not swallowed — it stays as the draft.
+    expect(screen.snapshot()).toContain("overflow");
+
+    streamController?.close();
+    await rendering;
+    expect(renderer.takeQueuedPrompt()).toBe(
+      "message 1\n\nmessage 2\n\nmessage 3\n\nmessage 4\n\nmessage 5",
+    );
+    renderer.shutdown();
+  });
+
+  it("restores undrained queued messages into the next prompt's buffer", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const abort = vi.fn();
+    const rendering = renderer.renderStream(
+      {
+        abort,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+    input.type("first");
+    input.enter();
+    input.type("second");
+    input.enter();
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("Queue 2/5");
+    });
+
+    // A client-side interrupt skips the runner's queue drain…
+    input.ctrlC();
+    await rendering;
+    expect(abort).toHaveBeenCalledTimes(1);
+    void streamController;
+
+    // …so the prompt folds the undelivered messages back into the buffer.
+    const prompt = renderer.readPrompt();
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("first");
+      expect(screen.snapshot()).toContain("second");
+    });
+    input.enter();
+    expect(await prompt).toBe("first\n\nsecond");
     renderer.shutdown();
   });
 
