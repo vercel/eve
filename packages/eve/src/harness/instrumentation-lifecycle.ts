@@ -1,0 +1,238 @@
+import type { Telemetry } from "ai";
+
+import { createLogger, formatError } from "#internal/logging.js";
+
+type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
+
+/** Stable eve identity for one actual model attempt. */
+export interface InstrumentationAttemptScope {
+  readonly attemptId: string;
+  readonly attemptIndex: number;
+  readonly functionId?: string;
+  readonly sessionId: string;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}
+
+export interface InstrumentationAttemptStartedEvent {
+  readonly type: "attempt.started";
+  readonly scope: InstrumentationAttemptScope;
+  readonly operation: TelemetryEvent<"onStart">;
+  readonly step: TelemetryEvent<"onStepStart">;
+}
+
+export interface InstrumentationModelCallStartedEvent {
+  readonly type: "model.call.started";
+  readonly id: string;
+  readonly scope: InstrumentationAttemptScope;
+  readonly source: TelemetryEvent<"onLanguageModelCallStart">;
+}
+
+export interface InstrumentationModelCallCompletedEvent {
+  readonly type: "model.call.completed";
+  readonly id: string;
+  readonly scope: InstrumentationAttemptScope;
+  readonly source: TelemetryEvent<"onLanguageModelCallEnd">;
+}
+
+export interface InstrumentationModelCallFailedEvent {
+  readonly type: "model.call.failed";
+  readonly error: unknown;
+  readonly id: string;
+  readonly scope: InstrumentationAttemptScope;
+}
+
+export type InstrumentationModelCallTerminalEvent =
+  | InstrumentationModelCallCompletedEvent
+  | InstrumentationModelCallFailedEvent;
+
+export interface InstrumentationToolCallStartedEvent {
+  readonly type: "tool.call.started";
+  readonly id: string;
+  readonly scope: InstrumentationAttemptScope;
+  readonly source: TelemetryEvent<"onToolExecutionStart">;
+}
+
+export interface InstrumentationToolCallCompletedEvent {
+  readonly type: "tool.call.completed";
+  readonly id: string;
+  readonly scope: InstrumentationAttemptScope;
+  readonly source: TelemetryEvent<"onToolExecutionEnd">;
+}
+
+export interface InstrumentationToolCallFailedEvent {
+  readonly type: "tool.call.failed";
+  readonly error: unknown;
+  readonly id: string;
+  readonly scope: InstrumentationAttemptScope;
+}
+
+export type InstrumentationToolCallTerminalEvent =
+  | InstrumentationToolCallCompletedEvent
+  | InstrumentationToolCallFailedEvent;
+
+export interface RelatedLifecycleHook<TStart, TTerminal> {
+  readonly before?: (event: TStart) => unknown | PromiseLike<unknown>;
+  readonly after?: (event: TTerminal, state: unknown) => void | PromiseLike<void>;
+}
+
+/** Internal provider shape mirrored by the future public hook contract. */
+export interface InstrumentationProviderDefinition {
+  readonly events?: {
+    readonly "model.call"?: RelatedLifecycleHook<
+      InstrumentationModelCallStartedEvent,
+      InstrumentationModelCallTerminalEvent
+    >;
+    readonly "attempt.started"?: (
+      event: InstrumentationAttemptStartedEvent,
+    ) => void | PromiseLike<void>;
+    readonly "tool.call"?: RelatedLifecycleHook<
+      InstrumentationToolCallStartedEvent,
+      InstrumentationToolCallTerminalEvent
+    >;
+  };
+  readonly executionContext?: {
+    runModelCall<T>(id: string, execute: () => PromiseLike<T>): PromiseLike<T>;
+    runToolCall<T>(id: string, execute: () => PromiseLike<T>): PromiseLike<T>;
+  };
+}
+
+export interface InstrumentationRelatedEventMap {
+  readonly "model.call": {
+    readonly start: InstrumentationModelCallStartedEvent;
+    readonly terminal: InstrumentationModelCallTerminalEvent;
+  };
+  readonly "tool.call": {
+    readonly start: InstrumentationToolCallStartedEvent;
+    readonly terminal: InstrumentationToolCallTerminalEvent;
+  };
+}
+
+export type InstrumentationRelatedEventName = keyof InstrumentationRelatedEventMap;
+
+export type InstrumentationPointEvent = InstrumentationAttemptStartedEvent;
+
+/** Provider-neutral hook operations consumed by the AI SDK bridge. */
+export interface InstrumentationHooks {
+  readonly execution: {
+    runModelCall<T>(id: string, execute: () => PromiseLike<T>): PromiseLike<T>;
+    runToolCall<T>(id: string, execute: () => PromiseLike<T>): PromiseLike<T>;
+  };
+  after<TKey extends InstrumentationRelatedEventName>(
+    name: TKey,
+    event: InstrumentationRelatedEventMap[TKey]["terminal"],
+  ): Promise<void>;
+  before<TKey extends InstrumentationRelatedEventName>(
+    name: TKey,
+    event: InstrumentationRelatedEventMap[TKey]["start"],
+  ): Promise<void>;
+  publish(event: InstrumentationPointEvent): Promise<void>;
+}
+
+const log = createLogger("harness.instrumentation-lifecycle");
+
+/** Creates failure-isolated hooks backed by an ordered provider list. */
+export function createInstrumentationHooks(
+  providers: readonly InstrumentationProviderDefinition[],
+): InstrumentationHooks {
+  const relatedState = new WeakMap<InstrumentationAttemptScope, Map<string, unknown>>();
+  const modelAdapters = providers.flatMap((provider) => {
+    const adapter = provider.executionContext;
+    return adapter === undefined
+      ? []
+      : [<T>(id: string, execute: () => PromiseLike<T>) => adapter.runModelCall(id, execute)];
+  });
+  const toolAdapters = providers.flatMap((provider) => {
+    const adapter = provider.executionContext;
+    return adapter === undefined
+      ? []
+      : [<T>(id: string, execute: () => PromiseLike<T>) => adapter.runToolCall(id, execute)];
+  });
+
+  const publish = async (event: InstrumentationPointEvent): Promise<void> => {
+    for (const provider of providers) {
+      const handler = provider.events?.[event.type];
+      if (handler === undefined) continue;
+      try {
+        await (handler as (value: typeof event) => void | PromiseLike<void>)(event);
+      } catch (error) {
+        warn(event.type, error);
+      }
+    }
+  };
+
+  const before = async <TKey extends InstrumentationRelatedEventName>(
+    name: TKey,
+    event: InstrumentationRelatedEventMap[TKey]["start"],
+  ): Promise<void> => {
+    const attemptState = relatedState.get(event.scope) ?? new Map<string, unknown>();
+    relatedState.set(event.scope, attemptState);
+    for (const [providerIndex, provider] of providers.entries()) {
+      const handler = provider.events?.[name]?.before;
+      if (handler === undefined) continue;
+      try {
+        const state = await (handler as (value: typeof event) => unknown)(event);
+        attemptState.set(relatedStateKey(providerIndex, event.id), state);
+      } catch (error) {
+        warn(`${name}.before`, error);
+      }
+    }
+  };
+
+  const after = async <TKey extends InstrumentationRelatedEventName>(
+    name: TKey,
+    event: InstrumentationRelatedEventMap[TKey]["terminal"],
+  ): Promise<void> => {
+    const attemptState = relatedState.get(event.scope);
+    for (const [providerIndex, provider] of providers.entries()) {
+      const handler = provider.events?.[name]?.after;
+      const stateKey = relatedStateKey(providerIndex, event.id);
+      if (handler === undefined || !attemptState?.has(stateKey)) continue;
+      const state = attemptState.get(stateKey);
+      attemptState.delete(stateKey);
+      try {
+        await (handler as (value: typeof event, state: unknown) => void | PromiseLike<void>)(
+          event,
+          state,
+        );
+      } catch (error) {
+        warn(`${name}.after`, error);
+      }
+    }
+  };
+
+  const runWithAdapters = <T>(
+    adapters: readonly (<TResult>(
+      id: string,
+      execute: () => PromiseLike<TResult>,
+    ) => PromiseLike<TResult>)[],
+    id: string,
+    execute: () => PromiseLike<T>,
+  ): PromiseLike<T> => {
+    let run = execute;
+    for (let index = adapters.length - 1; index >= 0; index--) {
+      const adapter = adapters[index]!;
+      const next = run;
+      run = () => adapter(id, next);
+    }
+    return run();
+  };
+
+  const warn = (boundary: string, error: unknown): void => {
+    log.warn("instrumentation provider failed", { boundary, error: formatError(error) });
+  };
+
+  return {
+    after,
+    before,
+    execution: {
+      runModelCall: (id, execute) => runWithAdapters(modelAdapters, id, execute),
+      runToolCall: (id, execute) => runWithAdapters(toolAdapters, id, execute),
+    },
+    publish,
+  };
+}
+
+function relatedStateKey(providerIndex: number, operationId: string): string {
+  return `${providerIndex}:${operationId}`;
+}
