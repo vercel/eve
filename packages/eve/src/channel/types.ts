@@ -43,6 +43,11 @@ export type TerminateSessionResult =
   | { readonly status: "terminated" }
   | { readonly status: "already_terminal" };
 
+/** Result of permanently purging a session's complete workflow run tree. */
+export type DeleteSessionResult =
+  | { readonly status: "absent" }
+  | { readonly status: "deleted"; readonly purgedRunCount: number };
+
 // ---------------------------------------------------------------------------
 // Lineage
 // ---------------------------------------------------------------------------
@@ -397,6 +402,9 @@ export interface Runtime {
 
   /** Terminally retires a session and releases its non-retained continuation hooks. */
   terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult>;
+
+  /** Permanently deletes a session and all descendant workflow-owned state. */
+  deleteSession?(sessionId: string): Promise<DeleteSessionResult>;
 
   /**
    * Delivers a follow-up message to a parked session.

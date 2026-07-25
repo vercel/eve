@@ -1,12 +1,14 @@
 import type { FilePart, UserContent } from "ai";
+import { SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 
+import { EntityConflictError } from "#compiled/@workflow/errors/index.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createJsonMessageRequest, createMockAgent } from "#internal/testing/route-harness.js";
 import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
-import { type AuthFn, none } from "#public/channels/auth.js";
+import { type AuthFn, jwtHmac, type JwtAuthFn, none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs, SendFn, SendOptions, SendPayload } from "#channel/routes.js";
@@ -178,6 +180,42 @@ function cancelRequest(body?: unknown): Request {
         }),
     method: "POST",
   });
+}
+
+function createEveDeleteHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const deleteRoute = channel.routes.find(
+    (r) => r.method === "DELETE" && r.path === "/eve/v1/session/:sessionId",
+  );
+  if (!deleteRoute) throw new Error("No session DELETE route found");
+
+  const agent = createMockAgent();
+  return {
+    deleteSession: agent.deleteSession,
+    async fetch(req?: Request) {
+      const args = attachRouteAgent(
+        {
+          send: vi.fn(),
+          resolveActiveSession: async () => undefined,
+          cancel: vi.fn(),
+          reset: vi.fn(),
+          getSession: vi.fn(),
+          receive: vi.fn() as any,
+          params: { sessionId: "test-session-id" },
+          waitUntil: () => undefined,
+          requestIp: "127.0.0.1",
+        } satisfies RouteHandlerArgs,
+        agent,
+      );
+      return (deleteRoute as any).handler(
+        req ??
+          new Request("https://example.com/eve/v1/session/test-session-id", {
+            method: "DELETE",
+          }),
+        args,
+      );
+    },
+  };
 }
 
 /** Creates a POST handler test harness for the continuation-addressed reset route. */
@@ -1439,6 +1477,99 @@ describe("eveChannel — cancel turn", () => {
       error: "Failed to cancel the turn.",
       ok: false,
     });
+  });
+});
+
+describe("eveChannel — hard delete session", () => {
+  const secret = "test-maintenance-secret-at-least-32-bytes";
+  const internalJwtAuth = jwtHmac({
+    algorithm: "HS256",
+    audiences: ["eve-maintenance"],
+    issuer: "rabbit-studio",
+    secret,
+  });
+
+  async function deleteRequest(): Promise<Request> {
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuer("rabbit-studio")
+      .setAudience("eve-maintenance")
+      .setSubject("rabbit-studio-runtime")
+      .setExpirationTime("5m")
+      .sign(new TextEncoder().encode(secret));
+    return new Request("https://example.com/eve/v1/session/test-session-id", {
+      headers: { authorization: `Bearer ${token}` },
+      method: "DELETE",
+    });
+  }
+
+  it("returns 204 for an authenticated deleted or absent session", async () => {
+    const handler = createEveDeleteHandler({
+      auth: () => {
+        throw new Error("Turn-context auth must not run for maintenance.");
+      },
+      maintenanceAuth: internalJwtAuth,
+    });
+
+    const response = await handler.fetch(await deleteRequest());
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(handler.deleteSession).toHaveBeenCalledWith("test-session-id");
+  });
+
+  it("does not expose deletion without a dedicated built-in JWT policy", async () => {
+    const forgedJwtAuth = Object.assign(none(), {
+      __eveBuiltInJwtAuth: undefined as never,
+    }) satisfies JwtAuthFn;
+    const handler = createEveDeleteHandler({
+      auth: none(),
+      maintenanceAuth: forgedJwtAuth,
+    });
+
+    const response = await handler.fetch();
+
+    expect(response.status).toBe(501);
+    expect(handler.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the maintenance JWT is missing", async () => {
+    const handler = createEveDeleteHandler({
+      auth: none(),
+      maintenanceAuth: internalJwtAuth,
+    });
+
+    const response = await handler.fetch();
+
+    expect(response.status).toBe(401);
+    expect(handler.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("returns retryable 409 while the run tree is still active", async () => {
+    const handler = createEveDeleteHandler({
+      auth: none(),
+      maintenanceAuth: internalJwtAuth,
+    });
+    handler.deleteSession.mockRejectedValue(
+      new EntityConflictError("Workflow run tree is still active"),
+    );
+
+    const response = await handler.fetch(await deleteRequest());
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBe("1");
+  });
+
+  it("does not infer a retryable conflict from an error message", async () => {
+    const handler = createEveDeleteHandler({
+      auth: none(),
+      maintenanceAuth: internalJwtAuth,
+    });
+    handler.deleteSession.mockRejectedValue(new Error("Workflow run tree is still active"));
+
+    const response = await handler.fetch(await deleteRequest());
+
+    expect(response.status).toBe(500);
   });
 });
 

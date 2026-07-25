@@ -20,6 +20,7 @@ export interface MockAgent extends Agent {
   readonly cancelTurn: Mock;
   readonly run: Mock;
   readonly deliver: Mock;
+  readonly deleteSession: Mock;
   readonly getEventStream: Mock;
 }
 
@@ -37,6 +38,7 @@ export function createMockAgent(): MockAgent {
   return {
     cancelTurn: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
     deliver: vi.fn().mockResolvedValue(undefined),
+    deleteSession: vi.fn().mockResolvedValue({ purgedRunCount: 1, status: "deleted" }),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
     run: vi.fn().mockResolvedValue({
       continuationToken: "http:test",

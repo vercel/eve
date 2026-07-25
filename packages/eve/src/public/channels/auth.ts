@@ -496,6 +496,34 @@ export type AuthFn<TEvent = Request> = (
   event: TEvent,
 ) => SessionAuthContext | null | undefined | Promise<SessionAuthContext | null | undefined>;
 
+const JWT_AUTH_FN_SYMBOL = Symbol("eve.channels.auth.jwt");
+
+/**
+ * A route authenticator created by Eve's built-in JWT verifiers.
+ *
+ * The runtime brand prevents maintenance-only routes from accepting a custom
+ * callback that merely returns JWT-looking principal metadata.
+ */
+export type JwtAuthFn = AuthFn<Request> & {
+  readonly __eveBuiltInJwtAuth: never;
+};
+
+/** @internal */
+export function isJwtAuthFn(fn: AuthFn<Request>): fn is JwtAuthFn {
+  return (
+    (
+      fn as AuthFn<Request> & {
+        readonly [JWT_AUTH_FN_SYMBOL]?: boolean;
+      }
+    )[JWT_AUTH_FN_SYMBOL] === true
+  );
+}
+
+function markJwtAuthFn(fn: AuthFn<Request>): JwtAuthFn {
+  Object.defineProperty(fn, JWT_AUTH_FN_SYMBOL, { value: true });
+  return fn as JwtAuthFn;
+}
+
 /**
  * Symbol-keyed property carrying the `www-authenticate` challenges an
  * {@link AuthFn} would satisfy, attached via {@link withAuthChallenges}.
@@ -1067,14 +1095,16 @@ export function httpBasic(
  * {@link verifyJwtHmac}. Declares a `Bearer` {@link withAuthChallenges}
  * challenge for {@link routeAuth}'s 401.
  */
-export function jwtHmac(config: VerifyJwtHmacConfig): AuthFn<Request> {
-  return withAuthChallenges(
-    async (request) => {
-      const token = extractBearerToken(request.headers.get("authorization"));
-      const result = await verifyJwtHmac(token, config);
-      return result.ok ? result.sessionAuth : null;
-    },
-    [{ scheme: "Bearer" }],
+export function jwtHmac(config: VerifyJwtHmacConfig): JwtAuthFn {
+  return markJwtAuthFn(
+    withAuthChallenges(
+      async (request) => {
+        const token = extractBearerToken(request.headers.get("authorization"));
+        const result = await verifyJwtHmac(token, config);
+        return result.ok ? result.sessionAuth : null;
+      },
+      [{ scheme: "Bearer" }],
+    ),
   );
 }
 
@@ -1083,14 +1113,16 @@ export function jwtHmac(config: VerifyJwtHmacConfig): AuthFn<Request> {
  * {@link verifyJwtEcdsa}. Declares a `Bearer` {@link withAuthChallenges}
  * challenge for {@link routeAuth}'s 401.
  */
-export function jwtEcdsa(config: VerifyJwtEcdsaConfig): AuthFn<Request> {
-  return withAuthChallenges(
-    async (request) => {
-      const token = extractBearerToken(request.headers.get("authorization"));
-      const result = await verifyJwtEcdsa(token, config);
-      return result.ok ? result.sessionAuth : null;
-    },
-    [{ scheme: "Bearer" }],
+export function jwtEcdsa(config: VerifyJwtEcdsaConfig): JwtAuthFn {
+  return markJwtAuthFn(
+    withAuthChallenges(
+      async (request) => {
+        const token = extractBearerToken(request.headers.get("authorization"));
+        const result = await verifyJwtEcdsa(token, config);
+        return result.ok ? result.sessionAuth : null;
+      },
+      [{ scheme: "Bearer" }],
+    ),
   );
 }
 
