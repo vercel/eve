@@ -28,11 +28,7 @@ interface FollowStreamInput {
   readonly endAtTail?: boolean;
 }
 
-/**
- * Configuration for one connection open. `requestTailIndex` asks the server
- * to report the durable tail index on the response; connections that do not
- * need the bound skip the lookup it costs server-side.
- */
+/** One connection open; `requestTailIndex` asks the server to report the durable tail index. */
 interface OpenStreamInput extends FollowStreamInput {
   readonly requestTailIndex?: boolean;
 }
@@ -46,9 +42,9 @@ interface OpenStreamInput extends FollowStreamInput {
  * boundary handling. Negative tail-relative cursors use one connection because
  * they cannot be advanced safely.
  *
- * With `endAtTail`, the first connection's `x-eve-stream-tail-index` header
- * fixes the bound: the iterator yields events until the cursor passes that
- * tail, reconnecting as needed, then returns instead of following.
+ * With `endAtTail`, the first connection fixes the bound: the iterator
+ * yields events until the cursor passes that tail, reconnecting as needed,
+ * then returns instead of following.
  */
 export async function* followStreamIterable(
   input: FollowStreamInput,
@@ -136,11 +132,7 @@ export async function* followStreamIterable(
   }
 }
 
-/**
- * One opened stream connection: the response body plus the durable tail
- * index reported by the `x-eve-stream-tail-index` response header, when
- * present and well-formed.
- */
+/** An opened connection: the response body plus the tail index from the response header, if any. */
 interface OpenedStream {
   readonly body: ReadableStream<Uint8Array>;
   readonly tailIndex: number | undefined;

@@ -229,10 +229,9 @@ export class ClientSession {
    * one connection. Negative indices read relative to the current tail on one connection
    * and do not advance the stored absolute cursor.
    *
-   * Pass `endAtTail` for a bounded read: the iterator yields events up to the
-   * durable tail observed when the stream opens, then returns instead of
-   * following the live stream. The stored cursor still advances past the
-   * consumed events.
+   * Pass `endAtTail` for a bounded read: yields events up to the durable
+   * tail observed when the stream opens, then returns instead of following.
+   * The stored cursor still advances past the consumed events.
    *
    * @throws {Error} If the session has no session ID (no message has been sent
    *   yet), or if `endAtTail` is combined with a negative `startIndex`.

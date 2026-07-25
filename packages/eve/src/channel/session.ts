@@ -32,9 +32,7 @@ export interface Session {
   }): Promise<ReadableStream<HandleMessageStreamEvent>>;
   /**
    * Resolves the durable tail of the event stream: the zero-based index of
-   * the last event recorded so far, or `-1` before the first event. Use it
-   * to bound a read at the tail you observed instead of following the live
-   * stream. Costs one stream-info lookup per call.
+   * the last recorded event, or `-1` before the first.
    */
   getStreamTailIndex(): Promise<number>;
 }

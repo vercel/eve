@@ -429,13 +429,9 @@ export interface Runtime {
 
   /**
    * Resolves the durable tail of a session's event stream: the zero-based
-   * index of the last event recorded so far, or `-1` before the first event.
-   *
-   * Callers use it to bound a read — consume events until the cursor passes
-   * the observed tail, then stop instead of following the live stream — and
-   * to resolve a tail-relative position into an absolute cursor. It costs one
-   * stream-info lookup, so the framework HTTP session-stream route only
-   * resolves it when a request opts in with `includeTailIndex`.
+   * index of the last recorded event, or `-1` before the first. Callers use
+   * it to bound a read at the tail they observed instead of following the
+   * live stream.
    */
   getStreamTailIndex(sessionId: string): Promise<number>;
 }

@@ -443,9 +443,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         try {
           const session = getSession(sessionId);
 
-          // Resolving the tail costs one stream-info lookup, so it is
-          // opt-in: only requests that bound a read pay for it. Resolved
-          // before the stream opens; the bound is the tail at open time.
+          // The tail lookup is opt-in: only requests that bound a read pay for it.
           const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
           const events = await session.getEventStream({ startIndex });
 
