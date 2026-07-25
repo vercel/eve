@@ -47,6 +47,24 @@ export default defineAgent({
 
 `description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out.
 
+To omit an unavailable or unnecessary subagent, export `disableSubagent()`
+from its config module. This works for both single-file and directory
+subagents, and is useful for environment-specific configuration:
+
+```ts title="agent/subagents/researcher.ts"
+import { defineRemoteAgent, disableSubagent } from "eve";
+
+export default process.env.RESEARCHER_URL
+  ? defineRemoteAgent({
+      description: "Investigate ambiguous questions before the parent agent responds.",
+      url: process.env.RESEARCHER_URL,
+    })
+  : disableSubagent();
+```
+
+The disabled subagent is omitted from the compiled agent graph and does not
+appear in the parent agent's capability surface.
+
 Minimum files:
 
 ```text

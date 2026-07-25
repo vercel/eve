@@ -10,6 +10,7 @@ import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { experimental_workflow } from "#public/definitions/tool.js";
+import { disableSubagent } from "#public/definitions/subagent.js";
 
 const mocks = vi.hoisted(() => ({
   compileAgentConfig: vi.fn(),
@@ -92,6 +93,41 @@ describe("compileAgentManifest", () => {
     const compiled = await compileAgentManifest(manifest);
 
     expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
+  });
+
+  it("omits a subagent that exports disableSubagent()", async () => {
+    const disabledManifest = createAgentSourceManifest({
+      agentId: "optional",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "subagents/optional.ts",
+      }),
+    });
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      subagents: [
+        createLocalSubagentSourceRef({
+          entryPath: "/app/agent/subagents/optional.ts",
+          logicalPath: "subagents/optional.ts",
+          manifest: disabledManifest,
+          rootPath: "/app/agent",
+          subagentId: "optional",
+        }),
+      ],
+    });
+
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue(disableSubagent());
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.remoteAgents).toEqual([]);
+    expect(compiled.subagentEdges).toEqual([]);
+    expect(compiled.subagents).toEqual([]);
+    expect(mocks.compileAgentConfig).toHaveBeenCalledOnce();
   });
 });
 

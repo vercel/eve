@@ -23,6 +23,7 @@ import {
 import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
+import { isDisabledSubagentSentinel } from "#public/definitions/subagent.js";
 
 /**
  * Callback the subagent compiler uses to recurse into the per-node
@@ -78,6 +79,10 @@ export async function compileSubagentGraph(input: {
       continue;
     }
 
+    if (compiledSubagent.kind === "disabled") {
+      continue;
+    }
+
     compiledNodes.push(compiledSubagent.node, ...compiledSubagent.descendants.nodes);
     compiledEdges.push(
       {
@@ -116,6 +121,9 @@ async function compileSubagentDefinition(input: {
       readonly kind: "remote";
       readonly node: CompiledRemoteAgentNode;
     }
+  | {
+      readonly kind: "disabled";
+    }
 > {
   const configModule = input.source.manifest.configModule;
 
@@ -131,6 +139,10 @@ async function compileSubagentDefinition(input: {
     kind: "subagent config",
     source: configModule,
   });
+
+  if (isDisabledSubagentSentinel(definition)) {
+    return { kind: "disabled" };
+  }
 
   if (readAgentDefinitionKind(definition) === "remote") {
     return {

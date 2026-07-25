@@ -22,3 +22,8 @@ export {
   type RemoteAgentUrl,
   defineRemoteAgent,
 } from "#public/definitions/remote-agent.js";
+export {
+  type DisabledSubagentSentinel,
+  disableSubagent,
+  isDisabledSubagentSentinel,
+} from "#public/definitions/subagent.js";

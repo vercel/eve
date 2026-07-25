@@ -58,6 +58,7 @@ Every authored directory has a typed helper. Import each from the matching subpa
 | Helper                                                                                                              | Subpath                               | Authored Location                                |
 | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
 | `defineAgent(...)`                                                                                                  | `eve`                                 | `agent.ts`, `subagents/<id>/agent.ts`            |
+| `defineRemoteAgent(...)`, `disableSubagent()`                                                                       | `eve`                                 | `subagents/<id>.ts` or `<id>/agent.ts`           |
 | `defineInstructions(...)`                                                                                           | `eve/instructions`                    | `instructions.ts` (or `instructions.md`)         |
 | `defineTool(...)`, `defineBashTool(...)`, `defineReadFileTool(...)`, `defineWriteFileTool(...)`, `disableTool(...)` | `eve/tools`                           | `tools/<name>.ts`                                |
 | `defineSkill(...)`, `getSkill(...)`                                                                                 | `eve/skills`                          | `skills/<name>.ts` (or `skills/<name>.md`)       |
