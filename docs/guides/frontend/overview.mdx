@@ -259,6 +259,25 @@ For multiple chat threads, keep one saved event log and session cursor per threa
 
 If the user can refresh or navigate immediately after pressing send, create your app-level chat row and store the pending user message before calling `send()`. After the request starts, persist the session state as soon as it contains a `sessionId`, then reconnect an interrupted in-flight turn with `session.stream({ startIndex: savedEvents.length })` from the lower-level client.
 
+### Exact-mirror invariant
+
+`startIndex: savedEvents.length` assumes your saved log is an **exact 1:1 mirror** of the events your client received: lossless, in order, and without duplicates. The stream cursor is an absolute event count, not a logical message id.
+
+If one persistence call fails after you already advanced your UI, or you save a subset of events, the cursor drifts. The next reconnect replays events your app already consumed. Treat persistence as part of the durability contract: make client-side storage idempotent the same way server-side tool steps must be idempotent when a workflow step re-runs.
+
+### Event identity for reconciliation
+
+Turn-scoped content events carry `data.turnId` and `data.sequence`. Replays serve recorded events verbatim — eve preserves the original `meta.at` timestamp on replay rather than inventing new ones. Use `(turnId, sequence)` (and `type` when needed) to deduplicate replays safely.
+
+Caveats when building a dedup key:
+
+- `subagent.completed` carries `callId` but no `turnId`.
+- `session.waiting` carries neither `turnId` nor `sequence`, and is content-identical across turns (it only carries the next `continuationToken`).
+
+### Cumulative delta storage
+
+`message.appended` and `reasoning.appended` carry both the incremental delta and the cumulative text so far (`messageSoFar` / `reasoningSoFar`). Persisting every raw append event grows storage roughly with the square of reply length per turn. Reasoning models emit many more deltas than models with empty or summarized reasoning, which can push naively persisted logs past transport limits (for example, Next.js Server Actions' default body size). Prefer projecting to finalized blocks (`message.completed`, `reasoning.completed`) for long-term storage when you do not need incremental replay fidelity.
+
 ## Custom hosts and headers
 
 Pass `host` when the eve server isn't same-origin, and pass `auth` or `headers` when the channel needs credentials. Function values are re-resolved before every HTTP request, reconnects included:
