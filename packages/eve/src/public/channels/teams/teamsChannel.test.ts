@@ -34,6 +34,7 @@ async function firePost(
     continuationToken: "TOKEN",
     cancel: async () => ({ status: "no_active_turn" as const }),
     getEventStream: async () => new ReadableStream(),
+    getStreamTailIndex: async () => -1,
     id: "SESSION",
   }));
   const waitUntil = vi.fn();
@@ -329,6 +330,7 @@ describe("teamsChannel", () => {
       continuationToken: "TOKEN",
       cancel: async () => ({ status: "no_active_turn" as const }),
       getEventStream: async () => new ReadableStream(),
+      getStreamTailIndex: async () => -1,
       id: "SESSION",
     }));
 

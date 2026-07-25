@@ -225,6 +225,17 @@ export function createWorkflowRuntime(config: {
       );
     },
 
+    async getStreamTailIndex(sessionId: string): Promise<number> {
+      // getTailIndex() reads the stream-info record; the readable itself is
+      // never consumed. Cancel it so the unread source does not linger.
+      const readable = getRun(sessionId).getReadable();
+      try {
+        return await readable.getTailIndex();
+      } finally {
+        await readable.cancel().catch(() => {});
+      }
+    },
+
     async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
       try {
         const hook = await getHookByToken(continuationToken);

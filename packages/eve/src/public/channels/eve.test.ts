@@ -67,6 +67,9 @@ function createEveCreateHandler(input: EveChannelInput) {
     async getEventStream() {
       return new ReadableStream();
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   } satisfies ChannelSession);
 
   return {
@@ -107,6 +110,9 @@ function createEveContinueHandler(input: EveChannelInput) {
     },
     async getEventStream() {
       return new ReadableStream();
+    },
+    async getStreamTailIndex() {
+      return -1;
     },
   };
 
@@ -229,15 +235,18 @@ function createEveStreamHandler(input: EveChannelInput) {
   if (!streamRoute) throw new Error("No session stream GET route found");
 
   const getEventStream = vi.fn().mockResolvedValue(new ReadableStream());
+  const getStreamTailIndex = vi.fn().mockResolvedValue(-1);
   const mockGetSession = vi.fn().mockReturnValue({
     cancel: vi.fn(),
     continuationToken: "eve:test",
     getEventStream,
+    getStreamTailIndex,
     id: "test-session-id",
   } satisfies ChannelSession);
 
   return {
     getEventStream,
+    getStreamTailIndex,
     async fetch(url: string) {
       const args: RouteHandlerArgs = {
         send: vi.fn(),
@@ -456,6 +465,28 @@ describe("eveChannel — stream cursor", () => {
       expect(handler.getEventStream).not.toHaveBeenCalled();
     },
   );
+
+  it("omits the tail index by default without paying for the lookup", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
+    expect(handler.getStreamTailIndex).not.toHaveBeenCalled();
+  });
+
+  it("reports the durable tail index when the request opts in", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockResolvedValueOnce(41);
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+  });
 });
 
 describe("eveChannel — onMessage", () => {

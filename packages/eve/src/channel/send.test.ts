@@ -22,6 +22,7 @@ function createRuntime(deliverError: unknown): Runtime {
     run: vi.fn().mockResolvedValue(createMockRunHandle()),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
     terminateSession: vi.fn(),
+    getStreamTailIndex: vi.fn().mockResolvedValue(-1),
   };
 }
 
@@ -85,6 +86,7 @@ describe("createSendFn", () => {
       run: vi.fn().mockResolvedValue(createMockRunHandle()),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
       terminateSession: vi.fn(),
+      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     };
 
     const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test");
@@ -119,6 +121,7 @@ describe("createSendFn", () => {
       run: vi.fn().mockResolvedValue(createMockRunHandle()),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
       terminateSession: vi.fn(),
+      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     };
 
     const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test", {
@@ -148,6 +151,7 @@ describe("createSendFn", () => {
       run: vi.fn().mockResolvedValue(createMockRunHandle()),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
       terminateSession: vi.fn(),
+      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     };
 
     const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test");

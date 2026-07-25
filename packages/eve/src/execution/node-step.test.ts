@@ -224,6 +224,9 @@ function createNoopRuntime(): Runtime {
       .fn()
       .mockRejectedValue(new Error("runtime.getEventStream should not be called in this test")),
     terminateSession: vi.fn(),
+    getStreamTailIndex: vi
+      .fn()
+      .mockRejectedValue(new Error("runtime.getStreamTailIndex should not be called in this test")),
   };
 }
 
