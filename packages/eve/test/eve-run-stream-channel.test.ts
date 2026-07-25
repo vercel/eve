@@ -185,7 +185,9 @@ function createArgs(input: {
 }): RouteHandlerArgs {
   return {
     send: vi.fn(),
+    resolveActiveSession: async () => undefined,
     cancel: vi.fn(),
+    reset: vi.fn(),
     getSession: input.getSession,
     receive: vi.fn() as any,
     params: input.params,

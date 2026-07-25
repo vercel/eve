@@ -15,12 +15,16 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 
 const getHookByTokenMock = vi.fn();
 const getRunMock = vi.fn();
+const getWorldMock = vi.fn();
 const resumeHookMock = vi.fn();
+const cancelRunMock = vi.fn();
 const startMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+  cancelRun: (...args: unknown[]) => cancelRunMock(...args),
   getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
   getRun: (...args: unknown[]) => getRunMock(...args),
+  getWorld: (...args: unknown[]) => getWorldMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
 }));
@@ -32,7 +36,9 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 afterEach(() => {
   getHookByTokenMock.mockReset();
   getRunMock.mockReset();
+  getWorldMock.mockReset();
   resumeHookMock.mockReset();
+  cancelRunMock.mockReset();
   startMock.mockReset();
   vi.mocked(getCompiledRuntimeAgentBundle).mockReset();
   vi.unstubAllEnvs();
@@ -180,6 +186,62 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     resumeHookMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).rejects.toBe(failure);
+  });
+});
+
+describe("createWorkflowRuntime#terminateSession", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("cancels the whole workflow run with the supplied reason", async () => {
+    const world = {};
+    getWorldMock.mockResolvedValue(world);
+    cancelRunMock.mockResolvedValue(undefined);
+
+    await expect(
+      buildRuntime().terminateSession({ reason: "User requested /new", sessionId: "session-1" }),
+    ).resolves.toEqual({ status: "terminated" });
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "session-1", {
+      cancelReason: "User requested /new",
+    });
+  });
+
+  it("uses a safe default terminal reason", async () => {
+    const world = {};
+    getWorldMock.mockResolvedValue(world);
+    cancelRunMock.mockResolvedValue(undefined);
+
+    await buildRuntime().terminateSession({ sessionId: "session-1" });
+
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "session-1", {
+      cancelReason: "Session reset by channel",
+    });
+  });
+
+  it("normalizes expected terminal races", async () => {
+    const { EntityConflictError, RunExpiredError, WorkflowRunNotFoundError } =
+      await import("#compiled/@workflow/errors/index.js");
+    getWorldMock.mockResolvedValue({});
+
+    for (const cause of [
+      new EntityConflictError("run is terminal"),
+      new RunExpiredError("run is terminal"),
+      new WorkflowRunNotFoundError("session-1"),
+    ]) {
+      cancelRunMock.mockRejectedValueOnce(new Error("Failed to cancel run", { cause }));
+      await expect(buildRuntime().terminateSession({ sessionId: "session-1" })).resolves.toEqual({
+        status: "already_terminal",
+      });
+    }
+  });
+
+  it("propagates unexpected World failures", async () => {
+    const failure = new Error("World unavailable");
+    getWorldMock.mockResolvedValue({});
+    cancelRunMock.mockRejectedValue(failure);
+
+    await expect(buildRuntime().terminateSession({ sessionId: "session-1" })).rejects.toBe(failure);
   });
 });
 

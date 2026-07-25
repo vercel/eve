@@ -29,14 +29,32 @@ describe("Browser Use connection setup", () => {
   });
 });
 
-describe("Kernel connection setup", () => {
-  it("uses the named Connect connector created for Kernel's MCP service", () => {
+describe("Kernel extension setup", () => {
+  it("uses Kernel's eve extension with Vercel Connect", () => {
     const integration = getIntegration("kernel")!;
-    const setup = buildConnectionSetup(integration);
 
-    expect(setup.variants["mcp:user"]).toContain('auth: connect("mcp.onkernel.com/kernel")');
-    expect(buildConnectionConfigure(integration)).toContain(
-      "vercel connect create mcp.onkernel.com --name kernel",
+    expect(integration.type).toBe("extension");
+    expect(integration.install).toContain("pnpm add @onkernel/eve-extension");
+    expect(integration.quickStart).toContain(
+      'kernel({ connect: "mcp.onkernel.com/eve-extension" })',
     );
+    expect(integration.configure).toContain("KERNEL_API_KEY");
+  });
+});
+
+describe("Vercel MCP connection setup", () => {
+  it("uses Vercel's MCP endpoint and Connect service", () => {
+    const integration = getIntegration("vercel")!;
+    const quickStart = buildConnectionSetup(integration).variants["mcp:user"];
+
+    expect(quickStart).toContain('url: "https://mcp.vercel.com"');
+    expect(quickStart).toContain('auth: connect("vercel")');
+    const configure = buildConnectionConfigure(integration);
+    expect(configure).toContain("vercel connect create vercel");
+    expect(configure).not.toContain("vercel connect attach");
+    expect(configure.indexOf("vercel link")).toBeLessThan(
+      configure.indexOf("vercel connect create vercel"),
+    );
+    expect(configure).toContain("select None");
   });
 });

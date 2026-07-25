@@ -98,15 +98,39 @@ import {
 import type { detectProjectIdentity } from "#setup/project-resolution.js";
 import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
 import type { DevDiagnostics } from "../diagnostics.js";
+import type { CommandLifecycle } from "../../shutdown.js";
 
 export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
+/**
+ * Cooperative-cancel retry cadence: 8 × 250ms covers the turn-dispatch
+ * window (locally the cancel hook is claimed well under a second after the
+ * send is accepted) without hammering the cancel route.
+ */
+const turnCancelRetryDelayMs = 250;
+const turnCancelAttempts = 8;
+
+async function delayMs(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
 
 export type AgentTUIStreamResult = {
   events: AsyncIterable<AgentTUIStreamEvent> | ReadableStream<AgentTUIStreamEvent>;
   abort?: () => void;
+  /**
+   * Requests cooperative server-side cancellation of the streaming turn
+   * (Esc Esc, or an Esc steer pop). Unlike {@link abort} — which drops the
+   * client stream and forces a fresh session — the server settles the turn
+   * as `turn.cancelled` → `session.waiting`, so the stream reaches its
+   * boundary normally and the session keeps its context. Best-effort and
+   * idempotent; scoped to the turn the user observed when its id is known.
+   */
+  cancel?: () => void;
   turnState?: AgentTUITurnState;
 };
 
@@ -129,6 +153,7 @@ export type AgentTUIStreamEvent =
   | { type: "tool-error"; toolCallId: string; errorText: string }
   | { type: "tool-rejected"; toolCallId: string; reason: string }
   | { type: "error"; errorText: string; hint?: string; detail?: string }
+  | { type: "turn-cancelled" }
   | { type: "finish"; usage?: AgentTUIStreamUsage };
 
 export type AgentTUITurnState = {
@@ -137,6 +162,10 @@ export type AgentTUITurnState = {
   pendingApprovals: AgentTUIToolApprovalRequest[];
   pendingQuestions: InputRequest[];
   sawSessionFailure: boolean;
+  /** Id of the streaming turn, once `turn.started` names it. Scopes cancels. */
+  turnId?: string;
+  /** True while a cooperative-cancel request loop is running for this turn. */
+  cancelInFlight?: boolean;
 };
 
 export type AgentTUISessionOptions = {
@@ -229,6 +258,24 @@ export type AgentTUIRenderer = {
   renderCommandResult?(text: string): void;
   readonly setupFlow?: SetupFlowRenderer;
   readPrompt?(options?: AgentTUISessionOptions): Promise<string | undefined>;
+  /**
+   * Consumes the next prompt produced by mid-turn input: the Esc-popped
+   * steering message when one is staged, otherwise every message queued
+   * during the turn coalesced into one. The runner calls this at a clean
+   * turn boundary and submits the result as the next turn without reading
+   * the prompt. Optional — renderers without mid-turn input never queue.
+   */
+  takeQueuedPrompt?(): string | undefined;
+  /**
+   * Reports the server session id backing the conversation — pushed by the
+   * runner once a send is accepted, and overwritten when a later session's
+   * turn is accepted. Deliberately sticky across `/new` and interrupt
+   * recovery: the terminal renderer echoes the LAST session this TUI talked
+   * to in the parting line on exit, so an interrupted conversation (whose
+   * replacement session never ran a turn) can still be found again
+   * (`eve logs`, the session store). Optional.
+   */
+  setSessionId?(sessionId: string): void;
   readToolApproval?(
     request: AgentTUIToolApprovalRequest,
     options?: AgentTUISessionOptions,
@@ -301,6 +348,8 @@ export type AgentTUIRenderer = {
    * lifecycle ends.
    */
   shutdown?(): void;
+  requestInterrupt?(): void;
+  exitRequested?(): boolean;
 };
 
 export interface PromptCommandHandlerContext {
@@ -390,6 +439,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   onBootProgress?: DevBootProgressReporter;
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
   diagnostics?: DevDiagnostics;
+  lifecycle?: CommandLifecycle;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -496,10 +546,12 @@ export class EveTUIRunner {
    */
   #sessionFailed = false;
   #unsubscribeDevelopmentSandboxLogs?: () => void;
+  readonly #lifecycle?: CommandLifecycle;
 
   constructor(options: EveTUIRunnerOptions) {
     this.#session = options.session;
     if (options.client !== undefined) this.#client = options.client;
+    if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     this.#renderer = createRenderer(options);
     const pumpOptions: SubagentPumpOptions = { formatActionResultError };
     if (this.#client !== undefined) pumpOptions.client = this.#client;
@@ -620,9 +672,13 @@ export class EveTUIRunner {
   }
 
   async run() {
+    const onStop = () => this.#renderer.requestInterrupt?.();
+    if (this.#lifecycle?.signal.aborted === true) onStop();
+    else this.#lifecycle?.signal.addEventListener("abort", onStop, { once: true });
     try {
       await this.#run();
     } finally {
+      this.#lifecycle?.signal.removeEventListener("abort", onStop);
       this.#disposed = true;
       this.#authProbeAbort.abort();
       this.#subagentPump.abortAll();
@@ -677,6 +733,9 @@ export class EveTUIRunner {
     }
 
     while (true) {
+      if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
+        return;
+      }
       if (!streamWithoutPrompt) {
         if (prompt == null) {
           if (!this.#renderer.readPrompt) {
@@ -717,11 +776,15 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "new") {
-          this.#startNewSession();
+          if (!(await this.#resetCurrentSession())) {
+            pendingInputResponses = undefined;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
-          this.#renderer.reset?.();
           continue;
         }
 
@@ -765,6 +828,12 @@ export class EveTUIRunner {
         prompt: streamWithoutPrompt ? undefined : prompt,
         inputResponses: pendingInputResponses,
       });
+      // The session id becomes known once the send is accepted; keep the
+      // renderer's copy fresh so the parting line can name the session.
+      const acceptedSessionId = this.#session.state.sessionId;
+      if (acceptedSessionId !== undefined) {
+        this.#renderer.setSessionId?.(acceptedSessionId);
+      }
       let submittedPrompt = prompt;
       let respondedToInputRequest = false;
 
@@ -878,6 +947,19 @@ export class EveTUIRunner {
       pendingInputResponses = undefined;
       prompt = undefined;
 
+      // A staged Esc steer message, or messages queued during the turn,
+      // submit immediately as the next turn — but only across a clean turn
+      // boundary. A failed session or a lost stream keeps them; the renderer
+      // restores them into the next prompt's editable buffer instead of
+      // firing them into a session whose state the user hasn't seen.
+      const boundaryEvent = result.turnState?.boundaryEvent;
+      if (
+        !this.#sessionFailed &&
+        (boundaryEvent === "session.waiting" || boundaryEvent === "session.completed")
+      ) {
+        prompt = this.#renderer.takeQueuedPrompt?.();
+      }
+
       // The session ended terminally this turn (session.failed, a dispatch
       // failure, or a user interrupt). Replace it with a fresh one so the
       // next prompt isn't sent into a dead session, but keep the transcript
@@ -919,6 +1001,20 @@ export class EveTUIRunner {
       this.#session = this.#client.session();
     }
     this.#runtimeArtifacts?.clear();
+  }
+
+  /** Resets the durable owner before clearing the local conversation view. */
+  async #resetCurrentSession(): Promise<boolean> {
+    try {
+      await this.#session.reset();
+    } catch (error) {
+      this.#renderer.renderNotice?.(`Couldn't reset the session: ${toErrorMessage(error)}`);
+      return false;
+    }
+
+    this.#startNewSession();
+    this.#renderer.reset?.();
+    return true;
   }
 
   async #readPromptWithIdleRefresh(options: AgentTUISessionOptions): Promise<string | undefined> {
@@ -1032,6 +1128,49 @@ export class EveTUIRunner {
   }
 
   /**
+   * Requests cooperative cancellation of the streaming turn and retries
+   * while the turn stays live. An Esc that lands in the dispatch window —
+   * after the turn was sent but before the turn workflow claims its cancel
+   * hook (i.e. before `turn.started` reaches the client) — resolves as a
+   * benign `no_active_turn` and would otherwise be silently lost, leaving
+   * the TUI showing "Cancelling…" while the turn runs to completion.
+   * Retrying until the stream reaches its boundary closes that window.
+   *
+   * Once `turn.started` names the turn, each retry carries its id, so a
+   * GUARDED retry that outlives the boundary is a benign no-op. An
+   * UNGUARDED attempt (turnId not yet known) has a residual race: if this
+   * turn's boundary, the queue drain, and the next turn's dispatch all
+   * complete while the request is in flight, the cancel can land on the
+   * next turn. Closing it needs turn-scoped cancel admission server-side
+   * (the #867 ledger); until then the renderer backstops it — a
+   * `turn.cancelled` arriving without an Esc in that stream restores the
+   * submitted message into the prompt instead of losing it.
+   * Single-flight per turn: repeated Esc presses join the running loop.
+   */
+  async #requestTurnCancellation(turnState: AgentTUITurnState): Promise<void> {
+    if (turnState.cancelInFlight === true) return;
+    turnState.cancelInFlight = true;
+    try {
+      for (let attempt = 0; attempt < turnCancelAttempts; attempt += 1) {
+        if (turnState.boundaryEvent !== undefined || turnState.aborted === true) return;
+        const turnId = turnState.turnId;
+        try {
+          const result = await this.#session.cancel(turnId === undefined ? undefined : { turnId });
+          // Accepted means the turn's cancellation hook consumed the
+          // request; the turn settles at its next safe boundary.
+          if (result.status === "accepted") return;
+        } catch {
+          // No accepted session yet or a transport failure — retry below;
+          // Ctrl+C remains the hard client-side interrupt.
+        }
+        await delayMs(turnCancelRetryDelayMs);
+      }
+    } finally {
+      turnState.cancelInFlight = false;
+    }
+  }
+
+  /**
    * Follows the same session after an interactive authorization callback.
    * `send()` stops at the parked `session.waiting` boundary; the callback's
    * completion events arrive in the next durable turn on `session.stream()`.
@@ -1054,12 +1193,19 @@ export class EveTUIRunner {
         turnState.aborted = true;
         abort();
       },
+      cancel: () => {
+        void this.#requestTurnCancellation(turnState);
+      },
       events: eveEventsToTUIStream({
         events,
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
         onSubagentCalled: (called) => this.#subagentPump.begin(called),
         onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
+        // A cancelled turn cancels its pending descendants server-side;
+        // settle their sections and stop their child streams so stale
+        // subagent output cannot paint into the next (steered) turn.
+        onTurnCancelled: () => this.#subagentPump.settleAll(),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
         onTerminalFailure: () => {
@@ -1467,6 +1613,7 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     input: options.userInput,
     output: options.screen,
     diagnostics: options.diagnostics,
+    onExitRequest: options.lifecycle?.requestStop,
   });
 }
 
@@ -1490,6 +1637,7 @@ type EveStreamTranslatorInput = {
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
   onSubagentCompleted?: (callId: string) => void;
+  onTurnCancelled?: () => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
   onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
@@ -1515,6 +1663,7 @@ async function* eveEventsToTUIStream(
     turnState,
     onSubagentCalled,
     onSubagentCompleted,
+    onTurnCancelled,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
     onTerminalFailure,
@@ -1545,9 +1694,15 @@ async function* eveEventsToTUIStream(
 
     switch (event.type) {
       case "session.started":
-      case "turn.started":
       case "message.received":
         // Boundary / metadata events with no direct UI surface.
+        break;
+
+      case "turn.started":
+        // Recorded so Esc-driven cancellation can scope its request to the
+        // turn the user is watching; a cancel that arrives after the
+        // boundary then no-ops instead of hitting the next turn.
+        turnState.turnId = event.data.turnId;
         break;
 
       case "step.started":
@@ -1829,6 +1984,15 @@ async function* eveEventsToTUIStream(
         visibleTurnCompleted = true;
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
+        break;
+
+      case "turn.cancelled":
+        // A cooperative cancel (Esc Esc or an Esc steer) — not a failure.
+        // `session.waiting` follows and finishes the stream normally.
+        onTurnCancelled?.();
+        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
+        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
+        yield { type: "turn-cancelled" };
         break;
 
       case "subagent.called": {

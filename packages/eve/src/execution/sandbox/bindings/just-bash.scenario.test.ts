@@ -472,6 +472,39 @@ describe("createLocalSandboxBackend with the just-bash engine", () => {
     expect(result.stdout.trim().split("\n")).toEqual(["/workspace/skills/weather.md"]);
   });
 
+  it("writes seed files before bootstrap and captures bootstrap outputs", async () => {
+    const appRoot = await createTemporaryCacheDirectory("seed-before-bootstrap");
+    const backend = createJustBashBackend();
+
+    await backend.prewarm({
+      bootstrap: async ({ use }) => {
+        const sandbox = await use();
+        await expect(sandbox.readTextFile({ path: "/workspace/seed.txt" })).resolves.toBe(
+          "authored seed",
+        );
+        await sandbox.writeTextFile({
+          content: "bootstrap output",
+          path: "/workspace/bootstrap.txt",
+        });
+      },
+      runtimeContext: { appRoot },
+      seedFiles: [{ content: "authored seed", path: "/workspace/seed.txt" }],
+      templateKey: "template-seed-before-bootstrap",
+    });
+
+    const handle = await backend.create({
+      runtimeContext: { appRoot },
+      sessionKey: "session-seed-before-bootstrap",
+      templateKey: "template-seed-before-bootstrap",
+    });
+    await expect(handle.session.readTextFile({ path: "/workspace/seed.txt" })).resolves.toBe(
+      "authored seed",
+    );
+    await expect(handle.session.readTextFile({ path: "/workspace/bootstrap.txt" })).resolves.toBe(
+      "bootstrap output",
+    );
+  });
+
   it("does not repair an existing session directory with later seed files", async () => {
     const appRoot = await createTemporaryCacheDirectory("seed-session");
     const backend = createJustBashBackend();

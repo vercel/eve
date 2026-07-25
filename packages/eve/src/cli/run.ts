@@ -8,6 +8,13 @@ import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
+  FORCED_EXIT_BACKSTOP_MS,
+  installShutdownSignal,
+  type CommandLifecycle,
+  waitForShutdownSignal,
+} from "#cli/shutdown.js";
+import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
+import {
   parseDevelopmentHeaderOption,
   resolveDevelopmentUrlTarget,
   type DevelopmentRequestHeaders,
@@ -140,7 +147,7 @@ async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalComm
 }
 
 async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
-  return (await import("#internal/nitro/host.js")).createDevelopmentServer;
+  return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
 }
 
 const loadIsActiveDevelopmentServerForApp = async () =>
@@ -156,39 +163,6 @@ function shouldPrintCliBootBanner(actionCommand: Command): boolean {
     actionCommand.name() === "dev" ||
     actionCommand.name() === "init"
   );
-}
-
-async function waitForShutdownSignal(input: { close(): Promise<void> }): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-
-    const cleanup = () => {
-      process.off("SIGINT", handleSignal);
-      process.off("SIGTERM", handleSignal);
-    };
-
-    const handleSignal = () => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      cleanup();
-      void input.close().then(resolve, reject);
-    };
-
-    process.once("SIGINT", handleSignal);
-    process.once("SIGTERM", handleSignal);
-  });
-}
-
-async function waitForProductionServer(input: ProductionServerHandle): Promise<void> {
-  await Promise.race([
-    input.wait(),
-    waitForShutdownSignal({
-      close: () => input.close(),
-    }),
-  ]);
 }
 
 function parsePortOption(value: string): number {
@@ -388,7 +362,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         }),
       );
 
-      await waitForProductionServer(server);
+      await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });
 
   program
@@ -465,6 +439,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           readonly serverUrl: string;
         },
         report?: DevBootProgressReporter,
+        lifecycle?: CommandLifecycle,
       ): Promise<void> => {
         const runDevelopmentTui = await devBootPhase(
           "loading interactive UI",
@@ -486,6 +461,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           target,
           initialInput: options.input,
           onBootProgress: report,
+          lifecycle,
           ...display,
         } satisfies RunDevelopmentTuiInput;
         if (remoteTarget?.headers !== undefined) {
@@ -514,27 +490,34 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         }
 
         logger.log("");
-        await runInteractiveUi({ serverUrl: remoteServerUrl });
+        const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
+        try {
+          await runInteractiveUi({ serverUrl: remoteServerUrl }, undefined, lifecycle);
+        } finally {
+          lifecycle.dispose();
+        }
         return;
       }
 
-      // Print spacing before the live row; a later write would strand the row.
       if (mode === "tui") logger.log("");
       const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
       const onBootProgress = createDevBootProgressReporter(buildProgress);
       buildProgress?.update("Building your agent");
 
-      let closed = false;
       let server: DevelopmentServer | undefined;
-      const closeServer = async () => {
-        if (closed || server === undefined) {
-          return;
-        }
-
-        closed = true;
-        // No-op when this instance attached to a server another process owns.
-        await server.close();
+      let closePromise: Promise<void> | undefined;
+      const closeServer = () => {
+        if (server === undefined) return Promise.resolve();
+        closePromise ??= server.close();
+        void closePromise.catch(() => undefined);
+        return closePromise;
       };
+      const lifecycle = installShutdownSignal({
+        exitAfterMs: FORCED_EXIT_BACKSTOP_MS,
+        onStop: () => {
+          void closeServer();
+        },
+      });
 
       try {
         const startHost = runtime.startHost ?? (await loadStartHost());
@@ -544,11 +527,13 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           onBootProgress,
           port: options.port,
         });
-        const handle = await server.start();
+        const outcome = await Promise.race([
+          server.start().then((handle) => ({ handle })),
+          lifecycle.stopped.then(() => ({ handle: undefined })),
+        ]);
+        const handle = outcome.handle;
+        if (handle === undefined) return;
 
-        // The terminal UI's header already shows the server URL, and startup
-        // no longer clears the screen, so the line would linger as noise.
-        // Headless consumers (scripts, scenario tests) still parse it.
         if (mode !== "tui") {
           logger.log(
             renderCliTaggedLine(theme, {
@@ -560,9 +545,6 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         }
 
         if (mode === "headless") {
-          // An explicit `--no-ui` is intentional and silent; a non-TTY
-          // terminal that did not ask for headless gets a hint so the
-          // missing UI is not mistaken for a hang.
           if (options.ui !== false && !interactive) {
             logger.log(
               renderCliTaggedLine(theme, {
@@ -573,15 +555,25 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             );
           }
 
-          return await waitForShutdownSignal({
-            close: closeServer,
-          });
+          await waitForServerOrStop(server, lifecycle);
+          return;
         }
 
-        await runInteractiveUi({ appRoot: handle.appRoot, serverUrl: handle.url }, onBootProgress);
+        await waitForUiOrServer({
+          handle,
+          lifecycle,
+          server,
+          runUi: async () =>
+            await runInteractiveUi(
+              { appRoot: handle.appRoot, serverUrl: handle.url },
+              onBootProgress,
+              lifecycle,
+            ),
+        });
       } finally {
         buildProgress?.stop();
         await closeServer();
+        lifecycle.dispose();
       }
     });
 

@@ -6,9 +6,6 @@ import { createSession, type Session } from "#channel/session.js";
 import type { SendFn, SendOptions, SendPayload } from "#channel/routes.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
-import { createLogger } from "#internal/logging.js";
-
-const log = createLogger("channel.send");
 
 export function createSendFn<TState = undefined>(
   runtime: Runtime,
@@ -21,6 +18,7 @@ export function createSendFn<TState = undefined>(
     options: SendOptions<TState>,
   ): Promise<Session> => {
     const auth = (options as { auth: SessionAuthContext | null }).auth;
+    const initiatorAuth = (options as { initiatorAuth?: SessionAuthContext | null }).initiatorAuth;
     const callback = (options as { callback?: SendOptions<TState>["callback"] }).callback;
     const mode = (options as { mode?: SendOptions<TState>["mode"] }).mode ?? "conversation";
     const state = (options as { state?: TState }).state;
@@ -47,12 +45,8 @@ export function createSendFn<TState = undefined>(
 
       return createSession(sessionId, rawToken, runtime);
     } catch (error) {
-      // No-active-session is the expected resume-or-start signal. The
-      // failure itself is logged in `deliver`; this only records the fallback.
       if (!isRuntimeNoActiveSessionError(error)) {
-        log.warn("deliver failed, falling back to starting a new session", {
-          continuationToken,
-        });
+        throw error;
       }
     }
 
@@ -66,7 +60,9 @@ export function createSendFn<TState = undefined>(
       ? { ...adapter, state: { ...adapter.state, ...(state as Record<string, unknown>) } }
       : adapter;
 
-    const runInput: RunInput = {
+    const runInput: {
+      -readonly [K in keyof RunInput]: RunInput[K];
+    } = {
       adapter: sessionAdapter,
       auth,
       capabilities: mode === "conversation" ? { requestInput: true } : undefined,
@@ -78,6 +74,9 @@ export function createSendFn<TState = undefined>(
       requestId: metadata.requestId,
       title,
     };
+    if (initiatorAuth !== undefined) {
+      runInput.initiatorAuth = initiatorAuth;
+    }
     const handle = await runtime.run(runInput);
 
     return createSession(handle.sessionId, rawToken, runtime);

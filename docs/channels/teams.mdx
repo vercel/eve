@@ -28,16 +28,23 @@ By default the channel mounts at `POST /eve/v1/teams`. Point your Azure Bot or T
 
 The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Before dispatch, eve strips the mention, adds a `<teams_context>` block, and scopes channel and group threads by root activity id (`replyToId ?? id`).
 
+For example, use the contextual `isSubscribed()` helper to continue active threads without requiring another mention:
+
 ```ts
 import { defaultTeamsAuth, teamsChannel } from "eve/channels/teams";
 
 export default teamsChannel({
-  onMessage(ctx, message) {
-    if (message.scope !== "personal" && !message.isBotMentioned) return null;
-    return { auth: defaultTeamsAuth(message) };
+  async onMessage(ctx, message) {
+    if (message.from.role === "bot" || message.from.id === message.recipient.id) return null;
+    const isDirectMessage = message.scope === "personal";
+    return isDirectMessage || message.isBotMentioned || (await ctx.isSubscribed())
+      ? { auth: defaultTeamsAuth(message) }
+      : null;
   },
 });
 ```
+
+`isSubscribed()` checks whether the conversation has previously involved the agent.
 
 ### Delivery
 

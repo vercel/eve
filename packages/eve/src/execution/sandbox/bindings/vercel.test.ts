@@ -38,6 +38,7 @@ function createMockSandbox(input: {
   status?: string;
   tags?: Record<string, string>;
 }) {
+  const files = new Map<string, Buffer>();
   let tags = input.tags;
   return {
     currentSnapshotId: input.snapshotId ?? "",
@@ -47,7 +48,10 @@ function createMockSandbox(input: {
       unlink: vi.fn().mockResolvedValue(undefined),
     },
     name: input.name,
-    readFile: vi.fn<(file: { path: string }) => Promise<object | null>>().mockResolvedValue(null),
+    readFile: vi.fn(async (file: { path: string }): Promise<object | null> => {
+      const content = files.get(file.path);
+      return content === undefined ? null : Readable.from([content]);
+    }),
     runCommand: vi.fn().mockResolvedValue(createMockCommandResult()),
     snapshot: vi.fn().mockResolvedValue({ snapshotId: `${input.name}-snapshot` }),
     status: input.status ?? "running",
@@ -60,7 +64,13 @@ function createMockSandbox(input: {
         tags = params.tags;
       }
     }),
-    writeFiles: vi.fn().mockResolvedValue(undefined),
+    writeFiles: vi.fn(
+      async (nextFiles: ReadonlyArray<{ readonly content: Uint8Array; readonly path: string }>) => {
+        for (const file of nextFiles) {
+          files.set(file.path, Buffer.from(file.content));
+        }
+      },
+    ),
   };
 }
 
@@ -329,6 +339,44 @@ describe("createVercelSandbox", () => {
       }),
     );
     expect(files?.[0]?.content).toBeInstanceOf(Buffer);
+  });
+
+  it("writes seed files before bootstrap and snapshots bootstrap outputs", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn().mockResolvedValueOnce(templateSandbox),
+        get: vi.fn().mockResolvedValueOnce(null),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await backend.prewarm({
+      bootstrap: async ({ use }) => {
+        const sandbox = await use();
+        await expect(sandbox.readTextFile({ path: "/workspace/seed.txt" })).resolves.toBe(
+          "authored seed",
+        );
+        await sandbox.writeTextFile({
+          content: "bootstrap output",
+          path: "/workspace/bootstrap.txt",
+        });
+      },
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [{ content: "authored seed", path: "/workspace/seed.txt" }],
+      templateKey: "template-key",
+    });
+
+    const writes = vi.mocked(templateSandbox.writeFiles);
+    expect(writes.mock.calls.map(([files]) => files[0]?.path)).toEqual([
+      "/workspace/seed.txt",
+      "/workspace/bootstrap.txt",
+    ]);
+    expect(writes.mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(templateSandbox.snapshot).mock.invocationCallOrder[0]!,
+    );
   });
 
   it("reports a fresh build when no framework snapshot exists yet", async () => {

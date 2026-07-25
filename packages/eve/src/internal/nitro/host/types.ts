@@ -16,6 +16,15 @@ export type NitroBuildSurface = "all" | "app" | "flow";
 export interface ApplicationBuildOptions {
   /** Absolute path for an optional machine-readable profile of a successful build. */
   readonly profileOutputPath?: string;
+  /**
+   * Public route prefix the agent's `/eve/v1/*` surface is mounted under on
+   * its callback origin. Baked into every emitted Vercel workflow function
+   * environment so deployed callback-URL minting resolves a routable public
+   * path. The CLI resolves it from `EVE_PUBLIC_ROUTE_PREFIX`, which
+   * multi-agent host integrations export in the generated service build
+   * command.
+   */
+  readonly publicRoutePrefix?: string;
   readonly skipVercelSandboxPrewarm: boolean;
   readonly vercelServiceOutput?: {
     readonly hostOutputDirectory: string;

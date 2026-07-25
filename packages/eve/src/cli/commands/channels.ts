@@ -1,8 +1,17 @@
 import { isEveProject, listAuthoredChannels, type ChannelKind } from "#setup/scaffold/index.js";
 
 import { interactiveAsker } from "#setup/ask.js";
-import { addChannels, type AddChannelsDeps } from "#setup/boxes/add-channels.js";
-import { deployProject, type DeployProjectDeps } from "#setup/boxes/deploy-project.js";
+import type { AddChannelsDeps } from "#setup/boxes/add-channels.js";
+import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
+import {
+  channelSetupEnvironment,
+  describeChannelSetupEnvironment,
+} from "#setup/channel-setup-environment.js";
+import { deployChannelSetup } from "#setup/channel-setup-deployment.js";
+import {
+  channelSetupIntegration,
+  createChannelSetupUi,
+} from "#setup/channel-setup-integrations.js";
 import { selectChannels } from "#setup/boxes/select-channels.js";
 import {
   detectDeployment,
@@ -13,6 +22,7 @@ import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { runInteractive, type AnySetupBox } from "#setup/runner.js";
 import { createDefaultSetupState, snapshotSetupState, type SetupState } from "#setup/state.js";
 import type { OutputSink } from "#setup/step.js";
+import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
 
 import {
   assertCanAddSelectedChannels,
@@ -47,6 +57,8 @@ export interface AddChannelCommandOptions {
 export interface ChannelsAddDependencies {
   createPrompter?: () => Prompter;
   detectDeployment(projectPath: string): Promise<DeploymentInfo>;
+  /** Read-only Vercel session probe. Optional only for legacy test seams. */
+  getVercelAuthStatus(projectPath: string): Promise<VercelAuthStatus>;
   /** Test seam into the add-channels box's scaffold/Connect/Vercel effects. */
   addChannelsDeps?: AddChannelsDeps;
   /** Test seam into the deploy box's subprocess effects. */
@@ -55,14 +67,13 @@ export interface ChannelsAddDependencies {
 
 const defaultChannelsAddDependencies: ChannelsAddDependencies = {
   detectDeployment,
+  getVercelAuthStatus,
 };
 
 /**
- * `eve channels add` composes the channel picker, scaffold, and deploy boxes.
- * Its picker allows an empty submit and keeps Slack viable while unlinked;
- * conflict validation against existing authored registrations, the interactive
- * `vercel link` fallback inside the add-channels box, Vercel services config
- * pinned on, and build-stamped web package versions.
+ * `eve channels add` detects Vercel capabilities, resolves portable or
+ * Vercel-specific channel plans, scaffolds the selection, then offers an
+ * optional deployment when the selected plan supports it.
  */
 async function runAddChannelsFlow(
   appRoot: string,
@@ -78,14 +89,21 @@ async function runAddChannelsFlow(
 
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
   prompter.intro("Add channels to your eve agent");
-  prompter.log.message("Checking the current Vercel project...");
+  prompter.log.message("Checking Vercel setup...");
+  const deployment = await dependencies.detectDeployment(appRoot);
+  const authStatus = await dependencies.getVercelAuthStatus(appRoot);
+  const environment = channelSetupEnvironment(
+    authStatus,
+    projectResolutionFromDeployment(deployment),
+  );
+  prompter.log.info(describeChannelSetupEnvironment(environment));
   // The detected on-disk link is the only seeded fact; there are no onboarding
   // plans in this command, so the rest of the state keeps its defaults. The
   // default agentName ("") keeps deriveSlackConnectorSlug on its package.json
   // fallback instead of the directory basename, as the dissolved engine did.
   const state: SetupState = {
     ...createDefaultSetupState(),
-    project: projectResolutionFromDeployment(await dependencies.detectDeployment(appRoot)),
+    project: projectResolutionFromDeployment(deployment),
     projectPath: { kind: "resolved", inPlace: true, path: appRoot },
   };
   let registrationInspection: ReturnType<typeof inspectExistingChannelRegistrations> | undefined;
@@ -115,33 +133,45 @@ async function runAddChannelsFlow(
         assertCanAddSelectedChannels(selectedChannels, await inspectRegistrations());
       },
     }),
-    addChannels({
-      // The slackbot question only runs interactively here (a passed kind or
-      // --yes short-circuits it), so the interactive base suffices, mirroring
-      // the select-channels box above.
-      asker: interactiveAsker(prompter),
-      prompter,
-      presetCreateSlackbot: options.yes ? true : undefined,
-      force: options.force,
-      // An unlinked directory still gets the Vercel services config (the engine
-      // never gated it), and the link fallback keeps unlinked Slack viable.
-      configureVercelServices: true,
-      ensureLinkedProject: "interactive-vercel-link",
-      deps: dependencies.addChannelsDeps,
-    }),
-    deployProject({
-      prompter,
-      ensureLinkedProject: "interactive-vercel-link",
-      deps: dependencies.deployProjectDeps,
-    }),
   ];
 
   const sink: OutputSink = { write: (line) => prompter.log.message(line) };
-  const result = await runInteractive(boxes, state, sink, { snapshot: snapshotSetupState });
-  if (result.kind === "cancelled") {
-    return;
+  const selected = await runInteractive(boxes, state, sink, { snapshot: snapshotSetupState });
+  if (selected.kind === "cancelled") return;
+
+  let finalState = selected.state;
+  const ui = createChannelSetupUi({ asker: interactiveAsker(prompter), prompter });
+  for (const selectedKind of selected.state.channelSelection) {
+    const result = await channelSetupIntegration(selectedKind).setup({
+      environment,
+      state: { ...finalState, channelSelection: [selectedKind] },
+      ui,
+      force: options.force,
+      presetCreateSlackbot: options.yes ? true : undefined,
+      presetPortableCredentials: options.yes === true ? true : undefined,
+      deps: dependencies.addChannelsDeps,
+    });
+    if (result.kind === "cancelled") return;
+    finalState = result.state;
   }
-  prompter.outro(result.state.channels.length === 0 ? "No channels added." : "Channels added.");
+
+  const addedVercelChannel =
+    finalState.slackbotAttached ||
+    (environment.vercel.kind === "available" && finalState.channels.includes("web"));
+  if (addedVercelChannel) {
+    finalState = await deployChannelSetup({
+      state: finalState,
+      ui,
+      presetDeploy:
+        options.yes === true
+          ? true
+          : !process.stdin.isTTY || !process.stdout.isTTY
+            ? false
+            : undefined,
+      deps: dependencies.deployProjectDeps,
+    });
+  }
+  prompter.outro(finalState.channels.length === 0 ? "No channels added." : "Channels added.");
 }
 
 export async function runChannelsAddCommand(

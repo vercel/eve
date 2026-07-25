@@ -9,8 +9,9 @@ const proxy = createProxy({
 });
 
 export const config = {
-  // Matcher ignoring `/_next/`, `/api/`, public static assets, favicon, sitemap, robots, etc.
+  // llms.txt needs the locale rewrite even though the general matcher ignores static extensions.
   matcher: [
+    "/llms.txt",
     "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|eve\\.tgz$|.*\\.(?!mdx?$)[^/]+$).*)",
   ],
 };

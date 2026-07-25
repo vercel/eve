@@ -1,5 +1,7 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
+
+import { appendEnv } from "../../append-env.js";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
@@ -71,9 +73,9 @@ export type ChannelMutationResult = SlackChannelMutationResult | WebChannelMutat
 interface SlackChannelWrittenResult {
   kind: "slack";
   action: "created" | "overwritten";
-  filesWritten: [string];
-  filesOverwritten?: [string];
-  filesSkipped: [];
+  filesWritten: string[];
+  filesOverwritten?: string[];
+  filesSkipped: string[];
   packageJsonUpdated: PackageJsonMutation[];
   slackConnectorSlug: SlackConnectorSlug;
 }
@@ -379,7 +381,7 @@ export async function deriveSlackConnectorSlug(
   return normalizeSlackConnectorSlug(dir || DEFAULT_SLACK_CONNECTOR_SLUG);
 }
 
-function buildSlackTemplate(connectorUid: string): string {
+function buildSlackConnectTemplate(connectorUid: string): string {
   if (!connectorUid.startsWith("slack/") || connectorUid.length === "slack/".length) {
     throw new Error(`Invalid Slack connector UID "${connectorUid}".`);
   }
@@ -391,6 +393,16 @@ export default slackChannel({
 });
 `;
 }
+
+const SLACK_ENV_TEMPLATE = `import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel();
+`;
+
+const SLACK_ENV_EXAMPLE_VALUES = {
+  SLACK_BOT_TOKEN: "",
+  SLACK_SIGNING_SECRET: "",
+} as const;
 
 function renderWebAppTemplate(content: string, appName: string): string {
   return content
@@ -450,6 +462,8 @@ export interface EnsureChannelOptions {
   /** Exact UID returned by Vercel Connect; takes precedence over the derived slug. */
   slackConnectorUid?: string;
   slackConnectorSlug?: SlackConnectorSlug;
+  /** Credential source rendered into a Slack channel. Defaults to Vercel Connect. */
+  slackCredentials?: "vercel-connect" | "environment";
   connectPackageVersion?: string;
   webPackageVersions?: WebPackageVersions;
   /** When false, Web Chat leaves Vercel Services config unwritten for preview-only scaffolds. */
@@ -588,24 +602,53 @@ async function ensureSlackChannel(
     };
   }
 
-  const connectPackageVersion = resolveVersionToken(
-    "connectPackageVersion",
-    options.connectPackageVersion ?? DEFAULT_CONNECT_PACKAGE_VERSION,
-  );
-
-  const packageJsonUpdated = await ensurePackageDependency(
-    join(options.projectRoot, "package.json"),
-    CONNECT_PACKAGE_NAME,
-    connectPackageVersion,
-  );
+  const credentials = options.slackCredentials ?? "vercel-connect";
   const slug = options.slackConnectorSlug ?? (await deriveSlackConnectorSlug(options.projectRoot));
-  const connectorUid = options.slackConnectorUid ?? `slack/${slug}`;
-  await writeTextFile(filePath, buildSlackTemplate(connectorUid), { force: options.force });
+  let template: string;
+  let packageJsonUpdated: PackageJsonMutation[] = [];
+  const filesWritten = [filePath];
+  const filesSkipped: string[] = [];
+  let envExampleRollback: { path: string; content?: string } | undefined;
+
+  if (credentials === "vercel-connect") {
+    const connectPackageVersion = resolveVersionToken(
+      "connectPackageVersion",
+      options.connectPackageVersion ?? DEFAULT_CONNECT_PACKAGE_VERSION,
+    );
+    packageJsonUpdated = await ensurePackageDependency(
+      join(options.projectRoot, "package.json"),
+      CONNECT_PACKAGE_NAME,
+      connectPackageVersion,
+    );
+    const connectorUid = options.slackConnectorUid ?? `slack/${slug}`;
+    template = buildSlackConnectTemplate(connectorUid);
+  } else {
+    template = SLACK_ENV_TEMPLATE;
+    const envExamplePath = join(options.projectRoot, ".env.example");
+    const envExampleExisted = await pathExists(envExamplePath);
+    envExampleRollback = {
+      path: envExamplePath,
+      ...(envExampleExisted ? { content: await readFile(envExamplePath, "utf8") } : {}),
+    };
+    const envExample = await appendEnv(envExamplePath, SLACK_ENV_EXAMPLE_VALUES);
+    if (envExample.written.length > 0) filesWritten.push(envExamplePath);
+    else filesSkipped.push(envExamplePath);
+  }
+
+  try {
+    await writeTextFile(filePath, template, { force: options.force });
+  } catch (error) {
+    if (envExampleRollback !== undefined) {
+      if (envExampleRollback.content === undefined) await unlink(envExampleRollback.path);
+      else await writeFile(envExampleRollback.path, envExampleRollback.content, "utf8");
+    }
+    throw error;
+  }
   const result: SlackChannelWrittenResult = {
     kind: "slack",
     action: fileAlreadyExists ? "overwritten" : "created",
-    filesWritten: [filePath],
-    filesSkipped: [],
+    filesWritten,
+    filesSkipped,
     packageJsonUpdated,
     slackConnectorSlug: slug,
   };

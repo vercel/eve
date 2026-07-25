@@ -27,19 +27,19 @@ const BANNER_LINES: readonly BannerLine[] = [
   {
     importLine: 'import { fileURLToPath as __eveFileURLToPath } from "node:url";',
     declarationLine: "const __filename = __eveFileURLToPath(import.meta.url);",
-    bindingPattern: /^(?:const|let|var)\s+__filename\b/m,
+    bindingPattern: /^(?:const|let|var)\s+__filename(?![\w$])/m,
   },
   {
     importLine: 'import { dirname as __eveDirname } from "node:path";',
     declarationLine: "const __dirname = __eveDirname(__filename);",
-    bindingPattern: /^(?:const|let|var)\s+__dirname\b/m,
+    bindingPattern: /^(?:const|let|var)\s+__dirname(?![\w$])/m,
   },
 ];
 
 const REQUIRE_LINE: BannerLine = {
   importLine: 'import { createRequire as __eveCreateRequire } from "node:module";',
   declarationLine: "const require = __eveCreateRequire(import.meta.url);",
-  bindingPattern: /^(?:const|let|var)\s+require\b/m,
+  bindingPattern: /^(?:const|let|var)\s+require(?![\w$])/m,
 };
 
 /**

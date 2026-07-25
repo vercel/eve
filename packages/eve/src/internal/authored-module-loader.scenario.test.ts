@@ -57,6 +57,113 @@ describe("loadAuthoredModuleNamespace", () => {
     }
   });
 
+  it("explains when an installed package contains Node-incompatible extensionless ESM", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/channels/eve.ts": [
+          'import { matchRoute } from "compiler-oriented-sdk/server";',
+          "",
+          'export const result = matchRoute("/");',
+          "",
+        ].join("\n"),
+        "node_modules/compiler-oriented-sdk/dist/server/index.js":
+          'export { matchRoute } from "./routeMatcher";\n',
+        "node_modules/compiler-oriented-sdk/dist/server/routeMatcher.js":
+          "export const matchRoute = () => true;\n",
+        "node_modules/compiler-oriented-sdk/package.json": JSON.stringify({
+          exports: { "./server": "./dist/server/index.js" },
+          name: "compiler-oriented-sdk",
+          type: "module",
+        }),
+      },
+      name: "compiler-oriented-external-package",
+    });
+    const modulePath = join(app.appRoot, "agent", "channels", "eve.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain(`Failed to evaluate authored module:\n  ${modulePath}`);
+    expect(error.message).toContain("Failed to load an installed package:");
+    expect(error.message).toContain(
+      "  Package: compiler-oriented-sdk (loaded outside the authored bundle)",
+    );
+    expect(error.message).toContain("  Import: dist/server/routeMatcher");
+    expect(error.message).not.toContain("routeMatcher.js");
+    expect(error.message).toContain(
+      "  Reason: Node's ESM loader does not infer file extensions for relative imports.",
+    );
+    expect(error.message).toContain("  Hint: Use a Node-compatible package or entrypoint");
+    expect(error.cause).toBeInstanceOf(Error);
+    expect((error.cause as NodeJS.ErrnoException).code).toBe("ERR_MODULE_NOT_FOUND");
+  });
+
+  it("does not infer a compiler requirement when package output is simply missing", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_sdk.ts": 'import "incomplete-sdk";\nexport const result = true;\n',
+        "node_modules/incomplete-sdk/index.js": 'import "./generated";\n',
+        "node_modules/incomplete-sdk/package.json": JSON.stringify({
+          exports: "./index.js",
+          name: "incomplete-sdk",
+          type: "module",
+        }),
+      },
+      name: "incomplete-external-package",
+    });
+    const modulePath = join(app.appRoot, "agent", "tools", "use_sdk.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain("Failed to load an installed package:");
+    expect(error.message).toContain(
+      "  Package: incomplete-sdk (loaded outside the authored bundle)",
+    );
+    expect(error.message).toContain("  Missing: generated");
+    expect(error.message).toContain(
+      "  Reason: Package output may be incomplete, incorrectly installed",
+    );
+    expect(error.message).not.toContain("ESM loader does not infer");
+    expect(error.cause).toMatchObject({ code: "ERR_MODULE_NOT_FOUND" });
+  });
+
+  it("preserves an authored module initialization failure as the evaluation cause", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/throws.ts": 'throw new Error("authored initialization failed");\n',
+      },
+      name: "authored-initialization-failure",
+    });
+    const modulePath = join(app.appRoot, "agent", "tools", "throws.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain(`Failed to evaluate authored module:\n  ${modulePath}`);
+    expect(error.message).not.toContain("Failed to load an installed package:");
+    expect(error.message).not.toContain("Package:");
+    expect(error.cause).toMatchObject({ message: "authored initialization failed" });
+  });
+
   it("resolves extensionless relative imports with dotted TypeScript basenames", async () => {
     const app = await scenarioApp({
       files: {

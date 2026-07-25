@@ -1,5 +1,77 @@
 # eve
 
+## 0.27.6
+
+### Patch Changes
+
+- 0a8b63c: `eve channels add` now scaffolds portable channel variants when Vercel is unavailable and asks before deploying Vercel-integrated channels. Portable Slack setup uses environment credentials and records the required variables in `.env.example`.
+- ad0dfa7: Remote agents can now forward the end user's identity across deployments. `defineRemoteAgent({ forwardPrincipal: true })` sends the dispatching turn's session principal (metadata only — never tokens) on the create-session request, and the receiving deployment opts in with `eveChannel({ trustedForwarders })`, a predicate over the verified transport forwarder. Accepted forwarding replaces the session principal so per-user connections, local subagents, and chained remote hops see the original user; a receiver that refuses the forwarder (or accepts no forwarded principal) rejects with 403 and the dispatch fails instead of silently downgrading to the calling service's identity.
+- ad0dfa7: Remote agent dispatch now ignores an empty `outputSchema` (`{}`) passed by the model on the lowered subagent tool call, matching local subagent dispatch. An empty schema constrains nothing, but forwarding it flipped the remote child into structured-output mode and replaced its text reply with `{}`.
+- 5cf8ae0: Make `eve dev` return the terminal after one Ctrl+C or termination signal. The local server gets a bounded cleanup window before process-group termination, and interrupted sandbox cleanup resumes on the next start. A forced exit (second Ctrl+C or the shutdown backstop) now restores the terminal — raw mode, cursor, bracketed paste — before the process ends.
+- c2079a4: Preserve remote agent base paths when creating sessions and cancelling turns, so same-origin agents mounted below a route prefix no longer receive requests at the wrong endpoint.
+
+## 0.27.5
+
+### Patch Changes
+
+- 1987e12: Add thread-bound session reset helpers to Slack message and interaction contexts, plus targeted reset support for generic Slack event handlers.
+
+## 0.27.4
+
+### Patch Changes
+
+- 5d961f3: Request Vercel CLI's maximum 100-team page instead of following its broken default pagination path.
+- 04d5814: `eve dev` no longer fails at boot with `UNRESOLVED_IMPORT` when a mounted extension (or any dependency) resolves through a `node_modules` above the app root — npm/yarn workspace hoisting, intermediate monorepo levels, and bare `withEve` agent directories whose host app owns the install now materialize in the dev-runtime snapshot.
+- bbba073: The dev TUI supports queueing, steering, and cooperative turn cancellation. Pressing Enter while a turn is running queues the message (up to 5) in a pinned panel directly above the input — one line per message — and the queue coalesces into the next turn's message when the turn ends. Esc steers: it pops the oldest queued message, cancels the running turn cooperatively (`turn.cancelled` → `session.waiting`, keeping the session's context), and submits the popped message as the replacement turn. With nothing queued, Esc twice cancels the turn. Cancellation requests retry while the turn is live, so an Esc that lands in the turn-dispatch window (before the server has armed the turn's cancel hook) is no longer silently lost. Cancelling a turn mid-delegation settles its subagent sections and stops their child streams, so stale subagent output cannot paint into the steered turn. Messages still queued when a turn is interrupted or fails restore into the next prompt's input, and a turn cancelled from outside the prompt (a stale cancel or another client's `/cancel`) restores its submitted message the same way. On exit, the parting line names the server session id (`☰eve  v0.27.0 · session ses_…`) so the conversation can be found again.
+- dfd360f: Custom channel routes can now call `reset()` and `ClientSession` can reset the session that owns a stable continuation token. The next `send()` starts a fresh workflow session and lazily initializes a new session-scoped sandbox instead of reusing prior history or workspace state, and the `eve dev` TUI's `/new` performs that durable reset before clearing its transcript.
+
+## 0.27.3
+
+### Patch Changes
+
+- 8168518: Fix connector-auth and remote-subagent callback URLs returning 404 in multi-agent mode. Generated per-agent Vercel services now bake the agent's public route prefix (`/eve/agents/<name>`) into their workflow function environment via `EVE_PUBLIC_ROUTE_PREFIX`, framework-minted callback URLs prepend it, and the session-callback validator accepts callback URLs mounted behind a route prefix so OAuth redirects and remote-subagent session callbacks reach the deployed agent.
+- fecdaf3: Attach authenticated `uploads.linear.app` images from inbound Linear Agent Session markdown as multimodal file parts while preserving the text fallback for untrusted, failed, or non-image URLs.
+- 25c12d3: Prevent bundler-suffixed CommonJS compatibility variables from suppressing the Node ESM globals that eve bundles need at startup.
+- 1bd0aa4: Preserve underscores in connection tool names shown by Slack typing status indicators.
+- 4d3748d: Keep raw outer workflow failure details in the private session trace instead of copying them into provider logs and Workflow telemetry.
+- 4803dbe: Scope authored resolver hooks to relevant import specifiers and reuse filesystem probes for one build. Repeated extensionless misses now perform at most 19 stats once per plugin instance instead of on every resolution.
+- d76f76b: Refresh session-scoped dynamic tools when an existing production session moves to a new Vercel deployment, so added, removed, and reordered tools use the current build.
+- 45ad5d0: Analyze dynamic tool closure references from the syntax tree so object keys and string contents cannot become invalid runtime captures.
+- fc53a9f: Show the number of discovered authored tools in the human-readable `eve info` output.
+- 1c3123c: Write authored sandbox workspace seed files before running bootstrap across the Vercel, Docker, microsandbox, and just-bash backends, so bootstrap can consume canonical workspace inputs and its outputs remain in the captured template.
+- 7094b4a: Load up to 100 Vercel teams per page and use the authenticated API continuation that matches Vercel's emitted cursor, avoiding repeated-page loops for accounts with many teams. When an outdated CLI lacks the required list options, the TUI can upgrade it with the native upgrader and now retains a concise error if that upgrade fails.
+
+## 0.27.2
+
+### Patch Changes
+
+- 6c433f4: Expose thread-scoped cancellation in Slack message and interaction contexts, plus target-addressed cancellation in `onEvent`, so authored Slack handlers can stop or replace in-flight turns.
+- 835f076: Emit an initial NDJSON whitespace byte when opening a session event stream so clients and proxies receive the response body before the first durable event.
+- f36f143: Added `thread.listParticipants()` for Slack thread routing based on the unique human participants in first-appearance order.
+- eb92ee3: Allow `session.send()` and `session.stream()` callers to disable automatic stream reconnection with `streamReconnectPolicy: { reconnect: false }`, so relays and proxies can own cursor recovery and retry policy.
+- 4133ffc: Slack thread helpers now reuse messages loaded within the same inbound handler, while overlapping `thread.refresh()` calls share one request and failed refreshes preserve the last successful snapshot.
+- ee72db8: Messages posted by the installed Slack app are now ignored before reaching message hooks to prevent self-reply loops.
+- bd4397b: Fixed Slack `threadContext` with `since: "last-agent-reply"` so only replies from the installed app move the context boundary. Replies from other bots remain part of the incremental thread context, are labeled `bot` instead of `agent` in the injected transcript, and their file uploads are now eligible for mention attachment lookback.
+- 64dbe2b: Add actionable authored-module evaluation errors that identify installed packages and distinguish extensionless ESM from missing package output while preserving the original failure as the cause.
+
+## 0.27.1
+
+### Patch Changes
+
+- eaaf6d6: Enable Workflow's optimistic concurrency precondition guard in every generated Vercel workflow function so stale replays reload concurrent events before committing.
+- 6ded22e: Preserve every queued delivery's message, context, and input responses when eve batches payloads before routing.
+- 3ffaf12: Added a Slack `onMessage` hook with `isBotMentioned()` and `isSubscribed()` helpers for custom message routing.
+- 49f2f13: Report `connection_search` as failed when every targeted connection fails to load, including authorization startup failures, so tool-call observability preserves the underlying error. Requests for unregistered connections now fail instead of returning an empty result.
+- 9679abc: Added an `isSubscribed()` helper to the Microsoft Teams `onMessage` hook for custom routing that can continue conversations without repeated mentions.
+- 1a618ba: Add a generic Slack `onEvent` fallback for subscribed Events API callbacks. Handlers can use a Slack-bound `receive` function to start zero, one, or many agent turns while authored mention and direct-message handlers retain precedence.
+- 0df8ab9: Update the bundled AI SDK and provider integrations to their latest compatible releases.
+- 394b467: Update the bundled Vercel integrations and core execution utilities to their latest compatible releases.
+- f2724fb: Update the Vite integration and Vitest test tooling to their latest compatible releases.
+- 01552fc: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- dd1ba23: Declining a session token-budget prompt now cancels the in-flight turn cleanly (`turn.cancelled` → `session.waiting`) instead of completing the session or surfacing an error to the delegating parent. Declining a delegated child's prompt cancels the whole turn tree from the root, so the parent can no longer retry the child against a fresh quota share, and stale answers to budget prompts are dropped instead of being shown to the model. The prompt copy is reworded ("This session has hit the input-token limit (2M) per session…") with Approve/Stop buttons.
+- a70d4ce: Restart native progress feedback across built-in chat channels when a completed connection authorization resumes the agent session. Slack also shows an explicit connected and resuming status.
+- d3cd770: Generated Web Chat apps now retain completed sessions for follow-up messages and cancel the active durable turn when Stop is clicked instead of only disconnecting the browser stream.
+
 ## 0.27.0
 
 ### Minor Changes

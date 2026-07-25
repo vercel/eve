@@ -186,8 +186,10 @@ export async function dispatchRuntimeActionsStep(input: {
             });
             childSessionId = await startRemoteAgentSession({
               action,
+              auth,
               callbackBaseUrl: input.callbackBaseUrl,
               callbackToken: input.parentContinuationToken,
+              initiatorAuth,
               remote: resolvedRemote,
               session,
             });

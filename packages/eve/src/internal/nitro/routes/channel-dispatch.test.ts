@@ -237,6 +237,7 @@ describe("dispatchChannelRequest", () => {
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn(),
+      terminateSession: vi.fn(),
     };
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
@@ -277,6 +278,57 @@ describe("dispatchChannelRequest", () => {
     );
   });
 
+  it("supplies a channel-scoped reset helper", async () => {
+    const runtimeForTest: Runtime = {
+      cancelTurn: vi.fn(),
+      deliver: vi.fn(),
+      getEventStream: vi.fn(),
+      resolveSession: vi.fn().mockResolvedValue({ sessionId: "sess_previous" }),
+      run: vi.fn(),
+      terminateSession: vi.fn().mockResolvedValue({ status: "terminated" }),
+    };
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        {
+          handler: async (_req, args) =>
+            Response.json(
+              await args.reset({
+                continuationToken: "direct:+15551234567:+15557654321",
+                reason: "User requested /new",
+              }),
+            ),
+          fetch: async () => new Response("ok"),
+          logicalPath: "agent/channels/imessage.ts",
+          method: "POST",
+          name: "imessage",
+          sourceId: "channel-imessage",
+          sourceKind: "module",
+          urlPath: "/imessage",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /imessage",
+      {} as never,
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      previousSessionId: "sess_previous",
+      status: "reset",
+    });
+    expect(runtimeForTest.resolveSession).toHaveBeenCalledWith(
+      "imessage:direct:+15551234567:+15557654321",
+    );
+    expect(runtimeForTest.terminateSession).toHaveBeenCalledWith({
+      reason: "User requested /new",
+      sessionId: "sess_previous",
+    });
+  });
+
   it("does not invent a channel request id when Vercel did not send one", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
@@ -284,6 +336,7 @@ describe("dispatchChannelRequest", () => {
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn(),
+      terminateSession: vi.fn(),
     };
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
@@ -330,6 +383,7 @@ describe("dispatchChannelRequest", () => {
         events: new ReadableStream(),
         sessionId: "sess_run",
       }),
+      terminateSession: vi.fn(),
     };
     const deliverInput = Object.freeze({
       auth: null,

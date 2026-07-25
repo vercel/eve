@@ -166,13 +166,13 @@ export const buildConnectionConfigure = (integration: Integration): string => {
     const connectorService = spec.connectorService ?? connector;
     sections.push(
       [
-        "Create the connector, link it to your project, and pull OIDC locally:",
+        "Link your project, create the connector, and pull OIDC locally:",
         ``,
         "```bash",
+        "vercel link",
         `vercel connect create ${connectorService}${
           spec.connectorService === undefined ? "" : ` --name ${integration.slug}`
         }`,
-        "vercel link",
         "vercel env pull",
         "```",
       ].join("\n"),

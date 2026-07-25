@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  linearInputRequestSignal,
   renderLinearInputRequests,
-  resolveLinearPromptInputResponses,
-  stripLinearHitlMarker,
 } from "#public/channels/linear/hitl.js";
 import type { InputRequest } from "#runtime/input/types.js";
 
@@ -17,7 +16,7 @@ function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
 }
 
 describe("Linear HITL helpers", () => {
-  it("renders input requests with a hidden Linear marker", () => {
+  it("renders only user-visible input request text", () => {
     const rendered = renderLinearInputRequests([
       makeRequest({
         options: [
@@ -30,46 +29,33 @@ describe("Linear HITL helpers", () => {
     expect(rendered).toContain("Approve deployment?");
     expect(rendered).toContain("1. Approve");
     expect(rendered).toContain("2. Deny - Stop the deployment");
-    expect(rendered).toContain("<!-- eve-input:");
-    expect(stripLinearHitlMarker(rendered)).not.toContain("eve-input");
+    expect(rendered).not.toContain("eve-input");
+    expect(rendered).not.toContain("<!--");
   });
 
-  it("resolves Linear prompt text against the latest elicitation marker", () => {
-    const elicitation = renderLinearInputRequests([
-      makeRequest({
+  it("uses user-facing option IDs as native Linear select values", () => {
+    expect(
+      linearInputRequestSignal([
+        makeRequest({
+          allowFreeform: true,
+          options: [
+            { id: "approve", label: "Approve" },
+            { id: "deny", label: "Deny" },
+          ],
+        }),
+      ]),
+    ).toEqual({
+      signal: "select",
+      signalMetadata: {
         options: [
-          { id: "approve", label: "Approve" },
-          { id: "deny", label: "Deny" },
+          { label: "Approve", value: "approve" },
+          { label: "Deny", value: "deny" },
         ],
-      }),
-    ]);
-
-    expect(
-      resolveLinearPromptInputResponses({
-        activities: [
-          {
-            content: { body: elicitation, type: "elicitation" },
-            id: "activity_1",
-          },
-        ],
-        body: "approve",
-      }),
-    ).toEqual([{ optionId: "approve", requestId: "call_1" }]);
+      },
+    });
   });
 
-  it("supports freeform replies when the original request allowed them", () => {
-    const elicitation = renderLinearInputRequests([
-      makeRequest({
-        allowFreeform: true,
-        options: [{ id: "pick_later", label: "Pick later" }],
-      }),
-    ]);
-
-    expect(
-      resolveLinearPromptInputResponses({
-        activities: [{ content: { body: elicitation, type: "elicitation" }, id: "activity_1" }],
-        body: "Ship it after 5pm",
-      }),
-    ).toEqual([{ requestId: "call_1", text: "Ship it after 5pm" }]);
+  it("does not emit a select signal for requests without options", () => {
+    expect(linearInputRequestSignal([makeRequest({ allowFreeform: true })])).toEqual({});
   });
 });

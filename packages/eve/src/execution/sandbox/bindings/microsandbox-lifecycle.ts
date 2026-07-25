@@ -118,6 +118,11 @@ export async function prewarmMicrosandboxTemplate(input: {
   );
 
   try {
+    if (input.prewarmInput.seedFiles.length > 0) {
+      input.prewarmInput.log?.(`writing ${input.prewarmInput.seedFiles.length} seed file(s)`);
+    }
+    await writeSandboxSeedFiles(templateSession, input.prewarmInput.seedFiles);
+
     if (input.prewarmInput.bootstrap !== undefined) {
       input.prewarmInput.log?.("running sandbox bootstrap");
       await input.prewarmInput.bootstrap({
@@ -132,11 +137,6 @@ export async function prewarmMicrosandboxTemplate(input: {
         },
       });
     }
-
-    if (input.prewarmInput.seedFiles.length > 0) {
-      input.prewarmInput.log?.(`writing ${input.prewarmInput.seedFiles.length} seed file(s)`);
-    }
-    await writeSandboxSeedFiles(templateSession, input.prewarmInput.seedFiles);
 
     input.prewarmInput.log?.("snapshotting template VM");
     await templateSandbox.stopAndSnapshot(snapshotName);

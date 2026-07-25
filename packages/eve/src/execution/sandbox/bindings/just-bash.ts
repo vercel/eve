@@ -92,6 +92,8 @@ export function createJustBashSandboxBackend(
       );
 
       try {
+        await writeSandboxSeedFiles(templateSession, prewarmInput.seedFiles);
+
         if (prewarmInput.bootstrap !== undefined) {
           prewarmInput.log?.("running sandbox bootstrap");
           await prewarmInput.bootstrap({
@@ -102,8 +104,6 @@ export function createJustBashSandboxBackend(
               }),
           });
         }
-
-        await writeSandboxSeedFiles(templateSession, prewarmInput.seedFiles);
 
         const captured = await templateSandbox.captureState();
         if (captured === null) {

@@ -20,11 +20,11 @@ export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
       className="group flex flex-col gap-4 rounded-lg border bg-background-100 p-5 transition-colors hover:border-gray-400 hover:bg-gray-100"
       href={`/integrations/${integration.slug}`}
     >
-      <div className="flex items-center justify-between">
-        <span className="flex size-10 items-center justify-center rounded-md border bg-background text-gray-1000">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background text-gray-1000">
           <Logo aria-hidden className="size-5" height={20} width={20} />
         </span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           {integration.badge ? (
             <span className="rounded-full bg-teal-100 px-2 py-0.5 font-medium text-teal-900 text-xs">
               {integration.badge}
@@ -43,9 +43,11 @@ export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
           </span>
         </div>
       </div>
-      <div className="flex flex-col gap-1">
-        <h3 className="font-medium text-base text-gray-1000 tracking-tight">{integration.name}</h3>
-        <p className="text-gray-900 text-sm leading-relaxed">{integration.tagline}</p>
+      <div className="flex min-w-0 flex-col gap-1">
+        <h3 className="break-words font-medium text-base text-gray-1000 tracking-tight">
+          {integration.name}
+        </h3>
+        <p className="break-words text-gray-900 text-sm leading-relaxed">{integration.tagline}</p>
       </div>
     </Link>
   );

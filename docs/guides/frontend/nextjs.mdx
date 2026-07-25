@@ -54,6 +54,8 @@ const billing = useEveAgent({ agent: "billing" });
 
 Use either `eveRoot` or `agents`, not both. `eveRoot` remains the shorthand for a single unnamed agent mounted at `/eve/v1/*`.
 
+Generated agent services build with `EVE_PUBLIC_ROUTE_PREFIX` set to the agent's public mount (for example `/eve/agents/support`) so framework-minted callback URLs — OAuth connection callbacks and remote-subagent session callbacks — resolve to the public per-agent path. If you configure eve services manually in `vercel.json` instead, export that variable in each named agent's build command.
+
 ### `withEve` options
 
 All fields are optional.

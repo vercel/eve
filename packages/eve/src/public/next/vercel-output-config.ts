@@ -6,6 +6,10 @@ import {
   EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
 } from "#internal/application/paths.js";
 import {
+  EVE_PUBLIC_ROUTE_PREFIX_ENV,
+  normalizePublicRoutePrefix,
+} from "#shared/public-route-prefix.js";
+import {
   findClosestLinkedVercelDirectory,
   findClosestVercelOutputDirectory,
 } from "#shared/vercel-output-directory.js";
@@ -167,9 +171,17 @@ function createGeneratedServiceBuild(input: {
     input.agent.appRoot,
     input.hostOutputDirectory,
   );
+  // Named agents are publicly mounted under this prefix while the service
+  // itself receives prefix-stripped `/eve/v1/*` paths, so the build must
+  // carry the prefix into the workflow runtime for callback-URL minting.
+  const publicRoutePrefix = normalizePublicRoutePrefix(input.agent.publicRoutePrefix);
+  const publicRoutePrefixExport =
+    publicRoutePrefix === undefined
+      ? ""
+      : ` && export ${EVE_PUBLIC_ROUTE_PREFIX_ENV}=${quoteShellArgument(publicRoutePrefix)}`;
 
   return {
-    buildCommand: `cd ${quoteShellArgument(workingDirectory)} && export ${EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteShellArgument(configuredOutputDirectory)} && export ${EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteShellArgument(configuredHostOutputDirectory)} && ${input.agent.buildCommand}`,
+    buildCommand: `cd ${quoteShellArgument(workingDirectory)} && export ${EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteShellArgument(configuredOutputDirectory)} && export ${EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteShellArgument(configuredHostOutputDirectory)}${publicRoutePrefixExport} && ${input.agent.buildCommand}`,
     root: resolveRelativeEntrypoint(input.nextRoot, rootDirectory),
     rootDirectory,
   };

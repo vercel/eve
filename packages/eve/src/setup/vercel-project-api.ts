@@ -46,7 +46,7 @@ const VercelTeamPageSchema = z
     teams: z.array(VercelTeamListEntrySchema),
     pagination: VercelPaginationSchema.optional(),
   })
-  .transform((data) => ({ items: data.teams, next: data.pagination?.next ?? undefined }));
+  .transform((data) => data.teams);
 
 const VercelProjectPageSchema = z
   .object({
@@ -64,30 +64,6 @@ export function parseVercelJson(stdout: string, description: string): unknown {
   }
 }
 
-/**
- * Drains a cursor-paginated Vercel list, deduping by `key`. A repeated cursor
- * means Vercel paged us in a circle — bail rather than loop forever.
- */
-async function drainPages<T>(
-  label: string,
-  key: (item: T) => string,
-  fetchPage: (next: number | undefined) => Promise<VercelPage<T>>,
-): Promise<T[]> {
-  const items = new Map<string, T>();
-  const cursors = new Set<number>();
-  let next: number | undefined;
-  while (true) {
-    const page = await fetchPage(next);
-    for (const item of page.items) items.set(key(item), item);
-    if (page.next === undefined) return [...items.values()];
-    if (cursors.has(page.next)) {
-      throw new Error(`Vercel returned a repeated pagination cursor for ${label}.`);
-    }
-    cursors.add(page.next);
-    next = page.next;
-  }
-}
-
 /** Converts a scoped API denial into the Vercel re-authentication action. */
 export function requireVercelTeamAccess(failure: VercelCaptureFailure): never {
   const stderr = failure.stderr.trim();
@@ -99,34 +75,52 @@ export function requireVercelTeamAccess(failure: VercelCaptureFailure): never {
   });
 }
 
-async function fetchTeamPage(
+const VERCEL_TEAM_PAGE_LIMIT = 100;
+
+function isUnsupportedTeamListFailure(failure: VercelCaptureFailure): boolean {
+  const output = `${failure.stderr}\n${failure.stdout}`;
+  return /(?:unknown|unexpected|invalid).*(?:--format|--limit)/iu.test(output);
+}
+
+function requireVercelCliUpgrade(failure: VercelCaptureFailure): never {
+  throw new HumanActionRequiredError({
+    kind: "vercel-cli-upgrade",
+    command: "vercel upgrade",
+    reason: `The installed Vercel CLI does not support the team-list options eve needs. ${failure.message} Upgrade it and retry.`,
+  });
+}
+
+async function captureTeamPage(
   projectRoot: string,
   options: VercelProjectOperationOptions,
-  next: number | undefined,
-): Promise<VercelPage<VercelTeamListEntry>> {
-  const args = ["teams", "ls", "--format", "json"];
-  if (next !== undefined) args.push("--next", String(next));
+  args: string[],
+): Promise<string> {
   const result = await captureVercel(args, { cwd: projectRoot, signal: options.signal });
   options.signal?.throwIfAborted();
   if (!result.ok) {
     if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
+    if (isUnsupportedTeamListFailure(result.failure)) requireVercelCliUpgrade(result.failure);
     throw new Error(`Could not list Vercel teams. ${result.failure.message}`);
   }
-  const parsed = VercelTeamPageSchema.safeParse(parseVercelJson(result.stdout, "teams"));
-  if (!parsed.success) throw new Error("Could not read teams from Vercel CLI JSON output.");
-  return parsed.data;
+  return result.stdout;
 }
 
-/** Lists every Vercel scope available to the current CLI user. */
+/** Lists up to the maximum 100 Vercel scopes supported by the CLI. */
 export async function listTeams(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},
 ): Promise<VercelTeamListEntry[]> {
-  return drainPages(
-    "Vercel teams",
-    (team) => team.slug,
-    (next) => fetchTeamPage(projectRoot, options, next),
-  );
+  const stdout = await captureTeamPage(projectRoot, options, [
+    "teams",
+    "ls",
+    "--format",
+    "json",
+    "--limit",
+    String(VERCEL_TEAM_PAGE_LIMIT),
+  ]);
+  const parsed = VercelTeamPageSchema.safeParse(parseVercelJson(stdout, "teams"));
+  if (!parsed.success) throw new Error("Could not read teams from Vercel CLI JSON output.");
+  return parsed.data;
 }
 
 async function fetchProjectPage(

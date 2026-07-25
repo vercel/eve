@@ -105,6 +105,21 @@ If you support refresh while an authorization prompt is pending, keep the sessio
 
 HTTP connections can end before a run does. The client reconnects from the number of events already consumed, so long turns continue without replaying events. It stops at a turn boundary, when aborted, or when the stream can no longer make progress.
 
+Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
+
+```ts
+const response = await session.send({
+  message: "Run the long operation.",
+  streamReconnectPolicy: { reconnect: false },
+});
+
+for await (const event of response) {
+  console.log(event.type);
+}
+```
+
+The same option is available on manual attachments as `session.stream({ streamReconnectPolicy: { reconnect: false } })`.
+
 ## Open a stream manually
 
 Use `session.stream()` when you already have a session cursor and only need to attach to the existing stream:

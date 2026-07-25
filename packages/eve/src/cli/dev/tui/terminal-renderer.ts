@@ -144,6 +144,7 @@ import {
   renderTodoPanelRows,
   type TodoPanelItem,
 } from "./todo-panel.js";
+import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
 import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
@@ -208,9 +209,14 @@ function moveActionCursor(
   return (cursor + delta + actionCount) % actionCount;
 }
 
-function completedTurnStatus(interrupted: boolean, continueSession: boolean): string {
-  if (interrupted) return "Interrupted";
-  if (continueSession) return "Ready";
+function completedTurnStatus(input: {
+  interrupted: boolean;
+  cancelled: boolean;
+  continueSession: boolean;
+}): string {
+  if (input.interrupted) return "Interrupted";
+  if (input.cancelled) return "Cancelled";
+  if (input.continueSession) return "Ready";
   return "Done";
 }
 
@@ -271,6 +277,7 @@ export type TerminalRendererOptions = {
   diagnostics?: DevDiagnostics;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
+  onExitRequest?: () => void;
 };
 
 export type AgentHeaderOptions = {
@@ -450,6 +457,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #everInteractive = false;
   #partingLinePrinted = false;
   #interrupted = false;
+  #exitRequested = false;
+  readonly #onExitRequest?: () => void;
   #caretVisible = true;
   #spinnerIndex = 0;
   #activityPulseStartedAtMs = Date.now();
@@ -511,6 +520,29 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * so committing must be idempotent per list content.
    */
   #todoCommittedSignature?: string;
+  /**
+   * Messages submitted while a turn streams, pinned in a panel directly
+   * above the input. Enter queues, Esc pops-to-steer or (empty) arms and
+   * then cancels; the runner drains via {@link takeQueuedPrompt} at a clean
+   * turn boundary and {@link readPrompt} restores any leftovers as a draft.
+   */
+  readonly #messageQueue = new MessageQueue();
+  /** The streaming result's cooperative cancel, armed for Esc while it renders. */
+  #requestTurnCancel?: () => void;
+  /** Set by the `turn-cancelled` stream event: settle in-flight tool blocks. */
+  #turnCancelled = false;
+  /** Server session id backing the conversation; named in the parting line. */
+  #sessionId?: string;
+  /**
+   * Provenance of the next runner-submitted prompt, remembered between
+   * {@link takeQueuedPrompt} and the echo in {@link #addSubmittedPrompt} so
+   * the user block can carry its steer/queue gutter arrow.
+   */
+  #nextSubmittedPromptOrigin?: "steer" | "queue";
+  /** True once an Esc in THIS stream requested cancellation (steer or Esc Esc). */
+  #cancelRequestedByUser = false;
+  /** The prompt submitted for the streaming turn, for external-cancel recovery. */
+  #currentSubmittedPrompt?: string;
   /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
   #flowInterrupt?: () => void;
   /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
@@ -551,6 +583,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#diagnostics = options?.diagnostics;
+    this.#onExitRequest = options?.onExitRequest;
     this.#logs = options?.logs ?? "none";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
@@ -594,10 +627,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
     // A draft typed during the turn carries into the prompt; an explicit
-    // initial draft (`eve dev --input`) wins over it.
-    let editor: LineState = lineOf(
-      stripPromptControlCharacters(options?.initialDraft ?? this.#streamDraft.text),
+    // initial draft (`eve dev --input`) wins over it. Queued messages the
+    // runner never drained (an interrupted or failed turn) fold back in
+    // ahead of the draft instead of vanishing — sanitized per line so the
+    // blank-line seams between restored messages survive.
+    const undelivered = this.#messageQueue
+      .restoreDraft()
+      ?.split("\n")
+      .map(stripPromptControlCharacters)
+      .join("\n");
+    const carriedDraft = stripPromptControlCharacters(
+      options?.initialDraft ?? this.#streamDraft.text,
     );
+    const seededDraft =
+      undelivered === undefined
+        ? carriedDraft
+        : carriedDraft.length === 0
+          ? undelivered
+          : `${undelivered}\n\n${carriedDraft}`;
+    let editor: LineState = lineOf(seededDraft);
     this.#streamDraft = EMPTY_LINE;
     this.#promptHistory.begin(editor.text);
     this.#syncInput(editor);
@@ -722,6 +770,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           case "ctrl-d":
             // EOF on an empty line quits; otherwise it forward-deletes.
             if (editor.text.length === 0) {
+              this.#requestExit();
               interrupt();
             } else {
               apply(deleteForward(editor));
@@ -734,9 +783,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#paint();
             break;
           case "ctrl-c":
-            // A first Ctrl+C clears a non-empty prompt; on an already-empty
-            // prompt it quits.
             if (editor.text.length === 0) {
+              this.#requestExit();
               interrupt();
             } else {
               apply(EMPTY_LINE);
@@ -754,6 +802,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #syncInput(state: LineState): void {
     this.#inputText = state.text;
     this.#inputCursor = state.cursor;
+  }
+
+  /**
+   * Consumes the next prompt produced by mid-turn input — the staged Esc
+   * steer message, or the whole queue coalesced into one. The runner calls
+   * this at a clean turn boundary and submits the result directly; the
+   * remembered origin marks the echoed user block with its gutter arrow.
+   */
+  takeQueuedPrompt(): string | undefined {
+    const steering = this.#messageQueue.view().steering;
+    const prompt = this.#messageQueue.takePrompt();
+    if (prompt !== undefined) {
+      this.#nextSubmittedPromptOrigin = steering ? "steer" : "queue";
+    }
+    return prompt;
   }
 
   async renderStream(
@@ -778,6 +841,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#turnClock.arm();
     }
     this.#interrupted = false;
+    this.#turnCancelled = false;
+    this.#cancelRequestedByUser = false;
+    this.#currentSubmittedPrompt = options?.submittedPrompt;
+    this.#messageQueue.beginTurn();
+    this.#requestTurnCancel = result.cancel;
     this.#totalTokens = undefined;
     this.#promptTokens = undefined;
     this.#assistantOutputTokens = undefined;
@@ -824,20 +892,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
     } finally {
       this.#resolveStreamInterrupt = undefined;
       if (this.#interrupted) result.abort?.();
+      this.#requestTurnCancel = undefined;
       this.#detachInput();
       this.#stopTicker();
       this.#streamDraftActive = false;
       if (this.#turnIndicator.kind === "waiting") {
         this.#turnIndicator = { kind: "idle" };
       }
-      this.#status = completedTurnStatus(this.#interrupted, options?.continueSession === true);
+      this.#status = completedTurnStatus({
+        interrupted: this.#interrupted,
+        cancelled: this.#turnCancelled,
+        continueSession: options?.continueSession === true,
+      });
       // Placeholders whose call never materialized (interrupted mid-input)
       // must vanish rather than commit.
       this.#sweepPreparingToolBlocks(turnState);
-      // An interrupted turn gets no terminal updates for its in-flight
-      // calls; a block left `running` would keep the settled prefix wedged
-      // and freeze scrollback for the rest of the session.
-      if (this.#interrupted) this.#settleInterruptedToolBlocks();
+      // An interrupted or cancelled turn gets no terminal updates for its
+      // in-flight calls; a block left `running` would keep the settled
+      // prefix wedged and freeze scrollback for the rest of the session.
+      if (this.#interrupted || this.#turnCancelled) this.#settleInterruptedToolBlocks();
       this.#finalizeAllBlocks();
       this.#diagnostics?.reportStats();
       this.#paint();
@@ -1461,6 +1534,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#subagentCallsByName.clear();
     this.#todoItems = undefined;
     this.#todoCommittedSignature = undefined;
+    this.#messageQueue.reset();
+    this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
     this.#turnClock.reset();
   }
@@ -2323,7 +2398,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     };
     // See #armFlowIdleTrap: stale deferred keys die with the old consumer.
     this.#clearKeyFlush();
-    this.#consumeKey = (key) => consume(key, settle, reject);
+    this.#consumeKey = (key) => {
+      if (key.type === "ctrl-c") {
+        this.#requestExit();
+      }
+      consume(key, settle, reject);
+    };
     this.#attachInput();
     return { promise, settle };
   }
@@ -2355,6 +2435,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#flowInterrupt === undefined) return;
     const consumer = (key: TerminalKey): void => {
       if (key.type === "ctrl-c" || key.type === "escape") {
+        if (key.type === "ctrl-c") {
+          this.#requestExit();
+        }
         const fire = this.#flowInterrupt;
         this.#flowInterrupt = undefined;
         this.#disarmFlowIdleTrap();
@@ -2468,17 +2551,41 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  /** Last server session id the runner reported; named in the parting line. */
+  setSessionId(sessionId: string): void {
+    this.#sessionId = sessionId;
+  }
+
   shutdown(): void {
     this.#stop();
     // The parting line: the boot banner's dim counterpart, written after the
     // terminal is restored so it lands as the session's last scrollback row.
     // Gated on the session having ever gone live (Ctrl-C stops the terminal
     // inside the reader long before the runner's teardown reaches here) and
-    // printed at most once.
+    // printed at most once. Carries the session id so the conversation the
+    // user just left can be found again.
     if (this.#everInteractive && !this.#partingLinePrinted) {
       this.#partingLinePrinted = true;
-      this.#output.write(`${this.#theme.colors.dim(eveVersionTag())}\n`);
+      const session =
+        this.#sessionId === undefined ? "" : ` ${this.#theme.glyph.dot} session ${this.#sessionId}`;
+      this.#output.write(`${this.#theme.colors.dim(`${eveVersionTag()}${session}`)}\n`);
     }
+  }
+
+  requestInterrupt(): void {
+    this.#interrupted = true;
+    if (this.#setupFlow !== undefined) this.#consumeKey?.({ type: "ctrl-c" });
+    this.#resolveStreamInterrupt?.();
+    this.#stop();
+  }
+
+  exitRequested(): boolean {
+    return this.#exitRequested;
+  }
+
+  #requestExit(): void {
+    this.#exitRequested = true;
+    this.#onExitRequest?.();
   }
 
   // ---------------------------------------------------------------------------
@@ -2510,7 +2617,24 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     this.#onResize = () => this.#paint();
     this.#output.on("resize", this.#onResize);
+    process.on("exit", this.#onProcessExit);
   }
+
+  /**
+   * Last-resort synchronous terminal restore for a forced `process.exit()`
+   * (the lifecycle's forced-exit backstop or a second Ctrl+C/SIGTERM) that
+   * preempts {@link #stop}. A shell left in raw mode with a hidden cursor and
+   * bracketed paste enabled is unusable; this runs on the process "exit"
+   * event, where only synchronous writes survive. Normal teardown removes it.
+   */
+  readonly #onProcessExit = () => {
+    if (!this.#isInteractive) return;
+    if (this.#input.isTTY) {
+      this.#live.emitBracketedPaste(false);
+      this.#input.setRawMode?.(false);
+    }
+    this.#live.showCursor();
+  };
 
   #stop() {
     // A reader still awaiting keys can never settle once input detaches;
@@ -2557,6 +2681,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#output.off("resize", this.#onResize);
       this.#onResize = undefined;
     }
+    process.off("exit", this.#onProcessExit);
 
     this.#isInteractive = false;
   }
@@ -2671,11 +2796,35 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#paint();
         }
         break;
-      case "enter":
-        // Inert while the turn streams — no mid-turn submits yet. The draft
-        // carries into the next prompt instead.
+      case "enter": {
+        // Mid-turn Enter queues the draft as a message for the next turn
+        // (or for an Esc steer pop). A full queue keeps the draft in place —
+        // the panel header says why — rather than silently dropping input.
+        const message = this.#streamDraft.text;
+        if (message.trim().length === 0) break;
+        if (this.#messageQueue.enqueue(message)) {
+          this.#streamDraft = EMPTY_LINE;
+        }
+        this.#paint();
         break;
+      }
+      case "escape": {
+        // Esc drives steering and cancellation: pop the oldest queued
+        // message and cancel the running turn so the runner submits it as
+        // the replacement turn; with nothing queued, arm once and cancel on
+        // the second press. Without a cancel capability an empty queue
+        // leaves Esc inert — arming would promise a cancel that can't land.
+        if (this.#messageQueue.idle && this.#requestTurnCancel === undefined) break;
+        const outcome = this.#messageQueue.handleEscape();
+        if (outcome === "steer" || outcome === "cancel") {
+          this.#cancelRequestedByUser = true;
+          this.#requestTurnCancel?.();
+        }
+        this.#paint();
+        break;
+      }
       default: {
+        this.#messageQueue.disarm();
         const edited = applyLineEditorKey(this.#streamDraft, key, { multiline: true });
         if (edited !== undefined) {
           this.#streamDraft = edited;
@@ -2786,11 +2935,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #addSubmittedPrompt(prompt: string | undefined) {
     if (prompt == null) return;
+    const origin = this.#nextSubmittedPromptOrigin;
+    this.#nextSubmittedPromptOrigin = undefined;
     if (this.#pendingEchoedPrompt === prompt) {
       this.#pendingEchoedPrompt = undefined;
       return;
     }
-    this.#pushBlock({ kind: "user", body: stripTerminalControls(prompt), live: false });
+    const block: Block = { kind: "user", body: stripTerminalControls(prompt), live: false };
+    if (origin !== undefined) block.promptOrigin = origin;
+    this.#pushBlock(block);
   }
 
   #addErrorBlock(
@@ -3041,6 +3194,27 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "error":
         this.#addErrorBlock("Error", event.errorText, { detail: event.detail, hint: event.hint });
+        break;
+
+      case "turn-cancelled":
+        // The server settled the turn cooperatively (an Esc steer or
+        // Esc Esc); its in-flight tool calls get no further updates and are
+        // settled by the interrupted-blocks sweep at stream end.
+        this.#turnCancelled = true;
+        // A cancellation nobody asked for through THIS prompt — a stale
+        // cancel from the previous turn landing late (the unguarded
+        // dispatch-window race), or `/cancel` from another client — must
+        // not eat the submitted message: hand it back as the next draft.
+        if (
+          !this.#cancelRequestedByUser &&
+          this.#currentSubmittedPrompt !== undefined &&
+          this.#streamDraft.text.length === 0
+        ) {
+          this.#streamDraft = lineOf(this.#currentSubmittedPrompt);
+          this.renderNotice(
+            "The turn was cancelled from outside this prompt — the message was restored to the input.",
+          );
+        }
         break;
 
       case "finish":
@@ -3543,6 +3717,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return rows;
     }
 
+    // The setup attention line rides above the pinned panels as a live
+    // element, so resolving its issue clears it instead of leaving it stale
+    // in scrollback.
+    if (this.#setupAttention !== undefined) {
+      rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
+    }
+
     // The pinned todo panel holds its place above the prompt, updated in
     // place by each `todo` tool call rather than scrolling with the stream.
     if (this.#todoItems !== undefined) {
@@ -3561,11 +3742,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       );
     }
 
-    // The setup attention line rides just above the prompt as a live element,
-    // so resolving its issue clears it instead of leaving it stale in scrollback.
-    if (this.#setupAttention !== undefined) {
-      rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
-    }
+    // The message-queue panel takes the slot directly above the input —
+    // ahead of the todo panel — because it holds the user's own undelivered
+    // words and carries the Esc steering/cancel affordance.
+    const queueRows = renderMessageQueueRows({
+      view: this.#messageQueue.view(),
+      width,
+      theme: this.#theme,
+      working: this.#streamDraftActive,
+    });
+    if (queueRows.length > 0) rows.push(...queueRows, "");
 
     if (this.#inputActive) {
       // A complete command name with a single match collapses the dropdown into

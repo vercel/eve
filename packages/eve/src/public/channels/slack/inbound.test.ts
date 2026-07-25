@@ -4,8 +4,56 @@ import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js"
 import {
   parseAppMentionEvent,
   parseDirectMessageEvent,
+  parseMessageEvent,
+  parseSlackEventEnvelope,
   slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
+
+describe("parseSlackEventEnvelope", () => {
+  it("preserves an arbitrary Events API payload and its delivery envelope", () => {
+    const envelope = parseSlackEventEnvelope(
+      JSON.stringify({
+        api_app_id: "A01",
+        event: {
+          item: { channel: "C01", ts: "1700000000.000100", type: "message" },
+          reaction: "eyes",
+          type: "reaction_added",
+          user: "U01",
+        },
+        event_id: "Ev01",
+        event_time: 1_700_000_000,
+        team_id: "T01",
+        type: "event_callback",
+      }),
+    );
+
+    expect(envelope).toMatchObject({
+      api_app_id: "A01",
+      event: {
+        item: { channel: "C01", ts: "1700000000.000100", type: "message" },
+        reaction: "eyes",
+        type: "reaction_added",
+        user: "U01",
+      },
+      event_id: "Ev01",
+      event_time: 1_700_000_000,
+      team_id: "T01",
+    });
+  });
+
+  it("returns null for non-event callbacks and missing event types", () => {
+    expect(
+      parseSlackEventEnvelope(JSON.stringify({ challenge: "abc", type: "url_verification" })),
+    ).toBeNull();
+    expect(
+      parseSlackEventEnvelope(JSON.stringify({ event: { user: "U01" }, type: "event_callback" })),
+    ).toBeNull();
+  });
+
+  it("throws for invalid JSON", () => {
+    expect(() => parseSlackEventEnvelope("not-json")).toThrow();
+  });
+});
 
 describe("parseAppMentionEvent", () => {
   it("returns a SlackMessage with mrkdwn re-rendered as GFM", () => {
@@ -110,6 +158,35 @@ describe("parseAppMentionEvent", () => {
       mimeType: "image/png",
       size: 1024,
     });
+  });
+});
+
+describe("parseMessageEvent", () => {
+  it("preserves bot and subtype message events for onMessage", () => {
+    const bot = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        bot_id: "B01",
+        user: "U_BOT",
+        text: "automated",
+        channel: "C01",
+        ts: "2.0",
+      },
+    });
+    const subtype = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        subtype: "message_changed",
+        text: "edited",
+        channel: "C01",
+        ts: "3.0",
+      },
+    });
+
+    expect(bot?.author?.isBot).toBe(true);
+    expect(subtype?.raw.subtype).toBe("message_changed");
   });
 });
 

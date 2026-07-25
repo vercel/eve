@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "extension/github-tools",
+  "title": "GitHub Tools",
+  "description": "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
+  "dependencies": ["@github-tools/eve-extension", "@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/extensions/github-tools.ts",
+      "content": "import githubTools from \"@github-tools/eve-extension\";\n\nexport default githubTools({});\n",
+      "type": "registry:file",
+      "target": "agent/extensions/github.ts"
+    }
+  ],
+  "type": "registry:item"
+}

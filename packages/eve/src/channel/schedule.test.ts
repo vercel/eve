@@ -10,6 +10,7 @@ import {
   ScheduleDispatcher,
 } from "#channel/schedule.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
@@ -24,10 +25,11 @@ function createMockRunHandle(): RunHandle {
 function createMockRuntime(): Runtime {
   return {
     cancelTurn: vi.fn(),
-    deliver: vi.fn().mockRejectedValue(new Error("no parked session")),
+    deliver: vi.fn().mockRejectedValue(new RuntimeNoActiveSessionError("schedule:token")),
     resolveSession: vi.fn(),
     run: vi.fn().mockResolvedValue(createMockRunHandle()),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
+    terminateSession: vi.fn(),
   };
 }
 

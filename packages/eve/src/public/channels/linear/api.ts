@@ -88,6 +88,8 @@ export interface LinearAgentActivityRecord {
     __typename?: string;
   };
   id: string;
+  signal?: string | null;
+  signalMetadata?: JsonObject | null;
   updatedAt?: string;
 }
 
@@ -306,6 +308,8 @@ export async function listLinearAgentSessionActivities(input: {
           activities(last: $last) {
             nodes {
               id
+              signal
+              signalMetadata
               updatedAt
               content {
                 __typename
@@ -374,6 +378,11 @@ function normalizeAgentActivityRecord(value: unknown): LinearAgentActivityRecord
     content,
     id: value.id,
   };
+  if (typeof value.signal === "string" || value.signal === null) record.signal = value.signal;
+  if (isObject(value.signalMetadata)) {
+    record.signalMetadata = parseJsonObject(value.signalMetadata);
+  }
+  if (value.signalMetadata === null) record.signalMetadata = null;
   if (typeof value.updatedAt === "string") record.updatedAt = value.updatedAt;
   return record;
 }

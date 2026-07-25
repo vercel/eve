@@ -50,13 +50,17 @@ export const Gallery = ({ integrations }: GalleryProps) => {
   }, [integrations, filter, query]);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="inline-flex gap-0.5 rounded-md border bg-background-100 p-1">
+    <div className="flex min-w-0 flex-col gap-6">
+      <div className="flex min-w-0 flex-col gap-3 min-[1024px]:flex-row min-[1024px]:items-center min-[1024px]:justify-between">
+        <div
+          aria-label="Integration type"
+          className="flex w-full gap-0.5 overflow-x-auto rounded-md border bg-background-100 p-1 [scrollbar-width:none] min-[1024px]:w-fit [&::-webkit-scrollbar]:hidden"
+          role="group"
+        >
           {FILTERS.map(({ value, label }) => (
             <button
               className={cn(
-                "rounded px-3 py-1 font-medium text-sm transition-colors",
+                "shrink-0 whitespace-nowrap rounded px-3 py-1 font-medium text-sm transition-colors",
                 filter === value
                   ? "bg-gray-100 text-gray-1000"
                   : "text-gray-900 hover:bg-gray-100/40 hover:text-gray-1000",
@@ -69,7 +73,7 @@ export const Gallery = ({ integrations }: GalleryProps) => {
             </button>
           ))}
         </div>
-        <InputGroup className="h-9 bg-background sm:w-64">
+        <InputGroup className="h-9 w-full bg-background min-[1024px]:w-64">
           <InputGroupAddon>
             <SearchIcon className="size-4 text-gray-700" />
           </InputGroupAddon>
@@ -88,7 +92,7 @@ export const Gallery = ({ integrations }: GalleryProps) => {
       )}
 
       {results.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid min-w-0 grid-cols-1 gap-4 min-[1024px]:grid-cols-2 min-[1200px]:grid-cols-3">
           {results.map((integration) => (
             <IntegrationCard integration={integration} key={integration.slug} />
           ))}

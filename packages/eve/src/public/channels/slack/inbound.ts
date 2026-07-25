@@ -20,6 +20,7 @@ import type {
 } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import { isObject } from "#shared/guards.js";
 
 /**
  * Author metadata for an inbound Slack message. Channel-owned shape;
@@ -76,6 +77,16 @@ export interface SlackMessage {
 }
 
 /**
+ * Open-ended Slack Events API payload handed to `slackChannel({ onEvent })`.
+ * `type` is the Slack event discriminator; all event-specific fields pass
+ * through unchanged from the signed webhook body.
+ */
+export interface SlackEvent {
+  readonly type: string;
+  readonly [key: string]: unknown;
+}
+
+/**
  * Slack `app_mention` event envelope (subset of fields the channel
  * actually reads).
  */
@@ -120,10 +131,38 @@ interface SlackMessageEvent {
 export interface SlackEventCallback {
   readonly type: "event_callback";
   readonly team_id?: string;
+  readonly authorizations?: readonly {
+    readonly is_bot?: boolean;
+    readonly user_id?: string;
+  }[];
   readonly event?: { readonly type?: string } & Record<string, unknown>;
   readonly event_id?: string;
   readonly event_time?: number;
   readonly [key: string]: unknown;
+}
+
+/**
+ * Validated Slack Events API callback envelope handed to `onEvent` through
+ * {@link SlackInboundEventContext}. Unlike the permissive parser input type,
+ * this shape always carries an event with a non-empty `type` discriminator.
+ */
+export interface SlackEventEnvelope extends SlackEventCallback {
+  readonly event: SlackEvent;
+}
+
+/**
+ * Parses a raw JSON webhook body into an open-ended Slack Events API envelope.
+ * Returns `null` for URL verification, interactivity, and malformed callback
+ * payloads. Invalid JSON is allowed to throw so the route can log it once.
+ */
+export function parseSlackEventEnvelope(body: string): SlackEventEnvelope | null {
+  const envelope = JSON.parse(body) as unknown;
+  if (!isObject(envelope) || envelope.type !== "event_callback") return null;
+
+  const event = envelope.event;
+  if (!isObject(event) || typeof event.type !== "string" || event.type.length === 0) return null;
+
+  return envelope as SlackEventEnvelope;
 }
 
 /**
@@ -152,6 +191,22 @@ export function parseAppMentionEvent(envelope: SlackEventCallback): SlackMessage
  * - the message was posted by a bot (`bot_id` set) — this prevents the
  *   bot's own DM replies from re-triggering the handler.
  */
+/** Returns the bot user id attached to a Slack event authorization. */
+export function slackEventBotUserId(envelope: SlackEventCallback): string | undefined {
+  const authorization = envelope.authorizations?.find(
+    (entry) => entry.is_bot === true && typeof entry.user_id === "string",
+  );
+  return authorization?.user_id;
+}
+
+/** Parses a Slack message event without applying bot or subtype policy. */
+export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
+  if (envelope.type !== "event_callback") return null;
+  const event = envelope.event;
+  if (!event || event.type !== "message") return null;
+  return buildSlackMessage(event as SlackMessageEvent, envelope.team_id);
+}
+
 export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
@@ -159,16 +214,20 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
 
   const message = event as SlackMessageEvent;
   if (message.channel_type !== "im") return null;
+  if (!isHumanMessage(message)) return null;
+
+  return buildSlackMessage(message, envelope.team_id);
+}
+
+function isHumanMessage(message: SlackMessageEvent): boolean {
   if (
     typeof message.subtype === "string" &&
     message.subtype.length > 0 &&
     message.subtype !== "file_share"
   ) {
-    return null;
+    return false;
   }
-  if (typeof message.bot_id === "string" && message.bot_id.length > 0) return null;
-
-  return buildSlackMessage(message, envelope.team_id);
+  return !(typeof message.bot_id === "string" && message.bot_id.length > 0);
 }
 
 export function slackMessageFromWebhookPayload(

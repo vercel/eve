@@ -1,31 +1,27 @@
-import { SCAFFOLDABLE_CHANNELS, type ChannelKind } from "#setup/scaffold/index.js";
+import type { ChannelKind } from "#setup/scaffold/index.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import { interactiveAsker } from "../ask.js";
-import { addChannels, type AddChannelsDeps } from "../boxes/add-channels.js";
-import { CHANNELS_PROMPT_MESSAGE, selectChannels } from "../boxes/select-channels.js";
+import type { AddChannelsDeps } from "../boxes/add-channels.js";
+import { CHANNELS_PROMPT_MESSAGE } from "../boxes/select-channels.js";
+import { channelSetupEnvironment } from "../channel-setup-environment.js";
+import {
+  CHANNEL_SETUP_INTEGRATIONS,
+  channelSetupIntegration,
+  createChannelSetupUi,
+} from "../channel-setup-integrations.js";
 import {
   assertCanAddSelectedChannels,
   inspectExistingChannelRegistrations,
   type ExistingChannelRegistrations,
 } from "../channel-add-conflicts.js";
-import {
-  detectDeployment,
-  isProjectResolved,
-  projectResolutionFromDeployment,
-} from "../project-resolution.js";
+import { detectDeployment, projectResolutionFromDeployment } from "../project-resolution.js";
 import type { Prompter, SelectOption, SingleSelectOptions } from "../prompter.js";
 import { WizardCancelledError } from "../step.js";
-import { runInteractive, type AnySetupBox } from "../runner.js";
-import { createDefaultSetupState, snapshotSetupState, type SetupState } from "../state.js";
-import {
-  getVercelAuthStatus,
-  vercelAuthBlockerReason,
-  type VercelAuthStatus,
-} from "../vercel-project.js";
-import { withSpinner } from "../with-spinner.js";
 
-import { prompterSink } from "./in-project.js";
+import { createDefaultSetupState, type SetupState } from "../state.js";
+import { getVercelAuthStatus } from "../vercel-project.js";
+import { withSpinner } from "../with-spinner.js";
 
 /** Injected for tests; defaults to the real detection and box effects. */
 export interface ChannelsFlowDeps {
@@ -56,27 +52,22 @@ export type ChannelsFlowResult =
       message: string;
     };
 
-/** The post-Slack "see it live" chooser's title. */
+/** Title for Slack's optional deploy-and-chat continuation. */
 export const SEE_IT_LIVE_MESSAGE = "See it live";
 
-/**
- * The streamlined hop from a fresh Slack connection to a live agent. A Slack
- * bot only receives messages once the project is deployed, so rather than leave
- * the user to discover `/deploy`, offer it inline: "Deploy and chat" ends the
- * channel loop so the caller can deploy and surface the workspace; "Later" (or
- * Esc) drops back to the channel list unchanged.
- */
-async function promptSeeItLive(prompter: Prompter): Promise<"deploy" | "later"> {
+async function offerDeployAndChat(prompter: Prompter): Promise<boolean> {
   try {
-    return await prompter.select<"deploy" | "later">({
-      message: SEE_IT_LIVE_MESSAGE,
-      options: [
-        { value: "deploy", label: "Deploy and chat" },
-        { value: "later", label: "Later" },
-      ],
-    });
+    return (
+      (await prompter.select<"deploy" | "later">({
+        message: SEE_IT_LIVE_MESSAGE,
+        options: [
+          { value: "deploy", label: "Deploy and chat" },
+          { value: "later", label: "Later" },
+        ],
+      })) === "deploy"
+    );
   } catch (error) {
-    if (error instanceof WizardCancelledError) return "later";
+    if (error instanceof WizardCancelledError) return false;
     throw error;
   }
 }
@@ -100,10 +91,8 @@ type ChannelPickResult = { kind: "picked"; value: ChannelListRow } | { kind: "ca
 async function pickChannel(
   prompter: Prompter,
   registrations: ExistingChannelRegistrations,
-  projectLinked: boolean,
-  authStatus: VercelAuthStatus,
 ): Promise<ChannelPickResult> {
-  const rows = channelListRows(registrations, projectLinked, authStatus);
+  const rows = channelListRows(registrations);
   // When every channel is already added or unavailable, the only action left
   // is to finish: default to "Done" instead of a completed row.
   const onlyDoneRemains = !rows.some(
@@ -150,28 +139,8 @@ function deployAndChatDetails(state: Readonly<SetupState>): {
  * Next.js app itself (`webAppPresent`), not the authored session-route channel
  * used by this REPL.
  */
-/**
- * Why a Vercel-backed channel can't be added yet, or `undefined` when it can.
- * Provisioning needs an installed CLI, a logged-in session, and a linked
- * project — all three, on independent axes — so each missing piece points at
- * its own fix rather than dead-ending. Authentication is checked regardless of
- * link state: a linked directory whose session is logged out still cannot
- * provision.
- */
-function vercelChannelBlocker(
-  authStatus: VercelAuthStatus,
-  projectLinked: boolean,
-): string | undefined {
-  const authBlocker = vercelAuthBlockerReason(authStatus);
-  if (authBlocker !== undefined) return authBlocker;
-  if (!projectLinked) return "Requires Vercel account, see /model";
-  return undefined;
-}
-
 function channelListRows(
   registrations: ExistingChannelRegistrations,
-  projectLinked: boolean,
-  authStatus: VercelAuthStatus,
 ): SelectOption<ChannelListRow>[] {
   const rows: SelectOption<ChannelListRow>[] = [
     {
@@ -181,7 +150,7 @@ function channelListRows(
       focusHint: "Already installed",
     },
   ];
-  for (const channel of SCAFFOLDABLE_CHANNELS) {
+  for (const channel of CHANNEL_SETUP_INTEGRATIONS) {
     if (channelAlreadyAdded(registrations, channel.kind)) {
       rows.push({
         value: channel.kind,
@@ -195,22 +164,6 @@ function channelListRows(
     if (disabledReason !== undefined) {
       rows.push({ value: channel.kind, label: channel.label, disabled: true, disabledReason });
       continue;
-    }
-    // The add sub-flow for these channels provisions against the linked Vercel
-    // project, which needs an installed CLI, a logged-in session, and a link.
-    // The row points at whichever is missing instead of dead-ending.
-    if (channel.requiresVercelProject === true) {
-      const blocker = vercelChannelBlocker(authStatus, projectLinked);
-      if (blocker !== undefined) {
-        rows.push({
-          value: channel.kind,
-          label: channel.label,
-          disabled: true,
-          disabledReason: blocker,
-          disabledReasonTone: "warning",
-        });
-        continue;
-      }
     }
     const row: SelectOption<ChannelListRow> = { value: channel.kind, label: channel.label };
     if (channel.hint !== undefined) row.hint = channel.hint;
@@ -230,14 +183,9 @@ function channelListRows(
  * the list after something was added reports the additions exactly like Done;
  * only an empty exit folds to cancelled.
  *
- * Each pick reuses the `eve channels add` composition — the same conflict
- * validation, Vercel services config pinned on, and the default empty agent
- * name (the Slack connector slug falls back to the package.json name) — with
- * two TUI-specific differences: no trailing deploy box (the TUI exposes
- * `/deploy` as its own command), and no inline link pickers — channels that
- * provision against the Vercel project render disabled with a warning
- * pointing at /model while the directory is unlinked, so a pick can never
- * reach provisioning without a link.
+ * The outer loop owns only picker lifecycle, conflict validation, and durable
+ * re-inspection. Each selected integration owns its prompts, provisioning,
+ * scaffold choices, deployment continuation, and next-step guidance.
  */
 export async function runChannelsFlow(input: {
   appRoot: string;
@@ -274,6 +222,10 @@ export async function runChannelsFlow(input: {
   // The detected on-disk link is the only seeded fact, exactly like
   // `eve channels add`. The state carries forward across picks so a link or
   // slackbot established for one channel is not redone for the next.
+  const environment = channelSetupEnvironment(
+    authStatus,
+    projectResolutionFromDeployment(deployment),
+  );
   let state: SetupState = {
     ...createDefaultSetupState(),
     project: projectResolutionFromDeployment(deployment),
@@ -282,12 +234,7 @@ export async function runChannelsFlow(input: {
   let retainedFailure: string | undefined;
 
   while (true) {
-    const picked = await pickChannel(
-      prompter,
-      registrations,
-      isProjectResolved(state.project),
-      authStatus,
-    );
+    const picked = await pickChannel(prompter, registrations);
     if (picked.kind === "cancelled") {
       if (state.channels.length === 0) return { kind: "cancelled" };
       break;
@@ -296,35 +243,34 @@ export async function runChannelsFlow(input: {
     if (pick === "done") break;
     if (pick === "repl" || channelAlreadyAdded(registrations, pick)) continue;
 
-    const boxes: AnySetupBox<SetupState>[] = [
-      selectChannels({
-        asker: interactiveAsker(prompter),
-        variant: "channels-add",
-        presetChannels: [pick],
-        validateSelection: (channels) => assertCanAddSelectedChannels(channels, registrations),
-      }),
-      addChannels({
-        asker: interactiveAsker(prompter),
-        prompter,
-        configureVercelServices: true,
-        deps: deps.addChannels,
-      }),
-    ];
-    let result: Awaited<ReturnType<typeof runInteractive<SetupState>>>;
+    assertCanAddSelectedChannels([pick], registrations);
+    let result: Awaited<ReturnType<ReturnType<typeof channelSetupIntegration>["setup"]>>;
     try {
-      result = await runInteractive(boxes, state, prompterSink(prompter), {
-        snapshot: snapshotSetupState,
+      result = await channelSetupIntegration(pick).setup({
+        environment,
+        state: { ...state, channelSelection: [pick] },
+        ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
         signal,
+        deps: deps.addChannels,
       });
     } catch (error) {
-      const observed = await withSpinner(prompter, "Checking the project…", () =>
-        deps.inspectExistingChannelRegistrations(appRoot),
-      );
+      // Cancellation can arrive after files land. Re-inspect without an
+      // abort-aware spinner in that case so durable success is still reported.
+      const observed =
+        signal?.aborted === true
+          ? await deps.inspectExistingChannelRegistrations(appRoot)
+          : await withSpinner(prompter, "Checking the project…", () =>
+              deps.inspectExistingChannelRegistrations(appRoot),
+            );
       if (channelLandedDuringSubflow(registrations, observed, pick)) {
         state = { ...state, channels: appendChannel(state.channels, pick) };
         registrations = observed;
-        retainedFailure = toErrorMessage(error);
+        if (!(error instanceof WizardCancelledError)) retainedFailure = toErrorMessage(error);
         if (signal?.aborted === true) break;
+        continue;
+      }
+      if (error instanceof WizardCancelledError) {
+        registrations = observed;
         continue;
       }
       // A provisioning failure (login / forbidden / missing CLI) throws before
@@ -332,33 +278,25 @@ export async function runChannelsFlow(input: {
       // to the command handler, which routes it to its fix command.
       throw error;
     }
-    if (result.kind === "done") {
-      state = result.state;
-      registrations = await withSpinner(prompter, "Checking the project…", () =>
-        deps.inspectExistingChannelRegistrations(appRoot),
-      );
-      signal?.throwIfAborted();
-      // A fresh Slack connection only comes alive once deployed, so offer the
-      // shortcut right here; "Later" falls back to the list like any other lap.
-      if (
-        pick === "slack" &&
-        state.slackbotAttached &&
-        (await promptSeeItLive(prompter)) === "deploy"
-      ) {
-        return {
-          kind: "deploy-and-chat",
-          addedChannels: state.channels,
-          chat: deployAndChatDetails(state),
-        };
-      }
-    } else {
-      const observed = await withSpinner(prompter, "Checking the project…", () =>
-        deps.inspectExistingChannelRegistrations(appRoot),
-      );
-      if (channelLandedDuringSubflow(registrations, observed, pick)) {
-        return { kind: "done", addedChannels: appendChannel(state.channels, pick) };
-      }
-      registrations = observed;
+    if (result.kind === "done") state = result.state;
+    const observed =
+      signal?.aborted === true
+        ? await deps.inspectExistingChannelRegistrations(appRoot)
+        : await withSpinner(prompter, "Checking the project…", () =>
+            deps.inspectExistingChannelRegistrations(appRoot),
+          );
+    if (channelLandedDuringSubflow(registrations, observed, pick)) {
+      state = { ...state, channels: appendChannel(state.channels, pick) };
+    }
+    registrations = observed;
+    if (signal?.aborted === true) break;
+    if (result.kind === "cancelled") continue;
+    if (pick === "slack" && state.slackbotAttached && (await offerDeployAndChat(prompter))) {
+      return {
+        kind: "deploy-and-chat",
+        addedChannels: state.channels,
+        chat: deployAndChatDetails(state),
+      };
     }
   }
 

@@ -22,6 +22,7 @@ export {
   type TeamsContext,
   type TeamsEventContext,
   type TeamsHandle,
+  type TeamsInboundMessageContext,
   type TeamsInboundResult,
   type TeamsInboundResultOrPromise,
   type TeamsInputResponseResult,
