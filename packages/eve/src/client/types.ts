@@ -216,6 +216,14 @@ export interface StreamOptions {
   readonly startIndex?: number;
 
   /**
+   * Stop at the durable tail instead of following the live stream. The first
+   * connection reports the index of the last durably recorded event; the
+   * iterator yields events until the cursor passes that tail, reconnecting as
+   * needed, then returns. Requires a nonnegative start cursor.
+   */
+  readonly endAtTail?: boolean;
+
+  /**
    * Abort signal for cancelling the stream.
    */
   readonly signal?: AbortSignal;
