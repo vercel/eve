@@ -50,8 +50,12 @@ async function readRegistryProject(appRoot: string, required: boolean): Promise<
   try {
     parsed = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
-    if (!required && (error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { path, document: {}, config: { registries: {} } };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (!required) return { path, document: {}, config: { registries: {} } };
+      throw new Error(
+        "Adding a registry namespace requires an existing components.json. " +
+          "Use an item URL with `eve add <url>` when the project is not configured for shadcn.",
+      );
     }
     throw new Error(`Could not read ${path}: ${errorMessage(error)}`);
   }

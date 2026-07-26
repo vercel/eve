@@ -93,7 +93,7 @@ eve registry view @acme/my-extension
 eve add @acme/my-extension
 ```
 
-`eve registry add` records configured sources in `components.json`. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. Official and other universal items with explicit file targets can be installed without `components.json`; configured namespace addresses use the project configuration.
+`eve registry add` records configured sources in an existing `components.json`. Projects without shadcn configuration can install a third-party item by URL instead. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. Official and other universal items with explicit file targets can be installed without `components.json`; configured namespace addresses use the project configuration.
 
 ## `eve info`
 
