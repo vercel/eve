@@ -42,30 +42,7 @@ The world package backs workflow state, queues, hooks, and streams. Keep secrets
 
 An eve agent spans two execution environments with different responsibilities:
 
-```mermaid
-flowchart LR
-  subgraph App["Trusted app runtime"]
-    direction TB
-    Loop["Agent loop<br/>durable workflow<br/>agent/agent.ts · agent/instructions.md"]
-    Runtime["Runtime code<br/>model calls · tools · hooks · instrumentation · connections<br/>agent/tools/** · agent/hooks/** · agent/instrumentation.ts · agent/connections/**"]
-    Credentials["Secrets and credentials<br/>provider keys · tool secrets · MCP/OpenAPI auth"]
-    Loop --> Runtime
-    Credentials --> Runtime
-  end
-
-  subgraph Sandbox["Isolated sandbox"]
-    direction TB
-    Operations["Sandbox operations<br/>shell · files · processes"]
-    Skills["Skills<br/>$HOME/.agents/skills<br/>from agent/skills/**"]
-    Workspace["Workspace<br/>/workspace<br/>from agent/sandbox/workspace/**"]
-    Processes["Running work<br/>commands · scripts · servers"]
-    Operations --- Skills
-    Operations --- Workspace
-    Operations --- Processes
-  end
-
-  Runtime -.->|"optional sandbox access: ctx.getSandbox()"| Operations
-```
+<AgentRuntimeDiagram />
 
 The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access. Provider-managed tools execute at the model provider, but the loop still orchestrates them from the app runtime.
 
