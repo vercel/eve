@@ -119,24 +119,24 @@ describe("stream following over real sockets", () => {
     const host = await listen(
       createServer((req, res) => {
         connections += 1;
-        const url = new URL(req.url ?? "", "http://127.0.0.1");
-        tailRequests.push(url.searchParams.get("includeTailIndex"));
         const index = startIndexOf(req.url);
+        const tailRequested = new URL(req.url ?? "", "http://127.0.0.1").searchParams.get(
+          "includeTailIndex",
+        );
+        tailRequests.push(tailRequested);
         res.writeHead(200, {
           "content-type": "application/x-ndjson",
-          ...(url.searchParams.get("includeTailIndex") === "1"
-            ? { "x-eve-stream-tail-index": String(log.length - 1) }
-            : {}),
+          ...(tailRequested === "1" ? { "x-eve-stream-tail-index": String(log.length - 1) } : {}),
         });
-        res.write(`${JSON.stringify(log[index])}\n`);
 
+        // The first two connections drop after one event; the third serves the
+        // rest and holds the connection open — a live follow would keep waiting.
+        const events = index < 2 ? [log[index]] : log.slice(index);
+        for (const event of events) {
+          res.write(`${JSON.stringify(event)}\n`);
+        }
         if (index < 2) {
           setTimeout(() => req.socket.destroy(), 40);
-        } else {
-          for (const event of log.slice(index + 1)) {
-            res.write(`${JSON.stringify(event)}\n`);
-          }
-          // Hold the connection open: a live follow would keep waiting here.
         }
       }),
     );
@@ -187,13 +187,9 @@ describe("stream following over real sockets", () => {
       }),
     );
 
-    const consume = async () => {
-      for await (const _event of follow(host, { endAtTail: true })) {
-        // Unreachable: the missing header must fail the read.
-      }
-    };
-
-    await expect(consume()).rejects.toThrow(/x-eve-stream-tail-index/);
+    await expect(follow(host, { endAtTail: true }).next()).rejects.toThrow(
+      /x-eve-stream-tail-index/,
+    );
   });
 
   it("never abandons a progressing turn: any event resets the idle budget", async () => {
