@@ -148,6 +148,27 @@ describe("registry commands", () => {
     expect(logger.logs).toEqual(["@acme/browser — Browser tools"]);
   });
 
+  it("reports total registry failure without describing it as an empty result", async () => {
+    const logger = createLogger();
+    searchRegistries.mockResolvedValue({
+      items: [],
+      errors: [
+        { registry: "https://eve.dev/r/registry.json", message: "eve unavailable" },
+        { registry: "@acme", message: "acme unavailable" },
+      ],
+      pagination: { total: 0, offset: 0, limit: 0, hasMore: false },
+    });
+
+    await runRegistrySearchCommand(logger, "/project", "browser");
+
+    expect(logger.logs).toEqual([]);
+    expect(logger.errors).toEqual([
+      "https://eve.dev/r/registry.json: eve unavailable",
+      "@acme: acme unavailable",
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("prints a registry item as JSON", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([{ name: "browser", type: "registry:item" }]);

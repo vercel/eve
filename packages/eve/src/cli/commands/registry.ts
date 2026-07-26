@@ -89,10 +89,14 @@ async function browseRegistryItems(
     continueOnError: sources.length > 1,
     query,
   });
-  printSearchResults(logger, result.items);
-  for (const error of result.errors ?? []) {
+  const errors = result.errors ?? [];
+  if (errors.length < sources.length) {
+    printSearchResults(logger, result.items);
+  }
+  for (const error of errors) {
     logger.error(`${error.registry}: ${error.message}`);
   }
+  if (errors.length > 0) process.exitCode = 1;
 }
 
 /** Installs an official, configured, or URL-addressed registry item. */
