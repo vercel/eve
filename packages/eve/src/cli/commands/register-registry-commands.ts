@@ -14,37 +14,49 @@ export function registerRegistryCommands(input: {
   const { appRoot, logger, program } = input;
 
   program
-    .command("add <item> [flags...]")
+    .command("add <item>")
     .description("Install a registry item; relative paths use the official eve registry.")
-    .allowUnknownOption(true)
-    .allowExcessArguments(true)
-    .action(async (item: string, flags: string[]) => {
-      const { runAddCommand } = await import("./extensions.js");
-      await runAddCommand(logger, appRoot, item, flags);
+    .option("-o, --overwrite", "Overwrite existing files.")
+    .action(async (item: string, options: { overwrite?: boolean }) => {
+      const { runAddCommand } = await import("./registry.js");
+      await runAddCommand(logger, appRoot, item, options);
     });
 
   const registry = program
     .command("registry")
-    .description("Browse extension and agent registry catalogs.");
+    .description("Configure and browse extension and agent registry catalogs.");
 
   registry
-    .command("add [registries...]")
-    .description("Add shadcn registry sources to the project.")
-    .allowUnknownOption(true)
-    .allowExcessArguments(true)
+    .command("add <registries...>")
+    .description("Add registry namespace mappings to components.json.")
     .action(async (registries: string[]) => {
-      const { runRegistryAddCommand } = await import("./extensions.js");
+      const { runRegistryAddCommand } = await import("./registry.js");
       await runRegistryAddCommand(logger, appRoot, registries);
     });
 
-  for (const command of ["list", "search", "view"] as const) {
-    registry
-      .command(`${command} [arguments...]`)
-      .allowUnknownOption(true)
-      .allowExcessArguments(true)
-      .action(async (arguments_: string[]) => {
-        const { runRegistryBrowseCommand } = await import("./extensions.js");
-        await runRegistryBrowseCommand(logger, appRoot, command, arguments_);
-      });
-  }
+  registry
+    .command("list")
+    .description("List items from all registries or one source.")
+    .option("-r, --registry <source>", "List items from one registry.")
+    .action(async (options: { registry?: string }) => {
+      const { runRegistryListCommand } = await import("./registry.js");
+      await runRegistryListCommand(logger, appRoot, options.registry);
+    });
+
+  registry
+    .command("search <query>")
+    .description("Search all registries or one source.")
+    .option("-r, --registry <source>", "Search one registry.")
+    .action(async (query: string, options: { registry?: string }) => {
+      const { runRegistrySearchCommand } = await import("./registry.js");
+      await runRegistrySearchCommand(logger, appRoot, query, options.registry);
+    });
+
+  registry
+    .command("view <item>")
+    .description("Print one registry item as JSON.")
+    .action(async (item: string) => {
+      const { runRegistryViewCommand } = await import("./registry.js");
+      await runRegistryViewCommand(logger, appRoot, item);
+    });
 }

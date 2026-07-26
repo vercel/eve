@@ -351,6 +351,7 @@
     "react": "catalog:",
     "react-test-renderer": "19.2.6",
     "semver": "7.8.4",
+    "shadcn": "4.15.0",
     "svelte": "^5.0.0",
     "turndown": "7.2.4",
     "vite": "^8.1.5",

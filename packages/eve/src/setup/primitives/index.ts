@@ -14,7 +14,6 @@ export {
   type PackageManagerInvocation,
   type PackageManagerStrategy,
 } from "./pm/index.js";
-export { runShadcn, resolveShadcnInvocation } from "./run-shadcn.js";
 export {
   captureVercel,
   runVercel,

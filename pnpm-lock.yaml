@@ -363,7 +363,7 @@ importers:
         version: 0.41.2
       '@vercel/connect':
         specifier: 'catalog:'
-        version: 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.34(zod@4.4.3))(eve@packages+eve)
+        version: 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.34(zod@4.4.3))(eve@packages+eve)
       '@vercel/oidc':
         specifier: 3.8.0
         version: 3.8.0
@@ -1269,6 +1269,9 @@ importers:
       semver:
         specifier: 7.8.4
         version: 7.8.4
+      shadcn:
+        specifier: 4.15.0
+        version: 4.15.0(supports-color@10.2.2)(typescript@6.0.3)
       svelte:
         specifier: ^5.0.0
         version: 5.56.1(@typescript-eslint/types@8.59.4)
@@ -12804,10 +12807,6 @@ packages:
   radix3@1.1.2:
     resolution: {integrity: sha512-b484I/7b8rDEdSDKckSSBA8knMpcdsXudlE/LNL639wFoHKwLbEkQFZHWEYwDC0wa0FKUcCY+GAF73Z7wxNVFA==}
 
-  range-parser@1.2.1:
-    resolution: {integrity: sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg==}
-    engines: {node: '>= 0.6'}
-
   range-parser@1.3.0:
     resolution: {integrity: sha512-hek2mFQpPuI4E1BBKrSto+BU3e3x4xuarsbiwr3+lf7p44juvFMV0XFWQAP3xUyqXA4RrXLIoaSUGbSt056ZMw==}
     engines: {node: '>= 0.6'}
@@ -13270,6 +13269,11 @@ packages:
 
   shadcn@4.13.1:
     resolution: {integrity: sha512-pSNPND8mVWGBytdd8l4Cksg7MyRZOsv28HpvNCtFtLwZoxLSGM6v3NMUpmpbOaIoreopS/UOpQvnCyttOHVLAQ==}
+    engines: {node: '>=20.18.1'}
+    hasBin: true
+
+  shadcn@4.15.0:
+    resolution: {integrity: sha512-fFTpfOuRwqjpXGp/sKpAxJkjdgv1jf8bDrW1xi0cVn2k7WJ5ijV/gjkAlkAidGDjhEkgcUuxVdm4oRB9r8BivA==}
     engines: {node: '>=20.18.1'}
     hasBin: true
 
@@ -15638,21 +15642,6 @@ snapshots:
       - supports-color
       - utf-8-validate
       - zod
-
-  '@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3)':
-    dependencies:
-      '@chat-adapter/shared': 4.34.0(ai@7.0.34(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
-      '@slack/socket-mode': 2.0.7(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
-      '@slack/web-api': 7.19.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
-      chat: 4.34.0(ai@7.0.34(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
-    transitivePeerDependencies:
-      - ai
-      - bufferutil
-      - debug
-      - supports-color
-      - utf-8-validate
-      - zod
-    optional: true
 
   '@chat-adapter/state-memory@4.34.0(ai@7.0.34(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)':
     dependencies:
@@ -21181,13 +21170,13 @@ snapshots:
       ai: 6.0.191(zod@4.4.3)
       eve: link:packages/eve
 
-  '@vercel/connect@0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.34(zod@4.4.3))(eve@packages+eve)':
+  '@vercel/connect@0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.34(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.34(zod@4.4.3))(eve@packages+eve)':
     dependencies:
       '@vercel/oidc': 3.8.0
     optionalDependencies:
       '@ai-sdk/mcp': 2.0.16(zod@4.4.3)
       '@auth/core': 0.41.2
-      '@chat-adapter/slack': 4.34.0(ai@7.0.34(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3)
+      '@chat-adapter/slack': 4.34.0(ai@7.0.34(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3)
       ai: 7.0.34(zod@4.4.3)
       eve: link:packages/eve
 
@@ -24013,7 +24002,7 @@ snapshots:
       parseurl: 1.3.3
       proxy-addr: 2.0.7
       qs: 6.15.2
-      range-parser: 1.2.1
+      range-parser: 1.3.0
       router: 2.2.0(supports-color@10.2.2)
       send: 1.2.1(supports-color@10.2.2)
       serve-static: 2.2.1(supports-color@10.2.2)
@@ -28122,8 +28111,6 @@ snapshots:
 
   radix3@1.1.2: {}
 
-  range-parser@1.2.1: {}
-
   range-parser@1.3.0: {}
 
   raw-body@2.4.1:
@@ -28777,6 +28764,46 @@ snapshots:
   setprototypeof@1.2.0: {}
 
   shadcn@4.13.1(supports-color@10.2.2)(typescript@6.0.3):
+    dependencies:
+      '@babel/core': 7.29.0(supports-color@10.2.2)
+      '@babel/parser': 7.29.7
+      '@babel/plugin-transform-typescript': 7.29.7(@babel/core@7.29.0(supports-color@10.2.2))(supports-color@10.2.2)
+      '@babel/preset-typescript': 7.29.7(@babel/core@7.29.0(supports-color@10.2.2))(supports-color@10.2.2)
+      '@dotenvx/dotenvx': 1.75.1
+      '@modelcontextprotocol/sdk': 1.29.0(supports-color@10.2.2)(zod@3.25.76)
+      '@types/validate-npm-package-name': 4.0.2
+      browserslist: 4.28.6
+      commander: 14.0.3
+      cosmiconfig: 9.0.2(typescript@6.0.3)
+      dedent: 1.7.2
+      deepmerge: 4.3.1
+      diff: 8.0.4
+      execa: 9.6.1
+      fast-glob: 3.3.3
+      fs-extra: 11.3.6
+      fuzzysort: 3.1.0
+      kleur: 4.1.5
+      open: 11.0.0
+      ora: 8.2.0
+      postcss: 8.5.15
+      postcss-selector-parser: 7.1.4
+      prompts: 2.4.2
+      recast: 0.23.12
+      stringify-object: 5.0.0
+      tailwind-merge: 3.6.0
+      ts-morph: 26.0.0
+      tsconfig-paths: 4.2.0
+      undici: 7.28.0
+      validate-npm-package-name: 7.0.2
+      zod: 3.25.76
+      zod-to-json-schema: 3.25.2(zod@3.25.76)
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - babel-plugin-macros
+      - supports-color
+      - typescript
+
+  shadcn@4.15.0(supports-color@10.2.2)(typescript@6.0.3):
     dependencies:
       '@babel/core': 7.29.0(supports-color@10.2.2)
       '@babel/parser': 7.29.7
