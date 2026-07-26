@@ -21,10 +21,8 @@ export const nav = [
     label: "Templates",
     href: "/templates",
   },
-  {
-    label: "GitHub",
-    href: `https://github.com/${github.owner}/${github.repo}/`,
-  },
+  // No GitHub entry here: geistdocs renders it from `github` above (icon button
+  // on desktop, "GitHub" link in the mobile menu). Adding it duplicates the link.
 ];
 
 export const suggestions = [
