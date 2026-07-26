@@ -127,11 +127,11 @@ This gives a consumer that only persisted `sessionId` a lightweight way to recov
 For a catch-up read that stops instead of following the live stream, pass `includeTailIndex=1`. The response then carries the `x-eve-stream-tail-index` header: the zero-based index of the last durably recorded event, or `-1` before the first. Read from your cursor until it passes that tail, then disconnect — reconnecting from the updated cursor if the connection drops first:
 
 ```bash
-curl -i "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=<count>&includeTailIndex=1"
+curl -i "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>&includeTailIndex=1"
 # x-eve-stream-tail-index: <tail>
 ```
 
-The lookup is opt-in because resolving the tail costs an extra stream-info read; requests without the parameter get no header. The TypeScript client wraps this into `stream({ endAtTail: true })`.
+The lookup is opt-in; requests without the parameter get no header. The TypeScript client wraps this into `stream({ endAtTail: true })`.
 
 ## Use the client from TypeScript
 
