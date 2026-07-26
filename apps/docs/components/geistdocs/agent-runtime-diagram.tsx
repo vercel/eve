@@ -19,8 +19,8 @@ function Environment({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <section className="flex min-w-0 flex-col gap-4 rounded-xl border border-gray-alpha-400 bg-background-100 p-4 sm:p-5">
-      <div className="flex flex-col gap-1">
+    <section className="flex min-w-0 flex-col gap-3 rounded-xl border border-gray-alpha-400 bg-background-100 p-4 sm:p-5">
+      <div className="flex flex-col gap-1 lg:min-h-16">
         <span className="font-mono font-medium uppercase tracking-[0.1em] text-gray-1000 text-label-14">
           {title}
         </span>
@@ -66,15 +66,15 @@ function RuntimeCard({
 
 function SandboxBridge(): JSX.Element {
   return (
-    <div className="relative flex min-h-28 items-center justify-center lg:min-h-0">
+    <div className="relative flex min-h-20 items-center justify-center lg:min-h-0">
       <div
         aria-hidden
-        className="absolute top-0 bottom-0 left-1/2 border-gray-alpha-700 border-l border-dashed lg:top-1/2 lg:bottom-auto lg:-right-3 lg:-left-3 lg:border-t lg:border-l-0"
+        className="absolute top-0 bottom-0 left-1/2 border-gray-alpha-700 border-l border-dashed lg:top-1/2 lg:bottom-auto lg:-right-4 lg:-left-4 lg:border-t lg:border-l-0"
       />
-      <div className="relative flex max-w-44 flex-col items-center rounded-xl border border-gray-alpha-700 bg-background-100 px-4 py-3 text-center shadow-sm">
-        <span className="font-medium text-copy-13 text-gray-1000">Logical sandbox bridge</span>
-        <code className="bg-transparent! p-0! text-copy-13! text-gray-900!">ctx.getSandbox()</code>
-        <span className="text-copy-12 text-gray-900">sandbox-backed tools</span>
+      <div className="relative rounded-lg border border-gray-alpha-700 bg-background-100 px-3 py-2 text-center shadow-sm">
+        <code className="bg-transparent! p-0! font-medium text-copy-13! text-gray-1000!">
+          ctx.getSandbox()
+        </code>
       </div>
     </div>
   );
@@ -87,7 +87,7 @@ export function AgentRuntimeDiagram(): JSX.Element {
   return (
     <figure
       aria-label="Agent loop and sandbox execution boundary"
-      className="my-8 grid w-full min-w-0 items-stretch gap-3 lg:grid-cols-[minmax(0,1fr)_192px_minmax(0,1fr)]"
+      className="my-8 grid w-full min-w-0 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_160px_minmax(0,1fr)]"
     >
       <Environment title="Trusted app runtime" description="Full Node.js access and credentials">
         <RuntimeCard

@@ -44,13 +44,15 @@ An eve agent spans two execution environments with different responsibilities:
 
 <AgentRuntimeDiagram />
 
-The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access. Provider-managed tools execute at the model provider, but the loop still orchestrates them from the app runtime.
+The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
 
-The dashed edge is a logical bridge, not another service or process. `ctx.getSandbox()` gives app-side runtime code a handle for sandbox operations. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools use it, and authored tools can use it when they need isolated filesystem or process access.
+App-side code reaches the sandbox through `ctx.getSandbox()`. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools use it, and authored tools can use it when they need isolated filesystem or process access.
 
 The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have decoupled lifetimes: the durable workflow can park or restart independently, while the app runtime opens or reuses sandbox compute only when code needs it.
 
-Credentials remain on the trusted side. eve resolves model-provider keys, tool secrets, and MCP, OpenAPI, and connection credentials in the app runtime rather than copying them into model context or the sandbox. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) supplies it without exposing the credential to the process.
+This split keeps credentials and trusted integration code out of model-controlled compute while giving the agent a real filesystem and process environment. Parked workflows also avoid holding sandbox compute.
+
+Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay in the app runtime. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) handles the request without exposing the credential to the process.
 
 ## Resuming after a crash
 
