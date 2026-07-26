@@ -50,7 +50,7 @@ App-side code reaches the sandbox through `ctx.getSandbox()`. The built-in `bash
 
 The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have decoupled lifetimes: the durable workflow can park or restart independently, while the app runtime opens or reuses sandbox compute only when code needs it.
 
-This split keeps credentials and trusted integration code out of model-controlled compute while giving the agent a real filesystem and process environment. Parked workflows also avoid holding sandbox compute.
+This split keeps credentials and trusted integration code out of model-controlled compute while giving the agent a real filesystem and process environment. Parked workflows do not hold sandbox compute, sandboxes can scale independently, and a sandbox failure does not erase durable session state. Because access flows through app-side tools, sandbox work gets the same approval and instrumentation path as any other tool call.
 
 Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay in the app runtime. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) handles the request without exposing the credential to the process.
 
