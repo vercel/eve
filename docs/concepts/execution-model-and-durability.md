@@ -38,6 +38,23 @@ export default defineAgent({
 
 The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.0.0-beta` line); the Workflow SDK rejects incompatible protocol versions during initialization. See [Self-host eve](../guides/deployment/self-hosting#persist-workflow-state), [agent.ts](../agent-config#workflow-world), and [Workflow Worlds](https://workflow-sdk.dev/worlds).
 
+## Agent loop and sandbox
+
+The agent loop and its sandbox are separate runtime components:
+
+|                    | Agent loop                                                              | Sandbox                                                                  |
+| ------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Runs as            | A durable workflow in the trusted app runtime                           | An isolated backend session, separate from the loop                      |
+| Owns               | Conversation, model calls, tool orchestration, and durable state        | `/workspace`, materialized skills, and processes started by the agent    |
+| Accesses the other | Opens or reattaches the sandbox through eve's managed runtime context   | Exposes sandbox operations; it does not run the agent loop               |
+| Lifetime           | Checkpoints, parks without compute, and resumes across process restarts | Can idle or stop while its filesystem remains available for reattachment |
+
+The loop reaches the [sandbox](../sandbox) through operations such as the built-in shell and file tools or `ctx.getSandbox()`. The sandbox is opened lazily on first access. At step boundaries, eve records the identifiers needed to reattach it; live process handles never become workflow state.
+
+Credentials stay on the trusted side. eve resolves model-provider keys, authored-tool secrets, and MCP, OpenAPI, and connection credentials in the app runtime and does not copy them into model context, sandbox environment variables, or files. Each credential is sent only to the service it authenticates. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) injects credentials at the network boundary without exposing them to the process.
+
+The lifetimes are deliberately decoupled. A workflow can park for days while sandbox compute idles, then resume and reattach the same per-session filesystem. An app redeploy does not discard that workspace, and the workflow world and sandbox backend can scale or change independently. Changing the sandbox definition replaces the sandbox without resetting conversation history, so keep application state that must survive sandbox replacement in [`defineState`](../guides/state), not only in `/workspace`.
+
 ## Resuming after a crash
 
 Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
