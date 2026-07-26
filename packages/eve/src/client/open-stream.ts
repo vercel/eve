@@ -150,10 +150,13 @@ export async function openStreamBody(input: OpenStreamInput): Promise<OpenedStre
   let lastHeaders: Headers | undefined;
   let retryDelayMs = STREAM_OPEN_RETRY_BASE_DELAY_MS;
 
-  const searchParams = {
-    ...(input.startIndex !== 0 ? { startIndex: String(input.startIndex) } : {}),
-    ...(input.requestTailIndex === true ? { includeTailIndex: "1" } : {}),
-  };
+  const searchParams: Record<string, string> = {};
+  if (input.startIndex !== 0) {
+    searchParams.startIndex = String(input.startIndex);
+  }
+  if (input.requestTailIndex === true) {
+    searchParams.includeTailIndex = "1";
+  }
 
   for (let attempt = 0; attempt < STREAM_OPEN_RETRY_ATTEMPTS; attempt += 1) {
     const url = createClientUrl(
