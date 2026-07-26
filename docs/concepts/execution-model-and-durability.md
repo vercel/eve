@@ -40,47 +40,40 @@ The world package backs workflow state, queues, hooks, and streams. Keep secrets
 
 ## Agent loop and sandbox
 
-The agent loop and its sandbox are separate runtime components joined by a narrow bridge:
+An eve agent spans two execution environments with different responsibilities:
 
 ```mermaid
 flowchart LR
   subgraph App["Trusted app runtime"]
     direction TB
-    Loop["Agent loop<br/>durable workflow<br/>model calls · orchestration<br/>agent/agent.ts · agent/instructions.md"]
-    AppTools["Tool execution<br/>authored tools · MCP/OpenAPI · built-in executors<br/>agent/tools/*.ts · agent/connections/*.ts"]
-    Credentials["Credentials stay here<br/>model keys · tool secrets · connection tokens"]
-    Loop --> AppTools
-    Credentials -.-> Loop
-    Credentials -.-> AppTools
+    Loop["Agent loop<br/>durable workflow<br/>agent/agent.ts · agent/instructions.md"]
+    Runtime["Runtime code<br/>model calls · tools · hooks · instrumentation · connections<br/>agent/tools/** · agent/hooks/** · agent/instrumentation.ts · agent/connections/**"]
+    Credentials["Secrets and credentials<br/>provider keys · tool secrets · MCP/OpenAPI auth"]
+    Loop --> Runtime
+    Credentials --> Runtime
   end
 
-  Bridge{{"Sandbox bridge<br/>bash · read_file · write_file · glob · grep<br/>ctx.getSandbox()<br/>operations ↔ results"}}
-
-  subgraph Isolated["Isolated sandbox"]
+  subgraph Sandbox["Isolated sandbox"]
     direction TB
-    Session["Sandbox session"]
+    Operations["Sandbox operations<br/>shell · files · processes"]
     Skills["Skills<br/>$HOME/.agents/skills<br/>from agent/skills/**"]
     Workspace["Workspace<br/>/workspace<br/>from agent/sandbox/workspace/**"]
-    Processes["Shell and processes<br/>commands · scripts · servers"]
-    Session --- Skills
-    Session --- Workspace
-    Session --- Processes
+    Processes["Running work<br/>commands · scripts · servers"]
+    Operations --- Skills
+    Operations --- Workspace
+    Operations --- Processes
   end
 
-  Loop -->|"sandbox-backed built-ins"| Bridge
-  AppTools -->|"sandbox operations"| Bridge
-  Bridge <--> Session
-
-  style Bridge stroke-width:4px
+  Runtime -.->|"optional sandbox access: ctx.getSandbox()"| Operations
 ```
 
-The loop runs as a durable workflow in the app runtime. Except for provider-managed tools, tool executors also run there. The bridge is the runtime API boundary: it turns built-in shell and file tool calls—or calls through `ctx.getSandbox()`—into sandbox backend operations, then returns their results. The executor stays in the app; only the requested command or filesystem effect lands in the sandbox. The model never receives a live sandbox handle, app environment, or credential.
+The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access. Provider-managed tools execute at the model provider, but the loop still orchestrates them from the app runtime.
 
-The [sandbox](../sandbox) owns the per-session filesystem, materialized skills, and any processes the agent starts. It opens lazily on first access. At step boundaries, eve records the identifiers needed to reattach it; live process handles never become workflow state.
+The dashed edge is a logical bridge, not another service or process. `ctx.getSandbox()` gives app-side runtime code a handle for sandbox operations. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools use it, and authored tools can use it when they need isolated filesystem or process access.
 
-Credentials stay on the trusted side. eve resolves model-provider keys, authored-tool secrets, and MCP, OpenAPI, and connection credentials in the app runtime and does not copy them into model context, sandbox environment variables, or files. Each credential is sent only to the service it authenticates. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) injects credentials at the network boundary without exposing them to the process.
+The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have decoupled lifetimes: the durable workflow can park or restart independently, while the app runtime opens or reuses sandbox compute only when code needs it.
 
-The lifetimes are deliberately decoupled. A workflow can park for days while sandbox compute idles, then resume and reattach the same per-session filesystem. An app redeploy does not discard that workspace, and the workflow world and sandbox backend can scale or change independently. Changing the sandbox definition replaces the sandbox without resetting conversation history, so keep application state that must survive sandbox replacement in [`defineState`](../guides/state), not only in `/workspace`.
+Credentials remain on the trusted side. eve resolves model-provider keys, tool secrets, and MCP, OpenAPI, and connection credentials in the app runtime rather than copying them into model context or the sandbox. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) supplies it without exposing the credential to the process.
 
 ## Resuming after a crash
 
