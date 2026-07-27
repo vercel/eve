@@ -1,5 +1,11 @@
 # eve
 
+## 0.27.8
+
+### Patch Changes
+
+- a69faae: Add `eve add` and `eve registry` commands for installing and discovering official or configured shadcn registry items.
+
 ## 0.27.7
 
 ### Patch Changes
