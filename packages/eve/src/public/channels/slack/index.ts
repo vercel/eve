@@ -39,6 +39,9 @@ export {
   type SlackResetOptions,
   type SlackSessionTarget,
   type SlackThread,
+  type SlackThreadParticipation,
+  type SlackThreadParticipationContext,
+  type SlackThreadParticipationResult,
   type SlackWebhookVerifier,
   type SlackWorkspaceHandle,
 } from "#public/channels/slack/slackChannel.js";

@@ -71,24 +71,54 @@ Only the first available handler runs. A message hook returning `null` drops the
 
 `onInteraction(action, ctx)` separately handles `block_actions` callbacks not consumed by HITL. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
 
-#### Continue conversations without repeated mentions
+#### Participate in active threads
 
-Use `onMessage` to handle explicit mentions and continue replies in threads with an active eve session:
+The API grows from mention-only behavior to automatic or stateful participation.
+
+**1. Respond only to explicit mentions.** This is the default:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  async onMessage(ctx, message) {
-    if (message.author?.isBot) return null;
-    const isDirectMessage = message.raw.channel_type === "im";
-    return isDirectMessage || ctx.isBotMentioned() || (await ctx.isSubscribed())
-      ? { auth: null }
-      : null;
+});
+```
+
+**2. Respond to every human reply in active threads.** Enable `threadParticipation` without requiring another mention:
+
+```ts title="agent/channels/slack.ts"
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadParticipation: true,
+});
+```
+
+For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
+
+**3. Track your own participation state.** Provide an `initialState` and return the next state from `handle`. This example treats mentioning another person as a handoff:
+
+```ts title="agent/channels/slack.ts"
+type ParticipationState = "followingThread" | "ignoringThread";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadParticipation: {
+    initialState: "followingThread" as ParticipationState,
+    handle(message, ctx) {
+      if (ctx.isBotMentioned) return { respond: true, state: "followingThread" };
+      if (ctx.state === "ignoringThread") return { respond: false, state: ctx.state };
+
+      const mentionsSomeone = /<@[A-Z0-9]+(?:\|[^>]+)?>/.test(message.text);
+      return mentionsSomeone
+        ? { respond: false, state: "ignoringThread" }
+        : { respond: true, state: ctx.state };
+    },
   },
 });
 ```
 
-`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
+The handler runs for replies in a thread, including explicit mentions, but not for the top-level message that starts the thread. It runs inside the durable session after Slack channel state and `defineState` are hydrated. `state` must be JSON-serializable.
+
+Use `onMessage` only when you need lower-level webhook-side admission, custom auth, or pre-dispatch behavior. `ctx.isBotMentioned()` identifies explicit mentions, while `ctx.isSubscribed()` is a point-in-time check for an active eve session; it does not inspect `threadParticipation` state.
 
 Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:
 

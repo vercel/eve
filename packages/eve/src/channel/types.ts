@@ -319,6 +319,8 @@ export interface RunInput {
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly input: {
     readonly message: string | UserContent;
+    /** @internal Channel-owned serializable data for durable delivery processing. */
+    readonly channelData?: unknown;
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;
   };

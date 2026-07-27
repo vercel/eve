@@ -44,6 +44,8 @@ export interface RouteHandlerArgs<TState = undefined> {
 export interface SendPayload {
   readonly message?: string | UserContent;
   readonly inputResponses?: readonly InputResponse[];
+  /** @internal Channel-owned serializable data for durable delivery processing. */
+  readonly channelData?: unknown;
   /**
    * Context strings contributed by the channel. eve appends each entry
    * as a `role: "user"` message to `session.history` before the delivery
