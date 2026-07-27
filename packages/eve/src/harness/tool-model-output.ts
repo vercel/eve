@@ -1,8 +1,10 @@
 import type { JSONValue } from "ai";
 
+import { z } from "#compiled/zod/index.js";
 import { createLogger } from "#internal/logging.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { ToolModelOutputPart } from "#shared/tool-definition.js";
+import { formatValidationError } from "#runtime/validation.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 
 /**
@@ -27,6 +29,22 @@ const CONTENT_FILE_WARN_BYTES = 3 * 1024 * 1024;
 
 /** File-data tags the AI SDK accepts but eve does not support yet. */
 const UNSUPPORTED_FILE_DATA_TAGS = new Set(["url", "reference", "text"]);
+
+const toolModelOutputPartSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({
+    type: z.literal("file"),
+    data: z.object({ type: z.literal("data"), data: z.string() }),
+    mediaType: z.string().min(1),
+    filename: z.string().optional(),
+  }),
+]);
+
+const toolModelOutputSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), value: z.string() }),
+  z.object({ type: z.literal("json"), value: z.unknown() }),
+  z.object({ type: z.literal("content"), value: z.array(toolModelOutputPartSchema).min(1) }),
+]);
 
 /**
  * Validates a tool output as JSON at one of the serialization boundaries,
@@ -65,20 +83,14 @@ export function normalizeToolModelOutput(input: {
       toolName: input.toolName,
     },
     () => {
-      if (input.output === null || typeof input.output !== "object") {
-        throw new TypeError("Expected a tool model output object.");
+      rejectTeachableFilePartMistakes(input.output);
+
+      const parsed = toolModelOutputSchema.safeParse(input.output);
+      if (!parsed.success) {
+        throw new TypeError(formatValidationError(parsed.error));
       }
 
-      const output = input.output as { readonly type?: unknown; readonly value?: unknown };
-
-      if (output.type === "text") {
-        if (typeof output.value !== "string") {
-          throw new TypeError('Expected text model output to include a string "value".');
-        }
-
-        return { type: "text", value: output.value };
-      }
-
+      const output = parsed.data;
       if (output.type === "json") {
         return {
           type: "json",
@@ -90,126 +102,77 @@ export function normalizeToolModelOutput(input: {
           }) as JSONValue,
         };
       }
-
       if (output.type === "content") {
-        if (!Array.isArray(output.value) || output.value.length === 0) {
-          throw new TypeError('Expected content model output "value" to be a non-empty array.');
+        for (const part of output.value) {
+          if (part.type === "file") {
+            warnOversizedFilePayload(part, input.toolName);
+          }
         }
-
-        return {
-          type: "content",
-          value: output.value.map((part) =>
-            normalizeToolModelOutputPart(part, { toolName: input.toolName }),
-          ),
-        };
       }
-
-      throw new TypeError('Expected tool model output type to be "text", "json", or "content".');
+      return output;
     },
   );
 }
 
-function normalizeToolModelOutputPart(
-  part: unknown,
-  context: { readonly toolName: string },
-): ToolModelOutputPart {
-  if (part === null || typeof part !== "object") {
-    throw new TypeError("Expected each content part to be an object.");
-  }
+/**
+ * The two author mistakes the schema cannot explain well are rejected up
+ * front with teaching messages: raw bytes (which `JSON.stringify` would
+ * corrupt silently at the durable boundary — the #497 failure class), and
+ * AI SDK `FileData` tags eve does not support yet. On a `Uint8Array` the
+ * schema would report a missing `data.type` key; the real fix is to
+ * base64-encode. Everything structural is left to the schema.
+ */
+function rejectTeachableFilePartMistakes(output: unknown): void {
+  if (output === null || typeof output !== "object") return;
+  const candidate = output as { readonly type?: unknown; readonly value?: unknown };
+  if (candidate.type !== "content" || !Array.isArray(candidate.value)) return;
 
-  const candidate = part as {
-    readonly type?: unknown;
-    readonly text?: unknown;
-    readonly data?: unknown;
-    readonly mediaType?: unknown;
-    readonly filename?: unknown;
-  };
+  for (const part of candidate.value) {
+    if (part === null || typeof part !== "object") continue;
+    const filePart = part as { readonly type?: unknown; readonly data?: unknown };
+    if (filePart.type !== "file") continue;
 
-  if (candidate.type === "text") {
-    if (typeof candidate.text !== "string") {
-      throw new TypeError('Expected text content part to include a string "text".');
-    }
-    return { type: "text", text: candidate.text };
-  }
-
-  if (candidate.type === "file") {
-    if (typeof candidate.mediaType !== "string" || candidate.mediaType.length === 0) {
-      throw new TypeError('Expected file content part to include a non-empty string "mediaType".');
-    }
-    if (typeof candidate.filename !== "string" && candidate.filename !== undefined) {
-      throw new TypeError('Expected file content part "filename" to be a string when present.');
-    }
-
-    const payload = normalizeFilePartData(candidate.data);
-    const estimatedBytes = Math.floor((payload.length * 3) / 4);
-    if (estimatedBytes > CONTENT_FILE_WARN_BYTES) {
-      log.warn(
-        "content-part file payload exceeds the inline size guideline — it is persisted in " +
-          "history and re-sent on every subsequent model call",
-        {
-          estimatedBytes,
-          mediaType: candidate.mediaType,
-          toolName: context.toolName,
-          warnBytes: CONTENT_FILE_WARN_BYTES,
-        },
+    const data = filePart.data;
+    const taggedPayload =
+      data !== null && typeof data === "object"
+        ? (data as { readonly data?: unknown }).data
+        : undefined;
+    if (isBinaryPayload(data) || isBinaryPayload(taggedPayload)) {
+      throw new TypeError(
+        "Expected file content part data to be a base64 string, received raw bytes. " +
+          "Base64-encode binary payloads before returning them from toModelOutput.",
       );
     }
 
-    const normalized: {
-      type: "file";
-      data: { type: "data"; data: string };
-      mediaType: string;
-      filename?: string;
-    } = {
-      type: "file",
-      data: { type: "data", data: payload },
-      mediaType: candidate.mediaType,
-    };
-    if (candidate.filename !== undefined) {
-      normalized.filename = candidate.filename;
-    }
-    return normalized;
-  }
-
-  throw new TypeError('Expected content part type to be "text" or "file".');
-}
-
-function normalizeFilePartData(data: unknown): string {
-  if (isBinaryPayload(data)) {
-    throw new TypeError(
-      "Expected file content part data to be a base64 string, received raw bytes. " +
-        "Base64-encode binary payloads before returning them from toModelOutput.",
-    );
-  }
-  if (data === null || typeof data !== "object") {
-    throw new TypeError(
-      'Expected file content part "data" to be a tagged object: { type: "data", data: string }.',
-    );
-  }
-
-  const tagged = data as { readonly type?: unknown; readonly data?: unknown };
-  if (tagged.type !== "data") {
-    if (typeof tagged.type === "string" && UNSUPPORTED_FILE_DATA_TAGS.has(tagged.type)) {
+    const tag =
+      data !== null && typeof data === "object"
+        ? (data as { readonly type?: unknown }).type
+        : undefined;
+    if (typeof tag === "string" && UNSUPPORTED_FILE_DATA_TAGS.has(tag)) {
       throw new TypeError(
-        `File content part data tag "${tagged.type}" is not supported yet; ` +
+        `File content part data tag "${tag}" is not supported yet; ` +
           'only { type: "data" } with a base64 string is accepted.',
       );
     }
-    throw new TypeError(
-      'Expected file content part "data" to be a tagged object: { type: "data", data: string }.',
-    );
   }
+}
 
-  if (isBinaryPayload(tagged.data)) {
-    throw new TypeError(
-      "Expected file content part data to be a base64 string, received raw bytes. " +
-        "Base64-encode binary payloads before returning them from toModelOutput.",
-    );
-  }
-  if (typeof tagged.data !== "string") {
-    throw new TypeError("Expected file content part data payload to be a base64 string.");
-  }
-  return tagged.data;
+function warnOversizedFilePayload(
+  part: { readonly data: { readonly data: string }; readonly mediaType: string },
+  toolName: string,
+): void {
+  const estimatedBytes = Math.floor((part.data.data.length * 3) / 4);
+  if (estimatedBytes <= CONTENT_FILE_WARN_BYTES) return;
+  log.warn(
+    "content-part file payload exceeds the inline size guideline — it is persisted in " +
+      "history and re-sent on every subsequent model call",
+    {
+      estimatedBytes,
+      mediaType: part.mediaType,
+      toolName,
+      warnBytes: CONTENT_FILE_WARN_BYTES,
+    },
+  );
 }
 
 function isBinaryPayload(value: unknown): value is Uint8Array | ArrayBuffer {

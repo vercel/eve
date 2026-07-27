@@ -101,7 +101,7 @@ describe("normalizeToolModelOutput", () => {
       /"reference" is not supported yet/u,
     ],
     ["text file-data tag", { type: "text", text: "inline" }, /"text" is not supported yet/u],
-    ["untagged string data", "aGVsbG8=", /tagged object/u],
+    ["untagged string data", "aGVsbG8=", /expected object, received string at "value\[0\]\.data"/u],
   ] as const)("rejects content file parts with %s", (_label, data, expected) => {
     expect(() =>
       normalize({ type: "content", value: [{ type: "file", data, mediaType: "image/png" }] }),
@@ -111,7 +111,7 @@ describe("normalizeToolModelOutput", () => {
   it("rejects empty content part arrays with the toModelOutput error identity", () => {
     expect(() => normalize({ type: "content", value: [] })).toThrow(
       'Tool "screenshot" call "call_1" returned a non-JSON-serializable model output. ' +
-        'Expected content model output "value" to be a non-empty array.',
+        'Too small: expected array to have >=1 items at "value"',
     );
   });
 
@@ -121,12 +121,12 @@ describe("normalizeToolModelOutput", () => {
         type: "content",
         value: [{ type: "media", data: "aGVsbG8=", mediaType: "image/png" }],
       }),
-    ).toThrow('Expected content part type to be "text" or "file".');
+    ).toThrow(/Invalid discriminator value. Expected 'text' \| 'file' at "value\[0\]\.type"/u);
   });
 
   it("rejects unknown output types", () => {
     expect(() => normalize({ type: "markdown", value: "# nope" })).toThrow(
-      'Expected tool model output type to be "text", "json", or "content".',
+      /Invalid discriminator value. Expected 'text' \| 'json' \| 'content' at "type"/u,
     );
   });
 });
