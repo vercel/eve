@@ -60,9 +60,9 @@ describe("createAiSdkHookBridge", () => {
   it("uses an eve-owned context runner while executing the model exactly once", async () => {
     const order: string[] = [];
     const hooks = createInstrumentationHooks([]);
-    const bridge = createAiSdkHookBridge(scope, hooks, async (_operation, run) => {
+    const bridge = createAiSdkHookBridge(scope, hooks, async (_operation, execute) => {
       order.push("enter");
-      const result = await run();
+      const result = await execute();
       order.push("exit");
       return result;
     });
@@ -86,9 +86,9 @@ describe("createAiSdkHookBridge", () => {
     const hooks = createInstrumentationHooks([
       { events: { "model.call": { before: (event) => ids.push(event.id) } } },
     ]);
-    const bridge = createAiSdkHookBridge(scope, hooks, (operation, run) => {
+    const bridge = createAiSdkHookBridge(scope, hooks, (operation, execute) => {
       ids.push(operation.id);
-      return run();
+      return execute();
     });
     Reflect.apply(bridge.onStart!, bridge, [
       { callId: "call-1", modelId: "model", operationId: "ai.streamText", provider: "test" },
@@ -108,9 +108,9 @@ describe("createAiSdkHookBridge", () => {
   it("executes directly when no start identity exists", async () => {
     let adapterCalls = 0;
     const hooks = createInstrumentationHooks([]);
-    const bridge = createAiSdkHookBridge(scope, hooks, (_operation, run) => {
+    const bridge = createAiSdkHookBridge(scope, hooks, (_operation, execute) => {
       adapterCalls += 1;
-      return run();
+      return execute();
     });
     const execute = vi.fn(async () => "result");
 

@@ -111,7 +111,7 @@ export type InstrumentationPointEvent = InstrumentationAttemptStartedEvent;
 /** Trusted framework operation for activating context around AI SDK execution. */
 export type InstrumentationContextRunner = <T>(
   operation: InstrumentationExecutionOperation,
-  run: () => PromiseLike<T>,
+  execute: () => PromiseLike<T>,
 ) => PromiseLike<T>;
 
 /** Stable identity supplied only to a trusted framework context runner. */

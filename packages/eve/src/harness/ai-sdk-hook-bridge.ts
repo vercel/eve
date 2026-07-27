@@ -127,7 +127,7 @@ export function createAiSdkHookBridge(
   }
 }
 
-const directRunInContext: InstrumentationContextRunner = (_operation, run) => run();
+const directRunInContext: InstrumentationContextRunner = (_operation, execute) => execute();
 
 function snapshot<T extends object>(event: T): Readonly<T> {
   return Object.freeze({ ...event });
