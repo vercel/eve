@@ -10,6 +10,7 @@ import {
 } from "@opentelemetry/api";
 
 import type {
+  InstrumentationAttemptScope,
   InstrumentationAttemptStartedEvent,
   InstrumentationAttemptTerminalEvent,
   InstrumentationModelCallTerminalEvent,
@@ -28,34 +29,72 @@ interface SpanState {
   readonly span: Span;
 }
 
-interface SessionMetadata {
+export interface AgentSessionTraceState {
   readonly agentName?: string;
   readonly channelKind?: string;
+  readonly context: SpanContext;
+  readonly pendingStarted: boolean;
   readonly rootSessionId: string;
 }
 
-/** Provider-owned storage for the trace context assigned to an eve session. */
-export interface AgentSessionContextStore {
-  get(sessionId: string): SpanContext | undefined;
-  set(sessionId: string, spanContext: SpanContext): void;
+export interface AgentTurnTraceState {
+  readonly context: SpanContext;
+  readonly rootSessionId: string;
+  readonly sequence: number;
+  readonly terminal?: {
+    readonly error?: unknown;
+    readonly type: InstrumentationTurnTerminalEvent["type"];
+  };
 }
 
-/** In-memory context storage used by tests and non-durable runtimes. */
-export class InMemoryAgentSessionContextStore implements AgentSessionContextStore {
-  readonly #contexts = new Map<string, SpanContext>();
+/** Provider-owned serializable storage for durable agent trace state. */
+export interface AgentTraceStateStore {
+  deleteSession(sessionId: string): void | PromiseLike<void>;
+  deleteTurn(sessionId: string, turnId: string): void | PromiseLike<void>;
+  getSession(
+    sessionId: string,
+  ): AgentSessionTraceState | undefined | PromiseLike<AgentSessionTraceState | undefined>;
+  getTurn(
+    sessionId: string,
+    turnId: string,
+  ): AgentTurnTraceState | undefined | PromiseLike<AgentTurnTraceState | undefined>;
+  setSession(sessionId: string, state: AgentSessionTraceState): void | PromiseLike<void>;
+  setTurn(sessionId: string, turnId: string, state: AgentTurnTraceState): void | PromiseLike<void>;
+}
 
-  get(sessionId: string): SpanContext | undefined {
-    return this.#contexts.get(sessionId);
+/** In-memory trace state used by tests and non-durable runtimes. */
+export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
+  readonly #sessions = new Map<string, AgentSessionTraceState>();
+  readonly #turns = new Map<string, AgentTurnTraceState>();
+
+  deleteSession(sessionId: string): void {
+    this.#sessions.delete(sessionId);
   }
 
-  set(sessionId: string, spanContext: SpanContext): void {
-    this.#contexts.set(sessionId, spanContext);
+  deleteTurn(sessionId: string, turnId: string): void {
+    this.#turns.delete(turnKey(sessionId, turnId));
+  }
+
+  getSession(sessionId: string): AgentSessionTraceState | undefined {
+    return this.#sessions.get(sessionId);
+  }
+
+  getTurn(sessionId: string, turnId: string): AgentTurnTraceState | undefined {
+    return this.#turns.get(turnKey(sessionId, turnId));
+  }
+
+  setSession(sessionId: string, state: AgentSessionTraceState): void {
+    this.#sessions.set(sessionId, state);
+  }
+
+  setTurn(sessionId: string, turnId: string, state: AgentTurnTraceState): void {
+    this.#turns.set(turnKey(sessionId, turnId), state);
   }
 }
 
 export interface AgentOtelProviderInput {
   readonly frameworkVersion: string;
-  readonly sessionContexts: AgentSessionContextStore;
+  readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
 }
 
@@ -65,53 +104,57 @@ export function createAgentOtelProvider(
 ): InstrumentationProviderDefinition {
   const actions = new Map<string, SpanState>();
   const modelContexts = new Map<string, Context>();
-  const pendingSessionStarted = new Set<string>();
-  const sessionMetadata = new Map<string, SessionMetadata>();
-  const steps = new Map<string, SpanState>();
-  const turns = new Map<string, SpanState>();
+  // Attempt scopes are object identities retained by the bridge for one
+  // atomic invocation; WeakMap state cannot outlive an abandoned attempt.
+  const steps = new WeakMap<InstrumentationAttemptScope, SpanState>();
 
-  const onSessionStarted = (event: InstrumentationSessionStartedEvent): void => {
-    sessionMetadata.set(event.sessionId, event);
-    if (ensureSessionContext(event).created) pendingSessionStarted.add(event.sessionId);
+  const onSessionStarted = async (event: InstrumentationSessionStartedEvent): Promise<void> => {
+    await ensureSessionContext(event);
   };
 
-  const onTurnStarted = (event: InstrumentationTurnStartedEvent): void => {
-    const session = ensureSessionContext({
+  const onTurnStarted = async (event: InstrumentationTurnStartedEvent): Promise<void> => {
+    const session = await ensureSessionContext({
       agentName: undefined,
       channelKind: undefined,
       rootSessionId: event.rootSessionId,
       sessionId: event.sessionId,
       type: "session.started",
     });
-    const metadata = sessionMetadata.get(event.sessionId);
     const span = input.tracer.startSpan(
       "agent.turn",
       {
         attributes: {
           "agent.framework.name": "eve",
           "agent.framework.version": input.frameworkVersion,
-          "agent.name": metadata?.agentName,
+          "agent.name": session.agentName,
           "agent.root.session.id": event.rootSessionId,
           "agent.session.id": event.sessionId,
           "agent.turn.id": event.turnId,
           "agent.turn.sequence": event.sequence,
         },
       },
-      session.context,
+      contextFromSpanContext(session.context),
     );
     span.addEvent("turn.started");
-    if (pendingSessionStarted.delete(event.sessionId)) {
+    if (session.pendingStarted) {
       span.addEvent("session.started");
     }
-    turns.set(turnKey(event.sessionId, event.turnId), {
-      context: trace.setSpan(session.context, span),
-      span,
+    await input.stateStore.setSession(event.sessionId, {
+      ...session,
+      pendingStarted: false,
     });
+    await input.stateStore.setTurn(event.sessionId, event.turnId, {
+      context: span.spanContext(),
+      rootSessionId: event.rootSessionId,
+      sequence: event.sequence,
+    });
+    span.end();
   };
 
-  const onAttemptStarted = (event: InstrumentationAttemptStartedEvent): void => {
-    const turn = turns.get(turnKey(event.scope.sessionId, event.scope.turnId));
+  const onAttemptStarted = async (event: InstrumentationAttemptStartedEvent): Promise<void> => {
+    const turn = await input.stateStore.getTurn(event.scope.sessionId, event.scope.turnId);
     if (turn === undefined) return;
+    const turnContext = contextFromSpanContext(turn.context);
     const span = input.tracer.startSpan(
       "agent.step",
       {
@@ -126,52 +169,72 @@ export function createAgentOtelProvider(
           "agent.name": event.scope.functionId,
         },
       },
-      turn.context,
+      turnContext,
     );
     span.addEvent("step.started");
-    steps.set(event.scope.attemptId, {
-      context: trace.setSpan(turn.context, span),
+    steps.set(event.scope, {
+      context: trace.setSpan(turnContext, span),
       span,
     });
   };
 
   const onAttemptTerminal = (event: InstrumentationAttemptTerminalEvent): void => {
-    const step = steps.get(event.scope.attemptId);
+    const step = steps.get(event.scope);
     if (step === undefined) return;
     step.span.addEvent(event.type === "attempt.completed" ? "step.completed" : "step.failed");
     if (event.type === "attempt.failed") recordError(step.span, event.error);
     step.span.end();
-    steps.delete(event.scope.attemptId);
+    steps.delete(event.scope);
   };
 
-  const onTurnTerminal = (event: InstrumentationTurnTerminalEvent): void => {
-    const turn = turns.get(turnKey(event.sessionId, event.turnId));
+  const onTurnTerminal = async (event: InstrumentationTurnTerminalEvent): Promise<void> => {
+    const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
     if (turn === undefined) return;
-    turn.span.addEvent(event.type);
-    if (event.type === "turn.failed") recordError(turn.span, event.error);
+    await input.stateStore.setTurn(event.sessionId, event.turnId, {
+      ...turn,
+      terminal: { error: event.error, type: event.type },
+    });
   };
 
-  const onSessionTransition = (event: InstrumentationSessionTransitionEvent): void => {
+  const onSessionTransition = async (
+    event: InstrumentationSessionTransitionEvent,
+  ): Promise<void> => {
     if (event.turnId !== undefined) {
-      const key = turnKey(event.sessionId, event.turnId);
-      const turn = turns.get(key);
+      const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
       if (turn !== undefined) {
-        turn.span.addEvent(event.type);
-        turn.span.end();
-        turns.delete(key);
+        const span = input.tracer.startSpan(
+          "agent.turn.terminal",
+          {
+            attributes: {
+              "agent.root.session.id": turn.rootSessionId,
+              "agent.session.id": event.sessionId,
+              "agent.turn.id": event.turnId,
+              "agent.turn.sequence": turn.sequence,
+            },
+          },
+          contextFromSpanContext(turn.context),
+        );
+        if (turn.terminal !== undefined) {
+          span.addEvent(turn.terminal.type);
+          if (turn.terminal.type === "turn.failed") {
+            recordError(span, turn.terminal.error);
+          }
+        }
+        span.addEvent(event.type);
+        span.end();
+        await input.stateStore.deleteTurn(event.sessionId, event.turnId);
       }
     }
     // `session.waiting` is not terminal — the session may resume with a new
     // turn that still needs its metadata — so only release session-scoped
     // state on terminal transitions.
     if (event.type === "session.completed" || event.type === "session.failed") {
-      sessionMetadata.delete(event.sessionId);
-      pendingSessionStarted.delete(event.sessionId);
+      await input.stateStore.deleteSession(event.sessionId);
     }
   };
 
   const beforeModelCall = (event: InstrumentationModelCallStartedEvent): SpanState | undefined => {
-    const step = steps.get(event.scope.attemptId);
+    const step = steps.get(event.scope);
     if (step === undefined) return undefined;
     step.span.setAttribute("agent.model.id", event.source.modelId);
     step.span.setAttribute("agent.model.provider", event.source.provider);
@@ -190,7 +253,7 @@ export function createAgentOtelProvider(
   };
 
   const beforeToolCall = (event: InstrumentationToolCallStartedEvent): SpanState | undefined => {
-    const step = steps.get(event.scope.attemptId);
+    const step = steps.get(event.scope);
     if (step === undefined) return undefined;
     const span = input.tracer.startSpan(
       "agent.action",
@@ -226,12 +289,11 @@ export function createAgentOtelProvider(
     state.span.end();
   };
 
-  const ensureSessionContext = (
+  const ensureSessionContext = async (
     event: InstrumentationSessionStartedEvent,
-  ): { context: Context; created: boolean } => {
-    let spanContext = input.sessionContexts.get(event.sessionId);
-    let created = false;
-    if (spanContext === undefined) {
+  ): Promise<AgentSessionTraceState> => {
+    let state = await input.stateStore.getSession(event.sessionId);
+    if (state === undefined) {
       const marker = input.tracer.startSpan(
         "agent.session",
         {
@@ -247,15 +309,17 @@ export function createAgentOtelProvider(
         },
         ROOT_CONTEXT,
       );
-      spanContext = marker.spanContext();
-      input.sessionContexts.set(event.sessionId, spanContext);
+      state = {
+        agentName: event.agentName,
+        channelKind: event.channelKind,
+        context: marker.spanContext(),
+        pendingStarted: true,
+        rootSessionId: event.rootSessionId,
+      };
+      await input.stateStore.setSession(event.sessionId, state);
       marker.end();
-      created = true;
     }
-    return {
-      context: trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext)),
-      created,
-    };
+    return state;
   };
 
   return {
@@ -289,6 +353,10 @@ export function createAgentOtelProvider(
 
 function turnKey(sessionId: string, turnId: string): string {
   return `${sessionId}:${turnId}`;
+}
+
+function contextFromSpanContext(spanContext: SpanContext): Context {
+  return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext));
 }
 
 function isSpanState(value: unknown): value is SpanState {

@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
   createAgentOtelProvider,
-  InMemoryAgentSessionContextStore,
+  InMemoryAgentTraceStateStore,
 } from "#harness/agent-otel-provider.js";
 import {
   createInstrumentationHooks,
@@ -24,7 +24,7 @@ interface TestRuntime {
   readonly provider: BasicTracerProvider;
 }
 
-function createRuntime(): TestRuntime {
+function createRuntime(stateStore = new InMemoryAgentTraceStateStore()): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const provider = new BasicTracerProvider({
     spanProcessors: [new SimpleSpanProcessor(exporter)],
@@ -32,7 +32,7 @@ function createRuntime(): TestRuntime {
   const hooks = createInstrumentationHooks([
     createAgentOtelProvider({
       frameworkVersion: "test",
-      sessionContexts: new InMemoryAgentSessionContextStore(),
+      stateStore,
       tracer: provider.getTracer("eve.agent"),
     }),
   ]);
@@ -145,17 +145,18 @@ describe("createAgentOtelProvider", () => {
     const spans = runtime.exporter.getFinishedSpans();
     const session = byName(spans, "agent.session")[0]!;
     const turn = byName(spans, "agent.turn")[0]!;
+    const turnTerminal = byName(spans, "agent.turn.terminal")[0]!;
     const step = byName(spans, "agent.step")[0]!;
     const action = byName(spans, "agent.action")[0]!;
 
     expect(session.parentSpanContext).toBeUndefined();
     expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
+    expect(turnTerminal.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(new Set(spans.map((span) => span.spanContext().traceId))).toHaveLength(1);
-    expect(turn.events.map((event) => event.name)).toEqual([
-      "turn.started",
-      "session.started",
+    expect(turn.events.map((event) => event.name)).toEqual(["turn.started", "session.started"]);
+    expect(turnTerminal.events.map((event) => event.name)).toEqual([
       "turn.completed",
       "session.waiting",
     ]);
@@ -177,22 +178,30 @@ describe("createAgentOtelProvider", () => {
   });
 
   it("reuses one trace id across turns", async () => {
-    const runtime = createRuntime();
+    const stateStore = new InMemoryAgentTraceStateStore();
+    const firstRuntime = createRuntime(stateStore);
     await emitAttempt({
-      hooks: runtime.hooks,
+      hooks: firstRuntime.hooks,
       sessionId: "session-1",
       turnId: "turn-1",
       turnSequence: 0,
     });
+    await firstRuntime.provider.forceFlush();
+
+    // A new provider instance models resumption in another Workflow worker.
+    const secondRuntime = createRuntime(stateStore);
     await emitAttempt({
-      hooks: runtime.hooks,
+      hooks: secondRuntime.hooks,
       sessionId: "session-1",
       turnId: "turn-2",
       turnSequence: 1,
     });
-    await runtime.provider.forceFlush();
+    await secondRuntime.provider.forceFlush();
 
-    const turns = byName(runtime.exporter.getFinishedSpans(), "agent.turn");
+    const turns = [
+      ...byName(firstRuntime.exporter.getFinishedSpans(), "agent.turn"),
+      ...byName(secondRuntime.exporter.getFinishedSpans(), "agent.turn"),
+    ];
     expect(turns).toHaveLength(2);
     expect(turns[0]!.spanContext().traceId).toBe(turns[1]!.spanContext().traceId);
     expect(
