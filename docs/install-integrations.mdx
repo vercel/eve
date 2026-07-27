@@ -4,23 +4,23 @@ description: "Discover and install extensions and other integrations from eve an
 contentType: "How-to"
 ---
 
-Install integrations from eve's official catalog, a third-party source, or an item URL. Integrations are distributed using the [shadcn registry format](https://ui.shadcn.com/docs/registry).
+Install integrations from eve's official catalog, a third-party source, or an integration URL. Integrations are distributed using the [shadcn registry format](https://ui.shadcn.com/docs/registry).
 
-## Install an official extension
+## Install an integration
 
-Run `eve add` from an eve agent project. This installs the item dependencies and writes its declared files into your project.
+Run `eve add` from an eve agent project. This installs the integration's dependencies and writes its declared files into your project.
 
 ```bash
 eve add extension/agent-browser
 ```
 
-The item may create an extension mount under `agent/extensions/`. Configure that mount and any required environment variables before running your agent.
+The integration may create an extension mount under `agent/extensions/`. Configure that mount and any required environment variables before running your agent.
 
-## Find an item
+## Find an integration
 
-Browse the [Integrations directory](/integrations) to see the official extensions available from the eve registry.
+Browse the [Integrations directory](/integrations) to see the official integrations available from the eve registry.
 
-List every official item and configured third-party source:
+List every official integration and configured third-party source:
 
 ```bash
 eve registry list
@@ -32,7 +32,7 @@ Search the catalog when you know what capability you need:
 eve registry search browser
 ```
 
-Inspect an item before you install it:
+Inspect an integration before you install it:
 
 ```bash
 eve registry view extension/agent-browser
@@ -42,13 +42,13 @@ eve registry view extension/agent-browser
 
 ## Add a third-party source
 
-Give a registry a namespace and an item URL template:
+Give a registry a namespace and an integration URL template:
 
 ```bash
 eve registry add @acme=https://registry.acme.com/r/{name}.json
 ```
 
-eve stores the mapping in `package.json#registries`. The `{name}` placeholder becomes the item name, so `@acme/analytics` resolves to `https://registry.acme.com/r/analytics.json`.
+eve stores the mapping in `package.json#registries`. The `{name}` placeholder becomes the integration name, so `@acme/analytics` resolves to `https://registry.acme.com/r/analytics.json`.
 
 Limit listing or search to that registry when needed:
 
@@ -57,13 +57,13 @@ eve registry list --registry @acme
 eve registry search analytics --registry @acme
 ```
 
-Install an item from that source:
+Install an integration from that source:
 
 ```bash
 eve add @acme/analytics
 ```
 
-Install a known item URL directly when you do not need a namespace:
+Install a known integration URL directly when you do not need a namespace:
 
 ```bash
 eve add https://registry.acme.com/r/analytics.json
@@ -71,15 +71,15 @@ eve add https://registry.acme.com/r/analytics.json
 
 ## Configure generated files
 
-Registry items add project files. Read the generated mount before you run the agent, then add the configuration the extension requires.
+Integrations add project files. Read the generated mount before you run the agent, then add the configuration the extension requires.
 
 For an extension, this usually means setting environment variables and editing the file under `agent/extensions/`. See [Extensions](./extensions) for mount configuration, namespacing, and overrides.
 
 Provider-specific setup lives in the [Integrations directory](/integrations). Follow that guidance for credentials, approval policies, and service-specific options.
 
-## Update an installed item
+## Update an installed integration
 
-Treat generated files as project code. Commit or review local changes before you install the item again.
+Treat generated files as project code. Commit or review local changes before you install the integration again.
 
 Run the same command when the registry publisher provides an updated scaffold:
 
@@ -97,7 +97,7 @@ Update the installed package with your package manager. Check the publisher's re
 
 ## Choose trusted sources
 
-Registry items can add dependencies and write files. Add sources you trust, inspect an item with `eve registry view`, and review the resulting project diff before you run the agent.
+Integrations can add dependencies and write files. Add sources you trust, inspect an integration with `eve registry view`, and review the resulting project diff before you run the agent.
 
 ## What to read next
 
