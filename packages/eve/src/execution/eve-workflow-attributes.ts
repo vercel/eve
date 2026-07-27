@@ -22,10 +22,12 @@
  * - `$eve.subagent`     — active compiled graph node id (subagent rows only)
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
  * - `$eve.title`        — truncated session title from the first user message
+ * - `$eve.user_id`      — stable id of the user starting a top-level session
  * - `$eve.channel_request_id` — inbound channel request id
  */
 
-import { ChannelRequestIdKey } from "#context/keys.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { AuthKey, ChannelRequestIdKey, InitiatorAuthKey } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
 
@@ -132,6 +134,20 @@ export function readChannelRequestId(
   return isNonEmptyString(channelRequestId) ? channelRequestId : undefined;
 }
 
+function readInitiatingUserId(serializedContext: Record<string, unknown>): string | undefined {
+  const initiator = serializedContext[InitiatorAuthKey.name] as
+    | SessionAuthContext
+    | null
+    | undefined;
+  const auth =
+    initiator === undefined
+      ? (serializedContext[AuthKey.name] as SessionAuthContext | null | undefined)
+      : initiator;
+  return auth?.principalType === "user" && auth.principalId.length > 0
+    ? auth.principalId
+    : undefined;
+}
+
 /**
  * Maximum visible length (in code points) of a derived `$eve.title`.
  *
@@ -209,6 +225,7 @@ export function buildSessionAttributes(input: {
 }): Record<string, EveAttributeValue> {
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
+    "$eve.user_id": readInitiatingUserId(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
     "$eve.title": deriveSessionTitle(input.inputMessage),

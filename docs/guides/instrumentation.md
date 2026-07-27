@@ -129,6 +129,7 @@ Structural tags describe each run's place in the tree:
 - `$eve.subagent`: compiled graph node id (subagent runs only)
 - `$eve.trigger`: the channel kind that started the run
 - `$eve.title`: truncated title derived from the first user message
+- `$eve.user_id`: stable id of the authenticated user who started a top-level session (session runs only)
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 
