@@ -48,6 +48,7 @@ import {
   type LoadThreadContextMessagesOptions,
 } from "#public/channels/slack/thread.js";
 import { slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
+import { enrichSlackUserAuth } from "#public/channels/slack/user-profile.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
@@ -1167,6 +1168,11 @@ async function deliverSlackMessage(input: {
   // This runs in the webhook's `waitUntil` task; an unguarded throw would
   // reject silently into the dispatch `allSettled` ("no response, no logs").
   try {
+    const enrichedAuthPromise = enrichSlackUserAuth({
+      auth: input.result.auth,
+      botToken: input.credentials?.botToken,
+      teamId: message.teamId,
+    });
     const priorMessages =
       input.threadContext === undefined
         ? []
@@ -1193,12 +1199,14 @@ async function deliverSlackMessage(input: {
 
     const channelContext = input.result.context ?? [];
 
+    const auth = await enrichedAuthPromise;
+
     await input.send(
       channelContext.length === 0
         ? { message: turnMessage }
         : { message: turnMessage, context: channelContext },
       {
-        auth: input.result.auth,
+        auth,
         continuationToken: slackContinuationToken(message.channelId, message.threadTs),
         state: {
           channelId: message.channelId,

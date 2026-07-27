@@ -39,6 +39,7 @@ export function buildSlackAuthContext(input: SlackAuthContextInput): SessionAuth
   };
   if (input.userName) attributes.user_name = input.userName;
   if (input.fullName) attributes.full_name = input.fullName;
+  if (input.fullName ?? input.userName) attributes.display_name = input.fullName ?? input.userName!;
   if (input.teamId) attributes.team_id = input.teamId;
 
   return {

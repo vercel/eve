@@ -71,7 +71,7 @@ describe("buildTelemetryRuntimeContext", () => {
   it("emits current user identity without arbitrary auth attributes", () => {
     const ctx = new ContextContainer();
     ctx.set(AuthKey, {
-      attributes: { email: "ada@example.com" },
+      attributes: { display_name: "Ada Lovelace", email: "ada@example.com" },
       authenticator: "slack-webhook",
       principalId: "slack:T1:U1",
       principalType: "user",
@@ -80,6 +80,7 @@ describe("buildTelemetryRuntimeContext", () => {
     expect(contextStorage.run(ctx, () => build())).toEqual({
       ...FRAMEWORK_KEYS,
       "eve.user.id": "slack:T1:U1",
+      "eve.user.name": "Ada Lovelace",
     });
   });
 

@@ -23,6 +23,7 @@
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
  * - `$eve.title`        — truncated session title from the first user message
  * - `$eve.user_id`      — stable id of the user starting a top-level session
+ * - `$eve.user_name`    — optional display label for that user
  * - `$eve.channel_request_id` — inbound channel request id
  */
 
@@ -134,18 +135,30 @@ export function readChannelRequestId(
   return isNonEmptyString(channelRequestId) ? channelRequestId : undefined;
 }
 
-function readInitiatingUserId(serializedContext: Record<string, unknown>): string | undefined {
+function readInitiatingUserAuth(
+  serializedContext: Record<string, unknown>,
+): SessionAuthContext | null | undefined {
   const initiator = serializedContext[InitiatorAuthKey.name] as
     | SessionAuthContext
     | null
     | undefined;
-  const auth =
-    initiator === undefined
-      ? (serializedContext[AuthKey.name] as SessionAuthContext | null | undefined)
-      : initiator;
-  return auth?.principalType === "user" && auth.principalId.length > 0
-    ? auth.principalId
-    : undefined;
+  return initiator === undefined
+    ? (serializedContext[AuthKey.name] as SessionAuthContext | null | undefined)
+    : initiator;
+}
+
+function buildUserAttributes(
+  auth: SessionAuthContext | null | undefined,
+): Record<string, EveAttributeValue> {
+  const user = toObservableUserIdentity(auth);
+  if (user === undefined) return {};
+  const attributes: Record<string, EveAttributeValue> = {
+    "$eve.user_id": user.id,
+  };
+  if (user.displayName !== undefined) {
+    attributes["$eve.user_name"] = user.displayName;
+  }
+  return attributes;
 }
 
 /**
@@ -224,8 +237,8 @@ export function buildSessionAttributes(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   return {
+    ...buildUserAttributes(readInitiatingUserAuth(input.serializedContext)),
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
-    "$eve.user_id": readInitiatingUserId(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
     "$eve.title": deriveSessionTitle(input.inputMessage),

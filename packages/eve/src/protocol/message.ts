@@ -152,10 +152,12 @@ export interface SessionStartedStreamEvent {
   type: "session.started";
 }
 
-/** Authenticated user identity attached to a turn. */
+/** Authenticated user snapshot attached to a turn. */
 export interface TurnUserIdentity {
   /** Stable canonical identity key. */
   readonly id: string;
+  /** Mutable presentation label. Never use as an identity key. */
+  readonly name?: string;
 }
 
 /**

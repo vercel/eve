@@ -115,7 +115,7 @@ ai.eve.turn  {eve.session.id}
 
 eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
-When the current caller is an authenticated user, eve adds `eve.user.id` to the turn span and model-call runtime context. The same normalized user id is persisted on `turn.started.data.user` for durable turn-level authorship. Service, runtime, bot, anonymous, and unknown principals are omitted, and arbitrary auth attributes are never exported.
+When the current caller is an authenticated user, eve adds `eve.user.id` and optional `eve.user.name` to the turn span and model-call runtime context. The same normalized identity is persisted on `turn.started.data.user` for durable turn-level authorship. Service, runtime, bot, anonymous, and unknown principals are omitted, and arbitrary auth attributes are never exported. Names are mutable presentation snapshots; use the id as the canonical key.
 
 ## Workflow run tags
 
@@ -132,6 +132,7 @@ Structural tags describe each run's place in the tree:
 - `$eve.trigger`: the channel kind that started the run
 - `$eve.title`: truncated title derived from the first user message
 - `$eve.user_id`: stable id of the authenticated user who started a top-level session (session runs only)
+- `$eve.user_name`: optional, mutable presentation label for that user (session runs only)
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 

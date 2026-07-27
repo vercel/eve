@@ -70,6 +70,9 @@ export function buildTelemetryRuntimeContext(
   };
   if (currentUser !== undefined) {
     runtimeContext["eve.user.id"] = currentUser.id;
+    if (currentUser.displayName !== undefined) {
+      runtimeContext["eve.user.name"] = currentUser.displayName;
+    }
   }
   return runtimeContext;
 }

@@ -15,7 +15,7 @@ import {
 import { AuthKey, ChannelRequestIdKey, InitiatorAuthKey } from "#context/keys.js";
 
 const userAuth = {
-  attributes: { email: "ada@example.com" },
+  attributes: { display_name: "Ada Lovelace", email: "ada@example.com" },
   authenticator: "slack-webhook",
   principalId: "slack:T1:U1",
   principalType: "user",
@@ -193,6 +193,7 @@ describe("buildSessionAttributes", () => {
 
     expect(attrs).toMatchObject({
       "$eve.user_id": "slack:T1:U1",
+      "$eve.user_name": "Ada Lovelace",
     });
     expect(JSON.stringify(attrs)).not.toContain("ada@example.com");
   });

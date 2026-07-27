@@ -520,6 +520,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const currentUser = toObservableUserIdentity(contextStorage.getStore()?.get(AuthKey));
     if (turnSpan && currentUser !== undefined) {
       turnSpan.setAttribute("eve.user.id", currentUser.id);
+      if (currentUser.displayName !== undefined) {
+        turnSpan.setAttribute("eve.user.name", currentUser.displayName);
+      }
     }
 
     // Store the turn span context on the session so continuation steps
@@ -577,7 +580,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           preambleStepInput ?? {},
           emissionState,
           config.runtimeIdentity,
-          currentUser,
+          currentUser === undefined
+            ? undefined
+            : { id: currentUser.id, name: currentUser.displayName },
         );
         turnSpan?.setAttribute("eve.turn.id", emissionState.turnId);
         emissionState = await emitTurnEpilogue(
@@ -621,7 +626,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         preambleStepInput ?? {},
         emissionState,
         config.runtimeIdentity,
-        currentUser,
+        currentUser === undefined
+          ? undefined
+          : { id: currentUser.id, name: currentUser.displayName },
       );
       session = setHarnessEmissionState(session, emissionState);
 

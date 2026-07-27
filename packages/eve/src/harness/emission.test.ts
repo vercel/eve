@@ -136,14 +136,14 @@ describe("emitTurnPreamble", () => {
       { message: "hello" },
       { sequence: 2, sessionStarted: true, stepIndex: 0, turnId: "" },
       undefined,
-      { id: "slack:T1:U1" },
+      { id: "slack:T1:U1", name: "Ada Lovelace" },
     );
 
     expect(emit).toHaveBeenNthCalledWith(1, {
       data: {
         sequence: 2,
         turnId: "turn_2",
-        user: { id: "slack:T1:U1" },
+        user: { id: "slack:T1:U1", name: "Ada Lovelace" },
       },
       type: "turn.started",
     });

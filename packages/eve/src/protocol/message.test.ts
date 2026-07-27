@@ -39,13 +39,13 @@ describe("message stream protocol", () => {
       createTurnStartedEvent({
         sequence: 2,
         turnId: "turn_2",
-        user: { id: "slack:T1:U1" },
+        user: { id: "slack:T1:U1", name: "Ada Lovelace" },
       }),
     ).toEqual({
       data: {
         sequence: 2,
         turnId: "turn_2",
-        user: { id: "slack:T1:U1" },
+        user: { id: "slack:T1:U1", name: "Ada Lovelace" },
       },
       type: "turn.started",
     });

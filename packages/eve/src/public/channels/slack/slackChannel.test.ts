@@ -24,6 +24,7 @@ import {
   SLACK_SECTION_TEXT_MAX_LENGTH,
 } from "#public/channels/slack/limits.js";
 import { defaultSlackAuth } from "#public/channels/slack/index.js";
+import { clearSlackUserProfileCacheForTests } from "#public/channels/slack/user-profile.js";
 import {
   constrainAuthorizationRequired,
   slackChannel,
@@ -1034,6 +1035,7 @@ describe("slackChannel() inbound mention pipeline", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    clearSlackUserProfileCacheForTests();
     process.env.SLACK_SIGNING_SECRET = SIGNING_SECRET;
     fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
@@ -1262,6 +1264,54 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(message).toContain("sender_id: U01");
     expect(message).toContain("message_ts:");
     expect(options.title).toBe("hello");
+  });
+
+  it("enriches accepted Slack user auth with a cached profile lookup", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      if (String(request).includes("users.info")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            user: {
+              name: "ada",
+              profile: { display_name: "Ada L.", real_name: "Ada Lovelace" },
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    const first = await firePost(channel, buildSignedRequest(buildMentionBody({ ts: "1.1" })));
+    const second = await firePost(channel, buildSignedRequest(buildMentionBody({ ts: "1.2" })));
+
+    expect(first.send.mock.calls[0]?.[1]).toMatchObject({
+      auth: { attributes: { display_name: "Ada L." } },
+    });
+    expect(second.send.mock.calls[0]?.[1]).toMatchObject({
+      auth: { attributes: { display_name: "Ada L." } },
+    });
+    expect(
+      fetchMock.mock.calls.filter(([request]) => String(request).includes("users.info")),
+    ).toHaveLength(1);
+  });
+
+  it("does not look up profiles for ignored messages", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => null,
+    });
+
+    const { body } = buildMentionBody();
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(fetchMock.mock.calls.some(([request]) => String(request).includes("users.info"))).toBe(
+      false,
+    );
   });
 
   it("uses only this app's reply as the incremental thread context boundary", async () => {

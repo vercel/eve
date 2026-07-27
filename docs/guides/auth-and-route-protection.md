@@ -300,7 +300,7 @@ export default eveChannel({
 });
 ```
 
-Keep `principalId` stable for the same person, and include an `issuer` when the same app may accept users from multiple identity providers. The connection token cache keys user credentials by issuer and principal id so two providers cannot accidentally share a grant.
+Keep `principalId` stable for the same person, and include an `issuer` when the same app may accept users from multiple identity providers. The connection token cache keys user credentials by issuer and principal id so two providers cannot accidentally share a grant. To give observability UIs a mutable presentation label, set a string `display_name` auth attribute. eve may also use standard `name` or `preferred_username` attributes when `display_name` is absent; none of these labels are identity keys.
 
 Built-in platform channels that identify a human sender, such as Slack, Discord, Teams, Telegram, Twilio, Linear, and GitHub, attach a user principal for that sender by default. A Slack mention, DM, or button click can therefore authorize a user-scoped connection for the Slack user who sent it without adding a separate browser-session auth function.
 
