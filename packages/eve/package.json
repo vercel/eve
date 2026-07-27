@@ -299,7 +299,8 @@
     "test:vercel": "vitest run --config vitest.vercel.config.ts"
   },
   "dependencies": {
-    "nitro": "3.0.260610-beta"
+    "nitro": "3.0.260610-beta",
+    "undici": "7.28.0"
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "catalog:",
