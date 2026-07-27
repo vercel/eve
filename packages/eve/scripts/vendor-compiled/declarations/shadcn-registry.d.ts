@@ -12,6 +12,7 @@ export interface RegistryConfig {
 
 export interface AddRegistryItemsOptions {
   cwd?: string;
+  config?: RegistryConfig;
   overwrite?: boolean;
 }
 

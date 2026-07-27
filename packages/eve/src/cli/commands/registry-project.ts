@@ -41,8 +41,6 @@ function parseRegistries(path: string, value: unknown): Record<string, RegistryS
   return registries;
 }
 
-// TODO: Replace this package.json handling with shadcn's registry config APIs
-// after shadcn-ui/ui#11304 and shadcn-ui/ui#11295 are released.
 async function readRegistryPackage(appRoot: string): Promise<RegistryPackage> {
   const path = join(appRoot, "package.json");
   let parsed: unknown;

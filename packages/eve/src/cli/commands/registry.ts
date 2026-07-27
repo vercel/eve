@@ -107,7 +107,8 @@ export async function runAddCommand(
   options: AddCommandOptions,
 ): Promise<void> {
   await runRegistryAction(logger, appRoot, async () => {
-    await addRegistryItems([itemAddress(item)], { ...options, cwd: appRoot });
+    const config = await readRegistryConfig(appRoot);
+    await addRegistryItems([itemAddress(item)], { ...options, config, cwd: appRoot });
   });
 }
 

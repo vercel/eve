@@ -69,8 +69,8 @@ minimumReleaseAgeExclude:
   - eve
   - nitro
   - rolldown
-  # This release contains the reviewed registry SDK installer used by the eve CLI.
-  - shadcn@4.15.0
+  # This release contains the reviewed package-config registry APIs used by the eve CLI.
+  - shadcn@4.16.0
   - turbo
   - typescript
   - vercel

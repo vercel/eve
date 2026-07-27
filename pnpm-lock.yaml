@@ -1270,8 +1270,8 @@ importers:
         specifier: 7.8.4
         version: 7.8.4
       shadcn:
-        specifier: 4.15.0
-        version: 4.15.0(supports-color@10.2.2)(typescript@6.0.3)
+        specifier: 4.16.0
+        version: 4.16.0(supports-color@10.2.2)(typescript@6.0.3)
       svelte:
         specifier: ^5.0.0
         version: 5.56.1(@typescript-eslint/types@8.59.4)
@@ -13272,8 +13272,8 @@ packages:
     engines: {node: '>=20.18.1'}
     hasBin: true
 
-  shadcn@4.15.0:
-    resolution: {integrity: sha512-fFTpfOuRwqjpXGp/sKpAxJkjdgv1jf8bDrW1xi0cVn2k7WJ5ijV/gjkAlkAidGDjhEkgcUuxVdm4oRB9r8BivA==}
+  shadcn@4.16.0:
+    resolution: {integrity: sha512-kPr4RrQmbbZeAjwBYeBSpFvAHV8rkTlNPUluIxkRriq5TpevfFelVO5xvcF6oguHPVn0R6wPuVer4HudfcLy/A==}
     engines: {node: '>=20.18.1'}
     hasBin: true
 
@@ -28803,7 +28803,7 @@ snapshots:
       - supports-color
       - typescript
 
-  shadcn@4.15.0(supports-color@10.2.2)(typescript@6.0.3):
+  shadcn@4.16.0(supports-color@10.2.2)(typescript@6.0.3):
     dependencies:
       '@babel/core': 7.29.0(supports-color@10.2.2)
       '@babel/parser': 7.29.7

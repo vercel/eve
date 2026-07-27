@@ -63,6 +63,9 @@ describe("registry commands", () => {
     });
 
     expect(addRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/extension/browser.json"], {
+      config: {
+        registries: { "@acme": "https://example.com/r/{name}.json" },
+      },
       cwd: "/project",
       overwrite: true,
     });
