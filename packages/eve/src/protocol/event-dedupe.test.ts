@@ -47,7 +47,7 @@ describe("createEventDeduper", () => {
       type: "session.started",
       data: {},
       meta: { at: "2026-07-27T18:04:11.912Z" },
-    } as unknown as StampedHandleMessageStreamEvent;
+    } as StampedHandleMessageStreamEvent;
 
     expect(deduper.isDuplicate(preV20)).toBe(false);
     expect(deduper.isDuplicate(preV20)).toBe(false);
