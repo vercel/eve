@@ -1661,7 +1661,88 @@ describe("slackChannel() onMessage", () => {
     expect(adapterCtx.state.participationState).toBe("followingThread");
   });
 
-  it("responds to explicit mentions by default", async () => {
+  it("does not run thread participation for a top-level session message", async () => {
+    const participate = vi.fn(() => ({ respond: false, state: "ignoringThread" }));
+    const channel = slackChannel({
+      threadParticipation: { initialState: "followingThread", handle: participate },
+    });
+    const adapter = withState(getAdapter(channel), {
+      ...THREAD_STATE,
+      participationState: "ignoringThread",
+    });
+    const adapterCtx = buildAdapterContext(adapter, stubAccessor());
+    const message = {
+      attachments: [],
+      channelId: "C01",
+      markdown: "@eve start",
+      raw: {},
+      teamId: "T01",
+      text: "<@U_BOT> start",
+      threadTs: "1700000000.000002",
+      ts: "1700000000.000002",
+    };
+
+    const result = await contextStorage.run(stubAlsContext, () =>
+      adapter.deliver!(
+        {
+          channelData: {
+            isBotMentioned: true,
+            kind: "slack-message",
+            message,
+          },
+          message: "attributed message",
+        },
+        adapterCtx,
+      ),
+    );
+
+    expect(participate).not.toHaveBeenCalled();
+    expect(result).toEqual({ message: "attributed message" });
+    expect(adapterCtx.state.participationState).toBe("followingThread");
+  });
+
+  it("runs thread participation for explicit mentions in a thread", async () => {
+    const participate = vi.fn(() => ({ respond: true, state: "followingThread" }));
+    const channel = slackChannel({
+      threadParticipation: { initialState: "followingThread", handle: participate },
+    });
+    const adapter = withState(getAdapter(channel), {
+      ...THREAD_STATE,
+      participationState: "ignoringThread",
+    });
+    const adapterCtx = buildAdapterContext(adapter, stubAccessor());
+    const message = {
+      attachments: [],
+      channelId: "C01",
+      markdown: "@eve come back",
+      raw: {},
+      teamId: "T01",
+      text: "<@U_BOT> come back",
+      threadTs: "1700000000.000001",
+      ts: "1700000000.000002",
+    };
+
+    await contextStorage.run(stubAlsContext, () =>
+      adapter.deliver!(
+        {
+          channelData: {
+            isBotMentioned: true,
+            kind: "slack-message",
+            message,
+          },
+          message: "attributed message",
+        },
+        adapterCtx,
+      ),
+    );
+
+    expect(participate).toHaveBeenCalledWith(
+      message,
+      expect.objectContaining({ state: "ignoringThread", isBotMentioned: true }),
+    );
+  });
+
+  it("responds to explicit mentions in a thread by default", async () => {
     const adapter = withState(getAdapter(slackChannel()), {
       ...THREAD_STATE,
       participationState: "ignoringThread",

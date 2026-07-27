@@ -118,6 +118,42 @@ export default slackChannel({
 
 The handler runs for replies in a thread, including explicit mentions, but not for the top-level message that starts the thread. It runs inside the durable session after Slack channel state and `defineState` are hydrated. `state` must be JSON-serializable.
 
+**4. Classify ambiguous replies.** The same state can distinguish a permanent handoff from one ignored message:
+
+```ts title="agent/channels/slack.ts"
+import { generateText, Output } from "ai";
+import { z } from "zod";
+
+type ParticipationState = "followingThread" | "ignoringThread";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadParticipation: {
+    initialState: "followingThread" as ParticipationState,
+    async handle(message, ctx) {
+      if (ctx.isBotMentioned) return { respond: true, state: "followingThread" };
+      if (ctx.state === "ignoringThread") return { respond: false, state: ctx.state };
+
+      await ctx.thread.refresh();
+      const conversation = ctx.thread.recentMessages
+        .map((entry) => `${entry.isMe ? "agent" : (entry.user ?? "unknown")}: ${entry.text}`)
+        .join("\n");
+      const { output } = await generateText({
+        model: "google/gemini-3.1-flash-lite",
+        system: "Decide whether the final Slack message expects the agent to answer.",
+        prompt: conversation,
+        output: Output.object({ schema: z.object({ respond: z.boolean() }) }),
+        timeout: 1_500,
+        maxRetries: 0,
+      });
+      return { respond: output.respond, state: ctx.state };
+    },
+  },
+});
+```
+
+`ctx.thread.refresh()` loads up to 50 Slack messages into `ctx.thread.recentMessages`. AI SDK string model ids use AI Gateway and the same ambient `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` credentials as string models in `defineAgent`; the standalone call does not add classifier input to agent history.
+
 Use `onMessage` only when you need lower-level webhook-side admission, custom auth, or pre-dispatch behavior. `ctx.isBotMentioned()` identifies explicit mentions, while `ctx.isSubscribed()` is a point-in-time check for an active eve session; it does not inspect `threadParticipation` state.
 
 Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:

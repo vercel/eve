@@ -587,7 +587,8 @@ export interface SlackChannelConfig<TParticipationState = never> {
    * Participates in replies to threads that have an eve session. Pass `true`
    * to respond to every admitted human reply, or provide user-defined durable
    * state and a handler that decides whether to respond. The handler runs for
-   * thread replies after durable session and Slack channel state are hydrated.
+   * thread replies after durable session and Slack channel state are hydrated;
+   * top-level messages bypass it and initialize the configured state.
    */
   readonly threadParticipation?: true | SlackThreadParticipation<TParticipationState>;
 
