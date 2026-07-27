@@ -108,13 +108,24 @@ on conflict (id) do nothing;
 
 Because ids lead with a timestamp, a `primary key (id)` stays roughly append-ordered and keeps inserts clustered.
 
-Three caveats worth knowing:
+**What the id covers.** Reconnecting is not the only way the same event reaches you twice, and the durable log does not guarantee it holds each event exactly once — writes are batched, and a batch that fails partway can re-send pages that already landed, leaving the same chunk in the log more than once. Keying on `meta.id` is what makes ingestion correct in all of these:
+
+- Reconnecting mid-turn and overlapping events you already handled.
+- Rewinding with `startIndex=0`, or reading back from the tail with a negative `startIndex`.
+- Restoring a saved event log that overlaps the prefix the live stream replays.
+- Duplicate chunks in the durable log itself.
+
+**What it does not cover: a retried step re-emits under new ids.** eve runs each durable step up to four times. If a step is interrupted partway — a crash, a timeout, a model error it retries through — whatever it already wrote stays on the stream, and the new attempt emits its own events with their own ids. Both attempts carry the same `turnId`, `stepIndex`, and `sequence`, because the retry restores that state from the step's input, but they are distinct events and no field records which attempt finished.
+
+Replaying a _completed_ step is a different thing and emits nothing at all: eve serves the recorded result from its journal without re-running the body. Crash recovery, redeploys, and resuming a parked turn therefore add nothing to the stream. Only an interrupted step re-runs.
+
+Three more things to know:
 
 - **Ids are time-ordered, not a total order.** The turn steps of one session can run in different processes, each generating ids from its own clock and its own random bits. Two events emitted in the same millisecond by different steps may sort either way, and clock skew between machines can invert neighbours. Record your own ingestion sequence, or read the stream in order and store the index, when you need an exact ordering to page against — do not use `where id > $cursor` as a lossless cursor. The stream itself is authoritative: `startIndex` is an absolute event count.
 - **Ids identify events, not intent.** Two events with identical payloads — the `step.failed` → `turn.failed` → `session.failed` cascade, or two identical text deltas in one step — are distinct events with distinct ids. Deduplicate on `meta.id` only; matching on content would drop real data.
 - **A subagent's event is re-emitted, not shared.** When a parent forwards a child's event onto its own stream, the parent's copy is a separate event with its own id. Correlate the two streams through `subagent.called.data.childSessionId`.
 
-Authored [hooks](../guides/hooks) receive the same envelope. Note that a hook observes each event as it is emitted, not as it is read: if an interrupted step re-runs, the turn re-emits its events as new events with new ids, so `meta.id` is a key for a stored row rather than a retry guard.
+Authored [hooks](../guides/hooks) receive the same envelope, but observe each event as it is emitted rather than as it is read — so a hook sees a retry as new events, and `meta.id` is a key for a stored row rather than a retry guard. Two things a hook does not have to defend against: a turn that parks for human input resumes without re-emitting anything it already sent, and a retried turn dispatch cannot double-stream a turn, because only one turn run can claim a session's turn inbox.
 
 ## Send a follow-up message
 

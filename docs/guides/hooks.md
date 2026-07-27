@@ -107,7 +107,14 @@ export default defineHook({
 });
 ```
 
-`meta.id` is stable for the life of the persisted event, so a consumer that re-reads the stream can ingest the same event twice safely. It is not a retry guard for the hook itself: if a step is interrupted and re-runs, the turn re-emits its events as _new_ events with new ids, and your hook runs again for each one. Make side effects that must happen exactly once idempotent on your own key — the turn and step coordinates in `event.data`, or an application-level identifier.
+`meta.id` is stable for the life of the persisted event, so a consumer that re-reads the stream can ingest the same event twice safely. It is not a retry guard for the hook itself: if a step is interrupted and re-runs, the turn re-emits its events as _new_ events with new ids, and your hook runs again for each one.
+
+What to key on instead depends on what you are protecting:
+
+- **A side effect that must happen once per turn or step** — a charge, an email, a ticket — keys well on the coordinates in `event.data` (`turnId`, `stepIndex`, `sequence`). A retry restores those from the step's input, so the second attempt computes the same key and your gate holds.
+- **Stored content should not key on those coordinates.** The retry re-invokes the model, so one coordinate can carry different text on each attempt. `on conflict (turn_id, step_index, sequence) do nothing` would keep the abandoned attempt and drop the one that finished. Key on `meta.id`, and accept that an interrupted turn leaves both attempts in the table.
+
+Behind that split is an asymmetry worth knowing: durable history keeps only the attempt that completed, while the event stream keeps every attempt, and no field marks which is which. Hooks are at-least-once, and no key collapses a retry.
 
 See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envelope) for the full contract.
 

@@ -11,6 +11,11 @@ export type EventDeduper = {
 /**
  * Creates an {@link EventDeduper} keyed on the durable `meta.id`.
  *
+ * Re-delivery is not only a reconnect concern. Stream writes are batched, and
+ * a batch that fails partway can re-send pages that already landed, so the
+ * durable log itself can hold the same chunk twice — callers need this even
+ * when they never rewind.
+ *
  * The window is unbounded on purpose. A bounded one cannot survive a rewind
  * past its capacity: the oldest id has already been evicted, so re-admitting
  * it evicts the next, and the whole replay cascades back in. Every caller
