@@ -4,6 +4,7 @@ import {
   getPendingRuntimeActionBatch,
   recordPendingSubagentChild,
   resolvePendingRuntimeActions,
+  resolveToolCallInputObject,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
@@ -133,5 +134,40 @@ describe("pending subagent child adoption", () => {
         "call-remote": "remote-child",
       },
     });
+  });
+});
+
+describe("resolveToolCallInputObject", () => {
+  const context = { callId: "call-1", toolName: "web_search" };
+
+  it("passes plain objects through", () => {
+    expect(resolveToolCallInputObject({ query: "eve" }, context)).toEqual({ query: "eve" });
+  });
+
+  it("treats undefined, null, and empty-string inputs as empty arguments", () => {
+    expect(resolveToolCallInputObject(undefined, context)).toEqual({});
+    expect(resolveToolCallInputObject(null, context)).toEqual({});
+    expect(resolveToolCallInputObject("", context)).toEqual({});
+    expect(resolveToolCallInputObject("  ", context)).toEqual({});
+  });
+
+  it("parses raw JSON-string inputs from provider-executed tool calls", () => {
+    expect(resolveToolCallInputObject('{"query":"eve"}', context)).toEqual({ query: "eve" });
+  });
+
+  it("rejects strings that are not JSON objects, naming the tool and call", () => {
+    expect(() => resolveToolCallInputObject('"query"', context)).toThrow(
+      /web_search.*call-1.*Expected a JSON-serializable object/su,
+    );
+    expect(() => resolveToolCallInputObject("not json", context)).toThrow(/web_search.*call-1/su);
+  });
+
+  it("rejects non-object JSON values", () => {
+    expect(() => resolveToolCallInputObject(42, context)).toThrow(
+      /Expected a JSON-serializable object/u,
+    );
+    expect(() => resolveToolCallInputObject(["a"], context)).toThrow(
+      /Expected a JSON-serializable object/u,
+    );
   });
 });
