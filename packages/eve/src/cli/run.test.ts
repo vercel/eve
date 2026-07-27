@@ -104,6 +104,20 @@ describe("CLI command registration", () => {
     expect(help).toContain("show [options] [logid]");
     expect(help).toContain("ls");
   });
+
+  it("registers the local trace inspection commands", async () => {
+    const output: string[] = [];
+    const logger = {
+      error: (message: string) => output.push(message),
+      log: (message: string) => output.push(message),
+    };
+
+    await runCli(["trace", "--help"], logger).catch(() => {});
+
+    const help = output.join("\n");
+    expect(help).toContain("show <trace>");
+    expect(help).toContain("ls");
+  });
 });
 
 describe("eve init compatibility flags", () => {

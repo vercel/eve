@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, info, build, start, dev, logs, link, deploy, eval, channels, and extension."
+description: "Reference for every eve CLI command: init, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
 ---
 
 The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
@@ -17,6 +17,8 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
 | `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                                           |
 | `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                                     |
+| `eve trace ls`                | List locally captured agent traces, most recent first                                                                                                 |
+| `eve trace show <trace>`      | Show the span tree for a local trace                                                                                                                  |
 | `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
 | `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
 | `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
@@ -212,6 +214,16 @@ A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.0
 `eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
 
 Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
+
+## `eve trace`
+
+```bash
+eve trace ls              # list traces, most recent first
+eve trace ls --json       # emit machine-readable trace summaries
+eve trace show <trace>    # show one span tree
+```
+
+`eve trace ls` reads the immutable OTLP/JSON segments captured under `.eve/traces/v1`; `eve dev` does not need to be running. `eve trace show` accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed or incomplete segments are skipped without hiding valid spans from the same trace.
 
 ## `eve link`
 

@@ -7,6 +7,7 @@ import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { listLocalTraces } from "#cli/commands/trace.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
 import { installLocalInstrumentationRuntime } from "#harness/local-instrumentation-runtime.js";
@@ -148,6 +149,9 @@ describe("local instrumentation runtime", () => {
     expect(span(spans, "agent.action").parentSpanId).toBe(span(spans, "agent.step").spanId);
     expect(span(spans, "ai.toolCall").parentSpanId).toBe(span(spans, "agent.action").spanId);
     expect(span(spans, "user.tool-work").parentSpanId).toBe(span(spans, "ai.toolCall").spanId);
+    const listed = await listLocalTraces(appRoot);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ sessionId: "session-1", traceId });
   });
 
   it("keeps segments from overlapping worker writers", async () => {

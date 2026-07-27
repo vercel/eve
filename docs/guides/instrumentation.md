@@ -13,6 +13,8 @@ When no authored `instrumentation.ts` exists, `eve dev` records agent, AI SDK, a
 
 The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
 
+Use `eve trace ls` to list captured traces and `eve trace show <trace>` to inspect a session's span tree.
+
 The local writer is an internal development default, not a second provider layered over authored instrumentation. When `instrumentation.ts` exists, its setup retains control and the zero-config writer is not installed.
 
 ## Three observability surfaces
@@ -106,9 +108,9 @@ A channel exposes its identity through `kind`. For authored channels it is `chan
 
 Channel metadata is channel-owned. Built-in channels expose only the fields they choose to make observable; Slack, for example, projects `channelId`, `teamId`, `threadTs`, and `triggeringUserId` from its durable channel state. User-authored channels expose their own projection by returning `metadata(state)` from `defineChannel`. Runtime instrumentation never falls back to raw channel state.
 
-## Trace hierarchy
+## Authored trace hierarchy
 
-When telemetry is enabled, each turn produces a trace like:
+The existing authored `instrumentation.ts` path remains separate from zero-config local traces. When authored telemetry is enabled, each turn currently produces a trace like:
 
 ```text
 ai.eve.turn  {eve.session.id}

@@ -603,6 +603,28 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       await runLogsListCommand(logger, appRoot, options);
     });
 
+  const traces = program
+    .command("trace")
+    .description("Inspect local agent traces captured by `eve dev` (.eve/traces).")
+    .alias("traces");
+
+  traces
+    .command("ls")
+    .description("List local traces, most recent first.")
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean }) => {
+      const { runTraceListCommand } = await import("#cli/commands/trace.js");
+      await runTraceListCommand(logger, appRoot, options);
+    });
+
+  traces
+    .command("show <trace>", { isDefault: true })
+    .description("Show one local trace by trace id, session id, or unambiguous prefix.")
+    .action(async (reference: string) => {
+      const { runTraceShowCommand } = await import("#cli/commands/trace.js");
+      await runTraceShowCommand(logger, appRoot, reference);
+    });
+
   program
     .command("info")
     .description("Print resolved application information.")
