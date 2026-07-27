@@ -28,7 +28,7 @@ type DynamicEventMapResult<TEvents extends DynamicEvents> = Awaited<
   ReturnType<DynamicEventMapHandler<TEvents>>
 >;
 
-export type { ToolModelOutput } from "#shared/tool-definition.js";
+export type { ToolModelOutput, ToolModelOutputPart } from "#shared/tool-definition.js";
 
 /**
  * Authorization provider passed to {@link ToolContext.getToken} or
