@@ -350,13 +350,13 @@ export function createAgentOtelInstrumentation(
         "turn.started": onTurnStarted,
       },
     },
-    runInContext(operation, run) {
+    runInContext(operation, execute) {
       const contexts = executionContexts.get(operation.scope);
       const parent =
         operation.type === "model.call"
           ? contexts?.models.get(operation.id)
           : contexts?.tools.get(operation.id);
-      return parent === undefined ? run() : context.with(parent, run);
+      return parent === undefined ? execute() : context.with(parent, execute);
     },
   };
 
