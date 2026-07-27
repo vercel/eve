@@ -8,6 +8,7 @@ function createRuntime(overrides?: Partial<Runtime>): Runtime {
     cancelTurn: vi.fn(),
     deliver: vi.fn(),
     getEventStream: vi.fn(),
+    getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveSession: vi.fn().mockResolvedValue({ sessionId: "sess_1" }),
     run: vi.fn(),
     terminateSession: vi.fn().mockResolvedValue({ status: "terminated" }),

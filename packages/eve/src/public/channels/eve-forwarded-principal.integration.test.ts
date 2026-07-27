@@ -63,6 +63,9 @@ function createEveCreateHandler(input: EveChannelInput) {
     async getEventStream() {
       return new ReadableStream();
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   } satisfies ChannelSession);
 
   return {

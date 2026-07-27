@@ -287,6 +287,7 @@ describe("dispatchChannelRequest", () => {
       cancelTurn: vi.fn(),
       deliver: vi.fn(),
       getEventStream: vi.fn(),
+      getStreamTailIndex: vi.fn(),
       resolveSession: vi.fn().mockResolvedValue({ sessionId: "sess_previous" }),
       run: vi.fn(),
       terminateSession: vi.fn().mockResolvedValue({ status: "terminated" }),

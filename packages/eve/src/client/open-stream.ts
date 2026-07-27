@@ -3,23 +3,80 @@ import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
 import { createEveMessageStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
-import type { ClientRedirectPolicy } from "#client/types.js";
+import type {
+  ClientRedirectPolicy,
+  ResolvedStreamReconnectPolicy as StreamReconnectPolicyOptions,
+  StreamReconnectPolicy,
+  StreamReconnectRetryPolicy,
+} from "#client/types.js";
 import { createClientUrl } from "#client/url.js";
 
-const STREAM_OPEN_RETRY_ATTEMPTS = 12;
-const STREAM_OPEN_RETRY_BASE_DELAY_MS = 250;
-const STREAM_OPEN_RETRY_MAX_DELAY_MS = 5_000;
-const STREAM_OPEN_RETRYABLE_STATUS = new Set([404, 409, 425, 500, 502, 503, 504]);
+interface RetryPolicy {
+  readonly baseDelayMs: number;
+  readonly maxAttempts: number;
+  readonly maxDelayMs: number;
+}
 
-const STREAM_RECONNECT_BASE_DELAY_MS = 250;
-const STREAM_RECONNECT_MAX_DELAY_MS = 4_000;
-const STREAM_MAX_IDLE_RECONNECTS = 5;
+interface ResolvedStreamReconnectPolicy {
+  readonly retryableErrorStatuses: ReadonlySet<number>;
+  readonly streamIdleReconnectPolicy: RetryPolicy;
+  readonly streamOpenReconnectPolicy: RetryPolicy;
+}
+
+const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
+  retryableErrorStatuses: new Set([404, 409, 425, 500, 502, 503, 504]),
+  streamIdleReconnectPolicy: { baseDelayMs: 250, maxAttempts: 5, maxDelayMs: 4_000 },
+  streamOpenReconnectPolicy: { baseDelayMs: 250, maxAttempts: 12, maxDelayMs: 5_000 },
+};
+
+const NO_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
+  ...DEFAULT_STREAM_RECONNECT_POLICY,
+  streamIdleReconnectPolicy: {
+    ...DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
+    maxAttempts: 0,
+  },
+  streamOpenReconnectPolicy: {
+    ...DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy,
+    maxAttempts: 1,
+  },
+};
+
+function resolveRetryPolicy(
+  policy: StreamReconnectRetryPolicy | undefined,
+  defaults: RetryPolicy,
+): RetryPolicy {
+  return { ...defaults, ...policy };
+}
+
+function resolveStreamReconnectPolicy(
+  policy: StreamReconnectPolicy | undefined,
+): ResolvedStreamReconnectPolicy {
+  if (policy && "reconnect" in policy && policy.reconnect === false) {
+    return NO_STREAM_RECONNECT_POLICY;
+  }
+
+  const configured = policy as StreamReconnectPolicyOptions | undefined;
+  return {
+    retryableErrorStatuses: configured?.retryableErrorStatuses
+      ? new Set(configured.retryableErrorStatuses)
+      : DEFAULT_STREAM_RECONNECT_POLICY.retryableErrorStatuses,
+    streamIdleReconnectPolicy: resolveRetryPolicy(
+      configured?.streamIdleReconnectPolicy,
+      DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
+    ),
+    streamOpenReconnectPolicy: resolveRetryPolicy(
+      configured?.streamOpenReconnectPolicy,
+      DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy,
+    ),
+  };
+}
 
 /**
  * Internal configuration for following a durable event stream.
  */
 interface FollowStreamInput {
   readonly host: string;
+  readonly streamReconnectPolicy?: StreamReconnectPolicy;
   readonly resolveHeaders: () => Promise<Headers>;
   readonly redirect?: ClientRedirectPolicy;
   readonly sessionId: string;
@@ -56,8 +113,10 @@ export async function* followStreamIterable(
     );
   }
 
+  const retryPolicy = resolveStreamReconnectPolicy(input.streamReconnectPolicy);
+  const idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
   let startIndex = input.startIndex;
-  let reconnectDelayMs = STREAM_RECONNECT_BASE_DELAY_MS;
+  let reconnectDelayMs = idleRetryPolicy.baseDelayMs;
   let idleReconnects = 0;
   let initialConnection = true;
   let tailIndex: number | undefined;
@@ -67,6 +126,7 @@ export async function* followStreamIterable(
     try {
       connection = await openStreamBody({
         ...input,
+        retryPolicy,
         startIndex,
         requestTailIndex: input.follow === false && tailIndex === undefined,
       });
@@ -98,7 +158,7 @@ export async function* followStreamIterable(
       for await (const event of readNdjsonStream(connection.body)) {
         startIndex += 1;
         deliveredEvent = true;
-        reconnectDelayMs = STREAM_RECONNECT_BASE_DELAY_MS;
+        reconnectDelayMs = idleRetryPolicy.baseDelayMs;
         idleReconnects = 0;
         yield event;
 
@@ -112,14 +172,14 @@ export async function* followStreamIterable(
       }
     }
 
-    if (input.signal?.aborted || input.startIndex < 0) {
+    if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
       return;
     }
 
     if (
       !deliveredEvent &&
       !initialConnection &&
-      (idleReconnects += 1) >= STREAM_MAX_IDLE_RECONNECTS
+      (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
     ) {
       return;
     }
@@ -129,7 +189,7 @@ export async function* followStreamIterable(
     if (input.signal?.aborted) {
       return;
     }
-    reconnectDelayMs = Math.min(reconnectDelayMs * 2, STREAM_RECONNECT_MAX_DELAY_MS);
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, idleRetryPolicy.maxDelayMs);
   }
 }
 
@@ -145,11 +205,15 @@ interface OpenedStream {
  * propagation window where a just-acknowledged session may not yet be
  * readable from the stream route.
  */
-export async function openStreamBody(input: OpenStreamInput): Promise<OpenedStream> {
+export async function openStreamBody(
+  input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
+): Promise<OpenedStream> {
+  const retryPolicy = input.retryPolicy ?? DEFAULT_STREAM_RECONNECT_POLICY;
+  const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
-  let retryDelayMs = STREAM_OPEN_RETRY_BASE_DELAY_MS;
+  let retryDelayMs = openRetryPolicy.baseDelayMs;
 
   const searchParams: Record<string, string> = {};
   if (input.startIndex !== 0) {
@@ -159,7 +223,7 @@ export async function openStreamBody(input: OpenStreamInput): Promise<OpenedStre
     searchParams.includeTailIndex = "1";
   }
 
-  for (let attempt = 0; attempt < STREAM_OPEN_RETRY_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
     const url = createClientUrl(
       input.host,
       createEveMessageStreamRoutePath(input.sessionId),
@@ -178,12 +242,12 @@ export async function openStreamBody(input: OpenStreamInput): Promise<OpenedStre
       if (
         input.signal?.aborted ||
         !isStreamDisconnectError(error) ||
-        attempt === STREAM_OPEN_RETRY_ATTEMPTS - 1
+        attempt === openRetryPolicy.maxAttempts - 1
       ) {
         throw error;
       }
       await sleep(retryDelayMs, input.signal);
-      retryDelayMs = Math.min(retryDelayMs * 2, STREAM_OPEN_RETRY_MAX_DELAY_MS);
+      retryDelayMs = Math.min(retryDelayMs * 2, openRetryPolicy.maxDelayMs);
       continue;
     }
 
@@ -198,13 +262,13 @@ export async function openStreamBody(input: OpenStreamInput): Promise<OpenedStre
     lastBody = await response.text();
     lastHeaders = response.headers;
 
-    if (!STREAM_OPEN_RETRYABLE_STATUS.has(response.status)) {
+    if (!retryPolicy.retryableErrorStatuses.has(response.status)) {
       throw new ClientError(response.status, lastBody, response.headers);
     }
 
-    if (attempt < STREAM_OPEN_RETRY_ATTEMPTS - 1) {
+    if (attempt < openRetryPolicy.maxAttempts - 1) {
       await sleep(retryDelayMs, input.signal);
-      retryDelayMs = Math.min(retryDelayMs * 2, STREAM_OPEN_RETRY_MAX_DELAY_MS);
+      retryDelayMs = Math.min(retryDelayMs * 2, openRetryPolicy.maxDelayMs);
     }
   }
 
