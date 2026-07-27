@@ -1,13 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Span } from "#compiled/@opentelemetry/api/index.js";
+import { SpanStatusCode } from "#compiled/@opentelemetry/api/index.js";
 import {
   createErrorId,
   createLogger,
   formatError,
   logError,
+  recordErrorOnSpan,
   setLogRecordSubscriber,
   type LogRecord,
 } from "#internal/logging.js";
+
+/** Active span seen by the logger; `undefined` keeps span recording off. */
+let activeSpan: Span | undefined;
+
+vi.mock("#compiled/@opentelemetry/api/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#compiled/@opentelemetry/api/index.js")>();
+  return {
+    ...actual,
+    trace: { ...actual.trace, getActiveSpan: () => activeSpan },
+  };
+});
 
 // ---------------------------------------------------------------------------
 // createErrorId
@@ -295,5 +309,117 @@ describe("logError", () => {
         detail: expect.stringContaining("upstream"),
       },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// span recording guard
+// ---------------------------------------------------------------------------
+
+interface FakeSpan {
+  addEvent: ReturnType<typeof vi.fn>;
+  recordException: ReturnType<typeof vi.fn>;
+  setStatus: ReturnType<typeof vi.fn>;
+  span: Span;
+}
+
+/**
+ * Mirrors the OTel SDK: a span that has ended is no longer recording, and
+ * mutating it logs "Operation attempted on ended Span" — modeled here as a
+ * throw so any unguarded write fails the test loudly.
+ */
+function makeFakeSpan(isRecording: boolean): FakeSpan {
+  const mutate = (name: string) =>
+    vi.fn((..._args: unknown[]) => {
+      if (!isRecording) {
+        throw new Error(`Operation attempted on ended Span: ${name}`);
+      }
+    });
+  const addEvent = mutate("addEvent");
+  const recordException = mutate("recordException");
+  const setStatus = mutate("setStatus");
+  const setAttribute = mutate("setAttribute");
+
+  const span: Span = {
+    addEvent(name, attributes) {
+      addEvent(name, attributes);
+      return this;
+    },
+    end() {},
+    isRecording: () => isRecording,
+    recordException(exception) {
+      recordException(exception);
+    },
+    setAttribute(key, value) {
+      setAttribute(key, value);
+      return this;
+    },
+    setStatus(status) {
+      setStatus(status);
+      return this;
+    },
+    spanContext: () => ({ spanId: "span-id", traceFlags: 1, traceId: "trace-id" }),
+  };
+
+  return { addEvent, recordException, setStatus, span };
+}
+
+describe("span recording guard", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    activeSpan = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it("skips writes to an ended active span", () => {
+    const span = makeFakeSpan(false);
+    activeSpan = span.span;
+
+    expect(() => createLogger("ns").error("boom", { error: new Error("x") })).not.toThrow();
+
+    expect(span.setStatus).not.toHaveBeenCalled();
+    expect(span.recordException).not.toHaveBeenCalled();
+    expect(span.addEvent).not.toHaveBeenCalled();
+  });
+
+  it("skips writes to an ended span passed directly", () => {
+    const span = makeFakeSpan(false);
+
+    expect(() => recordErrorOnSpan(span.span, new Error("x"))).not.toThrow();
+
+    expect(span.setStatus).not.toHaveBeenCalled();
+    expect(span.recordException).not.toHaveBeenCalled();
+  });
+
+  it("still records an error on a recording active span", () => {
+    const span = makeFakeSpan(true);
+    activeSpan = span.span;
+
+    createLogger("ns").error("boom", { error: new Error("x") });
+
+    expect(span.setStatus).toHaveBeenCalledWith({ code: SpanStatusCode.ERROR, message: "x" });
+    expect(span.recordException).toHaveBeenCalledTimes(1);
+  });
+
+  it("still adds an event on a recording active span when no error is present", () => {
+    const span = makeFakeSpan(true);
+    activeSpan = span.span;
+
+    createLogger("ns").error("plain", { foo: "bar" });
+
+    expect(span.addEvent).toHaveBeenCalledWith("plain", { foo: "bar" });
+    expect(span.setStatus).not.toHaveBeenCalled();
+  });
+
+  it("still records on a recording span passed directly", () => {
+    const span = makeFakeSpan(true);
+
+    recordErrorOnSpan(span.span, new Error("x"));
+
+    expect(span.setStatus).toHaveBeenCalledWith({ code: SpanStatusCode.ERROR, message: "x" });
+    expect(span.recordException).toHaveBeenCalledTimes(1);
   });
 });

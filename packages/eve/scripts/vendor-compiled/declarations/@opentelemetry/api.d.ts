@@ -8,6 +8,7 @@ export interface SpanContext {
 export interface Span {
   addEvent(name: string, attributes?: Record<string, unknown>): this;
   end(): void;
+  isRecording(): boolean;
   recordException(exception: unknown): void;
   setAttribute(key: string, value: unknown): this;
   setStatus(status: { code: SpanStatusCode; message?: string | undefined }): this;
