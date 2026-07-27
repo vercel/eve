@@ -326,7 +326,7 @@ function hasCardContent(block: Record<string, unknown>): boolean {
  * `onInteraction` callback for non-HITL clicks.
  */
 export interface InteractionHandlerDeps {
-  readonly config: SlackChannelConfig;
+  readonly config: SlackChannelConfig<unknown>;
 }
 
 /**

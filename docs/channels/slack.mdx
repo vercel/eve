@@ -56,7 +56,7 @@ VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1 vercel deploy --prod
 
 Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
 
-- `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
+- `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` identifies explicit mentions.
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.
 - `onDirectMessage(ctx, message)` handles only DMs and takes precedence over `onMessage`. Bot-authored messages and edits are filtered first; Slack requires `message.im` and `im:history`.
 
@@ -71,24 +71,80 @@ Only the first available handler runs. A message hook returning `null` drops the
 
 `onInteraction(action, ctx)` separately handles `block_actions` callbacks not consumed by HITL. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
 
-#### Continue conversations without repeated mentions
+#### Respond to active thread replies
 
-Use `onMessage` to handle explicit mentions and continue replies in threads with an active eve session:
+> **Vercel Connect:** Open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
+
+By default, eve responds only to explicit mentions. `threadReplies` adds automatic or stateful response decisions for replies in a thread with an active eve session.
+
+**1. Respond only to explicit mentions.** This is the default:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  async onMessage(ctx, message) {
-    if (message.author?.isBot) return null;
-    const isDirectMessage = message.raw.channel_type === "im";
-    return isDirectMessage || ctx.isBotMentioned() || (await ctx.isSubscribed())
-      ? { auth: null }
-      : null;
+});
+```
+
+**2. Respond to every human reply in active threads.** Enable `threadReplies` without requiring another mention:
+
+```ts title="agent/channels/slack.ts"
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadReplies: true,
+});
+```
+
+**3. Track your own reply state.** Provide an `initialState` and return the next state from `onReply`. This example treats mentioning another person as a handoff:
+
+```ts title="agent/channels/slack.ts"
+type ThreadReplyState = "followingThread" | "ignoringThread";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadReplies: {
+    initialState: "followingThread" as ThreadReplyState,
+    onReply(message, ctx) {
+      if (ctx.isBotMentioned) return { respond: true, state: "followingThread" };
+      if (ctx.state === "ignoringThread") return { respond: false, state: ctx.state };
+
+      const mentionsSomeone = /<@[A-Z0-9]+(?:\|[^>]+)?>/.test(message.text);
+      return mentionsSomeone
+        ? { respond: false, state: "ignoringThread" }
+        : { respond: true, state: ctx.state };
+    },
   },
 });
 ```
 
-`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
+Thread replies pass through two phases. First, the webhook admits only human replies that belong to an active eve session; `onMessage`, when configured, replaces that default admission policy and can apply custom auth or pre-dispatch work. Second, `threadReplies.onReply` runs inside the hydrated durable session and decides whether the admitted reply dispatches an agent turn. It receives thread replies, including explicit mentions, but not the top-level message that starts the thread; that message initializes `initialState` when the policy uses state. Stateful `state` values must be JSON-serializable. Returning `respond: false` skips this reply but leaves the session active, so the policy runs again for a later reply.
+
+**4. Classify ambiguous replies without state.** Omit `initialState` when the policy does not need durable state. `onReply` then returns only its response decision:
+
+```ts title="agent/channels/slack.ts"
+import { generateText, Output } from "ai";
+import { z } from "zod";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadReplies: {
+    async onReply(message, ctx) {
+      if (ctx.isBotMentioned) return { respond: true };
+
+      const { output } = await generateText({
+        model: "google/gemini-3.1-flash-lite",
+        system: "Decide whether this Slack message expects the agent to answer.",
+        prompt: message.text,
+        output: Output.object({ schema: z.object({ respond: z.boolean() }) }),
+        timeout: 1_500,
+        maxRetries: 0,
+      });
+      return { respond: output.respond };
+    },
+  },
+});
+```
+
+Use `onMessage` only when you need custom webhook admission, auth, or pre-dispatch behavior. It is the first phase and runs before durable session state is hydrated; `threadReplies.onReply` is the second phase. `ctx.isBotMentioned()` identifies explicit mentions.
 
 Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:
 
@@ -114,8 +170,7 @@ Message hooks (`onMessage`, `onAppMention`, and `onDirectMessage`) receive a thr
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   async onMessage(ctx, message) {
-    const shouldHandle = ctx.isBotMentioned() || (await ctx.isSubscribed());
-    if (!shouldHandle || message.author?.isBot) return null;
+    if (!ctx.isBotMentioned() || message.author?.isBot) return null;
 
     await ctx.cancel();
     return { auth: null };
