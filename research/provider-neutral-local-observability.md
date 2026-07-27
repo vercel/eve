@@ -21,7 +21,7 @@ eve lifecycle boundaries -------------------+
                                              +--> eve lifecycle hooks
 AI SDK callbacks -> per-attempt bridge -------+            |
                                                           +--> local OTel provider
-AI SDK execute() -> context adapters                      +--> Vercel provider
+AI SDK execute() -> eve-owned context runner              +--> Vercel provider
                                                           +--> Braintrust provider
                                                           +--> custom providers
 ```
@@ -36,7 +36,7 @@ Providers never receive raw AI SDK event types or execution functions.
 The bridge receives stable attempt scope and typed lifecycle hooks:
 
 ```ts
-createAiSdkHookBridge(scope, hooks): Telemetry;
+createAiSdkHookBridge(scope, hooks, runInContext): Telemetry;
 ```
 
 ```ts
@@ -67,7 +67,8 @@ The bridge:
 - assigns stable attempt, model-call, and tool-call identities;
 - publishes starts and terminals through typed hooks;
 - terminalizes open operations on errors and aborts;
-- invokes internal execution-context adapters while calling model and tool execution exactly once.
+- invokes trusted `runInContext` with a typed model or tool operation while calling execution
+  exactly once.
 
 The bridge does not create spans, export records, apply provider capture policy, or publish durable
 eve-native events.
@@ -88,8 +89,9 @@ Each provider owns an independent trace graph. It creates or restores its root f
 serializable session state and derives later parentage from that state. Providers do not use ambient
 Workflow context, or another provider's active context, as their trace parent.
 
-Execution-context activation is a separate internal adapter. It is not exposed as `wrap`,
-`around`, `next`, or another provider hook that can control execution.
+Providers never receive an execution function. A built-in integration that needs ambient context
+may register a trusted internal `runInContext` alongside its event definition; it is passed directly
+to the bridge and is not part of the provider or hook contract.
 
 ## Local tracing
 
@@ -144,9 +146,9 @@ The bridge is injected per actual model attempt:
 ```text
 runModelCallWithRetries(attempt)
   -> create stable AttemptScope
-  -> createAiSdkHookBridge(scope, hooks)
+  -> createAiSdkHookBridge(scope, hooks, runInContext)
   -> telemetry.integrations = [bridge, authoredOtel?]
-  -> AI SDK invokes callbacks and execute adapters
+  -> AI SDK invokes callbacks and trusted runInContext
 ```
 
 The harness supplies `sessionId`, `turnId`, logical step index, and retry attempt index. The bridge
@@ -181,7 +183,8 @@ local-tracing work.
 ## Delivery phases
 
 1. **Lifecycle bridge.** Land the unused attempt scope, WeakMap-backed state, typed hooks, related
-   before/after correlation, execution adapters, and AI SDK callback adapter. No runtime wiring.
+   before/after correlation, a trusted context runner, and the AI SDK callback adapter. No
+   runtime wiring.
 2. **Per-attempt wiring.** Add optional internal lifecycle hooks to the harness and pass one bridge
    through `telemetry.integrations` per retry attempt, composing authored OTel when active. No
    provider or trace output yet.
@@ -200,6 +203,7 @@ The current bridge PR is phase 1 only: it lands unused primitives and cannot emi
 
 - The provider-neutral lifecycle layer imports no AI SDK or OTel types.
 - Multiple providers observe one attempt while execution occurs exactly once.
+- No provider definition receives model or tool execution functions.
 - Documented authored instrumentation continues to observe eve calls.
 - Each eve provider can build its trace without inheriting Workflow or another provider's trace.
 - Parallel tool calls retain independent provider state.

@@ -91,10 +91,6 @@ export interface InstrumentationProviderDefinition {
       InstrumentationToolCallTerminalEvent
     >;
   };
-  readonly executionContext?: {
-    runModelCall<T>(id: string, execute: () => PromiseLike<T>): PromiseLike<T>;
-    runToolCall<T>(id: string, execute: () => PromiseLike<T>): PromiseLike<T>;
-  };
 }
 
 export interface InstrumentationRelatedEventMap {
@@ -112,12 +108,27 @@ export type InstrumentationRelatedEventName = keyof InstrumentationRelatedEventM
 
 export type InstrumentationPointEvent = InstrumentationAttemptStartedEvent;
 
+/** Trusted framework operation for activating context around AI SDK execution. */
+export type InstrumentationContextRunner = <T>(
+  operation: InstrumentationExecutionOperation,
+  run: () => PromiseLike<T>,
+) => PromiseLike<T>;
+
+/** Stable identity supplied only to a trusted framework context runner. */
+export type InstrumentationExecutionOperation =
+  | {
+      readonly id: string;
+      readonly scope: InstrumentationAttemptScope;
+      readonly type: "model.call";
+    }
+  | {
+      readonly id: string;
+      readonly scope: InstrumentationAttemptScope;
+      readonly type: "tool.call";
+    };
+
 /** Provider-neutral hook operations consumed by the AI SDK bridge. */
 export interface InstrumentationHooks {
-  readonly execution: {
-    runModelCall<T>(id: string, execute: () => PromiseLike<T>): PromiseLike<T>;
-    runToolCall<T>(id: string, execute: () => PromiseLike<T>): PromiseLike<T>;
-  };
   after<TKey extends InstrumentationRelatedEventName>(
     name: TKey,
     event: InstrumentationRelatedEventMap[TKey]["terminal"],
@@ -136,18 +147,6 @@ export function createInstrumentationHooks(
   providers: readonly InstrumentationProviderDefinition[],
 ): InstrumentationHooks {
   const relatedState = new WeakMap<InstrumentationAttemptScope, Map<string, unknown>>();
-  const modelAdapters = providers.flatMap((provider) => {
-    const adapter = provider.executionContext;
-    return adapter === undefined
-      ? []
-      : [<T>(id: string, execute: () => PromiseLike<T>) => adapter.runModelCall(id, execute)];
-  });
-  const toolAdapters = providers.flatMap((provider) => {
-    const adapter = provider.executionContext;
-    return adapter === undefined
-      ? []
-      : [<T>(id: string, execute: () => PromiseLike<T>) => adapter.runToolCall(id, execute)];
-  });
 
   const publish = async (event: InstrumentationPointEvent): Promise<void> => {
     for (const provider of providers) {
@@ -201,23 +200,6 @@ export function createInstrumentationHooks(
     }
   };
 
-  const runWithAdapters = <T>(
-    adapters: readonly (<TResult>(
-      id: string,
-      execute: () => PromiseLike<TResult>,
-    ) => PromiseLike<TResult>)[],
-    id: string,
-    execute: () => PromiseLike<T>,
-  ): PromiseLike<T> => {
-    let run = execute;
-    for (let index = adapters.length - 1; index >= 0; index--) {
-      const adapter = adapters[index]!;
-      const next = run;
-      run = () => adapter(id, next);
-    }
-    return run();
-  };
-
   const warn = (boundary: string, error: unknown): void => {
     log.warn("instrumentation provider failed", { boundary, error: formatError(error) });
   };
@@ -225,10 +207,6 @@ export function createInstrumentationHooks(
   return {
     after,
     before,
-    execution: {
-      runModelCall: (id, execute) => runWithAdapters(modelAdapters, id, execute),
-      runToolCall: (id, execute) => runWithAdapters(toolAdapters, id, execute),
-    },
     publish,
   };
 }

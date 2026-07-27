@@ -3,6 +3,7 @@ import type { Telemetry } from "ai";
 import type {
   InstrumentationAttemptScope,
   InstrumentationAttemptStartedEvent,
+  InstrumentationContextRunner,
   InstrumentationHooks,
   InstrumentationModelCallCompletedEvent,
   InstrumentationModelCallStartedEvent,
@@ -46,9 +47,9 @@ export function getAttemptState(scope: InstrumentationAttemptScope): AiSdkAttemp
 export function createAiSdkHookBridge(
   scope: InstrumentationAttemptScope,
   hooks: InstrumentationHooks,
+  runInContext: InstrumentationContextRunner = directRunInContext,
 ): Telemetry {
   const state = createAttemptStore(scope);
-  const execution = hooks.execution;
 
   return {
     onStart(event) {
@@ -65,9 +66,9 @@ export function createAiSdkHookBridge(
       const started = toModelCallStarted(state, id, event);
       await hooks.before("model.call", started);
     },
-    executeLanguageModelCall({ callId, execute }) {
+    executeLanguageModelCall({ callId, execute: run }) {
       const id = state.modelIds.get(callId);
-      return id === undefined ? execute() : execution.runModelCall(id, execute);
+      return id === undefined ? run() : runInContext({ id, scope, type: "model.call" }, run);
     },
     async onLanguageModelCallEnd(event) {
       const id = state.modelIds.get(event.callId);
@@ -82,9 +83,9 @@ export function createAiSdkHookBridge(
       const started = toToolCallStarted(state, id, event);
       await hooks.before("tool.call", started);
     },
-    executeTool({ toolCallId, execute }) {
+    executeTool({ toolCallId, execute: run }) {
       const id = state.toolIds.get(toolCallId);
-      return id === undefined ? execute() : execution.runToolCall(id, execute);
+      return id === undefined ? run() : runInContext({ id, scope, type: "tool.call" }, run);
     },
     async onToolExecutionEnd(event) {
       const toolCallId = event.toolCall.toolCallId;
@@ -123,6 +124,8 @@ export function createAiSdkHookBridge(
     await Promise.all(pending);
   }
 }
+
+const directRunInContext: InstrumentationContextRunner = (_operation, run) => run();
 
 function snapshot<T extends object>(event: T): Readonly<T> {
   return Object.freeze({ ...event });

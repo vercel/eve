@@ -57,23 +57,15 @@ describe("createAiSdkHookBridge", () => {
     ]);
   });
 
-  it("composes execution adapters while executing the model exactly once", async () => {
+  it("uses an eve-owned context runner while executing the model exactly once", async () => {
     const order: string[] = [];
-    const provider = (name: string): InstrumentationProviderDefinition => ({
-      executionContext: {
-        async runModelCall(_id, execute) {
-          order.push(`${name}:enter`);
-          const result = await execute();
-          order.push(`${name}:exit`);
-          return result;
-        },
-        runToolCall(_id, execute) {
-          return execute();
-        },
-      },
+    const hooks = createInstrumentationHooks([]);
+    const bridge = createAiSdkHookBridge(scope, hooks, async (_operation, run) => {
+      order.push("enter");
+      const result = await run();
+      order.push("exit");
+      return result;
     });
-    const hooks = createInstrumentationHooks([provider("a"), provider("b")]);
-    const bridge = createAiSdkHookBridge(scope, hooks);
     const execute = vi.fn(async () => "result");
     await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
       { callId: "call-1", modelId: "model", provider: "test", tools: undefined },
@@ -86,26 +78,18 @@ describe("createAiSdkHookBridge", () => {
 
     expect(result).toBe("result");
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(order).toEqual(["a:enter", "b:enter", "b:exit", "a:exit"]);
+    expect(order).toEqual(["enter", "exit"]);
   });
 
-  it("uses the identity captured at model-call start after step state changes", async () => {
+  it("passes the identity captured at model-call start to the context runner", async () => {
     const ids: string[] = [];
     const hooks = createInstrumentationHooks([
-      {
-        events: { "model.call": { before: (event) => ids.push(event.id) } },
-        executionContext: {
-          runModelCall(id, execute) {
-            ids.push(id);
-            return execute();
-          },
-          runToolCall(_id, execute) {
-            return execute();
-          },
-        },
-      },
+      { events: { "model.call": { before: (event) => ids.push(event.id) } } },
     ]);
-    const bridge = createAiSdkHookBridge(scope, hooks);
+    const bridge = createAiSdkHookBridge(scope, hooks, (operation, run) => {
+      ids.push(operation.id);
+      return run();
+    });
     Reflect.apply(bridge.onStart!, bridge, [
       { callId: "call-1", modelId: "model", operationId: "ai.streamText", provider: "test" },
     ]);
@@ -121,23 +105,13 @@ describe("createAiSdkHookBridge", () => {
     expect(ids).toEqual([expected, expected]);
   });
 
-  it("executes without an adapter when no model start identity exists", async () => {
+  it("executes directly when no start identity exists", async () => {
     let adapterCalls = 0;
-    const runModelCall = <T>(_id: string, execute: () => PromiseLike<T>): PromiseLike<T> => {
+    const hooks = createInstrumentationHooks([]);
+    const bridge = createAiSdkHookBridge(scope, hooks, (_operation, run) => {
       adapterCalls += 1;
-      return execute();
-    };
-    const hooks = createInstrumentationHooks([
-      {
-        executionContext: {
-          runModelCall,
-          runToolCall(_id, execute) {
-            return execute();
-          },
-        },
-      },
-    ]);
-    const bridge = createAiSdkHookBridge(scope, hooks);
+      return run();
+    });
     const execute = vi.fn(async () => "result");
 
     expect(await bridge.executeLanguageModelCall!({ callId: "missing", execute })).toBe("result");
