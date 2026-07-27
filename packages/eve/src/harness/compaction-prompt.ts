@@ -176,9 +176,7 @@ function renderCompactionContentPart(
     case "reasoning":
       return "";
     case "file":
-      return part.filename
-        ? `Attached file ${part.filename} (${part.mediaType})`
-        : `Attached file attachment (${part.mediaType})`;
+      return renderAttachedFileStub(part.filename, part.mediaType);
     case "tool-call":
       return renderTranscriptToolCall(part, conversationTextLimit);
     case "tool-result":
@@ -254,10 +252,10 @@ function renderContentToolOutputPart(part: unknown, limit: number): string {
   // "media" is the AI SDK's deprecated spelling of a file part; both carry
   // an inline payload the summarizer cannot read.
   if (candidate.type === "file" || candidate.type === "media") {
-    const mediaType = typeof candidate.mediaType === "string" ? candidate.mediaType : "unknown";
-    return typeof candidate.filename === "string"
-      ? `Attached file ${candidate.filename} (${mediaType})`
-      : `Attached file attachment (${mediaType})`;
+    return renderAttachedFileStub(
+      typeof candidate.filename === "string" ? candidate.filename : undefined,
+      typeof candidate.mediaType === "string" ? candidate.mediaType : "unknown",
+    );
   }
   return renderPayload(part, limit);
 }
@@ -270,6 +268,14 @@ function renderToolCall(part: { toolName: string; input?: unknown }, limit: numb
 function renderPayload(value: unknown, limit: number): string {
   if (value === undefined) return "";
   return capText(JSON.stringify(value) ?? "", limit);
+}
+
+// One summarized-attachment surface for the checkpoint model, whether the
+// file arrived on a message or inside a content tool output.
+// `renderSandboxRefAsTextPart` in attachment-staging deliberately matches
+// this shape.
+function renderAttachedFileStub(filename: string | undefined, mediaType: string): string {
+  return `Attached file ${filename ?? "attachment"} (${mediaType})`;
 }
 
 function renderConversationText(value: string, limit?: number): string {
