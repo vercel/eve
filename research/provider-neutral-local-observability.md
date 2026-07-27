@@ -100,9 +100,10 @@ providers.
 
 The local provider:
 
-- uses its own tracer provider;
+- is registered privately by eve while using the process OTel runtime so nested user spans share
+  agent context;
 - creates one trace per eve session, independently from Workflow context;
-- never installs a global tracer provider or context manager;
+- explicitly roots session context instead of inheriting the ambient Workflow span;
 - never captures Workflow spans;
 - persists traces as OTLP/JSON for later inspection.
 

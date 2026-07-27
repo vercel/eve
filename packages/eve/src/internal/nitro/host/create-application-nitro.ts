@@ -739,6 +739,11 @@ export async function createDevelopmentApplicationNitro(
   const nitroBuildDir = preparedHost.workspace.nitroBuildDir;
   const bundler = createApplicationNitroBundlerConfiguration(preparedHost, undefined);
   const plugins = createApplicationNitroPlugins(preparedHost);
+  if (preparedHost.compiledArtifacts.instrumentationPluginPath === undefined) {
+    plugins.unshift(
+      resolvePackageSourceFilePath("src/internal/nitro/host/local-tracing-runtime-plugin.ts"),
+    );
+  }
 
   await prepareEveVersionedCacheDirectory(nitroBuildDir);
   const nitro = await createNitro(

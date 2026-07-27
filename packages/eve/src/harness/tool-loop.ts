@@ -540,7 +540,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
       handleEvent: baseEmit,
-      hooks: config.instrumentationHooks,
+      hooks: config.instrumentation?.hooks,
       rootSessionId: parent?.rootSessionId,
       sessionId: session.sessionId,
     });
@@ -897,7 +897,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
-      const instrumentationHooks = config.instrumentationHooks;
+      const instrumentationHooks = config.instrumentation?.hooks;
       const instrumentationTurnId = activeTurnId(emissionState);
       const attemptScope: InstrumentationAttemptScope | undefined =
         instrumentationHooks === undefined
@@ -914,7 +914,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const bridgeIntegration =
         attemptScope === undefined || instrumentationHooks === undefined
           ? undefined
-          : createAiSdkHookBridge(attemptScope, instrumentationHooks);
+          : createAiSdkHookBridge(
+              attemptScope,
+              instrumentationHooks,
+              config.instrumentation?.runInContext,
+            );
 
       const hooks = buildStepHooks({
         cachePath,

@@ -51,7 +51,10 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import { createInstrumentationHooks } from "#harness/instrumentation-lifecycle.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationContextRunner,
+} from "#harness/instrumentation-lifecycle.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -3838,7 +3841,10 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        instrumentationHooks: createInstrumentationHooks([]),
+        instrumentation: {
+          hooks: createInstrumentationHooks([]),
+          runInContext: (_operation, execute) => execute(),
+        },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -8853,8 +8859,9 @@ describe("createToolLoopHarness", () => {
       const hooks = createInstrumentationHooks([
         { events: { "attempt.completed": attemptCompleted } },
       ]);
+      const runInContext: InstrumentationContextRunner = (_operation, execute) => execute();
       const config = createTestConfig("conversation", undefined, {
-        instrumentationHooks: hooks,
+        instrumentation: { hooks, runInContext },
       });
 
       const runStep = createToolLoopHarness(config);
@@ -8869,6 +8876,7 @@ describe("createToolLoopHarness", () => {
           turnId: "turn_0",
         }),
         hooks,
+        runInContext,
       );
       const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
@@ -8903,7 +8911,10 @@ describe("createToolLoopHarness", () => {
       const hooks = createInstrumentationHooks([]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
-          instrumentationHooks: hooks,
+          instrumentation: {
+            hooks,
+            runInContext: (_operation, execute) => execute(),
+          },
         }),
       );
 

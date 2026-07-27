@@ -16,9 +16,11 @@ import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
 
 import opentelemetryApi from "./@opentelemetry/api.mjs";
+import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
+import vercelOtel from "./@vercel/otel.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
@@ -65,6 +67,7 @@ export const MODULES = [
   mcp,
   openai,
   opentelemetryApi,
+  opentelemetryOtlpTransformer,
   otel,
   picocolors,
   provider,
@@ -75,6 +78,7 @@ export const MODULES = [
   turndown,
   vercelDetectAgent,
   vercelOidc,
+  vercelOtel,
   vercelSandbox,
   workflowCore,
   workflowErrors,

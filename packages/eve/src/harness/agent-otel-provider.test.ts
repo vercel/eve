@@ -168,13 +168,19 @@ describe("createAgentOtelInstrumentation", () => {
     const turn = byName(spans, "agent.turn")[0]!;
     const turnTerminal = byName(spans, "agent.turn.terminal")[0]!;
     const step = byName(spans, "agent.step")[0]!;
+    const operation = byName(spans, "ai.streamText")[0]!;
+    const model = byName(spans, "ai.streamText.doStream")[0]!;
     const action = byName(spans, "agent.action")[0]!;
+    const tool = byName(spans, "ai.toolCall")[0]!;
 
     expect(session.parentSpanContext).toBeUndefined();
     expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
     expect(turnTerminal.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
+    expect(operation.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
+    expect(model.parentSpanContext?.spanId).toBe(operation.spanContext().spanId);
     expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
+    expect(tool.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
     expect(new Set(spans.map((span) => span.spanContext().traceId))).toHaveLength(1);
     expect(turn.events.map((event) => event.name)).toEqual(["turn.started", "session.started"]);
     expect(turnTerminal.events.map((event) => event.name)).toEqual([

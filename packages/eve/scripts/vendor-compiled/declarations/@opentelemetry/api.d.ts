@@ -1,4 +1,5 @@
 export interface SpanContext {
+  isRemote?: boolean;
   spanId: string;
   traceFlags: number;
   traceId: string;
@@ -6,19 +7,27 @@ export interface SpanContext {
 }
 
 export interface Span {
-  addEvent(name: string, attributes?: Record<string, unknown>): this;
+  addEvent(name: string, attributes?: Attributes): this;
   end(): void;
-  recordException(exception: unknown): void;
-  setAttribute(key: string, value: unknown): this;
+  recordException(
+    exception: Error | string | { message?: string; name?: string; stack?: string },
+  ): void;
+  setAttribute(key: string, value: AttributeValue): this;
   setStatus(status: { code: SpanStatusCode; message?: string | undefined }): this;
   spanContext(): SpanContext;
 }
 
 export interface Tracer {
-  startSpan(name: string, options?: { attributes?: Record<string, unknown> | undefined }): Span;
+  startSpan(
+    name: string,
+    options?: { attributes?: Attributes | undefined; root?: boolean | undefined },
+    context?: Context,
+  ): Span;
 }
 
 export interface Context {}
+
+export declare const ROOT_CONTEXT: Context;
 
 export declare enum SpanStatusCode {
   UNSET = 0,
@@ -33,7 +42,7 @@ export declare const context: {
 
 export declare const trace: {
   getActiveSpan(): Span | undefined;
-  getTracer(name: string): Tracer;
+  getTracer(name: string, version?: string): Tracer;
   setSpan(context: Context, span: Span): Context;
   wrapSpanContext(spanContext: SpanContext): Span;
 };
@@ -45,3 +54,12 @@ export declare enum SpanKind {
   PRODUCER = 3,
   CONSUMER = 4,
 }
+export type AttributeValue =
+  | string
+  | number
+  | boolean
+  | Array<string | null | undefined>
+  | Array<number | null | undefined>
+  | Array<boolean | null | undefined>;
+
+export type Attributes = Record<string, AttributeValue | undefined>;
