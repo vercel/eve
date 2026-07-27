@@ -38,6 +38,22 @@ export default defineAgent({
 
 The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.0.0-beta` line); the Workflow SDK rejects incompatible protocol versions during initialization. See [Self-host eve](../guides/deployment/self-hosting#persist-workflow-state), [agent.ts](../agent-config#workflow-world), and [Workflow Worlds](https://workflow-sdk.dev/worlds).
 
+## Agent loop and sandbox
+
+An eve agent spans two execution environments with different responsibilities:
+
+<AgentRuntimeDiagram />
+
+The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
+
+App-side code reaches the sandbox through `ctx.getSandbox()`. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools use it, and authored tools can use it when they need isolated filesystem or process access.
+
+The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have decoupled lifetimes: the durable workflow can park or restart independently, while the app runtime opens or reuses sandbox compute only when code needs it.
+
+This split gives the agent a real filesystem and process environment without putting credentials or trusted integration code in model-controlled compute. The workflow can park without holding sandbox compute, while sandbox capacity and backends can change independently of durable orchestration. Because access flows through app-side tools, sandbox work gets the same approval and instrumentation path as any other tool call.
+
+Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay in the app runtime. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) handles the request without exposing the credential to the process.
+
 ## Resuming after a crash
 
 Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
