@@ -17,10 +17,6 @@ describe("createInstrumentationHandleEvent", () => {
     const hooks: InstrumentationHooks = {
       after: async () => {},
       before: async () => {},
-      execution: {
-        runModelCall: (_id, execute) => execute(),
-        runToolCall: (_id, execute) => execute(),
-      },
       publish: async (event) => {
         order.push(`lifecycle:${event.type}`);
       },
@@ -68,10 +64,6 @@ describe("createInstrumentationHandleEvent", () => {
         hooks: {
           after: async () => {},
           before: async () => {},
-          execution: {
-            runModelCall: (_id, execute) => execute(),
-            runToolCall: (_id, execute) => execute(),
-          },
           publish: async () => {},
         },
         sessionId: "session-1",
