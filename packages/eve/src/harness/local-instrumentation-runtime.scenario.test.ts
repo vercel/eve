@@ -126,7 +126,6 @@ describe("local instrumentation runtime", () => {
     const spans = spanGroups.flat();
     expect(spans.map((span) => span.name)).toEqual(
       expect.arrayContaining([
-        "agent.session",
         "agent.turn",
         "agent.step",
         "ai.streamText",

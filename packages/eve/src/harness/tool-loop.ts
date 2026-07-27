@@ -543,6 +543,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       hooks: config.instrumentation?.hooks,
       rootSessionId: parent?.rootSessionId,
       sessionId: session.sessionId,
+      turnId: activeTurnId(emissionState),
     });
 
     // Resolve deferred input, runtime actions, then HITL input; each stage

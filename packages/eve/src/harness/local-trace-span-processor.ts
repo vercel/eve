@@ -19,8 +19,10 @@ const log = createLogger("harness.local-trace-span-processor");
 export class LocalTraceSpanProcessor implements SpanProcessor {
   readonly #appRoot: string;
   readonly #ownedTraceIds = new Set<string>();
-  #failed = false;
+  readonly #sessionTraceIds = new Map<string, string>();
+  #attached = false;
   #queue = Promise.resolve();
+  #reportedFailure = false;
 
   constructor(appRoot: string) {
     this.#appRoot = appRoot;
@@ -30,15 +32,23 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
     return this.#queue;
   }
 
+  isAttached(): boolean {
+    return this.#attached;
+  }
+
   onStart(span: unknown): void {
+    this.#attached = true;
     if (!isReadableSpan(span)) return;
-    if (typeof span.attributes["agent.session.id"] === "string") {
-      this.#ownedTraceIds.add(span.spanContext().traceId);
+    const sessionId = span.attributes["agent.session.id"];
+    if (typeof sessionId === "string") {
+      const traceId = span.spanContext().traceId;
+      this.#ownedTraceIds.add(traceId);
+      this.#sessionTraceIds.set(sessionId, traceId);
     }
   }
 
   onEnd(span: unknown): void {
-    if (this.#failed || !isReadableSpan(span)) return;
+    if (!isReadableSpan(span)) return;
     if (span.instrumentationScope?.name === "workflow") return;
     const { spanId, traceId } = span.spanContext();
     if (!this.#ownedTraceIds.has(traceId) || !isHexId(traceId, 32) || !isHexId(spanId, 16)) return;
@@ -53,9 +63,18 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
         await atomicWriteFile(join(directory, `${spanId}.otlp.json`), payload);
       })
       .catch((error: unknown) => {
-        this.#failed = true;
-        log.warn("local trace persistence failed", { error: formatError(error) });
+        if (!this.#reportedFailure) {
+          this.#reportedFailure = true;
+          log.warn("local trace persistence failed", { error: formatError(error) });
+        }
       });
+  }
+
+  releaseSession(sessionId: string): void {
+    const traceId = this.#sessionTraceIds.get(sessionId);
+    if (traceId === undefined) return;
+    this.#ownedTraceIds.delete(traceId);
+    this.#sessionTraceIds.delete(sessionId);
   }
 
   shutdown(): Promise<void> {

@@ -19,6 +19,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
+import { preserveSerializedAgentTraceState } from "#harness/agent-trace-context-store.js";
 import {
   isSessionLimitDecline,
   isTurnCancellation,
@@ -417,7 +418,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     return {
       action: "cancelled",
-      serializedContext: input.serializedContext,
+      serializedContext: preserveSerializedAgentTraceState(
+        input.serializedContext,
+        serializeContext(ctx),
+      ),
       sessionState: input.sessionState,
     };
   }

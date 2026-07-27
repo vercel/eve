@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   ROOT_CONTEXT,
   SpanStatusCode,
@@ -373,30 +375,14 @@ export function createAgentOtelInstrumentation(
   ): Promise<AgentSessionTraceState> => {
     let state = await input.stateStore.getSession(event.sessionId);
     if (state === undefined) {
-      const marker = input.tracer.startSpan(
-        "agent.session",
-        {
-          attributes: {
-            "agent.channel.kind": event.channelKind,
-            "agent.framework.name": "eve",
-            "agent.framework.version": input.frameworkVersion,
-            "agent.name": event.agentName,
-            "agent.root.session.id": event.rootSessionId,
-            "agent.session.id": event.sessionId,
-          },
-          root: true,
-        },
-        ROOT_CONTEXT,
-      );
       state = {
         agentName: event.agentName,
         channelKind: event.channelKind,
-        context: marker.spanContext(),
+        context: sessionTraceContext(event.sessionId),
         pendingStarted: true,
         rootSessionId: event.rootSessionId,
       };
       await input.stateStore.setSession(event.sessionId, state);
-      marker.end();
     }
     return state;
   };
@@ -444,6 +430,18 @@ export function createAgentOtelInstrumentation(
 
 function turnKey(sessionId: string, turnId: string): string {
   return `${sessionId}:${turnId}`;
+}
+
+function sessionTraceContext(sessionId: string): SpanContext {
+  return {
+    spanId: digestId(`eve:session-parent:${sessionId}`, 16),
+    traceFlags: 1,
+    traceId: digestId(`eve:session:${sessionId}`, 32),
+  };
+}
+
+function digestId(value: string, length: number): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, length);
 }
 
 function contextFromSpanContext(spanContext: SpanContext): Context {

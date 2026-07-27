@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { ContextAgentTraceStateStore } from "#harness/agent-trace-context-store.js";
+import {
+  ContextAgentTraceStateStore,
+  preserveSerializedAgentTraceState,
+} from "#harness/agent-trace-context-store.js";
 
 describe("ContextAgentTraceStateStore", () => {
   it("restores serializable session and turn context", async () => {
@@ -55,6 +58,23 @@ describe("ContextAgentTraceStateStore", () => {
       expect(store.getTurn("session-1", "turn-1")).toBeUndefined();
       expect(store.getSession("session-1")).toBeUndefined();
     });
+  });
+
+  it("preserves only trace state from an interrupted context", async () => {
+    const context = new ContextContainer();
+    await contextStorage.run(context, () => {
+      new ContextAgentTraceStateStore().setSession("session-1", {
+        context: spanContext("1", "2"),
+        pendingStarted: true,
+        rootSessionId: "session-1",
+      });
+    });
+
+    const interrupted = await serializeContext(context);
+    const preserved = preserveSerializedAgentTraceState({ authored: "original" }, interrupted);
+
+    expect(preserved.authored).toBe("original");
+    expect(preserved["eve.harness.agentTrace"]).toBeDefined();
   });
 });
 

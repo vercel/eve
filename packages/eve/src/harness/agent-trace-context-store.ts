@@ -20,6 +20,17 @@ const AgentTraceContextKey = new ContextKey<AgentTraceContextState>("eve.harness
   },
 });
 
+/** Keeps only framework trace state from an interrupted step's context changes. */
+export function preserveSerializedAgentTraceState(
+  original: Record<string, unknown>,
+  interrupted: Record<string, unknown>,
+): Record<string, unknown> {
+  const traceState = interrupted[AgentTraceContextKey.name];
+  return traceState === undefined
+    ? original
+    : { ...original, [AgentTraceContextKey.name]: traceState };
+}
+
 /** Durable trace state backed by eve's serialized Workflow context. */
 export class ContextAgentTraceStateStore implements AgentTraceStateStore {
   deleteSession(sessionId: string): void {
