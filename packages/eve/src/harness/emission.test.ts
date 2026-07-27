@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   emitStreamContent,
+  emitTurnPreamble,
   getHarnessEmissionState,
   type HarnessEmissionState,
   setHarnessEmissionState,
@@ -123,6 +124,29 @@ describe("setHarnessEmissionState", () => {
     const retrieved = getHarnessEmissionState(session.state);
 
     expect(retrieved).toEqual(state);
+  });
+});
+
+describe("emitTurnPreamble", () => {
+  it("attaches the current user snapshot to turn.started", async () => {
+    const emit = createEmitStub();
+
+    await emitTurnPreamble(
+      emit,
+      { message: "hello" },
+      { sequence: 2, sessionStarted: true, stepIndex: 0, turnId: "" },
+      undefined,
+      { id: "slack:T1:U1" },
+    );
+
+    expect(emit).toHaveBeenNthCalledWith(1, {
+      data: {
+        sequence: 2,
+        turnId: "turn_2",
+        user: { id: "slack:T1:U1" },
+      },
+      type: "turn.started",
+    });
   });
 });
 

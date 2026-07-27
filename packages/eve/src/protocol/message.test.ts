@@ -13,6 +13,7 @@ import {
   createSessionWaitingEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
+  createTurnStartedEvent,
   encodeMessageStreamEvent,
   timestampHandleMessageStreamEvent,
 } from "#protocol/message.js";
@@ -20,7 +21,7 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("19");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("20");
   });
 
   it("publishes the channel-local continuation token on session.waiting", () => {
@@ -30,6 +31,27 @@ describe("message stream protocol", () => {
         wait: "next-user-message",
       },
       type: "session.waiting",
+    });
+  });
+
+  it("creates turn.started events with optional user identity", () => {
+    expect(
+      createTurnStartedEvent({
+        sequence: 2,
+        turnId: "turn_2",
+        user: { id: "slack:T1:U1" },
+      }),
+    ).toEqual({
+      data: {
+        sequence: 2,
+        turnId: "turn_2",
+        user: { id: "slack:T1:U1" },
+      },
+      type: "turn.started",
+    });
+    expect(createTurnStartedEvent({ sequence: 2, turnId: "turn_2" })).toEqual({
+      data: { sequence: 2, turnId: "turn_2" },
+      type: "turn.started",
     });
   });
 

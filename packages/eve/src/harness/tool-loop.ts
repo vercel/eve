@@ -85,6 +85,7 @@ import {
   enforceSessionTokenLimit,
 } from "#harness/session-limit-enforcement.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
+import { toObservableUserIdentity } from "#runtime/sessions/observable-user.js";
 import {
   advanceStep,
   emitFailedStep,
@@ -516,6 +517,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     turnSpan?: Span,
   ): Promise<StepResult> {
     let session = initialSession;
+    const currentUser = toObservableUserIdentity(contextStorage.getStore()?.get(AuthKey));
+    if (turnSpan && currentUser !== undefined) {
+      turnSpan.setAttribute("eve.user.id", currentUser.id);
+    }
 
     // Store the turn span context on the session so continuation steps
     // can restore the parent trace across step boundaries.
@@ -572,7 +577,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           preambleStepInput ?? {},
           emissionState,
           config.runtimeIdentity,
+          currentUser,
         );
+        turnSpan?.setAttribute("eve.turn.id", emissionState.turnId);
         emissionState = await emitTurnEpilogue(
           emit,
           emissionState,
@@ -614,12 +621,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         preambleStepInput ?? {},
         emissionState,
         config.runtimeIdentity,
+        currentUser,
       );
       session = setHarnessEmissionState(session, emissionState);
 
-      if (turnSpan) {
-        turnSpan.setAttribute("eve.turn.id", emissionState.turnId);
-      }
+      turnSpan?.setAttribute("eve.turn.id", emissionState.turnId);
     }
 
     session = pending.session;

@@ -11,6 +11,7 @@ import {
 } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessSession } from "#harness/types.js";
+import { toObservableUserIdentity } from "#runtime/sessions/observable-user.js";
 import {
   normalizeInstrumentationChannelKind,
   resolveInstrumentationProjection,
@@ -55,8 +56,9 @@ export function buildTelemetryRuntimeContext(
   const authoredRuntimeContext = resolveStepStartedRuntimeContext(input);
   const context = contextStorage.getStore();
   const projection = context?.get(ChannelInstrumentationKey);
+  const currentUser = toObservableUserIdentity(context?.get(AuthKey));
 
-  return {
+  const runtimeContext: Record<string, unknown> = {
     ...authoredRuntimeContext,
     "eve.channel.kind": normalizeInstrumentationChannelKind(projection?.kind),
     "eve.environment": input.environment,
@@ -66,6 +68,10 @@ export function buildTelemetryRuntimeContext(
     "eve.turn.sequence": String(input.emissionState.sequence),
     "eve.version": input.eveVersion,
   };
+  if (currentUser !== undefined) {
+    runtimeContext["eve.user.id"] = currentUser.id;
+  }
+  return runtimeContext;
 }
 
 function buildInstrumentationStepStartedInput(

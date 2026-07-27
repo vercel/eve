@@ -8824,6 +8824,45 @@ describe("createToolLoopHarness", () => {
       expect(agentCall?.telemetry?.isEnabled).toBe(true);
     });
 
+    it("emits current user identity on turn.started and model runtime context", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+
+      mockGetInstrumentationConfig.mockReturnValue({});
+      const { emit, events } = createEventCollector();
+      const ctx = new ContextContainer();
+      ctx.set(AuthKey, {
+        attributes: { email: "ada@example.com" },
+        authenticator: "slack-webhook",
+        principalId: "slack:T1:U1",
+        principalType: "user",
+      });
+
+      await contextStorage.run(ctx, () =>
+        createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+          message: "hi",
+        }),
+      );
+
+      const turnStarted = events.find((event) => event.type === "turn.started");
+      expect(turnStarted).toMatchObject({
+        data: { user: { id: "slack:T1:U1" } },
+      });
+      expect(JSON.stringify(turnStarted)).not.toContain("ada@example.com");
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        runtimeContext?: Record<string, unknown>;
+      };
+      expect(agentCall.runtimeContext).toMatchObject({
+        "eve.user.id": "slack:T1:U1",
+      });
+    });
+
     it("merges step-started runtime context before emitting step.started", async () => {
       setupMockAgent({
         finishReason: "stop",
