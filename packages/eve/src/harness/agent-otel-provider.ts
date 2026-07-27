@@ -13,6 +13,7 @@ import type {
   InstrumentationAttemptScope,
   InstrumentationAttemptStartedEvent,
   InstrumentationAttemptTerminalEvent,
+  InstrumentationContextRunner,
   InstrumentationModelCallTerminalEvent,
   InstrumentationModelCallStartedEvent,
   InstrumentationProviderDefinition,
@@ -92,18 +93,26 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
   }
 }
 
-export interface AgentOtelProviderInput {
+export interface AgentOtelInstrumentationInput {
   readonly frameworkVersion: string;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
 }
 
-/** Creates the OTel lifecycle provider for eve's structural `agent.*` convention. */
-export function createAgentOtelProvider(
-  input: AgentOtelProviderInput,
-): InstrumentationProviderDefinition {
-  const actions = new Map<string, SpanState>();
-  const modelContexts = new Map<string, Context>();
+/** OTel event definition and its trusted framework context runner. */
+export interface AgentOtelInstrumentation {
+  readonly hook: InstrumentationProviderDefinition;
+  readonly runInContext: InstrumentationContextRunner;
+}
+
+/** Creates OTel instrumentation for eve's structural `agent.*` convention. */
+export function createAgentOtelInstrumentation(
+  input: AgentOtelInstrumentationInput,
+): AgentOtelInstrumentation {
+  const executionContexts = new WeakMap<
+    InstrumentationAttemptScope,
+    { readonly models: Map<string, Context>; readonly tools: Map<string, Context> }
+  >();
   // Attempt scopes are object identities retained by the bridge for one
   // atomic invocation; WeakMap state cannot outlive an abandoned attempt.
   const steps = new WeakMap<InstrumentationAttemptScope, SpanState>();
@@ -179,6 +188,7 @@ export function createAgentOtelProvider(
   };
 
   const onAttemptTerminal = (event: InstrumentationAttemptTerminalEvent): void => {
+    executionContexts.delete(event.scope);
     const step = steps.get(event.scope);
     if (step === undefined) return;
     step.span.addEvent(event.type === "attempt.completed" ? "step.completed" : "step.failed");
@@ -238,12 +248,12 @@ export function createAgentOtelProvider(
     if (step === undefined) return undefined;
     step.span.setAttribute("agent.model.id", event.source.modelId);
     step.span.setAttribute("agent.model.provider", event.source.provider);
-    modelContexts.set(event.id, step.context);
+    getExecutionContexts(event.scope).models.set(event.id, step.context);
     return step;
   };
 
   const afterModelCall = (event: InstrumentationModelCallTerminalEvent, state: unknown): void => {
-    modelContexts.delete(event.id);
+    executionContexts.get(event.scope)?.models.delete(event.id);
     if (!isSpanState(state)) return;
     if (event.type === "model.call.failed") {
       recordError(state.span, event.error);
@@ -274,12 +284,12 @@ export function createAgentOtelProvider(
       step.context,
     );
     const state = { context: trace.setSpan(step.context, span), span };
-    actions.set(event.id, state);
+    getExecutionContexts(event.scope).tools.set(event.id, state.context);
     return state;
   };
 
   const afterToolCall = (event: InstrumentationToolCallTerminalEvent, state: unknown): void => {
-    actions.delete(event.id);
+    executionContexts.get(event.scope)?.tools.delete(event.id);
     if (!isSpanState(state)) return;
     if (event.type === "tool.call.failed") {
       recordError(state.span, event.error);
@@ -323,32 +333,44 @@ export function createAgentOtelProvider(
   };
 
   return {
-    events: {
-      "attempt.completed": onAttemptTerminal,
-      "attempt.failed": onAttemptTerminal,
-      "attempt.started": onAttemptStarted,
-      "model.call": { after: afterModelCall, before: beforeModelCall },
-      "session.completed": onSessionTransition,
-      "session.failed": onSessionTransition,
-      "session.started": onSessionStarted,
-      "session.waiting": onSessionTransition,
-      "tool.call": { after: afterToolCall, before: beforeToolCall },
-      "turn.cancelled": onTurnTerminal,
-      "turn.completed": onTurnTerminal,
-      "turn.failed": onTurnTerminal,
-      "turn.started": onTurnStarted,
+    hook: {
+      events: {
+        "attempt.completed": onAttemptTerminal,
+        "attempt.failed": onAttemptTerminal,
+        "attempt.started": onAttemptStarted,
+        "model.call": { after: afterModelCall, before: beforeModelCall },
+        "session.completed": onSessionTransition,
+        "session.failed": onSessionTransition,
+        "session.started": onSessionStarted,
+        "session.waiting": onSessionTransition,
+        "tool.call": { after: afterToolCall, before: beforeToolCall },
+        "turn.cancelled": onTurnTerminal,
+        "turn.completed": onTurnTerminal,
+        "turn.failed": onTurnTerminal,
+        "turn.started": onTurnStarted,
+      },
     },
-    executionContext: {
-      runModelCall(id, execute) {
-        const parent = modelContexts.get(id);
-        return parent === undefined ? execute() : context.with(parent, execute);
-      },
-      runToolCall(id, execute) {
-        const parent = actions.get(id)?.context;
-        return parent === undefined ? execute() : context.with(parent, execute);
-      },
+    runInContext(operation, run) {
+      const contexts = executionContexts.get(operation.scope);
+      const parent =
+        operation.type === "model.call"
+          ? contexts?.models.get(operation.id)
+          : contexts?.tools.get(operation.id);
+      return parent === undefined ? run() : context.with(parent, run);
     },
   };
+
+  function getExecutionContexts(scope: InstrumentationAttemptScope): {
+    readonly models: Map<string, Context>;
+    readonly tools: Map<string, Context>;
+  } {
+    let state = executionContexts.get(scope);
+    if (state === undefined) {
+      state = { models: new Map(), tools: new Map() };
+      executionContexts.set(scope, state);
+    }
+    return state;
+  }
 }
 
 function turnKey(sessionId: string, turnId: string): string {

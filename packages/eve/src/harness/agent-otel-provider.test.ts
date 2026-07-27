@@ -9,12 +9,13 @@ import { describe, expect, it } from "vitest";
 
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
-  createAgentOtelProvider,
+  createAgentOtelInstrumentation,
   InMemoryAgentTraceStateStore,
 } from "#harness/agent-otel-provider.js";
 import {
   createInstrumentationHooks,
   type InstrumentationAttemptScope,
+  type InstrumentationContextRunner,
   type InstrumentationHooks,
 } from "#harness/instrumentation-lifecycle.js";
 
@@ -22,6 +23,7 @@ interface TestRuntime {
   readonly exporter: InMemorySpanExporter;
   readonly hooks: InstrumentationHooks;
   readonly provider: BasicTracerProvider;
+  readonly runInContext: InstrumentationContextRunner;
 }
 
 function createRuntime(stateStore = new InMemoryAgentTraceStateStore()): TestRuntime {
@@ -29,19 +31,19 @@ function createRuntime(stateStore = new InMemoryAgentTraceStateStore()): TestRun
   const provider = new BasicTracerProvider({
     spanProcessors: [new SimpleSpanProcessor(exporter)],
   });
-  const hooks = createInstrumentationHooks([
-    createAgentOtelProvider({
-      frameworkVersion: "test",
-      stateStore,
-      tracer: provider.getTracer("eve.agent"),
-    }),
-  ]);
-  return { exporter, hooks, provider };
+  const agentOtel = createAgentOtelInstrumentation({
+    frameworkVersion: "test",
+    stateStore,
+    tracer: provider.getTracer("eve.agent"),
+  });
+  const hooks = createInstrumentationHooks([agentOtel.hook]);
+  return { exporter, hooks, provider, runInContext: agentOtel.runInContext };
 }
 
 async function emitAttempt(input: {
   readonly attemptIndex?: number;
   readonly hooks: InstrumentationHooks;
+  readonly runInContext: InstrumentationContextRunner;
   readonly sessionId: string;
   readonly toolError?: Error;
   readonly turnId: string;
@@ -70,7 +72,7 @@ async function emitAttempt(input: {
     type: "turn.started",
   });
 
-  const bridge = createAiSdkHookBridge(scope, input.hooks);
+  const bridge = createAiSdkHookBridge(scope, input.hooks, input.runInContext);
   Reflect.apply(bridge.onStart!, bridge, [
     {
       callId: "call-1",
@@ -85,6 +87,7 @@ async function emitAttempt(input: {
   await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
     { callId: "call-1", messages: [], modelId: "claude-test", provider: "anthropic" },
   ]);
+  await bridge.executeLanguageModelCall!({ callId: "call-1", execute: async () => undefined });
   await Reflect.apply(bridge.onLanguageModelCallEnd!, bridge, [
     {
       callId: "call-1",
@@ -101,6 +104,11 @@ async function emitAttempt(input: {
       toolCall: { input: { secret: "value" }, toolCallId: "tool-1", toolName: "weather" },
     },
   ]);
+  await bridge.executeTool!({
+    callId: "call-1",
+    execute: async () => undefined,
+    toolCallId: "tool-1",
+  });
   await Reflect.apply(bridge.onToolExecutionEnd!, bridge, [
     {
       callId: "call-1",
@@ -131,11 +139,12 @@ function byName(spans: readonly ReadableSpan[], name: string): ReadableSpan[] {
   return spans.filter((span) => span.name === name);
 }
 
-describe("createAgentOtelProvider", () => {
+describe("createAgentOtelInstrumentation", () => {
   it("emits the agent hierarchy in one session trace", async () => {
     const runtime = createRuntime();
     await emitAttempt({
       hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
       sessionId: "session-1",
       turnId: "turn-1",
       turnSequence: 0,
@@ -182,6 +191,7 @@ describe("createAgentOtelProvider", () => {
     const firstRuntime = createRuntime(stateStore);
     await emitAttempt({
       hooks: firstRuntime.hooks,
+      runInContext: firstRuntime.runInContext,
       sessionId: "session-1",
       turnId: "turn-1",
       turnSequence: 0,
@@ -192,6 +202,7 @@ describe("createAgentOtelProvider", () => {
     const secondRuntime = createRuntime(stateStore);
     await emitAttempt({
       hooks: secondRuntime.hooks,
+      runInContext: secondRuntime.runInContext,
       sessionId: "session-1",
       turnId: "turn-2",
       turnSequence: 1,
@@ -213,6 +224,7 @@ describe("createAgentOtelProvider", () => {
     const runtime = createRuntime();
     await emitAttempt({
       hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
       sessionId: "session-1",
       toolError: new Error("tool failed"),
       turnId: "turn-1",
