@@ -22,9 +22,10 @@ export function createEventDeduper(): EventDeduper {
 
   return {
     isDuplicate(event) {
-      // An agent older than stream version 20 sends no envelope, so this can
-      // be absent on the wire despite the type. Admit those events rather
-      // than throwing on a cross-version stream.
+      // `meta.id` arrived in stream version 20; `meta.at` predates it. An
+      // event written by an older agent still carries the envelope but no id,
+      // so this is absent on the wire despite the type. Admit those rather
+      // than dropping a whole legacy replay.
       const id: string | undefined = event.meta?.id;
       if (id === undefined) return false;
       if (seen.has(id)) return true;

@@ -39,15 +39,26 @@ describe("createEventDeduper", () => {
     expect(stream.filter((event) => !deduper.isDuplicate(event))).toHaveLength(0);
   });
 
-  it("admits events from a stream that predates the envelope", () => {
+  it("admits events written before ids existed", () => {
     const deduper = createEventDeduper();
-    const unstamped = {
+    // Stream version 19 and earlier: the envelope is present, but carries
+    // only `at`.
+    const preV20 = {
       type: "session.started",
       data: {},
-    } as StampedHandleMessageStreamEvent;
+      meta: { at: "2026-07-27T18:04:11.912Z" },
+    } as unknown as StampedHandleMessageStreamEvent;
 
-    expect(deduper.isDuplicate(unstamped)).toBe(false);
-    expect(deduper.isDuplicate(unstamped)).toBe(false);
+    expect(deduper.isDuplicate(preV20)).toBe(false);
+    expect(deduper.isDuplicate(preV20)).toBe(false);
+    expect(deduper.size).toBe(0);
+  });
+
+  it("admits events with no envelope at all", () => {
+    const deduper = createEventDeduper();
+    const bare = { type: "session.started", data: {} } as StampedHandleMessageStreamEvent;
+
+    expect(deduper.isDuplicate(bare)).toBe(false);
     expect(deduper.size).toBe(0);
   });
 });

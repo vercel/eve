@@ -96,7 +96,7 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
 
 `meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
 
-The envelope arrived in stream version 20. Events written by an earlier version are stored without it, so a session that started before you upgraded yields events with no `meta` when you rewind into that part of its stream. Guard the read (`event.meta?.id`) if your agent has live sessions that predate the upgrade.
+`meta.at` has always been there; `meta.id` arrived in stream version 20. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is missing. Read it as `event.meta?.id` and fall back for anything empty, if your agent has live sessions that predate the upgrade.
 
 That makes it the key for ingesting a stream into a database without duplicating rows when you re-read it:
 
