@@ -42,13 +42,13 @@ eve registry view extension/agent-browser
 
 ## Add a third-party source
 
-Projects with an existing shadcn `components.json` can give a registry a namespace and an item URL template:
+Give a registry a namespace and an item URL template:
 
 ```bash
 eve registry add @acme=https://registry.acme.com/r/{name}.json
 ```
 
-The `{name}` placeholder becomes the item name. `@acme/analytics` resolves to `https://registry.acme.com/r/analytics.json`.
+eve stores the mapping in `package.json#registries`. The `{name}` placeholder becomes the item name, so `@acme/analytics` resolves to `https://registry.acme.com/r/analytics.json`.
 
 Limit listing or search to that registry when needed:
 
@@ -63,7 +63,7 @@ Install an item from that source:
 eve add @acme/analytics
 ```
 
-For a universal item whose files have explicit targets, install a known item URL directly without configuring a namespace or `components.json`:
+Install a known item URL directly when you do not need a namespace:
 
 ```bash
 eve add https://registry.acme.com/r/analytics.json
