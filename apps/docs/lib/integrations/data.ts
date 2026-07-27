@@ -1240,6 +1240,68 @@ export { default } from "@onkernel/eve-extension";
 
 The default mount can execute JavaScript in the browser VM and reuse authenticated browser sessions. For team or multi-tenant agents, prefer Vercel Connect so each user authenticates separately, and add an approval gate by overriding the extension's \`browser\` connection. See the [Kernel eve extension guide](https://www.kernel.sh/docs/integrations/vercel/eve-extension) for API-key configuration, connection overrides, the complete tool list, and security guidance.`,
   },
+  "upstash-agentkit": {
+    logo: "upstash",
+    docsHref: "https://upstash.com/docs/redis/sdks/agentkit/eve",
+    keywords: [
+      "upstash",
+      "agentkit",
+      "redis",
+      "memory",
+      "long-term memory",
+      "chat history",
+      "search",
+      "rag",
+      "vector search",
+    ],
+    install: `Install the Upstash AgentKit extension for eve:
+
+\`\`\`bash
+pnpm add @upstash/agentkit-eve-extension
+\`\`\`
+
+The extension requires eve 0.25.2 or later. Add an Upstash Redis database's REST credentials to the agent's environment; the default Redis client reads them automatically:
+
+\`\`\`bash title=".env.local"
+UPSTASH_REDIS_REST_URL=https://...
+UPSTASH_REDIS_REST_TOKEN=...
+\`\`\``,
+    quickStart: `Mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/agentkit.ts"
+import agentkit from "@upstash/agentkit-eve-extension";
+
+export default agentkit();
+\`\`\`
+
+The filename supplies the \`agentkit\` namespace. This minimal mount adds \`agentkit__recall_memory\` and \`agentkit__save_memory\`, plus instructions that teach the model when to use them. By default, memory is isolated by the authenticated principal when available and otherwise by the eve session ID.`,
+    configure: `Enable durable transcript capture with \`chatHistory: true\`. To add RAG over a Redis Search index, install \`@upstash/redis\` and provide a schema:
+
+\`\`\`bash
+pnpm add @upstash/redis
+\`\`\`
+
+\`\`\`ts title="agent/extensions/agentkit.ts"
+import { s } from "@upstash/redis";
+import agentkit from "@upstash/agentkit-eve-extension";
+
+export default agentkit({
+  chatHistory: true,
+  search: {
+    schema: s.object({
+      title: s.string(),
+      author: s.string().noTokenize(),
+      year: s.number(),
+    }),
+    indexName: "books",
+  },
+});
+\`\`\`
+
+Search configuration adds the dynamic \`agentkit__search\`, \`agentkit__search_aggregate\`, and \`agentkit__search_count\` tools. Chat history stores each session's user and assistant messages in Redis and makes their text searchable; it does not add a model-facing tool.
+
+For multi-tenant agents, set \`userId\` to a stable tenant-scoped value or derive it from the request context, and never use a shared constant across tenants. You can also tune memory recall, search limits, chat-history keys and TTL, or supply an explicit Redis client. See the [Upstash AgentKit eve extension guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for the complete configuration and override reference.`,
+  },
   jetty: {
     logo: "jetty",
     docsHref: "https://github.com/jettyio/jetty-sdk/tree/main/packages/eve#readme",

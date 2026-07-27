@@ -27,6 +27,7 @@ import {
   SiSupabase,
   SiTicktick,
   SiTodoist,
+  SiUpstash,
   SiWebflow,
   SiWhatsapp,
   SiWix,
@@ -170,6 +171,8 @@ export const linearLogo = (props: LogoProps) => (
 );
 
 export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
+
+export const upstashLogo = (props: LogoProps) => <SiUpstash color="default" {...props} />;
 
 export const datadogLogo = (props: LogoProps) => <SiDatadog color="default" {...props} />;
 
@@ -562,6 +565,7 @@ export const logos = {
   datadog: datadogLogo,
   honeycomb: honeycombLogo,
   kernel: kernelLogo,
+  upstash: upstashLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,
   brex: brexLogo,

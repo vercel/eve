@@ -299,6 +299,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "upstash-agentkit",
+    name: "Upstash AgentKit",
+    kind: "extension",
+    tagline: "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "browser-use",
     name: "Browser Use",
     kind: "connection",
