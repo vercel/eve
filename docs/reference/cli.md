@@ -24,6 +24,8 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve channels list`           | List user-authored channels                                                                                                                           |
 | `eve extension init [target]` | Create a new extension package                                                                                                                        |
 | `eve extension build`         | Build the current package as an extension                                                                                                             |
+| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                                     |
+| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                                          |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
@@ -76,6 +78,22 @@ eve extension build
 ```
 
 Builds the complete agent-shaped extension tree into its configured dist root, emits declarations and compatibility metadata, and fills the package `exports` map. The original TypeScript source is not required in the published package.
+
+## Registry items
+
+Commands for installing and discovering [shadcn registry](https://ui.shadcn.com/docs/registry) items. Official registry items use a kind and slug (for example, `extension/agent-browser`); URLs and configured registry addresses are also supported.
+
+```bash
+eve add extension/agent-browser
+eve add https://example.com/r/my-extension.json --overwrite
+eve registry add @acme=https://example.com/r/{name}.json
+eve registry search browser
+eve registry search browser --registry @acme
+eve registry view @acme/my-extension
+eve add @acme/my-extension
+```
+
+`eve registry add` records configured sources in `package.json#registries`. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
 
 ## `eve info`
 

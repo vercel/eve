@@ -1,5 +1,13 @@
 # eve
 
+## 0.27.7
+
+### Patch Changes
+
+- 3c53306: Vercel builds now run a single Nitro build. The workflow flow function is emitted through Nitro's per-route `functionRules` (queue trigger, `maxDuration: "max"`, precondition guard) instead of a second standalone Nitro build that was copied and retargeted into the output, making `eve build` on Vercel roughly twice as fast.
+- e368fcd: The client's `session.stream()` accepts `follow: false` for bounded catch-up reads (`follow` defaults to `true`, following the live stream): it consumes events from the cursor to the durable tail observed when the stream opens — surviving reconnects and still advancing the stored `streamIndex` — then returns instead of following the live stream. The HTTP stream route reports the durable tail as the `x-eve-stream-tail-index` response header when a request opts in with `includeTailIndex=1`, and channel-authoring `Session` objects gain `getStreamTailIndex()` for serving bounded reads from custom routes.
+- 7e4f7ef: Tool calls whose arguments arrive as a raw JSON string (e.g. provider-executed server tools) are now parsed, and arguments that cannot be parsed at all — such as malformed JSON emitted by the model — surface as a failed tool result the model can react to instead of failing the whole turn.
+
 ## 0.27.6
 
 ### Patch Changes
