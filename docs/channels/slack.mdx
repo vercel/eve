@@ -38,6 +38,8 @@ export default slackChannel({
 
 `connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
 
+If eve cannot find an authenticated Vercel session, `eve channels add slack` asks whether to set up Vercel Connect or use portable environment credentials. The portable option adds the required names to `.env.example`. Before deploying, appropriate values must be supplied to your runtime environment.
+
 ### Deploy
 
 Deploy once the trigger destination and channel file are ready:

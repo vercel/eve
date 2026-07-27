@@ -9,7 +9,6 @@ import { z } from "zod";
 import {
   parseSlackConnectorDetails,
   parseSlackConnectors,
-  pickSlackConnector,
   type RawSlackConnector,
   type SlackConnectorDetails,
   type SlackConnectorRef,
@@ -94,11 +93,16 @@ export async function readProjectLink(projectRoot: string): Promise<VercelProjec
 }
 
 export type SlackConnectorLookup =
-  | { state: "found"; connector: SlackConnectorRef; connectorUids: ReadonlySet<string> }
+  | {
+      state: "found";
+      connectors: readonly SlackConnectorRef[];
+      preferred?: SlackConnectorRef;
+      connectorUids: ReadonlySet<string>;
+    }
   | { state: "not-found"; connectorUids: ReadonlySet<string> }
   | { state: "failed"; message: string };
 
-/** Resolves the expected (or newest project-attached) Slack connector from the inventory. */
+/** Lists Slack connectors attached to the linked project and identifies the expected UID. */
 export async function findSlackConnector(
   deps: SlackConnectLifecycleDeps,
   projectRoot: string,
@@ -110,10 +114,19 @@ export async function findSlackConnector(
   const list = await listSlackConnectors(deps, projectRoot, onOutput, signal);
   if (list.state === "failed") return list;
   const connectorUids = new Set(list.connectors.map((connector) => connector.uid));
-  const connector = pickSlackConnector(list.body, projectId, expectedUid);
-  return connector === undefined
-    ? { state: "not-found", connectorUids }
-    : { state: "found", connector, connectorUids };
+  if (projectId === undefined) return { state: "not-found", connectorUids };
+  const connectors = list.connectors
+    .filter(
+      (connector): connector is RawSlackConnector & { id: string } =>
+        connector.id !== undefined && connector.projectIds.includes(projectId),
+    )
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .map(({ uid, id }) => ({ uid, id }));
+  if (connectors.length === 0) return { state: "not-found", connectorUids };
+  const preferred = connectors.find((connector) => connector.uid === expectedUid);
+  return preferred === undefined
+    ? { state: "found", connectors, connectorUids }
+    : { state: "found", connectors, preferred, connectorUids };
 }
 
 /**

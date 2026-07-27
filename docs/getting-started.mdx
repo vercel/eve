@@ -1,206 +1,23 @@
 ---
 title: "Getting Started"
-description: "Install eve, scaffold your first agent, give it a tool, and run it locally."
+description: "Create an eve project, learn its filesystem layout, and start adding capabilities."
+contentType: "Landing"
 ---
 
-eve is a filesystem-first framework for durable agents. You write capabilities under `agent/`, and eve runs the model loop, persists every session, and serves the agent over HTTP and platform channels. You'll scaffold an app, add a tool, run it locally, then create, stream, and continue a session over HTTP.
+eve agents are TypeScript projects. You describe an agent with files under `agent/`, then eve runs it as a durable service.
 
-## Prerequisites
+## Start in order
 
-- Node 24 or newer
-- npm (bundled with Node)
-- A model credential (see below)
+1. [Install eve](/docs/installation): create a project, configure a model credential, and run it locally
+2. [Learn the project structure](/docs/project-structure): see which files eve discovers and where each capability belongs
+3. [Build your first agent](/docs/tutorial/first-agent): add tools, state, and an interface for a useful workflow
 
-The scaffold's default model is `anthropic/claude-sonnet-5`, which routes through the Vercel AI Gateway. Set one of these before you run the agent:
+## What you need
 
-- A gateway model id needs `AI_GATEWAY_API_KEY`, or a `VERCEL_OIDC_TOKEN` pulled with `vercel link`.
-- A direct provider model uses that provider's AI SDK package and API key. For example, `anthropic("claude-...")` from `@ai-sdk/anthropic` needs `ANTHROPIC_API_KEY`.
+- Node.js 24 or newer
+- npm, which Node.js includes
+- A model credential for the model your agent uses
 
-You are responsible for selecting a model, provider, and channel appropriate for your data and use case, and for complying with each provider's terms (as listed per model) and data-processing requirements.
+## Choose your next step
 
-If you skip this, the dev TUI flags the missing credential and its `/model` command walks you through pasting a key or linking a project.
-
-## Quick start
-
-`npx` runs `eve init` without installing eve first:
-
-```bash
-npx eve@latest init my-agent
-```
-
-The command:
-
-- Creates a child directory using the current workspace or launcher package manager, and uses eve's default model
-- Installs dependencies and initializes Git
-- When a supported coding-agent REPL (Claude Code, Codex, Cursor, Droid, Gemini CLI, opencode, or Pi) is on `PATH`, asks whether to open an available REPL or start the development server; otherwise starts the server and opens the interactive [terminal UI](./guides/dev-tui)
-
-Type a message and watch the model loop run. Pass `--channel-web-nextjs` to add the Web Chat application. Every app ships the built-in HTTP channel (`agent/channels/eve.ts`) regardless.
-
-When you choose one of those REPLs, eve starts it with a project-specific
-prompt that guides the setup. The prompt distinguishes `eve dev`, which starts
-eve's HMR server and the agent's terminal REPL, from `eve dev --no-ui`, which is
-the controllable background mode for verification.
-
-`eve init` holds the terminal, so stop it with Ctrl+C to get your shell back before editing the generated agent. The command does not create a Vercel project or deploy.
-
-To add eve to an existing project, run `eve init .` from a directory that already has a `package.json` and no `agent/` files yet. eve adds the missing `eve`, `ai`, and `zod` dependencies without touching anything else the project owns. The eve dependency and the Node engine come from the same release. eve pins `engines.node` to the lowest major that release supports (for example `24.x`). It keeps an existing range only when every version that range allows stays within that major; otherwise it replaces the range and prints a warning.
-
-## Manual installation
-
-To wire eve into an existing app by hand instead of using `eve init`, first declare a compatible Node runtime in `package.json`:
-
-```json
-{
-  "engines": {
-    "node": "24.x"
-  }
-}
-```
-
-Then install the dependencies and author the two files the runtime needs. The `eve init` scaffold adds `ai` and `zod` for you; by hand you install all three:
-
-```bash
-npm install eve@latest ai zod
-```
-
-### Project files
-
-A minimal agent is two files; you add tools as you need them.
-
-`agent/instructions.md` is the always-on system prompt:
-
-```md
-You are a concise assistant. Use tools when they are available.
-```
-
-`agent/agent.ts` holds runtime config:
-
-```ts
-import { defineAgent } from "eve";
-
-export default defineAgent({
-  model: "anthropic/claude-sonnet-5",
-});
-```
-
-Before using real customer data, confirm the selected model provider's terms, routing path, and retention settings are appropriate for that data.
-
-Even at this size the agent can already do real work. The default harness gives it file, shell, web, and delegation tools out of the box. See [Default harness](./concepts/default-harness) for the full set and how to override or disable any of them.
-
-### Add your first tool
-
-The filename becomes the tool name the model sees, and it must be snake_case ASCII. Create `agent/tools/get_weather.ts`:
-
-```ts
-import { defineTool } from "eve/tools";
-import { z } from "zod";
-
-// The model sees this tool as `get_weather`, from the filename.
-export default defineTool({
-  description: "Get the current weather for a city.",
-  inputSchema: z.object({ city: z.string().min(1) }),
-  async execute({ city }) {
-    return { city, condition: "Sunny", temperatureF: 72 };
-  },
-});
-```
-
-Tools run in your app runtime with full `process.env`, not inside the [sandbox](./sandbox). More in [Tools](./tools).
-
-## Run the app
-
-A scaffolded app has a `dev` script, so from the app root run:
-
-```bash
-npm run dev
-```
-
-The manual path authors no `dev` script. Run the binary through `npx` instead:
-
-```bash
-npx eve dev
-```
-
-Other commands the eve binary provides (prefix each with `npx`, or add a matching package.json script):
-
-- `eve info`: show the active routes and compiled artifacts
-- `eve build`: compile the agent into `.eve/` and build the host output
-- `eve start`: serve the built output
-- `eve dev`: start the local runtime and open the interactive [terminal UI](./guides/dev-tui)
-
-In the dev TUI, type a message and watch it happen in order. First the `get_weather` call, then its result, then the reply.
-
-The same CLI can point at a deployment. `npx eve dev https://your-app.vercel.app` drives a deployed app, which is handy for preview and production smoke tests. See [Deployment](./guides/deployment/overview).
-
-## Send a message
-
-Every eve app exposes the same stable HTTP API. Start a durable session:
-
-```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session \
-  -H 'content-type: application/json' \
-  -d '{"message":"What is the weather in Brooklyn?"}'
-```
-
-The response comes back with two things you'll reuse:
-
-- a `continuationToken` in the JSON body, to resume this conversation
-- an `x-eve-session-id` header that identifies the run to stream
-
-## Stream the session
-
-Attach to the session stream:
-
-```bash
-curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
-```
-
-The stream is NDJSON, served as `application/x-ndjson; charset=utf-8`. For this run you'll see a handful of lifecycle events:
-
-- `session.started`
-- `actions.requested` (the `get_weather` call)
-- `action.result`
-- `message.completed` (the reply)
-- `session.completed`
-
-`reasoning.appended` and `message.appended` are optional live-streaming events. Clients that can't surface incremental output can ignore them and rely on `reasoning.completed` and `message.completed`.
-
-Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
-
-The full set covers more lifecycle, human-in-the-loop, and authorization events, including `input.requested`, `turn.failed`, `authorization.required`, and `authorization.completed`. See [Sessions, runs and streaming](./concepts/sessions-runs-and-streaming) for every event and its data shape.
-
-## Send a follow-up message
-
-When the session is waiting for the next user message, post a follow-up with the token:
-
-```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
-  -H 'content-type: application/json' \
-  -d '{"continuationToken":"<token>","message":"Now do Queens."}'
-```
-
-See [Sessions, runs and streaming](./concepts/sessions-runs-and-streaming) for the full contract.
-
-## Setting up with a coding agent
-
-If a coding agent (Claude Code, Cursor, and the like) is doing the setup, hand it this prompt:
-
-<CopyPrompt text="Set up an eve agent for the user. eve is a filesystem-first TypeScript framework for durable agents, published as the npm package eve. Read its docs: once eve is installed they are bundled in the package at node_modules/eve/docs; before eve is installed, read the published Introduction and Getting Started pages. If the project has no eve app, scaffold one with `npx eve@latest init <name>`; add `--channel-web-nextjs` only when the user wants Web Chat. In a coding-agent launch, init installs dependencies and prints the project-specific dev command instead of starting the interactive terminal UI. A fresh project also initializes Git; an existing app keeps its repository and scripts. To add eve to an existing app, run `eve init .`, or install the dependencies by hand with `npm install eve@latest ai zod` (init adds ai and zod; the by-hand path needs all three). Make sure agent/agent.ts and agent/instructions.md exist, then add a first typed tool at agent/tools/get_weather.ts using defineTool from eve/tools with a Zod inputSchema and an inline execute. Start eve in a controllable background process with `npx eve dev --no-ui`, wait for the server URL, then exercise the HTTP API: create a session with POST /eve/v1/session, attach to GET /eve/v1/session/:id/stream, and send a follow-up with the returned continuationToken. Stop the dev process after verification. Verify with the project's typecheck, adapt model and provider choices to the project, and do not commit unless the user asks.">
-  Set up an eve agent: read the eve docs (bundled at node_modules/eve/docs once eve is
-  installed), scaffold with `npx eve@latest init <name>` (or `npm install eve@latest ai zod` in an existing app), add
-  a typed tool at agent/tools/get_weather.ts, run it with `npx eve dev --no-ui`, then create a session, stream
-  it, and send a follow-up.
-</CopyPrompt>
-
-Once `eve` is a dependency, the package bundles the full docs, so the agent can read them locally at `node_modules/eve/docs/` without fetching anything.
-
-To add a platform channel after setup, run `eve channels add slack` from an interactive terminal. The init flags are covered in [Quick start](#quick-start).
-
-## What to read next
-
-- [Instructions](./instructions) and [Tools](./tools): the core building blocks
-- [Channels](./channels/overview): reach the agent from Slack, Discord, or a web UI
-- [Frontend](./guides/frontend/overview): browser chat with `useEveAgent`
-- [TypeScript SDK](./guides/client/overview): call the agent from scripts or server-side code
-- [Sessions, runs and streaming](./concepts/sessions-runs-and-streaming): the durable session model
-- [Build an agent](./tutorial/first-agent): the full end-to-end walkthrough
+Start with [Installation](/docs/installation) when you need a new project. Read [Project structure](/docs/project-structure) when you already have an eve project or want to add a capability.

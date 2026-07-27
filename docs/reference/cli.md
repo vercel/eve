@@ -240,7 +240,7 @@ See [Evals](../evals/overview) for authoring evals.
 eve channels add [kind] [-f] [-y]
 ```
 
-Scaffolds a channel into `agent/channels/`. With no `kind` it prompts interactively; pass a `kind` (`slack` \| `web`) to scaffold one directly.
+Scaffolds a channel into `agent/channels/`. With no `kind` it prompts interactively; pass a `kind` (`slack` \| `web`) to scaffold one directly. When the Vercel CLI has an authenticated session, eve scaffolds the Vercel-integrated variant and asks whether to deploy after setup. Without one, Slack setup asks whether to set up Vercel Connect or use portable credentials. The portable variant reads `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` and adds both names to `.env.example`.
 
 | Flag          | Type | Default | Description                                               |
 | ------------- | ---- | ------- | --------------------------------------------------------- |

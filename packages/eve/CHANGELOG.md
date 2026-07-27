@@ -1,5 +1,15 @@
 # eve
 
+## 0.27.6
+
+### Patch Changes
+
+- 0a8b63c: `eve channels add` now scaffolds portable channel variants when Vercel is unavailable and asks before deploying Vercel-integrated channels. Portable Slack setup uses environment credentials and records the required variables in `.env.example`.
+- ad0dfa7: Remote agents can now forward the end user's identity across deployments. `defineRemoteAgent({ forwardPrincipal: true })` sends the dispatching turn's session principal (metadata only — never tokens) on the create-session request, and the receiving deployment opts in with `eveChannel({ trustedForwarders })`, a predicate over the verified transport forwarder. Accepted forwarding replaces the session principal so per-user connections, local subagents, and chained remote hops see the original user; a receiver that refuses the forwarder (or accepts no forwarded principal) rejects with 403 and the dispatch fails instead of silently downgrading to the calling service's identity.
+- ad0dfa7: Remote agent dispatch now ignores an empty `outputSchema` (`{}`) passed by the model on the lowered subagent tool call, matching local subagent dispatch. An empty schema constrains nothing, but forwarding it flipped the remote child into structured-output mode and replaced its text reply with `{}`.
+- 5cf8ae0: Make `eve dev` return the terminal after one Ctrl+C or termination signal. The local server gets a bounded cleanup window before process-group termination, and interrupted sandbox cleanup resumes on the next start. A forced exit (second Ctrl+C or the shutdown backstop) now restores the terminal — raw mode, cursor, bracketed paste — before the process ends.
+- c2079a4: Preserve remote agent base paths when creating sessions and cancelling turns, so same-origin agents mounted below a route prefix no longer receive requests at the wrong endpoint.
+
 ## 0.27.5
 
 ### Patch Changes

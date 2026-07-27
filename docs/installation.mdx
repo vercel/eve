@@ -1,0 +1,60 @@
+---
+title: "Installation"
+description: "Create an eve project, configure a model credential, and run it locally."
+contentType: "How-to"
+---
+
+Create an eve project with `eve init`. The scaffold installs dependencies, creates the agent files, and starts the local development server.
+
+## Configure a model credential
+
+The default scaffolded model routes through the Vercel AI Gateway. Set `AI_GATEWAY_API_KEY`, or link a Vercel project to use `VERCEL_OIDC_TOKEN`.
+
+You can also use a direct provider model. Install its AI SDK provider package and set that provider's API key before you run the agent.
+
+Choose a model, provider, and channel that meet your data-processing and compliance requirements.
+
+## Create a project
+
+Run `eve init` with a project name:
+
+```bash
+npx eve@latest init my-agent
+```
+
+The command creates `my-agent/`, installs dependencies, initializes Git, and starts eve's development server. If a supported coding-agent REPL is available, eve offers to open it instead.
+
+## Run the agent
+
+From the project root, run the generated development command:
+
+```bash
+cd my-agent
+npm run dev
+```
+
+The terminal UI sends messages to your agent. Stop the server with Ctrl+C when you need your shell for another command.
+
+## Add eve to an existing project
+
+Run `eve init .` from a project with a `package.json` and no existing `agent/` files:
+
+```bash
+npx eve@latest init .
+```
+
+eve adds the missing `eve`, `ai`, and `zod` dependencies without changing files the project already owns.
+
+## Install manually
+
+Install the runtime dependencies when you do not want to use the scaffold:
+
+```bash
+npm install eve@latest ai zod
+```
+
+Declare Node.js 24 in `package.json`, then create `agent/agent.ts` and `agent/instructions.md`. [Project structure](/docs/project-structure) shows the required layout, and [`agent.ts`](./agent-config) documents the runtime configuration.
+
+## Continue building
+
+Read [Project structure](/docs/project-structure) before adding instructions, tools, connections, or channels.

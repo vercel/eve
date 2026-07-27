@@ -3,6 +3,8 @@ import { type FilePart, type TextPart, type UserContent } from "ai";
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
+import type { SendOptions } from "#channel/routes.js";
+import { resolveForwardedPrincipal, type TrustedForwarders } from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -128,6 +130,25 @@ export interface EveChannelInput {
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
+   * The trusted-forwarders policy: which transport-authenticated callers may
+   * assert a forwarded principal on the create-session route (the
+   * `forwardedPrincipal` body field a `defineRemoteAgent({ forwardPrincipal:
+   * true })` sender emits). The predicate receives the *verified* route-auth
+   * principal of the forwarder — who is asserting, never what is asserted —
+   * and must match it precisely (for example
+   * `(forwarder) => forwarder.subject === vercelSubject({ teamSlug, projectName })`).
+   * A permissive predicate lets any authenticated forwarder assert any
+   * principal.
+   *
+   * When a trusted forwarder's assertion is accepted, the forwarded
+   * principal replaces the session principal (`session.auth.current` /
+   * `session.auth.initiator`) exactly as if that user had called this
+   * deployment directly, and the forwarder is recorded on the accepted
+   * contexts as the `eve:forwarded-by` attribute. Omit the option to reject
+   * every forwarded assertion with 403.
+   */
+  readonly trustedForwarders?: TrustedForwarders;
+  /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
    * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).
    */
@@ -206,6 +227,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
         }
 
+        const forwarded = await resolveForwardedPrincipal({
+          trustedForwarders: input.trustedForwarders,
+          forwarder: sessionAuth,
+          payload: payload as Record<string, unknown>,
+        });
+        if (forwarded instanceof Response) return forwarded;
+
         const body = parseCreateBody(payload as Record<string, unknown>);
         if (body instanceof Response) return body;
 
@@ -213,7 +241,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (policyRejection !== null) return policyRejection;
 
         const messageResult = await resolveOnMessage({
-          auth: sessionAuth,
+          auth: forwarded.auth,
           config: input,
           message: body.message,
           request: req,
@@ -224,12 +252,16 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const token = `eve:${crypto.randomUUID()}`;
         const context = mergeContext(body.context, messageResult.context);
 
-        const session = await send(createSendPayload(body, context), {
+        const sendOptions: SendOptions = {
           auth: messageResult.auth,
           callback: body.callback,
           continuationToken: token,
           mode: body.mode,
-        });
+        };
+        if (forwarded.accepted) {
+          sendOptions.initiatorAuth = forwarded.initiatorAuth;
+        }
+        const session = await send(createSendPayload(body, context), sendOptions);
 
         return Response.json(
           {
@@ -589,6 +621,15 @@ interface ParsedContinueBody {
 }
 
 function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody | Response {
+  // Fail loud instead of silently running the delivery as the transport
+  // principal: principal forwarding is create-only today.
+  if (payload.forwardedPrincipal !== undefined) {
+    return Response.json(
+      { error: "A forwarded principal is only accepted on session creation.", ok: false },
+      { status: 400 },
+    );
+  }
+
   const continuationToken =
     typeof payload.continuationToken === "string" && payload.continuationToken.length > 0
       ? payload.continuationToken

@@ -23,8 +23,6 @@ interface ChannelScaffold {
   label: string;
   /** Optional picker hint. */
   hint?: string;
-  /** The add sub-flow provisions against the linked Vercel project. */
-  requiresVercelProject?: true;
 }
 
 /**
@@ -40,8 +38,7 @@ const CHANNEL_SCAFFOLDS: readonly ChannelScaffold[] = [
     slug: "slack",
     kind: "slack",
     label: "Slack",
-    hint: "Creates slackbot and deploys to Vercel",
-    requiresVercelProject: true,
+    hint: "Slack app mentions and DMs",
   },
 ];
 
@@ -55,8 +52,6 @@ export interface ScaffoldableChannel {
   label: string;
   /** Optional picker hint. */
   hint?: string;
-  /** The add sub-flow provisions against the linked Vercel project. */
-  requiresVercelProject?: true;
 }
 
 function buildScaffoldableChannels(): ScaffoldableChannel[] {
@@ -80,9 +75,6 @@ function buildScaffoldableChannels(): ScaffoldableChannel[] {
     };
     if (scaffold.hint !== undefined) {
       channel.hint = scaffold.hint;
-    }
-    if (scaffold.requiresVercelProject !== undefined) {
-      channel.requiresVercelProject = scaffold.requiresVercelProject;
     }
     channels.push(channel);
   }

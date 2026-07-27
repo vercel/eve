@@ -12,6 +12,7 @@ import type { DeploymentInfo } from "#setup/project-resolution.js";
 import type { AddChannelsDeps } from "#setup/boxes/add-channels.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import { createFakePrompter, type FakePrompterConfig } from "#internal/testing/fake-prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import { runChannelsAddCommand, type CliLogger } from "./channels.js";
 
@@ -168,10 +169,11 @@ describe("runChannelsAddCommand", () => {
     await runChannelsAddCommand(
       logger,
       projectRoot,
-      { kind: "slack", options: { force: true } },
+      { kind: "slack", options: { force: true, yes: true } },
       {
         createPrompter: () => fake.prompter,
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => DEPLOYED),
+        getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
         addChannelsDeps,
         deployProjectDeps,
       },
@@ -185,6 +187,8 @@ describe("runChannelsAddCommand", () => {
       // agentName stays "" in this command, so the slug derives from the
       // package.json name, never the directory basename (R6).
       "my-agent",
+      undefined,
+      expect.objectContaining({ selectConnector: expect.any(Function) }),
     );
     expect(addChannelsDeps.ensureChannel).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "slack", slackConnectorSlug: "my-agent", force: true }),
@@ -214,6 +218,7 @@ describe("runChannelsAddCommand", () => {
       {
         createPrompter: () => fake.prompter,
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+        getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
         addChannelsDeps,
         deployProjectDeps: createDeployProjectDeps(),
       },
@@ -239,6 +244,7 @@ describe("runChannelsAddCommand", () => {
       {
         createPrompter: () => fake.prompter,
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+        getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
         addChannelsDeps,
         deployProjectDeps,
       },
@@ -265,7 +271,15 @@ describe("runChannelsAddCommand", () => {
     const detectDeployment = vi.fn(async (): Promise<DeploymentInfo> => UNLINKED);
 
     await withInteractiveTerminal(() =>
-      runChannelsAddCommand(logger, projectRoot, { options: { yes: true } }, { detectDeployment }),
+      runChannelsAddCommand(
+        logger,
+        projectRoot,
+        { options: { yes: true } },
+        {
+          detectDeployment,
+          getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
+        },
+      ),
     );
 
     expect(detectDeployment).not.toHaveBeenCalled();
@@ -298,10 +312,11 @@ describe("runChannelsAddCommand", () => {
       await runChannelsAddCommand(
         logger,
         projectRoot,
-        { kind: "web", options: {} },
+        { kind: "web", options: { yes: true } },
         {
           createPrompter: () => fake.prompter,
           detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+          getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
           addChannelsDeps,
           deployProjectDeps,
         },
@@ -341,6 +356,92 @@ describe("runChannelsAddCommand", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  test("deploys once after scaffolding multiple selected channels", async () => {
+    const projectRoot = await createAgentProject();
+    const logger = new TestLogger();
+    const fake = createTestPrompter({
+      multiple: () => ["web", "slack"],
+      single: () => "yes",
+    });
+    const addChannelsDeps = createAddChannelsDeps({ state: "linked", projectId: "prj_demo" });
+    const deployProjectDeps = createDeployProjectDeps();
+
+    await withInteractiveTerminal(() =>
+      runChannelsAddCommand(
+        logger,
+        projectRoot,
+        { options: {} },
+        {
+          createPrompter: () => fake.prompter,
+          detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+          getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
+          addChannelsDeps,
+          deployProjectDeps,
+        },
+      ),
+    );
+
+    expect(addChannelsDeps.ensureChannel).toHaveBeenCalledTimes(2);
+    expect(
+      deployProjectDeps.runVercel.mock.calls.filter(([args]) => args[0] === "deploy"),
+    ).toHaveLength(1);
+    expect(logger.errors).toEqual([]);
+  });
+
+  test("treats cancelling Slack credential selection as a normal command cancellation", async () => {
+    const projectRoot = await createAgentProject();
+    const logger = new TestLogger();
+    const fake = createTestPrompter({
+      single: () => {
+        throw new WizardCancelledError();
+      },
+    });
+    const addChannelsDeps = createAddChannelsDeps();
+
+    await runChannelsAddCommand(
+      logger,
+      projectRoot,
+      { kind: "slack", options: {} },
+      {
+        createPrompter: () => fake.prompter,
+        detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+        getVercelAuthStatus: vi.fn(async (): Promise<"logged-out"> => "logged-out"),
+        addChannelsDeps,
+      },
+    );
+
+    expect(addChannelsDeps.ensureChannel).not.toHaveBeenCalled();
+    expect(logger.errors).toEqual([]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("prompts before choosing portable Slack credentials when Vercel is unavailable", async () => {
+    const projectRoot = await createAgentProject();
+    const logger = new TestLogger();
+    const fake = createTestPrompter({ single: () => "portable" });
+    const addChannelsDeps = createAddChannelsDeps();
+
+    await runChannelsAddCommand(
+      logger,
+      projectRoot,
+      { kind: "slack", options: {} },
+      {
+        createPrompter: () => fake.prompter,
+        detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+        getVercelAuthStatus: vi.fn(async (): Promise<"unavailable"> => "unavailable"),
+        addChannelsDeps,
+        deployProjectDeps: createDeployProjectDeps(),
+      },
+    );
+
+    expect(fake.selectMessages).toContain("How would you like to configure Slack?");
+    expect(addChannelsDeps.ensureChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "slack", slackCredentials: "environment" }),
+    );
+    expect(addChannelsDeps.provisionSlackbot).not.toHaveBeenCalled();
+    expect(logger.errors).toEqual([]);
+  });
+
   test("does not scaffold Web Chat over an existing eve session channel", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
@@ -367,6 +468,7 @@ describe("runChannelsAddCommand", () => {
       {
         createPrompter: () => fake.prompter,
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+        getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       },
     );
 
@@ -406,6 +508,7 @@ describe("runChannelsAddCommand", () => {
       {
         createPrompter: () => fake.prompter,
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+        getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
         addChannelsDeps,
       },
     );
@@ -472,6 +575,7 @@ describe("runChannelsAddCommand", () => {
         {
           createPrompter: () => fake.prompter,
           detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
+          getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
           addChannelsDeps,
           deployProjectDeps,
         },

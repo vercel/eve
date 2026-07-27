@@ -33,10 +33,9 @@ export interface SelectChannelsOptions {
   presetChannels?: ChannelKind[];
   /**
    * Picker shape, chosen explicitly because the variants differ in whether a
-   * selection is required, whether the REPL row is shown, and how Slack is
-   * gated. The "channels-add" picker allows an empty submission and keeps Slack
-   * selectable from an unlinked directory because its add-channels box can run
-   * an interactive `vercel link` on demand.
+   * selection is required and whether the REPL row is shown. The
+   * "channels-add" picker allows an empty submission and keeps Slack selectable
+   * because capability planning later chooses Connect or environment credentials.
    */
   variant: "onboarding" | "in-project" | "channels-add";
   /**
@@ -58,7 +57,7 @@ export interface SelectChannelsOptions {
  * chosen channels afterward from `state.channelSelection`. During onboarding
  * the deployment decision has not been made yet, so Slack is never gated here:
  * picking it is what makes the later provisioning box resolve to Vercel. Only
- * the in-project variant gates Slack, on the detected on-disk link.
+ * the legacy in-project variant gates Slack on the detected on-disk link.
  *
  * The onboarding picker is required and always carries a locked, pre-selected
  * Terminal UI row, so an empty selection is impossible: every agent can at least be

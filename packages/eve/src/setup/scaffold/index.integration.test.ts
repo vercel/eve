@@ -89,6 +89,55 @@ describe("ensureChannel", () => {
     );
   });
 
+  test("writes a portable Slack channel and merges its environment example", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), "{}\n", "utf8");
+    await writeFile(
+      join(projectRoot, ".env.example"),
+      "EXISTING=value\nSLACK_BOT_TOKEN=old\n",
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "slack",
+      slackCredentials: "environment",
+    });
+
+    await expect(readFile(join(projectRoot, "agent/channels/slack.ts"), "utf8")).resolves.toBe(
+      'import { slackChannel } from "eve/channels/slack";\n\nexport default slackChannel();\n',
+    );
+    await expect(readFile(join(projectRoot, ".env.example"), "utf8")).resolves.toBe(
+      "EXISTING=value\nSLACK_BOT_TOKEN=old\n\nSLACK_SIGNING_SECRET=\n",
+    );
+    await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toBe("{}\n");
+    expect(result.packageJsonUpdated).toEqual([]);
+    expect(result.filesWritten).toEqual([
+      join(projectRoot, "agent/channels/slack.ts"),
+      join(projectRoot, ".env.example"),
+    ]);
+  });
+
+  test("rolls back the environment example when portable Slack scaffolding fails", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent/channels/slack.ts"), { recursive: true });
+    await writeFile(join(projectRoot, ".env.example"), "EXISTING=value\n", "utf8");
+
+    await expect(
+      ensureChannel({
+        projectRoot,
+        kind: "slack",
+        slackCredentials: "environment",
+        force: true,
+      }),
+    ).rejects.toThrow();
+
+    await expect(readFile(join(projectRoot, ".env.example"), "utf8")).resolves.toBe(
+      "EXISTING=value\n",
+    );
+  });
+
   test("writes the exact Slack connector UID returned by Connect", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent"), { recursive: true });
