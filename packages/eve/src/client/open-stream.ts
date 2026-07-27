@@ -25,7 +25,8 @@ interface FollowStreamInput {
   readonly sessionId: string;
   readonly signal?: AbortSignal;
   readonly startIndex: number;
-  readonly endAtTail?: boolean;
+  /** Follow the live stream after the durable tail (default). `false` bounds the read at the tail. */
+  readonly follow?: boolean;
 }
 
 /** One connection open; `requestTailIndex` asks the server to report the durable tail index. */
@@ -42,16 +43,16 @@ interface OpenStreamInput extends FollowStreamInput {
  * boundary handling. Negative tail-relative cursors use one connection because
  * they cannot be advanced safely.
  *
- * With `endAtTail`, the first connection fixes the bound: the iterator
+ * With `follow: false`, the first connection fixes the bound: the iterator
  * yields events until the cursor passes that tail, reconnecting as needed,
  * then returns instead of following.
  */
 export async function* followStreamIterable(
   input: FollowStreamInput,
 ): AsyncGenerator<HandleMessageStreamEvent> {
-  if (input.endAtTail === true && input.startIndex < 0) {
+  if (input.follow === false && input.startIndex < 0) {
     throw new Error(
-      "endAtTail requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
+      "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
     );
   }
 
@@ -67,7 +68,7 @@ export async function* followStreamIterable(
       connection = await openStreamBody({
         ...input,
         startIndex,
-        requestTailIndex: input.endAtTail === true && tailIndex === undefined,
+        requestTailIndex: input.follow === false && tailIndex === undefined,
       });
     } catch (error) {
       if (input.signal?.aborted) {
@@ -76,12 +77,12 @@ export async function* followStreamIterable(
       throw error;
     }
 
-    if (input.endAtTail === true && tailIndex === undefined) {
+    if (input.follow === false && tailIndex === undefined) {
       tailIndex = connection.tailIndex;
       if (tailIndex === undefined) {
         await connection.body.cancel().catch(() => {});
         throw new Error(
-          `endAtTail requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
+          `stream({ follow: false }) requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
             "The agent may be running an older eve version.",
         );
       }

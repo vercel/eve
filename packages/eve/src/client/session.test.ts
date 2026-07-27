@@ -462,7 +462,7 @@ describe("ClientSession", () => {
   it("rejects a bounded stream from a tail-relative cursor", () => {
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
 
-    expect(() => session.stream({ endAtTail: true, startIndex: -1 })).toThrow(
+    expect(() => session.stream({ follow: false, startIndex: -1 })).toThrow(
       /nonnegative startIndex/,
     );
   });

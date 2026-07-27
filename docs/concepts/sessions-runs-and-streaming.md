@@ -131,7 +131,7 @@ curl -i "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<cou
 # x-eve-stream-tail-index: <tail>
 ```
 
-The lookup is opt-in; requests without the parameter get no header. The TypeScript client wraps this into `stream({ endAtTail: true })`.
+The lookup is opt-in; requests without the parameter get no header. The TypeScript client wraps this into `stream({ follow: false })`.
 
 ## Use the client from TypeScript
 

@@ -27,9 +27,9 @@ function startIndexOf(url: string | undefined): number {
   return Number(new URL(url ?? "", "http://127.0.0.1").searchParams.get("startIndex") ?? "0");
 }
 
-function follow(host: string, options?: { endAtTail?: boolean }) {
+function follow(host: string, options?: { follow?: boolean }) {
   return followStreamIterable({
-    endAtTail: options?.endAtTail,
+    follow: options?.follow,
     host,
     resolveHeaders: () => Promise.resolve(new Headers()),
     sessionId: "s",
@@ -105,7 +105,7 @@ describe("stream following over real sockets", () => {
     expect(connections).toBe(6);
   }, 20_000);
 
-  it("bounds an endAtTail read at the first connection's tail across reconnects", async () => {
+  it("bounds a follow: false read at the first connection's tail across reconnects", async () => {
     const log = [
       { type: "step.started", data: {} },
       { type: "step.completed", data: {} },
@@ -145,7 +145,7 @@ describe("stream following over real sockets", () => {
     const session = client.session({ sessionId: "s1", streamIndex: 0 });
 
     const received: string[] = [];
-    for await (const event of session.stream({ endAtTail: true })) {
+    for await (const event of session.stream({ follow: false })) {
       received.push(event.type);
     }
 
@@ -155,7 +155,7 @@ describe("stream following over real sockets", () => {
     expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 6 });
   });
 
-  it("ends an endAtTail read immediately when the cursor is already past the tail", async () => {
+  it("ends a follow: false read immediately when the cursor is already past the tail", async () => {
     let connections = 0;
     const host = await listen(
       createServer((_req, res) => {
@@ -171,7 +171,7 @@ describe("stream following over real sockets", () => {
     );
 
     const received: string[] = [];
-    for await (const event of follow(host, { endAtTail: true })) {
+    for await (const event of follow(host, { follow: false })) {
       received.push(event.type);
     }
 
@@ -179,7 +179,7 @@ describe("stream following over real sockets", () => {
     expect(connections).toBe(1);
   });
 
-  it("fails an endAtTail read when the server does not report a tail index", async () => {
+  it("fails a follow: false read when the server does not report a tail index", async () => {
     const host = await listen(
       createServer((_req, res) => {
         res.writeHead(200, { "content-type": "application/x-ndjson" });
@@ -187,9 +187,7 @@ describe("stream following over real sockets", () => {
       }),
     );
 
-    await expect(follow(host, { endAtTail: true }).next()).rejects.toThrow(
-      /x-eve-stream-tail-index/,
-    );
+    await expect(follow(host, { follow: false }).next()).rejects.toThrow(/x-eve-stream-tail-index/);
   });
 
   it("never abandons a progressing turn: any event resets the idle budget", async () => {

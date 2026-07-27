@@ -229,12 +229,12 @@ export class ClientSession {
    * one connection. Negative indices read relative to the current tail on one connection
    * and do not advance the stored absolute cursor.
    *
-   * Pass `endAtTail` for a bounded read: yields events up to the durable
+   * Pass `follow: false` for a bounded read: yields events up to the durable
    * tail observed when the stream opens, then returns instead of following.
    * The stored cursor still advances past the consumed events.
    *
    * @throws {Error} If the session has no session ID (no message has been sent
-   *   yet), or if `endAtTail` is combined with a negative `startIndex`.
+   *   yet), or if `follow: false` is combined with a negative `startIndex`.
    */
   stream(options?: StreamOptions): AsyncIterable<HandleMessageStreamEvent> {
     const sessionId = this.#state.sessionId;
@@ -243,9 +243,9 @@ export class ClientSession {
       throw new Error("Session has no session ID. Send a message first.");
     }
 
-    if (options?.endAtTail === true && (options.startIndex ?? this.#state.streamIndex) < 0) {
+    if (options?.follow === false && (options.startIndex ?? this.#state.streamIndex) < 0) {
       throw new Error(
-        "endAtTail requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
+        "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
       );
     }
 
@@ -353,7 +353,7 @@ export class ClientSession {
 
     try {
       for await (const event of followStreamIterable({
-        endAtTail: options?.endAtTail,
+        follow: options?.follow,
         host: this.#context.host,
         resolveHeaders: () => this.#context.resolveHeaders(),
         redirect: this.#context.redirect,

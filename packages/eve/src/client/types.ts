@@ -216,11 +216,12 @@ export interface StreamOptions {
   readonly startIndex?: number;
 
   /**
-   * Stop at the durable tail instead of following the live stream: yields
-   * events until the cursor passes the tail observed when the stream opened,
-   * then returns. Requires a nonnegative start cursor.
+   * Follow the live stream after the durable tail (default). Pass `false`
+   * for a bounded catch-up read: yields events until the cursor passes the
+   * tail observed when the stream opened, then returns instead of
+   * following. Requires a nonnegative start cursor.
    */
-  readonly endAtTail?: boolean;
+  readonly follow?: boolean;
 
   /**
    * Abort signal for cancelling the stream.

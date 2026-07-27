@@ -159,10 +159,10 @@ Tail-relative attachments do not automatically reconnect or advance the session'
 
 ## Bounded catch-up reads
 
-Pass `endAtTail: true` to read from the cursor to the durable tail and then stop, instead of following the live stream:
+Pass `follow: false` to read from the cursor to the durable tail and then stop, instead of following the live stream (the default):
 
 ```ts
-for await (const event of session.stream({ endAtTail: true })) {
+for await (const event of session.stream({ follow: false })) {
   console.log(event.type);
 }
 // Returns once every event recorded before the stream opened is consumed.
@@ -170,7 +170,7 @@ for await (const event of session.stream({ endAtTail: true })) {
 
 The first connection pins the bound to the tail the server reports at open time; events recorded afterward are not part of the read. Reconnects during the read keep that original bound, and the session's stored `streamIndex` still advances past the consumed events, so a follow-up `stream()` or `send()` picks up exactly where the bounded read ended. When the cursor is already at or past the tail, the iterator returns immediately without yielding.
 
-Because a tail-relative cursor cannot be bounded, `endAtTail` throws when combined with a negative `startIndex`. It also fails if the server does not report the durable tail (an agent running an older eve version).
+Because a tail-relative cursor cannot be bounded, `follow: false` throws when combined with a negative `startIndex`. It also fails if the server does not report the durable tail (an agent running an older eve version).
 
 `stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
 
