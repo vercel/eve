@@ -3,6 +3,7 @@ import { registerOTel } from "#compiled/@vercel/otel/index.js";
 
 import { ContextAgentTraceStateStore } from "#harness/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#harness/agent-otel-provider.js";
+import { AgentTraceSpanProcessor } from "#harness/agent-trace-span-processor.js";
 import {
   createInstrumentationHooks,
   type InstrumentationProviderDefinition,
@@ -23,7 +24,8 @@ export function installLocalInstrumentationRuntime(input: {
   const existing = getInstrumentationRuntime();
   if (existing !== undefined) return existing;
 
-  const processor = new LocalTraceSpanProcessor(input.appRoot);
+  const persistence = new LocalTraceSpanProcessor(input.appRoot);
+  const processor = new AgentTraceSpanProcessor([persistence]);
   registerOTel({
     autoDetectResources: false,
     instrumentations: [],

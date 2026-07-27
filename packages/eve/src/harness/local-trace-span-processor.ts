@@ -8,8 +8,6 @@ import { createLogger, formatError } from "#internal/logging.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
 interface ReadableSpanLike {
-  readonly attributes: Readonly<Record<string, unknown>>;
-  readonly instrumentationScope?: { readonly name?: string };
   readonly spanContext: () => { readonly spanId: string; readonly traceId: string };
 }
 
@@ -18,9 +16,6 @@ const log = createLogger("harness.local-trace-span-processor");
 /** Persists spans from agent-owned traces as immutable OTLP/JSON segments. */
 export class LocalTraceSpanProcessor implements SpanProcessor {
   readonly #appRoot: string;
-  readonly #ownedTraceIds = new Set<string>();
-  readonly #sessionTraceIds = new Map<string, string>();
-  #attached = false;
   #queue = Promise.resolve();
   #reportedFailure = false;
 
@@ -32,26 +27,12 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
     return this.#queue;
   }
 
-  isAttached(): boolean {
-    return this.#attached;
-  }
-
-  onStart(span: unknown): void {
-    this.#attached = true;
-    if (!isReadableSpan(span)) return;
-    const sessionId = span.attributes["agent.session.id"];
-    if (typeof sessionId === "string") {
-      const traceId = span.spanContext().traceId;
-      this.#ownedTraceIds.add(traceId);
-      this.#sessionTraceIds.set(sessionId, traceId);
-    }
-  }
+  onStart(): void {}
 
   onEnd(span: unknown): void {
     if (!isReadableSpan(span)) return;
-    if (span.instrumentationScope?.name === "workflow") return;
     const { spanId, traceId } = span.spanContext();
-    if (!this.#ownedTraceIds.has(traceId) || !isHexId(traceId, 32) || !isHexId(spanId, 16)) return;
+    if (!isHexId(traceId, 32) || !isHexId(spanId, 16)) return;
     const payload = JsonTraceSerializer.serializeRequest([span]);
     if (payload === undefined) return;
 
@@ -68,13 +49,6 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
           log.warn("local trace persistence failed", { error: formatError(error) });
         }
       });
-  }
-
-  releaseSession(sessionId: string): void {
-    const traceId = this.#sessionTraceIds.get(sessionId);
-    if (traceId === undefined) return;
-    this.#ownedTraceIds.delete(traceId);
-    this.#sessionTraceIds.delete(sessionId);
   }
 
   shutdown(): Promise<void> {
