@@ -69,7 +69,7 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 
 ## State vs. connection-side storage
 
-`defineState` holds conversation-scoped working memory that lives and dies with the session, including counters, the current plan, and what the user has told you this conversation. It is the agent's short-term memory, persisted durably for the life of the session. Anything that has to outlive the session, be shared across sessions or users, or be queried independently of a turn belongs in an external store, either a [connection](../connections) or your own database.
+`defineState` holds conversation-scoped working memory that lives and dies with the session, including counters, the current plan, and what the user has told you this conversation. It is the agent's short-term memory, persisted durably for the life of the session. Anything that has to outlive the session, be shared across sessions or users, or be queried independently of a turn belongs in an external store. Start with a packaged [memory integration](/integrations?filter=memory), a general [connection](../connections), or your own database.
 
 ## What to read next
 
