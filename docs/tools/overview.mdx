@@ -109,6 +109,8 @@ The `toolOutput.text` and `toolOutput.json` builders construct the other two out
 
 File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. Keep payloads small: a content-part image is persisted in session history and re-sent on every subsequent model call, and eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
 
+When older turns are compacted, file payloads are dropped from the summary and replaced with a text stub naming the file and media type — the model cannot re-see a compacted image. Content parts are for "look at this now"; if the agent may need an artifact again later, write it to the [sandbox](/docs/sandbox) and return its path.
+
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 
 ## What to read next

@@ -212,8 +212,54 @@ function renderTranscriptToolResult(
   const limit =
     conversationTextLimit === undefined ? TRANSCRIPT_PAYLOAD_LIMIT : COMPACT_PAYLOAD_LIMIT;
   const status = part.isError ? "errored" : "returned";
-  const output = renderPayload(part.output, limit);
+  const output = renderToolResultOutput(part.output, limit);
   return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
+}
+
+// A `content` tool output carries model-facing parts whose file payloads
+// are base64: stringifying them would fill the payload budget with bytes
+// the summarizer cannot read. File parts render as the same stub used for
+// message file parts; text parts stay raw for the checkpoint model to judge.
+function renderToolResultOutput(value: unknown, limit: number): string {
+  const parts = contentToolOutputParts(value);
+  if (parts === undefined) {
+    return renderPayload(value, limit);
+  }
+  const rendered = parts
+    .map((part) => renderContentToolOutputPart(part, limit))
+    .filter((entry) => entry.length > 0)
+    .join(" ");
+  return capText(rendered, limit);
+}
+
+function contentToolOutputParts(value: unknown): readonly unknown[] | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const candidate = value as { readonly type?: unknown; readonly value?: unknown };
+  return candidate.type === "content" && Array.isArray(candidate.value)
+    ? candidate.value
+    : undefined;
+}
+
+function renderContentToolOutputPart(part: unknown, limit: number): string {
+  if (part === null || typeof part !== "object") return renderPayload(part, limit);
+  const candidate = part as {
+    readonly type?: unknown;
+    readonly text?: unknown;
+    readonly filename?: unknown;
+    readonly mediaType?: unknown;
+  };
+  if (candidate.type === "text" && typeof candidate.text === "string") {
+    return candidate.text;
+  }
+  // "media" is the AI SDK's deprecated spelling of a file part; both carry
+  // an inline payload the summarizer cannot read.
+  if (candidate.type === "file" || candidate.type === "media") {
+    const mediaType = typeof candidate.mediaType === "string" ? candidate.mediaType : "unknown";
+    return typeof candidate.filename === "string"
+      ? `Attached file ${candidate.filename} (${mediaType})`
+      : `Attached file attachment (${mediaType})`;
+  }
+  return renderPayload(part, limit);
 }
 
 function renderToolCall(part: { toolName: string; input?: unknown }, limit: number): string {
