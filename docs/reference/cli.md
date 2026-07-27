@@ -18,7 +18,7 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                                           |
 | `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                                     |
 | `eve trace ls`                | List locally captured agent traces, most recent first                                                                                                 |
-| `eve trace show <trace>`      | Show the span tree for a local trace                                                                                                                  |
+| `eve trace [trace]`           | Show a local span tree (the most recent when omitted)                                                                                                 |
 | `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
 | `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
 | `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
@@ -220,10 +220,11 @@ Each log has a same-named `.dump` sibling holding environment diagnostics and se
 ```bash
 eve trace ls              # list traces, most recent first
 eve trace ls --json       # emit machine-readable trace summaries
-eve trace show <trace>    # show one span tree
+eve trace                 # show the most recent span tree
+eve trace <trace>         # show one span tree
 ```
 
-`eve trace ls` reads the immutable OTLP/JSON segments captured under `.eve/traces/v1`; `eve dev` does not need to be running. `eve trace show` accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed or incomplete segments are skipped without hiding valid spans from the same trace.
+`eve trace ls` reads the immutable OTLP/JSON segments captured under `.eve/traces/v1`; `eve dev` does not need to be running. `eve trace` accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed or incomplete segments are skipped without hiding valid spans from the same trace.
 
 ## `eve link`
 

@@ -13,7 +13,7 @@ When no authored `instrumentation.ts` exists, `eve dev` records agent, AI SDK, a
 
 The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
 
-Use `eve trace ls` to list captured traces and `eve trace show <trace>` to inspect a session's span tree.
+Use `eve trace ls` to list captured traces and `eve trace <trace>` to inspect a session's span tree.
 
 The local writer is an internal development default, not a second provider layered over authored instrumentation. When `instrumentation.ts` exists, its setup retains control and the zero-config writer is not installed.
 

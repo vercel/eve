@@ -604,9 +604,13 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     });
 
   const traces = program
-    .command("trace")
-    .description("Inspect local agent traces captured by `eve dev` (.eve/traces).")
-    .alias("traces");
+    .command("trace [trace]")
+    .usage("[options] [trace]\n       eve trace ls [options]")
+    .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
+    .action(async (reference: string | undefined) => {
+      const { runTraceShowCommand } = await import("#cli/commands/trace.js");
+      await runTraceShowCommand(logger, appRoot, reference);
+    });
 
   traces
     .command("ls")
@@ -615,14 +619,6 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .action(async (options: { json?: boolean }) => {
       const { runTraceListCommand } = await import("#cli/commands/trace.js");
       await runTraceListCommand(logger, appRoot, options);
-    });
-
-  traces
-    .command("show <trace>", { isDefault: true })
-    .description("Show one local trace by trace id, session id, or unambiguous prefix.")
-    .action(async (reference: string) => {
-      const { runTraceShowCommand } = await import("#cli/commands/trace.js");
-      await runTraceShowCommand(logger, appRoot, reference);
     });
 
   program

@@ -145,9 +145,16 @@ export async function runTraceListCommand(
 export async function runTraceShowCommand(
   logger: CliTraceLogger,
   appRoot: string,
-  reference: string,
+  reference?: string,
 ): Promise<void> {
-  const trace = resolveLocalTrace(await listLocalTraces(appRoot), reference);
+  const traces = await listLocalTraces(appRoot);
+  if (traces.length === 0) {
+    const message = `No local traces found under ${TRACE_DISPLAY_DIRECTORY}.`;
+    if (reference !== undefined) throw new Error(message);
+    logger.log(message);
+    return;
+  }
+  const trace = reference === undefined ? traces[0]! : resolveLocalTrace(traces, reference);
   const theme = createCliTheme();
   logger.log(
     [

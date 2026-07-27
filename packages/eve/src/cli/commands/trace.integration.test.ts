@@ -129,6 +129,10 @@ describe("eve trace", () => {
   it("prints empty and JSON list output", async () => {
     const root = await createRoot();
     const empty = collectingLogger();
+    await runTraceShowCommand(empty.logger, root);
+    expect(empty.out).toEqual(["No local traces found under .eve/traces/v1."]);
+
+    empty.out.length = 0;
     await runTraceListCommand(empty.logger, root);
     expect(empty.out).toEqual(["No local traces found under .eve/traces/v1."]);
 
@@ -139,6 +143,9 @@ describe("eve trace", () => {
         "agent.session.id": "session-one",
       }),
     );
+    const latest = collectingLogger();
+    await runTraceShowCommand(latest.logger, root);
+    expect(latest.out[0]).toContain(TRACE_ONE);
     const json = collectingLogger();
     await runTraceListCommand(json.logger, root, { json: true });
     expect(JSON.parse(json.out[0]!)).toEqual([
