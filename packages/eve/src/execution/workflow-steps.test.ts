@@ -19,7 +19,7 @@ import {
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
@@ -151,6 +151,22 @@ const threadContextAdapter: ChannelAdapter = {
   },
 };
 
+const deferredDeliveryAdapter: ChannelAdapter = {
+  kind: "deferred-delivery",
+  deliver(payload: DeliverPayload) {
+    const message = String(payload.message ?? "");
+    if (message.startsWith("defer:")) {
+      return {
+        action: "defer",
+        input: { context: [message.slice(6)] },
+        reason: "test-defer",
+      };
+    }
+    if (message === "drop") return { action: "drop", reason: "test-drop" };
+    return { action: "dispatch", input: { message } };
+  },
+};
+
 function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSession {
   return {
     agent: { modelReference: { id: "test" }, system: "", tools: [] },
@@ -162,12 +178,14 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(
+  adapter: ChannelAdapter = threadContextAdapter,
+): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, {
     adapterRegistry: {
-      adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      adaptersByKind: new Map([[adapter.kind, adapter]]),
     },
     compiledArtifactsSource: {} as never,
     graph: {
@@ -183,7 +201,7 @@ function createSerializedContext(): Record<string, unknown> {
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never);
-  ctx.set(ChannelKey, threadContextAdapter);
+  ctx.set(ChannelKey, adapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
   ctx.set(ModeKey, "conversation");
   ctx.set(SessionIdKey, "session-1");
@@ -776,6 +794,82 @@ describe("turnStep", () => {
     expect(createDurableSessionState).toHaveBeenLastCalledWith({
       session: expect.objectContaining({ sessionId: "turn-step-session" }),
     });
+  });
+
+  it("persists deferred input across steps, leaves it on drop, then forwards and clears it", async () => {
+    const seen: StepInput[] = [];
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[deferredDeliveryAdapter.kind, deferredDeliveryAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session, input): Promise<StepResult> => {
+        seen.push(input ?? {});
+        return { next: null, session };
+      };
+    });
+
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    const first = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: Array.from({ length: 13 }, (_, index) => ({ message: `defer:${index}` })),
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(deferredDeliveryAdapter),
+      sessionState: createStubSessionState(),
+    });
+    expect(first.action).toBe("park");
+    expect(seen).toHaveLength(0);
+    expect(first.serializedContext["eve.deferredChannelInputs"]).toEqual(
+      Array.from({ length: 12 }, (_, index) => ({ context: [String(index + 1)] })),
+    );
+    expect(info).toHaveBeenCalledWith(
+      "[eve:execution.workflow-steps] channel delivery deferred without starting a turn",
+      expect.objectContaining({ bufferedInputs: 12, droppedInputs: 1 }),
+    );
+
+    const second = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "drop" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+    expect(second.action).toBe("park");
+    expect(seen).toHaveLength(0);
+
+    const third = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "now" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: second.serializedContext,
+      sessionState: second.sessionState,
+    });
+    expect(third.action).toBe("park");
+    expect(seen).toEqual([
+      {
+        context: Array.from({ length: 12 }, (_, index) => String(index + 1)),
+        message: "now",
+      },
+    ]);
+    expect(third.serializedContext["eve.deferredChannelInputs"]).toEqual([]);
+    expect(info).toHaveBeenCalledWith(
+      "[eve:execution.workflow-steps] channel delivery dispatching with deferred inputs",
+      expect.objectContaining({ forwardedInputs: 12 }),
+    );
   });
 
   it("persists onDeliver context into the next durable step", async () => {

@@ -1603,7 +1603,11 @@ describe("slackChannel() onMessage", () => {
       ),
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      action: "defer",
+      input: expect.objectContaining({ context: ["attributed message"], message: undefined }),
+      reason: "human-handoff",
+    });
     expect(adapterCtx.state.threadReplyState).toBe("ignoringThread");
     expect(log).toHaveBeenCalledWith(
       "[eve:slack.channel] Slack thread message skipped by thread reply policy",
@@ -1657,7 +1661,11 @@ describe("slackChannel() onMessage", () => {
       ),
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      action: "defer",
+      input: expect.objectContaining({ context: ["attributed message"], message: undefined }),
+      reason: "thread-reply-policy",
+    });
     expect(adapterCtx.state.threadReplyState).toBeUndefined();
     expect(onReply).toHaveBeenCalledWith(
       message,
@@ -1702,7 +1710,11 @@ describe("slackChannel() onMessage", () => {
       ),
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      action: "defer",
+      input: expect.objectContaining({ context: ["attributed message"], message: undefined }),
+      reason: "thread-reply-policy",
+    });
     expect(adapterCtx.state.threadReplyState).toBe("followingThread");
   });
 
@@ -1818,7 +1830,10 @@ describe("slackChannel() onMessage", () => {
       ),
     );
 
-    expect(result).toEqual({ message: "attributed message" });
+    expect(result).toEqual({
+      action: "dispatch",
+      input: expect.objectContaining({ message: "attributed message" }),
+    });
   });
 
   it("passes messages from other bots to onMessage", async () => {

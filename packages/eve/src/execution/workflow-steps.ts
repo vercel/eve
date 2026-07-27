@@ -12,6 +12,7 @@ import {
 import {
   AuthKey,
   CapabilitiesKey,
+  DeferredChannelInputsKey,
   ModeKey,
   SessionDynamicToolRuntimeRevisionKey,
 } from "#context/keys.js";
@@ -25,6 +26,7 @@ import {
   throwIfTurnAborted,
 } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { normalizeChannelDeliveryDecision } from "#execution/channel-delivery-decision.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
@@ -73,6 +75,7 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
+import { createLogger } from "#internal/logging.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import {
   createWorkflowRuntime,
@@ -126,6 +129,9 @@ export type DurableStepResult =
     };
 
 export type { TurnStepInput };
+
+const log = createLogger("execution.workflow-steps");
+const MAX_DEFERRED_CHANNEL_INPUTS = 12;
 
 /**
  * Runs one atomic harness step inside a durable `"use step"` boundary.
@@ -230,15 +236,45 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     const beforeDeliverySession = initialSession;
     const scoped = await withContextScope(ctx, initialSession, async (enrichedSession) => {
       const results: StepInput[] = [];
+      let deferred = [...(ctx.get(DeferredChannelInputsKey) ?? [])];
       for (const payload of delivery.payloads) {
         const result = adapter.deliver
           ? await adapter.deliver(payload, adapterCtx)
           : defaultDeliverResult(payload);
+        const decision = normalizeChannelDeliveryDecision(result);
 
-        if (result !== undefined && result !== null) {
-          results.push(result);
+        if (decision.action === "defer") {
+          deferred.push(decision.input);
+          const dropped = Math.max(0, deferred.length - MAX_DEFERRED_CHANNEL_INPUTS);
+          if (dropped > 0) deferred = deferred.slice(-MAX_DEFERRED_CHANNEL_INPUTS);
+          log.info("channel delivery deferred without starting a turn", {
+            adapterKind: adapter.kind,
+            bufferedInputs: deferred.length,
+            droppedInputs: dropped,
+            reason: decision.reason,
+            sessionId: initialSession.sessionId,
+          });
+          continue;
         }
+        if (decision.action === "drop") {
+          log.debug("channel delivery dropped without starting a turn", {
+            adapterKind: adapter.kind,
+            bufferedInputs: deferred.length,
+            reason: decision.reason,
+            sessionId: initialSession.sessionId,
+          });
+          continue;
+        }
+
+        log.info("channel delivery dispatching with deferred inputs", {
+          adapterKind: adapter.kind,
+          forwardedInputs: deferred.length,
+          sessionId: initialSession.sessionId,
+        });
+        results.push(...deferred, decision.input);
+        deferred = [];
       }
+      ctx.set(DeferredChannelInputsKey, deferred);
       return {
         result: results.length === 0 ? undefined : results.reduce(coalesceTurnInputs),
         session: enrichedSession,

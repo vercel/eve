@@ -100,6 +100,24 @@ export type { FetchFileResult };
 
 export type ChannelInstrumentationMetadata = Readonly<Record<string, unknown>>;
 
+/** Framework-owned control result from a channel's durable delivery hook. */
+export type ChannelDeliveryDecision =
+  | {
+      readonly action: "defer";
+      readonly input: StepInput;
+      readonly reason?: string;
+    }
+  | {
+      readonly action: "drop";
+      readonly reason?: string;
+    }
+  | {
+      readonly action: "dispatch";
+      readonly input: StepInput;
+    };
+
+export type ChannelDeliveryResult = StepInput | ChannelDeliveryDecision | void;
+
 export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,
 ) => ChannelInstrumentationMetadata;
@@ -138,7 +156,10 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
    * Return a {@link StepInput} to override the input the harness sees, or
    * return void to use the default payload projection.
    */
-  deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
+  deliver?(
+    payload: DeliverPayload,
+    ctx: TCtx,
+  ): ChannelDeliveryResult | Promise<ChannelDeliveryResult>;
 
   /**
    * Optional factory that builds the adapter context for this adapter.

@@ -19,6 +19,7 @@ import { ContextKey } from "#context/key.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { StepInput } from "#harness/types.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -80,6 +81,11 @@ export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabili
  * Optional framework-owned terminal callback metadata for this session.
  */
 export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCallback");
+
+/** Framework-owned channel inputs deferred until a later delivery dispatches. */
+export const DeferredChannelInputsKey = new ContextKey<readonly StepInput[]>(
+  "eve.deferredChannelInputs",
+);
 
 // ---------------------------------------------------------------------------
 // Derived keys — reconstructed by providers each step, never serialized.

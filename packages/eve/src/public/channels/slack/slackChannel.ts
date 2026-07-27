@@ -835,6 +835,8 @@ export function slackChannel<TThreadReplyState = never>(
         );
       }
       if (stateful && "state" in reply) adapterCtx.state.threadReplyState = reply.state;
+      const input = defaultDeliverResult(payload);
+      if (input === undefined) return undefined;
       if (!reply.respond) {
         log.info("Slack thread message skipped by thread reply policy", {
           channelId: delivery.message.channelId,
@@ -844,7 +846,24 @@ export function slackChannel<TThreadReplyState = never>(
           threadTs: delivery.message.threadTs,
         });
       }
-      return reply.respond ? defaultDeliverResult(payload) : undefined;
+      if (reply.respond) return { action: "dispatch", input };
+
+      // Slack's fetched thread history is model context preceding the current
+      // message. Store skipped attributed text the same way so a later
+      // dispatch preserves the triggering message as the turn input.
+      const deferredInput =
+        typeof input.message === "string"
+          ? {
+              ...input,
+              context: [...(input.context ?? []), input.message],
+              message: undefined,
+            }
+          : input;
+      return {
+        action: "defer",
+        input: deferredInput,
+        reason: reply.reason ?? "thread-reply-policy",
+      };
     },
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
