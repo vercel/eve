@@ -11,6 +11,8 @@ A channel is the edge adapter between a platform and your agent. It does three t
 
 eve ships a base HTTP channel plus first-class platform channels, and you can author your own. Browse the full set in the [Integrations](/integrations) gallery.
 
+After a channel normalizes input, eve runs the same agent runtime regardless of where the message came from. Tools and instructions do not need channel-specific logic.
+
 Each channel has its own provider terms, data flow, auth model, and user-consent expectations. Before sending non-public, sensitive, regulated, or production data through a channel, confirm that the channel provider and your configured scopes, signature checks, route auth, and delivery behavior are appropriate for your use case.
 
 ## Where channels live

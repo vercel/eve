@@ -1,0 +1,53 @@
+---
+title: "Project Structure"
+description: "Learn the files eve discovers and how their paths define agent capabilities."
+contentType: "Conceptual"
+---
+
+eve builds an agent from files under `agent/`. A file's location determines what eve loads, and most paths also determine the capability's name.
+
+## Start with two files
+
+A minimal agent needs an instructions file and optional runtime configuration:
+
+```text
+my-agent/
+├── package.json
+├── agent/
+│   ├── agent.ts
+│   └── instructions.md
+└── evals/
+```
+
+`agent/instructions.md` is the agent's always-on system prompt. `agent/agent.ts` selects the model and configures runtime behavior. Omit `agent.ts` when the defaults are sufficient.
+
+## Add capabilities as directories
+
+Add a directory when the agent needs that capability:
+
+| Path                                | Purpose                                       |
+| ----------------------------------- | --------------------------------------------- |
+| [`tools/`](./tools)                 | Typed functions the model can call            |
+| [`skills/`](./skills)               | Procedures the model loads when useful        |
+| [`channels/`](./channels/overview)  | HTTP and messaging entry points               |
+| [`connections/`](/docs/connections) | MCP and OpenAPI services                      |
+| [`sandbox/`](./sandbox)             | Controlled workspace files and commands       |
+| [`subagents/`](./subagents)         | Specialist agents the root agent delegates to |
+| [`schedules/`](./schedules)         | Recurring work                                |
+| `lib/`                              | Shared code imported by agent files           |
+
+The `evals/` directory sits beside `agent/`. It holds the checks that measure whether the agent completes its tasks. See [Evals](./evals/overview).
+
+## Let paths name capabilities
+
+The path supplies the name. This tool file becomes the `get_weather` tool:
+
+```text
+agent/tools/get_weather.ts
+```
+
+The same rule applies to connections, skills, and subagents. You do not add a duplicate `name` or `id` field to the definition.
+
+## Use the full layout reference
+
+[Project layout](./reference/project-layout) lists every supported slot, the root and subagent boundaries, and the file-discovery rules.
