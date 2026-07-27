@@ -42,9 +42,25 @@ export type ToolModelOutputPart =
     };
 ```
 
+Part builders ship alongside the union under a `toolOutputPart` namespace,
+exported from `eve/tools` (`packages/eve/src/public/tools/index.ts`), so
+authors never hand-write the tagged `data: { type: "data", data }` nesting:
+
+```ts
+export const toolOutputPart = {
+  text(text: string): ToolModelOutputPart,
+  file(base64: string, options: { mediaType: string; filename?: string }): ToolModelOutputPart,
+};
+```
+
+The builders are pure sugar: each returns the corresponding part literal, the
+union stays the source of truth, and hand-written literals remain valid.
+
 Authored usage:
 
 ```ts
+import { defineTool, toolOutputPart } from "eve/tools";
+
 export default defineTool({
   description: "Capture a screenshot of the current page",
   inputSchema: z.object({ url: z.string() }),
@@ -56,12 +72,8 @@ export default defineTool({
     return {
       type: "content",
       value: [
-        { type: "text", text: `Screenshot of ${output.path}:` },
-        {
-          type: "file",
-          data: { type: "data", data: output.screenshotBase64 },
-          mediaType: "image/png",
-        },
+        toolOutputPart.text(`Screenshot of ${output.path}:`),
+        toolOutputPart.file(output.screenshotBase64, { mediaType: "image/png" }),
       ],
     };
   },
@@ -133,6 +145,7 @@ than a hard cap.
 ## Boundaries and surfaces
 
 - `packages/eve/src/shared/tool-definition.ts` — union + part type + docs.
+- `packages/eve/src/public/tools/index.ts` — `toolOutputPart` builder export.
 - `packages/eve/src/harness/tools.ts` — `ToolModelOutputValue` widening and
   the `content` normalization case.
 - `docs/tools/overview.mdx` — extend the `toModelOutput` section with the
@@ -159,7 +172,8 @@ than a hard cap.
   happy path (text + file), byte-payload rejection, rejection of `url` /
   `reference` / `text` `FileData` tags, empty-array rejection, unknown-part
   rejection, error identity (`ToolOutputSerializationError`, `toModelOutput`
-  boundary).
+  boundary); `toolOutputPart.text` / `toolOutputPart.file` produce parts the
+  normalizer accepts.
 - E2E (`e2e/fixtures/agent-tools/evals/`): a tool returns a 1×1 red-pixel
   PNG via `toModelOutput` content parts; the eval asserts the model names
   the color, proving the bytes reached the model as vision input end to end.
