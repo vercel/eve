@@ -111,7 +111,7 @@ export async function runAddCommand(
   });
 }
 
-/** Adds registry namespace mappings to the project's components.json. */
+/** Adds registry namespace mappings to the project's package.json. */
 export async function runRegistryAddCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
@@ -126,7 +126,7 @@ export async function runRegistryAddCommand(
       logger.log(`Skipped ${namespace} because it is already configured.`);
     }
     if (result.added.length > 0) {
-      logger.log(`Added ${result.added.join(", ")} to components.json.`);
+      logger.log(`Added ${result.added.join(", ")} to package.json.`);
     }
   });
 }

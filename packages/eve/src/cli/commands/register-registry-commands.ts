@@ -28,7 +28,7 @@ export function registerRegistryCommands(input: {
 
   registry
     .command("add <registries...>")
-    .description("Add registry namespace mappings to components.json.")
+    .description("Add registry namespace mappings to package.json.")
     .action(async (registries: string[]) => {
       const { runRegistryAddCommand } = await import("./registry.js");
       await runRegistryAddCommand(logger, appRoot, registries);

@@ -45,6 +45,7 @@ describe("registry commands", () => {
     isEveProject.mockResolvedValue(true);
     readFile.mockResolvedValue(
       JSON.stringify({
+        name: "project",
         registries: { "@acme": "https://example.com/r/{name}.json" },
       }),
     );
@@ -68,15 +69,16 @@ describe("registry commands", () => {
     expect(logger.errors).toEqual([]);
   });
 
-  it("adds namespace mappings to components.json", async () => {
+  it("adds namespace mappings to package.json", async () => {
     const logger = createLogger();
 
     await runRegistryAddCommand(logger, "/project", ["@other=https://other.example/r/{name}.json"]);
 
     expect(writeFile).toHaveBeenCalledWith(
-      "/project/components.json",
+      "/project/package.json",
       `${JSON.stringify(
         {
+          name: "project",
           registries: {
             "@acme": "https://example.com/r/{name}.json",
             "@other": "https://other.example/r/{name}.json",
@@ -87,26 +89,12 @@ describe("registry commands", () => {
       )}\n`,
       "utf8",
     );
-    expect(logger.logs).toContain("Added @other to components.json.");
+    expect(logger.logs).toContain("Added @other to package.json.");
   });
 
-  it("guides projects without components.json to install by URL", async () => {
+  it("lists the official registry without configured namespaces", async () => {
     const logger = createLogger();
-    readFile.mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }));
-
-    await runRegistryAddCommand(logger, "/project", ["@other=https://other.example/r/{name}.json"]);
-
-    expect(writeFile).not.toHaveBeenCalled();
-    expect(logger.errors).toEqual([
-      "Adding a registry namespace requires an existing components.json. " +
-        "Use an item URL with `eve add <url>` when the project is not configured for shadcn.",
-    ]);
-    expect(process.exitCode).toBe(1);
-  });
-
-  it("lists the official registry without components.json", async () => {
-    const logger = createLogger();
-    readFile.mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }));
+    readFile.mockResolvedValue(JSON.stringify({ name: "project" }));
     searchRegistries.mockResolvedValue({
       items: [],
       pagination: { total: 0, offset: 0, limit: 0, hasMore: false },

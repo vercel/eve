@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import type { RegistryConfig, RegistrySource } from "#compiled/shadcn-registry/index.js";
 
-interface RegistryProject {
+interface RegistryPackage {
   path: string;
   document: Record<string, unknown>;
   config: RegistryConfig;
@@ -41,22 +41,14 @@ function parseRegistries(path: string, value: unknown): Record<string, RegistryS
   return registries;
 }
 
-// TODO: Replace this local components.json handling once shadcn exposes its
-// internal getRegistriesConfig and addRegistriesToConfig helpers from shadcn/registry.
-// Keeping this in eve temporarily avoids spawning the shadcn CLI for configuration.
-async function readRegistryProject(appRoot: string, required: boolean): Promise<RegistryProject> {
-  const path = join(appRoot, "components.json");
+// TODO: Replace this package.json handling with shadcn's registry config APIs
+// after shadcn-ui/ui#11304 and shadcn-ui/ui#11295 are released.
+async function readRegistryPackage(appRoot: string): Promise<RegistryPackage> {
+  const path = join(appRoot, "package.json");
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      if (!required) return { path, document: {}, config: { registries: {} } };
-      throw new Error(
-        "Adding a registry namespace requires an existing components.json. " +
-          "Use an item URL with `eve add <url>` when the project is not configured for shadcn.",
-      );
-    }
     throw new Error(`Could not read ${path}: ${errorMessage(error)}`);
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -86,18 +78,18 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
   return { namespace, url };
 }
 
-/** Reads configured registry namespaces, returning an empty config when components.json is absent. */
+/** Reads registry namespace mappings from package.json. */
 export async function readRegistryConfig(appRoot: string): Promise<RegistryConfig> {
-  return (await readRegistryProject(appRoot, false)).config;
+  return (await readRegistryPackage(appRoot)).config;
 }
 
-/** Adds explicit registry namespace mappings to components.json. */
+/** Adds explicit registry namespace mappings to package.json. */
 export async function addRegistryMappings(
   appRoot: string,
   arguments_: readonly string[],
 ): Promise<AddRegistryMappingsResult> {
   if (arguments_.length === 0) throw new Error("Pass at least one registry to add.");
-  const project = await readRegistryProject(appRoot, true);
+  const project = await readRegistryPackage(appRoot);
   const mappings = arguments_.map(parseRegistryMapping);
   const configured = { ...project.config.registries };
   const result: AddRegistryMappingsResult = {
