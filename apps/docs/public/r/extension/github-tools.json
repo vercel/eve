@@ -12,5 +12,8 @@
       "target": "agent/extensions/github.ts"
     }
   ],
+  "envVars": {
+    "GITHUB_TOKEN": ""
+  },
   "type": "registry:item"
 }

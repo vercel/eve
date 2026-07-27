@@ -12,5 +12,8 @@
       "target": "agent/extensions/kernel.ts"
     }
   ],
+  "envVars": {
+    "KERNEL_API_KEY": ""
+  },
   "type": "registry:item"
 }

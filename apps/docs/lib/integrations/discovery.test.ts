@@ -60,7 +60,7 @@ describe("integration discovery", () => {
     expect(agentkit).toBeDefined();
 
     const markdown = integrationMarkdown(agentkit!);
-    expect(markdown).toContain("pnpm add @upstash/agentkit-eve-extension");
+    expect(markdown).toContain("eve add extension/upstash-agentkit");
     expect(markdown).toContain('import agentkit from "@upstash/agentkit-eve-extension"');
     expect(markdown).toContain("UPSTASH_REDIS_REST_URL");
     expect(markdown).toContain("agentkit__recall_memory");

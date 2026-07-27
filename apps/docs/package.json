@@ -72,6 +72,7 @@
     "@types/pngjs": "^6.0.5",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@upstash/agentkit-eve-extension": "^0.4.0",
     "@vgpu/adapter-node": "0.0.7",
     "@webgpu/types": "^0.1.69",
     "eve": "workspace:*",

@@ -1257,7 +1257,7 @@ The default mount can execute JavaScript in the browser VM and reuse authenticat
     install: `Install the Upstash AgentKit extension for eve:
 
 \`\`\`bash
-pnpm add @upstash/agentkit-eve-extension
+eve add extension/upstash-agentkit
 \`\`\`
 
 The extension requires eve 0.25.2 or later. Add an Upstash Redis database's REST credentials to the agent's environment; the default Redis client reads them automatically:
@@ -1271,7 +1271,7 @@ UPSTASH_REDIS_REST_TOKEN=...
 \`\`\`ts title="agent/extensions/agentkit.ts"
 import agentkit from "@upstash/agentkit-eve-extension";
 
-export default agentkit();
+export default agentkit({});
 \`\`\`
 
 The filename supplies the \`agentkit\` namespace. This minimal mount adds \`agentkit__recall_memory\` and \`agentkit__save_memory\`, plus instructions that teach the model when to use them. By default, memory is isolated by the authenticated principal when available and otherwise by the eve session ID.`,

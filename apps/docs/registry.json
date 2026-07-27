@@ -23,6 +23,9 @@
       "title": "Browserbase",
       "description": "Search, fetch, and automate the web with Browserbase and Stagehand.",
       "dependencies": ["@browserbasehq/eve"],
+      "envVars": {
+        "BROWSERBASE_API_KEY": ""
+      },
       "files": [
         {
           "path": "registry/extensions/browserbase.ts",
@@ -37,6 +40,9 @@
       "title": "GitHub Tools",
       "description": "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
       "dependencies": ["@github-tools/eve-extension", "@vercel/connect"],
+      "envVars": {
+        "GITHUB_TOKEN": ""
+      },
       "files": [
         {
           "path": "registry/extensions/github-tools.ts",
@@ -51,6 +57,10 @@
       "title": "Jetty",
       "description": "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
       "dependencies": ["@jetty/eve"],
+      "envVars": {
+        "JETTY_API_TOKEN": "",
+        "JETTY_COLLECTION": ""
+      },
       "files": [
         {
           "path": "registry/extensions/jetty.ts",
@@ -65,11 +75,32 @@
       "title": "KERNEL",
       "description": "Let your eve agent use the Internet with KERNEL browser infrastructure, observability, and stealth.",
       "dependencies": ["@onkernel/eve-extension"],
+      "envVars": {
+        "KERNEL_API_KEY": ""
+      },
       "files": [
         {
           "path": "registry/extensions/kernel.ts",
           "type": "registry:file",
           "target": "agent/extensions/kernel.ts"
+        }
+      ]
+    },
+    {
+      "name": "extension/upstash-agentkit",
+      "type": "registry:item",
+      "title": "Upstash AgentKit",
+      "description": "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
+      "dependencies": ["@upstash/agentkit-eve-extension"],
+      "envVars": {
+        "UPSTASH_REDIS_REST_URL": "",
+        "UPSTASH_REDIS_REST_TOKEN": ""
+      },
+      "files": [
+        {
+          "path": "registry/extensions/upstash-agentkit.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/agentkit.ts"
         }
       ]
     }
