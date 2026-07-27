@@ -66,9 +66,11 @@ export function createAiSdkHookBridge(
       const started = toModelCallStarted(state, id, event);
       await hooks.before("model.call", started);
     },
-    executeLanguageModelCall({ callId, execute: run }) {
+    executeLanguageModelCall({ callId, execute }) {
       const id = state.modelIds.get(callId);
-      return id === undefined ? run() : runInContext({ id, scope, type: "model.call" }, run);
+      return id === undefined
+        ? execute()
+        : runInContext({ id, scope, type: "model.call" }, execute);
     },
     async onLanguageModelCallEnd(event) {
       const id = state.modelIds.get(event.callId);
@@ -83,9 +85,9 @@ export function createAiSdkHookBridge(
       const started = toToolCallStarted(state, id, event);
       await hooks.before("tool.call", started);
     },
-    executeTool({ toolCallId, execute: run }) {
+    executeTool({ toolCallId, execute }) {
       const id = state.toolIds.get(toolCallId);
-      return id === undefined ? run() : runInContext({ id, scope, type: "tool.call" }, run);
+      return id === undefined ? execute() : runInContext({ id, scope, type: "tool.call" }, execute);
     },
     async onToolExecutionEnd(event) {
       const toolCallId = event.toolCall.toolCallId;
