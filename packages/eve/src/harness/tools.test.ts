@@ -5,7 +5,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { always, never, once } from "#public/tools/approval/approval-helpers.js";
-import { toolOutputPart } from "#public/tools/output-parts.js";
+import { toolOutput, toolOutputPart } from "#public/tools/output-builders.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
@@ -681,6 +681,35 @@ describe("buildToolSet", () => {
     });
   });
 
+  it("accepts outputs built with the toolOutput builders", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>(
+      (
+        [
+          ["as_text", () => toolOutput.text("visible")],
+          ["as_json", () => toolOutput.json({ summary: "ok" })],
+        ] as const
+      ).map(([name, toModelOutput]) => [
+        name,
+        {
+          description: "Project output.",
+          execute: async () => ({ ok: true }),
+          inputSchema: jsonSchema({}),
+          name,
+          toModelOutput,
+        },
+      ]),
+    );
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      projectSdkToolOutput({ output: { ok: true }, tool: result.as_text }),
+    ).resolves.toEqual({ type: "text", value: "visible" });
+    await expect(
+      projectSdkToolOutput({ output: { ok: true }, tool: result.as_json }),
+    ).resolves.toEqual({ type: "json", value: { summary: "ok" } });
+  });
+
   it("accepts content parts built with the toolOutputPart builders", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
@@ -690,13 +719,11 @@ describe("buildToolSet", () => {
           execute: async () => ({ ok: true }),
           inputSchema: jsonSchema({}),
           name: "screenshot",
-          toModelOutput: () => ({
-            type: "content" as const,
-            value: [
+          toModelOutput: () =>
+            toolOutput.content([
               toolOutputPart.text("Screenshot:"),
               toolOutputPart.file("aGVsbG8=", { mediaType: "image/png" }),
-            ],
-          }),
+            ]),
         },
       ],
     ]);

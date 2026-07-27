@@ -1,4 +1,4 @@
-import { defineTool, toolOutputPart } from "eve/tools";
+import { defineTool, toolOutput, toolOutputPart } from "eve/tools";
 import { z } from "zod";
 
 /** 1x1 red-pixel PNG. */
@@ -17,15 +17,12 @@ export default defineTool({
     return { label: input.label, pixelBase64: RED_PIXEL_BASE64 };
   },
   toModelOutput(output) {
-    return {
-      type: "content",
-      value: [
-        toolOutputPart.text(`Rendered pixel for "${output.label}":`),
-        toolOutputPart.file(output.pixelBase64, {
-          filename: "pixel.png",
-          mediaType: "image/png",
-        }),
-      ],
-    };
+    return toolOutput.content([
+      toolOutputPart.text(`Rendered pixel for "${output.label}":`),
+      toolOutputPart.file(output.pixelBase64, {
+        filename: "pixel.png",
+        mediaType: "image/png",
+      }),
+    ]);
   },
 });

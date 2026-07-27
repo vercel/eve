@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "tool",
   "epoch": 3,
-  "sha256": "2dde56c860ea41a1ba4cd9a7cbc32558d7b79e3f8e94ffc1ab10460609b1de8a",
+  "sha256": "64e6354ca546aaa2bbd07a05b5fb66596d34d14633222a41e5c647898211e14f",
   "exports": [
     "defineBashTool",
     "defineGlobTool",
@@ -14,6 +14,7 @@
     "experimental_workflow",
     "isDisabledToolSentinel",
     "isExperimentalWorkflowToolDefinition",
+    "toolOutput",
     "toolOutputPart",
     "toolResultFrom"
   ]

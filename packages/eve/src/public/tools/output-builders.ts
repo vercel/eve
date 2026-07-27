@@ -1,4 +1,33 @@
-import type { ToolModelOutputPart } from "#shared/tool-definition.js";
+import type { ToolModelOutput, ToolModelOutputPart } from "#shared/tool-definition.js";
+
+/**
+ * Builders for the model-facing {@link ToolModelOutput} returned by
+ * `toModelOutput`. Pure sugar over the union — each returns the
+ * corresponding literal, and hand-written literals remain valid.
+ *
+ * ```ts
+ * toModelOutput(output) {
+ *   return toolOutput.content([
+ *     toolOutputPart.text(`Screenshot of ${output.path}:`),
+ *     toolOutputPart.file(output.screenshotBase64, { mediaType: "image/png" }),
+ *   ]);
+ * }
+ * ```
+ */
+export const toolOutput = {
+  /** Builds a text output: the model sees `value` as the tool result. */
+  text(value: string): ToolModelOutput {
+    return { type: "text", value };
+  },
+  /** Builds a JSON output; `value` must be JSON-serializable. */
+  json(value: unknown): ToolModelOutput {
+    return { type: "json", value };
+  },
+  /** Builds a content output from ordered {@link ToolModelOutputPart} entries. */
+  content(value: readonly ToolModelOutputPart[]): ToolModelOutput {
+    return { type: "content", value };
+  },
+};
 
 /**
  * Builders for `content` {@link ToolModelOutput} parts. Pure sugar over
