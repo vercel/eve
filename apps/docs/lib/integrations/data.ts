@@ -1252,7 +1252,7 @@ The default mount can execute JavaScript in the browser VM and reuse authenticat
       "chat history",
       "search",
       "rag",
-      "vector search",
+      "full-text search",
     ],
     install: `Install the Upstash AgentKit extension for eve:
 
@@ -1275,7 +1275,11 @@ export default agentkit();
 \`\`\`
 
 The filename supplies the \`agentkit\` namespace. This minimal mount adds \`agentkit__recall_memory\` and \`agentkit__save_memory\`, plus instructions that teach the model when to use them. By default, memory is isolated by the authenticated principal when available and otherwise by the eve session ID.`,
-    configure: `Enable durable transcript capture with \`chatHistory: true\`. To add RAG over a Redis Search index, install \`@upstash/redis\` and provide a schema:
+    configure: `Two further capabilities are opt-in, and they are independent of each other: chat history covers the agent's own past conversations, while search is retrieval over documents you seed into your own Redis Search index.
+
+Enable durable transcript capture with \`chatHistory: true\`. A hook writes every user and assistant message to Redis as the session streams, and the model gains \`agentkit__search_chat_history\` to find earlier conversations by what was said and \`agentkit__read_chat_history\` to read one back — so a user can ask about something settled in a previous session. Both tools take \`userId\` from the session rather than from model input, so they only ever reach the current user's own transcripts.
+
+To add RAG over your own data, install \`@upstash/redis\` and provide a Redis Search schema:
 
 \`\`\`bash
 pnpm add @upstash/redis
@@ -1298,7 +1302,7 @@ export default agentkit({
 });
 \`\`\`
 
-Search configuration adds the dynamic \`agentkit__search\`, \`agentkit__search_aggregate\`, and \`agentkit__search_count\` tools. Chat history stores each session's user and assistant messages in Redis and makes their text searchable; it does not add a model-facing tool.
+Search configuration adds the dynamic \`agentkit__search\`, \`agentkit__search_aggregate\`, and \`agentkit__search_count\` tools over that index, whose documents you write yourself; it is separate from chat history, which keeps its own keyspace and index. Both tool groups resolve at session start, so an unconfigured capability contributes no tools at all.
 
 For multi-tenant agents, set \`userId\` to a stable tenant-scoped value or derive it from the request context, and never use a shared constant across tenants. You can also tune memory recall, search limits, chat-history keys and TTL, or supply an explicit Redis client. See the [Upstash AgentKit eve extension guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for the complete configuration and override reference.`,
   },
