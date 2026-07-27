@@ -74,16 +74,14 @@ export async function settleCancelledTurnStep(input: {
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
         const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
-          const transformed = await callAdapterEventHandler(
-            adapter,
-            stampMessageStreamEvent(event),
-            adapterCtx,
-          );
+          const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
           setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-          await writer.write(encodeMessageStreamEvent(transformed));
+          // Stamp once: the persisted chunk and the hooks must agree on the id.
+          const stamped = stampMessageStreamEvent(transformed);
+          await writer.write(encodeMessageStreamEvent(stamped));
           await dispatchStreamEventHooks({
             ctx,
-            event: transformed,
+            event: stamped,
             registry: bundle.hookRegistry,
           });
         };

@@ -1672,9 +1672,8 @@ async function* eveEventsToTUIStream(
   } = input;
   const textParts = new Map<string, StreamPartState>();
   const reasoningParts = new Map<string, StreamPartState>();
-  // Re-delivery of a durable chunk — a reconnect, or a rewind to replay the
-  // turn so far — carries the id it was emitted with. Dropping those here
-  // means every case below is a genuinely new emission.
+  // A reconnect re-delivers chunks under the ids they were emitted with.
+  // Dropping them here means every case below is a new emission.
   const seenEvents = createEventDeduper();
   // Counts `step.started` events. The harness reuses `stepIndex` across the
   // model calls of one turn (e.g. the post-subagent call restarts at the same

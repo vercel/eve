@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { ChannelAdapter, ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
 import { callAdapterEventHandler, defaultDeliverResult, getAdapterKind } from "#channel/adapter.js";
 import { createSessionWaitingEvent } from "#protocol/message.js";
-import { stampTestEvent } from "#internal/testing/events.js";
 
 describe("ChannelAdapter (fetchFile field)", () => {
   it("treats the fetchFile field as optional", () => {
@@ -127,13 +126,12 @@ describe("ChannelAdapter helpers", () => {
 
     const event = await callAdapterEventHandler(
       adapter,
-      stampTestEvent(createSessionWaitingEvent("slack:temporary")),
+      createSessionWaitingEvent("slack:temporary"),
       context,
     );
 
     expect(event).toEqual({
       data: { continuationToken: "C1:T1", wait: "next-user-message" },
-      meta: { at: "2026-01-01T00:00:00.000Z", id: "evt_test_0000" },
       type: "session.waiting",
     });
   });

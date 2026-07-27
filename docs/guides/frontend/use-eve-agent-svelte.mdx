@@ -23,16 +23,16 @@ Import from `eve/svelte` and read the reactive getters directly. No `$` prefix:
 
 ## What it returns
 
-| Property  | Type                                        | Description                                                               |
-| --------- | ------------------------------------------- | ------------------------------------------------------------------------- |
-| `data`    | `TData`                                     | Projected state. With the default reducer, `EveMessageData` (`messages`). |
-| `status`  | `UseEveAgentStatus`                         | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
-| `error`   | `Error \| undefined`                        | Last transport-level error.                                               |
-| `events`  | `readonly HandleMessageStreamEvent[]`       | Raw server events for this session.                                       |
-| `session` | `SessionState`                              | Snapshot of session state.                                                |
-| `send`    | `(input: SendTurnPayload) => Promise<void>` | Send text or a full turn (multi-part, attachments, HITL responses).       |
-| `stop`    | `() => void`                                | Abort the client's in-flight stream.                                      |
-| `reset`   | `() => void`                                | Clear state and start a new session.                                      |
+| Property  | Type                                         | Description                                                               |
+| --------- | -------------------------------------------- | ------------------------------------------------------------------------- |
+| `data`    | `TData`                                      | Projected state. With the default reducer, `EveMessageData` (`messages`). |
+| `status`  | `UseEveAgentStatus`                          | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
+| `error`   | `Error \| undefined`                         | Last transport-level error.                                               |
+| `events`  | `readonly StampedHandleMessageStreamEvent[]` | Raw server events for this session.                                       |
+| `session` | `SessionState`                               | Snapshot of session state.                                                |
+| `send`    | `(input: SendTurnPayload) => Promise<void>`  | Send text or a full turn (multi-part, attachments, HITL responses).       |
+| `stop`    | `() => void`                                 | Abort the client's in-flight stream.                                      |
+| `reset`   | `() => void`                                 | Clear state and start a new session.                                      |
 
 These state fields are reactive getters, so read them straight from templates, `$derived`, or `$effect`. They are not stores, so don't prefix them with `$`.
 

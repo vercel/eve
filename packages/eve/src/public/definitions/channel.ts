@@ -16,7 +16,10 @@ import type {
   RunInput,
 } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type {
+  HandleMessageStreamEvent,
+  StampedHandleMessageStreamEvent,
+} from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/channel-definition.js";
 
@@ -160,7 +163,7 @@ export interface Agent {
   getEventStream(
     sessionId: string,
     options?: GetEventStreamOptions,
-  ): Promise<ReadableStream<HandleMessageStreamEvent>>;
+  ): Promise<ReadableStream<StampedHandleMessageStreamEvent>>;
 }
 
 /**

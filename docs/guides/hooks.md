@@ -80,9 +80,9 @@ import { search } from "@acme/crm/tools";
 const crmSearch = toolResultFrom(event.data.result, search); // typed; matches crm__search
 ```
 
-### Making a hook idempotent
+### Persist events to your own database
 
-Every event carries a `meta` envelope with a stable `meta.id`. A hook may run more than once for the same event — a durable step can be retried, and a turn can be re-driven after a park — so use the id as the key for any side effect that must happen once:
+Every event carries a `meta` envelope with `meta.id`, a unique, sortable identifier for that event. It makes a natural primary key for an events table:
 
 ```ts title="agent/hooks/persist.ts"
 import { defineHook } from "eve/hooks";
@@ -107,17 +107,19 @@ export default defineHook({
 });
 ```
 
-See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envelope) for the full contract, including what `meta.id` does and does not deduplicate.
+`meta.id` is stable for the life of the persisted event, so a consumer that re-reads the stream can ingest the same event twice safely. It is not a retry guard for the hook itself: if a step is interrupted and re-runs, the turn re-emits its events as _new_ events with new ids, and your hook runs again for each one. Make side effects that must happen exactly once idempotent on your own key — the turn and step coordinates in `event.data`, or an application-level identifier.
+
+See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envelope) for the full contract.
 
 ## Execution order
 
 When a stream event fires, three things happen in order:
 
-1. Emit. The event is stamped with its `meta` envelope, the channel adapter handler runs, then the event is written to the durable stream.
+1. Emit. The channel adapter handler runs, the event is stamped with its `meta` envelope, then it is written to the durable stream.
 2. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
 3. Dynamic tool resolvers. Resolvers subscribed to the event type run and update the tool set.
 
-Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The adapter, the persisted event, and every hook observe the same `meta.id`.
+Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
 
 ## What happens when a hook throws
 

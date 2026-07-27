@@ -91,9 +91,7 @@ export type SubagentRun = {
   /**
    * Child events already folded into this run. A pump is removed from
    * `#pumps` when its stream ends, so a later `subagent.called` for the same
-   * call — an SSE-resume re-entry, or a recovery after a dropped child
-   * stream — restarts the pump at `streamIndex: 0` while `steps` survives.
-   * Keyed on the durable event id, the replayed prefix folds in exactly once.
+   * call restarts it at `streamIndex: 0` while `steps` survives.
    */
   seenChildEvents: EventDeduper;
 };

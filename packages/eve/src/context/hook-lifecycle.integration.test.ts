@@ -102,29 +102,4 @@ describe("dispatchStreamEventHooks", () => {
       ),
     ).rejects.toThrow(/event hook boom/);
   });
-
-  it("hands subscribers the stamped envelope so a hook can dedupe its own work", async () => {
-    const seen: string[] = [];
-    const registry = createRuntimeHookRegistry([
-      hook("audit", {
-        events: {
-          // Typed and wildcard subscribers see one event, so both agree on the
-          // key a hook would write to a database.
-          "session.completed": async (event) => {
-            seen.push(event.meta.id);
-          },
-          "*": async (event) => {
-            seen.push(event.meta.id);
-          },
-        },
-      }),
-    ]);
-    const ctx = buildCtx();
-    const event = stampTestEvent({ type: "session.completed" });
-
-    await contextStorage.run(ctx, () => dispatchStreamEventHooks({ ctx, registry, event }));
-
-    expect(seen).toEqual([event.meta.id, event.meta.id]);
-    expect(event.meta.id).toBe("evt_test_0000");
-  });
 });

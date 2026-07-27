@@ -60,9 +60,8 @@ function stubSession(): ClientSession {
  * Wraps literal stream events in a real `MessageResponse`.
  *
  * Each literal is stamped as its own emission, so a fixture that repeats an
- * identical payload models two distinct events rather than a re-delivery.
- * Re-delivery is modelled by reusing one stamped event — see
- * {@link replayed}.
+ * identical payload models two distinct events. Model a re-delivery by
+ * passing the same already-stamped event twice.
  */
 function messageResponseOf(events: readonly unknown[]): MessageResponse {
   const stamped = events.map((event, index) =>
@@ -79,11 +78,6 @@ function messageResponseOf(events: readonly unknown[]): MessageResponse {
 
 function isStamped(event: unknown): event is StampedHandleMessageStreamEvent {
   return typeof (event as StampedHandleMessageStreamEvent).meta?.id === "string";
-}
-
-/** Models a re-delivered durable chunk: the same event, id included. */
-function replayed(event: unknown, index: number): StampedHandleMessageStreamEvent {
-  return isStamped(event) ? event : stampTestEvent(event as HandleMessageStreamEvent, index);
 }
 
 const AGENT_INFO: AgentInfoResult = {
@@ -1189,11 +1183,9 @@ describe("EveTUIRunner reused step indexes", () => {
 
 describe("EveTUIRunner replay guards", () => {
   it("renders a re-delivered chunk once even after the next step reuses its key", async () => {
-    // The hard case: a reconnect re-sends a chunk from the completed step
-    // after `step.started` opened the next one. Coordinates alone cannot tell
-    // that apart from a fresh model call reusing `stepIndex`, so without the
-    // id it renders as a second assistant block.
-    const appended = replayed(
+    // Coordinates alone cannot tell a re-delivered chunk apart from a fresh
+    // model call reusing `stepIndex`; only the id can.
+    const appended = stampTestEvent(
       {
         type: "message.appended",
         data: {
@@ -1203,7 +1195,7 @@ describe("EveTUIRunner replay guards", () => {
           stepIndex: 0,
           turnId: "turn_0",
         },
-      },
+      } as HandleMessageStreamEvent,
       1,
     );
     const prompts: Array<string | undefined> = ["weather", undefined];

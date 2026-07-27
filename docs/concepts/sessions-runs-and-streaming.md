@@ -91,12 +91,14 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
 }
 ```
 
-- **`meta.id`** uniquely identifies the event. It is a `evt_`-prefixed [ULID](https://github.com/ulid/spec), so sorting ids as strings reproduces emission order.
+- **`meta.id`** uniquely identifies the event. It is an `evt_`-prefixed [ULID](https://github.com/ulid/spec): a millisecond timestamp followed by random bits, so ids are broadly time-ordered.
 - **`meta.at`** is the ISO-8601 time the event was emitted.
 
 `meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
 
-That makes it the key for ingesting events into a database exactly once:
+The envelope arrived in stream version 20. Events written by an earlier version are stored without it, so a session that started before you upgraded yields events with no `meta` when you rewind into that part of its stream. Guard the read (`event.meta?.id`) if your agent has live sessions that predate the upgrade.
+
+That makes it the key for ingesting a stream into a database without duplicating rows when you re-read it:
 
 ```sql
 insert into agent_events (id, session_id, type, data, emitted_at)
@@ -104,14 +106,15 @@ values ($1, $2, $3, $4, $5)
 on conflict (id) do nothing;
 ```
 
-Because ids sort chronologically, a `primary key (id)` also keeps inserts clustered and lets you page with `where id > $cursor order by id`.
+Because ids lead with a timestamp, a `primary key (id)` stays roughly append-ordered and keeps inserts clustered.
 
-Two caveats worth knowing:
+Three caveats worth knowing:
 
+- **Ids are time-ordered, not a total order.** The turn steps of one session can run in different processes, each generating ids from its own clock and its own random bits. Two events emitted in the same millisecond by different steps may sort either way, and clock skew between machines can invert neighbours. Record your own ingestion sequence, or read the stream in order and store the index, when you need an exact ordering to page against — do not use `where id > $cursor` as a lossless cursor. The stream itself is authoritative: `startIndex` is an absolute event count.
 - **Ids identify events, not intent.** Two events with identical payloads — the `step.failed` → `turn.failed` → `session.failed` cascade, or two identical text deltas in one step — are distinct events with distinct ids. Deduplicate on `meta.id` only; matching on content would drop real data.
 - **A subagent's event is re-emitted, not shared.** When a parent forwards a child's event onto its own stream, the parent's copy is a separate event with its own id. Correlate the two streams through `subagent.called.data.childSessionId`.
 
-Authored [hooks](../guides/hooks) receive the same envelope, so a hook can use `event.meta.id` to make its own side effects idempotent across a retry.
+Authored [hooks](../guides/hooks) receive the same envelope. Note that a hook observes each event as it is emitted, not as it is read: if an interrupted step re-runs, the turn re-emits its events as new events with new ids, so `meta.id` is a key for a stored row rather than a retry guard.
 
 ## Send a follow-up message
 

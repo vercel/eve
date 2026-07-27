@@ -218,22 +218,20 @@ export async function dispatchRuntimeActionsStep(input: {
 
       const parentEvent = await callAdapterEventHandler(
         adapter,
-        stampMessageStreamEvent(
-          createSubagentCalledEvent({
-            callId: action.callId,
-            childSessionId,
-            name,
-            remote,
-            sequence: batch.event.sequence,
-            sessionId: session.sessionId,
-            toolName,
-            turnId: batch.event.turnId,
-            workflowId: workflowEntryReference.workflowId,
-          }),
-        ),
+        createSubagentCalledEvent({
+          callId: action.callId,
+          childSessionId,
+          name,
+          remote,
+          sequence: batch.event.sequence,
+          sessionId: session.sessionId,
+          toolName,
+          turnId: batch.event.turnId,
+          workflowId: workflowEntryReference.workflowId,
+        }),
         adapterCtx,
       );
-      await writer.write(encodeMessageStreamEvent(parentEvent));
+      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(parentEvent)));
     }
   } finally {
     writer.releaseLock();

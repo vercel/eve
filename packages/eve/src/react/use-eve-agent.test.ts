@@ -27,9 +27,9 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-/** Serializes fixture events the way the server does: stamped, one per line. */
 function createEagerStreamResponse(events: readonly HandleMessageStreamEvent[]): Response {
   const encoder = new TextEncoder();
+
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {

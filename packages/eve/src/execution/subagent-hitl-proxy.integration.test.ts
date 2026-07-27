@@ -11,8 +11,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { serializeContext } from "#context/serialize.js";
 import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
-import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
-import { stampMessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -176,18 +175,14 @@ function buildEmptySession(continuationToken: string, sessionId: string): Harnes
  */
 function buildCapturingEmit(ctx: ContextContainer): {
   readonly emit: HarnessEmitFn;
-  readonly events: StampedHandleMessageStreamEvent[];
+  readonly events: HandleMessageStreamEvent[];
   readonly persistAdapterState: () => void;
 } {
-  const events: StampedHandleMessageStreamEvent[] = [];
+  const events: HandleMessageStreamEvent[] = [];
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const emit: HarnessEmitFn = async (event) => {
-    const transformed = await callAdapterEventHandler(
-      adapter,
-      stampMessageStreamEvent(event),
-      adapterCtx,
-    );
+    const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
     events.push(transformed);
   };
   const persistAdapterState = () => {

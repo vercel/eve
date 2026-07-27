@@ -291,19 +291,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   const writer = input.parentWritable.getWriter();
 
-  // Stamp before the adapter runs so the adapter, the persisted chunk, and the
-  // hooks below all observe one `meta.id` for this event.
+  // Stamp once and reuse: the persisted chunk and the hooks below must agree
+  // on this event's `meta.id`.
   const emit = async (
     event: HandleMessageStreamEvent,
   ): Promise<StampedHandleMessageStreamEvent> => {
-    const toEmit = await callAdapterEventHandler(
-      adapter,
-      stampMessageStreamEvent(event),
-      adapterCtx,
-    );
+    const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    await writer.write(encodeMessageStreamEvent(toEmit));
-    return toEmit;
+    const stamped = stampMessageStreamEvent(toEmit);
+    await writer.write(encodeMessageStreamEvent(stamped));
+    return stamped;
   };
 
   const handleEvent = async (

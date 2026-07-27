@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
-import { stampTestEvent } from "#internal/testing/events.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createJsonMessageRequest, createMockAgent } from "#internal/testing/route-harness.js";
 import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
@@ -403,14 +402,12 @@ describe("eveChannel — events", () => {
     await contextStorage.run(ctx, async () => {
       await callAdapterEventHandler(
         adapter,
-        stampTestEvent(
-          createMessageCompletedEvent({
-            message: "done",
-            sequence: 1,
-            stepIndex: 0,
-            turnId: "turn-1",
-          }),
-        ),
+        createMessageCompletedEvent({
+          message: "done",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
         adapterCtx,
       );
     });

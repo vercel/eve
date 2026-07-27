@@ -89,18 +89,6 @@ describe("EveAgentStore stream overlap", () => {
     ]);
   });
 
-  it("drops a duplicated initialEvents entry", () => {
-    const events = turnEvents();
-    const store = new EveAgentStore({
-      initialEvents: [...events, ...events],
-      reducer: defaultMessageReducer(),
-    });
-
-    expect(store.snapshot.events.map((event) => event.meta.id)).toEqual(
-      events.map((event) => event.meta.id),
-    );
-  });
-
   it("re-admits events after reset clears the window", async () => {
     const events = turnEvents();
     const store = new EveAgentStore({

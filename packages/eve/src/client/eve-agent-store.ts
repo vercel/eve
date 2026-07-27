@@ -99,9 +99,8 @@ export class EveAgentStore<TData> {
   readonly #subscribers = new Set<() => void>();
 
   /**
-   * Events already folded into the projection. `initialEvents` is typically a
-   * server-rendered prefix that the live stream then overlaps, and a
-   * reconnect can re-deliver the chunk it resumed from — both re-deliver the
+   * Events already folded into the projection. A server-rendered
+   * `initialEvents` prefix and a reconnect both re-deliver events under the
    * ids they were emitted with.
    */
   #seenEvents = createEventDeduper();

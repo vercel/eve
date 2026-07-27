@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
-import { stampTestEvent } from "#internal/testing/events.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -460,7 +459,7 @@ describe("defineChannel", () => {
     await contextStorage.run(ctx, async () => {
       await callAdapterEventHandler(
         adapter,
-        stampTestEvent({
+        {
           type: "reasoning.appended",
           data: {
             reasoningDelta: "Need",
@@ -469,12 +468,12 @@ describe("defineChannel", () => {
             stepIndex: 0,
             turnId: "turn-1",
           },
-        }),
+        },
         adapterCtx,
       );
       await callAdapterEventHandler(
         adapter,
-        stampTestEvent({
+        {
           type: "reasoning.completed",
           data: {
             reasoning: "Need to inspect the repo.",
@@ -482,7 +481,7 @@ describe("defineChannel", () => {
             stepIndex: 0,
             turnId: "turn-1",
           },
-        }),
+        },
         adapterCtx,
       );
     });
@@ -529,10 +528,10 @@ describe("defineChannel", () => {
 
     await callAdapterEventHandler(
       adapter,
-      stampTestEvent({
+      {
         type: "session.failed",
         data: { code: "INTERNAL", message: "boom", sessionId: "sess-1" },
-      }),
+      },
       adapterCtx,
     );
 

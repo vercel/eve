@@ -81,15 +81,11 @@ export async function emitProxiedSubagentEvent(input: {
   let proxyEntries: ProxyInputRequestEntries | undefined;
   let scopedSession: HarnessSession;
   try {
-    // A child event re-emitted here becomes a distinct event on the parent
-    // stream, so it is stamped with its own id rather than reusing the child's.
+    // A child event re-emitted here is a distinct event on the parent stream,
+    // so it gets its own id rather than reusing the child's.
     const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
-      const transformed = await callAdapterEventHandler(
-        adapter,
-        stampMessageStreamEvent(event),
-        adapterCtx,
-      );
-      await writer.write(encodeMessageStreamEvent(transformed));
+      const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
+      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {

@@ -73,9 +73,7 @@ function subagentCalled(callId: string): SubagentCalledStreamEvent {
   } as SubagentCalledStreamEvent;
 }
 
-let nextChildEventIndex = 0;
-
-function reasoningEvent(delta: string): StampedHandleMessageStreamEvent {
+function reasoningEvent(delta: string, index = 0): StampedHandleMessageStreamEvent {
   return stampTestEvent(
     {
       type: "reasoning.appended",
@@ -87,14 +85,14 @@ function reasoningEvent(delta: string): StampedHandleMessageStreamEvent {
         turnId: "child-turn",
       },
     } as HandleMessageStreamEvent,
-    nextChildEventIndex++,
+    index,
   );
 }
 
-function boundaryEvent(): StampedHandleMessageStreamEvent {
+function boundaryEvent(index: number): StampedHandleMessageStreamEvent {
   return stampTestEvent(
     { type: "session.waiting", data: { wait: "next-user-message" } } as HandleMessageStreamEvent,
-    nextChildEventIndex++,
+    index,
   );
 }
 
@@ -113,7 +111,7 @@ describe("SubagentPump.settleAll", () => {
     const pump = new SubagentPump({ client, view, formatActionResultError: () => "failed" });
 
     pump.begin(subagentCalled("call-1"));
-    child.push(reasoningEvent("**Searching for current events**"));
+    child.push(reasoningEvent("**Searching for current events**", 0));
     await settleAsyncWork();
     expect(view.upsertStep).toHaveBeenCalledWith(
       expect.objectContaining({ callId: "call-1", finalized: false }),
@@ -128,7 +126,7 @@ describe("SubagentPump.settleAll", () => {
 
     // A child still flushing output after the cancel paints nothing.
     const updatesAfterSettle = vi.mocked(view.upsertStep).mock.calls.length;
-    child.push(reasoningEvent("stale output"));
+    child.push(reasoningEvent("stale output", 1));
     await settleAsyncWork();
     expect(vi.mocked(view.upsertStep).mock.calls.length).toBe(updatesAfterSettle);
 
@@ -141,10 +139,7 @@ describe("SubagentPump.settleAll", () => {
 
 describe("SubagentPump child stream replay", () => {
   it("folds a replayed child transcript in once when the pump restarts", async () => {
-    // A pump is dropped from the registry when its stream ends, so a second
-    // `subagent.called` for the same call — an SSE-resume re-entry — reopens
-    // the child at `streamIndex: 0` while the run's sections survive.
-    const transcript = [reasoningEvent("looked up the forecast"), boundaryEvent()];
+    const transcript = [reasoningEvent("looked up the forecast", 0), boundaryEvent(1)];
     let opened = 0;
     const client = new Client({ host: "http://localhost:3000" });
     vi.spyOn(client, "session").mockReturnValue({
@@ -172,8 +167,6 @@ describe("SubagentPump child stream replay", () => {
       .mock.calls.map(([update]) => update.reasoning)
       .filter((text): text is string => text !== undefined && text.length > 0);
     expect(reasoning.length).toBeGreaterThan(0);
-    // Every paint carries the transcript once, and the replay opened no
-    // second section to paint it into again.
     for (const text of reasoning) {
       expect(text).toBe("looked up the forecast");
     }

@@ -325,18 +325,15 @@ describe("workflowEntry integration", () => {
 
       try {
         expect(firstTurn.length).toBeGreaterThan(1);
-        // Every event carries a well-formed id, and no two events share one —
-        // including the append events that share `(turnId, sequence, stepIndex)`.
+        // No two events share an id, including appends that share
+        // `(turnId, sequence, stepIndex)`.
         expect(firstTurn.every((event) => isEventId(event.meta.id))).toBe(true);
         expect(new Set(firstTurn.map((event) => event.meta.id)).size).toBe(firstTurn.length);
 
-        // Ids are minted in emission order, so a consumer can sort by them.
         const ids = firstTurn.map((event) => event.meta.id);
         expect(ids).toEqual([...ids].sort());
 
-        // The contract that makes DB ingestion idempotent: re-reading the same
-        // durable stream returns the same ids, so a reconnect or a full rewind
-        // re-delivers events a consumer has already stored under those keys.
+        // Re-reading the durable stream returns the same ids.
         const workflowRuntime = createWorkflowRuntime({
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });

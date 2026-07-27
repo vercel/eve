@@ -45,9 +45,7 @@ export async function emitTerminalSessionFailureStep(input: {
     code,
   });
 
-  const event = stampMessageStreamEvent(
-    createSessionFailedEvent({ code, details, message, sessionId }),
-  );
+  const event = createSessionFailedEvent({ code, details, message, sessionId });
 
   // Best-effort: invoke the adapter handler so channels surface the
   // failure. Errors are logged, never rethrown — the outer workflow
@@ -73,7 +71,7 @@ export async function emitTerminalSessionFailureStep(input: {
   try {
     const writer = input.parentWritable.getWriter();
     try {
-      await writer.write(encodeMessageStreamEvent(event));
+      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
     } finally {
       writer.releaseLock();
     }

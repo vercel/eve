@@ -2,7 +2,7 @@ import type {
   HandleMessageStreamEvent,
   StampedHandleMessageStreamEvent,
 } from "#protocol/message.js";
-import { isCurrentTurnBoundaryEvent, stampMessageStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 
 /**
  * Minimal, duck-typed handle to one workflow `Run`'s readable stream.
@@ -175,16 +175,19 @@ async function readUntilBoundary(
  * contract without going through a real emit seam.
  *
  * Ids are sequential and deterministic so failure output stays readable. Use
- * the real {@link stampMessageStreamEvent} when a test asserts on id format.
+ * `stampMessageStreamEvent` when a test asserts on real id format.
  */
 export function stampTestEvent(
   event: HandleMessageStreamEvent,
   index = 0,
 ): StampedHandleMessageStreamEvent {
-  return stampMessageStreamEvent(event, {
-    at: new Date(Date.UTC(2026, 0, 1) + index).toISOString(),
-    id: `evt_test_${String(index).padStart(4, "0")}`,
-  });
+  return {
+    ...event,
+    meta: {
+      at: new Date(Date.UTC(2026, 0, 1) + index).toISOString(),
+      id: `evt_test_${String(index).padStart(4, "0")}`,
+    },
+  };
 }
 
 /** Stamps every event in a fixture list. See {@link stampTestEvent}. */

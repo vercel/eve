@@ -61,37 +61,23 @@ describe("message stream protocol", () => {
   });
 
   it("stamps durable envelope metadata and preserves it through encoding", () => {
-    const timed = stampMessageStreamEvent(
-      createStepStartedEvent({
-        sequence: 0,
-        stepIndex: 1,
-        turnId: "turn_0",
-      }),
-      { at: "2026-04-17T10:14:22.123Z", id: "evt_fixed" },
+    const stamped = stampMessageStreamEvent(
+      createStepStartedEvent({ sequence: 0, stepIndex: 1, turnId: "turn_0" }),
     );
 
-    expect(timed.meta).toEqual({
-      at: "2026-04-17T10:14:22.123Z",
-      id: "evt_fixed",
-    });
+    expect(isEventId(stamped.meta.id)).toBe(true);
+    expect(stamped.meta.at).toBe(new Date(stamped.meta.at).toISOString());
 
-    const encoded = encodeMessageStreamEvent(timed);
-    const decoded = JSON.parse(new TextDecoder().decode(encoded).trim()) as typeof timed;
+    const encoded = encodeMessageStreamEvent(stamped);
+    const decoded = JSON.parse(new TextDecoder().decode(encoded).trim()) as typeof stamped;
 
-    expect(decoded).toEqual(timed);
+    expect(decoded).toEqual(stamped);
   });
 
-  it("mints a unique event id per stamp", () => {
+  it("mints a distinct id for each emission of an identical payload", () => {
     const event = createStepStartedEvent({ sequence: 0, stepIndex: 0, turnId: "turn_0" });
 
-    const first = stampMessageStreamEvent(event);
-    const second = stampMessageStreamEvent(event);
-
-    expect(isEventId(first.meta.id)).toBe(true);
-    expect(isEventId(second.meta.id)).toBe(true);
-    // Two emissions of an identical payload are two distinct stream events, so
-    // a consumer keyed on `meta.id` must store both rather than collapse them.
-    expect(first.meta.id).not.toBe(second.meta.id);
+    expect(stampMessageStreamEvent(event).meta.id).not.toBe(stampMessageStreamEvent(event).meta.id);
   });
 
   it("builds authorization.required with optional challenge and webhookUrl", () => {

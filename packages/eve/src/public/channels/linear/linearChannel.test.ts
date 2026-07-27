@@ -6,11 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type {
-  HandleMessageStreamEvent,
-  StampedHandleMessageStreamEvent,
-} from "#protocol/message.js";
-import { stampTestEvent } from "#internal/testing/events.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -51,10 +47,8 @@ function callEvent(
   adapter: ChannelAdapter,
   event: HandleMessageStreamEvent,
   ctx: any,
-): Promise<StampedHandleMessageStreamEvent> {
-  return contextStorage.run(stubAlsContext, () =>
-    callAdapterEventHandler(adapter, stampTestEvent(event), ctx),
-  );
+): Promise<HandleMessageStreamEvent> {
+  return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
 function makeEvent<T extends HandleMessageStreamEvent["type"]>(

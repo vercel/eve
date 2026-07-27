@@ -226,10 +226,10 @@ const agent = useEveAgent({ reducer: toolCounter });
 The browser conversation lives durably on the server. Persist both the rendered event log and the `session` cursor to pick it back up after a reload:
 
 ```tsx
-import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+import type { SessionState, StampedHandleMessageStreamEvent } from "eve/client";
 
 type SavedEveChat = {
-  events?: readonly HandleMessageStreamEvent[];
+  events?: readonly StampedHandleMessageStreamEvent[];
   session?: SessionState;
 };
 

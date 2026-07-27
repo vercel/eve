@@ -8,11 +8,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type {
-  HandleMessageStreamEvent,
-  StampedHandleMessageStreamEvent,
-} from "#protocol/message.js";
-import { stampTestEvent } from "#internal/testing/events.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import {
   DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
   renderInputRequestComponents,
@@ -51,10 +47,8 @@ function callEvent(
   adapter: ChannelAdapter,
   event: HandleMessageStreamEvent,
   ctx: any,
-): Promise<StampedHandleMessageStreamEvent> {
-  return contextStorage.run(stubAlsContext, () =>
-    callAdapterEventHandler(adapter, stampTestEvent(event), ctx),
-  );
+): Promise<HandleMessageStreamEvent> {
+  return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
 function captureAccessor(initialContinuationToken: string): {
@@ -428,8 +422,8 @@ describe("discordChannel() default event handlers", () => {
     const ctx = buildAdapterContext(adapter, accessor);
 
     await expect(
-      callAdapterEventHandler(adapter, stampTestEvent(makeEvent("turn.started", {})), ctx),
-    ).resolves.toEqual(stampTestEvent(makeEvent("turn.started", {})));
+      callAdapterEventHandler(adapter, makeEvent("turn.started", {}), ctx),
+    ).resolves.toEqual(makeEvent("turn.started", {}));
   });
 
   it("uses the environment bot token for proactive messages", async () => {
