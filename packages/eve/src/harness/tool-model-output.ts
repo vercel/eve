@@ -83,7 +83,7 @@ export function normalizeToolModelOutput(input: {
       toolName: input.toolName,
     },
     () => {
-      rejectTeachableFilePartMistakes(input.output);
+      assertSupportedFilePartData(input.output);
 
       const parsed = toolModelOutputSchema.safeParse(input.output);
       if (!parsed.success) {
@@ -115,14 +115,15 @@ export function normalizeToolModelOutput(input: {
 }
 
 /**
- * The two author mistakes the schema cannot explain well are rejected up
- * front with teaching messages: raw bytes (which `JSON.stringify` would
- * corrupt silently at the durable boundary — the #497 failure class), and
- * AI SDK `FileData` tags eve does not support yet. On a `Uint8Array` the
- * schema would report a missing `data.type` key; the real fix is to
- * base64-encode. Everything structural is left to the schema.
+ * Asserts every file part's `data` is the supported form, covering the two
+ * author mistakes the schema cannot explain well: raw bytes (which
+ * `JSON.stringify` would corrupt silently at the durable boundary — the
+ * #497 failure class), and AI SDK `FileData` tags eve does not support
+ * yet. On a `Uint8Array` the schema would report a missing `data.type`
+ * key; the real fix is to base64-encode. Everything structural is left to
+ * the schema.
  */
-function rejectTeachableFilePartMistakes(output: unknown): void {
+function assertSupportedFilePartData(output: unknown): void {
   if (output === null || typeof output !== "object") return;
   const candidate = output as { readonly type?: unknown; readonly value?: unknown };
   if (candidate.type !== "content" || !Array.isArray(candidate.value)) return;
