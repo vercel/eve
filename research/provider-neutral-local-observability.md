@@ -107,6 +107,10 @@ The local provider:
 - never captures Workflow spans;
 - persists traces as OTLP/JSON for later inspection.
 
+Immutable OTLP/JSON segments are the canonical local store. A future DuckDB or dashboard index is a
+rebuildable consumer of that spool, not a second source of trace identity or Workflow continuation
+state.
+
 Authored instrumentation and local capture may observe the same attempt concurrently without
 executing the model or tool more than once.
 

@@ -11,6 +11,8 @@ If you intend to export telemetry, review the exporter destination, data categor
 
 When no authored `instrumentation.ts` exists, `eve dev` records agent, AI SDK, and user-created OpenTelemetry spans under `.eve/traces/v1`. Each session has one trace, rooted independently from Workflow telemetry, with turns, model steps, and tool actions represented explicitly. Spans created by application code while a model or tool is executing inherit that active agent context.
 
+The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
+
 The local writer is an internal development default, not a second provider layered over authored instrumentation. When `instrumentation.ts` exists, its setup retains control and the zero-config writer is not installed.
 
 ## Three observability surfaces

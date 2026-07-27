@@ -2,13 +2,15 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { trace } from "@opentelemetry/api";
+import { ROOT_CONTEXT, trace } from "@opentelemetry/api";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
 import { installLocalInstrumentationRuntime } from "#harness/local-instrumentation-runtime.js";
+import { LocalTraceSpanProcessor } from "#harness/local-trace-span-processor.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -146,6 +148,32 @@ describe("local instrumentation runtime", () => {
     expect(span(spans, "agent.action").parentSpanId).toBe(span(spans, "agent.step").spanId);
     expect(span(spans, "ai.toolCall").parentSpanId).toBe(span(spans, "agent.action").spanId);
     expect(span(spans, "user.tool-work").parentSpanId).toBe(span(spans, "ai.toolCall").spanId);
+  });
+
+  it("keeps segments from overlapping worker writers", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "eve-local-traces-workers-"));
+    temporaryDirectories.push(appRoot);
+    const firstProcessor = new LocalTraceSpanProcessor(appRoot);
+    const secondProcessor = new LocalTraceSpanProcessor(appRoot);
+    const firstProvider = new BasicTracerProvider({ spanProcessors: [firstProcessor] });
+    const secondProvider = new BasicTracerProvider({ spanProcessors: [secondProcessor] });
+    const parent = trace.setSpan(
+      ROOT_CONTEXT,
+      trace.wrapSpanContext({
+        spanId: "b".repeat(16),
+        traceFlags: 1,
+        traceId: "a".repeat(32),
+      }),
+    );
+
+    firstProvider.getTracer("worker-1").startSpan("worker.one", {}, parent).end();
+    secondProvider.getTracer("worker-2").startSpan("worker.two", {}, parent).end();
+    await Promise.all([firstProcessor.forceFlush(), secondProcessor.forceFlush()]);
+
+    const segments = await readdir(
+      join(appRoot, ".eve", "traces", "v1", "a".repeat(32), "segments"),
+    );
+    expect(segments).toHaveLength(2);
   });
 });
 
