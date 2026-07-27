@@ -31,6 +31,7 @@ function createMockRuntime(): Runtime {
     getEventStream: vi
       .fn()
       .mockResolvedValue(new ReadableStream<StampedHandleMessageStreamEvent>()),
+    getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     terminateSession: vi.fn(),
   };
 }

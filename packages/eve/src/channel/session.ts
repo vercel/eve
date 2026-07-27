@@ -30,6 +30,11 @@ export interface Session {
   getEventStream(options?: {
     startIndex?: number;
   }): Promise<ReadableStream<StampedHandleMessageStreamEvent>>;
+  /**
+   * Resolves the durable tail of the event stream: the zero-based index of
+   * the last recorded event, or `-1` before the first.
+   */
+  getStreamTailIndex(): Promise<number>;
 }
 
 /**
@@ -55,6 +60,9 @@ export function createSession(id: string, continuationToken: string, runtime: Ru
     },
     async getEventStream(options?: { startIndex?: number }) {
       return runtime.getEventStream(id, options);
+    },
+    async getStreamTailIndex() {
+      return runtime.getStreamTailIndex(id);
     },
   };
 }

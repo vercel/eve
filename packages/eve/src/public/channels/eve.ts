@@ -18,6 +18,7 @@ import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
   EVE_STREAM_FORMAT_HEADER,
+  EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
 import {
@@ -437,9 +438,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const startIndex = parseStartIndex(req);
         if (startIndex instanceof Response) return startIndex;
 
+        const includeTailIndex = parseIncludeTailIndex(req);
+
         try {
           const session = getSession(sessionId);
+
+          // The tail lookup is opt-in: only requests that bound a read pay for it.
+          const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
           const events = await session.getEventStream({ startIndex });
+
           const ndjson = serializeAsNdjson(events);
           return new Response(ndjson, {
             headers: {
@@ -452,6 +459,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               "x-accel-buffering": "no",
               [EVE_SESSION_ID_HEADER]: sessionId,
               [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
+              ...(tailIndex === undefined
+                ? {}
+                : { [EVE_STREAM_TAIL_INDEX_HEADER]: String(tailIndex) }),
               [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
             },
           });
@@ -981,6 +991,11 @@ function parseClientContextField(value: unknown): string[] | Response | undefine
 
 function toClientContextMessage(content: string): string {
   return `${CLIENT_CONTEXT_PREFIX}${content}`;
+}
+
+function parseIncludeTailIndex(request: Request): boolean {
+  const raw = new URL(request.url).searchParams.get("includeTailIndex");
+  return raw === "1" || raw === "true";
 }
 
 function parseStartIndex(request: Request): number | undefined | Response {

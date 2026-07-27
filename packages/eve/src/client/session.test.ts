@@ -459,6 +459,14 @@ describe("ClientSession", () => {
     expect(session.state).toEqual(initialState);
   });
 
+  it("rejects a bounded stream from a tail-relative cursor", () => {
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    expect(() => session.stream({ follow: false, startIndex: -1 })).toThrow(
+      /nonnegative startIndex/,
+    );
+  });
+
   it("does not reconnect a tail-relative stream after a disconnect", async () => {
     const encoder = new TextEncoder();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {

@@ -49,7 +49,7 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 - `send(message, { auth, continuationToken, state?, title? })` starts or resumes a session. `title` overrides the new workflow session's display title without changing the model message. Returns a `Session`.
 - `cancel({ continuationToken, turnId? })` requests cancellation of the active turn on the session that owns the token. See [Cancel a turn](#cancel-a-turn).
 - `reset({ continuationToken, reason? })` retires the session that owns the token so the next `send()` starts a fresh session. See [Reset a session](#reset-a-session).
-- `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming and `cancel({ turnId? })` for session-id-addressed cancellation.
+- `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming, `getStreamTailIndex()` for resolving the durable tail when a route wants to serve bounded reads, and `cancel({ turnId? })` for session-id-addressed cancellation.
 - `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
 - `params` holds route parameters extracted from the path pattern.
 - `waitUntil(promise)` extends the request lifetime for background work.

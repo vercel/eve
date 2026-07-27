@@ -55,6 +55,19 @@ describe("integration discovery", () => {
     expect(integrationSearchText(jetty!)).toContain("grading");
   });
 
+  it("renders the Upstash AgentKit extension setup", () => {
+    const agentkit = getIntegration("upstash-agentkit");
+    expect(agentkit).toBeDefined();
+
+    const markdown = integrationMarkdown(agentkit!);
+    expect(markdown).toContain("pnpm add @upstash/agentkit-eve-extension");
+    expect(markdown).toContain('import agentkit from "@upstash/agentkit-eve-extension"');
+    expect(markdown).toContain("UPSTASH_REDIS_REST_URL");
+    expect(markdown).toContain("agentkit__recall_memory");
+    expect(markdown).toContain("chatHistory: true");
+    expect(integrationSearchText(agentkit!)).toContain("long-term memory");
+  });
+
   it("renders the GitHub Tools extension setup", () => {
     const githubTools = getIntegration("github-tools");
     expect(githubTools).toBeDefined();

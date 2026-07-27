@@ -597,6 +597,54 @@ describe("emitStreamContent action requests", () => {
       },
     ]);
   });
+
+  it("turns malformed provider-executed tool call input into a failed tool result", async () => {
+    const emit = createEmitStub();
+    const message =
+      'Failed to parse tool-call arguments for "web_search" (call-bad): Expected a JSON-serializable object.';
+
+    const result = await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          // Opus 5 has emitted syntactically invalid JSON for provider
+          // web_search arguments: an unquoted bare value.
+          input: '{"objective": "Find the champion.", "search_queries": 2025 NBA Finals}',
+          providerExecuted: true,
+          toolCallId: "call-bad",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map<string, HarnessToolDefinition>(),
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: { code: "ACTION_RESULT_FAILED", message },
+          result: {
+            callId: "call-bad",
+            isError: true,
+            kind: "tool-result",
+            output: message,
+            toolName: "web_search",
+          },
+          status: "failed",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    expect([...result.invalidInputToolCallIds]).toEqual(["call-bad"]);
+    // Provider results live in the assistant response; no local tool message.
+    expect(result.trailingInlineToolResultParts).toEqual([]);
+  });
 });
 
 describe("emitStreamContent error-part handling", () => {

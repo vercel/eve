@@ -429,6 +429,14 @@ export interface Runtime {
     sessionId: string,
     options?: GetEventStreamOptions,
   ): Promise<ReadableStream<StampedHandleMessageStreamEvent>>;
+
+  /**
+   * Resolves the durable tail of a session's event stream: the zero-based
+   * index of the last recorded event, or `-1` before the first. Callers use
+   * it to bound a read at the tail they observed instead of following the
+   * live stream.
+   */
+  getStreamTailIndex(sessionId: string): Promise<number>;
 }
 
 /**
