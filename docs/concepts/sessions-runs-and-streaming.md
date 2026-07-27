@@ -87,7 +87,7 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
     "stepIndex": 0,
     "turnId": "turn_0"
   },
-  "meta": { "id": "evt_01K18VW2Q7B4M9XN3RTC5FDGHJ", "at": "2026-07-27T18:04:11.912Z" }
+  "meta": { "id": "evt_01KYJBZA88B4M9XN3RTC5FDGHJ", "at": "2026-07-27T18:04:11.912Z" }
 }
 ```
 
