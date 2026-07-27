@@ -42,24 +42,31 @@ export type ToolModelOutputPart =
     };
 ```
 
-Part builders ship alongside the union under a `toolOutputPart` namespace,
-exported from `eve/tools` (`packages/eve/src/public/tools/index.ts`), so
-authors never hand-write the tagged `data: { type: "data", data }` nesting:
+Builders ship alongside the union under two namespaces exported from
+`eve/tools` (`packages/eve/src/public/tools/index.ts`): `toolOutput` for the
+output union and `toolOutputPart` for content parts, so authors never
+hand-write the tagged `data: { type: "data", data }` nesting:
 
 ```ts
+export const toolOutput = {
+  text(value: string): ToolModelOutput,
+  json(value: unknown): ToolModelOutput,
+  content(value: readonly ToolModelOutputPart[]): ToolModelOutput,
+};
+
 export const toolOutputPart = {
   text(text: string): ToolModelOutputPart,
   file(base64: string, options: { mediaType: string; filename?: string }): ToolModelOutputPart,
 };
 ```
 
-The builders are pure sugar: each returns the corresponding part literal, the
+The builders are pure sugar: each returns the corresponding literal, the
 union stays the source of truth, and hand-written literals remain valid.
 
 Authored usage:
 
 ```ts
-import { defineTool, toolOutputPart } from "eve/tools";
+import { defineTool, toolOutput, toolOutputPart } from "eve/tools";
 
 export default defineTool({
   description: "Capture a screenshot of the current page",
@@ -69,13 +76,10 @@ export default defineTool({
     return { path: png.path, screenshotBase64: png.base64 };
   },
   toModelOutput(output) {
-    return {
-      type: "content",
-      value: [
-        toolOutputPart.text(`Screenshot of ${output.path}:`),
-        toolOutputPart.file(output.screenshotBase64, { mediaType: "image/png" }),
-      ],
-    };
+    return toolOutput.content([
+      toolOutputPart.text(`Screenshot of ${output.path}:`),
+      toolOutputPart.file(output.screenshotBase64, { mediaType: "image/png" }),
+    ]);
   },
 });
 ```
@@ -145,7 +149,7 @@ than a hard cap.
 ## Boundaries and surfaces
 
 - `packages/eve/src/shared/tool-definition.ts` — union + part type + docs.
-- `packages/eve/src/public/tools/index.ts` — `toolOutputPart` builder export.
+- `packages/eve/src/public/tools/output-builders.ts` — `toolOutput` and `toolOutputPart` builders, exported from `eve/tools`.
 - `packages/eve/src/harness/tools.ts` — `ToolModelOutputValue` widening and
   the `content` normalization case.
 - `docs/tools/overview.mdx` — extend the `toModelOutput` section with the
