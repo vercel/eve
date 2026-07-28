@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createAiSdkHookBridge, getAttemptState } from "#harness/ai-sdk-hook-bridge.js";
+import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHooks,
   type InstrumentationAttemptScope,
@@ -171,35 +171,28 @@ describe("createAiSdkHookBridge", () => {
     );
   });
 
-  it("stores callback snapshots by attempt scope", () => {
-    const hooks = createInstrumentationHooks([]);
+  it("publishes frozen callback snapshots", async () => {
+    const started = vi.fn();
+    const hooks = createInstrumentationHooks([{ events: { "attempt.started": started } }]);
     const bridge = createAiSdkHookBridge(scope, hooks);
-    const event = {
+    const operation = {
       callId: "call-1",
       modelId: "model",
       operationId: "ai.streamText",
       provider: "test",
     };
+    const step = { callId: "call-1", stepNumber: 0 };
 
-    Reflect.apply(bridge.onStart!, bridge, [event]);
+    Reflect.apply(bridge.onStart!, bridge, [operation]);
+    await Reflect.apply(bridge.onStepStart!, bridge, [step]);
 
-    expect(getAttemptState(scope)?.operationStart).toEqual(event);
-    expect(getAttemptState(scope)?.operationStart).not.toBe(event);
-    expect(Object.isFrozen(getAttemptState(scope)?.operationStart)).toBe(true);
-  });
-
-  it("snapshots errors consistently", async () => {
-    const hooks = createInstrumentationHooks([]);
-    const bridge = createAiSdkHookBridge(scope, hooks);
-    const error = new Error("failed");
-
-    await Reflect.apply(bridge.onError!, bridge, [error]);
-
-    expect(getAttemptState(scope)?.operationError).toEqual(
-      expect.objectContaining({ message: "failed", name: "Error" }),
-    );
-    expect(getAttemptState(scope)?.operationError).not.toBe(error);
-    expect(Object.isFrozen(getAttemptState(scope)?.operationError)).toBe(true);
+    expect(started).toHaveBeenCalledOnce();
+    const event = started.mock.calls[0]?.[0];
+    expect(event).toEqual({ operation, scope, step, type: "attempt.started" });
+    expect(event.operation).not.toBe(operation);
+    expect(event.step).not.toBe(step);
+    expect(Object.isFrozen(event.operation)).toBe(true);
+    expect(Object.isFrozen(event.step)).toBe(true);
   });
 
   it("retains state for parallel tool starts", async () => {
