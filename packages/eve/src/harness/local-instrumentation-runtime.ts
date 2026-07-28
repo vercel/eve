@@ -70,11 +70,11 @@ export function installLocalInstrumentationRuntime(input: {
   });
 
   async function releaseSessionTrace(event: { readonly sessionId: string }): Promise<void> {
-    const released = processor.releaseSession(event.sessionId);
-    if (released === undefined) return;
-    // The released trace is now evictable, so settle its pending segment writes
-    // before a sweep can measure or remove it.
+    // Settle pending segment writes before dropping liveness: a sweep already
+    // running reads the same live set, so releasing first would expose the
+    // trace to eviction while it is still being written.
     await processor.forceFlush();
+    if (!processor.releaseSession(event.sessionId)) return;
     requestPrune();
   }
 

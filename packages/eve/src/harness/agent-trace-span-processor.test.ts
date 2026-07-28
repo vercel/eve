@@ -38,14 +38,14 @@ describe("AgentTraceSpanProcessor", () => {
     processor.onStart(span("trace-2", { "agent.session.id": "session-2" }), {});
     expect([...processor.activeTraceIds()].sort()).toEqual(["trace-1", "trace-2"]);
 
-    expect(processor.releaseSession("session-1")).toBe("trace-1");
+    expect(processor.releaseSession("session-1")).toBe(true);
     expect([...processor.activeTraceIds()]).toEqual(["trace-2"]);
   });
 
-  it("returns nothing when releasing a session it never owned", () => {
+  it("reports no release for a session it never owned", () => {
     const processor = new AgentTraceSpanProcessor([]);
 
-    expect(processor.releaseSession("session-unknown")).toBeUndefined();
+    expect(processor.releaseSession("session-unknown")).toBe(false);
   });
 
   it("excludes Workflow instrumentation from an agent trace", () => {

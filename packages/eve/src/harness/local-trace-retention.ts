@@ -11,12 +11,16 @@ import { createLogger, formatError } from "#internal/logging.js";
 const log = createLogger("harness.local-trace-retention");
 
 /**
- * How long an `atomicWriteFile` temp file must sit untouched before a sweep
- * treats it as abandoned. A real write renames within milliseconds, so anything
- * this old belongs to a killed process — and reaping a live one would break the
- * write it belongs to.
+ * How long a trace must sit untouched before a sweep may act on it.
+ *
+ * Liveness is tracked per dev worker, so a draining worker's writes and a
+ * waiting session restored into a replacement worker are both invisible to the
+ * open-session set. Recent writes are the one liveness signal that crosses
+ * processes, so nothing written this recently is evicted, and an
+ * `atomicWriteFile` temp file is only reaped once this stale — a real write
+ * renames within milliseconds.
  */
-const LOCAL_TRACE_ABANDONED_TEMP_FILE_MS = 5 * 60 * 1_000;
+const LOCAL_TRACE_QUIESCENCE_MS = 5 * 60 * 1_000;
 
 const LOCAL_TRACE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 const LOCAL_TRACE_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
@@ -49,7 +53,7 @@ export interface LocalTracePruneResult {
 
 export interface PruneLocalTraceStoreInput {
   readonly appRoot: string;
-  /** Traces whose session is still open; never evicted, even mid-write. */
+  /** Traces whose session is open in this worker; never evicted. */
   readonly activeTraceIds: ReadonlySet<string>;
   readonly maxAgeMs?: RetentionBound;
   readonly maxTotalBytes?: RetentionBound;
@@ -89,14 +93,15 @@ export function resolveLocalTraceRetentionSettings(
 /**
  * Bounds the local trace store.
  *
- * A trace survives when its session is still open, when it is among the newest
- * `retainCount`, or when it is younger than `maxAgeMs`. Whatever survives is
- * then evicted oldest-first while the store exceeds `maxTotalBytes`, never
- * dropping an active trace and never breaching the count floor.
+ * A trace survives while its session is open, while it was written within the
+ * quiescence window, while it is among the newest `retainCount`, and while it
+ * is younger than `maxAgeMs`. Everything else is evicted oldest-first, taking
+ * the age bound first and then whatever the `maxTotalBytes` budget still
+ * demands.
  *
- * The count floor outranks age deliberately: a trace records something that
- * happened and cannot be regenerated, so returning to a quiet project should
- * not mean returning to an empty store.
+ * The count floor outranks both other bounds deliberately: a trace records
+ * something that happened and cannot be regenerated, so returning to a quiet
+ * project should not mean returning to an empty store.
  */
 export async function pruneLocalTraceStore(
   input: PruneLocalTraceStoreInput,
@@ -106,83 +111,102 @@ export async function pruneLocalTraceStore(
   const maxTotalBytes = clampBound(input.maxTotalBytes ?? LOCAL_TRACE_MAX_TOTAL_BYTES);
   const retainCount = clampCount(input.retainCount ?? LOCAL_TRACE_RETAIN_COUNT);
 
-  const reasons = new Set<LocalTracePruneReason>();
-  let reclaimedBytes = 0;
-  let removedTraces = 0;
-
   const traces = await readStoredTraces(input.appRoot, now);
-  const byNewestFirst = [...traces].sort((left, right) => right.modifiedAtMs - left.modifiedAtMs);
+  const newestFirst = [...traces].sort((left, right) => right.modifiedAtMs - left.modifiedAtMs);
   // `off` disables the bound, and this bound is a floor: disabling it removes
   // the keep-newest guarantee rather than granting unlimited retention.
-  const floor = new Set(byNewestFirst.slice(0, retainCount === false ? 0 : retainCount));
+  const floor = new Set(newestFirst.slice(0, retainCount === false ? 0 : retainCount));
 
-  const survivors: StoredTrace[] = [];
-  for (const trace of byNewestFirst) {
+  const reasons = new Set<LocalTracePruneReason>();
+  let totalBytes = traces.reduce((sum, trace) => sum + trace.byteSize, 0);
+  let reclaimedBytes = 0;
+  let removedTraces = 0;
+  let retainedTraces = 0;
+
+  for (const trace of newestFirst.toReversed()) {
+    const idle = now - trace.modifiedAtMs;
     const protectedTrace =
       input.activeTraceIds.has(trace.traceId) ||
       floor.has(trace) ||
-      maxAgeMs === false ||
-      now - trace.modifiedAtMs <= maxAgeMs;
-    if (protectedTrace) {
-      survivors.push(trace);
+      idle <= LOCAL_TRACE_QUIESCENCE_MS;
+    const reason: LocalTracePruneReason | undefined = protectedTrace
+      ? undefined
+      : maxAgeMs !== false && idle > maxAgeMs
+        ? "maxAgeMs"
+        : maxTotalBytes !== false && totalBytes > maxTotalBytes
+          ? "maxTotalBytes"
+          : undefined;
+
+    if (reason === undefined) {
+      retainedTraces += 1;
       continue;
     }
-    reclaimedBytes += await removeDirectory(trace.path);
+    await rm(trace.path, { force: true, recursive: true });
+    totalBytes -= trace.byteSize;
+    reclaimedBytes += trace.byteSize;
     removedTraces += 1;
-    reasons.add("maxAgeMs");
+    reasons.add(reason);
   }
 
-  if (maxTotalBytes !== false) {
-    let total = survivors.reduce((sum, trace) => sum + trace.byteSize, 0);
-    // Oldest-first, and stop at the floor: the budget may not delete what the
-    // keep-newest guarantee promised.
-    for (const trace of [...survivors].reverse()) {
-      if (total <= maxTotalBytes) break;
-      if (input.activeTraceIds.has(trace.traceId) || floor.has(trace)) continue;
-      total -= trace.byteSize;
-      reclaimedBytes += await removeDirectory(trace.path);
-      removedTraces += 1;
-      survivors.splice(survivors.indexOf(trace), 1);
-      reasons.add("maxTotalBytes");
-    }
-  }
-
-  return {
-    reasons: [...reasons],
-    reclaimedBytes,
-    removedTraces,
-    retainedTraces: survivors.length,
-  };
+  return { reasons: [...reasons], reclaimedBytes, removedTraces, retainedTraces };
 }
 
-let inFlight: Promise<void> | undefined;
+interface PruneRequestState {
+  input: PruneLocalTraceStoreInput;
+  requested: boolean;
+  running: Promise<void> | undefined;
+}
+
+const pruneRequest: PruneRequestState = {
+  input: { activeTraceIds: new Set(), appRoot: "" },
+  requested: false,
+  running: undefined,
+};
 
 /**
  * Requests a sweep without blocking the caller.
  *
- * Concurrent requests are dropped rather than queued: the next session terminal
- * requests again, so the store still converges, and a sweep never delays a
- * harness step. Failures are reported once per sweep and otherwise swallowed —
- * an unbounded store is preferable to a broken dev server.
+ * One pending request is coalesced rather than dropped, so a session that
+ * finishes while a sweep is already running still gets swept — the same
+ * guarantee `requestDevelopmentGenerationPrune` gives dev runtime generations.
+ * Failures are reported and otherwise swallowed: an unbounded store is
+ * preferable to a broken dev server.
  */
 export function requestLocalTraceStorePrune(input: PruneLocalTraceStoreInput): void {
-  if (inFlight !== undefined) return;
-  inFlight = pruneLocalTraceStore(input)
-    .then((result) => {
-      if (result.removedTraces === 0 && result.reclaimedBytes === 0) return;
-      log.debug("pruned local traces", {
-        reasons: result.reasons.join(","),
-        reclaimedBytes: result.reclaimedBytes,
-        removedTraces: result.removedTraces,
-        retainedTraces: result.retainedTraces,
-      });
-    })
+  pruneRequest.input = input;
+  pruneRequest.requested = true;
+  if (pruneRequest.running === undefined) startPruning();
+}
+
+function startPruning(): void {
+  pruneRequest.running = (async () => {
+    while (pruneRequest.requested) {
+      pruneRequest.requested = false;
+      report(await pruneLocalTraceStore(pruneRequest.input));
+    }
+  })()
     .catch((error: unknown) => {
       log.warn("local trace retention failed", { error: formatError(error) });
     })
     .finally(() => {
-      inFlight = undefined;
+      pruneRequest.running = undefined;
+      if (pruneRequest.requested) startPruning();
     });
+}
+
+/**
+ * Reports at `info` so it survives the default log threshold: a trace cannot be
+ * regenerated, and there is no trace browser yet, so a silent deletion is
+ * indistinguishable from a span that was never captured.
+ */
+function report(result: LocalTracePruneResult): void {
+  if (result.removedTraces === 0) return;
+  log.info("pruned local traces", {
+    reasons: result.reasons.join(","),
+    reclaimedBytes: result.reclaimedBytes,
+    removedTraces: result.removedTraces,
+    retainedTraces: result.retainedTraces,
+  });
 }
 
 async function readStoredTraces(appRoot: string, now: number): Promise<StoredTrace[]> {
@@ -194,13 +218,21 @@ async function readStoredTraces(appRoot: string, now: number): Promise<StoredTra
     entries
       .filter((entry) => entry.isDirectory())
       .map(async (entry) => {
+        const path = join(schemaDirectory, entry.name);
         const segments = resolveLocalTraceSegmentsDirectory(appRoot, entry.name);
-        const measured = await measureSegments(segments, now);
-        if (measured === undefined) return undefined;
+        await reapAbandonedTemporaryFiles(segments, now);
+        // Segments are added and never rewritten, so that directory's mtime is
+        // when the trace last received a span. A trace directory without one
+        // falls back to its own mtime so it is still bounded rather than
+        // invisible to the policy.
+        const modifiedAtMs = (await directoryMtime(segments)) ?? (await directoryMtime(path));
+        if (modifiedAtMs === undefined) return undefined;
         return {
-          byteSize: measured.byteSize,
-          modifiedAtMs: measured.modifiedAtMs,
-          path: join(schemaDirectory, entry.name),
+          // Measured across the whole trace directory, so anything the writer
+          // leaves behind counts against the budget.
+          byteSize: await directorySize(path),
+          modifiedAtMs,
+          path,
           traceId: entry.name,
         };
       }),
@@ -209,48 +241,31 @@ async function readStoredTraces(appRoot: string, now: number): Promise<StoredTra
 }
 
 /**
- * Sums a trace's segments and reports when it last received one.
- *
- * Also reaps `atomicWriteFile` temp files: it removes its own on a failed
- * rename, but a process killed between write and rename leaves one behind, and
- * nothing else would ever reclaim those bytes.
+ * Removes `atomicWriteFile` temp files left by a killed process. It clears its
+ * own on a failed rename, but a process killed between write and rename leaves
+ * one behind and nothing else would ever reclaim those bytes.
  */
-async function measureSegments(
-  segmentsDirectory: string,
-  now: number,
-): Promise<{ byteSize: number; modifiedAtMs: number } | undefined> {
+async function reapAbandonedTemporaryFiles(segmentsDirectory: string, now: number): Promise<void> {
   const entries = await readDirectoryEntries(segmentsDirectory);
-  if (entries === undefined) return undefined;
-
-  let byteSize = 0;
+  if (entries === undefined) return;
   for (const entry of entries) {
-    if (!entry.isFile()) continue;
+    if (!entry.isFile() || !entry.name.includes(".tmp-")) continue;
     const path = join(segmentsDirectory, entry.name);
     try {
-      const stats = await stat(path);
-      if (!entry.name.includes(".tmp-")) {
-        byteSize += stats.size;
-        continue;
-      }
-      if (now - stats.mtimeMs > LOCAL_TRACE_ABANDONED_TEMP_FILE_MS) {
-        await rm(path, { force: true }).catch(() => undefined);
-      }
+      if (now - (await stat(path)).mtimeMs <= LOCAL_TRACE_QUIESCENCE_MS) continue;
+      await rm(path, { force: true });
     } catch {
-      // Raced with a concurrent writer; the next sweep sees the settled file.
+      // Raced with the writer that owns it; the next sweep sees the outcome.
     }
-  }
-
-  try {
-    return { byteSize, modifiedAtMs: (await stat(segmentsDirectory)).mtimeMs };
-  } catch {
-    return undefined;
   }
 }
 
-async function removeDirectory(path: string): Promise<number> {
-  const byteSize = await directorySize(path);
-  await rm(path, { force: true, recursive: true });
-  return byteSize;
+async function directoryMtime(path: string): Promise<number | undefined> {
+  try {
+    return (await stat(path)).mtimeMs;
+  } catch {
+    return undefined;
+  }
 }
 
 async function directorySize(path: string): Promise<number> {
@@ -266,7 +281,7 @@ async function directorySize(path: string): Promise<number> {
     try {
       total += (await stat(child)).size;
     } catch {
-      // Disappeared mid-sweep; it contributes nothing to reclaimed bytes.
+      // Disappeared mid-sweep; it contributes nothing to the measured size.
     }
   }
   return total;

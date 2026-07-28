@@ -21,11 +21,14 @@ The local writer is an internal development default, not a second provider layer
 
 The store is bounded, so it cannot grow without limit on a development machine. eve sweeps it when a session finishes and once when the dev server starts. A trace is kept when **any** of these holds:
 
-- its session is still open;
+- its session is open in the running dev worker;
+- it received a span in the last five minutes;
 - it is one of the newest `EVE_TRACES_RETAIN_COUNT` traces;
 - it last received a span within `EVE_TRACES_MAX_AGE_MS`.
 
 Whatever survives is then evicted oldest-first while the store exceeds `EVE_TRACES_MAX_TOTAL_BYTES`. The keep-newest floor always wins: eve will exceed the size budget rather than drop below it, because a trace records something that happened and cannot be regenerated.
+
+Open sessions are tracked per dev worker, so a session waiting across a restart, or a trace a draining worker is still writing, is not covered by the first rule. The five-minute write-recency rule is what protects those, and it applies even when you set `EVE_TRACES_MAX_AGE_MS=0`.
 
 | Variable                     | Default              | Effect                                        |
 | ---------------------------- | -------------------- | --------------------------------------------- |

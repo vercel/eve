@@ -14,6 +14,7 @@ const createScratchDirectory = useTemporaryDirectories();
 
 const NOW = 1_700_000_000_000;
 const DAY_MS = 24 * 60 * 60 * 1_000;
+const HOUR_MS = 60 * 60 * 1_000;
 
 /**
  * Writes one trace whose segments directory carries `modifiedAtMs`, which is
@@ -92,7 +93,7 @@ describe("pruneLocalTraceStore", () => {
     for (const index of [0, 1, 2, 3]) {
       await writeTrace({
         appRoot,
-        modifiedAtMs: NOW - index * 1_000,
+        modifiedAtMs: NOW - HOUR_MS - index * 1_000,
         segmentBytes: 1_000,
         traceId: `trace-${index}`,
       });
@@ -157,19 +158,69 @@ describe("pruneLocalTraceStore", () => {
     await expect(stat(inFlight)).resolves.toBeDefined();
   });
 
-  it("leaves a trace directory in place when it holds no segments directory", async () => {
+  it("bounds a trace directory that never grew a segments directory", async () => {
     const appRoot = await createScratchDirectory("eve-trace-retention-partial-");
     const partial = join(resolveLocalTraceSchemaDirectory(appRoot), "partial");
     await mkdir(partial, { recursive: true });
+    const staleAt = new Date(NOW - 30 * DAY_MS);
+    await utimes(partial, staleAt, staleAt);
+
+    await pruneLocalTraceStore({
+      activeTraceIds: new Set(),
+      appRoot,
+      maxAgeMs: 7 * DAY_MS,
+      now: NOW,
+      retainCount: 0,
+    });
+
+    await expect(stat(partial)).rejects.toThrow();
+  });
+
+  it("never evicts a trace written inside the quiescence window", async () => {
+    const appRoot = await createScratchDirectory("eve-trace-retention-quiescent-");
+    // Another dev worker could still be writing this one: liveness is tracked
+    // per process, so recency is the only cross-process signal.
+    await writeTrace({ appRoot, modifiedAtMs: NOW - 1_000, traceId: "draining" });
+    await writeTrace({ appRoot, modifiedAtMs: NOW - HOUR_MS, traceId: "settled" });
 
     await pruneLocalTraceStore({
       activeTraceIds: new Set(),
       appRoot,
       maxAgeMs: 0,
+      maxTotalBytes: 0,
       now: NOW,
       retainCount: 0,
     });
 
-    await expect(stat(partial)).resolves.toBeDefined();
+    await expect(listTraceIds(appRoot)).resolves.toEqual(["draining"]);
+  });
+
+  it("counts temp files left behind toward the size budget", async () => {
+    const appRoot = await createScratchDirectory("eve-trace-retention-tmp-budget-");
+    await writeTrace({
+      appRoot,
+      modifiedAtMs: NOW - HOUR_MS,
+      segmentBytes: 10,
+      traceId: "bloated",
+    });
+    const segments = resolveLocalTraceSegmentsDirectory(appRoot, "bloated");
+    // Recent enough to survive reaping, so its bytes must still be counted.
+    await writeFile(join(segments, "dddddddddddddddd.otlp.json.tmp-1-a"), "x".repeat(5_000));
+    // Writing into the directory bumped its mtime; restore the settled age.
+    const settledAt = new Date(NOW - HOUR_MS);
+    await utimes(segments, settledAt, settledAt);
+
+    const result = await pruneLocalTraceStore({
+      activeTraceIds: new Set(),
+      appRoot,
+      maxAgeMs: false,
+      maxTotalBytes: 1_000,
+      now: NOW,
+      retainCount: 0,
+    });
+
+    expect(result.reasons).toEqual(["maxTotalBytes"]);
+    expect(result.reclaimedBytes).toBeGreaterThan(5_000);
+    await expect(listTraceIds(appRoot)).resolves.toEqual([]);
   });
 });

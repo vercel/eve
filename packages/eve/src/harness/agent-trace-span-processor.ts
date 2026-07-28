@@ -48,13 +48,13 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     return this.#ownedTraceIds;
   }
 
-  /** Forgets one session's trace, returning the trace id it released. */
-  releaseSession(sessionId: string): string | undefined {
+  /** Forgets one session's trace, reporting whether it owned one. */
+  releaseSession(sessionId: string): boolean {
     const traceId = this.#sessionTraceIds.get(sessionId);
-    if (traceId === undefined) return undefined;
+    if (traceId === undefined) return false;
     this.#ownedTraceIds.delete(traceId);
     this.#sessionTraceIds.delete(sessionId);
-    return traceId;
+    return true;
   }
 
   async shutdown(): Promise<void> {
