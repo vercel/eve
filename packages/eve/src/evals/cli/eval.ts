@@ -17,6 +17,7 @@ import { JUnit } from "#evals/runner/reporters/junit.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import { resolveEvalTargetHandle } from "#evals/target.js";
 import type { EveEval, EveEvalTargetHandle } from "#evals/types.js";
+import { readDevelopmentControlToken } from "#internal/nitro/dev-control-auth.js";
 
 interface EvalCliOptions {
   url?: string;
@@ -115,6 +116,10 @@ export async function runEvalCommand(
       );
       target = await resolveEvalTargetHandle({
         client,
+        developmentControlToken: await readDevelopmentControlToken({
+          appRoot,
+          serverUrl: options.url,
+        }),
         expectedAgentName: await readExpectedAgentName(appRoot),
         kind: "remote",
         url: options.url,
@@ -125,6 +130,10 @@ export async function runEvalCommand(
       client = await createEvalClient({ kind: "local", url: started.url });
       target = await resolveEvalTargetHandle({
         client,
+        developmentControlToken: await readDevelopmentControlToken({
+          appRoot,
+          serverUrl: started.url,
+        }),
         expectedAgentName: await readExpectedAgentName(appRoot),
         kind: "local",
         url: started.url,

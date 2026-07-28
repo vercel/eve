@@ -24,18 +24,21 @@ import {
 } from "#internal/application/package.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
 import type {
+  NitroBuildSurface,
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
 } from "#internal/nitro/host/types.js";
-import {
-  createEveVercelOptions,
-  EVE_WORKFLOW_FLOW_ROUTE_PATH,
-} from "#internal/nitro/host/vercel-build-output-config.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
+import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 
-const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
-const configureProductionNitroRoutes = vi.fn(async () => undefined);
+const applyPreparedDevelopmentNitroRoutes = vi.fn();
+const applyPreparedProductionNitroRoutes = vi.fn();
+const configureStandaloneNitroShellRoutes = vi.fn();
 const createNitroMock = vi.fn();
+const prepareDevelopmentNitroRoutes = vi.fn(async () => ({}));
+const prepareProductionNitroRoutes = vi.fn(async () => ({}));
 const registerScheduleTaskHandlers = vi.fn();
 
 vi.mock("nitro/builder", () => ({
@@ -47,8 +50,11 @@ vi.mock("./schedule-task-routes.js", () => ({
 }));
 
 vi.mock("./configure-nitro-routes.js", () => ({
-  configureDevelopmentNitroRoutes,
-  configureProductionNitroRoutes,
+  applyPreparedDevelopmentNitroRoutes,
+  applyPreparedProductionNitroRoutes,
+  configureStandaloneNitroShellRoutes,
+  prepareDevelopmentNitroRoutes,
+  prepareProductionNitroRoutes,
 }));
 
 vi.mock("#internal/workflow-bundle/workflow-builders.js", () => ({
@@ -69,6 +75,7 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
   return {
     hookHandlers,
     nitro: {
+      close: async () => {},
       hooks: {
         hook(name: string, handler: (...args: unknown[]) => unknown) {
           const handlers = hookHandlers.get(name) ?? [];
@@ -169,10 +176,14 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
   };
 }
 
-function createProductionOptions(preparedHost: PreparedApplicationHost) {
+function createProductionOptions(
+  preparedHost: PreparedApplicationHost,
+  surface: NitroBuildSurface = "all",
+) {
   return {
     buildDir: resolveNitroBuildDirectory(preparedHost.appRoot),
     outputDir: join(preparedHost.appRoot, ".output"),
+    surface,
   };
 }
 
@@ -199,6 +210,23 @@ describe("application Nitro creation", () => {
 
     expect(plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath)).toBeLessThan(
       plugins.indexOf(preparedHost.compiledArtifacts.workflowWorldPluginPath),
+    );
+  });
+
+  it("requests WebSocket support for the standalone development host", async () => {
+    const nitroStub = createNitroStub({ dev: true });
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createDevelopmentApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    await createDevelopmentApplicationNitro(createPreparedHost());
+
+    expect(createNitroMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dev: true,
+        features: { websocket: true },
+      }),
+      { watch: true },
     );
   });
 
@@ -294,13 +322,17 @@ describe("application Nitro creation", () => {
       await hook(nitroStub.nitro, config);
     }
 
-    const external = config.external as (id: string) => boolean | null | undefined;
+    const external = config.external as (
+      id: string,
+      importer?: string,
+      isResolved?: boolean,
+    ) => boolean | null | undefined;
     expect(external(`${preparedHost.workflowBuildDir}/workflows.mjs`)).toBe(true);
     expect(external("/tmp/weather-agent/.nitro/workflow/workflows.mjs")).toBeUndefined();
     expect(external(`${preparedHost.workflowBuildDir}/steps.mjs`)).toBeUndefined();
     expect(external("/tmp/weather-agent/.nitro/workflow/steps.mjs")).toBeUndefined();
-    expect(external("/tmp/keep-external")).toBe(false);
-    expect(existingExternal).toHaveBeenCalledWith("/tmp/keep-external");
+    expect(external("/tmp/keep-external", "/tmp/importer.mjs", true)).toBe(false);
+    expect(existingExternal).toHaveBeenCalledWith("/tmp/keep-external", "/tmp/importer.mjs", true);
   });
 
   it("limits step-surface scan directories to the package execution directory", async () => {
@@ -336,69 +368,276 @@ describe("application Nitro creation", () => {
     });
   });
 
-  it("sets the eve framework version and flow function rules on Vercel build output config", async () => {
-    vi.stubEnv("VERCEL", "1");
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+  it.each<{
+    includesFrameworkMetadata: boolean;
+    surface: NitroBuildSurface;
+  }>([
+    { includesFrameworkMetadata: true, surface: "all" },
+    { includesFrameworkMetadata: true, surface: "app" },
+    { includesFrameworkMetadata: false, surface: "flow" },
+  ])(
+    "preserves Vercel framework metadata for the $surface production surface",
+    async ({ includesFrameworkMetadata, surface }) => {
+      vi.stubEnv("VERCEL", "1");
+      const nitroStub = createNitroStub();
+      createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = createPreparedHost();
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+      const { createProductionApplicationNitro } =
+        await import("#internal/nitro/host/create-application-nitro.js");
+      const preparedHost = createPreparedHost();
+      await createProductionApplicationNitro(
+        preparedHost,
+        createProductionOptions(preparedHost, surface),
+      );
 
-    expect(createNitroMock).toHaveBeenCalledWith(
-      expect.objectContaining({
+      const expectedVercelOptions = includesFrameworkMetadata
+        ? {
+            config: {
+              version: 3,
+              framework: {
+                slug: "eve",
+                version: resolveInstalledPackageInfo().version,
+              },
+            },
+          }
+        : undefined;
+      expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
         preset: "vercel",
-        vercel: createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
-      }),
-    );
+        vercel: expectedVercelOptions,
+      });
+      const vercelOptions = createNitroMock.mock.calls[0]?.[0].vercel;
+      if (includesFrameworkMetadata) {
+        expect(vercelOptions?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]).toMatchObject({
+          maxDuration: "max",
+          experimentalTriggers: [expect.objectContaining({ type: "queue/v2beta" })],
+        });
+      } else {
+        expect(vercelOptions).toBeUndefined();
+      }
+    },
+  );
 
-    const vercelOptions = createNitroMock.mock.calls[0]?.[0].vercel;
-    expect(vercelOptions?.config).toEqual({
-      version: 3,
-      framework: {
-        slug: "eve",
-        version: resolveInstalledPackageInfo().version,
-      },
-    });
-    expect(vercelOptions?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]).toMatchObject({
-      maxDuration: "max",
-      experimentalTriggers: [expect.objectContaining({ type: "queue/v2beta" })],
-    });
-  });
+  it.each<{
+    enablesWebSockets: boolean;
+    surface: NitroBuildSurface;
+  }>([
+    { enablesWebSockets: true, surface: "all" },
+    { enablesWebSockets: true, surface: "app" },
+    { enablesWebSockets: false, surface: "flow" },
+  ])(
+    "$surface production surface preserves WebSocket feature selection",
+    async ({ enablesWebSockets, surface }) => {
+      const nitroStub = createNitroStub();
+      createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-  it("enables websockets without overriding the Vercel entry format", async () => {
-    vi.stubEnv("VERCEL", "1");
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+      const { createProductionApplicationNitro } =
+        await import("#internal/nitro/host/create-application-nitro.js");
+      const preparedHost = createPreparedHost();
+      const websocketChannel: CompiledChannelEntry = {
+        kind: "channel",
+        logicalPath: "channels/voice.ts",
+        method: "WEBSOCKET",
+        name: "voice",
+        sourceId: "channels/voice.ts",
+        sourceKind: "module",
+        urlPath: "/eve/v1/voice/ws",
+      };
+      preparedHost.compileResult.manifest.channels = [websocketChannel];
 
-    const { createProductionApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = createPreparedHost();
-    const websocketChannel: CompiledChannelEntry = {
-      kind: "channel",
-      logicalPath: "channels/voice.ts",
-      method: "WEBSOCKET",
-      name: "voice",
-      sourceId: "channels/voice.ts",
-      sourceKind: "module",
-      urlPath: "/eve/v1/voice/ws",
-    };
-    preparedHost.compileResult.manifest.channels = [websocketChannel];
+      await createProductionApplicationNitro(
+        preparedHost,
+        createProductionOptions(preparedHost, surface),
+      );
 
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+      expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
+        features: { websocket: enablesWebSockets },
+      });
+    },
+  );
 
-    const nitroOptions = createNitroMock.mock.calls[0]?.[0];
-    expect(nitroOptions).toMatchObject({
-      features: {
-        websocket: true,
-      },
-      preset: "vercel",
-    });
-    expect(nitroOptions?.vercel).toEqual(
-      createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
-    );
-  });
+  it.each<NitroBuildSurface>(["all", "app", "flow"])(
+    "$surface production surface disables WebSockets for HTTP-only manifests",
+    async (surface) => {
+      const nitroStub = createNitroStub();
+      createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+      const { createProductionApplicationNitro } =
+        await import("#internal/nitro/host/create-application-nitro.js");
+      const preparedHost = createPreparedHost();
+
+      await createProductionApplicationNitro(
+        preparedHost,
+        createProductionOptions(preparedHost, surface),
+      );
+
+      expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
+        features: { websocket: false },
+      });
+    },
+  );
+
+  it.each<{
+    includesWorkflowResources: boolean;
+    surface: NitroBuildSurface;
+  }>([
+    { includesWorkflowResources: true, surface: "all" },
+    { includesWorkflowResources: false, surface: "app" },
+    { includesWorkflowResources: true, surface: "flow" },
+  ])(
+    "$surface production surface isolates Workflow-only build resources",
+    async ({ includesWorkflowResources, surface }) => {
+      const nitroStub = createNitroStub();
+      createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+      const { createProductionApplicationNitro } =
+        await import("#internal/nitro/host/create-application-nitro.js");
+      const preparedHost = createPreparedHost();
+
+      await createProductionApplicationNitro(
+        preparedHost,
+        createProductionOptions(preparedHost, surface),
+      );
+
+      const createdConfig = createNitroMock.mock.calls[0]?.[0];
+      const rollupConfig = { plugins: [] as Array<{ name?: string }> };
+      for (const hook of nitroStub.hookHandlers.get("rollup:before") ?? []) {
+        await hook(nitroStub.nitro, rollupConfig);
+      }
+      const pluginNames = rollupConfig.plugins.map((plugin) => plugin.name);
+
+      if (includesWorkflowResources) {
+        expect(createdConfig.scanDirs).toEqual([
+          resolvePackageSourceDirectoryPath("src/execution"),
+        ]);
+        expect(nitroStub.nitro.options.alias.workflow).toBe(resolveWorkflowModulePath("workflow"));
+        expect(pluginNames).toEqual(
+          expect.arrayContaining([
+            "eve:workflow-module-side-effects",
+            "eve:workflow-step-module-side-effects",
+            "eve:workflow-step-transform",
+          ]),
+        );
+      } else {
+        expect(createdConfig.scanDirs).toBeUndefined();
+        expect(nitroStub.nitro.options.alias.workflow).toBeUndefined();
+        expect(pluginNames).not.toEqual(
+          expect.arrayContaining([
+            "eve:workflow-module-side-effects",
+            "eve:workflow-step-module-side-effects",
+            "eve:workflow-step-transform",
+          ]),
+        );
+        expect(nitroStub.nitro.options.noExternals).toBeUndefined();
+      }
+    },
+  );
+
+  it.each<{
+    registersSchedules: boolean;
+    surface: NitroBuildSurface;
+  }>([
+    { registersSchedules: true, surface: "all" },
+    { registersSchedules: true, surface: "app" },
+    { registersSchedules: false, surface: "flow" },
+  ])(
+    "$surface production surface preserves schedule registration",
+    async ({ registersSchedules, surface }) => {
+      const nitroStub = createNitroStub();
+      createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+      const { createProductionApplicationNitro } =
+        await import("#internal/nitro/host/create-application-nitro.js");
+      const preparedHost = createPreparedHost();
+      const scheduleRegistration: ScheduleRegistration = {
+        cron: "0 8 * * *",
+        description: 'Run eve schedule "daily-digest".',
+        logicalPath: "schedules/daily-digest.ts",
+        scheduleId: "daily-digest",
+        sourceId: "schedules/daily-digest.ts",
+        taskName: "eve.schedule.daily-digest",
+      };
+      preparedHost.scheduleRegistrations = [scheduleRegistration];
+
+      await createProductionApplicationNitro(
+        preparedHost,
+        createProductionOptions(preparedHost, surface),
+      );
+
+      if (registersSchedules) {
+        expect(registerScheduleTaskHandlers).toHaveBeenCalledOnce();
+        expect(registerScheduleTaskHandlers).toHaveBeenCalledWith(
+          nitroStub.nitro,
+          expect.objectContaining({ registrations: [scheduleRegistration] }),
+        );
+      } else {
+        expect(registerScheduleTaskHandlers).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each<{
+    hasSchedule: boolean;
+    surface: NitroBuildSurface;
+    usesCronRoute: boolean;
+  }>([
+    { hasSchedule: true, surface: "all", usesCronRoute: true },
+    { hasSchedule: true, surface: "app", usesCronRoute: true },
+    { hasSchedule: true, surface: "flow", usesCronRoute: false },
+    { hasSchedule: false, surface: "all", usesCronRoute: false },
+    { hasSchedule: false, surface: "app", usesCronRoute: false },
+    { hasSchedule: false, surface: "flow", usesCronRoute: false },
+  ])(
+    "$surface Vercel surface with schedule=$hasSchedule composes the cron route",
+    async ({ hasSchedule, surface, usesCronRoute }) => {
+      vi.stubEnv("VERCEL", "1");
+      const nitroStub = createNitroStub();
+      createNitroMock.mockImplementationOnce(async (config) => {
+        nitroStub.nitro.options.vercel = config.vercel;
+        return nitroStub.nitro;
+      });
+
+      const { createProductionApplicationNitro } =
+        await import("#internal/nitro/host/create-application-nitro.js");
+      const preparedHost = createPreparedHost();
+      if (hasSchedule) {
+        preparedHost.scheduleRegistrations = [
+          {
+            cron: "0 8 * * *",
+            description: 'Run eve schedule "daily-digest".',
+            logicalPath: "schedules/daily-digest.ts",
+            scheduleId: "daily-digest",
+            sourceId: "schedules/daily-digest.ts",
+            taskName: "eve.schedule.daily-digest",
+          },
+        ];
+      }
+
+      const nitro = await createProductionApplicationNitro(
+        preparedHost,
+        createProductionOptions(preparedHost, surface),
+      );
+
+      if (surface === "flow") {
+        expect(nitro.options.vercel).toBeUndefined();
+      } else {
+        expect(nitro.options.vercel?.config).toEqual({
+          version: 3,
+          framework: {
+            slug: "eve",
+            version: resolveInstalledPackageInfo().version,
+          },
+        });
+      }
+
+      if (usesCronRoute) {
+        expect(nitro.options.vercel?.cronHandlerRoute).toMatch(
+          new RegExp(`^${EVE_ROUTE_PREFIX}/cron/[A-Za-z0-9_-]{43}$`),
+        );
+      } else {
+        expect(nitro.options.vercel?.cronHandlerRoute).toBeUndefined();
+      }
+    },
+  );
 
   it("clears Nitro build cache output from a different eve version", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-nitro-version-cache-"));

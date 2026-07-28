@@ -5,12 +5,10 @@ import { readDevelopmentEnvironmentHostValues } from "#cli/dev/environment.js";
 import { computeChannelRouteRegistrations } from "#internal/nitro/host/channel-routes.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 
-export async function computeDevelopmentHostFingerprint(
-  host: PreparedDevelopmentApplicationHost,
-): Promise<string> {
+async function createDevelopmentHostFingerprintPayload(host: PreparedDevelopmentApplicationHost) {
   const manifest = host.compileResult.manifest;
   const agentNodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  const payload = {
+  return {
     agentName: manifest.config.name,
     bundler: {
       externalDependencies: [
@@ -38,8 +36,40 @@ export async function computeDevelopmentHostFingerprint(
       world: manifest.config.experimental?.workflow?.world ?? "local",
     },
   };
+}
 
-  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+function fingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+export async function computeDevelopmentHostFingerprint(
+  host: PreparedDevelopmentApplicationHost,
+): Promise<string> {
+  return fingerprint(await createDevelopmentHostFingerprintPayload(host));
+}
+
+/** Computes route-sensitive and route-independent fingerprints from one read pass. */
+export async function computeDevelopmentHostFingerprints(
+  host: PreparedDevelopmentApplicationHost,
+): Promise<{
+  readonly configuration: string;
+  readonly host: string;
+}> {
+  const payload = await createDevelopmentHostFingerprintPayload(host);
+  const { channels: _channels, ...configuration } = payload;
+  return {
+    configuration: fingerprint(configuration),
+    host: fingerprint(payload),
+  };
+}
+
+/** Fingerprints structural host inputs other than channel route topology. */
+export async function computeDevelopmentHostConfigurationFingerprint(
+  host: PreparedDevelopmentApplicationHost,
+): Promise<string> {
+  const { channels: _channels, ...configuration } =
+    await createDevelopmentHostFingerprintPayload(host);
+  return fingerprint(configuration);
 }
 
 async function readInstrumentationSource(

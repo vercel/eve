@@ -1,9 +1,10 @@
 import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
+import { resolveDiscoveryProject, type ResolvedDiscoveryProject } from "#discover/project.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   type BuiltInWorkflowWorldTarget,
   writeCompiledArtifactsFiles,
@@ -33,15 +34,18 @@ import type {
 export async function prepareDevelopmentApplicationHost(
   appRoot: string,
   options: {
+    readonly agentRoot?: string;
     readonly changedPaths?: readonly string[];
     readonly previousExtensions?: readonly DevelopmentWorkspaceExtension[];
   } = {},
 ): Promise<PreparedDevelopmentApplicationHost> {
+  const project = await resolvePreparedApplicationProject(appRoot, options.agentRoot);
   const extensionPreparation: {
+    agentRoot?: string;
     appRoot: string;
     changedPaths?: readonly string[];
     previousExtensions?: readonly DevelopmentWorkspaceExtension[];
-  } = { appRoot };
+  } = { agentRoot: project.agentRoot, appRoot };
   if (options.changedPaths !== undefined) {
     extensionPreparation.changedPaths = options.changedPaths;
   }
@@ -58,7 +62,8 @@ export async function prepareDevelopmentApplicationHost(
         publishedRoot: join(appRoot, ".eve"),
         writeRoot: workspace.compilerArtifactsDir,
       },
-      startPath: appRoot,
+      project,
+      startPath: project.agentRoot,
     });
     const schedules = await resolveSchedules({ manifest: compileResult.manifest });
     generation = await stageDevelopmentGeneration(compileResult);
@@ -107,13 +112,16 @@ export async function prepareDevelopmentApplicationHost(
  */
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
+  options: { readonly agentRoot?: string } = {},
 ): Promise<PreparedApplicationHost> {
+  const project = await resolvePreparedApplicationProject(workspace.appRoot, options.agentRoot);
   const compileResult = await compileAgentInWorkspace({
     artifactLocations: {
       publishedRoot: join(workspace.publication.output.finalDir, ".eve"),
       writeRoot: workspace.compiler.artifactsDir,
     },
-    startPath: workspace.appRoot,
+    project,
+    startPath: project.agentRoot,
   });
   const schedules = await resolveSchedules({ manifest: compileResult.manifest });
 
@@ -129,6 +137,23 @@ export async function prepareProductionApplicationHost(
     schedules,
     workflowBuildDir: workspace.workflow.buildDir,
   });
+}
+
+async function resolvePreparedApplicationProject(
+  appRoot: string,
+  agentRoot: string | undefined,
+): Promise<ResolvedDiscoveryProject> {
+  if (agentRoot === undefined) {
+    return await resolveDiscoveryProject(appRoot);
+  }
+
+  const resolvedAppRoot = resolve(appRoot);
+  const resolvedAgentRoot = resolve(agentRoot);
+  return {
+    agentRoot: resolvedAgentRoot,
+    appRoot: resolvedAppRoot,
+    layout: resolvedAgentRoot === resolvedAppRoot ? "flat" : "nested",
+  };
 }
 
 function createPreparedApplicationHost(input: {

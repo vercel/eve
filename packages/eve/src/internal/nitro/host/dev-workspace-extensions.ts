@@ -33,15 +33,19 @@ export interface DevelopmentWorkspaceExtension {
  * compiles and returns the inputs needed to scope the next development rebuild.
  */
 export async function prepareDevelopmentWorkspaceExtensions(input: {
+  readonly agentRoot?: string;
   readonly appRoot: string;
   readonly changedPaths?: readonly string[];
   readonly previousExtensions?: readonly DevelopmentWorkspaceExtension[];
 }): Promise<readonly DevelopmentWorkspaceExtension[]> {
   const appRoot = resolve(input.appRoot);
-  const project = await resolveDiscoveryProject(appRoot);
+  const agentRoot =
+    input.agentRoot === undefined
+      ? (await resolveDiscoveryProject(appRoot)).agentRoot
+      : resolve(input.agentRoot);
   const source = createDiskProjectSource();
   const discovered = await discoverExtensionMountDeclarations({
-    agentRoot: project.agentRoot,
+    agentRoot,
     source,
   });
   const workspaceSourceRoot = await toCanonicalPath(resolveDevelopmentSourceRoot(appRoot));
@@ -50,7 +54,7 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
   for (const mount of discovered.mounts) {
     const extension = await resolveWorkspaceExtension({
       appRoot,
-      agentRoot: project.agentRoot,
+      agentRoot,
       mount,
       source,
       workspaceSourceRoot,

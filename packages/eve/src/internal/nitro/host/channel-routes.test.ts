@@ -1,7 +1,43 @@
 import { describe, expect, it } from "vitest";
 
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { registerChannelVirtualHandlers } from "#internal/nitro/host/channel-routes.js";
+import {
+  describeChannelNitroRouteResources,
+  registerChannelVirtualHandlers,
+  replaceLiveChannelVirtualHandlers,
+} from "#internal/nitro/host/channel-routes.js";
+
+describe("describeChannelNitroRouteResources", () => {
+  it("describes the exact handler and virtual resources registration will own", () => {
+    expect(
+      describeChannelNitroRouteResources([
+        { cors: {}, method: "GET", route: "/events" },
+        { cors: {}, method: "POST", route: "/events" },
+        { method: "WEBSOCKET", route: "/voice" },
+      ]),
+    ).toEqual([
+      {
+        method: "GET",
+        route: "/events",
+        virtualId: "#nitro/virtual/eve-channel/GET /events",
+      },
+      {
+        method: "OPTIONS",
+        route: "/events",
+        virtualId: "#nitro/virtual/eve-channel/OPTIONS /events",
+      },
+      {
+        method: "POST",
+        route: "/events",
+        virtualId: "#nitro/virtual/eve-channel/POST /events",
+      },
+      {
+        route: "/voice",
+        virtualId: "#nitro/virtual/eve-channel/WEBSOCKET /voice",
+      },
+    ]);
+  });
+});
 
 describe("registerChannelVirtualHandlers", () => {
   it("wraps CORS-enabled HTTP routes and registers preflight handlers", () => {
@@ -98,5 +134,35 @@ describe("registerChannelVirtualHandlers", () => {
     expect(nitro.options.virtual["#nitro/virtual/eve-channel/WEBSOCKET /voice"]).toContain(
       "dispatchChannelWebSocketRequest",
     );
+  });
+});
+
+describe("replaceLiveChannelVirtualHandlers", () => {
+  it("updates Nitro options and its initialized virtual file system", async () => {
+    const oldVirtualId = "#nitro/virtual/eve-channel/GET /old";
+    const nitro = {
+      options: {
+        handlers: [{ handler: oldVirtualId, method: "GET" as const, route: "/old" }],
+        virtual: { [oldVirtualId]: "export default () => 'old';" } as Record<
+          string,
+          string | (() => string | Promise<string>)
+        >,
+      },
+      vfs: new Map([[oldVirtualId, { render: () => "export default () => 'old';" }]]),
+    };
+
+    replaceLiveChannelVirtualHandlers(nitro, {
+      artifactsConfig: createDevelopmentNitroArtifactsConfig({ appRoot: "/app" }),
+      next: [{ method: "POST", route: "/new" }],
+      previous: [{ method: "GET", route: "/old" }],
+    });
+
+    const newVirtualId = "#nitro/virtual/eve-channel/POST /new";
+    expect(nitro.options.handlers).toEqual([
+      { handler: newVirtualId, method: "POST", route: "/new" },
+    ]);
+    expect(nitro.options.virtual[oldVirtualId]).toBeUndefined();
+    expect(nitro.vfs.has(oldVirtualId)).toBe(false);
+    expect(await nitro.vfs.get(newVirtualId)?.render()).toContain("dispatchChannelRequest");
   });
 });

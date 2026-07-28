@@ -13,6 +13,7 @@ import {
 import {
   DevelopmentRuntimeSourceSnapshotError,
   type DevelopmentSourceSnapshotPlan,
+  toDevelopmentSourceSnapshotPlanPath,
   toDevelopmentSourceSnapshotPath,
 } from "#internal/nitro/dev-runtime-source-snapshot.js";
 
@@ -379,11 +380,7 @@ async function validateSnapshotTsConfigExtends(configPath: string): Promise<void
 }
 
 function toSnapshotPathForPlan(plan: DevelopmentSourceSnapshotPlan, sourcePath: string): string {
-  return toDevelopmentSourceSnapshotPath({
-    snapshotSourceRoot: plan.snapshotSourceRoot,
-    sourcePath,
-    sourceRoot: plan.sourceRoot,
-  });
+  return toDevelopmentSourceSnapshotPlanPath(plan, sourcePath);
 }
 
 function isPathInsideOrEqual(path: string, directory: string): boolean {

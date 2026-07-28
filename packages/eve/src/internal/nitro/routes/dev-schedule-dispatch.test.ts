@@ -1,4 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  DEVELOPMENT_CONTROL_TOKEN_HEADER,
+  digestDevelopmentControlToken,
+} from "#internal/nitro/dev-control-auth.js";
 
 const mocks = vi.hoisted(() => ({
   dispatchScheduleInDev: vi.fn(),
@@ -15,6 +20,7 @@ vi.mock("#internal/nitro/host/dispatch-schedule-in-dev.js", async () => {
 });
 
 const APP_ROOT = "/tmp/eve-test";
+const DEVELOPMENT_CONTROL_TOKEN = "test-development-control-token-that-is-long-enough";
 const ARTIFACTS_CONFIG = {
   appRoot: APP_ROOT,
   devRuntimeArtifactsPointerPath: "/tmp/eve-test/.eve/dev-runtime/latest.json",
@@ -29,12 +35,47 @@ async function importHandler() {
 async function postSchedule(scheduleIdInUrl: string): Promise<Response> {
   const { handleDevScheduleDispatchRequest } = await importHandler();
   const request = new Request(`http://localhost:3000/eve/v1/dev/schedules/${scheduleIdInUrl}`, {
+    headers: { [DEVELOPMENT_CONTROL_TOKEN_HEADER]: DEVELOPMENT_CONTROL_TOKEN },
     method: "POST",
   });
-  return await handleDevScheduleDispatchRequest(ARTIFACTS_CONFIG, request);
+  return await handleDevScheduleDispatchRequest(
+    {
+      artifactsConfig: ARTIFACTS_CONFIG,
+      controlTokenDigest: digestDevelopmentControlToken(DEVELOPMENT_CONTROL_TOKEN),
+    },
+    request,
+  );
 }
 
 describe("handleDevScheduleDispatchRequest", () => {
+  beforeEach(() => {
+    mocks.dispatchScheduleInDev.mockReset();
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["wrong", "wrong-development-control-token-that-is-long-enough"],
+  ])("rejects a %s development control token before dispatch", async (_kind, token) => {
+    const { handleDevScheduleDispatchRequest } = await importHandler();
+    const headers = token === undefined ? undefined : { [DEVELOPMENT_CONTROL_TOKEN_HEADER]: token };
+    const request = new Request("http://localhost:3000/eve/v1/dev/schedules/heartbeat", {
+      headers,
+      method: "POST",
+    });
+
+    const response = await handleDevScheduleDispatchRequest(
+      {
+        artifactsConfig: ARTIFACTS_CONFIG,
+        controlTokenDigest: digestDevelopmentControlToken(DEVELOPMENT_CONTROL_TOKEN),
+      },
+      request,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Unauthorized." });
+    expect(mocks.dispatchScheduleInDev).not.toHaveBeenCalled();
+  });
+
   it("returns scheduleId and sessionIds from the dev dispatch result", async () => {
     mocks.dispatchScheduleInDev.mockResolvedValueOnce({
       scheduleId: "heartbeat",

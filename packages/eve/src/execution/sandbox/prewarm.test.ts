@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
+import { prewarmAppSandboxes, prewarmBundledAppSandboxes } from "#execution/sandbox/prewarm.js";
+import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import type {
   SandboxBackend,
   SandboxBackendPrewarmInput,
@@ -9,18 +10,33 @@ import type {
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedAgentGraphBundle } from "#runtime/graph.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
+import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
+
+const mocks = vi.hoisted(() => ({
+  materializeWorkspaceDirectory: vi.fn<
+    () => Promise<readonly { readonly content: Buffer; readonly path: string }[]>
+  >(async () => []),
+  resolveRuntimeAgentGraph: vi.fn(),
+}));
+
+vi.mock("#runtime/resolve-agent-graph.js", () => ({
+  resolveRuntimeAgentGraph: mocks.resolveRuntimeAgentGraph,
+}));
 
 vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
   withSandboxTemplatePrewarmLock: async (_input: unknown, callback: () => Promise<unknown>) =>
     await callback(),
 }));
 vi.mock("#runtime/workspace/seed-files.js", () => ({
-  materializeWorkspaceDirectory: vi.fn(async () => []),
+  materializeWorkspaceDirectory: mocks.materializeWorkspaceDirectory,
 }));
 
 describe("prewarmAppSandboxes", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    mocks.materializeWorkspaceDirectory.mockReset();
+    mocks.materializeWorkspaceDirectory.mockResolvedValue([]);
+    mocks.resolveRuntimeAgentGraph.mockReset();
   });
 
   it("uses the stable sandbox app root for dev snapshot artifact sources", async () => {
@@ -79,6 +95,56 @@ describe("prewarmAppSandboxes", () => {
 
     expect(inputs).toHaveLength(0);
     expect(signatures).toHaveLength(1);
+  });
+
+  it("hydrates bundled workspace resources without deployed source files", async () => {
+    const workspaceResourceRoot = {
+      contentHash: "workspace-content-hash",
+      logicalPath: "workspace-resources/__root__",
+      rootEntries: ["fixture.txt"],
+    };
+    const graph = createGraph({ workspaceResourceRoot });
+    mocks.resolveRuntimeAgentGraph.mockResolvedValueOnce(graph);
+    mocks.materializeWorkspaceDirectory.mockResolvedValueOnce([
+      { content: Buffer.from("portable bytes"), path: "/workspace/fixture.txt" },
+    ]);
+    const inputs: SandboxBackendPrewarmInput[] = [];
+    const manifest = {
+      ...createCompiledAgentManifest({
+        agentRoot: "/deleted/agent",
+        appRoot: "/deleted/app",
+        config: {
+          model: {
+            id: "openai/gpt-5-mini",
+            routing: { kind: "gateway", target: "openai" },
+          },
+          name: "portable-agent",
+        },
+      }),
+      workspaceResourceRoot,
+    };
+
+    await withBundledCompiledArtifacts(
+      {
+        manifest,
+        moduleMap: { nodes: {} },
+        compilerArtifactsRoot: "/moved/output/.eve",
+      },
+      async () => {
+        await prewarmBundledAppSandboxes({
+          appRoot: "/moved/output",
+          dispatch: recordPrewarmInputs(inputs),
+        });
+      },
+    );
+
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]?.seedFiles).toEqual([
+      {
+        content: Buffer.from("portable bytes"),
+        path: "/workspace/fixture.txt",
+      },
+    ]);
   });
 
   it.each(["docker", "microsandbox"])(

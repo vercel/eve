@@ -20,6 +20,10 @@ interface ChannelRouteNitro {
   readonly options: Pick<Nitro["options"], "handlers" | "virtual">;
 }
 
+interface LiveChannelRouteNitro extends ChannelRouteNitro {
+  readonly vfs: Nitro["vfs"];
+}
+
 /**
  * One Nitro route registration for an eve channel.
  */
@@ -27,6 +31,13 @@ export interface NitroChannelRouteRegistration {
   readonly method: ChannelRouteMethod;
   readonly route: string;
   readonly cors?: NormalizedChannelCorsOptions;
+}
+
+/** Exact Nitro resources one channel registration pass will own. */
+export interface NitroChannelRouteResource {
+  readonly method?: ChannelRouteMethod | "OPTIONS";
+  readonly route: string;
+  readonly virtualId: string;
 }
 
 /**
@@ -84,6 +95,46 @@ export function computeChannelRouteRegistrations(
   return merged;
 }
 
+function createChannelVirtualId(method: ChannelRouteMethod | "OPTIONS", route: string): string {
+  return `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${method.toUpperCase()} ${route}`;
+}
+
+/**
+ * Describes channel handlers before registration so an embedding host can
+ * reject collisions without partially mutating Nitro.
+ */
+export function describeChannelNitroRouteResources(
+  registrations: readonly NitroChannelRouteRegistration[],
+): readonly NitroChannelRouteResource[] {
+  const preflightRoutes = new Set<string>();
+  const resources: NitroChannelRouteResource[] = [];
+
+  for (const registration of registrations) {
+    resources.push(
+      registration.method === "WEBSOCKET"
+        ? {
+            route: registration.route,
+            virtualId: createChannelVirtualId(registration.method, registration.route),
+          }
+        : {
+            method: registration.method,
+            route: registration.route,
+            virtualId: createChannelVirtualId(registration.method, registration.route),
+          },
+    );
+    if (registration.cors !== undefined && !preflightRoutes.has(registration.route)) {
+      preflightRoutes.add(registration.route);
+      resources.push({
+        method: "OPTIONS",
+        route: registration.route,
+        virtualId: createChannelVirtualId("OPTIONS", registration.route),
+      });
+    }
+  }
+
+  return resources;
+}
+
 /**
  * Registers virtual Nitro handlers for the provided eve channel routes.
  */
@@ -106,6 +157,72 @@ export function registerChannelVirtualHandlers(
   }
 }
 
+function removeChannelVirtualHandlers(
+  nitro: Pick<ChannelRouteNitro, "options">,
+  registrations: readonly NitroChannelRouteRegistration[],
+): void {
+  const resources = describeChannelNitroRouteResources(registrations);
+  const resourceKeys = new Set(
+    resources.map(
+      (resource) => `${resource.virtualId}\0${resource.method ?? ""}\0${resource.route}`,
+    ),
+  );
+
+  nitro.options.handlers = nitro.options.handlers.filter(
+    (handler) =>
+      !resourceKeys.has(`${handler.handler}\0${handler.method ?? ""}\0${handler.route ?? ""}`),
+  );
+  for (const resource of resources) {
+    delete nitro.options.virtual[resource.virtualId];
+  }
+}
+
+/** Replaces only channel resources proven to be owned by eve. */
+export function replaceChannelVirtualHandlers(
+  nitro: Pick<ChannelRouteNitro, "options">,
+  input: {
+    readonly artifactsConfig: NitroArtifactsConfig;
+    readonly next: readonly NitroChannelRouteRegistration[];
+    readonly previous: readonly NitroChannelRouteRegistration[];
+  },
+): void {
+  removeChannelVirtualHandlers(nitro, input.previous);
+  registerChannelVirtualHandlers(nitro, {
+    artifactsConfig: input.artifactsConfig,
+    registrations: input.next,
+  });
+}
+
+/** Replaces channel resources in an initialized Nitro development runtime. */
+export function replaceLiveChannelVirtualHandlers(
+  nitro: LiveChannelRouteNitro,
+  input: {
+    readonly artifactsConfig: NitroArtifactsConfig;
+    readonly next: readonly NitroChannelRouteRegistration[];
+    readonly previous: readonly NitroChannelRouteRegistration[];
+  },
+): void {
+  replaceChannelVirtualHandlers(nitro, input);
+
+  for (const resource of describeChannelNitroRouteResources(input.previous)) {
+    nitro.vfs.delete(resource.virtualId);
+  }
+  for (const resource of describeChannelNitroRouteResources(input.next)) {
+    const template = nitro.options.virtual[resource.virtualId];
+    if (template === undefined) {
+      throw new Error(`Missing eve channel virtual handler: ${resource.virtualId}`);
+    }
+    const module = { id: resource.virtualId, template };
+    const virtualModule: Nitro["vfs"] extends Map<string, infer Entry>
+      ? Entry & { readonly module: typeof module }
+      : never = {
+      module,
+      render: () => (typeof template === "function" ? template() : template),
+    };
+    nitro.vfs.set(resource.virtualId, virtualModule);
+  }
+}
+
 function createChannelRouteKey(registration: NitroChannelRouteRegistration): string {
   return `${registration.method.toUpperCase()} ${registration.route}`;
 }
@@ -121,7 +238,7 @@ function addChannelVirtualHandler(
   },
 ): void {
   const routeKey = createChannelRouteKey(input);
-  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}`;
+  const virtualId = createChannelVirtualId(input.method, input.route);
   const dispatchModulePath = stringifyEsmImportSpecifier(
     resolvePackageSourceFilePath("src/internal/nitro/routes/channel-dispatch.ts"),
   );
@@ -190,8 +307,7 @@ function addChannelCorsPreflightHandler(
   }
   input.preflightRoutes.add(input.route);
 
-  const routeKey = `OPTIONS ${input.route}`;
-  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}`;
+  const virtualId = createChannelVirtualId("OPTIONS", input.route);
 
   nitro.options.handlers.push({
     handler: virtualId,

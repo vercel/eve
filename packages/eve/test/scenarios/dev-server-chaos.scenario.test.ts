@@ -88,6 +88,7 @@ function toolSource(marker: string): string {
 interface HealthProbe {
   readonly failures: readonly string[];
   stop(): Promise<number>;
+  waitForMinimum(count: number): Promise<void>;
 }
 
 function startHealthProbe(serverUrl: string): HealthProbe {
@@ -118,6 +119,12 @@ function startHealthProbe(serverUrl: string): HealthProbe {
       stopped = true;
       await run;
       return probes;
+    },
+    async waitForMinimum(count) {
+      await waitForCondition(
+        () => probes >= count,
+        () => `Timed out after ${String(probes)} of ${String(count)} health probes.`,
+      );
     },
   };
 }
@@ -179,10 +186,11 @@ describe("eve dev server chaos", () => {
         await waitForToolMarker(server.url, "storm-final");
         await completeStreamedTurn(server, "What's the weather in Lisbon?");
 
+        await probe.waitForMinimum(31);
         const probes = await probe.stop();
         expect(probe.failures, probe.failures.join("\n")).toEqual([]);
-        // The floor proves the probe ran continuously through the storm;
-        // the storm itself is deterministic-length now, not wall-clock.
+        // Keep the request floor deterministic without making the edit storm
+        // duration depend on machine speed.
         expect(probes).toBeGreaterThan(30);
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {

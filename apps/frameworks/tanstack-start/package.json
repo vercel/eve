@@ -1,0 +1,27 @@
+{
+  "name": "framework-tanstack-start",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter eve build && vite build",
+    "dev": "vite dev",
+    "start": "node .output/server/index.mjs",
+    "typecheck": "vite build && tsc --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "1.170.18",
+    "@tanstack/react-start": "1.168.32",
+    "eve": "workspace:*",
+    "nitro": "3.0.260610-beta",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "6.0.3",
+    "typescript": "catalog:",
+    "vite": "8.1.5"
+  }
+}

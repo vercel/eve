@@ -26,6 +26,7 @@ import type { SandboxState } from "#sandbox/state.js";
 
 const mocks = vi.hoisted(() => ({
   prewarmAppSandboxes: vi.fn(async () => {}),
+  prewarmBundledAppSandboxes: vi.fn(async () => {}),
   waitForSandboxTemplatePrewarmLock: vi.fn<(input: unknown) => Promise<void>>(async () => {}),
   waitForDevelopmentSandboxPrewarm: vi.fn<(input: unknown) => Promise<void>>(async () => {}),
 }));
@@ -35,6 +36,7 @@ vi.mock("#execution/sandbox/development-prewarm.js", () => ({
 }));
 vi.mock("#execution/sandbox/prewarm.js", () => ({
   prewarmAppSandboxes: mocks.prewarmAppSandboxes,
+  prewarmBundledAppSandboxes: mocks.prewarmBundledAppSandboxes,
 }));
 vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
   waitForSandboxTemplatePrewarmLock: mocks.waitForSandboxTemplatePrewarmLock,
@@ -119,6 +121,8 @@ describe("ensureSandboxAccess", () => {
   beforeEach(() => {
     mocks.prewarmAppSandboxes.mockReset();
     mocks.prewarmAppSandboxes.mockResolvedValue(undefined);
+    mocks.prewarmBundledAppSandboxes.mockReset();
+    mocks.prewarmBundledAppSandboxes.mockResolvedValue(undefined);
     mocks.waitForSandboxTemplatePrewarmLock.mockReset();
     mocks.waitForSandboxTemplatePrewarmLock.mockResolvedValue(undefined);
     mocks.waitForDevelopmentSandboxPrewarm.mockReset();
@@ -178,6 +182,25 @@ describe("ensureSandboxAccess", () => {
         appRoot,
         compiledArtifactsSource,
       }),
+    );
+    expect(backend.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("prewarms and retries a deployed bundled sandbox at first use", async () => {
+    const backend = createBackend();
+    const registry = createTestRegistry({ bootstrap: vi.fn() }, backend);
+    vi.mocked(backend.create).mockRejectedValueOnce(
+      new SandboxTemplateNotProvisionedError({
+        backendName: "test",
+        templateKey: "missing-template",
+      }),
+    );
+
+    const access = await ensure({ registry });
+    await access.get();
+
+    expect(mocks.prewarmBundledAppSandboxes).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: process.cwd() }),
     );
     expect(backend.create).toHaveBeenCalledTimes(2);
   });

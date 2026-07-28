@@ -553,7 +553,9 @@ describe("createDevelopmentServer", () => {
     const response = await callControlHandler("http://localhost/eve/v1/dev/runtime-artifacts");
 
     if (!(response instanceof Response)) throw new Error("Expected a Response.");
-    await expect(response.json()).resolves.toEqual({ revision: "/tmp/eve-test" });
+    const body = (await response.json()) as { revision: string };
+    expect(body.revision).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(body.revision).not.toContain("/tmp/eve-test");
     expect(mocks.authoredSourceWatcher.flush).not.toHaveBeenCalled();
     expect(mocks.authoredSourceWatcher.rebuild).not.toHaveBeenCalled();
 
@@ -583,7 +585,9 @@ describe("createDevelopmentServer", () => {
     expect(mocks.authoredSourceWatcher.rebuild).toHaveBeenCalledOnce();
     expect(mocks.authoredSourceWatcher.flush).not.toHaveBeenCalled();
     if (!(response instanceof Response)) throw new Error("Expected a Response.");
-    await expect(response.json()).resolves.toEqual({ revision: "/tmp/eve-test" });
+    const body = (await response.json()) as { revision: string };
+    expect(body.revision).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(body.revision).not.toContain("/tmp/eve-test");
 
     await server.close();
   });

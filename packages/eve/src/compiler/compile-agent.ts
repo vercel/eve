@@ -91,9 +91,13 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
  */
 export async function compileAgentInWorkspace(input: {
   readonly artifactLocations: CompilerArtifactLocations;
+  readonly project?: ResolvedDiscoveryProject;
   readonly startPath: string;
 }): Promise<CompileAgentResult> {
-  const discovered = await discoverAgentForCompilation({ startPath: input.startPath });
+  const discovered = await discoverAgentForCompilation({
+    project: input.project,
+    startPath: input.startPath,
+  });
   const result = await writeAgentCompilation(discovered, input.artifactLocations);
 
   return finishAgentCompilation(result, CompileAgentError.fromTransientArtifacts);
@@ -106,10 +110,10 @@ interface DiscoveredAgentCompilation {
 }
 
 async function discoverAgentForCompilation(
-  input: CompileAgentInput,
+  input: CompileAgentInput & { readonly project?: ResolvedDiscoveryProject },
 ): Promise<DiscoveredAgentCompilation> {
   const source = input.source ?? createDiskProjectSource();
-  const project = await resolveDiscoveryProject(input.startPath, { source });
+  const project = input.project ?? (await resolveDiscoveryProject(input.startPath, { source }));
   const discoveryResult = await discoverAgent({ ...project, source });
 
   return {

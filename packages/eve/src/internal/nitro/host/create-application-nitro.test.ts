@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldPruneLocalSandboxBackends } from "#internal/nitro/host/create-application-nitro.js";
+import { shouldPruneLocalSandboxBackends } from "#internal/nitro/host/eve-nitro-contribution.js";
 
 describe("shouldPruneLocalSandboxBackends", () => {
   it("prunes local backends from hosted Vercel builds when the sandbox uses defaultSandbox", () => {

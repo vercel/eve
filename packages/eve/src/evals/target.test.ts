@@ -9,10 +9,14 @@ afterEach(() => {
 
 describe("resolveEvalTargetHandle", () => {
   it("performs health/info handshake and exposes target capabilities", async () => {
-    const fetches: Array<{ method: string; url: string }> = [];
+    const fetches: Array<{ headers: Headers; method: string; url: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url = fetchUrl(request);
-      fetches.push({ method: init?.method ?? "GET", url });
+      fetches.push({
+        headers: new Headers(init?.headers),
+        method: init?.method ?? "GET",
+        url,
+      });
 
       if (url.endsWith("/eve/v1/health")) {
         return Response.json({ ok: true, status: "ready", workflowId: "wf" });
@@ -32,6 +36,7 @@ describe("resolveEvalTargetHandle", () => {
     const client = new Client({ host: "http://127.0.0.1:3000" });
     const target = await resolveEvalTargetHandle({
       client,
+      developmentControlToken: "local-development-control-token",
       expectedAgentName: "agent-basic-runtime",
       kind: "local",
       url: "http://127.0.0.1:3000",
@@ -49,6 +54,9 @@ describe("resolveEvalTargetHandle", () => {
       "GET /eve/v1/info",
       "POST /eve/v1/dev/schedules/heartbeat",
     ]);
+    expect(fetches.at(-1)?.headers.get("x-eve-dev-control-token")).toBe(
+      "local-development-control-token",
+    );
   });
 
   it("fails when the target identity does not match the current app", async () => {
