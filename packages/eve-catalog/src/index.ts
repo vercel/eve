@@ -263,6 +263,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "pushary",
+    name: "Pushary",
+    kind: "channel",
+    tagline: "Answer approvals and questions as a push notification on your phone.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",

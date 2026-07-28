@@ -1427,6 +1427,52 @@ export default githubExtension({
 
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
   },
+  pushary: {
+    logo: "pushary",
+    docsHref: "https://pushary.com/human-in-the-loop-eve",
+    keywords: [
+      "push",
+      "push notification",
+      "phone",
+      "mobile",
+      "approval",
+      "approvals",
+      "human-in-the-loop",
+      "hitl",
+      "lock screen",
+      "on-call",
+    ],
+    install: `Install the channel package:
+
+\`\`\`bash
+npm install @pushary/eve
+\`\`\`
+
+Set your Pushary credentials. The webhook secret comes from \`decisions.getWebhookSecret()\`, and the callback origin is the public URL this agent is deployed at, so answers can be routed back:
+
+\`\`\`bash title=".env.local"
+PUSHARY_API_KEY=pk_...sk_...
+PUSHARY_WEBHOOK_SECRET=whsec_...
+PUSHARY_CALLBACK_ORIGIN=https://your-agent.vercel.app
+\`\`\``,
+    quickStart: `Create \`agent/channels/pushary.ts\`:
+
+\`\`\`ts
+// agent/channels/pushary.ts
+import { pusharyChannel } from "@pushary/eve";
+
+export default pusharyChannel();
+\`\`\`
+
+That is the whole integration. Every approval and every \`ask_question\` the agent raises is delivered as a push notification, and the answer resolves the parked turn. Because the session parks durably, nothing is held open while it waits — a decision can be answered minutes or hours later.
+
+By default the channel asks the session principal, so user-scoped auth gives each end-user their own approver. Pass \`externalId\` to bind a fixed person for single-user agents and scheduled runs.`,
+    configure: `The channel mounts four routes. \`POST /pushary/answer\` receives the answer and is the URL Pushary calls back; it verifies the Pushary webhook signature and a per-request routing signature before resuming the session. \`POST /pushary/message\`, \`/pushary/stop\`, and \`/pushary/reset\` let the same person send a follow-up, cancel the in-flight turn, or start a fresh session from their phone, mapping onto \`send\`, \`cancel\`, and \`reset\`.
+
+Options are matched back by label and then by id, so an approval resolves to eve's \`approve\` or \`deny\` and a select resolves to the option the human tapped. Each decision carries an idempotency key derived from the session and request id, so a replayed step never asks the same person twice. Set \`requireReachable: true\` to fail loudly when the end-user has no connected device instead of opening a decision that will expire unanswered.
+
+See the [Pushary eve guide](https://pushary.com/human-in-the-loop-eve) for enrollment, multi-tenant keys, and the fail-closed semantics.`,
+  },
   "agent-browser": {
     logo: "agent-browser",
     docsHref:
