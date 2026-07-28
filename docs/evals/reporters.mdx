@@ -1,6 +1,6 @@
 ---
 title: "Reporters"
-description: "Ship eval results to Braintrust experiments or JUnit XML. eve runs and scores everything itself."
+description: "Ship eval results to Braintrust, Datadog, or JUnit XML. eve runs and scores everything itself."
 ---
 
 eve runs and grades everything itself; reporters ship the results out. The CLI prints a console summary by default (one line per eval, with failed assertions and their messages), and reporters from `eve/evals/reporters` add destinations on top.
@@ -43,6 +43,23 @@ The reporter config takes an optional `projectName` and `experimentName`, plus a
 A reporter instance observes the evals that reference it. Share one instance across several evals (the config, a `shared.ts` export, or every entry of a dataset array) and their results land in a single experiment. Listing the same config reporter on an eval too does not double-report it.
 
 Braintrust needs its SDK installed in the app and credentials in the environment: install the `braintrust` package (`npm install braintrust`) and set `BRAINTRUST_API_KEY`. Pass `--skip-report` to run the eval without shipping results, which also suppresses config reporters and is useful locally when iterating.
+
+## Datadog
+
+`Datadog(...)` uploads eval assertion scores to a Datadog LLM Observability Experiment. Put one instance in the config so it covers the whole run:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { Datadog } from "eve/evals/reporters";
+
+export default defineEvalConfig({
+  reporters: [Datadog({ projectName: "weather-agent" })],
+});
+```
+
+The reporter creates one Datadog Experiment on run start, creates a placeholder dataset for the experiment, submits one synthetic experiment span per completed eve eval, associates that eval's assertion scores as experiment metrics, and prints the Datadog Experiment URL after the run completes. Metric labels use Datadog-safe names: gate assertions log under a `gate_` prefix, and characters outside letters, numbers, underscores, and hyphens are normalized to underscores.
+
+Datadog needs `dd-trace` installed in the app and Datadog credentials in the environment: install the `dd-trace` package (`npm install dd-trace`) and set `DD_API_KEY`, `DD_APP_KEY`, and `DD_SITE` as appropriate. By default, the reporter records assertion scores and eval metadata only; pass `recordInputs: true`, `recordOutputs: true`, or `recordExpectedOutputs: true` if your destination is approved for eval prompts, outputs, or authored expectations. Input is read from the eval's first `t.send(...)` message, falling back to the eval description when no message event is available. Expected output is read from eval `metadata.expectedOutput`, `metadata.expected`, or `metadata.expected_output`.
 
 ## JUnit
 
