@@ -99,6 +99,20 @@ async function copySnapshotDirectory(input: {
       continue;
     }
 
+    // `cp` refuses to copy a directory that contains its own destination,
+    // even when the filter excludes that subtree. A copy root above the app
+    // root (an owning package with tsconfig path aliases, vercel/eve#1242)
+    // contains the snapshot inside the app root's `.eve` directory, so
+    // recurse manually until the skipped `.eve` subtree is filtered out.
+    if (entry.isDirectory() && isPathInsideOrEqual(input.plan.snapshotRoot, sourcePath)) {
+      await copySnapshotDirectory({
+        plan: input.plan,
+        sourcePath,
+        targetPath: join(input.targetPath, entry.name),
+      });
+      continue;
+    }
+
     await cp(sourcePath, join(input.targetPath, entry.name), {
       filter: (source) => !shouldSkipSnapshotSource(input.plan, source),
       mode: SNAPSHOT_COPY_MODE,
@@ -310,11 +324,17 @@ async function createSnapshotDependencyMounts(plan: DevelopmentSourceSnapshotPla
 }
 
 async function ensureRuntimePackageJson(plan: DevelopmentSourceSnapshotPlan): Promise<void> {
-  const runtimePackageJsonPath = join(plan.runtimeAppRoot, "package.json");
-
-  if (existsSync(runtimePackageJsonPath)) {
+  // A synthetic package.json below an owning package that made it into the
+  // snapshot would move the package boundary that authored-module bundling
+  // (`resolveAuthoredPackageRoot`) and Node resolution walk up to, hiding the
+  // owning package's tsconfig path aliases (vercel/eve#1242). Only generate
+  // one when the snapshot carries no owning package.json at or above the
+  // runtime app root.
+  if (findNearestSnapshotPackageJsonPath(plan) !== undefined) {
     return;
   }
+
+  const runtimePackageJsonPath = join(plan.runtimeAppRoot, "package.json");
 
   await mkdir(plan.runtimeAppRoot, { recursive: true });
   await writeFile(
@@ -333,11 +353,9 @@ async function ensureRuntimePackageJson(plan: DevelopmentSourceSnapshotPlan): Pr
 async function validateDevelopmentSourceSnapshot(
   plan: DevelopmentSourceSnapshotPlan,
 ): Promise<void> {
-  const runtimePackageJsonPath = join(plan.runtimeAppRoot, "package.json");
-
-  if (!existsSync(runtimePackageJsonPath)) {
+  if (findNearestSnapshotPackageJsonPath(plan) === undefined) {
     throw new DevelopmentRuntimeSourceSnapshotError(
-      `Development runtime source snapshot is missing the runtime app package.json at "${runtimePackageJsonPath}".`,
+      `Development runtime source snapshot is missing a package.json at or above the runtime app root "${plan.runtimeAppRoot}".`,
     );
   }
 
@@ -376,6 +394,35 @@ async function validateSnapshotTsConfigExtends(configPath: string): Promise<void
       `Development runtime source snapshot cannot resolve tsconfig extends "${extendsSpecifier}" from "${configPath}".`,
     );
   }
+}
+
+/**
+ * Finds the package.json that owns the runtime app root inside the snapshot
+ * source tree, walking up like `resolveAuthoredPackageRoot` does at bundle
+ * time but bounded by the snapshot source root.
+ */
+function findNearestSnapshotPackageJsonPath(
+  plan: DevelopmentSourceSnapshotPlan,
+): string | undefined {
+  let currentDirectory = resolve(plan.runtimeAppRoot);
+
+  while (isPathInsideOrEqual(currentDirectory, plan.snapshotSourceRoot)) {
+    const packageJsonPath = join(currentDirectory, "package.json");
+
+    if (existsSync(packageJsonPath)) {
+      return packageJsonPath;
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      return undefined;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+
+  return undefined;
 }
 
 function toSnapshotPathForPlan(plan: DevelopmentSourceSnapshotPlan, sourcePath: string): string {
