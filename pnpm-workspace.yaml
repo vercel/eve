@@ -68,6 +68,7 @@ minimumReleaseAgeExclude:
   - crossws
   - experimental-ai-sdk-code-mode
   - eve
+  - nf3@0.3.23
   - nitro
   - rolldown
   # This release contains the reviewed package-config registry APIs used by the eve CLI.
