@@ -3,6 +3,8 @@ import { mockModel, type MockModelRequest } from "eve/evals";
 
 import {
   COMPACTION_CHECKPOINT_TEXT,
+  CONTENT_OUTPUT_COMPACTION_MARKER,
+  CONTENT_OUTPUT_TAIL_MARKER,
   SECOND_CHECKPOINT_MARKER,
   TASK_PRESERVED_MARKER,
   TASK_TAIL_SENTINEL,
@@ -11,7 +13,11 @@ import {
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 const MAX_TOOL_CALLS = 10;
 
-type RegressionCase = "redundant-tool-calls" | "stale-todo-work" | "task-survival";
+type RegressionCase =
+  | "content-output-file-stub"
+  | "redundant-tool-calls"
+  | "stale-todo-work"
+  | "task-survival";
 
 let activeCase: RegressionCase | undefined;
 const checkpointAdvanceCallCounts = new Map<RegressionCase, number>();
@@ -46,6 +52,33 @@ const taskModel = mockModel({
     }
 
     const regressionCase = activeCase;
+
+    if (regressionCase === "content-output-file-stub") {
+      const compacted = request.messages.some(
+        (message) => message.role === "user" && message.text === COMPACTION_CHECKPOINT_TEXT,
+      );
+      if (compacted) {
+        return assistantEvidenceContains(request.messages, CONTENT_OUTPUT_TAIL_MARKER)
+          ? `Checkpoint preserved content-output text: ${CONTENT_OUTPUT_COMPACTION_MARKER}`
+          : "Checkpoint lost content-output text: CONTENT_OUTPUT_TEXT_LOST";
+      }
+
+      const contentOutputCalls = toolCallCounts.get(regressionCase) ?? 0;
+      if (contentOutputCalls >= 1) {
+        return "Hard stop without a compaction: CONTENT_OUTPUT_NO_COMPACTION";
+      }
+
+      toolCallCounts.set(regressionCase, contentOutputCalls + 1);
+      return {
+        toolCalls: [
+          {
+            id: "emit-compaction-content-1",
+            input: {},
+            name: "emit-compaction-content",
+          },
+        ],
+      };
+    }
 
     if (regressionCase === "task-survival") {
       const compacted = request.messages.some(
@@ -161,13 +194,16 @@ function findInitialCase(request: MockModelRequest): RegressionCase | undefined 
 }
 
 function regressionCaseFromText(text: string): RegressionCase | undefined {
+  if (text.includes("[case: content-output-file-stub]")) return "content-output-file-stub";
   if (text.includes("[case: redundant-tool-calls]")) return "redundant-tool-calls";
   if (text.includes("[case: stale-todo-work]")) return "stale-todo-work";
   if (text.includes("[case: task-survival]")) return "task-survival";
   return undefined;
 }
 
-function completionMarker(regressionCase: Exclude<RegressionCase, "task-survival">): string {
+function completionMarker(
+  regressionCase: Exclude<RegressionCase, "content-output-file-stub" | "task-survival">,
+): string {
   return regressionCase === "redundant-tool-calls"
     ? "REPOSITORY_INSPECTION_COMPLETE"
     : "SOURCE_ANALYSIS_COMPLETE";

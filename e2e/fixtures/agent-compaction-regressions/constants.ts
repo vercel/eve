@@ -12,3 +12,9 @@ export const TASK_PRESERVED_MARKER = "TASK_PRESERVED_AFTER_COMPACTION";
 
 /** Checkpoint marker the harness inserts when compaction summarizes. */
 export const COMPACTION_CHECKPOINT_TEXT = "Summary of our conversation so far:";
+
+/** Trailing content-output text that must reach the compaction model. */
+export const CONTENT_OUTPUT_TAIL_MARKER = "CONTENT_OUTPUT_TEXT_AFTER_FILE";
+
+/** Reported by the task model only when the checkpoint preserved the trailing text. */
+export const CONTENT_OUTPUT_COMPACTION_MARKER = "CONTENT_OUTPUT_TEXT_SURVIVED_COMPACTION";
