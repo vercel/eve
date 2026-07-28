@@ -32,4 +32,13 @@ describe("SCAFFOLDABLE_CHANNELS", () => {
     const slack = SCAFFOLDABLE_CHANNELS.find((channel) => channel.slug === "slack");
     expect(slack?.kind).toBe("slack");
   });
+
+  test("associates scaffoldable channels with canonical registry items", () => {
+    expect(SCAFFOLDABLE_CHANNELS.map(({ kind, registryItem }) => ({ kind, registryItem }))).toEqual(
+      [
+        { kind: "web", registryItem: "channel/web" },
+        { kind: "slack", registryItem: "channel/slack" },
+      ],
+    );
+  });
 });

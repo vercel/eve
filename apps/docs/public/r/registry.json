@@ -651,6 +651,28 @@
           "target": "agent/connections/zomato.ts"
         }
       ]
+    },
+    {
+      "name": "channel/web",
+      "type": "registry:item",
+      "title": "Web Chat",
+      "description": "Add the built-in Next.js Web Chat channel to an eve agent.",
+      "meta": {
+        "eve": {
+          "channel": "web"
+        }
+      }
+    },
+    {
+      "name": "channel/slack",
+      "type": "registry:item",
+      "title": "Slack",
+      "description": "Connect an eve agent to Slack with Vercel Connect or portable credentials.",
+      "meta": {
+        "eve": {
+          "channel": "slack"
+        }
+      }
     }
   ]
 }
