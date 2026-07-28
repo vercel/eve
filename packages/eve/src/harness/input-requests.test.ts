@@ -7,6 +7,7 @@ import { once } from "#public/tools/approval/approval-helpers.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
+  classifyInputRequest,
   consumeDeferredStepInput,
   createRuntimeToolCallActionFromToolCall,
   getApprovedTools,
@@ -921,5 +922,65 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
 
     const deferred = consumeDeferredStepInput({ session: result.session });
     expect(deferred.input).toEqual({ message: "also do this other thing" });
+  });
+});
+
+describe("classifyInputRequest", () => {
+  const action = {
+    callId: "call_1",
+    input: {},
+    kind: "tool-call",
+    toolName: "ask_user",
+  } as const;
+
+  it("requires an explicit answer for tool approvals", () => {
+    expect(
+      classifyInputRequest({
+        action,
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Deny" },
+        ],
+        prompt: "Run the tool?",
+        requestId: "call_1",
+      }),
+    ).toBe("required");
+  });
+
+  it("requires an explicit answer for session-limit continuations", () => {
+    expect(
+      classifyInputRequest(
+        createSessionLimitContinuationRequest({
+          sessionId: "sess-test",
+          violation: { kind: "input", limit: 12, usedTokens: 12 },
+        }),
+      ),
+    ).toBe("required");
+  });
+
+  it("classifies model questions as dismissable", () => {
+    expect(
+      classifyInputRequest({
+        action,
+        allowFreeform: true,
+        options: [{ id: "blue", label: "Blue" }],
+        prompt: "Which color?",
+        requestId: "call_1",
+      }),
+    ).toBe("dismissable");
+  });
+
+  it("does not mistake non-approval two-option requests for approvals", () => {
+    expect(
+      classifyInputRequest({
+        action,
+        options: [
+          { id: "blue", label: "Blue" },
+          { id: "red", label: "Red" },
+        ],
+        prompt: "Which color?",
+        requestId: "call_1",
+      }),
+    ).toBe("dismissable");
   });
 });

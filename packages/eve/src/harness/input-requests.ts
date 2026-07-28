@@ -121,12 +121,13 @@ export function hasDeferredStepInput(session: HarnessSession): boolean {
 /**
  * Resolves pending input at the start of a harness step.
  *
- * When a pending tool approval or session-limit continuation has not received
- * an explicit answer, follow-up input is deferred instead of dismissing and
- * recreating the request. Tool approval responses also resolve in isolation
- * because AI SDK cannot process an approval response and a new user message in
- * the same request. {@link consumeDeferredStepInput} replays deferred input on
- * the subsequent step.
+ * Each pending request is either `"required"` or `"dismissable"` — see
+ * {@link classifyInputRequest}. While a required request is unanswered,
+ * follow-up input is deferred instead of dismissing and recreating the
+ * request; {@link consumeDeferredStepInput} replays it on the subsequent
+ * step. Tool approval responses additionally resolve in isolation because
+ * AI SDK cannot process an approval response and a new user message in the
+ * same request.
  */
 export function resolvePendingInput(input: {
   readonly history?: readonly ModelMessage[];
@@ -149,23 +150,20 @@ export function resolvePendingInput(input: {
   const resolvedStepInput = resolveTextMessageInput(pendingBatch, stepInput);
   const responses = resolvedStepInput?.inputResponses ?? [];
   const resolvesApprovalBatch = pendingBatch.requests.some((request) => isApprovalRequest(request));
-  const requiresExplicitResponse = pendingBatch.requests.some(
-    (request) => isApprovalRequest(request) || isSessionLimitContinuationRequest(request),
-  );
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  if (requiresExplicitResponse && hasUnansweredExplicitRequest({ pendingBatch, responses })) {
+  if (hasUnansweredRequiredRequest({ pendingBatch, responses })) {
     session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
     return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
   }
 
   if (responses.length === 0 && resolvedStepInput?.message !== undefined) {
-    // A follow-up message arrived for question-only input with no explicit
-    // responses. Keep the existing question semantics: mark unanswered
-    // question requests ignored so the model can continue with the message.
+    // A follow-up message arrived and every pending request is dismissable
+    // (a required one would have deferred above): mark the unanswered
+    // requests ignored so the model can continue with the message.
     const toolParts = buildToolResponseParts(pendingBatch, []);
     const messages: ModelMessage[] = [...baseHistory, ...pendingBatch.responseMessages];
     if (toolParts.length > 0) {
@@ -304,15 +302,50 @@ function compactStepInput(
   return result;
 }
 
-function hasUnansweredExplicitRequest(input: {
+/**
+ * Behavioral class of a pending input request.
+ *
+ * `"required"` — the request must be explicitly answered before the turn can
+ * move on. While one is unanswered, any other arriving input is queued via
+ * {@link queueDeferredStepInput} and replayed on the step after the answer.
+ * The pending batch never churns, so the request ids the user is answering
+ * stay valid.
+ *
+ * `"dismissable"` — a plain follow-up message counts as the user moving on.
+ * The request resolves as a real `tool-result` with `status: "ignored"` and
+ * the model continues with the message in the same step.
+ */
+export type InputRequestClass = "dismissable" | "required";
+
+/** Classifies one pending request; see {@link InputRequestClass}. */
+export function classifyInputRequest(request: InputRequest): InputRequestClass {
+  // A tool approval gates a model-emitted tool call. AI SDK requires the
+  // approval response to resolve in isolation, and skipping it would leave
+  // the intercepted call permanently un-adjudicated.
+  if (isApprovalRequest(request)) {
+    return "required";
+  }
+  // A session-limit continuation guards the next model call itself:
+  // "ignore and continue" cannot continue -- the pre-model gate re-parks
+  // while the violation holds -- and, being harness-authored, the request
+  // has no history anchor on which an ignored outcome could be recorded.
+  if (isSessionLimitContinuationRequest(request)) {
+    return "required";
+  }
+  // Everything else wraps a model-emitted tool call whose ignored outcome
+  // is expressible as a tool-result, so dismissal is always representable.
+  // There is no third class.
+  return "dismissable";
+}
+
+function hasUnansweredRequiredRequest(input: {
   readonly pendingBatch: PendingInputBatch;
   readonly responses: readonly InputResponse[];
 }): boolean {
   const responseIds = new Set(input.responses.map((response) => response.requestId));
   return input.pendingBatch.requests.some(
     (request) =>
-      (isApprovalRequest(request) || isSessionLimitContinuationRequest(request)) &&
-      !responseIds.has(request.requestId),
+      classifyInputRequest(request) === "required" && !responseIds.has(request.requestId),
   );
 }
 
