@@ -4,6 +4,9 @@ import { mockModel, type MockModelRequest } from "eve/evals";
 import {
   COMPACTION_CHECKPOINT_TEXT,
   CONTENT_OUTPUT_COMPACTION_MARKER,
+  CONTENT_OUTPUT_FILENAME,
+  CONTENT_OUTPUT_LEAD_MARKER,
+  CONTENT_OUTPUT_PAYLOAD_CANARY,
   CONTENT_OUTPUT_TAIL_MARKER,
   SECOND_CHECKPOINT_MARKER,
   TASK_PRESERVED_MARKER,
@@ -58,9 +61,33 @@ const taskModel = mockModel({
         (message) => message.role === "user" && message.text === COMPACTION_CHECKPOINT_TEXT,
       );
       if (compacted) {
-        return assistantEvidenceContains(request.messages, CONTENT_OUTPUT_TAIL_MARKER)
-          ? `Checkpoint preserved content-output text: ${CONTENT_OUTPUT_COMPACTION_MARKER}`
-          : "Checkpoint lost content-output text: CONTENT_OUTPUT_TEXT_LOST";
+        // Every check reads assistant evidence (the checkpoint), so each fact
+        // proves what the compaction prompt contained: markers and the stub
+        // filename can only arrive through their own rendering, and the
+        // payload canary can only arrive if the raw payload leaked.
+        const diagnostics = [
+          assistantEvidenceContains(request.messages, CONTENT_OUTPUT_TAIL_MARKER)
+            ? "TAIL_PRESERVED"
+            : "TAIL_LOST",
+          assistantEvidenceContains(request.messages, CONTENT_OUTPUT_LEAD_MARKER)
+            ? "LEAD_PRESERVED"
+            : "LEAD_LOST",
+          assistantEvidenceContains(request.messages, CONTENT_OUTPUT_FILENAME)
+            ? "FILE_STUB_RENDERED"
+            : "FILE_STUB_LOST",
+          assistantEvidenceContains(request.messages, CONTENT_OUTPUT_PAYLOAD_CANARY)
+            ? "PAYLOAD_LEAKED"
+            : "NO_PAYLOAD_LEAK",
+          request.userMessages.some((text) => text.includes("[case: content-output-file-stub]"))
+            ? "NEIGHBOR_PRESERVED"
+            : "NEIGHBOR_LOST",
+        ];
+        const honored =
+          !diagnostics.some((entry) => entry.endsWith("_LOST")) &&
+          !diagnostics.includes("PAYLOAD_LEAKED");
+        return honored
+          ? `Checkpoint honored the content-output contract (${diagnostics.join(", ")}): ${CONTENT_OUTPUT_COMPACTION_MARKER}`
+          : `Checkpoint violated the content-output contract: ${diagnostics.join(", ")}`;
       }
 
       const contentOutputCalls = toolCallCounts.get(regressionCase) ?? 0;
