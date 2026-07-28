@@ -535,6 +535,33 @@ describe("dispatchDynamicToolEvent", () => {
     expect(buildDynamicTools(ctx)).toHaveLength(0);
   });
 
+  it("passes the final qualified name to a step-scoped tool", async () => {
+    const ctx = createCtx();
+    const resolver = {
+      ...createResolver("search", ["step.started"], () => ({
+        query: defineTool({
+          description: "search records",
+          inputSchema: { type: "object" },
+          execute: async (_input, toolCtx) => ({ toolName: toolCtx.toolName }),
+        }),
+      })),
+      extensionNamespace: "warehouse",
+    };
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    const tool = buildDynamicTools(ctx)[0]!;
+    expect(tool.name).toBe("warehouse__query");
+    await expect(tool.execute!({}, executeOptions)).resolves.toEqual({
+      toolName: "warehouse__query",
+    });
+  });
+
   it("replaces tools from the same resolver slug (last write wins)", async () => {
     const ctx = createCtx();
     let callCount = 0;
@@ -654,7 +681,10 @@ describe("dispatchDynamicToolEvent", () => {
     // Register a step function so replayDynamicSessionTools can
     // reconstruct the tool on the second step.
     const stepId = "eve:dynamic-tool//__eve_dispatch_rehydrate_test";
-    const stepFn = vi.fn((_vars: unknown, input: unknown) => ({ input }));
+    const stepFn = vi.fn((_vars: unknown, input: unknown, toolCtx: unknown) => ({
+      input,
+      toolName: (toolCtx as { toolName: string }).toolName,
+    }));
     const registrySym = Symbol.for("@workflow/core//registeredSteps");
     const registry = getOrCreateStepRegistry(registrySym);
     registry.set(stepId, stepFn);
@@ -693,6 +723,10 @@ describe("dispatchDynamicToolEvent", () => {
       const tools = buildDynamicTools(ctx);
       expect(tools).toHaveLength(1);
       expect(tools[0]!.name).toBe("query");
+      expect(tools[0]!.execute!({}, executeOptions)).toEqual({
+        input: {},
+        toolName: "query",
+      });
     } finally {
       registry.delete(stepId);
     }

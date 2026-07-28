@@ -7,8 +7,10 @@ import { ContextKey } from "#context/key.js";
 import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
+import {
+  getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
+} from "#harness/runtime-actions.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -25,9 +27,9 @@ import { projectToDurableSession } from "#execution/session.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import {
   dispatchTurnStep,
-  emitTerminalSessionFailureStep,
   resolveEffectiveOutputSchema,
   turnStep,
 } from "#execution/workflow-steps.js";
@@ -227,6 +229,20 @@ describe("dispatchTurnStep", () => {
     );
   });
 
+  it("starts turn workflows on the latest promoted generation in local development", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    const input = createTurnInput();
+    startMock.mockResolvedValue({ runId: "turn-run" });
+
+    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
+
+    expect(startMock).toHaveBeenCalledWith(
+      turnWorkflowReference,
+      [createTurnWorkflowInput(input)],
+      expect.objectContaining({ deploymentId: "latest" }),
+    );
+  });
+
   it("pins turn workflows to the current deployment off production", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     const input = createTurnInput();
@@ -283,7 +299,7 @@ describe("dispatchTurnStep", () => {
 });
 
 describe("dispatchRuntimeActionsStep", () => {
-  it("starts subagent child drivers on the latest deployment", async () => {
+  it("preserves a started local child when a later start fails", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as never;
     const compiledBundle = {
@@ -303,10 +319,10 @@ describe("dispatchRuntimeActionsStep", () => {
       subagentRegistry: {
         subagentsByNodeId: new Map([
           [
-            "subagents/delegate",
+            "subagents/agent",
             {
               definition: {
-                description: "Local delegate child description.",
+                description: "Explicitly declared agent child description.",
                 kind: "subagent",
               },
             },
@@ -317,7 +333,9 @@ describe("dispatchRuntimeActionsStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    startMock.mockResolvedValue({ runId: "child-run" });
+    startMock
+      .mockResolvedValueOnce({ runId: "child-run" })
+      .mockRejectedValueOnce(new Error("child start failed"));
     getRunMock.mockReturnValue({
       getReadable: () =>
         new ReadableStream<Uint8Array>({
@@ -334,16 +352,27 @@ describe("dispatchRuntimeActionsStep", () => {
           description: "Runtime action event description.",
           input: { message: "investigate latest routing" },
           kind: "subagent-call",
-          name: "delegate",
-          nodeId: "subagents/delegate",
-          subagentName: "delegate",
+          name: "agent",
+          nodeId: "subagents/agent",
+          subagentName: "agent",
+        },
+        {
+          callId: "call-2",
+          description: "Second runtime action event description.",
+          input: { message: "investigate fallback routing" },
+          kind: "subagent-call",
+          name: "agent",
+          nodeId: "subagents/agent",
+          subagentName: "agent",
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
+        rootSessionId: "root-session",
         sessionId: "parent-session",
+        subagentDepth: 99,
       }),
     });
     installSessionStoreMocks([session]);
@@ -360,13 +389,39 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionState,
     });
 
-    expect(result).toEqual({ results: [], sessionState: expect.any(Object) });
+    expect(result).toEqual({
+      results: [
+        {
+          callId: "call-2",
+          isError: true,
+          kind: "subagent-result",
+          output: {
+            code: "SUBAGENT_START_FAILED",
+            message: "child start failed",
+          },
+          subagentName: "agent",
+        },
+      ],
+      sessionState: expect.any(Object),
+    });
+    expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
+      {
+        childContinuationTokens: {
+          "call-1": "subagent:parent-session:call-1",
+        },
+        childSessionIds: {
+          "call-1": "child-run",
+        },
+      },
+    );
     expect(startMock).toHaveBeenCalledWith(
       workflowEntryReference,
       [
         expect.objectContaining({
           input: {
-            message: expect.stringContaining("Description: Local delegate child description."),
+            message: expect.stringContaining(
+              "Description: Explicitly declared agent child description.",
+            ),
           },
           limits: {
             maxInputTokensPerSession: false,
@@ -384,7 +439,7 @@ describe("dispatchRuntimeActionsStep", () => {
         allowReservedAttributes: true,
         attributes: expect.objectContaining({
           "$eve.parent": "parent-session",
-          "$eve.root": "parent-session",
+          "$eve.root": "root-session",
           "$eve.type": "subagent",
         }),
         deploymentId: "latest",
@@ -505,7 +560,91 @@ describe("dispatchRuntimeActionsStep", () => {
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
 
-  it("blocks pending subagent calls at the subagent depth limit", async () => {
+  it("records a successfully started remote child session for cancellation", async () => {
+    const remote = {
+      definition: {
+        description: "Research remote",
+        kind: "remote",
+        name: "research",
+        nodeId: "remote/research",
+        path: "/eve/v1/session",
+        url: "https://remote.example.com",
+      },
+    };
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([["remote/research", remote]]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { ok: true, sessionId: "remote-child" },
+            { headers: { "x-eve-session-id": "remote-child" }, status: 202 },
+          ),
+        ),
+    );
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-remote",
+          description: "Delegate the work.",
+          input: { message: "investigate latest routing" },
+          kind: "remote-agent-call",
+          name: "research",
+          nodeId: "remote/research",
+          remoteAgentName: "research",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(result.results).toEqual([]);
+    expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
+      {
+        childSessionIds: { "call-remote": "remote-child" },
+      },
+    );
+  });
+
+  it("blocks a stale recursive agent call from a delegated session", async () => {
     const compiledBundle = {
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -536,18 +675,18 @@ describe("dispatchRuntimeActionsStep", () => {
           description: "Delegate the work.",
           input: { message: "try to recurse" },
           kind: "subagent-call",
-          name: "delegate",
-          nodeId: "subagents/delegate",
-          subagentName: "delegate",
+          name: "agent",
+          nodeId: "__root__",
+          subagentName: "agent",
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
+        rootSessionId: "root-session",
         sessionId: "parent-session",
-        subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-        subagentMaxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
+        subagentDepth: 1,
       }),
     });
     installSessionStoreMocks([session]);
@@ -571,24 +710,21 @@ describe("dispatchRuntimeActionsStep", () => {
           isError: true,
           kind: "subagent-result",
           output: {
-            code: "SUBAGENT_DEPTH_LIMIT_REACHED",
-            currentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-            maxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-            message: `Subagent depth limit reached (${DEFAULT_SUBAGENT_MAX_DEPTH + 1}); "delegate" was not called.`,
+            code: "RECURSIVE_AGENT_ROOT_ONLY",
+            message: 'The built-in "agent" tool is only available to the root session.',
           },
-          subagentName: "delegate",
+          subagentName: "agent",
         },
       ],
       sessionState,
     });
     expect(startMock).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
-      "[eve:execution.dispatch-runtime-actions] subagent depth limit reached; blocking delegated call",
+      "[eve:execution.dispatch-runtime-actions] recursive agent call blocked outside the root session",
       expect.objectContaining({
         callId: "call-1",
-        currentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-        maxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-        subagentName: "delegate",
+        currentDepth: 1,
+        subagentName: "agent",
       }),
     );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();

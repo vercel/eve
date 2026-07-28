@@ -58,6 +58,10 @@ export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "in
  * Constraints applied to subagent calls by `t.calledSubagent`.
  */
 export interface EveEvalSubagentCallMatchOptions {
+  /** Matcher over the runtime-action call id. */
+  readonly callId?: EveEvalValueMatcher<string | undefined>;
+  /** Matcher over the durable child session id, when delegation started. */
+  readonly childSessionId?: EveEvalValueMatcher<string | undefined>;
   /** Matcher over the `subagent.called` remote URL. */
   readonly remoteUrl?: EveEvalValueMatcher<string | undefined>;
   /** Matcher over the `subagent.completed` output. */
@@ -150,6 +154,15 @@ export function subagentCallMatches(
   call: EveEvalSubagentCall,
   options: EveEvalSubagentCallMatchOptions,
 ): boolean {
+  if (options.callId !== undefined && !matchesValue(options.callId, call.callId)) {
+    return false;
+  }
+  if (
+    options.childSessionId !== undefined &&
+    !matchesValue(options.childSessionId, call.childSessionId)
+  ) {
+    return false;
+  }
   if (options.remoteUrl !== undefined && !matchesValue(options.remoteUrl, call.remoteUrl)) {
     return false;
   }

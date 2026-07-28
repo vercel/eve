@@ -146,6 +146,7 @@ export interface LinearChannelEvents {
   readonly "input.requested"?: LinearEventHandler<"input.requested">;
   readonly "turn.failed"?: LinearEventHandler<"turn.failed">;
   readonly "turn.completed"?: LinearEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: LinearEventHandler<"turn.cancelled">;
   readonly "session.failed"?: LinearSessionFailedHandler;
   readonly "session.completed"?: LinearEventHandler<"session.completed">;
   readonly "session.waiting"?: LinearEventHandler<"session.waiting">;
@@ -425,7 +426,8 @@ function stateFromAgentSession(
     issueIdentifier: session.issue?.identifier ?? null,
     issueTitle: session.issue?.title ?? null,
     issueUrl: session.issue?.url ?? null,
-    organizationId: session.organizationId ?? null,
+    // Only the webhook session ref carries an organization id.
+    organizationId: "organizationId" in session ? (session.organizationId ?? null) : null,
     pendingToolCallMessage: null,
     sourceCommentId: session.sourceCommentId ?? null,
   };

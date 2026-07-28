@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
+import { loadDeclaration } from "../_shared.mjs";
+
 const require = createRequire(import.meta.url);
 
 function resolveWorkflowWorldLocalVersion() {
@@ -35,13 +37,18 @@ const workflowWorldLocalVersion = resolveWorkflowWorldLocalVersion();
 const workflowWorldLocalVersionPlugin = {
   name: "eve-workflow-world-local-version",
   transform(source, id) {
-    if (!id.endsWith("/@workflow/world-local/dist/init.js")) {
+    if (!id.replaceAll("\\", "/").endsWith("/@workflow/world-local/dist/init.js")) {
       return undefined;
+    }
+
+    const bundledVersionSource = "version: 'bundled',";
+    if (!source.includes(bundledVersionSource)) {
+      throw new Error("Failed to find the bundled @workflow/world-local version fallback.");
     }
 
     return {
       code: source.replace(
-        "version: 'bundled',",
+        bundledVersionSource,
         `version: ${JSON.stringify(workflowWorldLocalVersion)},`,
       ),
       map: null,
@@ -53,5 +60,6 @@ export default {
   packageName: "@workflow/world-local",
   compiledPath: "@workflow/world-local",
   chunkGroup: "workflow",
+  declaration: await loadDeclaration("workflow-world-local.d.ts"),
   plugins: [workflowWorldLocalVersionPlugin],
 };

@@ -34,9 +34,8 @@ vi.mock("#internal/nitro/routes/agent-info/load-agent-info-data.js", () => ({
 
 const ROUTE_INPUT = {
   appRoot: "/tmp/app",
-  dev: true,
   devRuntimeArtifactsPointerPath: "/tmp/app/.eve/dev-runtime/current.json",
-  mode: "development",
+  kind: "development",
   moduleMapLoaderPath: "/tmp/eve/src/internal/authored-module-map-loader.ts",
 } as const;
 

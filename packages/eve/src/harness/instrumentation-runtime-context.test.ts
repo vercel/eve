@@ -14,14 +14,6 @@ import type {
   InstrumentationStepStartedEventResult,
 } from "#public/instrumentation/index.js";
 
-declare module "#public/channels/index.js" {
-  interface ChannelMetadataMap {
-    readonly "channel:support": {
-      readonly triggeringUserId: string | null;
-    } & Readonly<Record<string, unknown>>;
-  }
-}
-
 const session: HarnessSession = {
   agent: {
     modelReference: { id: "test-model" },
@@ -183,7 +175,10 @@ describe("buildTelemetryRuntimeContext", () => {
               input.channel.kind === "channel:support"
                 ? {
                     runtimeContext: {
-                      "slack.user_id": input.channel.metadata.triggeringUserId ?? "",
+                      "slack.user_id":
+                        typeof input.channel.metadata["triggeringUserId"] === "string"
+                          ? input.channel.metadata["triggeringUserId"]
+                          : "",
                     },
                   }
                 : { runtimeContext: {} },
@@ -234,6 +229,6 @@ describe("buildTelemetryRuntimeContext", () => {
     if (captured?.channel.kind !== "channel:support") {
       throw new Error("expected support channel");
     }
-    expect(captured.channel.metadata.nested).toEqual({ value: "original" });
+    expect(captured.channel.metadata).toMatchObject({ nested: { value: "original" } });
   });
 });

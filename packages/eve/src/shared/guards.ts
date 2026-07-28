@@ -46,6 +46,16 @@ export function isThenable(value: unknown): value is PromiseLike<unknown> {
 }
 
 /**
+ * Returns `true` when `error` is an `Error` carrying the given Node.js
+ * `errno` code (`"ENOENT"`, `"EEXIST"`, ...). Filesystem control flow
+ * routinely branches on these codes; this guard keeps the
+ * `"code" in error` duck-typing in one place.
+ */
+export function isErrnoCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
+}
+
+/**
  * Returns `true` when `value` is a plain object record — `{}`,
  * `Object.create(null)`, or an object whose prototype is
  * `Object.prototype`. Class instances, `Map`, `Date`, and other

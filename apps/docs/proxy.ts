@@ -11,7 +11,7 @@ const proxy = createProxy({
 export const config = {
   // Matcher ignoring `/_next/`, `/api/`, public static assets, favicon, sitemap, robots, etc.
   matcher: [
-    "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|eve\\.tgz$|.*\\.[^/]+$).*)",
+    "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|eve\\.tgz$|.*\\.(?!mdx?$)[^/]+$).*)",
   ],
 };
 

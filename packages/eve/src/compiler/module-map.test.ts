@@ -24,7 +24,6 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
     },
     extensionMounts: [],
     disabledFrameworkTools: [],
-    workflowEnabled: false,
     dynamicInstructions: [],
     dynamicSkills: [],
     dynamicTools: [],

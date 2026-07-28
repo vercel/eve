@@ -13,6 +13,7 @@ export { mockModel } from "#evals/mock-model.js";
 
 export type { RuntimeIdentity } from "#protocol/message.js";
 export type { InputRequest } from "#runtime/input/types.js";
+export type { CancelSessionResult } from "#client/types.js";
 
 export type {
   EveEvalCountMatcher,
@@ -45,6 +46,7 @@ export type {
   EveEvalConfigInput,
   EveEvalDefinition,
   EveEvalInput,
+  EveEvalLiveTurn,
   EveEvalResult,
   EveEvalTarget,
   EveEvalTargetCapabilities,
@@ -52,6 +54,8 @@ export type {
   EveEvalTaskResult,
   EveEvalToolCall,
   EveEvalTurn,
+  EveEvalStreamEvent,
+  EveEvalWaitForEventOptions,
   EveEvalVerdict,
   JudgeContext,
   JudgeOpts,

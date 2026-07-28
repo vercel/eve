@@ -29,4 +29,18 @@ export {
   imprintCellSizeForLogicalHeight,
   imprintGridSizeForLogicalSize,
 } from "./render/constants";
-export type { Bounds, EnvLightConfig, EveMaterial, ImprintRenderOptions, MeshData, PaintPointerMapping, PaintPointerMappingInput, PaintPointerRect, PaintRenderOptions, PaintSeed, PaintStroke, RenderControls, StudioCubemap } from "./render/types";
+export type {
+  Bounds,
+  EnvLightConfig,
+  EveMaterial,
+  ImprintRenderOptions,
+  MeshData,
+  PaintPointerMapping,
+  PaintPointerMappingInput,
+  PaintPointerRect,
+  PaintRenderOptions,
+  PaintSeed,
+  PaintStroke,
+  RenderControls,
+  StudioCubemap,
+} from "./render/types";

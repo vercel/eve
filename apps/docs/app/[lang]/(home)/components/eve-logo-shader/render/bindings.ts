@@ -52,7 +52,11 @@ export function createBackParamsBinding(
   return { buffer, bindGroup };
 }
 
-export function createUniformParamsBinding(device: Device, pipeline: GPURenderPipeline, label: string) {
+export function createUniformParamsBinding(
+  device: Device,
+  pipeline: GPURenderPipeline,
+  label: string,
+) {
   const buffer = device.createBuffer({
     size: PARAMS_BYTE_SIZE,
     usage: ["uniform", "copy_dst"],

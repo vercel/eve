@@ -11,7 +11,7 @@ import type { HarnessSession } from "#harness/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
-import { resolveSubagentDelegationLimit } from "#harness/subagent-depth.js";
+import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
 
 /**
@@ -93,16 +93,10 @@ export function buildSubagentRunInput(input: {
   // explicit root, so its own `sessionId` becomes the root for its
   // children.
   const rootSessionId = session.rootSessionId ?? session.sessionId;
-  const delegationLimit = resolveSubagentDelegationLimit(session);
+  const subagentDepth = resolveSubagentDepth(session);
   const inheritedLimits: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
-  if (session.subagentMaxDepth !== undefined) {
-    inheritedLimits.maxSubagentDepth = session.subagentMaxDepth;
-  }
-  if (session.workflowMaxSubagents !== undefined) {
-    inheritedLimits.maxSubagents = session.workflowMaxSubagents;
-  }
 
   const runInput: {
     -readonly [K in keyof RunInput]: RunInput[K];
@@ -139,7 +133,7 @@ export function buildSubagentRunInput(input: {
         sequence: batchEvent.sequence,
       },
     },
-    subagentDepth: delegationLimit.nextChildDepth,
+    subagentDepth: subagentDepth.nextChildDepth,
   };
 
   return { childContinuationToken, runInput };

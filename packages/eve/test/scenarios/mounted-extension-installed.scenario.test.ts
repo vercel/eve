@@ -28,13 +28,13 @@ afterEach(async () => {
 
 const PACKAGE_NAME = "@acme/installed-crm";
 const EXT_TREE: Readonly<Record<string, string>> = {
-  "ext/extension.ts": [
+  "extension/extension.ts": [
     'import { defineExtension } from "eve/extension";',
     'const config = { "~standard": { version: 1, vendor: "scenario", validate: (value) => ({ value }) } };',
     "export default defineExtension({ config });",
     "",
   ].join("\n"),
-  "ext/tools/echo.ts": [
+  "extension/tools/echo.ts": [
     'import { defineTool } from "eve/tools";',
     'import extension from "../extension.js";',
     "export default defineTool({",
@@ -49,8 +49,8 @@ const EXT_TREE: Readonly<Record<string, string>> = {
 };
 
 /**
- * Runs `eve build` over a `.ts`-authored extension and returns the built package
- * (compiled `dist/` + source `ext/`) as files to place under the consumer's real
+ * Runs the extension package build over a `.ts`-authored extension and returns the built package
+ * (compiled `dist/` + source `extension/`) as files to place under the consumer's real
  * `node_modules/`. Placing it there — rather than a workspace symlink — means the
  * mount's `.` entrypoint resolves under `node_modules` and is externalized, so
  * Node loads the emitted `dist/index.mjs` directly. The `.ts` source is
@@ -62,10 +62,10 @@ async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
   tempRoots.push(extRoot);
   await writeFile(
     join(extRoot, "package.json"),
-    `${JSON.stringify({ name: PACKAGE_NAME, type: "module", eve: { extension: "./ext" } }, null, 2)}\n`,
+    `${JSON.stringify({ name: PACKAGE_NAME, type: "module", eve: { extension: "./extension" } }, null, 2)}\n`,
     "utf8",
   );
-  await mkdir(join(extRoot, "ext", "tools"), { recursive: true });
+  await mkdir(join(extRoot, "extension", "tools"), { recursive: true });
   for (const [path, contents] of Object.entries(EXT_TREE)) {
     await writeFile(join(extRoot, path), contents, "utf8");
   }
@@ -74,7 +74,7 @@ async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
   await buildExtensionPackage(extRoot, config!);
 
   // `eve build` writes dist/ (compiled entrypoints + declarations) and the
-  // exports map into package.json; ship those plus the ext/ source verbatim.
+  // exports map into package.json; ship those plus the extension/ source verbatim.
   const packaged = [
     "package.json",
     "dist/index.mjs",

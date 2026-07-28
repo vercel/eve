@@ -2,7 +2,12 @@
 // INVARIANT: Pure move from render.ts; keep shader ABI, binding order, and pixel output unchanged.
 // Imported by render/renderer.ts and re-exported only through render.ts facade.
 
-import type { Bounds, PaintPointerMapping, PaintPointerMappingInput, RenderControls } from "./types";
+import type {
+  Bounds,
+  PaintPointerMapping,
+  PaintPointerMappingInput,
+  RenderControls,
+} from "./types";
 import {
   BLOOM_RADIUS,
   DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,

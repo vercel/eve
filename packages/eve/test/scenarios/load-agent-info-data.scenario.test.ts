@@ -64,7 +64,7 @@ describe("loadAgentInfoData", () => {
       });
 
       const agentInfoCompiledArtifactsSource = resolveAgentInfoCompiledArtifactsSource({
-        appRoot,
+        kind: "production",
       });
       expect(agentInfoCompiledArtifactsSource.kind).toBe("bundled");
       const data = await loadAgentInfoData({

@@ -470,8 +470,6 @@ describe("linearChannel default event handlers", () => {
             agentSession: {
               id: "agent_session_2",
               issue: { id: "issue_1", identifier: "EVE-123", title: "Linear work" },
-              issueId: "issue_1",
-              organizationId: "org_1",
               url: "https://linear.app/acme/agent-session/agent_session_2",
             },
             success: true,
@@ -504,7 +502,7 @@ describe("linearChannel default event handlers", () => {
         agentSessionId: "agent_session_2",
         issueId: "issue_1",
         issueIdentifier: "EVE-123",
-        organizationId: "org_1",
+        organizationId: null,
       }),
     });
   });

@@ -162,7 +162,6 @@ describe("buildSubagentRunInput", () => {
       ...makeSession(),
       sessionId: "intermediate-session",
       subagentDepth: 2,
-      subagentMaxDepth: 4,
     };
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
@@ -173,7 +172,6 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.subagentDepth).toBe(3);
-    expect(runInput.limits).toMatchObject({ maxSubagentDepth: 4 });
   });
 
   it("threads inherited limits through the child run input", () => {
@@ -184,16 +182,12 @@ describe("buildSubagentRunInput", () => {
       initiatorAuth: null,
       session: {
         ...makeSession(),
-        subagentMaxDepth: 4,
-        workflowMaxSubagents: 7,
       },
     });
 
     expect(runInput.limits).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: false,
-      maxSubagentDepth: 4,
-      maxSubagents: 7,
     });
   });
 

@@ -10,6 +10,7 @@ import type { Runtime } from "#channel/types.js";
 
 function makeRuntime(): Runtime {
   return {
+    cancelTurn: vi.fn(),
     deliver: vi.fn(),
     getEventStream: vi.fn(),
     run: vi.fn(),

@@ -34,7 +34,9 @@ export function renderBackMaterial(
   });
   const pass = new RenderPass(device, {
     label: "eve-5-back-material-pass",
-    colorAttachments: [{ view: target, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }],
+    colorAttachments: [
+      { view: target, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] },
+    ],
     depthStencilAttachment: {
       view: depth,
       depthClearValue: 1,
@@ -77,7 +79,9 @@ export function renderBackDepth(
   });
   const pass = new RenderPass(device, {
     label: "eve-5-back-depth-pass",
-    colorAttachments: [{ view: target, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }],
+    colorAttachments: [
+      { view: target, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] },
+    ],
     depthStencilAttachment: {
       view: depth,
       depthLoadOp: "load",

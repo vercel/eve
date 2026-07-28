@@ -149,15 +149,13 @@ export function resolvePendingInput(input: {
   // Pending batch exists -- only resolve if we have actual responses.
   const resolvedStepInput = resolveTextMessageInput(pendingBatch, stepInput);
   const responses = resolvedStepInput?.inputResponses ?? [];
+  const resolvesApprovalBatch = pendingBatch.requests.some((request) => isApprovalRequest(request));
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  if (
-    pendingBatch.requests.some((request) => isApprovalRequest(request)) &&
-    hasUnansweredApproval({ pendingBatch, responses })
-  ) {
+  if (resolvesApprovalBatch && hasUnansweredApproval({ pendingBatch, responses })) {
     session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
     return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
   }
@@ -208,26 +206,35 @@ export function resolvePendingInput(input: {
   const rejectedActions = buildRejectedActionBatch(pendingBatch, responses);
   session = clearPendingInputBatch(session);
 
-  // AI SDK cannot process tool-approval responses and a new user message
-  // in the same request. Defer the message so the approval is resolved in
-  // isolation; `consumeDeferredStepInput` replays it on the next step.
-  if (
-    resolvedStepInput?.message !== undefined &&
-    pendingBatch.requests.some((request) => isApprovalRequest(request))
-  ) {
-    session = queueDeferredStepInput(session, {
-      message: resolvedStepInput.message,
-    });
+  // AI SDK collects approval responses only from the tail tool message.
+  // Defer channel context and any follow-up message so the approval resolves
+  // in isolation; `consumeDeferredStepInput` replays them on the next step.
+  if (resolvesApprovalBatch) {
+    const deferredInput: {
+      context?: StepInput["context"];
+      message?: StepInput["message"];
+    } = {};
+    if ((resolvedStepInput?.context?.length ?? 0) > 0) {
+      deferredInput.context = resolvedStepInput?.context;
+    }
+    if (resolvedStepInput?.message !== undefined) {
+      deferredInput.message = resolvedStepInput.message;
+    }
 
-    return {
-      consumedMessage: resolvedStepInput?.messageConsumed,
-      deferredMessage: true,
-      limitContinuation,
-      outcome: "resolved",
-      messages,
-      rejectedActions,
-      session,
-    };
+    if (deferredInput.context !== undefined || deferredInput.message !== undefined) {
+      session = queueDeferredStepInput(session, deferredInput);
+
+      return {
+        consumedMessage: resolvedStepInput?.messageConsumed,
+        deferredContext: deferredInput.context === undefined ? undefined : true,
+        deferredMessage: deferredInput.message === undefined ? undefined : true,
+        limitContinuation,
+        outcome: "resolved",
+        messages,
+        rejectedActions,
+        session,
+      };
+    }
   }
 
   return {
@@ -307,6 +314,7 @@ function hasUnansweredApproval(input: {
 
 type ResolvePendingInputResult = {
   readonly consumedMessage?: boolean;
+  readonly deferredContext?: boolean;
   readonly deferredMessage?: boolean;
   /**
    * Present when the resolved batch answered a session-limit continuation

@@ -1,13 +1,13 @@
 ---
 title: "Subagents"
-description: "Delegate work to child agents, either a copy of the agent itself or declared specialists with their own sandbox and skills."
+description: "Delegate work to root-agent copies or declared specialists with their own tools and sandbox."
 ---
 
-A subagent is a child agent that one agent delegates a focused subtask to. Split work into one to run it in parallel, to give the child a narrower set of tools, or to give a specialist its own identity. There are two kinds, the built-in `agent` tool (a copy of the agent itself) and declared subagents (specialists with their own directory).
+eve supports two ways to delegate work: the root-only built-in `agent` tool, which runs a fresh copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
 
 ## The built-in `agent` tool
 
-Every agent gets an `agent` tool by default. The model calls it to delegate a subtask to a copy of itself:
+The root session receives `agent` by default. The model calls it to delegate a task to a fresh copy of the root agent:
 
 ```ts
 {
@@ -16,11 +16,21 @@ Every agent gets an `agent` tool by default. The model calls it to delegate a su
 }
 ```
 
-The copy shares the parent's sandbox and tools, and a child's file writes are immediately visible to the parent. That is what makes parallel calls natural: emit multiple `agent` calls in one response to fan out a small, fixed set of independent subtasks. eve runs that batch concurrently and returns every result before the parent continues. Give children non-overlapping write scopes when they work in the shared sandbox. The copy inherits auth and connections, but starts with fresh conversation history and fresh state. If a declared subagent calls `agent`, the child is a copy of _that_ subagent, not the root.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. To run independent tasks in parallel, emit multiple `agent` calls in one response; eve runs the batch concurrently and returns every result before the root continues. Give parallel children non-overlapping write scopes.
+
+`agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
 The parent transfers data to the child through the `message` input it gives the subagent. Do not include sensitive data in a subagent request unless that child and its inherited tools, connections, sandbox, and telemetry path are appropriate for that data.
 
-An authored tool at `agent/tools/agent.ts` takes priority over the built-in.
+To prevent the root session from delegating to a fresh copy of itself, disable `agent` the same way as any other built-in tool:
+
+```ts title="agent/tools/agent.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
+An authored root tool at `agent/tools/agent.ts` takes priority over the built-in.
 
 ## Declared subagents
 
@@ -55,10 +65,10 @@ agent/subagents/researcher/
 
 A declared subagent inherits nothing from the root's authored slots. Discovery treats its directory as its own agent root, so it has only the instructions, tools, connections, skills, sandbox, hooks, and nested subagents authored under `agent/subagents/<id>/`. An absent slot falls back to the framework default, not to the root's version.
 
-| Slot         | Built-in `agent` tool         | Declared subagent                      |
+| Slot         | Root built-in `agent` tool    | Declared subagent                      |
 | ------------ | ----------------------------- | -------------------------------------- |
 | Instructions | Inherited (copy of the agent) | Own `instructions.{md,ts}`, optional   |
-| Tools        | Inherited                     | Own `tools/`                           |
+| Tools        | Inherited except root-only    | Own `tools/`                           |
 | Connections  | Inherited                     | Own `connections/`                     |
 | Skills       | Inherited                     | Own `skills/`                          |
 | Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
@@ -69,32 +79,17 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 
 For a declared subagent this means duplicating anything the child needs. When two subagents need the same procedure, copy the markdown under each `skills/` directory, or share typed helpers via `lib/`. The sandbox does not inherit from the parent; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
 
-The built-in `agent` tool is the exception. Its children share the parent's sandbox and tools because they are copies of the same agent working on the same files.
+The root built-in `agent` tool is the exception. Its children share the root's sandbox and tools because they are copies of the same agent working on the same files.
 
 `defineState` is never shared, for either kind. Each child starts with fresh durable state.
 
 ## What the parent sees
 
-eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
+eve lowers every subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
 
-Subagent delegation is capped by default at one child-session level. Increase
-or lower that limit with `limits.maxSubagentDepth`:
+Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
-```ts title="agent/agent.ts"
-export default defineAgent({
-  model: "anthropic/claude-sonnet-5",
-  limits: {
-    maxSubagentDepth: 4,
-  },
-});
-```
-
-The root session is depth 0. With `maxSubagentDepth: 4`, eve may create child sessions
-at depths 1 through 4; a session already at depth 4 cannot delegate again.
-
-At the configured depth, eve stops advertising subagent tools, including declared local subagents, remote-agent tools, the built-in `agent` tool, and the `Workflow` orchestration tool when it would only expose subagents. If a stale or forced subagent call still reaches execution, eve blocks it and returns an error tool result instead of starting another child session.
-
-`Workflow` is root-only. Delegated subagent sessions can still call their own visible subagent tools until the depth cap, but they do not receive the `Workflow` orchestration wrapper. The number of subagent calls one Workflow program may dispatch is capped separately by `limits.maxSubagents` (default 100); see [Dynamic workflows](./guides/dynamic-workflows).
+`Workflow` is also root-only. Child sessions can still call their own declared or remote subagents, but they receive neither `Workflow` nor the built-in `agent`. The Workflow tool's `maxSubagents` option caps the number of calls made by one program (default 100); see [Dynamic workflows](./guides/dynamic-workflows).
 
 A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
 
@@ -110,6 +105,8 @@ Because the name lives in the same runtime tool namespace as authored tools, a s
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
+
+Cancelling a parent turn also requests cancellation of every active child it started, recursively through nested and remote subagents. Each affected session emits its own `turn.cancelled` → `session.waiting` boundary; the cancelled parent does not synthesize tool results or emit `subagent.completed`. A child that already completed or parked has no active turn and is a benign no-op.
 
 Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call so completed earlier steps, tool results, and sandbox work remain available to the child. Other recoverable task errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed task result instead of stacking both retry budgets; terminal errors fail immediately.
 

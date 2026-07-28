@@ -43,7 +43,13 @@ function providerRequestsPrecedeResults(events: readonly HandleMessageStreamEven
 export default defineEval({
   description: "Provider tools smoke: gateway web search answers a current-events question.",
   async test(t) {
-    const turn = await t.send("Who won the 2026 NBA finals");
+    const turn = await t.send(
+      [
+        "Important date context: the 2026 NBA Finals have absolutely already been played, and a champion has been crowned.",
+        "Do not claim the event is in the future, even if your internal knowledge incorrectly places the current date in 2025.",
+        `Call ${TOOL_NAME} to verify who won the 2026 NBA Finals, then answer with the winning team.`,
+      ].join("\n"),
+    );
 
     t.succeeded();
     t.calledTool(TOOL_NAME);

@@ -33,7 +33,7 @@ const { data } = useEveAgent();
 | `events`  | `ComputedRef<readonly HandleMessageStreamEvent[]>` | Raw server events for this session.                                       |
 | `session` | `ComputedRef<SessionState>`                        | Snapshot of session state.                                                |
 | `send`    | `(input: SendTurnPayload) => Promise<void>`        | Send text or a full turn (multi-part, attachments, HITL responses).       |
-| `stop`    | `() => void`                                       | Abort the in-flight request.                                              |
+| `stop`    | `() => void`                                       | Abort the client's in-flight stream.                                      |
 | `reset`   | `() => void`                                       | Clear state and start a new session.                                      |
 
 The first five are `ComputedRef`s; the rest are methods. Destructure whatever you need, since refs keep their reactivity through destructuring. Read them with `.value` in `<script>`, and unwrapped in `<template>`.
@@ -116,7 +116,7 @@ The find-and-answer flow is the same across every framework. The [React hook ref
 
 ## Stop, reset, and resume
 
-`stop()` aborts the in-flight stream. `reset()` wipes state and starts a fresh session. To survive a reload, pass `initialSession` to restore a saved session and `onSessionChange` to persist the cursor as it moves:
+`stop()` aborts the in-flight stream; the server-side turn keeps running and remains attachable — to stop the turn itself, POST the session's [cancel route](../../channels/eve#routes). `reset()` wipes state and starts a fresh session. To survive a reload, pass `initialSession` to restore a saved session and `onSessionChange` to persist the cursor as it moves:
 
 ```ts
 const agent = useEveAgent({

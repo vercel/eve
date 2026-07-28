@@ -191,7 +191,7 @@ async function composeManifestContributions(input: {
         sourceId: scopeSourceId(entry.definition.sourceId),
         logicalPath: rebase(entry.definition.logicalPath),
       });
-    } else if (entry.kind === "enable-workflow") {
+    } else if (entry.kind === "workflow-tool") {
       throw new Error(
         `${describeExtensionSource(role, namespace, source.logicalPath)} enables the Workflow tool, ` +
           `but the Workflow tool is the consuming agent's to enable, not an extension's. Remove it.`,

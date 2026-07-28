@@ -57,7 +57,7 @@ interface ManagedExportTarget {
   readonly default: string;
 }
 
-/** Subpath exports `eve build` manages for an extension package. */
+/** Subpath exports `eve extension build` manages for an extension package. */
 const MANAGED_EXTENSION_EXPORTS: Readonly<Record<string, ManagedExportTarget>> = {
   ".": { types: "./dist/index.d.ts", default: "./dist/index.mjs" },
   "./tools": { types: "./dist/tools/index.d.ts", default: "./dist/tools/index.mjs" },
@@ -193,7 +193,7 @@ interface Reexport {
 /**
  * Emits one Node-facing entrypoint: a self-contained runnable `.mjs` (bundled
  * from the authored source with the extension namespace baked in) and a `.d.ts`
- * barrel whose type re-exports resolve into the shipped `ext/` source.
+ * barrel whose type re-exports resolve into the shipped `extension/` source.
  */
 async function emitEntrypoint(input: {
   readonly entryPath: string;
@@ -228,7 +228,7 @@ async function emitEntrypoint(input: {
 
 /**
  * Rewrites a bundle specifier to the form a `.d.ts` re-export resolves for types,
- * so declarations resolve into the shipped `.ts` source (`../ext/x.ts` → `../ext/x.js`).
+ * so declarations resolve into the shipped `.ts` source (`../extension/x.ts` → `../extension/x.js`).
  */
 function toDeclarationSpecifier(specifier: string): string {
   return specifier

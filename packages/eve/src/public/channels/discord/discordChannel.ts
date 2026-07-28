@@ -134,6 +134,7 @@ export interface DiscordChannelEvents {
   readonly "input.requested"?: DiscordEventHandler<"input.requested">;
   readonly "turn.failed"?: DiscordEventHandler<"turn.failed">;
   readonly "turn.completed"?: DiscordEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: DiscordEventHandler<"turn.cancelled">;
   readonly "session.failed"?: DiscordSessionFailedHandler;
   readonly "session.completed"?: DiscordEventHandler<"session.completed">;
   readonly "session.waiting"?: DiscordEventHandler<"session.waiting">;

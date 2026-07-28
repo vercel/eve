@@ -5,7 +5,7 @@ import {
   defineTool,
   defineDynamic,
   disableTool,
-  ExperimentalWorkflow,
+  experimental_workflow,
 } from "#public/definitions/tool.js";
 import { once } from "#public/tools/approval/approval-helpers.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -40,10 +40,22 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns an enable-workflow entry for the ExperimentalWorkflow marker", () => {
-    const entry = normalizeToolDefinition(ExperimentalWorkflow, FAILURE_MESSAGE);
+  it("returns a configured entry for the experimental Workflow tool", () => {
+    const entry = normalizeToolDefinition(
+      experimental_workflow({ maxSubagents: 6 }),
+      FAILURE_MESSAGE,
+    );
 
-    expect(entry).toEqual({ kind: "enable-workflow" });
+    expect(entry).toEqual({ kind: "workflow-tool", maxSubagents: 6 });
+  });
+
+  it.each([0, 1.5, -1, "6"])("rejects invalid workflow max subagents %j", (maxSubagents) => {
+    expect(() =>
+      normalizeToolDefinition(
+        experimental_workflow({ maxSubagents: maxSubagents as number }),
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("rejects authored tool exports that carry an authored `name` field", () => {

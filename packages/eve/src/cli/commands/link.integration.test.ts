@@ -136,12 +136,12 @@ describe("runLinkCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("links through the shared flow and reports success", async () => {
+  test("creates a project through the shared flow and reports success", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
     const fake = createFakePrompter({
       single: (opts) => {
-        if (opts.message === "Vercel project") return "link";
+        if (opts.message === "Vercel project") return "new";
         throw new Error(`Unexpected select: ${opts.message}`);
       },
     });
@@ -158,6 +158,8 @@ describe("runLinkCommand", () => {
     expect(process.exitCode).toBeUndefined();
     expect(fake.prompter.intro).toHaveBeenCalledWith("Link your eve agent to Vercel");
     expect(fake.prompter.outro).toHaveBeenCalledWith("Project linked.");
+    expect(flowDeps.resolveProvisioning?.pickNewProjectName).toHaveBeenCalled();
+    expect(flowDeps.resolveProvisioning?.pickProject).not.toHaveBeenCalled();
     expect(flowDeps.linkProject?.linkProject).toHaveBeenCalled();
   });
 });

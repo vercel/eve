@@ -58,11 +58,12 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                      |
 | `turn.completed`          | The turn finished.                                                                                               |
 | `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                          |
-| `session.waiting`         | The session parked, waiting for the next input (a message, an answer).                                           |
+| `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                   |
+| `session.waiting`         | The session parked for the next input; carries the current channel-owned `continuationToken`.                    |
 | `session.failed`          | The session failed.                                                                                              |
 | `session.completed`       | The session reached a terminal end.                                                                              |
 
-`reasoning.appended` and `message.appended` stream deltas as they arrive, and each one carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+`reasoning.appended` and `message.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
 
 Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
 
@@ -70,11 +71,11 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 A delegated subagent publishes progress on its own child-session stream. The parent only emits `subagent.called` with a `childSessionId`, which a client uses to attach.
 
-`step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
+`step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally — whatever the turn streamed before cancellation stays on the stream, while durable history keeps only what had already settled. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
 
 ## Send a follow-up message
 
-Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with the stored continuation token:
+Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with `event.data.continuationToken`:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
@@ -88,13 +89,32 @@ If the session is waiting on a human-in-the-loop approval, a matching text reply
 
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
+## Cancel the in-flight turn
+
+POST to the session's cancel endpoint to stop the turn that is currently running. The body is optional; pass `turnId` (stamped on every turn-scoped stream event) to scope the cancel to the turn you observed:
+
+```bash
+curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel
+# {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
+```
+
+`"accepted"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+
 ## Reconnect and rewind
 
-The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. Pass `startIndex` to reconnect by event count and pick up where you dropped off, or rewind to the start:
+The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
 
 ```bash
 curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
 ```
+
+A negative `startIndex` reads relative to the stream's current tail. For example, `-1` reads the latest event, which is normally `session.waiting` for a resumable session:
+
+```bash
+curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=-1"
+```
+
+This gives a consumer that only persisted `sessionId` a lightweight way to recover the current `continuationToken`. Because a tail-relative position does not resolve to an absolute consumed-event count, client tail reads do not automatically reconnect or advance the stored cursor.
 
 ## Use the client from TypeScript
 

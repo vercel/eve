@@ -3,6 +3,7 @@ import { isEveProject, listAuthoredChannels, type ChannelKind } from "#setup/sca
 import { interactiveAsker } from "#setup/ask.js";
 import { addChannels, type AddChannelsDeps } from "#setup/boxes/add-channels.js";
 import { deployProject, type DeployProjectDeps } from "#setup/boxes/deploy-project.js";
+import { reconcileHostFrameworkPreset } from "#setup/boxes/reconcile-host-framework-preset.js";
 import { selectChannels } from "#setup/boxes/select-channels.js";
 import {
   detectDeployment,
@@ -129,6 +130,10 @@ async function runAddChannelsFlow(
       ensureLinkedProject: "interactive-vercel-link",
       deps: dependencies.addChannelsDeps,
     }),
+    // A web (Next.js) channel added to an already-linked eve project may leave
+    // the project's Vercel Framework Preset on `eve`; switch it before deploying
+    // so the host app actually builds.
+    reconcileHostFrameworkPreset({ prompter }),
     deployProject({
       prompter,
       ensureLinkedProject: "interactive-vercel-link",

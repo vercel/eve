@@ -51,7 +51,7 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
     tools.push({
       description: m.description,
       execute: (input: unknown, options) =>
-        stepFn(m.closureVars, input, buildBaseToolContext(options)),
+        stepFn(m.closureVars, input, buildBaseToolContext({ options, toolName: m.name })),
       inputSchema: jsonSchema(m.inputSchema),
       name: m.name,
       approval: buildReplayedApproval(m),

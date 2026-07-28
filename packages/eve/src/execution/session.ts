@@ -68,7 +68,6 @@ export interface CreateSessionInput {
   readonly outputSchema?: HarnessSession["outputSchema"];
   readonly skillRoot?: string;
   readonly subagentDepth?: number;
-  readonly subagentMaxDepth?: number;
   readonly workflowMaxSubagents?: number;
 }
 
@@ -110,9 +109,6 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   }
   if (input.subagentDepth !== undefined) {
     session.subagentDepth = input.subagentDepth;
-  }
-  if (input.subagentMaxDepth !== undefined) {
-    session.subagentMaxDepth = input.subagentMaxDepth;
   }
   if (input.workflowMaxSubagents !== undefined) {
     session.workflowMaxSubagents = input.workflowMaxSubagents;
@@ -203,7 +199,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     sessionId: string;
     state?: HarnessSession["state"];
     subagentDepth?: number;
-    subagentMaxDepth?: number;
     workflowMaxSubagents?: number;
   } = {
     agent: { system: session.agent.system },
@@ -238,9 +233,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   }
   if (session.subagentDepth !== undefined) {
     durable.subagentDepth = session.subagentDepth;
-  }
-  if (session.subagentMaxDepth !== undefined) {
-    durable.subagentMaxDepth = session.subagentMaxDepth;
   }
   if (session.workflowMaxSubagents !== undefined) {
     durable.workflowMaxSubagents = session.workflowMaxSubagents;
@@ -306,9 +298,6 @@ export function hydrateDurableSession(input: {
   }
   if (durable.subagentDepth !== undefined) {
     session.subagentDepth = durable.subagentDepth;
-  }
-  if (durable.subagentMaxDepth !== undefined) {
-    session.subagentMaxDepth = durable.subagentMaxDepth;
   }
   if (durable.workflowMaxSubagents !== undefined) {
     session.workflowMaxSubagents = durable.workflowMaxSubagents;

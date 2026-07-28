@@ -146,7 +146,8 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
 };
 
 /**
- * Runtime-owned authored tool definition resolved from a compiled module map.
+ * Runtime-owned tool definition resolved from a compiled module map or
+ * declared by the framework catalog.
  * A tool without `execute` is surfaced to the client and never executed by eve.
  */
 export type ResolvedToolDefinition = Readonly<
@@ -387,13 +388,13 @@ export interface ResolvedAgent {
    */
   readonly disabledFrameworkTools: readonly string[];
   /**
-   * Whether the author opted into the framework `Workflow` orchestration tool
-   * by re-exporting the `Workflow` marker as the default export of a file in
-   * `agent/tools/`. When true, the harness exposes an isolated JavaScript sandbox
-   * whose only callable operations are this agent's subagents and remote
-   * agents.
+   * Configuration for the experimental framework `Workflow` orchestration
+   * tool. Present when an authored tool module exports
+   * `experimental_workflow(...)`.
    */
-  readonly workflowEnabled: boolean;
+  readonly workflowTool?: {
+    readonly maxSubagents?: number;
+  };
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
   readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];

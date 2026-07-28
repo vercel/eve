@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("./resolve-eve-binary.js", async () => {
+  const { join } = await import("node:path");
+  return {
+    // Pin resolution to the conventional app-local path so the default
+    // build-command assertion is deterministic without touching the
+    // filesystem. The real resolver is covered by its own integration test.
+    resolveEveBinaryPath: (nextRoot: string) =>
+      join(nextRoot, "node_modules", "eve", "bin", "eve.js"),
+  };
+});
+
 vi.mock("./vercel-output-config.js", () => ({
   ensureEveVercelOutputConfig: vi.fn(
     async (input: {
