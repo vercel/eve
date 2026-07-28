@@ -72,7 +72,7 @@ export default defineEval({
     );
     recovered.expectOk();
     stopSession.succeeded();
-    stopSession.calledSubagent("limited-worker", { count: 1 });
+    stopSession.calledSubagent("limited-worker", { count: 1, status: "pending" });
     stopSession.messageIncludes(ROOT_RECOVERY_TOKEN);
   },
 });
