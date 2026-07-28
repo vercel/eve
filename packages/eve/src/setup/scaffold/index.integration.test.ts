@@ -916,6 +916,10 @@ describe("scaffoldBaseProject", () => {
     expect(agentsMd).toContain("installed eve package docs");
     expect(agentsMd).toContain("node_modules/eve/docs/");
     expect(agentsMd).toContain("resolve the\ninstalled `eve` package location");
+    expect(agentsMd).toContain("`eve registry search <query> --json`");
+    expect(agentsMd).toContain("`eve registry list --json`");
+    expect(agentsMd).toContain("`eve registry view <item>`");
+    expect(agentsMd).toContain("`eve add <item>`");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy
