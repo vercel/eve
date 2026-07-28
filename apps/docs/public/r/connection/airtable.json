@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/airtable",
+  "title": "Airtable",
+  "description": "Bases, tables, and records through Airtable's MCP server.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/airtable.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://mcp.airtable.com/mcp\",\n  description: \"Airtable: bases, tables, and records.\",\n  auth: connect(\"airtable\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/airtable.ts"
+    }
+  ],
+  "type": "registry:item"
+}

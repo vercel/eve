@@ -1,0 +1,18 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/browser-use",
+  "title": "Browser Use",
+  "description": "Run managed browser automation tasks through Browser Use's MCP server.",
+  "files": [
+    {
+      "path": "registry/connections/browser-use.ts",
+      "content": "import { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://api.browser-use.com/v3/mcp\",\n  description:\n    \"Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.\",\n  headers: () => ({\n    \"x-browser-use-api-key\": process.env.BROWSER_USE_API_KEY!,\n  }),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/browser-use.ts"
+    }
+  ],
+  "envVars": {
+    "BROWSER_USE_API_KEY": ""
+  },
+  "type": "registry:item"
+}

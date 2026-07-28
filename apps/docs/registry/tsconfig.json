@@ -4,6 +4,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["extensions/**/*.ts"],
+  "include": ["connections/**/*.ts", "extensions/**/*.ts", "instrumentation/**/*.ts"],
   "exclude": ["node_modules"]
 }

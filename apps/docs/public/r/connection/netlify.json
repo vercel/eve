@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/netlify",
+  "title": "Netlify",
+  "description": "Create, deploy, manage, and secure websites on Netlify.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/netlify.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://netlify-mcp.netlify.app/mcp\",\n  description: \"Netlify: create, deploy, manage, and secure sites.\",\n  auth: connect(\"netlify\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/netlify.ts"
+    }
+  ],
+  "type": "registry:item"
+}

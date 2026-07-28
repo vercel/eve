@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/hugging-face",
+  "title": "Hugging Face",
+  "description": "Access the Hugging Face Hub and thousands of Gradio apps.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/hugging-face.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://huggingface.co/mcp?login&gradio=none\",\n  description: \"Hugging Face: models, datasets, Spaces, and Gradio apps on the Hub.\",\n  auth: connect(\"hugging-face\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/hugging-face.ts"
+    }
+  ],
+  "type": "registry:item"
+}

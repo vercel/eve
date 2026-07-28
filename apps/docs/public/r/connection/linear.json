@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/linear",
+  "title": "Linear",
+  "description": "Issues, projects, cycles, and comments via Linear's MCP server.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/linear.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://mcp.linear.app/mcp\",\n  description: \"Linear workspace: issues, projects, cycles, and comments.\",\n  auth: connect(\"linear\"),\n\n  // For app-scoped authentication, replace the auth block above with:\n  // auth: connect({ connector: \"linear\", principalType: \"app\" }),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/linear.ts"
+    }
+  ],
+  "type": "registry:item"
+}

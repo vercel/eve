@@ -1,17 +1,10 @@
-import {
-  type JSONValue,
-  type ToolApprovalConfiguration,
-  type ToolApprovalStatus,
-  type ToolSet,
-  tool,
-} from "ai";
+import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, tool } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
-import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
@@ -25,12 +18,8 @@ import {
   modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
-import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
+import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
-
-type ToolModelOutputValue =
-  | { readonly type: "json"; readonly value: JSONValue }
-  | { readonly type: "text"; readonly value: string };
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -190,63 +179,6 @@ export function wrapToolExecute(
       toolName: definition.name,
     });
   };
-}
-
-function normalizeToolJsonOutput(input: {
-  readonly boundary: "execute" | "toModelOutput";
-  readonly output: unknown;
-  readonly toolCallId?: string;
-  readonly toolName: string;
-}): JsonValue {
-  const candidate = input.output === undefined ? null : input.output;
-
-  return withToolOutputSerializationError(input, () => {
-    parseJsonValue(candidate);
-    return candidate as JsonValue;
-  });
-}
-
-function normalizeToolModelOutput(input: {
-  readonly output: unknown;
-  readonly toolCallId?: string;
-  readonly toolName: string;
-}): ToolModelOutputValue {
-  return withToolOutputSerializationError(
-    {
-      boundary: "toModelOutput",
-      toolCallId: input.toolCallId,
-      toolName: input.toolName,
-    },
-    () => {
-      if (input.output === null || typeof input.output !== "object") {
-        throw new TypeError("Expected a tool model output object.");
-      }
-
-      const output = input.output as { readonly type?: unknown; readonly value?: unknown };
-
-      if (output.type === "text") {
-        if (typeof output.value !== "string") {
-          throw new TypeError('Expected text model output to include a string "value".');
-        }
-
-        return { type: "text", value: output.value };
-      }
-
-      if (output.type === "json") {
-        return {
-          type: "json",
-          value: normalizeToolJsonOutput({
-            boundary: "toModelOutput",
-            output: output.value,
-            toolCallId: input.toolCallId,
-            toolName: input.toolName,
-          }) as JSONValue,
-        };
-      }
-
-      throw new TypeError('Expected tool model output type to be "text" or "json".');
-    },
-  );
 }
 
 /**

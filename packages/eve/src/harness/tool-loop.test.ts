@@ -51,6 +51,7 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { createInstrumentationHooks } from "#harness/instrumentation-lifecycle.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -68,7 +69,17 @@ vi.mock("ai", () => ({
   tool: vi.fn((t: unknown) => t),
 }));
 
+const { existingOtelIntegration, mockCreateAiSdkHookBridge } = vi.hoisted(() => ({
+  existingOtelIntegration: { onStart: vi.fn() },
+  mockCreateAiSdkHookBridge: vi.fn((..._args: unknown[]) => ({ onStart: vi.fn() })),
+}));
+
+vi.mock("./ai-sdk-hook-bridge.js", () => ({
+  createAiSdkHookBridge: (...args: unknown[]) => mockCreateAiSdkHookBridge(...args),
+}));
+
 vi.mock("./otel-integration.js", () => ({
+  createOtelIntegration: vi.fn(() => existingOtelIntegration),
   ensureOtelIntegration: vi.fn(),
 }));
 
@@ -3827,6 +3838,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
+        instrumentationHooks: createInstrumentationHooks([]),
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -3857,6 +3869,10 @@ describe("createToolLoopHarness", () => {
       // The second agent was constructed for the retry.
       expect(constructedCalls.count()).toBe(2);
       expect(resolveRuntimeContext).toHaveBeenCalledTimes(2);
+      expect(mockCreateAiSdkHookBridge.mock.calls.map(([attempt]) => attempt)).toEqual([
+        expect.objectContaining({ attemptIndex: 0 }),
+        expect.objectContaining({ attemptIndex: 1 }),
+      ]);
 
       // The retry succeeded — the session parked normally instead of
       // emitting any failure cascade.
@@ -8814,7 +8830,7 @@ describe("createToolLoopHarness", () => {
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         runtimeContext?: Record<string, unknown>;
-        telemetry?: { isEnabled?: boolean };
+        telemetry?: { integrations?: unknown; isEnabled?: boolean };
       };
       const runtimeContext = agentCall?.runtimeContext;
       expect(runtimeContext).toBeDefined();
@@ -8822,6 +8838,90 @@ describe("createToolLoopHarness", () => {
       expect(runtimeContext?.["eve.version"]).not.toBe("");
       expect(runtimeContext?.["eve.session.id"]).toBe("test-session");
       expect(agentCall?.telemetry?.isEnabled).toBe(true);
+      expect(agentCall?.telemetry?.integrations).toBeUndefined();
+    });
+
+    it("injects one provider-neutral bridge when lifecycle hooks opt in", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const attemptCompleted = vi.fn();
+      const hooks = createInstrumentationHooks([
+        { events: { "attempt.completed": attemptCompleted } },
+      ]);
+      const config = createTestConfig("conversation", undefined, {
+        instrumentationHooks: hooks,
+      });
+
+      const runStep = createToolLoopHarness(config);
+      await runStep(createTestSession(), { message: "hi" });
+
+      expect(mockCreateAiSdkHookBridge).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          attemptId: "test-session:turn_0:0:0",
+          attemptIndex: 0,
+          sessionId: "test-session",
+          stepIndex: 0,
+          turnId: "turn_0",
+        }),
+        hooks,
+      );
+      const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: {
+          integrations?: unknown[];
+          recordInputs?: boolean;
+          recordOutputs?: boolean;
+        };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        integrations: [bridge],
+        recordInputs: true,
+        recordOutputs: true,
+      });
+      expect(attemptCompleted).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          scope: expect.objectContaining({ attemptIndex: 0 }),
+          type: "attempt.completed",
+        }),
+      );
+    });
+
+    it("composes lifecycle hooks with existing authored OTel", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      mockGetInstrumentationConfig.mockReturnValue({ recordInputs: true, recordOutputs: false });
+      const hooks = createInstrumentationHooks([]);
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentationHooks: hooks,
+        }),
+      );
+
+      await runStep(createTestSession(), { message: "hi" });
+
+      const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: {
+          integrations?: unknown[];
+          recordInputs?: boolean;
+          recordOutputs?: boolean;
+        };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        integrations: [bridge, existingOtelIntegration],
+        recordInputs: true,
+        recordOutputs: false,
+      });
     });
 
     it("merges step-started runtime context before emitting step.started", async () => {

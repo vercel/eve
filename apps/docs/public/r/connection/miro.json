@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/miro",
+  "title": "Miro",
+  "description": "Access and create content on Miro boards.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/miro.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://mcp.miro.com/\",\n  description: \"Miro: read and create content on boards.\",\n  auth: connect(\"miro\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/miro.ts"
+    }
+  ],
+  "type": "registry:item"
+}

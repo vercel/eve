@@ -103,6 +103,695 @@
           "target": "agent/extensions/agentkit.ts"
         }
       ]
+    },
+    {
+      "name": "connection/browser-use",
+      "type": "registry:item",
+      "title": "Browser Use",
+      "description": "Run managed browser automation tasks through Browser Use's MCP server.",
+      "envVars": {
+        "BROWSER_USE_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/browser-use.ts",
+          "type": "registry:file",
+          "target": "agent/connections/browser-use.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/vercel",
+      "type": "registry:item",
+      "title": "Vercel",
+      "description": "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/vercel.ts",
+          "type": "registry:file",
+          "target": "agent/connections/vercel.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/linear",
+      "type": "registry:item",
+      "title": "Linear",
+      "description": "Issues, projects, cycles, and comments via Linear's MCP server.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/linear.ts",
+          "type": "registry:file",
+          "target": "agent/connections/linear.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/notion",
+      "type": "registry:item",
+      "title": "Notion",
+      "description": "Search and edit Notion pages and databases over MCP or OpenAPI.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/notion.ts",
+          "type": "registry:file",
+          "target": "agent/connections/notion.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/datadog",
+      "type": "registry:item",
+      "title": "Datadog",
+      "description": "Query metrics, monitors, and logs through Datadog's MCP server.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/datadog.ts",
+          "type": "registry:file",
+          "target": "agent/connections/datadog.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/honeycomb",
+      "type": "registry:item",
+      "title": "Honeycomb",
+      "description": "Explore traces and run queries through Honeycomb's MCP server.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/honeycomb.ts",
+          "type": "registry:file",
+          "target": "agent/connections/honeycomb.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/airtable",
+      "type": "registry:item",
+      "title": "Airtable",
+      "description": "Bases, tables, and records through Airtable's MCP server.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/airtable.ts",
+          "type": "registry:file",
+          "target": "agent/connections/airtable.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/bitly",
+      "type": "registry:item",
+      "title": "Bitly",
+      "description": "Shorten links, generate QR Codes, and track performance.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/bitly.ts",
+          "type": "registry:file",
+          "target": "agent/connections/bitly.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/brex",
+      "type": "registry:item",
+      "title": "Brex",
+      "description": "Expenses, cards, and cash through Brex's finance automation.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/brex.ts",
+          "type": "registry:file",
+          "target": "agent/connections/brex.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/candid",
+      "type": "registry:item",
+      "title": "Candid",
+      "description": "Research nonprofits and funders using Candid's data.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/candid.ts",
+          "type": "registry:file",
+          "target": "agent/connections/candid.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/clickhouse",
+      "type": "registry:item",
+      "title": "ClickHouse",
+      "description": "Query and explore your ClickHouse Cloud data.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/clickhouse.ts",
+          "type": "registry:file",
+          "target": "agent/connections/clickhouse.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/cloudinary",
+      "type": "registry:item",
+      "title": "Cloudinary",
+      "description": "Manage, transform, and deliver your images and videos.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/cloudinary.ts",
+          "type": "registry:file",
+          "target": "agent/connections/cloudinary.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/coda",
+      "type": "registry:item",
+      "title": "Coda",
+      "description": "Create, search, and update docs and tables.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/coda.ts",
+          "type": "registry:file",
+          "target": "agent/connections/coda.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/egnyte",
+      "type": "registry:item",
+      "title": "Egnyte",
+      "description": "Securely access and analyze Egnyte content.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/egnyte.ts",
+          "type": "registry:file",
+          "target": "agent/connections/egnyte.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/embat",
+      "type": "registry:item",
+      "title": "Embat",
+      "description": "Ask Embat about cash, debt, payments, and accounting.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/embat.ts",
+          "type": "registry:file",
+          "target": "agent/connections/embat.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/hugging-face",
+      "type": "registry:item",
+      "title": "Hugging Face",
+      "description": "Access the Hugging Face Hub and thousands of Gradio apps.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/hugging-face.ts",
+          "type": "registry:file",
+          "target": "agent/connections/hugging-face.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/local-falcon",
+      "type": "registry:item",
+      "title": "Local Falcon",
+      "description": "AI visibility and local search intelligence.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/local-falcon.ts",
+          "type": "registry:file",
+          "target": "agent/connections/local-falcon.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/make",
+      "type": "registry:item",
+      "title": "Make",
+      "description": "Run Make scenarios and manage your Make account.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/make.ts",
+          "type": "registry:file",
+          "target": "agent/connections/make.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/manufact",
+      "type": "registry:item",
+      "title": "Manufact",
+      "description": "Deploy and monitor MCP servers with Manufact.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/manufact.ts",
+          "type": "registry:file",
+          "target": "agent/connections/manufact.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/mem0",
+      "type": "registry:item",
+      "title": "Mem0",
+      "description": "Persistent memory for AI agents and assistants.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/mem0.ts",
+          "type": "registry:file",
+          "target": "agent/connections/mem0.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/miro",
+      "type": "registry:item",
+      "title": "Miro",
+      "description": "Access and create content on Miro boards.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/miro.ts",
+          "type": "registry:file",
+          "target": "agent/connections/miro.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/mixpanel",
+      "type": "registry:item",
+      "title": "Mixpanel",
+      "description": "Analyze, query, and manage your Mixpanel data.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/mixpanel.ts",
+          "type": "registry:file",
+          "target": "agent/connections/mixpanel.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/netlify",
+      "type": "registry:item",
+      "title": "Netlify",
+      "description": "Create, deploy, manage, and secure websites on Netlify.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/netlify.ts",
+          "type": "registry:file",
+          "target": "agent/connections/netlify.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/oreilly",
+      "type": "registry:item",
+      "title": "O'Reilly",
+      "description": "Discover O'Reilly's expert learning content.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/oreilly.ts",
+          "type": "registry:file",
+          "target": "agent/connections/oreilly.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/planetscale",
+      "type": "registry:item",
+      "title": "PlanetScale",
+      "description": "Authenticated access to your PlanetScale Postgres and MySQL databases.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/planetscale.ts",
+          "type": "registry:file",
+          "target": "agent/connections/planetscale.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/posthog",
+      "type": "registry:item",
+      "title": "PostHog",
+      "description": "Query, analyze, and manage your PostHog insights.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/posthog.ts",
+          "type": "registry:file",
+          "target": "agent/connections/posthog.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/postman",
+      "type": "registry:item",
+      "title": "Postman",
+      "description": "Give API context to your coding agents with Postman.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/postman.ts",
+          "type": "registry:file",
+          "target": "agent/connections/postman.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/razorpay",
+      "type": "registry:item",
+      "title": "Razorpay",
+      "description": "Razorpay payments, settlements, and dashboard data.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/razorpay.ts",
+          "type": "registry:file",
+          "target": "agent/connections/razorpay.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/sentry",
+      "type": "registry:item",
+      "title": "Sentry",
+      "description": "Search, query, and debug errors intelligently.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/sentry.ts",
+          "type": "registry:file",
+          "target": "agent/connections/sentry.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/similarweb",
+      "type": "registry:item",
+      "title": "Similarweb",
+      "description": "Real-time web, mobile app, and market data.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/similarweb.ts",
+          "type": "registry:file",
+          "target": "agent/connections/similarweb.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/stripe",
+      "type": "registry:item",
+      "title": "Stripe",
+      "description": "Payment processing and financial infrastructure tools.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/stripe.ts",
+          "type": "registry:file",
+          "target": "agent/connections/stripe.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/supabase",
+      "type": "registry:item",
+      "title": "Supabase",
+      "description": "Manage databases, authentication, and storage.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/supabase.ts",
+          "type": "registry:file",
+          "target": "agent/connections/supabase.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/ticket-tailor",
+      "type": "registry:item",
+      "title": "Ticket Tailor",
+      "description": "Manage tickets, orders, and events with Ticket Tailor.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/ticket-tailor.ts",
+          "type": "registry:file",
+          "target": "agent/connections/ticket-tailor.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/ticktick",
+      "type": "registry:item",
+      "title": "TickTick",
+      "description": "Search, create, and manage your tasks and habits in TickTick.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/ticktick.ts",
+          "type": "registry:file",
+          "target": "agent/connections/ticktick.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/todoist",
+      "type": "registry:item",
+      "title": "Todoist",
+      "description": "Search, complete, and manage your tasks in Todoist.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/todoist.ts",
+          "type": "registry:file",
+          "target": "agent/connections/todoist.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/webflow",
+      "type": "registry:item",
+      "title": "Webflow",
+      "description": "Manage Webflow CMS, pages, assets, and sites.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/webflow.ts",
+          "type": "registry:file",
+          "target": "agent/connections/webflow.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/wix",
+      "type": "registry:item",
+      "title": "Wix",
+      "description": "Manage and build sites and apps on Wix.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/wix.ts",
+          "type": "registry:file",
+          "target": "agent/connections/wix.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/zapier",
+      "type": "registry:item",
+      "title": "Zapier",
+      "description": "Automate workflows across thousands of apps.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/zapier.ts",
+          "type": "registry:file",
+          "target": "agent/connections/zapier.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/zomato",
+      "type": "registry:item",
+      "title": "Zomato",
+      "description": "Online food ordering and delivery through Zomato.",
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/zomato.ts",
+          "type": "registry:file",
+          "target": "agent/connections/zomato.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/web",
+      "type": "registry:item",
+      "title": "Web Chat",
+      "description": "Add the built-in Next.js Web Chat channel to an eve agent.",
+      "meta": {
+        "eve": {
+          "channel": "web"
+        }
+      }
+    },
+    {
+      "name": "channel/slack",
+      "type": "registry:item",
+      "title": "Slack",
+      "description": "Connect an eve agent to Slack with Vercel Connect or portable credentials.",
+      "meta": {
+        "eve": {
+          "channel": "slack"
+        }
+      }
+    },
+    {
+      "name": "instrumentation/braintrust",
+      "type": "registry:item",
+      "title": "Braintrust",
+      "description": "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
+      "dependencies": ["@braintrust/otel", "@vercel/otel"],
+      "envVars": {
+        "BRAINTRUST_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/braintrust.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/sentry",
+      "type": "registry:item",
+      "title": "Sentry",
+      "description": "Send agent traces to Sentry's OTLP endpoint for tracing and debugging.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "SENTRY_OTLP_TRACES_ENDPOINT": "",
+        "SENTRY_PUBLIC_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/sentry.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/datadog",
+      "type": "registry:item",
+      "title": "Datadog",
+      "description": "Export agent traces to Datadog APM alongside the rest of your stack.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "DATADOG_OTLP_TRACES_ENDPOINT": "",
+        "DD_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/datadog.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/honeycomb",
+      "type": "registry:item",
+      "title": "Honeycomb",
+      "description": "Send OpenTelemetry traces to Honeycomb and query every agent turn.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "HONEYCOMB_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/honeycomb.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/arize",
+      "type": "registry:item",
+      "title": "Arize",
+      "description": "Export traces to Arize AX for LLM observability and evaluation.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "ARIZE_SPACE_ID": "",
+        "ARIZE_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/arize.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/raindrop",
+      "type": "registry:item",
+      "title": "Raindrop",
+      "description": "Send agent traces to Raindrop to detect and debug AI product issues.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "RAINDROP_WRITE_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/raindrop.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/jaeger",
+      "type": "registry:item",
+      "title": "Jaeger",
+      "description": "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
+      "dependencies": ["@vercel/otel"],
+      "files": [
+        {
+          "path": "registry/instrumentation/jaeger.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
     }
   ]
 }

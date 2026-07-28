@@ -89,4 +89,14 @@ describe("integration discovery", () => {
     expect(markdown).toContain("### OpenAPI · User");
     expect(markdown).toContain("agent/connections/notion.ts");
   });
+
+  it("renders instrumentation providers with registry installation", () => {
+    const braintrust = getIntegration("braintrust");
+    expect(braintrust).toBeDefined();
+
+    const markdown = integrationMarkdown(braintrust!);
+    expect(markdown).toContain("eve add instrumentation/braintrust");
+    expect(markdown).toContain("agent/instrumentation.ts");
+    expect(markdown).toContain("BRAINTRUST_API_KEY");
+  });
 });
