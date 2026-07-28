@@ -13,6 +13,7 @@ function makeRuntime(): Runtime {
     cancelTurn: vi.fn(),
     deliver: vi.fn(),
     getEventStream: vi.fn(),
+    getStreamTailIndex: vi.fn(),
     resolveSession: vi.fn(),
     run: vi.fn(),
     terminateSession: vi.fn(),
@@ -28,6 +29,9 @@ function makeSession(): Session {
     },
     async getEventStream() {
       return new ReadableStream();
+    },
+    async getStreamTailIndex() {
+      return -1;
     },
   };
 }

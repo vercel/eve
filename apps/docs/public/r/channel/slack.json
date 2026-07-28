@@ -1,0 +1,12 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/slack",
+  "title": "Slack",
+  "description": "Connect an eve agent to Slack with Vercel Connect or portable credentials.",
+  "meta": {
+    "eve": {
+      "channel": "slack"
+    }
+  },
+  "type": "registry:item"
+}

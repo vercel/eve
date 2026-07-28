@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/posthog",
+  "title": "PostHog",
+  "description": "Query, analyze, and manage your PostHog insights.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/posthog.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://mcp.posthog.com/mcp\",\n  description: \"PostHog: insights, events, and feature flags.\",\n  auth: connect(\"posthog\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/posthog.ts"
+    }
+  ],
+  "type": "registry:item"
+}

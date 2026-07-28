@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Monorepo for eve, a filesystem-first framework for durable backend agents on Vercel.",
+  "homepage": "https://eve.dev/",
   "workspaces": [
     "apps/*",
     "apps/*/*",

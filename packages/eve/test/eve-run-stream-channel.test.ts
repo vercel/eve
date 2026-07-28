@@ -176,6 +176,9 @@ function createMockGetSession(events: ReadableStream<HandleMessageStreamEvent>) 
     async getEventStream() {
       return events;
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   } satisfies Session);
 }
 

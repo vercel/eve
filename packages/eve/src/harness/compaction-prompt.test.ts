@@ -82,6 +82,70 @@ describe("createCompactionPrompt", () => {
     expect(result.prompt).toContain("…");
   });
 
+  it("stubs content-output file parts instead of reproducing base64", () => {
+    const base64 = "iVBORw0KGgo".repeat(500);
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                { type: "text", text: "Rendered pixel for smoke-test:" },
+                {
+                  type: "file",
+                  data: { type: "data", data: base64 },
+                  filename: "pixel.png",
+                  mediaType: "image/png",
+                },
+              ],
+            },
+            toolCallId: "call-1",
+            toolName: "render_pixel",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+
+    const result = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+
+    expect(result.prompt).toContain(
+      "Tool render_pixel returned Rendered pixel for smoke-test: " +
+        "Attached file pixel.png (image/png)",
+    );
+    expect(result.prompt).not.toContain("iVBORw0KGgo");
+  });
+
+  it("stubs content-output file parts without filenames as attachments", () => {
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                { type: "file", data: { type: "data", data: "aGVsbG8=" }, mediaType: "image/jpeg" },
+              ],
+            },
+            toolCallId: "call-1",
+            toolName: "screenshot",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+
+    const result = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+
+    expect(result.prompt).toContain(
+      "Tool screenshot returned Attached file attachment (image/jpeg)",
+    );
+    expect(result.prompt).not.toContain("aGVsbG8=");
+  });
+
   it("renders conversational text verbatim regardless of length", () => {
     // A delegated task message destroyed here is unrecoverable after the first
     // compaction, so user/assistant text must reach the summarizer whole.

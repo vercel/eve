@@ -122,6 +122,45 @@ history, fixtures, report integrity, and assignment of every public authoring
 export to a capability. Reports and fixtures cover structural compatibility;
 behavior changes still need focused compatibility tests.
 
+## Adding an integration to the registry
+
+The registry source lives under [`apps/docs/registry/`](./apps/docs/registry/). Add the project-owned source file to its collection directory, such as `registry/connections/linear.ts` or `registry/extensions/browserbase.ts`. Registry item names use the singular integration kind. Register the item in [`apps/docs/registry.json`](./apps/docs/registry.json):
+
+```json
+{
+  "name": "connection/linear",
+  "type": "registry:item",
+  "title": "Linear",
+  "description": "Connect an eve agent to Linear.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/linear.ts",
+      "type": "registry:file",
+      "target": "agent/connections/linear.ts"
+    }
+  ]
+}
+```
+
+`path` points to the hand-written source file relative to `apps/docs`; `target` is where `eve add` writes it in the consuming agent. Declare packages with `dependencies` and required environment variables with `envVars`.
+
+Run:
+
+```bash
+pnpm --filter eve-docs registry:check
+```
+
+This runs `shadcn build`, which reads each referenced source file and embeds it as the escaped `content` field in `apps/docs/public/r/<kind>/<slug>.json`. It also rebuilds `apps/docs/public/r/registry.json`, validates connection coverage, and typechecks the registry source files. Never edit `content` or another file under `apps/docs/public/r/` by hand; edit the reference file under `apps/docs/registry/`, rebuild, and commit both the source and generated output.
+
+### Extension requirements
+
+The registry and integrations gallery list reviewed, published extensions. Open an issue and get maintainer agreement before submitting a registry addition. The package must be publicly installable from npm, work with the current released `eve` version, and include documentation for its configuration, authentication, and any security-sensitive behavior.
+
+In the PR, add the package as an `apps/docs` dev dependency, add its package to the reviewed exceptions in `pnpm-workspace.yaml`, and add a mount example under [`apps/docs/registry/extensions/`](./apps/docs/registry/extensions/). Register that example under an `extension/<slug>` name, with its dependencies, title, and description, in [`apps/docs/registry.json`](./apps/docs/registry.json).
+
+Also add the extension identity to [`packages/eve-catalog/src/index.ts`](./packages/eve-catalog/src/index.ts), its gallery presentation and setup instructions to [`apps/docs/lib/integrations/data.ts`](./apps/docs/lib/integrations/data.ts), and a logo in [`apps/docs/lib/integrations/logos.tsx`](./apps/docs/lib/integrations/logos.tsx). Add or update focused tests for the integration page.
+
 ## Documentation
 
 User-facing docs live in [`docs/`](./docs) and are published with the `eve` npm package and rendered by the docs site in [`apps/docs`](./apps/docs). If your change alters public behavior, update the relevant doc in the same PR and run `pnpm docs:check`.

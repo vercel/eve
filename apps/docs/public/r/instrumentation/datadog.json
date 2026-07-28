@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "instrumentation/datadog",
+  "title": "Datadog",
+  "description": "Export agent traces to Datadog APM alongside the rest of your stack.",
+  "dependencies": ["@vercel/otel"],
+  "files": [
+    {
+      "path": "registry/instrumentation/datadog.ts",
+      "content": "import { OTLPHttpProtoTraceExporter, registerOTel } from \"@vercel/otel\";\nimport { defineInstrumentation } from \"eve/instrumentation\";\n\nexport default defineInstrumentation({\n  setup: ({ agentName }) =>\n    registerOTel({\n      serviceName: agentName,\n      traceExporter: new OTLPHttpProtoTraceExporter({\n        url: process.env.DATADOG_OTLP_TRACES_ENDPOINT!,\n        headers: { \"dd-api-key\": process.env.DD_API_KEY! },\n      }),\n    }),\n});\n",
+      "type": "registry:file",
+      "target": "agent/instrumentation.ts"
+    }
+  ],
+  "envVars": {
+    "DATADOG_OTLP_TRACES_ENDPOINT": "",
+    "DD_API_KEY": ""
+  },
+  "type": "registry:item"
+}

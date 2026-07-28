@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "extension/upstash-agentkit",
+  "title": "Upstash AgentKit",
+  "description": "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
+  "dependencies": ["@upstash/agentkit-eve-extension"],
+  "files": [
+    {
+      "path": "registry/extensions/upstash-agentkit.ts",
+      "content": "import agentkit from \"@upstash/agentkit-eve-extension\";\n\nexport default agentkit({});\n",
+      "type": "registry:file",
+      "target": "agent/extensions/agentkit.ts"
+    }
+  ],
+  "envVars": {
+    "UPSTASH_REDIS_REST_URL": "",
+    "UPSTASH_REDIS_REST_TOKEN": ""
+  },
+  "type": "registry:item"
+}

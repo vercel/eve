@@ -277,6 +277,7 @@ export type TerminalRendererOptions = {
   diagnostics?: DevDiagnostics;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
+  onExitRequest?: () => void;
 };
 
 export type AgentHeaderOptions = {
@@ -456,6 +457,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #everInteractive = false;
   #partingLinePrinted = false;
   #interrupted = false;
+  #exitRequested = false;
+  readonly #onExitRequest?: () => void;
   #caretVisible = true;
   #spinnerIndex = 0;
   #activityPulseStartedAtMs = Date.now();
@@ -580,6 +583,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#diagnostics = options?.diagnostics;
+    this.#onExitRequest = options?.onExitRequest;
     this.#logs = options?.logs ?? "none";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
@@ -766,6 +770,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           case "ctrl-d":
             // EOF on an empty line quits; otherwise it forward-deletes.
             if (editor.text.length === 0) {
+              this.#requestExit();
               interrupt();
             } else {
               apply(deleteForward(editor));
@@ -778,9 +783,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#paint();
             break;
           case "ctrl-c":
-            // A first Ctrl+C clears a non-empty prompt; on an already-empty
-            // prompt it quits.
             if (editor.text.length === 0) {
+              this.#requestExit();
               interrupt();
             } else {
               apply(EMPTY_LINE);
@@ -2394,7 +2398,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     };
     // See #armFlowIdleTrap: stale deferred keys die with the old consumer.
     this.#clearKeyFlush();
-    this.#consumeKey = (key) => consume(key, settle, reject);
+    this.#consumeKey = (key) => {
+      if (key.type === "ctrl-c") {
+        this.#requestExit();
+      }
+      consume(key, settle, reject);
+    };
     this.#attachInput();
     return { promise, settle };
   }
@@ -2426,6 +2435,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#flowInterrupt === undefined) return;
     const consumer = (key: TerminalKey): void => {
       if (key.type === "ctrl-c" || key.type === "escape") {
+        if (key.type === "ctrl-c") {
+          this.#requestExit();
+        }
         const fire = this.#flowInterrupt;
         this.#flowInterrupt = undefined;
         this.#disarmFlowIdleTrap();
@@ -2560,6 +2572,22 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
+  requestInterrupt(): void {
+    this.#interrupted = true;
+    if (this.#setupFlow !== undefined) this.#consumeKey?.({ type: "ctrl-c" });
+    this.#resolveStreamInterrupt?.();
+    this.#stop();
+  }
+
+  exitRequested(): boolean {
+    return this.#exitRequested;
+  }
+
+  #requestExit(): void {
+    this.#exitRequested = true;
+    this.#onExitRequest?.();
+  }
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
@@ -2589,7 +2617,24 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     this.#onResize = () => this.#paint();
     this.#output.on("resize", this.#onResize);
+    process.on("exit", this.#onProcessExit);
   }
+
+  /**
+   * Last-resort synchronous terminal restore for a forced `process.exit()`
+   * (the lifecycle's forced-exit backstop or a second Ctrl+C/SIGTERM) that
+   * preempts {@link #stop}. A shell left in raw mode with a hidden cursor and
+   * bracketed paste enabled is unusable; this runs on the process "exit"
+   * event, where only synchronous writes survive. Normal teardown removes it.
+   */
+  readonly #onProcessExit = () => {
+    if (!this.#isInteractive) return;
+    if (this.#input.isTTY) {
+      this.#live.emitBracketedPaste(false);
+      this.#input.setRawMode?.(false);
+    }
+    this.#live.showCursor();
+  };
 
   #stop() {
     // A reader still awaiting keys can never settle once input detaches;
@@ -2636,6 +2681,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#output.off("resize", this.#onResize);
       this.#onResize = undefined;
     }
+    process.off("exit", this.#onProcessExit);
 
     this.#isInteractive = false;
   }

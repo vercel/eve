@@ -6,6 +6,7 @@ const typeLabel: Record<Integration["type"], string> = {
   channel: "Channel",
   connection: "Connection",
   extension: "Extension",
+  instrumentation: "Instrumentation",
 };
 
 interface IntegrationCardProps {

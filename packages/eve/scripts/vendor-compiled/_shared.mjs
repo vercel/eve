@@ -30,6 +30,7 @@
  *   platform?: "node" | "neutral",
  *   resolve?: ResolveOptions,
  *   bundling?: "shared" | "standalone",  // default "shared"
+ *   banner?: string,               // standalone bundle prelude
  *   chunkGroup?: string,                  // default "node"
  *   typeOnly?: boolean,                   // skips JS bundling entirely
  * }
@@ -651,7 +652,7 @@ async function bundleStandaloneModule({ destinationRoot, module, packageInfo, pa
     resolve: module.resolve ?? getDefaultResolve(platform),
     treeshake: true,
     output: {
-      banner: "/* oxlint-disable */",
+      banner: module.banner ?? "/* oxlint-disable */",
       codeSplitting: false,
       comments: false,
       file: join(destinationRoot, "index.js"),

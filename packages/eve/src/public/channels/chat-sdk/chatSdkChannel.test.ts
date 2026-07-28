@@ -106,6 +106,9 @@ async function firePost(
     async getEventStream() {
       return new ReadableStream();
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   });
   const waitUntil = vi.fn();
 
@@ -254,6 +257,9 @@ describe("chatSdkChannel", () => {
       },
       async getEventStream() {
         return new ReadableStream();
+      },
+      async getStreamTailIndex() {
+        return -1;
       },
     });
 

@@ -98,6 +98,7 @@ import {
 import type { detectProjectIdentity } from "#setup/project-resolution.js";
 import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
 import type { DevDiagnostics } from "../diagnostics.js";
+import type { CommandLifecycle } from "../../shutdown.js";
 
 export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 
@@ -347,6 +348,8 @@ export type AgentTUIRenderer = {
    * lifecycle ends.
    */
   shutdown?(): void;
+  requestInterrupt?(): void;
+  exitRequested?(): boolean;
 };
 
 export interface PromptCommandHandlerContext {
@@ -436,6 +439,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   onBootProgress?: DevBootProgressReporter;
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
   diagnostics?: DevDiagnostics;
+  lifecycle?: CommandLifecycle;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -542,10 +546,12 @@ export class EveTUIRunner {
    */
   #sessionFailed = false;
   #unsubscribeDevelopmentSandboxLogs?: () => void;
+  readonly #lifecycle?: CommandLifecycle;
 
   constructor(options: EveTUIRunnerOptions) {
     this.#session = options.session;
     if (options.client !== undefined) this.#client = options.client;
+    if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     this.#renderer = createRenderer(options);
     const pumpOptions: SubagentPumpOptions = { formatActionResultError };
     if (this.#client !== undefined) pumpOptions.client = this.#client;
@@ -666,9 +672,13 @@ export class EveTUIRunner {
   }
 
   async run() {
+    const onStop = () => this.#renderer.requestInterrupt?.();
+    if (this.#lifecycle?.signal.aborted === true) onStop();
+    else this.#lifecycle?.signal.addEventListener("abort", onStop, { once: true });
     try {
       await this.#run();
     } finally {
+      this.#lifecycle?.signal.removeEventListener("abort", onStop);
       this.#disposed = true;
       this.#authProbeAbort.abort();
       this.#subagentPump.abortAll();
@@ -723,6 +733,9 @@ export class EveTUIRunner {
     }
 
     while (true) {
+      if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
+        return;
+      }
       if (!streamWithoutPrompt) {
         if (prompt == null) {
           if (!this.#renderer.readPrompt) {
@@ -1600,6 +1613,7 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     input: options.userInput,
     output: options.screen,
     diagnostics: options.diagnostics,
+    onExitRequest: options.lifecycle?.requestStop,
   });
 }
 

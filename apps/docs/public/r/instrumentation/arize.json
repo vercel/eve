@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "instrumentation/arize",
+  "title": "Arize",
+  "description": "Export traces to Arize AX for LLM observability and evaluation.",
+  "dependencies": ["@vercel/otel"],
+  "files": [
+    {
+      "path": "registry/instrumentation/arize.ts",
+      "content": "import { OTLPHttpProtoTraceExporter, registerOTel } from \"@vercel/otel\";\nimport { defineInstrumentation } from \"eve/instrumentation\";\n\nexport default defineInstrumentation({\n  setup: ({ agentName }) =>\n    registerOTel({\n      serviceName: agentName,\n      attributes: { \"openinference.project.name\": agentName },\n      traceExporter: new OTLPHttpProtoTraceExporter({\n        url: \"https://otlp.arize.com/v1/traces\",\n        headers: {\n          space_id: process.env.ARIZE_SPACE_ID!,\n          api_key: process.env.ARIZE_API_KEY!,\n        },\n      }),\n    }),\n});\n",
+      "type": "registry:file",
+      "target": "agent/instrumentation.ts"
+    }
+  ],
+  "envVars": {
+    "ARIZE_SPACE_ID": "",
+    "ARIZE_API_KEY": ""
+  },
+  "type": "registry:item"
+}

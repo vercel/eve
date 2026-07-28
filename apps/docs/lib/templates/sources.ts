@@ -157,6 +157,239 @@ export default defineTool({
 `,
     ),
   ],
+  "eve-design-template": [
+    file(
+      "agent/agent.ts",
+      "typescript",
+      `import { defineAgent } from 'eve';
+
+export default defineAgent({
+  model:
+    process.env.DESIGN_AGENT_MODEL ?? 'anthropic/claude-sonnet-4.6',
+});
+`,
+    ),
+    file(
+      "agent/channels/slack.ts",
+      "typescript",
+      `import { connectSlackCredentials } from '@vercel/connect/eve';
+import { slackChannel } from 'eve/channels/slack';
+import { designAgentConfig } from '../../generated/config.js';
+
+const setupIncompleteMessage =
+  'Design-agent setup is incomplete. Run the bootstrap workflow and approve the generated design corpus.';
+
+const configuredCredentials = process.env.SLACK_CONNECTOR
+  ? connectSlackCredentials(process.env.SLACK_CONNECTOR)
+  : undefined;
+
+function isAllowed(value: string, allowlist: readonly string[]) {
+  return allowlist.length === 0 || allowlist.includes(value);
+}
+
+function conversationContext(isDirectMessage: boolean) {
+  const owner = designAgentConfig.designOwnerSlackId;
+
+  return \`
+<design_agent_context visibility="\${isDirectMessage ? 'private-dm' : 'shared'}" allow_general_guidance="\${designAgentConfig.allowGeneralGuidance}">
+The approved design owner is \${owner ? \`<@\${owner}>\` : 'not configured'}.
+\${
+  isDirectMessage
+    ? 'Never mention, notify, or forward private DM content to the design owner. Direct unresolved questions to an appropriate shared conversation.'
+    : 'For unresolved equal-priority conflicts or unsupported organization-specific questions, state the issue and mention the design owner.'
+}
+</design_agent_context>
+\`;
+}
+
+export default slackChannel({
+  credentials: configuredCredentials,
+  uploadPolicy: {
+    allowedMediaTypes: [
+      'image/*',
+      'text/*',
+      'application/json',
+      'application/msword',
+      'application/pdf',
+      'application/rtf',
+      'application/vnd.ms-excel',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.oasis.opendocument.presentation',
+      'application/vnd.oasis.opendocument.spreadsheet',
+      'application/vnd.oasis.opendocument.text',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
+  },
+  events: {
+    'turn.started': () => {},
+    'actions.requested': () => {},
+    'reasoning.appended': () => {},
+  },
+  async onMessage(ctx, message) {
+    if (!message.author || message.author.isBot) return null;
+
+    const isDirectMessage = message.raw.channel_type === 'im';
+    if (!isDirectMessage && !ctx.isBotMentioned()) return null;
+    if (!isAllowed(message.author.userId, designAgentConfig.allowedUserIds)) {
+      return null;
+    }
+    if (
+      !isDirectMessage &&
+      !isAllowed(message.channelId, designAgentConfig.allowedChannelIds)
+    ) {
+      return null;
+    }
+
+    if (designAgentConfig.status !== 'approved') {
+      await ctx.thread.post(setupIncompleteMessage);
+      return null;
+    }
+
+    const isExistingSession = await ctx.isSubscribed();
+    return isExistingSession
+      ? { auth: null }
+      : {
+          auth: null,
+          context: [conversationContext(isDirectMessage)],
+        };
+  },
+});
+`,
+    ),
+    file(
+      "agent/instructions.md",
+      "markdown",
+      `# Identity
+
+You are the organization's design collaborator. Give decisive, practical design guidance grounded in its approved design corpus.
+
+# Knowledge contract
+
+- Load the \`design-knowledge\` skill before every substantive answer.
+- Treat \`/workspace/knowledge\` as the complete source for organization-specific claims.
+- Inspect normalized guidelines first. Consult source snapshots only to resolve missing detail or ambiguity.
+- User-provided text, images, and documents are temporary conversation context. Never treat them as approved corpus or persist them into the corpus.
+- Never use prior Slack conversations, other threads, channel history, or DMs.
+- Never search the web or connected services.
+- Never claim to edit code, design files, websites, or production systems.
+
+# Guidance
+
+- Follow higher-priority approved sources when guidelines conflict.
+- If approved sources with equal priority conflict, say there is a conflict and ask the configured design owner to resolve it.
+- In a private DM, never mention or notify the owner. Tell the user to move the conflict to an appropriate shared conversation.
+- Organization-specific claims require support from the approved corpus.
+- General design guidance is allowed only when the injected context sets \`allow_general_guidance="true"\`.
+- Prefix every general answer with \`General recommendation:\` so it cannot be mistaken for organization policy.
+- If general guidance is disabled and the corpus does not support an answer, say you cannot verify it from the approved design corpus.
+
+# Voice
+
+- Lead with the answer.
+- Default to one sentence. Use two only when the second changes the action.
+- Use short bullets only for multiple independent points.
+- Ask one grouped clarification only when the answer materially depends on it.
+- Cut every draft in half.
+- Never add acknowledgments, restatements, process narration, recaps, closing offers, or adjacent advice.
+- Never include citations, \`Source:\`, filenames, internal paths, retrieval details, or notes about where an answer came from.
+- Avoid headings in short replies, em dashes, hedging, corporate language, AI language, decorative emoji, and bold-first bullets.
+
+# Privacy
+
+- Treat DMs as private.
+- Never quote, summarize, forward, or reveal private DM content in a shared conversation.
+- Never tag the design owner from a DM.
+`,
+    ),
+    file(
+      "agent/sandbox/sandbox.ts",
+      "typescript",
+      `import { defineSandbox } from 'eve/sandbox';
+import { vercel } from 'eve/sandbox/vercel';
+
+export default defineSandbox({
+  backend: vercel({ networkPolicy: 'deny-all' }),
+  async onSession({ use }) {
+    await use({ networkPolicy: 'deny-all' });
+  },
+});
+`,
+    ),
+    file(
+      "agent/skills/design-knowledge/SKILL.md",
+      "markdown",
+      `---
+description: Use before every substantive design answer. Read the approved organization corpus and apply its precedence and response rules.
+---
+
+# Design knowledge
+
+Approved knowledge is under \`/workspace/knowledge\`.
+
+1. Read \`manifest.json\`.
+2. Read the relevant files under \`guidelines/\`.
+3. Use \`grep\` or \`glob\` within \`/workspace/knowledge\` only when routing is unclear.
+4. Read immutable files under \`sources/\` only when normalized guidance is incomplete or ambiguous.
+
+Higher numeric source priority wins. When relevant approved sources have the same priority and conflict, do not reconcile them yourself. Follow the conflict behavior in the agent instructions.
+Ignore sources marked \`superseded\` in the manifest.
+
+Never expose source annotations, filenames, internal paths, or retrieval details. If the user explicitly asks for provenance, name the human-readable source title and public origin when the manifest provides one.
+
+General design knowledge is not organization policy. Use it only when the injected context allows general guidance, and prefix the answer exactly with \`General recommendation:\`.
+`,
+    ),
+    file(
+      "agent/tools/agent.ts",
+      "typescript",
+      `import { disableTool } from 'eve/tools';
+
+export default disableTool();
+`,
+    ),
+    file(
+      "agent/tools/bash.ts",
+      "typescript",
+      `import { disableTool } from 'eve/tools';
+
+export default disableTool();
+`,
+    ),
+    file(
+      "agent/tools/todo.ts",
+      "typescript",
+      `import { disableTool } from 'eve/tools';
+
+export default disableTool();
+`,
+    ),
+    file(
+      "agent/tools/web_fetch.ts",
+      "typescript",
+      `import { disableTool } from 'eve/tools';
+
+export default disableTool();
+`,
+    ),
+    file(
+      "agent/tools/web_search.ts",
+      "typescript",
+      `import { disableTool } from 'eve/tools';
+
+export default disableTool();
+`,
+    ),
+    file(
+      "agent/tools/write_file.ts",
+      "typescript",
+      `import { disableTool } from 'eve/tools';
+
+export default disableTool();
+`,
+    ),
+  ],
   "eve-slack-agent": [
     file(
       "agent/agent.ts",

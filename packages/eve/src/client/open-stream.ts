@@ -1,4 +1,5 @@
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
 import { createEveMessageStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
@@ -81,6 +82,13 @@ interface FollowStreamInput {
   readonly sessionId: string;
   readonly signal?: AbortSignal;
   readonly startIndex: number;
+  /** Follow the live stream after the durable tail (default). `false` bounds the read at the tail. */
+  readonly follow?: boolean;
+}
+
+/** One connection open; `requestTailIndex` asks the server to report the durable tail index. */
+interface OpenStreamInput extends FollowStreamInput {
+  readonly requestTailIndex?: boolean;
 }
 
 /**
@@ -91,21 +99,37 @@ interface FollowStreamInput {
  * idle budget; repeated empty streams eventually stop the follow. Callers own
  * boundary handling. Negative tail-relative cursors use one connection because
  * they cannot be advanced safely.
+ *
+ * With `follow: false`, the first connection fixes the bound: the iterator
+ * yields events until the cursor passes that tail, reconnecting as needed,
+ * then returns instead of following.
  */
 export async function* followStreamIterable(
   input: FollowStreamInput,
 ): AsyncGenerator<HandleMessageStreamEvent> {
+  if (input.follow === false && input.startIndex < 0) {
+    throw new Error(
+      "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
+    );
+  }
+
   const retryPolicy = resolveStreamReconnectPolicy(input.streamReconnectPolicy);
   const idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
   let startIndex = input.startIndex;
   let reconnectDelayMs = idleRetryPolicy.baseDelayMs;
   let idleReconnects = 0;
   let initialConnection = true;
+  let tailIndex: number | undefined;
 
   while (true) {
-    let body: ReadableStream<Uint8Array>;
+    let connection: OpenedStream;
     try {
-      body = await openStreamBody({ ...input, retryPolicy, startIndex });
+      connection = await openStreamBody({
+        ...input,
+        retryPolicy,
+        startIndex,
+        requestTailIndex: input.follow === false && tailIndex === undefined,
+      });
     } catch (error) {
       if (input.signal?.aborted) {
         return;
@@ -113,14 +137,34 @@ export async function* followStreamIterable(
       throw error;
     }
 
+    if (input.follow === false && tailIndex === undefined) {
+      tailIndex = connection.tailIndex;
+      if (tailIndex === undefined) {
+        await connection.body.cancel().catch(() => {});
+        throw new Error(
+          `stream({ follow: false }) requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
+            "The agent may be running an older eve version.",
+        );
+      }
+    }
+
+    if (tailIndex !== undefined && startIndex > tailIndex) {
+      await connection.body.cancel().catch(() => {});
+      return;
+    }
+
     let deliveredEvent = false;
     try {
-      for await (const event of readNdjsonStream(body)) {
+      for await (const event of readNdjsonStream(connection.body)) {
         startIndex += 1;
         deliveredEvent = true;
         reconnectDelayMs = idleRetryPolicy.baseDelayMs;
         idleReconnects = 0;
         yield event;
+
+        if (tailIndex !== undefined && startIndex > tailIndex) {
+          return;
+        }
       }
     } catch (error) {
       if (!isStreamDisconnectError(error)) {
@@ -149,6 +193,12 @@ export async function* followStreamIterable(
   }
 }
 
+/** An opened connection: the response body plus the tail index from the response header, if any. */
+interface OpenedStream {
+  readonly body: ReadableStream<Uint8Array>;
+  readonly tailIndex: number | undefined;
+}
+
 /**
  * Opens one stream response body, retrying transient failures with capped
  * exponential backoff (~35s total): brief network outages and the short
@@ -156,8 +206,8 @@ export async function* followStreamIterable(
  * readable from the stream route.
  */
 export async function openStreamBody(
-  input: FollowStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
-): Promise<ReadableStream<Uint8Array>> {
+  input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
+): Promise<OpenedStream> {
   const retryPolicy = input.retryPolicy ?? DEFAULT_STREAM_RECONNECT_POLICY;
   const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
@@ -165,11 +215,19 @@ export async function openStreamBody(
   let lastHeaders: Headers | undefined;
   let retryDelayMs = openRetryPolicy.baseDelayMs;
 
+  const searchParams: Record<string, string> = {};
+  if (input.startIndex !== 0) {
+    searchParams.startIndex = String(input.startIndex);
+  }
+  if (input.requestTailIndex === true) {
+    searchParams.includeTailIndex = "1";
+  }
+
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
     const url = createClientUrl(
       input.host,
       createEveMessageStreamRoutePath(input.sessionId),
-      input.startIndex !== 0 ? { startIndex: String(input.startIndex) } : undefined,
+      Object.keys(searchParams).length > 0 ? searchParams : undefined,
     );
 
     const headers = await input.resolveHeaders();
@@ -197,7 +255,7 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
-      return response.body;
+      return { body: response.body, tailIndex: parseTailIndexHeader(response.headers) };
     }
 
     lastStatus = response.status;
@@ -215,6 +273,15 @@ export async function openStreamBody(
   }
 
   throw new ClientError(lastStatus ?? 0, lastBody ?? "Failed to open message stream.", lastHeaders);
+}
+
+function parseTailIndexHeader(headers: Headers): number | undefined {
+  const raw = headers.get(EVE_STREAM_TAIL_INDEX_HEADER);
+  if (raw === null || !/^-?\d+$/.test(raw)) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/postman",
+  "title": "Postman",
+  "description": "Give API context to your coding agents with Postman.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/postman.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://mcp.postman.com/minimal\",\n  description: \"Postman: APIs, collections, and workspaces.\",\n  auth: connect(\"postman\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/postman.ts"
+    }
+  ],
+  "type": "registry:item"
+}

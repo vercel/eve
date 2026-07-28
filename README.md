@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://github.com/vercel/eve">
+  <a href="https://eve.dev/">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/assets/eve.svg">
       <img alt="eve logo" src=".github/assets/eve.svg" height="128">
@@ -14,7 +14,7 @@
 
 </div>
 
-eve is a filesystem-first framework for durable AI agents. Core agent capabilities live in
+[eve](https://eve.dev/) is a filesystem-first framework for durable AI agents. Core agent capabilities live in
 conventional locations, so projects are easier to inspect, extend, and operate.
 
 ## The filesystem is the authoring interface

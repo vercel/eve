@@ -1,7 +1,8 @@
 /**
  * Shared identity for eve integrations. This package is the single source of
- * truth for *which* integrations exist (channels, connections, and extensions)
- * and how a connection is wired (transport + model-facing description).
+ * truth for *which* integrations exist (channels, connections, extensions, and
+ * instrumentation providers) and how a connection is wired (transport +
+ * model-facing description).
  *
  * Surface-specific concerns live with their consumer, keyed by {@link
  * IntegrationEntry.slug}: the scaffolder (eve) overlays the
@@ -18,7 +19,7 @@
  */
 
 /** Surface an integration targets. Extend as new kinds are catalogued. */
-export type IntegrationKind = "channel" | "connection" | "extension";
+export type IntegrationKind = "channel" | "connection" | "extension" | "instrumentation";
 
 /** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
@@ -48,7 +49,7 @@ export interface ConnectionIdentity {
 
 /** Which eve surfaces an integration is available on today. */
 export interface IntegrationSurfaces {
-  /** The eve CLI can scaffold this integration without further work. */
+  /** eve's interactive setup flow can provision and scaffold this integration. */
   scaffoldable: boolean;
   /** Listed in the docs integrations gallery. */
   gallery: boolean;
@@ -81,10 +82,11 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  * carries only shared identity; the scaffolder and docs overlay their own
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
  *
- * `surfaces.scaffoldable` reflects what the CLI can scaffold today: Slack and
- * Web Chat for channels, and every curated connection. The remaining
- * channels are runtime modules that are still configured by hand, so they
- * appear in the gallery but not the CLI picker.
+ * `surfaces.scaffoldable` reflects what eve's interactive setup flow can
+ * provision and scaffold today: Slack and Web Chat for channels, plus its
+ * curated connections. Registry installation is independent of this flag.
+ * The remaining channels are runtime modules configured by hand, so they
+ * appear in the gallery but not the setup picker.
  */
 export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
@@ -296,6 +298,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     kind: "extension",
     tagline:
       "Let your eve agent use the Internet with KERNEL browser infra, o11y, and stealth. Integrated natively with Vercel Connect and AI Gateway.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "upstash-agentkit",
+    name: "Upstash AgentKit",
+    kind: "extension",
+    tagline: "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -734,6 +743,58 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       mcp: { url: "https://mcp-server.zomato.com/mcp" },
     },
   },
+  // Instrumentation providers are OpenTelemetry backends configured in
+  // `agent/instrumentation.ts`. Slugs stay unique across the whole catalog, so
+  // providers that also ship a connection carry an `-instrumentation` suffix.
+  {
+    slug: "braintrust",
+    name: "Braintrust",
+    kind: "instrumentation",
+    tagline: "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "sentry-instrumentation",
+    name: "Sentry",
+    kind: "instrumentation",
+    tagline: "Send agent traces to Sentry's OTLP endpoint for tracing and debugging.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "datadog-instrumentation",
+    name: "Datadog",
+    kind: "instrumentation",
+    tagline: "Export agent traces to Datadog APM alongside the rest of your stack.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "honeycomb-instrumentation",
+    name: "Honeycomb",
+    kind: "instrumentation",
+    tagline: "Send OpenTelemetry traces to Honeycomb and query every agent turn.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "arize",
+    name: "Arize",
+    kind: "instrumentation",
+    tagline: "Export traces to Arize AX for LLM observability and evaluation.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "raindrop",
+    name: "Raindrop",
+    kind: "instrumentation",
+    tagline: "Send agent traces to Raindrop to detect and debug AI product issues.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "jaeger",
+    name: "Jaeger",
+    kind: "instrumentation",
+    tagline: "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
 ];
 
 const BY_SLUG = new Map(INTEGRATIONS.map((entry) => [entry.slug, entry]));
@@ -761,4 +822,9 @@ export function channelEntries(): IntegrationEntry[] {
 /** All extension entries, in catalog order. */
 export function extensionEntries(): IntegrationEntry[] {
   return integrationsByKind("extension");
+}
+
+/** All instrumentation entries, in catalog order. */
+export function instrumentationEntries(): IntegrationEntry[] {
+  return integrationsByKind("instrumentation");
 }

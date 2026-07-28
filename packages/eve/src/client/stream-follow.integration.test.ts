@@ -27,8 +27,9 @@ function startIndexOf(url: string | undefined): number {
   return Number(new URL(url ?? "", "http://127.0.0.1").searchParams.get("startIndex") ?? "0");
 }
 
-function follow(host: string) {
+function follow(host: string, options?: { follow?: boolean }) {
   return followStreamIterable({
+    follow: options?.follow,
     host,
     resolveHeaders: () => Promise.resolve(new Headers()),
     sessionId: "s",
@@ -103,6 +104,91 @@ describe("stream following over real sockets", () => {
     expect(received).toEqual([]);
     expect(connections).toBe(6);
   }, 20_000);
+
+  it("bounds a follow: false read at the first connection's tail across reconnects", async () => {
+    const log = [
+      { type: "step.started", data: {} },
+      { type: "step.completed", data: {} },
+      { type: "step.started", data: {} },
+      { type: "step.completed", data: {} },
+      { type: "step.started", data: {} },
+      { type: "step.completed", data: {} },
+    ];
+    const tailRequests: Array<string | null> = [];
+    let connections = 0;
+    const host = await listen(
+      createServer((req, res) => {
+        connections += 1;
+        const index = startIndexOf(req.url);
+        const tailRequested = new URL(req.url ?? "", "http://127.0.0.1").searchParams.get(
+          "includeTailIndex",
+        );
+        tailRequests.push(tailRequested);
+        res.writeHead(200, {
+          "content-type": "application/x-ndjson",
+          ...(tailRequested === "1" ? { "x-eve-stream-tail-index": String(log.length - 1) } : {}),
+        });
+
+        // The first two connections drop after one event; the third serves the
+        // rest and holds the connection open — a live follow would keep waiting.
+        const events = index < 2 ? [log[index]] : log.slice(index);
+        for (const event of events) {
+          res.write(`${JSON.stringify(event)}\n`);
+        }
+        if (index < 2) {
+          setTimeout(() => req.socket.destroy(), 40);
+        }
+      }),
+    );
+
+    const client = new Client({ host });
+    const session = client.session({ sessionId: "s1", streamIndex: 0 });
+
+    const received: string[] = [];
+    for await (const event of session.stream({ follow: false })) {
+      received.push(event.type);
+    }
+
+    expect(received).toEqual(log.map((event) => event.type));
+    expect(connections).toBe(3);
+    expect(tailRequests).toEqual(["1", null, null]);
+    expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 6 });
+  });
+
+  it("ends a follow: false read immediately when the cursor is already past the tail", async () => {
+    let connections = 0;
+    const host = await listen(
+      createServer((_req, res) => {
+        connections += 1;
+        res.writeHead(200, {
+          "content-type": "application/x-ndjson",
+          "x-eve-stream-tail-index": "-1",
+        });
+        // Send headers without any body: a live follow would idle here
+        // waiting for events that never arrive.
+        res.flushHeaders();
+      }),
+    );
+
+    const received: string[] = [];
+    for await (const event of follow(host, { follow: false })) {
+      received.push(event.type);
+    }
+
+    expect(received).toEqual([]);
+    expect(connections).toBe(1);
+  });
+
+  it("fails a follow: false read when the server does not report a tail index", async () => {
+    const host = await listen(
+      createServer((_req, res) => {
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.end();
+      }),
+    );
+
+    await expect(follow(host, { follow: false }).next()).rejects.toThrow(/x-eve-stream-tail-index/);
+  });
 
   it("never abandons a progressing turn: any event resets the idle budget", async () => {
     const events = ["step.started", "step.completed", "step.started", "session.completed"];

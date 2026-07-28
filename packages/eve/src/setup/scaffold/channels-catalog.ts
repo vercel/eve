@@ -19,12 +19,12 @@ interface ChannelScaffold {
   slug: string;
   /** Internal scaffolder kind; the catalog's `eve` channel is surfaced as `web`. */
   kind: ChannelKind;
+  /** Canonical item in the official eve registry. */
+  registryItem: `channel/${ChannelKind}`;
   /** Picker label. */
   label: string;
   /** Optional picker hint. */
   hint?: string;
-  /** The add sub-flow provisions against the linked Vercel project. */
-  requiresVercelProject?: true;
 }
 
 /**
@@ -35,13 +35,19 @@ interface ChannelScaffold {
  * for *which* channels are scaffoldable.
  */
 const CHANNEL_SCAFFOLDS: readonly ChannelScaffold[] = [
-  { slug: "eve", kind: "web", label: "Web Chat", hint: "Next.js app" },
+  {
+    slug: "eve",
+    kind: "web",
+    registryItem: "channel/web",
+    label: "Web Chat",
+    hint: "Next.js app",
+  },
   {
     slug: "slack",
     kind: "slack",
+    registryItem: "channel/slack",
     label: "Slack",
-    hint: "Creates slackbot and deploys to Vercel",
-    requiresVercelProject: true,
+    hint: "Slack app mentions and DMs",
   },
 ];
 
@@ -51,12 +57,12 @@ export interface ScaffoldableChannel {
   slug: string;
   /** Internal scaffolder kind passed to `ensureChannel`. */
   kind: ChannelKind;
+  /** Canonical item in the official eve registry. */
+  registryItem: `channel/${ChannelKind}`;
   /** Picker label. */
   label: string;
   /** Optional picker hint. */
   hint?: string;
-  /** The add sub-flow provisions against the linked Vercel project. */
-  requiresVercelProject?: true;
 }
 
 function buildScaffoldableChannels(): ScaffoldableChannel[] {
@@ -76,13 +82,11 @@ function buildScaffoldableChannels(): ScaffoldableChannel[] {
     const channel: ScaffoldableChannel = {
       slug: scaffold.slug,
       kind: scaffold.kind,
+      registryItem: scaffold.registryItem,
       label: scaffold.label,
     };
     if (scaffold.hint !== undefined) {
       channel.hint = scaffold.hint;
-    }
-    if (scaffold.requiresVercelProject !== undefined) {
-      channel.requiresVercelProject = scaffold.requiresVercelProject;
     }
     channels.push(channel);
   }

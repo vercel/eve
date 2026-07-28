@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/planetscale",
+  "title": "PlanetScale",
+  "description": "Authenticated access to your PlanetScale Postgres and MySQL databases.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/planetscale.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://mcp.pscale.dev/mcp/planetscale\",\n  description: \"PlanetScale: query Postgres and MySQL databases.\",\n  auth: connect(\"planetscale\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/planetscale.ts"
+    }
+  ],
+  "type": "registry:item"
+}

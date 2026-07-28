@@ -163,6 +163,9 @@ describe("dispatchChannelRequest", () => {
       async getEventStream() {
         return new ReadableStream();
       },
+      async getStreamTailIndex() {
+        return -1;
+      },
     });
     const targetDefinition: CompiledChannel = {
       __kind: CHANNEL_SENTINEL,
@@ -236,6 +239,7 @@ describe("dispatchChannelRequest", () => {
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
       run: vi.fn(),
       terminateSession: vi.fn(),
     };
@@ -283,6 +287,7 @@ describe("dispatchChannelRequest", () => {
       cancelTurn: vi.fn(),
       deliver: vi.fn(),
       getEventStream: vi.fn(),
+      getStreamTailIndex: vi.fn(),
       resolveSession: vi.fn().mockResolvedValue({ sessionId: "sess_previous" }),
       run: vi.fn(),
       terminateSession: vi.fn().mockResolvedValue({ status: "terminated" }),
@@ -335,6 +340,7 @@ describe("dispatchChannelRequest", () => {
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
       run: vi.fn(),
       terminateSession: vi.fn(),
     };
@@ -378,6 +384,7 @@ describe("dispatchChannelRequest", () => {
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_deliver" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
       run: vi.fn().mockResolvedValue({
         continuationToken: "route-token",
         events: new ReadableStream(),

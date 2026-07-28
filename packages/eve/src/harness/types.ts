@@ -12,6 +12,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { InstrumentationHooks } from "#harness/instrumentation-lifecycle.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -240,6 +241,11 @@ export interface ToolLoopHarnessConfig {
    */
   readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
+  /**
+   * Internal lifecycle hooks injected into each actual model attempt.
+   * Omitted in production until an instrumentation runtime opts in.
+   */
+  readonly instrumentationHooks?: InstrumentationHooks;
   /**
    * Execution mode for the current harness.
    *

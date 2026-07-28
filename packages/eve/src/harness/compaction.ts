@@ -5,6 +5,7 @@ import {
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
+  stubContentOutputFileParts,
   TODO_COMPACTION_PRESERVATION_LABEL,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction-prompt.js";
@@ -268,9 +269,17 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       if (part.type !== "tool-result") {
         return part;
       }
-      const serialized = JSON.stringify(part.output) ?? "";
+      // File parts of a content output reduce to their text stubs before the
+      // size check: serializing raw payloads into a prefix cap would keep
+      // bytes the model cannot read while cutting the text it can.
+      const output = stubContentOutputFileParts(part.output) as typeof part.output;
+      const serialized = JSON.stringify(output) ?? "";
       if (serialized.length <= TRANSCRIPT_PAYLOAD_LIMIT) {
-        return part;
+        if (output === part.output) {
+          return part;
+        }
+        changed = true;
+        return { ...part, output };
       }
 
       changed = true;
