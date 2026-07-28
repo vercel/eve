@@ -445,6 +445,10 @@ describe("dispatchChannelRequest", () => {
     expect(startedInput).not.toBe(runInput);
     expect(deliveredInput?.requestId).toBe("iad1::abc123-1710000000000-deadbeef");
     expect(startedInput?.requestId).toBe("iad1::abc123-1710000000000-deadbeef");
+    expect(startedInput?.provenance).toEqual({
+      origin: "channel",
+      channel: "internal",
+    });
     expect(deliverInput).not.toHaveProperty("requestId");
     expect(runInput).not.toHaveProperty("requestId");
   });

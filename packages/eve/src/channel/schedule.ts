@@ -77,7 +77,11 @@ export class ScheduleDispatcher {
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const sessions: Session[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
-    const receive = createCrossChannelReceiveFn(this.runtime, toCrossChannelTargets(this.channels));
+    const receive = createCrossChannelReceiveFn(
+      this.runtime,
+      toCrossChannelTargets(this.channels),
+      { origin: "schedule", schedule: input.scheduleId },
+    );
 
     const args: ScheduleHandlerArgs = {
       appAuth: SCHEDULE_APP_AUTH,
@@ -94,7 +98,7 @@ export class ScheduleDispatcher {
     if (input.run) {
       await input.run(args);
     } else if (input.markdown !== undefined) {
-      const session = await this.runMarkdown(input.markdown);
+      const session = await this.runMarkdown(input.markdown, input.scheduleId);
       sessions.push(session);
     } else {
       throw new Error(
@@ -105,12 +109,13 @@ export class ScheduleDispatcher {
     return { sessions, waitUntilTasks };
   }
 
-  private async runMarkdown(markdown: string): Promise<Session> {
+  private async runMarkdown(markdown: string, scheduleId: string): Promise<Session> {
     const handle = await this.runtime.run({
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
       input: { message: markdown },
       mode: "task",
+      provenance: { origin: "schedule", schedule: scheduleId },
     });
     return createSession(handle.sessionId, handle.continuationToken, this.runtime);
   }

@@ -76,6 +76,10 @@ describe("ScheduleDispatcher", () => {
           input: { message: "Run heartbeat task." },
           mode: "task",
           auth: SCHEDULE_APP_AUTH,
+          provenance: {
+            origin: "schedule",
+            schedule: "heartbeat",
+          },
         }),
       );
       expect(SCHEDULE_ADAPTER.kind).toBe(SCHEDULE_ADAPTER_KIND);
@@ -132,6 +136,11 @@ describe("ScheduleDispatcher", () => {
           /^slack:C0123ABC:[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/,
         );
         expect(runInput.auth).toEqual(SCHEDULE_APP_AUTH);
+        expect(runInput.provenance).toEqual({
+          origin: "schedule",
+          channel: "slack",
+          schedule: "daily-digest",
+        });
       } finally {
         vi.unstubAllEnvs();
       }

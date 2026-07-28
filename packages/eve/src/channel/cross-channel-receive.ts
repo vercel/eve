@@ -5,7 +5,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import { createSendFn } from "#channel/send.js";
 import type { Session } from "#channel/session.js";
-import type { Runtime, SessionAuthContext } from "#channel/types.js";
+import type { RunProvenance, Runtime, SessionAuthContext } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 /**
@@ -76,10 +76,12 @@ export function toCrossChannelTargets(
 export function createCrossChannelReceiveFn(
   runtime: Runtime,
   channels: readonly CrossChannelTarget[],
+  provenance?: Omit<RunProvenance, "channel">,
 ): CrossChannelReceiveFn {
   return async (channel, options) => {
     const targetChannel = resolveTargetByReference(channel, channels);
     return await invokeChannelReceive({
+      provenance,
       runtime,
       target: targetChannel,
       input: {
@@ -97,6 +99,7 @@ export function createCrossChannelReceiveFn(
 }
 
 interface InvokeChannelReceiveInput {
+  readonly provenance?: Omit<RunProvenance, "channel">;
   readonly runtime: Runtime;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter">;
   readonly input: {
@@ -121,7 +124,9 @@ export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Pro
   if (!args.target.adapter) {
     throw new Error(args.describeMissingAdapter());
   }
-  const send = createSendFn(args.runtime, args.target.adapter, args.target.name);
+  const send = createSendFn(args.runtime, args.target.adapter, args.target.name, {
+    provenance: args.provenance,
+  });
   return await args.target.receive(args.input, { send });
 }
 

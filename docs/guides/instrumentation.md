@@ -138,7 +138,12 @@ Structural tags describe each run's place in the tree:
 - `$eve.root`: session id of the root session in the chain (group a whole tree with `$eve.root=<id>`)
 - `$eve.subagent`: compiled graph node id (subagent runs only)
 - `$eve.trigger`: the channel kind that started the run
+- `$eve.origin`: verified initiating boundary, either `channel` or `schedule` (session runs only)
+- `$eve.channel`: configured logical channel name for direct channel runs and schedules that target a channel (session runs only)
+- `$eve.schedule`: configured logical schedule name for scheduled runs (session runs only)
 - `$eve.title`: truncated title derived from the first user message
+
+`$eve.trigger` remains the channel adapter kind, so a scheduled handler that targets Slack still has Slack as its trigger. `$eve.origin` records that the schedule initiated the session, while `$eve.channel` and `$eve.schedule` identify the configured target and schedule. Eve omits provenance attributes when the initiation boundary or identity is unavailable; it does not infer or backfill them for older runs.
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 

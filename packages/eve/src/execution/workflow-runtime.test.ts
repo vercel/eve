@@ -351,6 +351,32 @@ describe("createWorkflowRuntime#run", () => {
     expect(startOptions.attributes["$eve.title"]).toBe("ship it");
   });
 
+  it("persists verified provenance without deriving it from the adapter trigger", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: null,
+      input: { message: "post the digest" },
+      mode: "task",
+      provenance: {
+        origin: "schedule",
+        channel: "slack",
+        schedule: "daily-digest",
+      },
+    });
+
+    const [, , startOptions] = startMock.mock.calls[0]!;
+    expect(startOptions.attributes).toMatchObject({
+      "$eve.channel": "slack",
+      "$eve.origin": "schedule",
+      "$eve.schedule": "daily-digest",
+      "$eve.trigger": "http",
+    });
+  });
+
   it("serializes the channel request id into workflow context", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;

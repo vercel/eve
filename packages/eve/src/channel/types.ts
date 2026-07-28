@@ -265,6 +265,19 @@ export interface SessionCapabilities {
 // ---------------------------------------------------------------------------
 
 /**
+ * Framework-verified provenance for a top-level session.
+ *
+ * @internal Authored code must not infer or supply these values. Initiation
+ * boundaries stamp them before the runtime emits reserved `$eve.*` workflow
+ * attributes.
+ */
+export interface RunProvenance {
+  readonly origin: "channel" | "schedule";
+  readonly channel?: string;
+  readonly schedule?: string;
+}
+
+/**
  * Single input shape consumed by {@link Runtime.run} for both root runs
  * (started by routes) and delegated child runs (started by the
  * subagent tool wrapper).
@@ -292,6 +305,8 @@ export interface RunInput {
   readonly capabilities?: SessionCapabilities;
   /** Inbound channel request id used to correlate workflow attributes. */
   readonly requestId?: string;
+  /** Framework-owned provenance for top-level session instrumentation. */
+  readonly provenance?: RunProvenance;
   /**
    * Human-readable workflow title for top-level sessions. When omitted, the
    * runtime derives `$eve.title` from {@link input.message}.

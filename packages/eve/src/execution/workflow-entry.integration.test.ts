@@ -498,6 +498,11 @@ describe("workflowEntry integration", () => {
           attributes: normalizeEveAttributes(
             buildSessionAttributes({
               inputMessage: "session tag round-trip",
+              provenance: {
+                origin: "schedule",
+                channel: "slack",
+                schedule: "daily-digest",
+              },
               serializedContext,
             }),
           ),
@@ -514,6 +519,9 @@ describe("workflowEntry integration", () => {
 
         expect(attrs["$eve.type"]).toBe("session");
         expect(attrs["$eve.trigger"]).toBe("http");
+        expect(attrs["$eve.origin"]).toBe("schedule");
+        expect(attrs["$eve.channel"]).toBe("slack");
+        expect(attrs["$eve.schedule"]).toBe("daily-digest");
         expect(attrs["$eve.title"]).toContain("session tag round-trip");
         // Top-level sessions have no parent or subagent name on the root run.
         expect(attrs["$eve.parent"]).toBeUndefined();

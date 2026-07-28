@@ -45,6 +45,10 @@ describe("createSendFn", () => {
     expect(session.id).toBe("mock-session-id");
     expect(runtime.deliver).toHaveBeenCalledTimes(1);
     expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(runtime.run).mock.calls[0]![0].provenance).toEqual({
+      origin: "channel",
+      channel: "test",
+    });
     expect(log).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
 

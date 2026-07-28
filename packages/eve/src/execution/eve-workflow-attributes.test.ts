@@ -138,6 +138,24 @@ describe("deriveSessionTitle", () => {
 });
 
 describe("buildSessionAttributes", () => {
+  it("emits verified channel provenance without changing the trigger", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "ship the thing please",
+      provenance: { origin: "channel", channel: "support/slack" },
+      serializedContext: slackChannelCtx,
+    });
+
+    expect(attrs).toEqual({
+      "$eve.channel": "support/slack",
+      "$eve.channel_request_id": undefined,
+      "$eve.origin": "channel",
+      "$eve.schedule": undefined,
+      "$eve.type": "session",
+      "$eve.trigger": "slack",
+      "$eve.title": "ship the thing please",
+    });
+  });
+
   it("emits type=session with trigger and derived title", () => {
     const attrs = buildSessionAttributes({
       inputMessage: "ship the thing please",
@@ -160,6 +178,9 @@ describe("buildSessionAttributes", () => {
 
     expect(attrs["$eve.trigger"]).toBeUndefined();
     expect(attrs["$eve.title"]).toBe("hi");
+    expect(attrs["$eve.origin"]).toBeUndefined();
+    expect(attrs["$eve.channel"]).toBeUndefined();
+    expect(attrs["$eve.schedule"]).toBeUndefined();
   });
 
   it("emits the channel request id when present", () => {

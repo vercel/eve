@@ -21,10 +21,14 @@
  * - `$eve.parent_turn`  — parent turn id that dispatched the subagent (subagent rows only)
  * - `$eve.subagent`     — active compiled graph node id (subagent rows only)
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
+ * - `$eve.origin`       — verified initiating boundary (`channel` or `schedule`)
+ * - `$eve.channel`      — configured target channel name (session rows only)
+ * - `$eve.schedule`     — configured schedule name (session rows only)
  * - `$eve.title`        — truncated session title from the first user message
  * - `$eve.channel_request_id` — inbound channel request id
  */
 
+import type { RunProvenance } from "#channel/types.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
@@ -205,10 +209,18 @@ function collectMessageText(message: unknown): string | undefined {
  */
 export function buildSessionAttributes(input: {
   readonly inputMessage: unknown;
+  readonly provenance?: RunProvenance;
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
+    ...(input.provenance
+      ? {
+          "$eve.channel": input.provenance.channel,
+          "$eve.origin": input.provenance.origin,
+          "$eve.schedule": input.provenance.schedule,
+        }
+      : {}),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
     "$eve.title": deriveSessionTitle(input.inputMessage),
