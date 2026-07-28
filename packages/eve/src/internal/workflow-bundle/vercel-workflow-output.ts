@@ -14,6 +14,7 @@ import { dirname, join, relative } from "node:path";
 
 import {
   EVE_SHARED_SERVER_FUNCTION_PATH,
+  EVE_WORKFLOW_FLOW_ROUTE_PATH,
   isEveVercelFunctionPath,
   normalizeEveVercelRoutes,
 } from "#internal/workflow-bundle/eve-service-route-output.js";
@@ -40,6 +41,38 @@ export const WORKFLOW_BUILDER_DEFERRED_PACKAGES = ["@chat-adapter/slack", "chat"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Recreates the queue-triggered flow function from Nitro's completed server
+ * output while retaining its route-specific Vercel configuration.
+ *
+ * Nitro copies function-rule output without preserving relative symlink text,
+ * which can turn traced `.nf3` package links into absolute paths inside eve's
+ * disposable build workspace. Materializing after Nitro finishes keeps those
+ * links relative so the published function remains self-contained.
+ */
+export async function materializeVercelWorkflowFunctionOutput(outputDir: string): Promise<void> {
+  const functionsDir = join(outputDir, "functions");
+  const rootServerFunctionPath = await realpath(join(functionsDir, "__server.func"));
+  const flowFunctionPath = join(functionsDir, `${EVE_WORKFLOW_FLOW_ROUTE_PATH.slice(1)}.func`);
+  const flowFunctionConfig = await readFile(join(flowFunctionPath, ".vc-config.json"));
+  const stagingPath = `${flowFunctionPath}.eve-staging`;
+
+  await rm(stagingPath, {
+    force: true,
+    recursive: true,
+  });
+  await cp(rootServerFunctionPath, stagingPath, {
+    recursive: true,
+    verbatimSymlinks: true,
+  });
+  await writeFile(join(stagingPath, ".vc-config.json"), flowFunctionConfig);
+  await rm(flowFunctionPath, {
+    force: true,
+    recursive: true,
+  });
+  await rename(stagingPath, flowFunctionPath);
 }
 
 /**

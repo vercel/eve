@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/discord",
+  "title": "Discord",
+  "description": "Run your agent as a Discord bot across servers and threads.",
+  "files": [
+    {
+      "path": "registry/channels/discord.ts",
+      "content": "import { discordChannel } from \"eve/channels/discord\";\n\nexport default discordChannel({\n  credentials: {\n    botToken: () => process.env.DISCORD_BOT_TOKEN!,\n    publicKey: () => process.env.DISCORD_PUBLIC_KEY!,\n  },\n});\n",
+      "type": "registry:file",
+      "target": "agent/channels/discord.ts"
+    }
+  ],
+  "envVars": {
+    "DISCORD_APPLICATION_ID": "",
+    "DISCORD_BOT_TOKEN": "",
+    "DISCORD_PUBLIC_KEY": ""
+  },
+  "type": "registry:item"
+}

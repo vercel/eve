@@ -180,6 +180,8 @@ export interface AddChannelsOptions {
    */
   slackbotFailure?: "abort" | "warn-and-continue";
   deps?: AddChannelsDeps;
+  /** Registry installation already owns package dependency mutations. */
+  skipDependencyMutation?: boolean;
 }
 
 /**
@@ -279,6 +281,7 @@ export function addChannels(
         slackConnectorUid: connectorUid,
         slackConnectorSlug: slug,
         force: options.force,
+        skipDependencyMutation: options.skipDependencyMutation,
       });
       payload.dependenciesChanged ||= result.packageJsonUpdated.length > 0;
       warnOverwrittenFiles(log, result.filesOverwritten);
@@ -354,6 +357,7 @@ export function addChannels(
       packageManager,
       force: options.force,
       configureVercelServices: options.configureVercelServices ?? hasVercelProject(state),
+      skipDependencyMutation: options.skipDependencyMutation,
     };
     if (options.evePackage !== undefined) {
       ensureWebOptions.webPackageVersions = { evePackage: options.evePackage };
@@ -470,6 +474,7 @@ export function addChannels(
           slackConnectorSlug: slug,
           slackCredentials: "environment",
           force: options.force,
+          skipDependencyMutation: options.skipDependencyMutation,
         });
         payload.dependenciesChanged ||= result.packageJsonUpdated.length > 0;
         warnOverwrittenFiles(log, result.filesOverwritten);
@@ -546,7 +551,7 @@ export function addChannels(
     payload: AddChannelsPayload,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (!payload.dependenciesChanged) return;
+    if (options.skipDependencyMutation || !payload.dependenciesChanged) return;
     const installed = await withPhase(
       log,
       `Installing channel dependencies (${packageManager} install)...`,

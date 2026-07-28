@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/chat-sdk-photon",
+  "title": "Photon",
+  "description": "Cloud, self-hosted, and local iMessage messaging through Photon.",
+  "dependencies": ["chat", "@photon-ai/chat-adapter-imessage", "@chat-adapter/state-memory"],
+  "files": [
+    {
+      "path": "registry/channels/chat-sdk-photon.ts",
+      "content": "import { createiMessageAdapter } from \"@photon-ai/chat-adapter-imessage\";\nimport { createMemoryState } from \"@chat-adapter/state-memory\";\nimport type { Message, Thread } from \"chat\";\nimport { chatSdkChannel } from \"eve/channels/chat-sdk\";\n\nexport const { bot, channel, send } = chatSdkChannel({\n  userName: \"My Agent\",\n  adapters: {\n    imessage: createiMessageAdapter({\n      local: false,\n      projectId: process.env.IMESSAGE_PROJECT_ID,\n      projectSecret: process.env.IMESSAGE_PROJECT_SECRET,\n    }),\n  },\n  state: createMemoryState(),\n});\n\nbot.onNewMention(async (thread: Thread, message: Message) => {\n  await thread.subscribe();\n  await send(message.text, { thread });\n});\n\nbot.onSubscribedMessage(async (thread: Thread, message: Message) => {\n  await send(message.text, { thread });\n});\n\nexport default channel;\n",
+      "type": "registry:file",
+      "target": "agent/channels/imessage.ts"
+    }
+  ],
+  "envVars": {
+    "IMESSAGE_PROJECT_ID": "",
+    "IMESSAGE_PROJECT_SECRET": ""
+  },
+  "type": "registry:item"
+}

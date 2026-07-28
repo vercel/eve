@@ -56,6 +56,31 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
     join(outputDir, "functions", "eve", "v1", "health.func"),
     "dir",
   );
+
+  if (process.env.VERCEL) {
+    const flowFunctionDirectory = join(
+      outputDir,
+      "functions",
+      ".well-known",
+      "workflow",
+      "v1",
+      "flow.func",
+    );
+
+    await mkdir(flowFunctionDirectory, { recursive: true });
+    await writeFile(
+      join(flowFunctionDirectory, ".vc-config.json"),
+      `${JSON.stringify(
+        {
+          experimentalTriggers: [{ topic: "eve-test", type: "queue/v2beta" }],
+          maxDuration: "max",
+          runtime: "nodejs24.x",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
 });
 const copyPublicAssetsMock = vi.fn(async () => undefined);
 const createProductionApplicationNitroMock = vi.fn();
@@ -425,6 +450,19 @@ describe("buildApplication", () => {
     const sharedFunctionStats = await lstat(
       join(appRoot, ".vercel", "output", "functions", "eve", "__server.func"),
     );
+    const flowFunctionDirectory = join(
+      appRoot,
+      ".vercel",
+      "output",
+      "functions",
+      ".well-known",
+      "workflow",
+      "v1",
+      "flow.func",
+    );
+    const flowFunctionConfig = JSON.parse(
+      await readFile(join(flowFunctionDirectory, ".vc-config.json"), "utf8"),
+    ) as Record<string, unknown>;
     const vercelConfig = JSON.parse(
       await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
     ) as {
@@ -451,6 +489,14 @@ describe("buildApplication", () => {
         "utf8",
       ),
     ).resolves.toContain("export default");
+    await expect(readFile(join(flowFunctionDirectory, "_runtime.mjs"), "utf8")).resolves.toContain(
+      "export default",
+    );
+    expect(flowFunctionConfig).toMatchObject({
+      experimentalTriggers: [{ topic: "eve-test", type: "queue/v2beta" }],
+      maxDuration: "max",
+      runtime: "nodejs24.x",
+    });
     expect(vercelConfig.routes).toEqual([
       { handle: "filesystem" },
       { dest: "/eve/__server", src: "/eve/v1/health" },

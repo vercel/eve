@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/chat-sdk-velt",
+  "title": "Velt",
+  "description": "Add agents to anchored comments across documents, canvases, PDFs, and video.",
+  "dependencies": ["chat", "@veltdev/chat-sdk-adapter", "@chat-adapter/state-memory"],
+  "files": [
+    {
+      "path": "registry/channels/chat-sdk-velt.ts",
+      "content": "import { createVeltAdapter } from \"@veltdev/chat-sdk-adapter\";\nimport { createMemoryState } from \"@chat-adapter/state-memory\";\nimport type { Message, Thread } from \"chat\";\nimport { chatSdkChannel } from \"eve/channels/chat-sdk\";\n\nexport const { bot, channel, send } = chatSdkChannel({\n  userName: \"My Agent\",\n  adapters: {\n    velt: createVeltAdapter({\n      apiKey: process.env.VELT_API_KEY!,\n      webhookSecret: process.env.VELT_WEBHOOK_SECRET!,\n      botUserId: \"my-agent\",\n      botUserName: \"My Agent\",\n    }),\n  },\n  state: createMemoryState(),\n});\n\nbot.onNewMention(async (thread: Thread, message: Message) => {\n  await thread.subscribe();\n  await send(message.text, { thread });\n});\n\nbot.onSubscribedMessage(async (thread: Thread, message: Message) => {\n  await send(message.text, { thread });\n});\n\nexport default channel;\n",
+      "type": "registry:file",
+      "target": "agent/channels/velt.ts"
+    }
+  ],
+  "envVars": {
+    "VELT_API_KEY": "",
+    "VELT_WEBHOOK_SECRET": ""
+  },
+  "type": "registry:item"
+}

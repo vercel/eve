@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/chat-sdk-agentphone",
+  "title": "AgentPhone",
+  "description": "SMS, MMS, iMessage, and voice conversations through AgentPhone.",
+  "dependencies": ["chat", "@agentphone/chat-sdk-adapter", "@chat-adapter/state-memory"],
+  "files": [
+    {
+      "path": "registry/channels/chat-sdk-agentphone.ts",
+      "content": "import { createAgentPhoneAdapter } from \"@agentphone/chat-sdk-adapter\";\nimport { createMemoryState } from \"@chat-adapter/state-memory\";\nimport type { Message, Thread } from \"chat\";\nimport { chatSdkChannel } from \"eve/channels/chat-sdk\";\n\nexport const { bot, channel, send } = chatSdkChannel({\n  userName: \"My Agent\",\n  adapters: {\n    agentphone: createAgentPhoneAdapter({\n      apiKey: process.env.AGENTPHONE_API_KEY!,\n      agentId: process.env.AGENTPHONE_AGENT_ID!,\n      webhookSecret: process.env.AGENTPHONE_WEBHOOK_SECRET!,\n    }),\n  },\n  state: createMemoryState(),\n});\n\nbot.onNewMention(async (thread: Thread, message: Message) => {\n  await thread.subscribe();\n  await send(message.text, { thread });\n});\n\nbot.onSubscribedMessage(async (thread: Thread, message: Message) => {\n  await send(message.text, { thread });\n});\n\nexport default channel;\n",
+      "type": "registry:file",
+      "target": "agent/channels/agentphone.ts"
+    }
+  ],
+  "envVars": {
+    "AGENTPHONE_API_KEY": "",
+    "AGENTPHONE_AGENT_ID": "",
+    "AGENTPHONE_WEBHOOK_SECRET": ""
+  },
+  "type": "registry:item"
+}

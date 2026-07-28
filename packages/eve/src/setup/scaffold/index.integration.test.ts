@@ -354,7 +354,10 @@ describe("ensureChannel", () => {
 
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
     const sourceChannel = await readFile(
-      new URL("../../../../../apps/templates/web-chat-next/agent/channels/eve.ts", import.meta.url),
+      new URL(
+        "../../../../../apps/docs/registry/channel/web/agent/channels/eve.ts",
+        import.meta.url,
+      ),
       "utf8",
     );
     // The template is LF; a Windows checkout may hand back the source app as

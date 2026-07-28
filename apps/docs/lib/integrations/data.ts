@@ -166,10 +166,10 @@ The channel handles mentions, DMs, typing indicators, delivery, and human-in-the
     logo: "discord",
     docsHref: "/docs/channels/discord",
     keywords: ["chat", "messaging", "bot", "guild"],
-    install: `Install the framework. The Discord channel ships with it:
+    install: `Add this channel from eve's registry. This writes \`agent/channels/discord.ts\`:
 
 \`\`\`bash
-npm install eve@latest
+eve add channel/discord
 \`\`\``,
     quickStart: `Create \`agent/channels/discord.ts\`:
 
@@ -178,8 +178,10 @@ npm install eve@latest
 import { discordChannel } from "eve/channels/discord";
 
 export default discordChannel({
-  botToken: () => process.env.DISCORD_BOT_TOKEN!,
-  publicKey: () => process.env.DISCORD_PUBLIC_KEY!,
+  credentials: {
+    botToken: () => process.env.DISCORD_BOT_TOKEN!,
+    publicKey: () => process.env.DISCORD_PUBLIC_KEY!,
+  },
 });
 \`\`\``,
     configure: `Create a Discord application, add a bot, and set the interactions endpoint URL to the route eve serves (\`/eve/v1/discord\`). Provide the bot token and public key through environment variables. See the [Discord channel docs](/docs/channels/discord) for intents and slash-command setup.`,
@@ -188,10 +190,10 @@ export default discordChannel({
     logo: "teams",
     docsHref: "/docs/channels/teams",
     keywords: ["chat", "messaging", "bot", "microsoft"],
-    install: `Install the framework:
+    install: `Add this channel from eve's registry. This writes \`agent/channels/teams.ts\`:
 
 \`\`\`bash
-npm install eve@latest
+eve add channel/teams
 \`\`\``,
     quickStart: `Create \`agent/channels/teams.ts\`:
 
@@ -200,8 +202,10 @@ npm install eve@latest
 import { teamsChannel } from "eve/channels/teams";
 
 export default teamsChannel({
-  appId: () => process.env.TEAMS_APP_ID!,
-  appPassword: () => process.env.TEAMS_APP_PASSWORD!,
+  credentials: {
+    appId: () => process.env.TEAMS_APP_ID!,
+    appPassword: () => process.env.TEAMS_APP_PASSWORD!,
+  },
 });
 \`\`\``,
     configure: `Register an Azure Bot, configure the messaging endpoint to eve's route (\`/eve/v1/teams\`), and supply the app ID and password via environment variables. See the [Teams channel docs](/docs/channels/teams) for the full provisioning checklist.`,
@@ -210,10 +214,10 @@ export default teamsChannel({
     logo: "telegram",
     docsHref: "/docs/channels/telegram",
     keywords: ["chat", "messaging", "bot"],
-    install: `Install the framework:
+    install: `Add this channel from eve's registry. This writes \`agent/channels/telegram.ts\`:
 
 \`\`\`bash
-npm install eve@latest
+eve add channel/telegram
 \`\`\``,
     quickStart: `Create \`agent/channels/telegram.ts\`:
 
@@ -222,7 +226,7 @@ npm install eve@latest
 import { telegramChannel } from "eve/channels/telegram";
 
 export default telegramChannel({
-  botToken: () => process.env.TELEGRAM_BOT_TOKEN!,
+  credentials: { botToken: () => process.env.TELEGRAM_BOT_TOKEN! },
 });
 \`\`\``,
     configure: `Create a bot with [@BotFather](https://t.me/botfather), then register the webhook to point at eve's route (\`/eve/v1/telegram\`). Store the bot token in an environment variable. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
@@ -231,10 +235,10 @@ export default telegramChannel({
     logo: "twilio",
     docsHref: "/docs/channels/twilio",
     keywords: ["sms", "voice", "calls", "phone", "transcription"],
-    install: `Install the framework:
+    install: `Add this channel from eve's registry. This writes \`agent/channels/twilio.ts\`:
 
 \`\`\`bash
-npm install eve@latest
+eve add channel/twilio
 \`\`\``,
     quickStart: `Create \`agent/channels/twilio.ts\`. \`allowFrom\` is required and gates who can reach the inbound hooks:
 
@@ -258,10 +262,10 @@ TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
     logo: "github",
     docsHref: "/docs/channels/github",
     keywords: ["issues", "pull requests", "app", "webhook", "code"],
-    install: `Install the framework:
+    install: `Add this channel from eve's registry. This writes \`agent/channels/github.ts\`:
 
 \`\`\`bash
-npm install eve@latest
+eve add channel/github
 \`\`\``,
     quickStart: `Create \`agent/channels/github.ts\`:
 
@@ -270,9 +274,11 @@ npm install eve@latest
 import { githubChannel } from "eve/channels/github";
 
 export default githubChannel({
-  appId: () => process.env.GITHUB_APP_ID!,
-  privateKey: () => process.env.GITHUB_APP_PRIVATE_KEY!,
-  webhookSecret: () => process.env.GITHUB_WEBHOOK_SECRET!,
+  credentials: {
+    appId: () => process.env.GITHUB_APP_ID!,
+    privateKey: () => process.env.GITHUB_APP_PRIVATE_KEY!,
+    webhookSecret: () => process.env.GITHUB_WEBHOOK_SECRET!,
+  },
 });
 \`\`\``,
     configure: `Create a GitHub App, subscribe to issue and pull-request events, and set the webhook URL to eve's route (\`/eve/v1/github\`). Provide the app ID, private key, and webhook secret through environment variables. See the [GitHub channel docs](/docs/channels/github) for required permissions.`,
@@ -281,10 +287,10 @@ export default githubChannel({
     logo: "linear",
     docsHref: "/docs/channels/linear",
     keywords: ["issues", "comments", "agent sessions", "developer preview", "webhook"],
-    install: `Install the framework. The Linear channel ships with it:
+    install: `Add this channel from eve's registry. This writes \`agent/channels/linear.ts\`:
 
 \`\`\`bash
-npm install eve@latest
+eve add channel/linear-agent
 \`\`\``,
     quickStart: `Create \`agent/channels/linear.ts\`:
 
@@ -333,19 +339,18 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
     docsHref: "/docs/channels/chat-sdk",
     badge: "Chat SDK",
     keywords: ["chat sdk", "google chat", "spaces", "bot"],
-    install: `Install eve, the Chat SDK core (\`chat\`), the Google Chat adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/gchat.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @chat-adapter/gchat @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is fine for local development; use a durable state adapter (Redis, PostgreSQL) in production so thread subscriptions survive restarts.`,
+eve add channel/chat-sdk-gchat
+\`\`\``,
     quickStart: `Create \`agent/channels/gchat.ts\`. Register Chat SDK handlers on \`bot\`, call \`send\` to hand each turn to eve, and export the channel:
 
 \`\`\`ts
 // agent/channels/gchat.ts
 import { createGoogleChatAdapter } from "@chat-adapter/gchat";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -354,12 +359,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -374,19 +379,18 @@ Credentials come from the \`createGoogleChatAdapter\` config or the adapter's en
     docsHref: "/docs/channels/chat-sdk",
     badge: "Chat SDK",
     keywords: ["chat sdk", "whatsapp", "business cloud", "messaging"],
-    install: `Install eve, the Chat SDK core (\`chat\`), the WhatsApp adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/whatsapp.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @chat-adapter/whatsapp @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is fine for local development; use a durable state adapter (Redis, PostgreSQL) in production so thread subscriptions survive restarts.`,
+eve add channel/chat-sdk-whatsapp
+\`\`\``,
     quickStart: `Create \`agent/channels/whatsapp.ts\`. Register Chat SDK handlers on \`bot\`, call \`send\` to hand each turn to eve, and export the channel:
 
 \`\`\`ts
 // agent/channels/whatsapp.ts
 import { createWhatsAppAdapter } from "@chat-adapter/whatsapp";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -395,12 +399,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -415,19 +419,18 @@ Credentials come from the \`createWhatsAppAdapter\` config or the adapter's envi
     docsHref: "/docs/channels/chat-sdk",
     badge: "Chat SDK",
     keywords: ["chat sdk", "x", "twitter", "mentions", "dms"],
-    install: `Install eve, the Chat SDK core (\`chat\`), the X adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/x.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @chat-adapter/x @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is fine for local development; use a durable state adapter (Redis, PostgreSQL) in production so thread subscriptions survive restarts.`,
+eve add channel/chat-sdk-x
+\`\`\``,
     quickStart: `Create \`agent/channels/x.ts\`. Register Chat SDK handlers on \`bot\`, call \`send\` to hand each turn to eve, and export the channel:
 
 \`\`\`ts
 // agent/channels/x.ts
 import { createXAdapter } from "@chat-adapter/x";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -436,12 +439,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -456,19 +459,18 @@ Credentials come from the \`createXAdapter\` config or the adapter's environment
     docsHref: "/docs/channels/chat-sdk",
     badge: "Chat SDK",
     keywords: ["chat sdk", "messenger", "facebook", "bot"],
-    install: `Install eve, the Chat SDK core (\`chat\`), the Messenger adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/messenger.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @chat-adapter/messenger @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is fine for local development; use a durable state adapter (Redis, PostgreSQL) in production so thread subscriptions survive restarts.`,
+eve add channel/chat-sdk-messenger
+\`\`\``,
     quickStart: `Create \`agent/channels/messenger.ts\`. Register Chat SDK handlers on \`bot\`, call \`send\` to hand each turn to eve, and export the channel:
 
 \`\`\`ts
 // agent/channels/messenger.ts
 import { createMessengerAdapter } from "@chat-adapter/messenger";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -477,12 +479,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -508,19 +510,18 @@ Credentials come from the \`createMessengerAdapter\` config or the adapter's env
       "bluesky",
       "reddit",
     ],
-    install: `Install eve, Chat SDK, the Zernio adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/zernio.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @zernio/chat-sdk-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Zernio.`,
+eve add channel/chat-sdk-zernio
+\`\`\``,
     quickStart: `Create \`agent/channels/zernio.ts\`:
 
 \`\`\`ts
 // agent/channels/zernio.ts
 import { createZernioAdapter } from "@zernio/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -531,12 +532,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -560,19 +561,18 @@ See the [Zernio adapter documentation](https://chat-sdk.dev/adapters/vendor-offi
       "pdf",
       "video",
     ],
-    install: `Install eve, Chat SDK, the Velt adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/velt.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @veltdev/chat-sdk-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Velt.`,
+eve add channel/chat-sdk-velt
+\`\`\``,
     quickStart: `Create \`agent/channels/velt.ts\`:
 
 \`\`\`ts
 // agent/channels/velt.ts
 import { createVeltAdapter } from "@veltdev/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -588,12 +588,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -608,19 +608,18 @@ See the [Velt adapter documentation](https://chat-sdk.dev/adapters/vendor-offici
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "sendblue", "imessage", "sms", "rcs", "tapbacks", "phone"],
-    install: `Install eve, Chat SDK, the Sendblue adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/sendblue.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat chat-adapter-sendblue @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Sendblue.`,
+eve add channel/chat-sdk-sendblue
+\`\`\``,
     quickStart: `Create \`agent/channels/sendblue.ts\`:
 
 \`\`\`ts
 // agent/channels/sendblue.ts
 import { createSendblueAdapter } from "chat-adapter-sendblue";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -631,12 +630,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -660,19 +659,18 @@ See the [Sendblue adapter documentation](https://chat-sdk.dev/adapters/vendor-of
       "email",
       "multichannel",
     ],
-    install: `Install eve, Chat SDK, the Novu adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/novu.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @novu/chat-sdk-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Novu.`,
+eve add channel/chat-sdk-novu
+\`\`\``,
     quickStart: `Create \`agent/channels/novu.ts\`:
 
 \`\`\`ts
 // agent/channels/novu.ts
 import { createNovuAdapter } from "@novu/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -683,12 +681,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -711,19 +709,18 @@ See the [Novu adapter documentation](https://chat-sdk.dev/adapters/vendor-offici
       "mentions",
       "reactions",
     ],
-    install: `Install eve, Chat SDK, the Liveblocks adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/liveblocks.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @liveblocks/chat-sdk-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Liveblocks.`,
+eve add channel/chat-sdk-liveblocks
+\`\`\``,
     quickStart: `Create \`agent/channels/liveblocks.ts\`:
 
 \`\`\`ts
 // agent/channels/liveblocks.ts
 import { createLiveblocksAdapter } from "@liveblocks/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -739,12 +736,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -759,19 +756,18 @@ See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
-    install: `Install eve, Chat SDK, the Linq adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/linq.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @linqapp/chat-sdk-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Linq.`,
+eve add channel/chat-sdk-linq
+\`\`\``,
     quickStart: `Create \`agent/channels/linq.ts\`:
 
 \`\`\`ts
 // agent/channels/linq.ts
 import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -785,12 +781,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -805,19 +801,18 @@ See the [Linq adapter documentation](https://chat-sdk.dev/adapters/vendor-offici
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "kapso", "whatsapp", "meta", "business", "buttons", "media"],
-    install: `Install eve, Chat SDK, the Kapso adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/kapso.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @kapso/chat-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Kapso.`,
+eve add channel/chat-sdk-kapso
+\`\`\``,
     quickStart: `Create \`agent/channels/kapso.ts\`:
 
 \`\`\`ts
 // agent/channels/kapso.ts
 import { createKapsoAdapter } from "@kapso/chat-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -832,12 +827,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -864,19 +859,18 @@ See the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-offic
       "agentphone",
       "dial",
     ],
-    install: `Install eve, Chat SDK, the Photon adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/imessage.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @photon-ai/chat-adapter-imessage @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+eve add channel/chat-sdk-photon
+\`\`\``,
     quickStart: `Create \`agent/channels/imessage.ts\`:
 
 \`\`\`ts
 // agent/channels/imessage.ts
 import { createiMessageAdapter } from "@photon-ai/chat-adapter-imessage";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -891,12 +885,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -911,19 +905,18 @@ See the [Photon adapter documentation](https://chat-sdk.dev/adapters/vendor-offi
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "dial", "sms", "mms", "imessage", "voice", "phone", "calls"],
-    install: `Install eve, Chat SDK, the Dial adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/dial.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @getdial/chat-sdk-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by Dial.`,
+eve add channel/chat-sdk-dial
+\`\`\``,
     quickStart: `Create \`agent/channels/dial.ts\`:
 
 \`\`\`ts
 // agent/channels/dial.ts
 import { createDialAdapter } from "@getdial/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -938,12 +931,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -958,19 +951,18 @@ See the [Dial adapter documentation](https://chat-sdk.dev/adapters/vendor-offici
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "agentphone", "sms", "mms", "imessage", "voice", "phone", "calls"],
-    install: `Install eve, Chat SDK, the AgentPhone adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/agentphone.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @agentphone/chat-sdk-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. This adapter is built and maintained by AgentPhone.`,
+eve add channel/chat-sdk-agentphone
+\`\`\``,
     quickStart: `Create \`agent/channels/agentphone.ts\`:
 
 \`\`\`ts
 // agent/channels/agentphone.ts
 import { createAgentPhoneAdapter } from "@agentphone/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -985,12 +977,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -1005,19 +997,18 @@ See the [AgentPhone adapter documentation](https://chat-sdk.dev/adapters/vendor-
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "lark", "feishu", "bytedance", "cardkit", "messaging"],
-    install: `Install eve, Chat SDK, the Lark / Feishu adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/lark.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @larksuite/vercel-chat-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+eve add channel/chat-sdk-lark
+\`\`\``,
     quickStart: `Create \`agent/channels/lark.ts\`:
 
 \`\`\`ts
 // agent/channels/lark.ts
 import { createLarkAdapter } from "@larksuite/vercel-chat-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -1028,12 +1019,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -1050,19 +1041,18 @@ See the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vend
     docsHref: "/docs/channels/chat-sdk",
     badge: "Provider official",
     keywords: ["chat sdk", "matrix", "beeper", "encrypted chat", "e2ee", "signal", "instagram"],
-    install: `Install eve, Chat SDK, the Beeper Matrix adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/beeper.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @beeper/chat-adapter-matrix @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+eve add channel/chat-sdk-beeper
+\`\`\``,
     quickStart: `Create \`agent/channels/matrix.ts\`:
 
 \`\`\`ts
 // agent/channels/matrix.ts
 import { createMatrixAdapter } from "@beeper/chat-adapter-matrix";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -1073,12 +1063,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -1102,19 +1092,18 @@ See the [Beeper Matrix adapter documentation](https://chat-sdk.dev/adapters/vend
       "transactional email",
       "attachments",
     ],
-    install: `Install eve, Chat SDK, the Email (Resend) adapter, and a state adapter:
+    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/resend.ts\` and installs Chat SDK and its adapter dependencies:
 
 \`\`\`bash
-npm install eve@latest chat @resend/chat-sdk-adapter @chat-adapter/state-memory
-\`\`\`
-
-The in-memory state store is for local development. Use Redis or PostgreSQL in production. The adapter is vendor-official.`,
+eve add channel/chat-sdk-resend
+\`\`\``,
     quickStart: `Create \`agent/channels/resend.ts\`:
 
 \`\`\`ts
 // agent/channels/resend.ts
 import { createResendAdapter } from "@resend/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
+import type { Message, Thread } from "chat";
 import { chatSdkChannel } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -1128,12 +1117,12 @@ export const { bot, channel, send } = chatSdkChannel({
   state: createMemoryState(),
 });
 
-bot.onNewMention(async (thread, message) => {
+bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
   await send(message.text, { thread });
 });
 
-bot.onSubscribedMessage(async (thread, message) => {
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
