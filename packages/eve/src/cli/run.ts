@@ -5,6 +5,7 @@ import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
+import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
@@ -264,8 +265,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .option("-f, --force", "Overwrite existing channel files")
     .option("-y, --yes", "Assume yes for confirmations; requires an explicit channel kind")
     .action(async (kind: string | undefined, options: { force?: boolean; yes?: boolean }) => {
-      const { runChannelsAddCommand } = await import("#cli/commands/channels.js");
-      await runChannelsAddCommand(logger, appRoot, { kind, options });
+      const { runChannelsAddCompatibilityCommand } = await import("#cli/commands/channels.js");
+      await runChannelsAddCompatibilityCommand(logger, appRoot, { kind, options });
     });
 
   channels
@@ -276,6 +277,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       const { runChannelsListCommand } = await import("#cli/commands/channels.js");
       await runChannelsListCommand(logger, appRoot, options);
     });
+
+  registerIntegrationCommands({ program, logger, appRoot });
 
   const extension = program
     .command("extension")

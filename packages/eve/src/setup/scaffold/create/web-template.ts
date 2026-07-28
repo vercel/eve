@@ -1,4 +1,4 @@
-// Generated from apps/templates/web-chat-next by eve's setup build (src/setup/build.ts).
+// Generated from apps/docs/registry/channel/web by eve's setup build (src/setup/build.ts).
 // Do not edit directly. Edit the app or the declared generator transforms.
 
 export const WEB_APP_TEMPLATE_FILES = {
@@ -95,29 +95,28 @@ export const WEB_APP_TEMPLATE_PACKAGE_JSON = {
     "@streamdown/math": "1.0.2",
     "@streamdown/mermaid": "1.0.2",
     "@tailwindcss/postcss": "4.3.0",
-    ai: "catalog:",
+    ai: "^7.0.38",
     "class-variance-authority": "0.7.1",
     clsx: "2.1.1",
     cmdk: "1.1.1",
-    eve: "workspace:*",
     "lucide-react": "1.16.0",
     motion: "12.40.0",
     nanoid: "5.1.11",
-    next: "catalog:",
+    next: "16.3.0-preview.6",
     "radix-ui": "1.4.3",
-    react: "catalog:",
-    "react-dom": "catalog:",
+    react: "19.2.6",
+    "react-dom": "19.2.6",
     shiki: "4.1.0",
-    streamdown: "catalog:",
+    streamdown: "2.5.0",
     "tailwind-merge": "3.6.0",
     tailwindcss: "4.3.0",
     "use-stick-to-bottom": "1.1.4",
-    zod: "catalog:",
+    zod: "4.4.3",
   },
   devDependencies: {
-    "@types/node": "catalog:",
-    "@types/react": "catalog:",
-    "@types/react-dom": "catalog:",
+    "@types/node": "26",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.3",
     typescript: "6.0.3",
   },
 } as const;

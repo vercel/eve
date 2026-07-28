@@ -28,6 +28,7 @@ const GATED_IDS = [
   "detect-ai-gateway",
   "link-project",
   "apply-ai-gateway-credential",
+  "install-channel-registry-items",
   "add-channels",
   "add-connections",
   "deploy-project",
@@ -51,6 +52,7 @@ describe("composeOnboardingBoxes", () => {
     expect(ids.indexOf("resolve-provisioning")).toBe(ids.indexOf("select-connections") + 1);
     expect(ids.indexOf("resolve-provisioning")).toBeLessThan(ids.indexOf("scaffold"));
     expect(ids.indexOf("add-connections")).toBeGreaterThan(ids.indexOf("scaffold"));
+    expect(ids.indexOf("install-channel-registry-items")).toBeLessThan(ids.indexOf("add-channels"));
   });
 
   it("one-shot gates every interview and post-scaffold box but keeps the scaffold path", () => {

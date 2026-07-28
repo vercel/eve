@@ -117,6 +117,7 @@ describe("runChannelsFlow", () => {
         detectDeployment: vi.fn(async () => UNLINKED),
         inspectExistingChannelRegistrations: inspect,
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -147,6 +148,7 @@ describe("runChannelsFlow", () => {
         detectDeployment: vi.fn(async () => UNLINKED),
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -175,6 +177,7 @@ describe("runChannelsFlow", () => {
           slackOwners: ["agent/channels/slack.ts"],
         })),
         addChannels: createAddChannelsDeps(),
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -199,6 +202,7 @@ describe("runChannelsFlow", () => {
         // Web Chat is still addable, so the cursor keeps its first-focusable default.
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         addChannels: createAddChannelsDeps(),
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -219,6 +223,7 @@ describe("runChannelsFlow", () => {
           disabledChannelReasons: { slack: "already configured" },
         })),
         addChannels: createAddChannelsDeps(),
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -242,6 +247,7 @@ describe("runChannelsFlow", () => {
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         getVercelAuthStatus: vi.fn(async () => input.authStatus),
         addChannels: createAddChannelsDeps(),
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
     expect(result).toEqual({ kind: "done", addedChannels: [] });
@@ -278,6 +284,7 @@ describe("runChannelsFlow", () => {
           webRouteOwners: ["channels/eve.ts"],
         })),
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -312,6 +319,7 @@ describe("runChannelsFlow", () => {
           webAppPresent: true,
         })),
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -341,6 +349,7 @@ describe("runChannelsFlow", () => {
           webAppPresent: true,
         })),
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -361,6 +370,7 @@ describe("runChannelsFlow", () => {
         detectDeployment: vi.fn(async () => UNLINKED),
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -379,6 +389,7 @@ describe("runChannelsFlow", () => {
         detectDeployment: vi.fn(async () => UNLINKED),
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         addChannels: createAddChannelsDeps(),
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -400,6 +411,7 @@ describe("runChannelsFlow", () => {
         ),
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -436,6 +448,7 @@ describe("runChannelsFlow", () => {
         detectDeployment: vi.fn(async () => UNLINKED),
         inspectExistingChannelRegistrations: inspect,
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -474,6 +487,7 @@ describe("runChannelsFlow", () => {
         ),
         inspectExistingChannelRegistrations: inspect,
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -515,6 +529,7 @@ describe("runChannelsFlow", () => {
           inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
           getVercelAuthStatus: vi.fn(async (): Promise<VercelAuthStatus> => "authenticated"),
           addChannels: addChannelsDeps,
+          installRegistryItem: vi.fn(async () => {}),
         },
       }),
     ).rejects.toBeInstanceOf(HumanActionRequiredError);
@@ -538,6 +553,7 @@ describe("runChannelsFlow", () => {
         ),
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -572,6 +588,7 @@ describe("runChannelsFlow", () => {
         ),
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         addChannels: addChannelsDeps,
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 
@@ -599,6 +616,7 @@ describe("runChannelsFlow", () => {
         detectDeployment: vi.fn(async () => UNLINKED),
         inspectExistingChannelRegistrations: vi.fn(async () => NO_REGISTRATIONS),
         addChannels: createAddChannelsDeps(),
+        installRegistryItem: vi.fn(async () => {}),
       },
     });
 

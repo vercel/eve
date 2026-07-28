@@ -15,6 +15,8 @@ export interface ChannelSetupContext {
   readonly presetCreateSlackbot?: boolean;
   readonly presetPortableCredentials?: boolean;
   readonly deps?: AddChannelsDeps;
+  /** Registry installation already owns package dependency mutations. */
+  readonly skipDependencyMutation?: boolean;
 }
 
 /** Structured outcome from a channel-owned setup implementation. */
