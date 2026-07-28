@@ -2,24 +2,27 @@ import { defineEval } from "eve/evals";
 
 import { CONTENT_OUTPUT_COMPACTION_MARKER } from "../constants";
 
-// The mock task model reports CONTENT_OUTPUT_COMPACTION_MARKER only when the
-// post-compaction checkpoint honors the full content-output contract:
-// - the text parts around the file survived (lead + tail markers);
-// - the file rendered as a stub (the filename exists nowhere but the stub);
-// - the raw payload did not leak (a canary buried in the base64 can reach
-//   the checkpoint only if the payload reached the compaction prompt);
+// Compaction handles the oversized content output with its tool-result cap
+// heuristic: no summarizer call, no checkpoint — the history keeps its exact
+// shape and only the file part is rewritten to a text stub in place. The
+// mock task model reports CONTENT_OUTPUT_COMPACTION_MARKER only when that
+// capped result honors the full contract:
+// - the raw payload is gone (a canary buried in the base64 detects the cap
+//   and any leak);
+// - the file rendered as its `Attached file <name> (<mediaType>)` stub;
+// - the text parts around the file survived in place (lead + tail markers);
 // - the surrounding conversation was untouched (the case's own user text).
-// On violation the model emits granular *_LOST / PAYLOAD_LEAKED diagnostics
-// instead, so a failing run names the broken clause.
-// The exact conversation shape, rendered by the mock model per request:
-// the pre-compaction call sees only the task; the post-compaction call sees
-// the checkpoint pair and the replayed task — the tool call and its 12KB
-// result must be gone entirely, summarized rather than kept. The shape is
-// deterministic: the payload can never fit the fixture's keep threshold, so
-// the stripped-tail path always runs.
+// On violation the model emits granular *_LOST diagnostics instead, so a
+// failing run names the broken clause.
+// The exact conversation shape, rendered by the mock model per request: the
+// pre-compaction call sees only the task; the post-cap call sees the same
+// conversation, structurally untouched — task, tool call, and tool result
+// all still present, with only the result's file payload stubbed. No
+// checkpoint pair appears because the cap heuristic satisfies the threshold
+// without summarizing.
 const EXPECTED_HISTORY =
   "HISTORY<1: system > user:task ;; " +
-  "2: system > user:checkpoint-marker > assistant:checkpoint > user:task>";
+  "2: system > user:task > assistant:tool-call > tool:result>";
 
 export default defineEval({
   description: "Compaction stubs a large inline file content part without losing its sibling text.",
