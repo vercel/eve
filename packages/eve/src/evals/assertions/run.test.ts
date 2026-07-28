@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import type {
   EveEvalDerivedFacts,
@@ -20,7 +21,8 @@ function makeResult(overrides: {
     output: overrides.output ?? null,
     finalMessage: null,
     status: overrides.status ?? "completed",
-    events: overrides.events ?? [],
+    // Fixtures are authored without envelopes; stamp them the way the wire would.
+    events: stampTestEvents(overrides.events ?? []),
     derived: { ...createEmptyDerivedFacts(), ...overrides.derived },
   };
 }

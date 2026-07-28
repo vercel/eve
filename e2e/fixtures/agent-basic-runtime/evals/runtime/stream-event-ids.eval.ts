@@ -17,12 +17,12 @@ export default defineEval({
     const turn = await t.send('Reply with exactly the text "id smoke" and nothing else.');
     t.succeeded();
 
-    const ids = turn.events.map((event) => event.meta?.id);
+    const ids = turn.events.map((event) => event.meta.id);
 
     await t.require(
       ids,
-      satisfies<readonly (string | undefined)[]>(
-        (value) => value.length > 0 && value.every((id) => id !== undefined && EVENT_ID.test(id)),
+      satisfies<readonly string[]>(
+        (value) => value.length > 0 && value.every((id) => EVENT_ID.test(id)),
         "every event carries a well-formed evt_ id",
       ),
     );
@@ -31,7 +31,7 @@ export default defineEval({
     const replay = await t.target.watchTurn(turn.sessionId, { startIndex: 0 }).result();
 
     await t.require(
-      replay.events.map((event) => event.meta?.id),
+      replay.events.map((event) => event.meta.id),
       equals(ids),
     );
   },

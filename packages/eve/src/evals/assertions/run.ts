@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
 import {
   deepEquals,
   eventMatches,
@@ -18,7 +18,7 @@ import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector
 /** Minimal captured scope consumed by deterministic eval assertions. */
 export interface EveEvalAssertionSubject {
   readonly derived: import("#evals/types.js").EveEvalDerivedFacts;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly StampedHandleMessageStreamEvent[];
   readonly output: unknown;
   readonly status: "completed" | "failed" | "waiting";
 }
@@ -204,7 +204,7 @@ export function noFailedActions(): RunAssertion {
     name: "noFailedActions",
     evaluate(result) {
       const failed = result.events.filter(
-        (evt): evt is Extract<HandleMessageStreamEvent, { type: "action.result" }> =>
+        (evt): evt is Extract<StampedHandleMessageStreamEvent, { type: "action.result" }> =>
           evt.type === "action.result" &&
           (evt.data.status === "failed" || evt.data.result.isError === true),
       );
@@ -263,7 +263,7 @@ export function calledSubagent(
  */
 export function eventsSatisfy(
   label: string,
-  predicate: (events: readonly HandleMessageStreamEvent[]) => boolean,
+  predicate: (events: readonly StampedHandleMessageStreamEvent[]) => boolean,
 ): RunAssertion {
   return {
     name: `eventsSatisfy(${label})`,
@@ -364,7 +364,7 @@ export function outputMatches(schema: StandardSchemaV1): RunAssertion {
   };
 }
 
-function joinCompletedMessages(events: readonly HandleMessageStreamEvent[]): string {
+function joinCompletedMessages(events: readonly StampedHandleMessageStreamEvent[]): string {
   const parts: string[] = [];
   for (const evt of events) {
     if (evt.type === "message.completed" && evt.data.message !== null) {
@@ -379,7 +379,7 @@ function failureDetail(prefix: string, code: string | undefined): string {
 }
 
 function formatFailedActionResult(
-  event: Extract<HandleMessageStreamEvent, { type: "action.result" }>,
+  event: Extract<StampedHandleMessageStreamEvent, { type: "action.result" }>,
 ): string {
   const { result, status } = event.data;
   const parts = [
@@ -394,7 +394,7 @@ function formatFailedActionResult(
 }
 
 function actionResultLabel(
-  result: Extract<HandleMessageStreamEvent, { type: "action.result" }>["data"]["result"],
+  result: Extract<StampedHandleMessageStreamEvent, { type: "action.result" }>["data"]["result"],
 ): string {
   switch (result.kind) {
     case "tool-result":
@@ -411,7 +411,9 @@ function runFailure(result: EveEvalAssertionSubject): AssertionOutcome | undefin
     return fail(failureDetail("run failed", result.derived.failureCode));
   }
   const failedEvent = result.events.find(
-    (event): event is Extract<HandleMessageStreamEvent, { type: "step.failed" | "turn.failed" }> =>
+    (
+      event,
+    ): event is Extract<StampedHandleMessageStreamEvent, { type: "step.failed" | "turn.failed" }> =>
       event.type === "turn.failed" || event.type === "step.failed",
   );
   return failedEvent === undefined
@@ -471,7 +473,9 @@ interface ToolRequestEntry {
   readonly name: string;
 }
 
-function requestedTools(events: readonly HandleMessageStreamEvent[]): readonly ToolRequestEntry[] {
+function requestedTools(
+  events: readonly StampedHandleMessageStreamEvent[],
+): readonly ToolRequestEntry[] {
   const entries: ToolRequestEntry[] = [];
   const seenCallIds = new Set<string>();
   const append = (callId: string, name: string): void => {

@@ -1,11 +1,11 @@
-import type { ActionResultStreamEvent, HandleMessageStreamEvent } from "eve/client";
+import type { ActionResultStreamEvent, StampedHandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "streamed-action";
 const LABEL = "streaming-e2e";
 
 function streamedBeforeLocalExecutionCompletes(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly StampedHandleMessageStreamEvent[],
 ): boolean {
   const matchingRequests = events.flatMap((event) => {
     if (event.type !== "actions.requested") return [];
@@ -24,7 +24,7 @@ function streamedBeforeLocalExecutionCompletes(
   }
 
   const result = events.find(
-    (event): event is ActionResultStreamEvent =>
+    (event): event is ActionResultStreamEvent & StampedHandleMessageStreamEvent =>
       event.type === "action.result" &&
       event.data.result.kind === "tool-result" &&
       event.data.result.callId === request.action.callId,
@@ -33,7 +33,7 @@ function streamedBeforeLocalExecutionCompletes(
     return false;
   }
 
-  const requestAt = parseTimestamp(request.event.meta?.at);
+  const requestAt = parseTimestamp(request.event.meta.at);
   const executionCompletedAt = readExecutionCompletedAt(result.data.result.output);
   return (
     requestAt !== undefined &&
@@ -42,9 +42,7 @@ function streamedBeforeLocalExecutionCompletes(
   );
 }
 
-function parseTimestamp(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-
+function parseTimestamp(value: string): number | undefined {
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }

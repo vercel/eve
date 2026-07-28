@@ -2,7 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { JsonObject } from "#shared/json.js";
-import { createEmptyDerivedFacts, deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { stampTestEvents } from "#internal/testing/events.js";
+import {
+  createEmptyDerivedFacts,
+  deriveRunFacts,
+  type DeriveRunFactsOptions,
+} from "#evals/runner/derive-run-facts.js";
+import type { EveEvalDerivedFacts } from "#evals/types.js";
+
+/** Fixtures are authored without envelopes; stamp them the way the wire would. */
+function derive(
+  events: readonly HandleMessageStreamEvent[],
+  options?: DeriveRunFactsOptions,
+): EveEvalDerivedFacts {
+  return deriveRunFacts(stampTestEvents(events), options);
+}
 
 function turnStarted(turnId: string, sequence: number): HandleMessageStreamEvent {
   return { type: "turn.started", data: { turnId, sequence } };
@@ -98,7 +112,7 @@ function inputRequested(requestIds: readonly string[]): HandleMessageStreamEvent
 
 describe("deriveRunFacts", () => {
   it("returns empty facts for no events", () => {
-    const facts = deriveRunFacts([]);
+    const facts = derive([]);
     expect(facts).toEqual({ ...createEmptyDerivedFacts(), failureCode: undefined });
   });
 
@@ -118,7 +132,7 @@ describe("deriveRunFacts", () => {
       }),
     ];
 
-    const facts = deriveRunFacts(events, { sessionId: "s1" });
+    const facts = derive(events, { sessionId: "s1" });
 
     expect(facts.toolCalls).toEqual([
       {
@@ -147,7 +161,7 @@ describe("deriveRunFacts", () => {
       actionResult({ callId: "c1", toolName: "bash", isError: true }),
     ];
 
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.toolCalls[0]?.status).toBe("failed");
   });
 
@@ -164,7 +178,7 @@ describe("deriveRunFacts", () => {
       actionResult({ callId: "rejected", toolName: "rejected", status: "rejected" }),
     ];
 
-    expect(deriveRunFacts(events).toolCalls.map((call) => call.status)).toEqual([
+    expect(derive(events).toolCalls.map((call) => call.status)).toEqual([
       "pending",
       "completed",
       "failed",
@@ -173,7 +187,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("derives pending tool calls from HITL input requests", () => {
-    const facts = deriveRunFacts([turnStarted("t1", 0), inputRequested(["approval"])]);
+    const facts = derive([turnStarted("t1", 0), inputRequested(["approval"])]);
 
     expect(facts.toolCalls).toEqual([
       {
@@ -199,7 +213,7 @@ describe("deriveRunFacts", () => {
       }),
     ];
 
-    expect(deriveRunFacts(events).toolCalls).toEqual([
+    expect(derive(events).toolCalls).toEqual([
       {
         name: "bash",
         input: {},
@@ -212,7 +226,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("derives resolved tool calls from result-only turn events", () => {
-    const facts = deriveRunFacts([
+    const facts = derive([
       turnStarted("t2", 1),
       actionResult({ callId: "approval-call", toolName: "bash", status: "rejected" }),
     ]);
@@ -236,7 +250,7 @@ describe("deriveRunFacts", () => {
       inputRequested(["approval"]),
     ];
 
-    expect(deriveRunFacts(events).toolCalls).toHaveLength(1);
+    expect(derive(events).toolCalls).toHaveLength(1);
   });
 
   it("stamps the turn index from turn.started boundaries", () => {
@@ -249,7 +263,7 @@ describe("deriveRunFacts", () => {
       actionResult({ callId: "c2", toolName: "second_tool" }),
     ];
 
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.toolCalls.map((call) => call.turnIndex)).toEqual([0, 1]);
   });
 
@@ -274,7 +288,7 @@ describe("deriveRunFacts", () => {
         data: { finishReason: "stop", message: "world", stepIndex: 2, turnId: "t1", sequence: 3 },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.messageCount).toBe(2);
   });
 
@@ -289,7 +303,7 @@ describe("deriveRunFacts", () => {
         data: { reasoning: "more thinking...", stepIndex: 1, turnId: "t1", sequence: 2 },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.reasoningBlockCount).toBe(2);
   });
 
@@ -316,7 +330,7 @@ describe("deriveRunFacts", () => {
       },
     ];
 
-    const facts = deriveRunFacts(events, { sessionId: "s0" });
+    const facts = derive(events, { sessionId: "s0" });
     expect(facts.subagentCalls).toEqual([
       {
         callId: "c1",
@@ -333,7 +347,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("derives failed subagent calls from result-only events", () => {
-    const facts = deriveRunFacts([
+    const facts = derive([
       turnStarted("t1", 0),
       subagentResult({
         callId: "c1",
@@ -362,7 +376,7 @@ describe("deriveRunFacts", () => {
         data: { callId: "c1", subagentName: "inline-agent" },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.subagentCalls.map((call) => call.name)).toEqual(["inline-agent"]);
   });
 
@@ -377,7 +391,7 @@ describe("deriveRunFacts", () => {
         data: { callId: "c2", subagentName: "agent-a" },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.subagentCalls.map((call) => call.name)).toEqual(["agent-a", "agent-a"]);
     expect(facts.subagentCallCount).toBe(2);
   });
@@ -393,13 +407,13 @@ describe("deriveRunFacts", () => {
         },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.failureCode).toBe("TIMEOUT");
   });
 
   it("collects HITL input requests", () => {
     const events: HandleMessageStreamEvent[] = [turnStarted("t1", 0), inputRequested(["r1", "r2"])];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.inputRequests.map((request) => request.requestId)).toEqual(["r1", "r2"]);
   });
 
@@ -414,7 +428,7 @@ describe("deriveRunFacts", () => {
       },
     ] as HandleMessageStreamEvent[];
 
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.parked).toBe(true);
   });
 
@@ -433,7 +447,7 @@ describe("deriveRunFacts", () => {
       },
     ] as HandleMessageStreamEvent[];
 
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.parked).toBe(false);
   });
 });

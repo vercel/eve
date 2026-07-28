@@ -661,10 +661,13 @@ export function isCurrentTurnBoundaryEvent(event: HandleMessageStreamEvent): boo
 
 /**
  * Narrows a stream event to the failure events that terminate or poison a turn.
+ *
+ * Generic so narrowing keeps the input's stamping: a
+ * {@link StampedHandleMessageStreamEvent} narrows to a stamped failure event.
  */
-export function isTurnFailureEvent(
-  event: HandleMessageStreamEvent,
-): event is TurnFailureStreamEvent {
+export function isTurnFailureEvent<TEvent extends HandleMessageStreamEvent>(
+  event: TEvent,
+): event is TEvent & TurnFailureStreamEvent {
   return (
     event.type === "session.failed" || event.type === "step.failed" || event.type === "turn.failed"
   );

@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
@@ -36,7 +36,7 @@ export interface DeriveRunFactsOptions {
  * before this epilogue is `input.requested`, the run ended parked on
  * unanswered HITL input.
  */
-const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<HandleMessageStreamEvent["type"]> = new Set([
+const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<StampedHandleMessageStreamEvent["type"]> = new Set([
   "turn.completed",
   "session.waiting",
   "session.completed",
@@ -51,7 +51,7 @@ const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<HandleMessageStreamEvent["type"]> =
  * power checks, scorers, and reporters.
  */
 export function deriveRunFacts(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly StampedHandleMessageStreamEvent[],
   options?: DeriveRunFactsOptions,
 ): EveEvalDerivedFacts {
   const sessionId = options?.sessionId;
@@ -210,7 +210,7 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
  * (`turn.completed` → `session.waiting`) is `input.requested`: the harness
  * surfaced HITL requests and stopped without resolving them.
  */
-function endedParkedOnInput(events: readonly HandleMessageStreamEvent[]): boolean {
+function endedParkedOnInput(events: readonly StampedHandleMessageStreamEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event === undefined || TURN_EPILOGUE_EVENT_TYPES.has(event.type)) continue;

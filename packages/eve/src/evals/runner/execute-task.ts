@@ -1,5 +1,5 @@
 import type { Client } from "#client/client.js";
-import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { StampedHandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
   AssertionResult,
@@ -141,7 +141,7 @@ function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): stri
  * in the stream, if present.
  */
 function extractRuntimeIdentity(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly StampedHandleMessageStreamEvent[],
 ): RuntimeIdentity | undefined {
   for (const event of events) {
     if (event.type === "session.started" && event.data.runtime !== undefined) {

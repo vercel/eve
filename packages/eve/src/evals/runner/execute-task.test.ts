@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 import { executeTask } from "#evals/runner/execute-task.js";
 import type { EveEval, EveEvalContext } from "#evals/types.js";
 import { createEvalTargetHandle } from "#evals/target.js";
@@ -671,7 +672,8 @@ function streamResponse(events: readonly HandleMessageStreamEvent[]): Response {
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
-        for (const event of events) {
+        // Fixtures are authored without envelopes; stamp them the way the wire would.
+        for (const event of stampTestEvents(events)) {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();

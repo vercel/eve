@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
@@ -88,14 +88,14 @@ export interface EveEvalInputRequestMatchOptions {
 
 /** One typed stream-event matcher used by scoped event assertions. */
 export type EveEvalEventMatch<
-  TType extends HandleMessageStreamEvent["type"] = HandleMessageStreamEvent["type"],
-> = TType extends HandleMessageStreamEvent["type"]
+  TType extends StampedHandleMessageStreamEvent["type"] = StampedHandleMessageStreamEvent["type"],
+> = TType extends StampedHandleMessageStreamEvent["type"]
   ? {
       /** Stream-event type to match. */
       readonly type: TType;
       /** Partial-deep matcher over the event data. */
       readonly data?: EveEvalDeepMatcher<
-        Extract<HandleMessageStreamEvent, { type: TType }> extends { data: infer TData }
+        Extract<StampedHandleMessageStreamEvent, { type: TType }> extends { data: infer TData }
           ? TData
           : never
       >;
@@ -199,7 +199,10 @@ export function inputRequestMatches(
 }
 
 /** Returns true when one stream event satisfies a typed event matcher. */
-export function eventMatches(event: HandleMessageStreamEvent, matcher: EveEvalEventMatch): boolean {
+export function eventMatches(
+  event: StampedHandleMessageStreamEvent,
+  matcher: EveEvalEventMatch,
+): boolean {
   return (
     event.type === matcher.type &&
     (matcher.data === undefined ||
