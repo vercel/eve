@@ -2,7 +2,7 @@ import { lookup } from "node:dns";
 import { isIP } from "node:net";
 import type { LookupFunction } from "node:net";
 
-import { Agent, Dispatcher1Wrapper } from "undici";
+import type { Dispatcher1Wrapper } from "undici";
 
 import { isLoopbackHostname, isPrivateOrReservedIpAddress } from "#shared/network-address.js";
 
@@ -73,6 +73,7 @@ async function requestOnce(
   options: PublicUrlRequestOptions,
 ): Promise<{ readonly dispatcher: Dispatcher1Wrapper; readonly response: Response }> {
   assertPublicHostname(url.hostname);
+  const { Agent, Dispatcher1Wrapper } = await import("undici");
   const agent = new Agent({
     connect: {
       lookup: createPublicLookup(),
