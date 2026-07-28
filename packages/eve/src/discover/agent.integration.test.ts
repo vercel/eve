@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
+import {
+  EXTENSION_CAPABILITY_SUPPORT,
+  EXTENSION_CAPABILITY_VERSIONS,
+} from "#compiler/extension-compatibility.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
   DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
@@ -983,6 +987,9 @@ describe("discoverAgent (memory)", () => {
   });
 
   it("rejects a mounted extension that requires an unsupported capability version", async () => {
+    // One past the current epoch is unsupported by construction, so the
+    // fixture keeps rejecting after future capability bumps.
+    const unsupportedToolVersion = EXTENSION_CAPABILITY_VERSIONS.tool + 1;
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -994,7 +1001,7 @@ describe("discoverAgent (memory)", () => {
           kind: "eve-extension",
           formatVersion: 1,
           builtWithEve: "9.0.0",
-          requires: { extension: 1, tool: 3 },
+          requires: { extension: 1, tool: unsupportedToolVersion },
         }),
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
@@ -1015,8 +1022,10 @@ describe("discoverAgent (memory)", () => {
       (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
     );
     expect(incompatible).toBeDefined();
-    expect(incompatible?.message).toContain("tool contract v3");
-    expect(incompatible?.message).toContain("versions: v1, v2");
+    expect(incompatible?.message).toContain(`tool contract v${unsupportedToolVersion}`);
+    expect(incompatible?.message).toContain(
+      `versions: ${EXTENSION_CAPABILITY_SUPPORT.tool.map((version) => `v${version}`).join(", ")}`,
+    );
     expect(result.manifest.resolvedExtensions).toEqual([]);
   });
 

@@ -5,6 +5,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { always, never, once } from "#public/tools/approval/approval-helpers.js";
+
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
@@ -633,6 +634,51 @@ describe("buildToolSet", () => {
     ).rejects.toThrow(
       'Tool "timestamp" call "call_timestamp" returned a non-JSON-serializable model output. Expected a JSON-serializable value.',
     );
+  });
+
+  it("passes valid content toModelOutput values through in the AI SDK shape", async () => {
+    const pixel =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "screenshot",
+        {
+          description: "Capture a screenshot.",
+          execute: async () => ({ ok: true }),
+          inputSchema: jsonSchema({}),
+          name: "screenshot",
+          toModelOutput: () => ({
+            type: "content" as const,
+            value: [
+              { type: "text" as const, text: "Screenshot:" },
+              {
+                type: "file" as const,
+                data: { type: "data" as const, data: pixel },
+                mediaType: "image/png",
+                filename: "pixel.png",
+              },
+            ],
+          }),
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      projectSdkToolOutput({ output: { ok: true }, tool: result.screenshot }),
+    ).resolves.toEqual({
+      type: "content",
+      value: [
+        { type: "text", text: "Screenshot:" },
+        {
+          type: "file",
+          data: { type: "data", data: pixel },
+          mediaType: "image/png",
+          filename: "pixel.png",
+        },
+      ],
+    });
   });
 
   it("passes valid text toModelOutput values through", async () => {

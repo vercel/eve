@@ -651,6 +651,147 @@
           "target": "agent/connections/zomato.ts"
         }
       ]
+    },
+    {
+      "name": "channel/web",
+      "type": "registry:item",
+      "title": "Web Chat",
+      "description": "Add the built-in Next.js Web Chat channel to an eve agent.",
+      "meta": {
+        "eve": {
+          "channel": "web"
+        }
+      }
+    },
+    {
+      "name": "channel/slack",
+      "type": "registry:item",
+      "title": "Slack",
+      "description": "Connect an eve agent to Slack with Vercel Connect or portable credentials.",
+      "meta": {
+        "eve": {
+          "channel": "slack"
+        }
+      }
+    },
+    {
+      "name": "instrumentation/braintrust",
+      "type": "registry:item",
+      "title": "Braintrust",
+      "description": "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
+      "dependencies": ["@braintrust/otel", "@vercel/otel"],
+      "envVars": {
+        "BRAINTRUST_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/braintrust.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/sentry",
+      "type": "registry:item",
+      "title": "Sentry",
+      "description": "Send agent traces to Sentry's OTLP endpoint for tracing and debugging.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "SENTRY_OTLP_TRACES_ENDPOINT": "",
+        "SENTRY_PUBLIC_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/sentry.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/datadog",
+      "type": "registry:item",
+      "title": "Datadog",
+      "description": "Export agent traces to Datadog APM alongside the rest of your stack.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "DATADOG_OTLP_TRACES_ENDPOINT": "",
+        "DD_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/datadog.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/honeycomb",
+      "type": "registry:item",
+      "title": "Honeycomb",
+      "description": "Send OpenTelemetry traces to Honeycomb and query every agent turn.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "HONEYCOMB_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/honeycomb.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/arize",
+      "type": "registry:item",
+      "title": "Arize",
+      "description": "Export traces to Arize AX for LLM observability and evaluation.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "ARIZE_SPACE_ID": "",
+        "ARIZE_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/arize.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/raindrop",
+      "type": "registry:item",
+      "title": "Raindrop",
+      "description": "Send agent traces to Raindrop to detect and debug AI product issues.",
+      "dependencies": ["@vercel/otel"],
+      "envVars": {
+        "RAINDROP_WRITE_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/raindrop.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/jaeger",
+      "type": "registry:item",
+      "title": "Jaeger",
+      "description": "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
+      "dependencies": ["@vercel/otel"],
+      "files": [
+        {
+          "path": "registry/instrumentation/jaeger.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
     }
   ]
 }

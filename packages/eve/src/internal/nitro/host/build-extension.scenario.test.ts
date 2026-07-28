@@ -6,7 +6,10 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { parseExtensionCompatibilityManifest } from "#compiler/extension-compatibility.js";
+import {
+  EXTENSION_CAPABILITY_VERSIONS,
+  parseExtensionCompatibilityManifest,
+} from "#compiler/extension-compatibility.js";
 import {
   buildExtensionPackage,
   tryReadExtensionBuildConfig,
@@ -223,13 +226,15 @@ describe("extension build output", () => {
     );
     expect(manifest.kind).toBe("eve-extension");
     expect(manifest.builtWithEve).toMatch(/^\d+\.\d+\.\d+/);
+    // The set of stamped capabilities is the assertion; the versions track
+    // the current contract table so epoch bumps do not break this test.
     expect(manifest.requires).toEqual({
-      extension: 1,
-      tool: 2,
-      dynamicTool: 4,
-      skill: 1,
-      config: 1,
-      state: 2,
+      extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+      tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+      dynamicTool: EXTENSION_CAPABILITY_VERSIONS.dynamicTool,
+      skill: EXTENSION_CAPABILITY_VERSIONS.skill,
+      config: EXTENSION_CAPABILITY_VERSIONS.config,
+      state: EXTENSION_CAPABILITY_VERSIONS.state,
     });
     const dynamicToolDeclaration = await readFile(
       join(outDir, "extension", "tools", "crm_search.d.ts"),

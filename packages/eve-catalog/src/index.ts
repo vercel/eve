@@ -1,7 +1,8 @@
 /**
  * Shared identity for eve integrations. This package is the single source of
- * truth for *which* integrations exist (channels, connections, and extensions)
- * and how a connection is wired (transport + model-facing description).
+ * truth for *which* integrations exist (channels, connections, extensions, and
+ * instrumentation providers) and how a connection is wired (transport +
+ * model-facing description).
  *
  * Surface-specific concerns live with their consumer, keyed by {@link
  * IntegrationEntry.slug}: the scaffolder (eve) overlays the
@@ -18,7 +19,7 @@
  */
 
 /** Surface an integration targets. Extend as new kinds are catalogued. */
-export type IntegrationKind = "channel" | "connection" | "extension";
+export type IntegrationKind = "channel" | "connection" | "extension" | "instrumentation";
 
 /** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
@@ -742,6 +743,58 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       mcp: { url: "https://mcp-server.zomato.com/mcp" },
     },
   },
+  // Instrumentation providers are OpenTelemetry backends configured in
+  // `agent/instrumentation.ts`. Slugs stay unique across the whole catalog, so
+  // providers that also ship a connection carry an `-instrumentation` suffix.
+  {
+    slug: "braintrust",
+    name: "Braintrust",
+    kind: "instrumentation",
+    tagline: "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "sentry-instrumentation",
+    name: "Sentry",
+    kind: "instrumentation",
+    tagline: "Send agent traces to Sentry's OTLP endpoint for tracing and debugging.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "datadog-instrumentation",
+    name: "Datadog",
+    kind: "instrumentation",
+    tagline: "Export agent traces to Datadog APM alongside the rest of your stack.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "honeycomb-instrumentation",
+    name: "Honeycomb",
+    kind: "instrumentation",
+    tagline: "Send OpenTelemetry traces to Honeycomb and query every agent turn.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "arize",
+    name: "Arize",
+    kind: "instrumentation",
+    tagline: "Export traces to Arize AX for LLM observability and evaluation.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "raindrop",
+    name: "Raindrop",
+    kind: "instrumentation",
+    tagline: "Send agent traces to Raindrop to detect and debug AI product issues.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "jaeger",
+    name: "Jaeger",
+    kind: "instrumentation",
+    tagline: "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
 ];
 
 const BY_SLUG = new Map(INTEGRATIONS.map((entry) => [entry.slug, entry]));
@@ -769,4 +822,9 @@ export function channelEntries(): IntegrationEntry[] {
 /** All extension entries, in catalog order. */
 export function extensionEntries(): IntegrationEntry[] {
   return integrationsByKind("extension");
+}
+
+/** All instrumentation entries, in catalog order. */
+export function instrumentationEntries(): IntegrationEntry[] {
+  return integrationsByKind("instrumentation");
 }

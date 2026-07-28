@@ -1,28 +1,26 @@
-import {
-  defineDynamic,
-  defineTool,
-  type DynamicToolEvents,
-  type DynamicToolResult,
-} from "#public/tools/index.js";
+import { defineDynamic, defineTool } from "#public/tools/index.js";
 
-/**
- * Epoch 3 resolvers take the stream event as `unknown` and read session
- * identity from the resolve context.
- */
-const events = {
-  "session.started": (_event, ctx): DynamicToolResult => ({
-    inspect_session: defineTool({
-      description: "Inspect the resolved session",
-      inputSchema: { type: "object", properties: {} },
-      async execute(_input, toolContext) {
-        return {
-          resolverSessionId: ctx.session.id,
-          toolSessionId: toolContext.session.id,
-        };
-      },
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) => ({
+      summarize_report: defineTool({
+        description: "Summarize a report for the model",
+        inputSchema: { type: "object", properties: {} },
+        async execute(_input, toolContext) {
+          return {
+            internal: "details",
+            resolverSessionId: ctx.session.id,
+            sessionId: toolContext.session.id,
+            summary: "Report generated",
+          };
+        },
+        toModelOutput(output) {
+          return {
+            type: "text",
+            value: (output as { summary: string }).summary,
+          };
+        },
+      }),
     }),
-  }),
-  "step.started": (): DynamicToolResult => null,
-} satisfies DynamicToolEvents;
-
-export default defineDynamic({ events });
+  },
+});

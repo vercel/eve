@@ -23,6 +23,7 @@ const typeLabel = {
   channel: "Channel",
   connection: "Connection",
   extension: "Extension",
+  instrumentation: "Instrumentation",
 } as const;
 
 const languages = Object.keys(translations);
