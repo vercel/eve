@@ -18,6 +18,7 @@ const DELEGATE_PROMPT = [
 export default defineEval({
   description:
     "A descendant session-limit prompt reaches the root; continue resumes the child and stop leaves the root session reusable.",
+  timeoutMs: 90_000,
   async test(t) {
     await t.send(DELEGATE_PROMPT);
     const continueRequest = t.requireInputRequest({
