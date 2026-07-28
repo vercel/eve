@@ -3227,6 +3227,65 @@ describe("createToolLoopHarness", () => {
     expect(eventTypes).not.toContain("session.failed");
   });
 
+  it("retries a model call after an undici body timeout", async () => {
+    vi.useFakeTimers();
+    const timeout = new TypeError("terminated", {
+      cause: Object.assign(new Error("Body Timeout Error"), {
+        code: "UND_ERR_BODY_TIMEOUT",
+      }),
+    });
+    const success = {
+      finishReason: "stop",
+      response: { messages: [{ content: "Recovered", role: "assistant" }] },
+      text: "Recovered",
+      toolCalls: [],
+      toolResults: [],
+    };
+    const modelCallMock = vi.fn();
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: ToolLoopAgent,
+      settings: MockAgentSettings,
+    ) {
+      const { onStepFinish, prepareStep } = settings;
+      this.generate = modelCallMock.mockImplementation(async (options: { messages: unknown[] }) => {
+        if (prepareStep) {
+          await prepareStep({
+            context: undefined,
+            messages: options.messages,
+            model: {},
+            stepNumber: 0,
+            steps: [],
+          });
+        }
+        if (modelCallMock.mock.calls.length === 1) {
+          throw timeout;
+        }
+        if (onStepFinish) {
+          void Promise.resolve().then(() => onStepFinish(success));
+        }
+        return createMockGenerateResult(success);
+      });
+      this.stream = vi.fn();
+      return this;
+    } as MockAgentConstructor);
+
+    try {
+      const runStep = createToolLoopHarness(createTestConfig());
+      const pending = runStep(createTestSession(), { message: "Hi" });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+
+      expect(modelCallMock).toHaveBeenCalledTimes(2);
+      expect(result.session.history).toEqual([
+        { content: "Hi", role: "user" },
+        { content: "Recovered", role: "assistant" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not start a model call when the turn signal is already aborted", async () => {
     const abortController = new AbortController();
     const cancellation = new TurnCancelledError();
