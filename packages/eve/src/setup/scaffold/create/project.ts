@@ -270,9 +270,9 @@ installed \`eve\` package location first and read its \`docs/\` directory. If
 package docs are unavailable, use https://eve.dev/docs as a fallback.
 
 Before implementing an integration yourself, use
-\`eve registry search <query> --json\` or \`eve registry list --json\` to discover
-available integrations. Inspect one with \`eve registry view <item>\`, then
-install it with \`eve add <item>\`.
+\`eve registry search <query>\` or \`eve registry list\` to discover available
+integrations. Inspect one with \`eve registry view <item>\`, then install it with
+\`eve add <item>\`.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,
