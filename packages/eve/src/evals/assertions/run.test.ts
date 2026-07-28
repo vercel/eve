@@ -21,7 +21,6 @@ function makeResult(overrides: {
     output: overrides.output ?? null,
     finalMessage: null,
     status: overrides.status ?? "completed",
-    // Fixtures are authored without envelopes; stamp them the way the wire would.
     events: stampTestEvents(overrides.events ?? []),
     derived: { ...createEmptyDerivedFacts(), ...overrides.derived },
   };

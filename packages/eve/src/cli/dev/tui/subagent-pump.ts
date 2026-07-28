@@ -368,7 +368,7 @@ export class SubagentPump {
   #applyChildEvent(callId: string, event: StampedHandleMessageStreamEvent) {
     const run = this.#runs.get(callId);
     if (!run) return;
-    if (run.seenChildEvents.isDuplicate(event)) return;
+    if (!run.seenChildEvents.admit(event)) return;
     // A child event after settle is a HITL-parked turn resuming: reopen the
     // run explicitly (begin clears the header's Done mark) instead of
     // mutating a completed section by accident.

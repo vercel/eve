@@ -18,14 +18,14 @@ describe("createEventDeduper", () => {
 
     // Re-delivering one event is a duplicate; two emissions of a
     // byte-identical payload are not.
-    expect(deduper.isDuplicate(replayed)).toBe(false);
-    expect(deduper.isDuplicate(replayed)).toBe(true);
-    expect(
-      deduper.isDuplicate(stampMessageStreamEvent({ type: "session.started", data: {} })),
-    ).toBe(false);
-    expect(
-      deduper.isDuplicate(stampMessageStreamEvent({ type: "session.started", data: {} })),
-    ).toBe(false);
+    expect(deduper.admit(replayed)).toBe(true);
+    expect(deduper.admit(replayed)).toBe(false);
+    expect(deduper.admit(stampMessageStreamEvent({ type: "session.started", data: {} }))).toBe(
+      true,
+    );
+    expect(deduper.admit(stampMessageStreamEvent({ type: "session.started", data: {} }))).toBe(
+      true,
+    );
     expect(deduper.size).toBe(3);
   });
 
@@ -34,8 +34,11 @@ describe("createEventDeduper", () => {
     const stream = Array.from({ length: 25_000 }, (_, index) => sessionStarted(index));
     const deduper = createEventDeduper();
 
-    expect(stream.filter((event) => !deduper.isDuplicate(event))).toHaveLength(stream.length);
-    expect(stream.filter((event) => !deduper.isDuplicate(event))).toHaveLength(0);
+    const firstRead = stream.filter((event) => deduper.admit(event));
+    const rewound = stream.filter((event) => deduper.admit(event));
+
+    expect(firstRead).toHaveLength(stream.length);
+    expect(rewound).toHaveLength(0);
   });
 
   it("admits events written before ids existed", () => {
@@ -47,8 +50,8 @@ describe("createEventDeduper", () => {
       meta: { at: "2026-07-27T18:04:11.912Z" },
     } as StampedHandleMessageStreamEvent;
 
-    expect(deduper.isDuplicate(preV20)).toBe(false);
-    expect(deduper.isDuplicate(preV20)).toBe(false);
+    expect(deduper.admit(preV20)).toBe(true);
+    expect(deduper.admit(preV20)).toBe(true);
     expect(deduper.size).toBe(0);
   });
 
@@ -56,7 +59,7 @@ describe("createEventDeduper", () => {
     const deduper = createEventDeduper();
     const bare = { type: "session.started", data: {} } as StampedHandleMessageStreamEvent;
 
-    expect(deduper.isDuplicate(bare)).toBe(false);
+    expect(deduper.admit(bare)).toBe(true);
     expect(deduper.size).toBe(0);
   });
 });

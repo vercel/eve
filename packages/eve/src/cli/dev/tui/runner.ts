@@ -1691,7 +1691,7 @@ async function* eveEventsToTUIStream(
   let latestStepUsage: StepCompletedStreamEvent["data"]["usage"] | undefined;
 
   for await (const event of events) {
-    if (seenEvents.isDuplicate(event)) {
+    if (!seenEvents.admit(event)) {
       continue;
     }
 

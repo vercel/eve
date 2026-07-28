@@ -122,9 +122,13 @@ export class EveAgentStore<TData> {
             headers: init.headers,
             host: init.host ?? "",
           }).session(init.initialSession);
-    this.#events = (init.initialEvents ?? []).filter(
-      (event) => !this.#seenEvents.isDuplicate(event),
-    );
+    // Seed the deduper from the saved log so a live stream that replays the
+    // same prefix does not double-apply it.
+    const initialEvents: StampedHandleMessageStreamEvent[] = [];
+    for (const event of init.initialEvents ?? []) {
+      if (this.#seenEvents.admit(event)) initialEvents.push(event);
+    }
+    this.#events = initialEvents;
     this.#projectionEvents = [...this.#events];
     this.#optimistic = init.optimistic ?? true;
     this.#reducer = init.reducer;
@@ -188,7 +192,7 @@ export class EveAgentStore<TData> {
           this.#status = "streaming";
         }
 
-        if (this.#seenEvents.isDuplicate(event)) {
+        if (!this.#seenEvents.admit(event)) {
           continue;
         }
 

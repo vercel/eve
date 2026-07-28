@@ -672,7 +672,6 @@ function streamResponse(events: readonly HandleMessageStreamEvent[]): Response {
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
-        // Fixtures are authored without envelopes; stamp them the way the wire would.
         for (const event of stampTestEvents(events)) {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
