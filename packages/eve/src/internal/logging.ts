@@ -228,6 +228,13 @@ function truncateForDisplay(value: string, maxChars = 160): string {
  * non-active span should be annotated.
  */
 export function recordErrorOnSpan(span: Span, error: unknown): void {
+  // The harness turn span is ended in a `finally` while still the active
+  // span, so an error log scheduled on a late continuation can reach here
+  // after the end. Writing then makes the OTel SDK log at error level (#776).
+  if (!span.isRecording()) {
+    return;
+  }
+
   const message = error instanceof Error ? error.message : getErrorMessage(error);
   const name = error instanceof Error ? error.name : "Error";
 
@@ -351,7 +358,7 @@ function renderFields(fields: LogFields): JsonObject {
 
 function recordOnActiveSpan(message: string, fields?: LogFields): void {
   const span = trace.getActiveSpan();
-  if (span === undefined) {
+  if (span === undefined || !span.isRecording()) {
     return;
   }
 
