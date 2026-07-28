@@ -291,6 +291,9 @@ importers:
       '@upstash/agentkit-eve-extension':
         specifier: ^0.4.0
         version: 0.4.0(eve@packages+eve)
+      '@vercel/connect':
+        specifier: 'catalog:'
+        version: 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@6.0.191(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@6.0.191(zod@4.4.3))(eve@packages+eve)
       '@vgpu/adapter-node':
         specifier: 0.0.7
         version: 0.0.7(supports-color@10.2.2)

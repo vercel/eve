@@ -15,8 +15,7 @@ describe("Browser Use connection setup", () => {
 
     expect(quickStart).toContain('"x-browser-use-api-key": process.env.BROWSER_USE_API_KEY!');
     expect(quickStart).not.toContain("@vercel/connect");
-    expect(buildConnectionInstall(integration)).toContain("npm install eve@latest");
-    expect(buildConnectionInstall(integration)).not.toContain("@vercel/connect");
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/browser-use");
     expect(buildConnectionConfigure(integration)).toContain("BROWSER_USE_API_KEY=your_api_key");
   });
 
@@ -25,7 +24,7 @@ describe("Browser Use connection setup", () => {
     const quickStart = buildConnectionSetup(integration).variants["mcp:user"];
 
     expect(quickStart).toContain("@vercel/connect/eve");
-    expect(buildConnectionInstall(integration)).toContain("@vercel/connect");
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/linear");
   });
 });
 

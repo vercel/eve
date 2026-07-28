@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/razorpay",
+  "title": "Razorpay",
+  "description": "Razorpay payments, settlements, and dashboard data.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/razorpay.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://mcp.razorpay.com/mcp\",\n  description: \"Razorpay: payments, settlements, and dashboard data.\",\n  auth: connect(\"razorpay\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/razorpay.ts"
+    }
+  ],
+  "type": "registry:item"
+}

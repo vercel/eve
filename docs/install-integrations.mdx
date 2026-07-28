@@ -12,9 +12,10 @@ Run `eve add` from an eve agent project. This installs the integration's depende
 
 ```bash
 eve add extension/agent-browser
+eve add connection/linear
 ```
 
-The integration may create an extension mount under `agent/extensions/`. Configure that mount and any required environment variables before running your agent.
+Extensions may create a mount under `agent/extensions/`. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Configure the generated file and any required environment variables before running your agent.
 
 ## Find an integration
 
