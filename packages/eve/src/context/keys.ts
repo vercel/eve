@@ -138,6 +138,14 @@ export const SessionDynamicToolMetadataKey = new ContextKey<readonly DurableDyna
 );
 
 /**
+ * Runtime revision that last resolved session-scoped dynamic tools.
+ * Used to refresh their durable metadata after a deploy or development rebuild.
+ */
+export const SessionDynamicToolRuntimeRevisionKey = new ContextKey<string>(
+  "eve.sessionDynamicToolRuntimeRevision",
+);
+
+/**
  * Turn-scoped dynamic tool metadata (from `turn.started`).
  * Replaced each turn.
  */

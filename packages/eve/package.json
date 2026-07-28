@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.27.1",
+  "version": "0.27.8",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -304,7 +304,8 @@
     "test:vercel": "vitest run --config vitest.vercel.config.ts"
   },
   "dependencies": {
-    "nitro": "3.0.260610-beta"
+    "nitro": "3.0.260610-beta",
+    "undici": "7.28.0"
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "catalog:",
@@ -356,6 +357,7 @@
     "react": "catalog:",
     "react-test-renderer": "19.2.6",
     "semver": "7.8.4",
+    "shadcn": "4.16.0",
     "svelte": "^5.0.0",
     "turndown": "7.2.4",
     "vite": "^8.1.5",

@@ -3,7 +3,7 @@ import type { ModelMessage } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalContext } from "#public/definitions/approval.js";
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent, SessionStartedStreamEvent } from "#protocol/message.js";
 import {
   ALLOWED_DYNAMIC_TOOL_EVENTS,
   isBrandedToolEntry,
@@ -21,6 +21,7 @@ import type { ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
+  SessionDynamicToolRuntimeRevisionKey,
   TurnDynamicToolMetadataKey,
   LiveStepToolsKey,
 } from "#context/keys.js";
@@ -339,7 +340,12 @@ export async function dispatchDynamicToolEvent(input: {
   if (!ALLOWED_DYNAMIC_TOOL_EVENTS.has(event.type)) return;
 
   const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
-  if (matching.length === 0) return;
+  if (matching.length === 0) {
+    if (event.type === "session.started") {
+      ctx.set(SessionDynamicToolMetadataKey, []);
+    }
+    return;
+  }
 
   const { metadata, liveTools } = await resolveToolsFromEvent(ctx, matching, event, messages);
 
@@ -356,8 +362,41 @@ export async function dispatchDynamicToolEvent(input: {
   const durableKey = durableKeyForEvent(event.type);
   if (durableKey === undefined) return;
 
+  if (event.type === "session.started") {
+    ctx.set(SessionDynamicToolMetadataKey, metadata);
+    return;
+  }
+
   const slugs = new Set(matching.map((r) => r.slug));
   const existing = ctx.get(durableKey) ?? [];
   const kept = existing.filter((m) => !slugs.has(m.resolverSlug));
   ctx.set(durableKey, [...kept, ...metadata]);
+}
+
+/**
+ * Re-resolves session-scoped dynamic tools when a durable session reaches a
+ * different runtime revision. The refresh is internal: lifecycle consumers
+ * still observe exactly one `session.started` event for the session.
+ */
+export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
+  readonly ctx: ContextContainer;
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+  readonly event: SessionStartedStreamEvent;
+  readonly messages: readonly ModelMessage[];
+  readonly runtimeRevision: string;
+}): Promise<void> {
+  if (input.ctx.get(SessionDynamicToolRuntimeRevisionKey) === input.runtimeRevision) {
+    return;
+  }
+
+  const matching = input.resolvers.filter((resolver) =>
+    resolver.eventNames.includes("session.started"),
+  );
+  const { metadata } =
+    matching.length === 0
+      ? { metadata: [] }
+      : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
+
+  input.ctx.set(SessionDynamicToolMetadataKey, metadata);
+  input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
 }

@@ -72,7 +72,10 @@ export async function createDevelopmentApplicationNitro(
         publicAssets: [],
         rootDir: preparedHost.appRoot,
         serverDir: false,
-        vercel: createEveVercelOptions(false),
+        vercel: createEveVercelOptions({
+          agentName: preparedHost.compileResult.manifest.config.name,
+          enabled: false,
+        }),
         watchOptions: createDevelopmentWatchOptions(preparedHost.appRoot),
       },
       contribution,
@@ -94,14 +97,14 @@ export async function createDevelopmentApplicationNitro(
 interface ProductionApplicationNitroOptions {
   readonly buildDir: string;
   readonly outputDir: string;
-  readonly surface: NitroBuildSurface;
+  readonly publicRoutePrefix?: string;
+  readonly surface?: NitroBuildSurface;
 }
 
 /**
- * Creates a build-mode Nitro host for one production surface. `surface`
- * narrows which route groups are registered ("all" for self-hosted output;
- * "app"/"flow" for separately bundled Vercel functions), while `buildDir`
- * and `outputDir` remain standalone-host policy.
+ * Creates a build-mode Nitro host. Standalone builds use the complete route
+ * surface, while internal callers may narrow it for isolated build outputs.
+ * `buildDir` and `outputDir` remain standalone-host policy.
  */
 export async function createProductionApplicationNitro(
   preparedHost: PreparedApplicationHost,
@@ -111,7 +114,7 @@ export async function createProductionApplicationNitro(
   const contribution = createEveNitroContribution(preparedHost, {
     mode: "production",
     preset,
-    surface: options.surface,
+    surface: options.surface ?? "all",
   });
 
   await prepareEveVersionedCacheDirectory(options.buildDir);
@@ -126,7 +129,11 @@ export async function createProductionApplicationNitro(
         publicAssets: [],
         rootDir: preparedHost.appRoot,
         serverDir: false,
-        vercel: createEveVercelOptions(preset === "vercel" && contribution.applicationRoutes),
+        vercel: createEveVercelOptions({
+          agentName: preparedHost.compileResult.manifest.config.name,
+          enabled: preset === "vercel" && contribution.applicationRoutes,
+          publicRoutePrefix: options.publicRoutePrefix,
+        }),
       },
       contribution,
     ),

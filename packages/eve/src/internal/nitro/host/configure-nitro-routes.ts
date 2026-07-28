@@ -38,6 +38,7 @@ import {
   getOrCreateDevelopmentControlToken,
   persistDevelopmentControlToken,
 } from "#internal/nitro/dev-control-auth.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/nitro/host/vercel-build-output-config.js";
 
 export function createEveNitroHandlerVirtualId(method: string | undefined, route: string): string {
   return `#eve-route-handler/${method ?? "ALL"} ${route}`;
@@ -401,7 +402,7 @@ async function prepareWorkflowRoute(
     bundleName: "workflows",
     bundlePath: workflowBundlePath,
     directHandlers,
-    route: "/.well-known/workflow/v1/flow",
+    route: EVE_WORKFLOW_FLOW_ROUTE_PATH,
     runtimeImportSpecifier,
     workflowWorldPluginPath: preparedHost.compiledArtifacts.workflowWorldPluginPath,
   });
@@ -572,7 +573,7 @@ export function applyPreparedProductionNitroRoutes(
 export async function configureProductionNitroRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
-  surface: NitroBuildSurface,
+  surface: NitroBuildSurface = "all",
 ): Promise<void> {
   applyPreparedProductionNitroRoutes(
     nitro,

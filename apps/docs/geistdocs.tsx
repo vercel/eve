@@ -21,10 +21,6 @@ export const nav = [
     label: "Templates",
     href: "/templates",
   },
-  {
-    label: "GitHub",
-    href: `https://github.com/${github.owner}/${github.repo}/`,
-  },
 ];
 
 export const suggestions = [

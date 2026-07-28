@@ -80,8 +80,12 @@ function run(input: {
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
+  upgradeChoice?: "upgrade" | "later";
 }) {
-  const fake = createFakePrompter({});
+  const { upgradeChoice } = input;
+  const fake = createFakePrompter(
+    upgradeChoice === undefined ? {} : { single: () => upgradeChoice },
+  );
   const commandInput: TuiSetupCommandInput = {
     command: input.command,
     appRoot: APP_ROOT,
@@ -230,6 +234,93 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "/model dismissed.",
       preserveFlowDiagnostics: false,
+    });
+  });
+
+  it("prompts to upgrade an old Vercel CLI when setup reports it unsupported", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The installed Vercel CLI does not support the required team-list options.",
+        });
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
+        kind: "installed",
+      })),
+    });
+
+    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message: "Upgraded the Vercel CLI. Retry /model.",
+      preserveFlowDiagnostics: false,
+    });
+    expect(flows.runInstallVercelCliFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot: APP_ROOT,
+        upgrade: true,
+      }),
+    );
+  });
+
+  it("gives the manual upgrade command when the old-CLI prompt is declined", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The installed Vercel CLI does not support the required team-list options.",
+        });
+      }),
+    });
+
+    await expect(run({ command: "model", flows, upgradeChoice: "later" })).resolves.toEqual({
+      message: "The Vercel CLI needs an update — run `vercel upgrade`, then retry /model.",
+      preserveFlowDiagnostics: true,
+    });
+    expect(flows.runInstallVercelCliFlow).not.toHaveBeenCalled();
+  });
+
+  it("prints a thrown upgrade error with the manual command", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The installed Vercel CLI does not support the required team-list options.",
+        });
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => {
+        throw new Error("package manager failed");
+      }),
+    });
+
+    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message:
+        "Couldn't upgrade the Vercel CLI (package manager failed) — run `vercel upgrade`, then retry /model.",
+      preserveFlowDiagnostics: true,
+    });
+  });
+
+  it("prints the native CLI failure reason with the manual command", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The installed Vercel CLI does not support the required team-list options.",
+        });
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
+        kind: "failed",
+        reason: "ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory",
+      })),
+    });
+
+    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message:
+        "Couldn't upgrade the Vercel CLI (ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory) — run `vercel upgrade`, then retry /model.",
+      preserveFlowDiagnostics: true,
     });
   });
 

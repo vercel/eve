@@ -37,13 +37,11 @@ import {
   createRuntimeToolResultFromToolError,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
-import {
-  createRuntimeActionRequestFromToolCall,
-  resolveToolCallInputObject,
-} from "#harness/runtime-actions.js";
+import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import {
   createInvalidToolCallInputError,
   isInvalidToolCall,
+  resolveProviderToolCallRequest,
 } from "#harness/tool-call-input-errors.js";
 import type {
   RuntimeActionRequest,
@@ -455,15 +453,15 @@ async function consumeStreamContent(
       await flushCurrentMessage();
     }
 
-    providerActionBatch.observe({
-      callId: toolCall.toolCallId,
-      input: resolveToolCallInputObject(toolCall.input, {
-        callId: toolCall.toolCallId,
-        toolName: toolCall.toolName,
-      }),
-      kind: "tool-call",
-      toolName: toolCall.toolName,
-    });
+    const resolved = resolveProviderToolCallRequest(toolCall);
+    if (resolved.toolError !== undefined) {
+      invalidInputToolCallIds.add(toolCall.toolCallId);
+      await emitActionResult(createRuntimeToolResultFromToolError(resolved.toolError));
+      handledInlineToolResultCallIds.add(toolCall.toolCallId);
+      return;
+    }
+
+    providerActionBatch.observe(resolved.request);
   };
 
   const emitActionResult = async (result: RuntimeToolResultActionResult): Promise<void> => {

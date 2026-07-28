@@ -106,6 +106,9 @@ async function firePost(
     async getEventStream() {
       return new ReadableStream();
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   });
   const waitUntil = vi.fn();
 
@@ -119,6 +122,7 @@ async function firePost(
       getSession: vi.fn() as any,
       resolveActiveSession: async () => undefined,
       cancel: vi.fn(),
+      reset: vi.fn(),
       params: {},
       receive: vi.fn() as any,
       requestIp: null,
@@ -175,6 +179,7 @@ describe("chatSdkChannel", () => {
         getSession: vi.fn() as any,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        reset: vi.fn(),
         params: {},
         receive: vi.fn() as any,
         requestIp: null,
@@ -252,6 +257,9 @@ describe("chatSdkChannel", () => {
       },
       async getEventStream() {
         return new ReadableStream();
+      },
+      async getStreamTailIndex() {
+        return -1;
       },
     });
 

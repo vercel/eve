@@ -116,6 +116,35 @@ describe("Client request policy", () => {
     expect(sent.get("x-vercel-trusted-oidc-idp-token")).toBe("oidc-tok");
   });
 
+  it("lets turn authorization override the client bearer while retaining trusted OIDC", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ continuationToken: "eve:test", sessionId: "session_1" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+      );
+    const client = new Client({
+      host: "https://eve.test",
+      auth: { vercelOidc: { token: "oidc-tok" } },
+    });
+
+    await (
+      await client.session().send({
+        headers: { authorization: "Bearer application-user" },
+        message: "hello",
+      })
+    ).result();
+
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      const sent = new Headers(init?.headers);
+      expect(sent.get("authorization")).toBe("Bearer application-user");
+      expect(sent.get("x-vercel-trusted-oidc-idp-token")).toBe("oidc-tok");
+    }
+  });
+
   it("includes response headers in info request errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("Redirecting...", {

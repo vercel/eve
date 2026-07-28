@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
 import {
@@ -35,21 +35,16 @@ import {
 import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { writeNitroStepEntrypoint } from "#internal/workflow-bundle/nitro-step-entry.js";
 import {
-  copyNitroFunctionDirectory,
-  createWorkflowFunctionEnvironment,
-  retargetNitroFunctionDirectoryToWorkflowRoute,
   WORKFLOW_BUILDER_DEFERRED_PACKAGES,
   WORKFLOW_STEP_EXTERNAL_PACKAGES,
 } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import {
   detectWorkflowPatterns,
-  createEveWorkflowQueueTrigger,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
 export class WorkflowBundleBuilder {
-  readonly #agentName: string;
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
   readonly #queueNamespace: string;
@@ -71,7 +66,6 @@ export class WorkflowBundleBuilder {
       workingDir: options.rootDir,
     };
 
-    this.#agentName = options.agentName;
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
@@ -355,145 +349,8 @@ export class WorkflowBundleBuilder {
     return manifestJson;
   }
 
-  async buildVercelOutput(options: {
-    flowNitroOutputDir: string;
-    outputDir: string;
-    runtime?: string;
-  }): Promise<void> {
-    await this.build();
-
-    const stagedWorkflowGeneratedDir = join(
-      this.#outDir,
-      "vercel-build-output",
-      "functions",
-      ".well-known",
-      "workflow",
-      "v1",
-    );
-    const stagedFlowFunctionDir = join(stagedWorkflowGeneratedDir, "flow.func");
-    const workflowGeneratedDir = join(
-      options.outputDir,
-      "functions",
-      ".well-known",
-      "workflow",
-      "v1",
-    );
-    const nitroFlowServerFunctionDir = join(
-      options.flowNitroOutputDir,
-      "functions",
-      "__server.func",
-    );
-    const nitroFlowFunctionDir = join(
-      options.flowNitroOutputDir,
-      "functions",
-      ".well-known",
-      "workflow",
-      "v1",
-      "flow.func",
-    );
-    const flowFunctionDir = join(workflowGeneratedDir, "flow.func");
-    const staleStepFunctionDir = join(workflowGeneratedDir, "step.func");
-    const staleWebhookFunctionDir = join(workflowGeneratedDir, "webhook", "[token].func");
-
-    await copyNitroFunctionDirectory({
-      fallbackPath: nitroFlowServerFunctionDir,
-      sourcePath: nitroFlowFunctionDir,
-      targetPath: stagedFlowFunctionDir,
-    });
-
-    await Promise.all([
-      this.#patchVercelFunctionConfig(stagedFlowFunctionDir, {
-        experimentalTriggers: [createEveWorkflowQueueTrigger(this.#agentName)],
-        maxDuration: "max",
-        runtime: options.runtime ?? null,
-        shouldAddHelpers: false,
-      }),
-      cp(join(this.#outDir, "manifest.json"), join(stagedWorkflowGeneratedDir, "manifest.json")),
-    ]);
-    await retargetNitroFunctionDirectoryToWorkflowRoute({
-      functionDirectoryPath: stagedFlowFunctionDir,
-      workflowRoutePath: "/.well-known/workflow/v1/flow",
-    });
-
-    await Promise.all([
-      rm(flowFunctionDir, {
-        force: true,
-        recursive: true,
-      }),
-      rm(staleStepFunctionDir, {
-        force: true,
-        recursive: true,
-      }),
-      rm(staleWebhookFunctionDir, {
-        force: true,
-        recursive: true,
-      }),
-    ]);
-    await mkdir(workflowGeneratedDir, { recursive: true });
-    await Promise.all([
-      cp(stagedFlowFunctionDir, flowFunctionDir, { recursive: true }),
-      cp(
-        join(stagedWorkflowGeneratedDir, "manifest.json"),
-        join(workflowGeneratedDir, "manifest.json"),
-      ),
-    ]);
-  }
-
   async #getBuildInputFiles(): Promise<string[]> {
     return await this.getInputFiles();
-  }
-
-  async #patchVercelFunctionConfig(
-    directoryPath: string,
-    patch: {
-      experimentalTriggers?: readonly unknown[];
-      maxDuration?: number | "max";
-      runtime?: string | null;
-      shouldAddHelpers?: boolean;
-      shouldAddSourcemapSupport?: boolean;
-    },
-  ): Promise<void> {
-    const configPath = join(directoryPath, ".vc-config.json");
-    const baseConfig = await this.#readVercelFunctionConfig(configPath);
-    const nextConfig: Record<string, unknown> = {
-      ...baseConfig,
-    };
-    nextConfig.environment = createWorkflowFunctionEnvironment(baseConfig.environment);
-
-    if (patch.runtime !== null) {
-      nextConfig.runtime = patch.runtime;
-    }
-
-    if (patch.maxDuration !== undefined) {
-      nextConfig.maxDuration = patch.maxDuration;
-    }
-
-    if (patch.shouldAddHelpers !== undefined) {
-      nextConfig.shouldAddHelpers = patch.shouldAddHelpers;
-    }
-
-    if (patch.shouldAddSourcemapSupport !== undefined) {
-      nextConfig.shouldAddSourcemapSupport = patch.shouldAddSourcemapSupport;
-    }
-
-    if (patch.experimentalTriggers !== undefined) {
-      nextConfig.experimentalTriggers = [...patch.experimentalTriggers];
-    }
-
-    await writeFile(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
-  }
-
-  async #readVercelFunctionConfig(configPath: string): Promise<Record<string, unknown>> {
-    try {
-      const parsed = JSON.parse(await readFile(configPath, "utf8"));
-      if (parsed !== null && typeof parsed === "object") {
-        return parsed as Record<string, unknown>;
-      }
-    } catch {
-      // fall through
-    }
-
-    return {};
   }
 }
 

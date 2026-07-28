@@ -8,8 +8,10 @@ function runtime(): Runtime {
     cancelTurn: vi.fn(),
     deliver: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveSession: vi.fn(),
     run: vi.fn(),
+    terminateSession: vi.fn(),
   };
 }
 

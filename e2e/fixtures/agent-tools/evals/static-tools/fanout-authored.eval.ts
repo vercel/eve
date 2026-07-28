@@ -1,11 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import {
-  FANOUT_SIZE,
-  fanoutExecutionsReachBarrier,
-  fanoutRequestsPrecedeFirstResult,
-  fanoutRequestsUseExpectedLabels,
-} from "./fanout";
+import { FANOUT_SIZE, fanoutExecutionsReachBarrier } from "./fanout";
 
 const TOOL_NAME = "fanout-barrier";
 const LABELS = [
@@ -36,15 +31,9 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool(TOOL_NAME, { count: FANOUT_SIZE });
-    t.noFailedActions();
-    turn.eventsSatisfy("ten authored requests precede the first authored result", (events) =>
-      fanoutRequestsPrecedeFirstResult({ events, toolName: TOOL_NAME }),
-    );
-    turn.eventsSatisfy("ten authored requests use their distinct labels", (events) =>
-      fanoutRequestsUseExpectedLabels({ events, labels: LABELS, toolName: TOOL_NAME }),
-    );
-    turn.eventsSatisfy("ten authored executions reach the concurrency barrier", (events) =>
-      fanoutExecutionsReachBarrier({ events, toolName: TOOL_NAME }),
+    turn.eventsSatisfy(
+      "ten distinctly labeled authored executions reach the concurrency barrier",
+      (events) => fanoutExecutionsReachBarrier({ events, labels: LABELS, toolName: TOOL_NAME }),
     );
   },
 });

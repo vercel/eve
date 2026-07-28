@@ -10,8 +10,10 @@ function createRuntime(): Runtime {
     cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
     deliver: vi.fn(),
     getEventStream: vi.fn(),
+    getStreamTailIndex: vi.fn(),
     resolveSession: vi.fn(),
     run: vi.fn(),
+    terminateSession: vi.fn(),
   };
 }
 

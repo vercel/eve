@@ -24,6 +24,8 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve channels list`           | List user-authored channels                                                                                                                           |
 | `eve extension init [target]` | Create a new extension package                                                                                                                        |
 | `eve extension build`         | Build the current package as an extension                                                                                                             |
+| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                                     |
+| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                                          |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
@@ -76,6 +78,22 @@ eve extension build
 ```
 
 Builds the complete agent-shaped extension tree into its configured dist root, emits declarations and compatibility metadata, and fills the package `exports` map. The original TypeScript source is not required in the published package.
+
+## Registry items
+
+Commands for installing and discovering [shadcn registry](https://ui.shadcn.com/docs/registry) items. Official registry items use a kind and slug (for example, `extension/agent-browser`); URLs and configured registry addresses are also supported.
+
+```bash
+eve add extension/agent-browser
+eve add https://example.com/r/my-extension.json --overwrite
+eve registry add @acme=https://example.com/r/{name}.json
+eve registry search browser
+eve registry search browser --registry @acme
+eve registry view @acme/my-extension
+eve add @acme/my-extension
+```
+
+`eve registry add` records configured sources in `package.json#registries`. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
 
 ## `eve info`
 
@@ -173,7 +191,7 @@ For bearer tokens or custom schemes, pass explicit headers with `-H`.
 
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 
-Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; use `/new` to start a fresh session. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
+Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
 
 ## `eve logs`
 
@@ -240,7 +258,7 @@ See [Evals](../evals/overview) for authoring evals.
 eve channels add [kind] [-f] [-y]
 ```
 
-Scaffolds a channel into `agent/channels/`. With no `kind` it prompts interactively; pass a `kind` (`slack` \| `web`) to scaffold one directly.
+Scaffolds a channel into `agent/channels/`. With no `kind` it prompts interactively; pass a `kind` (`slack` \| `web`) to scaffold one directly. When the Vercel CLI has an authenticated session, eve scaffolds the Vercel-integrated variant and asks whether to deploy after setup. Without one, Slack setup asks whether to set up Vercel Connect or use portable credentials. The portable variant reads `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` and adds both names to `.env.example`.
 
 | Flag          | Type | Default | Description                                               |
 | ------------- | ---- | ------- | --------------------------------------------------------- |

@@ -40,6 +40,7 @@ import jsonSchema from "./json-schema.mjs";
 import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
 import semver from "./semver.mjs";
+import shadcnRegistry from "./shadcn-registry.mjs";
 import turndown from "./turndown.mjs";
 import zod from "./zod.mjs";
 import zodValidationError from "./zod-validation-error.mjs";
@@ -69,6 +70,7 @@ export const MODULES = [
   provider,
   providerUtils,
   semver,
+  shadcnRegistry,
   standardSchemaSpec,
   turndown,
   vercelDetectAgent,

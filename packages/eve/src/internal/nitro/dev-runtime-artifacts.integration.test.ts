@@ -385,6 +385,101 @@ describe("development runtime artifact snapshots", () => {
     );
   });
 
+  // https://github.com/vercel/eve/issues/1151 — hoisting-workspace expression.
+  it("mounts declared dependencies hoisted above the app root into source snapshots", async () => {
+    const workspaceRoot = await createScratchDirectory("eve-dev-runtime-hoisted-dependency-");
+    const appRoot = join(workspaceRoot, "agents", "support");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const hoistedPackageRoot = join(workspaceRoot, "node_modules", "@acme", "extension");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(hoistedPackageRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      '{"private":true,"workspaces":["agents/*"]}\n',
+    );
+    await writeFile(
+      join(appRoot, "package.json"),
+      `${JSON.stringify({
+        dependencies: { "@acme/extension": "1.0.0" },
+        type: "module",
+      })}\n`,
+    );
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(
+      join(hoistedPackageRoot, "package.json"),
+      '{"name":"@acme/extension","version":"1.0.0"}\n',
+    );
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    // The compiled module map imports the dependency relative to the app's
+    // compile directory, escaping the app root toward the install location
+    // (`../../../../node_modules/@acme/extension/...`). Any correct snapshot
+    // must materialize the package somewhere inside the snapshot where that
+    // resolution can land: either mirroring the hoisted location relative to
+    // the snapshot source root, or flattened into the app root's own
+    // node_modules.
+    const acceptableMountLocations = [
+      join(snapshot.runtimeAppRoot, "node_modules", "@acme", "extension"),
+      join(snapshot.runtimeAppRoot, "..", "..", "node_modules", "@acme", "extension"),
+    ];
+    expect(acceptableMountLocations.some((location) => existsSync(location))).toBe(true);
+  });
+
+  // https://github.com/vercel/eve/issues/1151 — withEve bare-agent-dir expression:
+  // the agent root has no package.json of its own; the host app owns the
+  // dependency declaration and the install.
+  it("mounts host-declared dependencies for bare agent roots without a package.json", async () => {
+    const hostRoot = await createScratchDirectory("eve-dev-runtime-bare-agent-dependency-");
+    const appRoot = join(hostRoot, "agents", "research");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const hostPackageRoot = join(hostRoot, "node_modules", "@acme", "extension");
+
+    await mkdir(appRoot, { recursive: true });
+    await mkdir(hostPackageRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    // The host boundary is a real workspace root marker so the snapshot's
+    // source-root walk resolves to it, exactly like a withEve app.
+    await writeFile(join(hostRoot, "pnpm-workspace.yaml"), "packages: []\n");
+    await writeFile(
+      join(hostRoot, "package.json"),
+      `${JSON.stringify({
+        dependencies: { "@acme/extension": "1.0.0" },
+        type: "module",
+      })}\n`,
+    );
+    await writeFile(join(appRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(
+      join(hostPackageRoot, "package.json"),
+      '{"name":"@acme/extension","version":"1.0.0"}\n',
+    );
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot: appRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    const acceptableMountLocations = [
+      join(snapshot.runtimeAppRoot, "node_modules", "@acme", "extension"),
+      join(snapshot.runtimeAppRoot, "..", "..", "node_modules", "@acme", "extension"),
+    ];
+    expect(acceptableMountLocations.some((location) => existsSync(location))).toBe(true);
+  });
+
   it("stops copying at nested git repository boundaries", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-nested-git-");
     const agentRoot = join(appRoot, "agent");

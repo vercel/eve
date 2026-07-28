@@ -248,46 +248,20 @@ describe("runChannelsFlow", () => {
     return listPaints[0]?.find((option) => option.value === "slack");
   }
 
-  it("points an unlinked Vercel-dependent channel at /model when logged in", async () => {
-    expect(await slackRowFor({ deployment: UNLINKED, authStatus: "authenticated" })).toMatchObject({
-      disabled: true,
-      disabledReason: "Requires Vercel account, see /model",
-      disabledReasonTone: "warning",
-    });
-  });
-
-  it("points a Vercel-dependent channel at /vc:login when logged out, even if linked", async () => {
-    // Authentication is a separate axis from link: a linked-but-logged-out
-    // directory still cannot provision, so the row routes to /vc:login, not /model.
-    for (const deployment of [UNLINKED, LINKED]) {
-      expect(await slackRowFor({ deployment, authStatus: "logged-out" })).toMatchObject({
-        disabled: true,
-        disabledReason: "Log in to Vercel first, see /vc:login",
-        disabledReasonTone: "warning",
-      });
-    }
-  });
-
-  it("points a Vercel-dependent channel at the CLI install when the CLI is missing", async () => {
-    expect(await slackRowFor({ deployment: UNLINKED, authStatus: "cli-missing" })).toMatchObject({
-      disabled: true,
-      disabledReason: "Vercel CLI not found, see /vc:install",
-      disabledReasonTone: "warning",
-    });
-  });
-
-  it("flags a Vercel-dependent channel as unreachable on a transient fault", async () => {
-    expect(await slackRowFor({ deployment: LINKED, authStatus: "unavailable" })).toMatchObject({
-      disabled: true,
-      disabledReason: "Couldn't reach Vercel, check your connection",
-      disabledReasonTone: "warning",
-    });
-  });
-
-  it("keeps a Vercel-dependent channel addable when authenticated and linked", async () => {
-    const slackRow = await slackRowFor({ deployment: LINKED, authStatus: "authenticated" });
-    expect(slackRow?.disabled).toBeUndefined();
-  });
+  it.each([
+    [UNLINKED, "authenticated"],
+    [UNLINKED, "logged-out"],
+    [LINKED, "logged-out"],
+    [UNLINKED, "cli-missing"],
+    [LINKED, "unavailable"],
+  ] as const)(
+    "keeps Slack addable for deployment %o and Vercel status %s",
+    async (deployment, authStatus) => {
+      const slackRow = await slackRowFor({ deployment, authStatus });
+      expect(slackRow).toMatchObject({ value: "slack", label: "Slack" });
+      expect(slackRow?.disabled).toBeUndefined();
+    },
+  );
 
   it("shows the active Terminal UI as a checked task and keeps Web Chat addable", async () => {
     const { single, listPaints } = scriptList(["web", "done"]);
@@ -412,12 +386,10 @@ describe("runChannelsFlow", () => {
   });
 
   it("returns to the list when a channel's sub-flow is cancelled", async () => {
-    const { single, listPaints } = scriptList(["slack", "done"], (opts) => {
-      if (/slackbot/i.test(opts.message)) throw new WizardCancelledError();
-      throw new Error(`Unexpected select: ${opts.message}`);
-    });
+    const { single, listPaints } = scriptList(["slack", "done"]);
     const fake = createFakePrompter({ single });
     const addChannelsDeps = createAddChannelsDeps();
+    addChannelsDeps.provisionSlackbot.mockResolvedValue({ state: "cancelled" });
 
     const result = await runChannelsFlow({
       appRoot: APP_ROOT,

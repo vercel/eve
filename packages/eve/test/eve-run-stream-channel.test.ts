@@ -176,6 +176,9 @@ function createMockGetSession(events: ReadableStream<HandleMessageStreamEvent>) 
     async getEventStream() {
       return events;
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   } satisfies Session);
 }
 
@@ -187,6 +190,7 @@ function createArgs(input: {
     send: vi.fn(),
     resolveActiveSession: async () => undefined,
     cancel: vi.fn(),
+    reset: vi.fn(),
     getSession: input.getSession,
     receive: vi.fn() as any,
     params: input.params,

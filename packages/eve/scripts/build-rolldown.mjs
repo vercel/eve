@@ -127,7 +127,7 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  *
  *   - Peer dependencies (`ai`, `next`, `react`, `@opentelemetry/api`,
  *     `braintrust`) — consumers provide the install.
- *   - Runtime dependencies (`nitro`) — resolved at
+ *   - Runtime dependencies (`nitro`, `undici`) — resolved at
  *     runtime against the eve installation.
  *   - Optional peer dependency (`just-bash`) — the opt-in local sandbox
  *     engine; resolved lazily against the consumer's install and never
@@ -149,6 +149,7 @@ const EXTERNAL_PACKAGES = new Set([
   "nitro",
   "react",
   "svelte",
+  "undici",
   "vite",
   "vue",
 ]);

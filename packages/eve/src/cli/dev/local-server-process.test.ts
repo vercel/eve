@@ -1,0 +1,81 @@
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  createDevelopmentServer,
+  DEV_SERVER_CLOSE_BUDGET_MS,
+} from "#cli/dev/local-server-process.js";
+import { FORCED_EXIT_BACKSTOP_MS } from "#cli/shutdown.js";
+
+const mocks = vi.hoisted(() => ({ fork: vi.fn(), loadEnv: vi.fn() }));
+vi.mock("node:child_process", () => ({ fork: mocks.fork }));
+vi.mock("#cli/dev/environment.js", () => ({ loadDevelopmentEnvironmentFiles: mocks.loadEnv }));
+
+class FakeChild extends EventEmitter {
+  connected = true;
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly send = vi.fn();
+  readonly kill = vi.fn();
+  readonly disconnect = vi.fn(() => {
+    this.connected = false;
+  });
+  readonly unref = vi.fn();
+}
+
+describe("createDevelopmentServer", () => {
+  let child: FakeChild;
+
+  beforeEach(() => {
+    child = new FakeChild();
+    mocks.fork.mockReturnValue(child);
+  });
+
+  it("finishes the close escalation inside the CLI forced-exit backstop", () => {
+    expect(DEV_SERVER_CLOSE_BUDGET_MS).toBeLessThan(FORCED_EXIT_BACKSTOP_MS);
+  });
+
+  it("starts and hands cleanup to the child", async () => {
+    const server = createDevelopmentServer("/tmp/app", { port: 2000 });
+    const started = server.start();
+    child.emit("message", {
+      type: "started",
+      handle: { kind: "started", appRoot: "/tmp/app", url: "http://127.0.0.1:2000" },
+    });
+    await started;
+
+    const closing = server.close();
+    expect(child.send).toHaveBeenCalledWith({ type: "shutdown" });
+    child.emit("exit", 0, null);
+
+    await closing;
+    expect(child.unref).toHaveBeenCalledOnce();
+  });
+
+  it("escalates when graceful cleanup misses the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const server = createDevelopmentServer("/tmp/app");
+      const started = server.start();
+      child.emit("message", {
+        type: "started",
+        handle: { kind: "started", appRoot: "/tmp/app", url: "http://127.0.0.1:2000" },
+      });
+      await started;
+
+      const closing = server.close();
+      await vi.advanceTimersByTimeAsync(550);
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      await vi.advanceTimersByTimeAsync(150);
+      expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+      child.emit("exit", null, "SIGKILL");
+
+      await closing;
+      expect(child.unref).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

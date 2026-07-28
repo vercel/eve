@@ -52,7 +52,43 @@ describe("CLI command registration", () => {
     expect(help).toContain("init [options] [target]");
     expect(help).toContain("link");
     expect(help).toContain("deploy");
+    expect(help).toContain("registry");
     expect(help).not.toContain("setup");
+  });
+
+  it("keeps registry installation options minimal", async () => {
+    const output: string[] = [];
+    const logger = {
+      error: (message: string) => output.push(message),
+      log: (message: string) => output.push(message),
+    };
+
+    await runCli(["add", "--help"], logger).catch(() => {});
+
+    const help = output.join("\n");
+    expect(help).toContain("--overwrite");
+    expect(help).not.toContain("--yes");
+    expect(help).not.toContain("--silent");
+    expect(help).not.toContain("--skip-fonts");
+    expect(help).not.toContain("--path");
+  });
+
+  it("registers only supported shadcn registry commands", async () => {
+    const output: string[] = [];
+    const logger = {
+      error: (message: string) => output.push(message),
+      log: (message: string) => output.push(message),
+    };
+
+    await runCli(["registry", "--help"], logger).catch(() => {});
+
+    const help = output.join("\n");
+    expect(help).toContain("add <registries...>");
+    expect(help).toContain("list [options]");
+    expect(help).toContain("search [options] <query>");
+    expect(help).toContain("view <item>");
+    expect(help).not.toContain("remove [arguments...]");
+    expect(help).not.toContain("sources [arguments...]");
   });
 
   it("registers the diagnostic logs commands", async () => {
@@ -419,6 +455,39 @@ describe("eve dev local server ownership", () => {
     }));
 
     await runInteractiveDev(["dev"], { startHost });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("awaits the close already started by a TUI stop request", async () => {
+    let resolveClose: () => void = () => {};
+    const closing = new Promise<void>((resolve) => {
+      resolveClose = resolve;
+    });
+    const close = vi.fn(() => closing);
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close,
+    }));
+    const runDevelopmentTui = vi.fn(async (input: RunDevelopmentTuiInput) => {
+      input.lifecycle?.requestStop();
+    });
+
+    let settled = false;
+    const run = withInteractiveTerminal(() =>
+      runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
+    ).then(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveClose();
+    await run;
     expect(close).toHaveBeenCalledOnce();
   });
 });

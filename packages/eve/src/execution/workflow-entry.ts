@@ -32,6 +32,9 @@ import {
 } from "#execution/session-delivery-hook.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 
+const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
+  "Agent workflow failed. Inspect the private session trace for details.";
+
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
 // Error logging happens inside `emitTerminalSessionFailureStep`.
@@ -139,8 +142,14 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       result: createDelegatedSubagentErrorResult(input.serializedContext, error),
       serializedContext: input.serializedContext,
     });
-    throw error;
+    throw createSafeOuterWorkflowError();
   }
+}
+
+function createSafeOuterWorkflowError(): Error {
+  const error = new Error(SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE);
+  error.name = "EveWorkflowFailure";
+  return error;
 }
 
 async function runDriverLoop(input: {

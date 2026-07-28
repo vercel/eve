@@ -48,14 +48,31 @@ function createDeps() {
             action: "created",
             filesWritten: ["/tmp/project/app/page.tsx"],
             filesSkipped: [],
-            packageJsonUpdated: [],
+            packageJsonUpdated: [
+              {
+                path: "/tmp/project/package.json",
+                dependencies: ["next"],
+                devDependencies: [],
+                scripts: [],
+              },
+            ],
           }
         : {
             kind: "slack",
             action: "created",
             filesWritten: ["/tmp/project/agent/channels/slack.ts"],
             filesSkipped: [],
-            packageJsonUpdated: [],
+            packageJsonUpdated:
+              options.slackCredentials === "environment"
+                ? []
+                : [
+                    {
+                      path: "/tmp/project/package.json",
+                      dependencies: ["@vercel/connect"],
+                      devDependencies: [],
+                      scripts: [],
+                    },
+                  ],
             slackConnectorSlug: normalizeSlackConnectorSlug("my-agent"),
           },
     ),
@@ -125,6 +142,35 @@ describe("addChannels box", () => {
     await expect(run).rejects.not.toBeInstanceOf(HumanActionRequiredError);
     expect(deps.ensureChannel).not.toHaveBeenCalled();
     expect(deps.provisionSlackbot).not.toHaveBeenCalled();
+  });
+
+  it("uses portable Slack credentials without provisioning when Vercel is unavailable", async () => {
+    const deps = createDeps();
+    const box = makeBox({
+      prompter: createPrompter(),
+      evePackage: TEST_EVE_PACKAGE,
+      slackCredentials: "environment",
+      deps,
+    });
+
+    const next = await runHeadless(
+      [box],
+      { ...noVercelState(), channelSelection: ["slack"] },
+      silentSink,
+      snapshot,
+    );
+
+    expect(deps.provisionSlackbot).not.toHaveBeenCalled();
+    expect(deps.runVercel).not.toHaveBeenCalled();
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.ensureChannel).toHaveBeenCalledWith({
+      projectRoot: "/tmp/project",
+      kind: "slack",
+      slackConnectorSlug: "my-agent",
+      slackCredentials: "environment",
+      force: undefined,
+    });
+    expect(next.channels).toEqual(["slack"]);
   });
 
   it("passes the web scaffold options through to ensureChannel", async () => {
@@ -351,28 +397,6 @@ describe("addChannels box", () => {
     }
   });
 
-  it("skips the link fallback when the slackbot is declined", async () => {
-    const deps = createDeps();
-    const state = resolvedState(["slack"]);
-    state.project = { kind: "unresolved" };
-    state.vercelProject = { kind: "none" };
-    const prompter = createFakePrompter({ single: () => "no" }).prompter;
-    const box = makeBox({
-      prompter,
-      ensureLinkedProject: "interactive-vercel-link",
-      deps,
-    });
-
-    const result = await runInteractive([box], state, silentSink, snapshot);
-
-    expect(deps.runVercel).not.toHaveBeenCalled();
-    expect(deps.provisionSlackbot).not.toHaveBeenCalled();
-    expect(prompter.log.info).toHaveBeenCalledWith(
-      "Slack channel was not added because Slackbot setup was skipped.",
-    );
-    expect(result.kind).toBe("done");
-  });
-
   it("fails the link fallback with the engine's copy when `vercel link` fails", async () => {
     const deps = createDeps();
     deps.runVercel.mockResolvedValue(false);
@@ -428,24 +452,41 @@ describe("addChannels box", () => {
     }
   });
 
-  it("asks the slackbot question only when Slack is selected and undecided", async () => {
+  it("offers concrete existing connectors and a create-new option", async () => {
     const deps = createDeps();
-    const fake = createFakePrompter({ single: () => "no" });
+    let pickerOptions: unknown;
+    const fake = createFakePrompter({
+      single: (options) => {
+        pickerOptions = options;
+        return "slack/operations";
+      },
+    });
+    deps.provisionSlackbot.mockImplementation(async (_log, _root, _slug, _deps, options) => {
+      const selected = await options?.selectConnector?.(
+        [
+          { uid: "slack/my-agent", id: "scl_expected" },
+          { uid: "slack/operations", id: "scl_operations" },
+        ],
+        { uid: "slack/my-agent", id: "scl_expected" },
+      );
+      expect(selected).toEqual({ uid: "slack/operations", id: "scl_operations" });
+      return { state: "attached", connectorUid: "slack/operations" };
+    });
     const box = makeBox({ prompter: fake.prompter, evePackage: TEST_EVE_PACKAGE, deps });
 
-    const result = await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
 
-    expect(fake.selectMessages).toEqual(["Do you want to create your slackbot?"]);
-    expect(deps.provisionSlackbot).not.toHaveBeenCalled();
-    expect(deps.ensureChannel).not.toHaveBeenCalled();
-    expect(fake.prompter.log.info).toHaveBeenCalledWith(
-      "Slack channel was not added because Slackbot setup was skipped.",
+    expect(fake.selectMessages).toEqual(["Which Slack app would you like to use?"]);
+    expect(pickerOptions).toEqual(
+      expect.objectContaining({
+        initialValue: "slack/my-agent",
+        options: [
+          { value: "slack/my-agent", label: "Use slack/my-agent", hint: "Matches this agent" },
+          { value: "slack/operations", label: "Use slack/operations" },
+          { value: "create", label: "Create a new Slack app" },
+        ],
+      }),
     );
-    expect(result.kind).toBe("done");
-    if (result.kind === "done") {
-      expect(result.state.channels).toEqual([]);
-      expect(result.state.deploymentPending).toBe(false);
-    }
   });
 
   it("does not prompt when the slackbot decision is preset", async () => {
@@ -487,31 +528,9 @@ describe("addChannels box", () => {
       "/tmp/project",
       "my-agent",
       undefined,
-      { awaitChoice },
+      { awaitChoice, selectConnector: expect.any(Function) },
     );
     expect("awaitChoice" in prompter.log).toBe(false);
-  });
-
-  it("still scaffolds Web Chat when the slackbot is skipped", async () => {
-    const deps = createDeps();
-    const prompter = createFakePrompter({ single: () => "no" }).prompter;
-    const box = makeBox({ prompter, evePackage: TEST_EVE_PACKAGE, deps });
-
-    const result = await runInteractive(
-      [box],
-      resolvedState(["web", "slack"]),
-      silentSink,
-      snapshot,
-    );
-
-    expect(deps.ensureChannel).toHaveBeenCalledTimes(1);
-    expect(deps.ensureChannel).toHaveBeenCalledWith(expect.objectContaining({ kind: "web" }));
-    expect(deps.provisionSlackbot).not.toHaveBeenCalled();
-    expect(result.kind).toBe("done");
-    if (result.kind === "done") {
-      expect(result.state.channels).toEqual(["web"]);
-      expect(result.state.deploymentPending).toBe(true);
-    }
   });
 
   it("records nothing for web when a Next.js project skips the scaffold", async () => {

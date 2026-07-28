@@ -7,15 +7,22 @@ import type { DevelopmentGeneration } from "#internal/nitro/development-generati
 import type { DevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
 
-/**
- * Route surface included in one programmatic Nitro host build.
- */
+/** Route surface included in one programmatic Nitro host build. */
 export type NitroBuildSurface = "all" | "app" | "flow";
 
 /** Options for one production application build. */
 export interface ApplicationBuildOptions {
   /** Absolute path for an optional machine-readable profile of a successful build. */
   readonly profileOutputPath?: string;
+  /**
+   * Public route prefix the agent's `/eve/v1/*` surface is mounted under on
+   * its callback origin. Baked into every emitted Vercel workflow function
+   * environment so deployed callback-URL minting resolves a routable public
+   * path. The CLI resolves it from `EVE_PUBLIC_ROUTE_PREFIX`, which
+   * multi-agent host integrations export in the generated service build
+   * command.
+   */
+  readonly publicRoutePrefix?: string;
   readonly skipVercelSandboxPrewarm: boolean;
   readonly vercelServiceOutput?: {
     readonly hostOutputDirectory: string;

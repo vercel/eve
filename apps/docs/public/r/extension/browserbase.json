@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "extension/browserbase",
+  "title": "Browserbase",
+  "description": "Search, fetch, and automate the web with Browserbase and Stagehand.",
+  "dependencies": ["@browserbasehq/eve"],
+  "files": [
+    {
+      "path": "registry/extensions/browserbase.ts",
+      "content": "import browserbase from \"@browserbasehq/eve\";\n\nexport default browserbase({\n  apiKey: process.env.BROWSERBASE_API_KEY!,\n});\n",
+      "type": "registry:file",
+      "target": "agent/extensions/browserbase.ts"
+    }
+  ],
+  "envVars": {
+    "BROWSERBASE_API_KEY": ""
+  },
+  "type": "registry:item"
+}

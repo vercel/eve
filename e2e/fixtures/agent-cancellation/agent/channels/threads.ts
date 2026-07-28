@@ -11,8 +11,8 @@ const AUTH = {
  * Chat-style channel for the continuation-addressed cancellation eval.
  *
  * Messages address a thread by channel-local continuation token. The stop
- * route cancels the thread's active turn through the public `cancel` route
- * helper without knowing the runtime session id.
+ * and reset routes act through public channel helpers without knowing the
+ * runtime session id.
  */
 export default defineChannel({
   routes: [
@@ -27,6 +27,17 @@ export default defineChannel({
     POST("/threads/:threadId/stop", async (_request, { params, cancel }) => {
       const result = await cancel({ continuationToken: params.threadId ?? "" });
       return Response.json(result);
+    }),
+    POST("/threads/:threadId/new", async (_request, { params, reset }) => {
+      const result = await reset({
+        continuationToken: params.threadId ?? "",
+        reason: "E2E user requested /new",
+      });
+      return Response.json({ acknowledgement: "Started a new conversation.", ...result });
+    }),
+    POST("/threads/:threadId/owner", async (_request, { params, resolveActiveSession }) => {
+      const owner = await resolveActiveSession({ continuationToken: params.threadId ?? "" });
+      return Response.json({ sessionId: owner?.sessionId ?? null });
     }),
   ],
 });

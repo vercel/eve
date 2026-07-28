@@ -32,6 +32,54 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve channels add slack");
   });
 
+  it("renders the Browserbase extension setup", () => {
+    const browserbase = getIntegration("browserbase");
+    expect(browserbase).toBeDefined();
+
+    const markdown = integrationMarkdown(browserbase!);
+    expect(markdown).toContain("eve add extension/browserbase");
+    expect(markdown).toContain('import browserbase from "@browserbasehq/eve"');
+    expect(markdown).toContain("BROWSERBASE_API_KEY");
+    expect(integrationSearchText(browserbase!)).toContain("Stagehand");
+  });
+
+  it("renders the Jetty extension and eval reporter setup", () => {
+    const jetty = getIntegration("jetty");
+    expect(jetty).toBeDefined();
+
+    const markdown = integrationMarkdown(jetty!);
+    expect(markdown).toContain("eve add extension/jetty");
+    expect(markdown).toContain('import jetty from "@jetty/eve"');
+    expect(markdown).toContain('import { Jetty } from "@jetty/eve/reporter"');
+    expect(markdown).toContain("JETTY_API_TOKEN");
+    expect(integrationSearchText(jetty!)).toContain("grading");
+  });
+
+  it("renders the Upstash AgentKit extension setup", () => {
+    const agentkit = getIntegration("upstash-agentkit");
+    expect(agentkit).toBeDefined();
+
+    const markdown = integrationMarkdown(agentkit!);
+    expect(markdown).toContain("eve add extension/upstash-agentkit");
+    expect(markdown).toContain('import agentkit from "@upstash/agentkit-eve-extension"');
+    expect(markdown).toContain("UPSTASH_REDIS_REST_URL");
+    expect(markdown).toContain("agentkit__recall_memory");
+    expect(markdown).toContain("chatHistory: true");
+    expect(integrationSearchText(agentkit!)).toContain("long-term memory");
+  });
+
+  it("renders the GitHub Tools extension setup", () => {
+    const githubTools = getIntegration("github-tools");
+    expect(githubTools).toBeDefined();
+
+    const markdown = integrationMarkdown(githubTools!);
+    expect(markdown).toContain("eve add extension/github-tools");
+    expect(markdown).toContain('connector: "github/my-connector"');
+    expect(markdown).toContain('preset: "maintainer"');
+    expect(markdown).toContain("github__addPullRequestComment");
+    expect(integrationSearchText(githubTools!)).toContain("code review");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();

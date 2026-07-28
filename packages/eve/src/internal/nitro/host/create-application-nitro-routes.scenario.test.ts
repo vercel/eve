@@ -22,6 +22,7 @@ import {
   EVE_HEALTH_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
   EVE_MESSAGE_STREAM_ROUTE_PATTERN,
+  EVE_RESET_SESSION_ROUTE_PATH,
 } from "#protocol/routes.js";
 import type {
   NitroBuildSurface,
@@ -53,6 +54,7 @@ const APPLICATION_ROUTE_KEYS = [
   `GET ${EVE_CONNECTION_CALLBACK_ROUTE_PATTERN}`,
   `POST ${EVE_CONNECTION_CALLBACK_ROUTE_PATTERN}`,
   `POST ${EVE_CALLBACK_ROUTE_PATTERN}`,
+  `POST ${EVE_RESET_SESSION_ROUTE_PATH}`,
 ].sort();
 const WORKFLOW_ROUTE_KEY = "ALL /.well-known/workflow/v1/flow";
 const tempRoots: string[] = [];

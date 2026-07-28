@@ -159,14 +159,14 @@ export class Client {
       headers.set(key, value);
     }
 
+    for (const [key, value] of Object.entries(authHeaders)) {
+      headers.set(key, value);
+    }
+
     if (perRequest) {
       for (const [key, value] of Object.entries(perRequest)) {
         headers.set(key, value);
       }
-    }
-
-    for (const [key, value] of Object.entries(authHeaders)) {
-      headers.set(key, value);
     }
 
     return headers;
