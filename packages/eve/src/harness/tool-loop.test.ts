@@ -8849,7 +8849,10 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      const hooks = createInstrumentationHooks([]);
+      const attemptCompleted = vi.fn();
+      const hooks = createInstrumentationHooks([
+        { events: { "attempt.completed": attemptCompleted } },
+      ]);
       const config = createTestConfig("conversation", undefined, {
         instrumentationHooks: hooks,
       });
@@ -8880,6 +8883,12 @@ describe("createToolLoopHarness", () => {
         recordInputs: true,
         recordOutputs: true,
       });
+      expect(attemptCompleted).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          scope: expect.objectContaining({ attemptIndex: 0 }),
+          type: "attempt.completed",
+        }),
+      );
     });
 
     it("composes lifecycle hooks with existing authored OTel", async () => {
