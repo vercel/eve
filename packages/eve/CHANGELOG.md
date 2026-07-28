@@ -1,5 +1,11 @@
 # eve
 
+## 0.27.10
+
+### Patch Changes
+
+- 15478d2: Show result counts and concise kind-and-slug addresses for official items in `eve registry list` and `eve registry search` instead of their full registry URLs.
+
 ## 0.27.9
 
 ### Patch Changes
