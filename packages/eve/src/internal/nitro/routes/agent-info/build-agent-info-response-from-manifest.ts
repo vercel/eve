@@ -34,7 +34,7 @@ export function buildAgentInfoResponseFromManifest(
   },
 ): AgentInfoResponse {
   const manifest = data.manifest;
-  const authoredChannels = manifest.channels.filter((channel) => channel.kind === "channel");
+  const authoredChannels = manifest.channels.filter((channel) => channel.kind !== "disabled");
   const disabledFrameworkChannels = manifest.channels
     .filter((channel) => channel.kind === "disabled")
     .map((channel) => channel.name);
@@ -72,10 +72,10 @@ export function buildAgentInfoResponseFromManifest(
   const renderedAuthoredChannels = authoredChannels.map((channel) => ({
     ...toSource(channel),
     adapterKind: channel.adapterKind,
-    method: channel.method,
+    method: channel.kind === "channel" ? channel.method : null,
     name: channel.name,
     origin: "authored" as const,
-    urlPath: channel.urlPath,
+    urlPath: channel.kind === "channel" ? channel.urlPath : null,
   }));
 
   return {

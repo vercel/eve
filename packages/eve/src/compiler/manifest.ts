@@ -41,12 +41,16 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 36;
+export const COMPILED_AGENT_MANIFEST_VERSION = 37;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
  */
-export type CompiledChannelEntry = CompiledChannelDefinition | DisabledCompiledChannelEntry;
+export type CompiledActiveChannelDefinition =
+  | CompiledChannelDefinition
+  | CompiledReceiveOnlyChannelDefinition;
+
+export type CompiledChannelEntry = CompiledActiveChannelDefinition | DisabledCompiledChannelEntry;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -75,6 +79,19 @@ export interface CompiledChannelDefinition {
    * channel leaves CORS untouched.
    */
   readonly cors?: NormalizedChannelCorsOptions;
+}
+
+/**
+ * Active compiled channel entry with a `receive` hook and no network route.
+ */
+export interface CompiledReceiveOnlyChannelDefinition {
+  readonly kind: "receive-only-channel";
+  readonly name: string;
+  readonly logicalPath: string;
+  readonly sourceId: string;
+  readonly sourceKind: "module";
+  readonly exportName?: string;
+  readonly adapterKind?: string;
 }
 
 /**
@@ -337,6 +354,18 @@ const compiledChannelDefinitionSchema = z
   })
   .strict();
 
+const compiledReceiveOnlyChannelDefinitionSchema = z
+  .object({
+    kind: z.literal("receive-only-channel"),
+    name: z.string(),
+    logicalPath: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
+    exportName: z.string().optional(),
+    adapterKind: z.string().optional(),
+  })
+  .strict();
+
 const disabledCompiledChannelEntrySchema = z
   .object({
     kind: z.literal("disabled"),
@@ -347,6 +376,7 @@ const disabledCompiledChannelEntrySchema = z
 
 const compiledChannelEntrySchema = z.union([
   compiledChannelDefinitionSchema,
+  compiledReceiveOnlyChannelDefinitionSchema,
   disabledCompiledChannelEntrySchema,
 ]) as unknown as z.ZodType<CompiledChannelEntry>;
 

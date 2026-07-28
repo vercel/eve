@@ -1,6 +1,7 @@
 import type { Nitro } from "nitro/types";
 
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import {
   getAllFrameworkChannelNames,
@@ -12,7 +13,7 @@ import {
   resolvePackageSourceFilePath,
 } from "#internal/application/package.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
-import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type { ResolvedChannelRouteDefinition } from "#runtime/types.js";
 
 const EVE_CHANNEL_VIRTUAL_ID_PREFIX = "#nitro/virtual/eve-channel/";
 
@@ -29,11 +30,17 @@ export interface NitroChannelRouteRegistration {
   readonly cors?: NormalizedChannelCorsOptions;
 }
 
+interface ChannelRouteManifestHost {
+  readonly compileResult: {
+    readonly manifest: Pick<CompiledAgentManifest, "channels">;
+  };
+}
+
 /**
  * Computes the merged set of channel routes the Nitro host should mount.
  */
 export function computeChannelRouteRegistrations(
-  preparedHost: PreparedApplicationHost,
+  preparedHost: ChannelRouteManifestHost,
 ): readonly NitroChannelRouteRegistration[] {
   const manifestChannels = preparedHost.compileResult.manifest.channels;
   const authoredNames = new Set<string>();
@@ -55,11 +62,15 @@ export function computeChannelRouteRegistrations(
       continue;
     }
     authoredNames.add(entry.name);
+    if (entry.kind === "receive-only-channel") {
+      continue;
+    }
     authoredRoutes.push({ method: entry.method, route: entry.urlPath, cors: entry.cors });
   }
 
   const activeFrameworkRoutes = getFrameworkChannelDefinitions()
     .filter((channel) => !authoredNames.has(channel.name) && !disabledNames.has(channel.name))
+    .filter((channel): channel is ResolvedChannelRouteDefinition => channel.method !== undefined)
     .map(
       (channel): NitroChannelRouteRegistration => ({
         method: channel.method,

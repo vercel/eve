@@ -12,6 +12,7 @@ import {
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
+import { defineChannel } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 function createMockRunHandle(): RunHandle {
@@ -152,6 +153,50 @@ describe("ScheduleDispatcher", () => {
       expect(result.waitUntilTasks).toHaveLength(2);
       await expect(Promise.all(result.waitUntilTasks)).resolves.toEqual(["done", 42]);
       expect(result.sessions).toHaveLength(0);
+    });
+
+    it("dispatches to a registered receive-only channel", async () => {
+      const runtime = createMockRuntime();
+      const definition = defineChannel({
+        routes: [],
+        async receive(input, { send }) {
+          return await send(input.message, {
+            auth: input.auth,
+            continuationToken: String(input.target.workspaceId),
+            mode: "task",
+          });
+        },
+      }) as CompiledChannel;
+      const resolved = {
+        adapter: definition.adapter,
+        definition,
+        logicalPath: "channels/learning.ts",
+        name: "learning",
+        receive: definition.receive,
+        sourceId: "channels/learning.ts",
+        sourceKind: "module",
+      } satisfies ResolvedChannelDefinition;
+      const dispatcher = new ScheduleDispatcher({ runtime, channels: [resolved] });
+
+      await dispatcher.trigger({
+        scheduleId: "learn",
+        async run({ appAuth, receive }) {
+          await receive(definition, {
+            auth: appAuth,
+            message: "Study the latest outcomes.",
+            target: { workspaceId: "ws_123" },
+          });
+        },
+      });
+
+      expect(runtime.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auth: SCHEDULE_APP_AUTH,
+          continuationToken: "learning:ws_123",
+          input: { message: "Study the latest outcomes." },
+          mode: "task",
+        }),
+      );
     });
 
     it("throws when args.receive(channel) is called with an unregistered channel", async () => {

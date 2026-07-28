@@ -67,7 +67,14 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
             method: channel.method,
             urlPath: channel.urlPath,
           }
-        : { name: channel.name, kind: "disabled", method: null, urlPath: null },
+        : channel.kind === "receive-only-channel"
+          ? {
+              name: channel.name,
+              kind: channel.adapterKind ?? null,
+              method: null,
+              urlPath: null,
+            }
+          : { name: channel.name, kind: "disabled", method: null, urlPath: null },
     ),
     messaging: {
       create: messaging.createSessionRoutePath,

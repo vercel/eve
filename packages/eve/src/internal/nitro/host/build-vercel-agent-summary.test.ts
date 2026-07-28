@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type CompiledReceiveOnlyChannelDefinition,
   type CompiledChannelDefinition,
   type CompiledConnectionDefinition,
   type CompiledScheduleDefinition,
@@ -83,6 +84,20 @@ function makeChannel(input: { name: string; adapterKind?: string }): CompiledCha
   };
 }
 
+function makeReceiveOnlyChannel(input: {
+  name: string;
+  adapterKind?: string;
+}): CompiledReceiveOnlyChannelDefinition {
+  return {
+    adapterKind: input.adapterKind,
+    kind: "receive-only-channel",
+    logicalPath: `channels/${input.name}.ts`,
+    name: input.name,
+    sourceId: `channels/${input.name}.ts`,
+    sourceKind: "module",
+  };
+}
+
 function makeFlatSkill(name: string): CompiledSkillDefinition {
   return {
     description: `${name} description`,
@@ -146,6 +161,7 @@ describe("buildVercelAgentSummary", () => {
         makeChannel({ name: "messages", adapterKind: "http" }),
         makeChannel({ name: "stripe", adapterKind: "stripe-webhook" }),
         makeChannel({ name: "mystery" }),
+        makeReceiveOnlyChannel({ name: "learning", adapterKind: "learning-worker" }),
         { kind: "disabled", logicalPath: "channels/disabled.ts", name: "disabled" },
       ],
       config: {
@@ -319,6 +335,15 @@ describe("buildVercelAgentSummary", () => {
         name: "mystery",
         type: "unknown",
         urlPath: "/mystery",
+      },
+      {
+        adapterKind: "learning-worker",
+        logicalPath: "channels/learning.ts",
+        method: null,
+        name: "learning",
+        receiveOnly: true,
+        type: "unknown",
+        urlPath: null,
       },
     ]);
 

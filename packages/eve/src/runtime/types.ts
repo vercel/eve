@@ -214,20 +214,13 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
 }
 
 /**
- * Runtime-owned authored channel definition resolved from the compiled
- * module map. Channels are uniform fetch handlers — there is no per-platform
- * subtype.
- *
- * Supports both old Route-style `fetch` handlers and new CompiledChannel
- * route handlers. The dispatch layer checks for `handler` first.
+ * Fields shared by routed and receive-only authored channels resolved from
+ * the compiled module map.
  */
-export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
+interface ResolvedChannelCommon extends ResolvedModuleSourceRef {
   readonly name: string;
-  readonly method: ChannelRouteMethod;
   readonly adapter?: ChannelAdapter;
   readonly cors?: NormalizedChannelCorsOptions;
-  readonly urlPath: string;
-  readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
   /**
    * Universal entry point for new sessions, called by cross-channel
    * initiators (the schedule dispatcher today). Typed precisely as
@@ -249,6 +242,15 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
    * `defineChannel`.
    */
   readonly definition?: CompiledChannel;
+}
+
+/**
+ * Runtime-owned authored channel route.
+ */
+export interface ResolvedChannelRouteDefinition extends ResolvedChannelCommon {
+  readonly method: ChannelRouteMethod;
+  readonly urlPath: string;
+  readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
   /**
    * New-style route handler from CompiledChannel. When present, the
    * dispatch layer uses this instead of `fetch`.
@@ -260,6 +262,21 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
    */
   readonly websocket?: WebSocketRouteHandler;
 }
+
+/**
+ * Runtime-owned authored channel that only accepts proactive `receive` calls.
+ */
+export interface ResolvedReceiveOnlyChannelDefinition extends ResolvedChannelCommon {
+  readonly method?: undefined;
+  readonly urlPath?: undefined;
+  readonly fetch?: undefined;
+  readonly handler?: undefined;
+  readonly websocket?: undefined;
+}
+
+export type ResolvedChannelDefinition =
+  | ResolvedChannelRouteDefinition
+  | ResolvedReceiveOnlyChannelDefinition;
 
 /**
  * Runtime-owned local subagent node resolved from one compiled local

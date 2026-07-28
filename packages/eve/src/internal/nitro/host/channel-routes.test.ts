@@ -1,9 +1,34 @@
 import { describe, expect, it } from "vitest";
 
+import type { CompiledReceiveOnlyChannelDefinition } from "#compiler/manifest.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { registerChannelVirtualHandlers } from "#internal/nitro/host/channel-routes.js";
+import {
+  computeChannelRouteRegistrations,
+  registerChannelVirtualHandlers,
+} from "#internal/nitro/host/channel-routes.js";
 
 describe("registerChannelVirtualHandlers", () => {
+  it("does not mount a route for a receive-only channel", () => {
+    const receiveOnlyChannel = {
+      adapterKind: "http",
+      kind: "receive-only-channel",
+      logicalPath: "channels/learning.ts",
+      name: "learning",
+      sourceId: "channels/learning.ts",
+      sourceKind: "module",
+    } satisfies CompiledReceiveOnlyChannelDefinition;
+    const withoutAuthoredChannels = {
+      compileResult: { manifest: { channels: [] } },
+    };
+    const withReceiveOnlyChannel = {
+      compileResult: { manifest: { channels: [receiveOnlyChannel] } },
+    };
+
+    expect(computeChannelRouteRegistrations(withReceiveOnlyChannel)).toEqual(
+      computeChannelRouteRegistrations(withoutAuthoredChannels),
+    );
+  });
+
   it("wraps CORS-enabled HTTP routes and registers preflight handlers", () => {
     const nitro = {
       options: {

@@ -2,8 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type {
+  CompiledActiveChannelDefinition,
   CompiledAgentManifest,
-  CompiledChannelDefinition,
   CompiledChannelEntry,
   CompiledConnectionDefinition,
   CompiledInstructionsDefinition,
@@ -100,8 +100,8 @@ export async function emitVercelAgentSummary(input: {
   return input.outputPath;
 }
 
-function isActiveChannel(entry: CompiledChannelEntry): entry is CompiledChannelDefinition {
-  return entry.kind === "channel";
+function isActiveChannel(entry: CompiledChannelEntry): entry is CompiledActiveChannelDefinition {
+  return entry.kind !== "disabled";
 }
 
 function toInstructionsEntry(
@@ -158,20 +158,22 @@ function toConnectionEntry(connection: CompiledConnectionDefinition): VercelEveC
   return entry;
 }
 
-function toChannelEntry(channel: CompiledChannelDefinition): VercelEveChannelEntry {
+function toChannelEntry(channel: CompiledActiveChannelDefinition): VercelEveChannelEntry {
   const entry: VercelEveChannelEntry = {
     name: channel.name,
-    method: channel.method,
-    urlPath: channel.urlPath,
+    method: channel.kind === "channel" ? channel.method : null,
+    urlPath: channel.kind === "channel" ? channel.urlPath : null,
     type: normalizeChannelKindForDisplay(channel.adapterKind),
     logicalPath: channel.logicalPath,
   };
+  const channelEntry: VercelEveChannelEntry =
+    channel.kind === "receive-only-channel" ? { ...entry, receiveOnly: true } : entry;
 
   if (channel.adapterKind !== undefined) {
-    return { ...entry, adapterKind: channel.adapterKind };
+    return { ...channelEntry, adapterKind: channel.adapterKind };
   }
 
-  return entry;
+  return channelEntry;
 }
 
 function toSubagentEntry(subagent: CompiledSubagentNode): VercelEveSubagentEntry {

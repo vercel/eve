@@ -8,7 +8,9 @@ import {
 } from "#discover/manifest.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
+import { collectModuleRefsForManifest } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { defineChannel } from "#public/definitions/channel.js";
 import { experimental_workflow } from "#public/definitions/tool.js";
 
 const mocks = vi.hoisted(() => ({
@@ -92,6 +94,47 @@ describe("compileAgentManifest", () => {
     const compiled = await compileAgentManifest(manifest);
 
     expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
+  });
+
+  it("preserves receive-only channels in the manifest and module map", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      channels: [createModuleSourceRef({ logicalPath: "channels/learning.ts" })],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue(
+      defineChannel({
+        routes: [],
+        async receive(input, { send }) {
+          return await send(input.message, {
+            auth: input.auth,
+            continuationToken: "learning",
+            mode: "task",
+          });
+        },
+      }),
+    );
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.channels).toEqual([
+      {
+        adapterKind: "http",
+        kind: "receive-only-channel",
+        logicalPath: "channels/learning.ts",
+        name: "learning",
+        sourceId: "channels/learning.ts",
+        sourceKind: "module",
+      },
+    ]);
+    expect(collectModuleRefsForManifest(compiled)).toContainEqual({
+      exportName: undefined,
+      logicalPath: "channels/learning.ts",
+      sourceId: "channels/learning.ts",
+      sourceKind: "module",
+    });
   });
 });
 
