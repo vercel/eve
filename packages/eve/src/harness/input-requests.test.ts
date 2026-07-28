@@ -7,7 +7,7 @@ import { once } from "#public/tools/approval/approval-helpers.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
-  classifyInputRequest,
+  clearPendingSessionLimitPrompt,
   consumeDeferredStepInput,
   createRuntimeToolCallActionFromToolCall,
   getApprovedTools,
@@ -925,62 +925,62 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
   });
 });
 
-describe("classifyInputRequest", () => {
-  const action = {
-    callId: "call_1",
-    input: {},
-    kind: "tool-call",
-    toolName: "ask_user",
-  } as const;
-
-  it("requires an explicit answer for tool approvals", () => {
-    expect(
-      classifyInputRequest({
-        action,
-        options: [
-          { id: "approve", label: "Approve" },
-          { id: "deny", label: "Deny" },
-        ],
-        prompt: "Run the tool?",
-        requestId: "call_1",
-      }),
-    ).toBe("required");
-  });
-
-  it("requires an explicit answer for session-limit continuations", () => {
-    expect(
-      classifyInputRequest(
+describe("clearPendingSessionLimitPrompt", () => {
+  it("drops a pending batch made only of session-limit continuation prompts", () => {
+    const session = setPendingInputBatch({
+      requests: [
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
-      ),
-    ).toBe("required");
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const cleared = clearPendingSessionLimitPrompt(session);
+    const result = resolvePendingInput({ session: cleared, stepInput: { message: "try again" } });
+
+    // No stale batch left: the follow-up message flows to the step (where
+    // the pre-model gate re-raises the prompt) instead of deferring forever.
+    expect(result.outcome).toBe("continue");
+    expect(hasDeferredStepInput(cleared)).toBe(false);
   });
 
-  it("classifies model questions as dismissable", () => {
-    expect(
-      classifyInputRequest({
-        action,
-        allowFreeform: true,
-        options: [{ id: "blue", label: "Blue" }],
-        prompt: "Which color?",
-        requestId: "call_1",
-      }),
-    ).toBe("dismissable");
+  it("keeps model-anchored batches (tool approvals) intact", () => {
+    const session = setPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "approval-call",
+            input: { command: "rm -rf /tmp/demo" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "deny", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
+        },
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const kept = clearPendingSessionLimitPrompt(session);
+    const result = resolvePendingInput({ session: kept, stepInput: { message: "and then this" } });
+
+    // The approval still gates the turn: the follow-up defers behind it.
+    expect(result.outcome).toBe("unresolved");
+    expect(hasDeferredStepInput(result.session)).toBe(true);
   });
 
-  it("does not mistake non-approval two-option requests for approvals", () => {
-    expect(
-      classifyInputRequest({
-        action,
-        options: [
-          { id: "blue", label: "Blue" },
-          { id: "red", label: "Red" },
-        ],
-        prompt: "Which color?",
-        requestId: "call_1",
-      }),
-    ).toBe("dismissable");
+  it("is a no-op without a pending batch", () => {
+    const session = createHarnessSession();
+    expect(clearPendingSessionLimitPrompt(session)).toBe(session);
   });
 });

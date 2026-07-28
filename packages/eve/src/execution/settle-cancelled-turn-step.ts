@@ -13,6 +13,7 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
+import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import {
   getHarnessEmissionState,
   isHarnessBetweenTurns,
@@ -110,11 +111,19 @@ export async function settleCancelledTurnStep(input: {
     }
   }
 
+  // `clearPendingSessionLimitPrompt`: cancellation settles with the step's
+  // input snapshot, which can resurrect an already-answered session-limit
+  // prompt (the decline that cancelled this turn consumed the answer in the
+  // discarded turn state). The pre-model gate re-raises the prompt while the
+  // violation holds, so the next delivery gets a fresh prompt instead of
+  // queueing forever behind a stale one.
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
-      clearAllProxyInputRequests(
-        clearPendingWorkflowInterrupt(clearPendingRuntimeActionBatch(session)),
+      clearPendingSessionLimitPrompt(
+        clearAllProxyInputRequests(
+          clearPendingWorkflowInterrupt(clearPendingRuntimeActionBatch(session)),
+        ),
       ),
       emissionState,
     ),

@@ -6,6 +6,7 @@ import type {
 } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
+import { classifyInputRequest, isApprovalRequest } from "#harness/input-request-class.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 import {
@@ -303,39 +304,26 @@ function compactStepInput(
 }
 
 /**
- * Behavioral class of a pending input request.
+ * Drops a pending session-limit continuation prompt from a parked session.
  *
- * `"required"` — the request must be explicitly answered before the turn can
- * move on. While one is unanswered, any other arriving input is queued via
- * {@link queueDeferredStepInput} and replayed on the step after the answer.
- * The pending batch never churns, so the request ids the user is answering
- * stay valid.
- *
- * `"dismissable"` — a plain follow-up message counts as the user moving on.
- * The request resolves as a real `tool-result` with `status: "ignored"` and
- * the model continues with the message in the same step.
+ * A cancelled turn settles with the step's input snapshot, which can
+ * resurrect a continuation prompt the user already answered — the decline
+ * that cancelled the turn consumed the answer inside the discarded turn
+ * state. Left in place, the stale prompt would queue every follow-up
+ * message behind an answer that will never come. Harness-authored prompts
+ * are deterministically re-raised by the pre-model gate, so dropping is
+ * always safe; model-anchored batches (tool approvals, questions) are kept
+ * because their tool calls still require resolution.
  */
-export type InputRequestClass = "dismissable" | "required";
-
-/** Classifies one pending request; see {@link InputRequestClass}. */
-export function classifyInputRequest(request: InputRequest): InputRequestClass {
-  // A tool approval gates a model-emitted tool call. AI SDK requires the
-  // approval response to resolve in isolation, and skipping it would leave
-  // the intercepted call permanently un-adjudicated.
-  if (isApprovalRequest(request)) {
-    return "required";
+export function clearPendingSessionLimitPrompt(session: HarnessSession): HarnessSession {
+  const pendingBatch = getPendingInputBatch(session.state);
+  if (pendingBatch === undefined || pendingBatch.requests.length === 0) {
+    return session;
   }
-  // A session-limit continuation guards the next model call itself:
-  // "ignore and continue" cannot continue -- the pre-model gate re-parks
-  // while the violation holds -- and, being harness-authored, the request
-  // has no history anchor on which an ignored outcome could be recorded.
-  if (isSessionLimitContinuationRequest(request)) {
-    return "required";
+  if (!pendingBatch.requests.every((request) => isSessionLimitContinuationRequest(request))) {
+    return session;
   }
-  // Everything else wraps a model-emitted tool call whose ignored outcome
-  // is expressible as a tool-result, so dismissal is always representable.
-  // There is no third class.
-  return "dismissable";
+  return clearPendingInputBatch(session);
 }
 
 function hasUnansweredRequiredRequest(input: {
@@ -678,15 +666,6 @@ function buildToolResponsePartsForRequest(
       type: "tool-result",
     },
   ];
-}
-
-/** Shared approval predicate: a request whose options are exactly `approve` / `deny`. */
-export function isApprovalRequest(request: InputRequest): boolean {
-  return (
-    request.options?.length === 2 &&
-    request.options[0]?.id === "approve" &&
-    request.options[1]?.id === "deny"
-  );
 }
 
 // ---------------------------------------------------------------------------
