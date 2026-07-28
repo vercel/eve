@@ -40,8 +40,8 @@ catalogs:
       specifier: 0.4.2
       version: 0.4.2
     '@vercel/sandbox':
-      specifier: 2.8.0
-      version: 2.8.0
+      specifier: 2.9.0
+      version: 2.9.0
     ai:
       specifier: ^7.0.38
       version: 7.0.38
@@ -257,7 +257,7 @@ importers:
     devDependencies:
       '@agent-browser/eve':
         specifier: ^0.33.0
-        version: 0.33.0(@vercel/sandbox@2.8.0)(eve@packages+eve)
+        version: 0.33.0(@vercel/sandbox@2.9.0)(eve@packages+eve)
       '@braintrust/otel':
         specifier: ^0.3.0
         version: 0.3.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))(braintrust@3.14.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.4.3))
@@ -1202,7 +1202,7 @@ importers:
         version: 3.8.0
       '@vercel/sandbox':
         specifier: 'catalog:'
-        version: 2.8.0
+        version: 2.9.0
       '@vercel/sdk':
         specifier: 1.28.8
         version: 1.28.8
@@ -8031,8 +8031,8 @@ packages:
   '@vercel/sandbox@2.1.1':
     resolution: {integrity: sha512-gKhW+YlvU15Qxya7jQKByB+sqA1dWat5zx/rvxT52E3Ryg9MAIXgqD5wd1d+CoJDbdHL26gIOcksTZY5sFpplA==}
 
-  '@vercel/sandbox@2.8.0':
-    resolution: {integrity: sha512-1gmIXWgueeBBwBitVl1xqOsYmVv7xr7qX1qXeqwLGZTKGG1SkkpYkDzpWZ8LIDN0PmPGCqE6lvYao3zP8iz5uw==}
+  '@vercel/sandbox@2.9.0':
+    resolution: {integrity: sha512-AMnzmOUG765PJnNyrj12Ed4XD+M2ns8C+o9UTBERuZeUQxbRo2izJTKPezaeDCl+KEpyw+JXepRCKIxSsylsMQ==}
 
   '@vercel/sdk@1.28.8':
     resolution: {integrity: sha512-uAl+pEZZnFYRFzE/43ihP3aYTJ+4v0+coiMYobYMqtaERWknYKuRZWEj9Dk9r87yWXfxclsQugXkN42kaOcySw==}
@@ -14945,17 +14945,17 @@ packages:
 
 snapshots:
 
-  '@agent-browser/eve@0.33.0(@vercel/sandbox@2.8.0)(eve@packages+eve)':
+  '@agent-browser/eve@0.33.0(@vercel/sandbox@2.9.0)(eve@packages+eve)':
     dependencies:
-      '@agent-browser/sandbox': 0.33.0(@vercel/sandbox@2.8.0)
+      '@agent-browser/sandbox': 0.33.0(@vercel/sandbox@2.9.0)
       eve: link:packages/eve
       zod: 4.4.3
     transitivePeerDependencies:
       - '@vercel/sandbox'
 
-  '@agent-browser/sandbox@0.33.0(@vercel/sandbox@2.8.0)':
+  '@agent-browser/sandbox@0.33.0(@vercel/sandbox@2.9.0)':
     optionalDependencies:
-      '@vercel/sandbox': 2.8.0
+      '@vercel/sandbox': 2.9.0
 
   '@ai-sdk/amazon-bedrock@3.0.110(zod@4.4.3)':
     dependencies:
@@ -21759,7 +21759,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/sandbox@2.8.0':
+  '@vercel/sandbox@2.9.0':
     dependencies:
       '@vercel/oidc': 3.2.0
       '@workflow/serde': 4.1.0-beta.2

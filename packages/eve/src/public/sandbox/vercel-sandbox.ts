@@ -14,16 +14,15 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
   : never;
 
 /**
- * Options accepted by `vercel(opts)`. Forwarded to Vercel
- * Sandbox creation for every fresh sandbox the framework creates
- * (template at prewarm time, session at first-time session-create).
- * Skipped on resume (`Sandbox.get`) since no create happens there.
+ * Options accepted by `vercel(opts)`. Forwarded to Vercel when eve
+ * creates a template or forks a fresh session from one. Skipped on
+ * resume (`Sandbox.get`).
  *
  * `networkPolicy` is deferred until after framework-owned base setup
  * for fresh templates and template-less sessions, so eve can install
  * required packages before authored bootstrap code runs. Template-backed
- * session creates receive it at creation time because the template
- * already contains the prepared base runtime.
+ * session forks receive it as an override because the template already
+ * contains the prepared base runtime.
  *
  * Framework-injected fields (`name`, `onResume`, `persistent`, `signal`)
  * are excluded: the framework owns those and overrides any
@@ -37,7 +36,7 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * base layer for the template. Framework setup, bootstrap, and seed
  * files all run on top, and the resulting
  * framework-owned snapshot is what every later session derives from,
- * so `source` is stripped from the session-create path. eve does not
+ * so `source` is stripped from the session-fork path. eve does not
  * detect external snapshot changes; to pick up a rebuilt external
  * snapshot, force a template rebuild (e.g. by changing the sandbox
  * definition so its template key changes).

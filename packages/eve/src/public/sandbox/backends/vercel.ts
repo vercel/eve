@@ -12,18 +12,17 @@ import type {
  * including for local development, where it creates real hosted
  * sandboxes (requires Vercel credentials).
  *
- * The optional `opts` parameter is forwarded to Vercel Sandbox creation
- * for every fresh sandbox the framework creates (template at prewarm,
- * session at first-time create). On resume (`Sandbox.get`), no create
- * happens, so opts are not re-applied. `networkPolicy` is applied after
- * framework-owned base setup for fresh templates and template-less
- * sessions, before authored bootstrap code runs.
+ * The optional `opts` parameter is forwarded to Vercel when eve creates
+ * a template or forks a fresh session from one. On resume
+ * (`Sandbox.get`), opts are not re-applied. `networkPolicy` is applied
+ * after framework-owned base setup for fresh templates and
+ * template-less sessions, before authored bootstrap code runs.
  *
  * `opts.source`, if supplied, is used only on the template create:
  * the author's snapshot, git revision, or tarball becomes the base
  * layer of the template. Bootstrap, seed files, and framework setup
- * still run on top, and every session derives from the resulting
- * eve-owned snapshot. `source` is stripped from session creates so the
+ * still run on top, and every session forks from the resulting
+ * eve-owned snapshot. `source` is stripped from session forks so the
  * framework's snapshot always wins.
  *
  * `bootstrap({ use })` applies its options to the template via

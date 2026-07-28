@@ -36,6 +36,7 @@ import {
   type CreateVercelSandbox,
   type VercelSandboxCreateParams,
 } from "#execution/sandbox/bindings/vercel-create-sdk.js";
+import { getVercelSandboxFetch } from "#execution/sandbox/bindings/vercel-credentials.js";
 import {
   isVercelSandboxMissingError,
   isVercelSnapshotUnavailableError,
@@ -45,6 +46,7 @@ import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-re
 import { writeSandboxSeedFiles } from "#execution/sandbox/bindings/local-backend-utils.js";
 import type {
   VercelCreateOptions,
+  VercelForkOptions,
   VercelModule,
   VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
@@ -57,10 +59,9 @@ export interface CreateVercelSandboxInput {
 /**
  * Creates the Vercel-backed sandbox backend.
  *
- * Any author-supplied `createOptions` are forwarded to Vercel's sandbox
- * create API for every fresh sandbox the framework creates (template at
- * prewarm time, session at first-time session-create). On resume
- * (`Sandbox.get`) no create happens, so they are not re-applied.
+ * Any author-supplied `createOptions` are forwarded to Vercel when the
+ * framework creates a template or forks a fresh session from one. On
+ * resume (`Sandbox.get`) they are not re-applied.
  */
 export function createVercelSandbox(
   input: CreateVercelSandboxInput = {},
@@ -102,8 +103,8 @@ export function createVercelSandbox(
           existingMetadata: createInput.existingMetadata,
           sandboxModule,
           sessionKey: createInput.sessionKey,
-          snapshotId: template?.snapshotId,
           tags,
+          templateSandboxName: template?.sandboxName,
         });
       } catch (error) {
         if (
@@ -163,7 +164,6 @@ export function createVercelSandbox(
 
 interface VercelSandboxTemplateRecord {
   readonly sandboxName: string;
-  readonly snapshotId: string;
   readonly templateKey: string;
 }
 
@@ -217,7 +217,10 @@ async function readTemplate(input: {
     sandboxName: input.templateKey,
   });
 
-  if (sandbox === null || typeof sandbox.currentSnapshotId !== "string") {
+  if (
+    sandbox === null ||
+    !hasFrameworkSnapshot(sandbox, extractAuthorSnapshotId(input.createOptions))
+  ) {
     throw new SandboxTemplateNotProvisionedError({
       backendName: "vercel",
       templateKey: input.templateKey,
@@ -226,7 +229,6 @@ async function readTemplate(input: {
 
   return {
     sandboxName: sandbox.name,
-    snapshotId: sandbox.currentSnapshotId,
     templateKey: input.templateKey,
   };
 }
@@ -252,9 +254,9 @@ async function readTemplateForCreate(input: {
 
 /**
  * Creates or refreshes one named Vercel sandbox template and returns the
- * resulting snapshot metadata along with whether an existing snapshot
- * was reused. Internal — exposed only to the prewarm pipeline through
- * the backend's `prewarm` method.
+ * template record along with whether an existing snapshot was reused.
+ * Internal — exposed only to the prewarm pipeline through the backend's
+ * `prewarm` method.
  */
 async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplateOutcome> {
   const sandboxModule = await input.loadSandboxModule();
@@ -295,17 +297,11 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
    * framework snapshot, and we still owe `ensureSandboxWorkingDirectory`,
    * bootstrap, seed file writes, and `sandbox.snapshot()` on top.
    */
-  const hasFrameworkSnapshot =
-    typeof sandbox.currentSnapshotId === "string" &&
-    sandbox.currentSnapshotId.length > 0 &&
-    sandbox.currentSnapshotId !== authorSnapshotId;
-
-  if (hasFrameworkSnapshot) {
+  if (hasFrameworkSnapshot(sandbox, authorSnapshotId)) {
     return {
       reused: true,
       template: {
         sandboxName: sandbox.name,
-        snapshotId: sandbox.currentSnapshotId as string,
         templateKey: input.templateKey,
       },
     };
@@ -337,12 +333,11 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
     });
   }
 
-  const snapshot = await sandbox.snapshot();
+  await sandbox.snapshot();
   return {
     reused: false,
     template: {
       sandboxName: sandbox.name,
-      snapshotId: snapshot.snapshotId,
       templateKey: input.templateKey,
     },
   };
@@ -354,8 +349,8 @@ interface EnsureSessionInput {
   readonly existingMetadata?: Record<string, unknown>;
   readonly sandboxModule: VercelModule;
   readonly sessionKey: string;
-  readonly snapshotId?: string;
   readonly tags: Record<string, string> | undefined;
+  readonly templateSandboxName?: string;
 }
 
 interface VercelSandboxSessionCreateResult {
@@ -376,17 +371,20 @@ async function ensureSession(input: EnsureSessionInput): Promise<VercelSandboxSe
     return { created: false, sandbox: existing };
   }
 
-  const createParams = createSessionCreateParams(input, sandboxName);
-  if (input.tags !== undefined) {
-    createParams.tags = input.tags;
-  }
+  const sandbox =
+    input.templateSandboxName === undefined
+      ? await input.createSandbox({
+          createOptions: createSessionCreateParams(input, sandboxName),
+          sandboxModule: input.sandboxModule,
+        })
+      : await input.sandboxModule.Sandbox.fork({
+          ...createSessionForkParams(input, sandboxName, input.templateSandboxName),
+          fetch: getVercelSandboxFetch(input.createOptions),
+        });
 
   return {
     created: true,
-    sandbox: await input.createSandbox({
-      createOptions: createParams,
-      sandboxModule: input.sandboxModule,
-    }),
+    sandbox,
   };
 }
 
@@ -394,34 +392,45 @@ function createSessionCreateParams(
   input: EnsureSessionInput,
   sandboxName: string,
 ): VercelSandboxCreateParams {
-  if (input.snapshotId === undefined) {
-    return withBaseSetupNetworkPolicy({
-      ...input.createOptions,
-      name: sandboxName,
-      persistent: true,
-    });
+  const createParams = withBaseSetupNetworkPolicy({
+    ...input.createOptions,
+    name: sandboxName,
+    persistent: true,
+  });
+  if (input.tags !== undefined) {
+    createParams.tags = input.tags;
   }
+  return createParams;
+}
 
+function createSessionForkParams(
+  input: EnsureSessionInput,
+  sandboxName: string,
+  templateSandboxName: string,
+): VercelForkOptions {
   /*
    * Strip `source`, `runtime`, and `image` from author-supplied create options
-   * for the template-backed session path. The framework owns the source there,
-   * and a snapshot source is mutually exclusive with both `runtime` and `image`
-   * (the template snapshot already has the eve image baked in).
+   * for the template-backed session path. The fork inherits the framework's
+   * prepared image and filesystem from the template sandbox.
    */
   const {
     image: _image,
     runtime: _runtime,
     source: _source,
-    ...sessionCreateOptions
+    ...forkOptions
   } = input.createOptions as VercelCreateOptions &
     Partial<Record<"image" | "runtime" | "source", unknown>>;
 
-  return {
-    ...sessionCreateOptions,
+  const forkParams: VercelForkOptions = {
+    ...forkOptions,
     name: sandboxName,
     persistent: true,
-    source: { snapshotId: input.snapshotId, type: "snapshot" as const },
+    sourceSandbox: templateSandboxName,
   };
+  if (input.tags !== undefined) {
+    forkParams.tags = input.tags;
+  }
+  return forkParams;
 }
 
 function withBaseSetupNetworkPolicy(
@@ -543,6 +552,17 @@ function isUnprovisionedTerminalTemplateSandbox(
 
   return (
     sandbox.status === "aborted" || sandbox.status === "failed" || sandbox.status === "stopped"
+  );
+}
+
+function hasFrameworkSnapshot(
+  sandbox: VercelSandbox,
+  authorSnapshotId: string | undefined,
+): boolean {
+  return (
+    typeof sandbox.currentSnapshotId === "string" &&
+    sandbox.currentSnapshotId.length > 0 &&
+    sandbox.currentSnapshotId !== authorSnapshotId
   );
 }
 

@@ -75,10 +75,27 @@ function createMockSandbox(input: {
 }
 
 function createTestVercelSandbox(input: Parameters<typeof createVercelSandbox>[0] = {}) {
+  const originalLoadSandboxModule = input.loadSandboxModule;
+  const loadSandboxModule =
+    originalLoadSandboxModule === undefined
+      ? undefined
+      : async () => {
+          const sandboxModule = await originalLoadSandboxModule();
+          return {
+            ...sandboxModule,
+            Sandbox: {
+              ...sandboxModule.Sandbox,
+              fork: async (forkOptions: unknown) =>
+                await sandboxModule.Sandbox.create(forkOptions as never),
+            },
+          } as never;
+        };
+
   return createVercelSandbox({
     ...input,
     createSandbox: async ({ createOptions, sandboxModule }) =>
       await sandboxModule.Sandbox.create(createOptions),
+    loadSandboxModule,
   });
 }
 
@@ -465,6 +482,30 @@ describe("createVercelSandbox", () => {
     expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
   });
 
+  it("rejects an unprovisioned template instead of forking from its base image", async () => {
+    const templateSandbox = createMockSandbox({ name: "template-key" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(),
+        fork: vi.fn(),
+        get: vi.fn().mockResolvedValue(templateSandbox),
+      },
+    };
+    const backend = createVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await expect(
+      backend.create({
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+        sessionKey: "session-key",
+        templateKey: "template-key",
+      }),
+    ).rejects.toBeInstanceOf(SandboxTemplateNotProvisionedError);
+
+    expect(sandboxModule.Sandbox.fork).not.toHaveBeenCalled();
+  });
+
   it("removes paths through the sandbox filesystem API", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });
@@ -504,7 +545,7 @@ describe("createVercelSandbox", () => {
     expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
   });
 
-  it("applies a 30-minute default timeout to Sandbox.create", async () => {
+  it("applies a 30-minute default timeout to template creation and session forks", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi
@@ -540,21 +581,20 @@ describe("createVercelSandbox", () => {
     expect(sessionArgs?.[0]).toMatchObject({ timeout: 30 * 60 * 1_000 });
   });
 
-  it("applies framework defaults to Sandbox.create when no createOptions are supplied", async () => {
-    const templateSandbox = createMockSandbox({ name: "template" });
+  it("creates template-backed sessions through Sandbox.fork", async () => {
+    const templateSandbox = createMockSandbox({ name: "template-key" });
     const sessionSandbox = createMockSandbox({ name: "session" });
-    const create = vi
-      .fn()
-      .mockResolvedValueOnce(templateSandbox)
-      .mockResolvedValueOnce(sessionSandbox);
+    const create = vi.fn().mockResolvedValueOnce(templateSandbox);
+    const fork = vi.fn().mockResolvedValueOnce(sessionSandbox);
     const sandboxModule = {
       Sandbox: {
         create,
+        fork,
         get: vi.fn().mockResolvedValue(null),
       },
     };
 
-    const backend = createTestVercelSandbox({
+    const backend = createVercelSandbox({
       loadSandboxModule: async () => sandboxModule as never,
     });
 
@@ -570,9 +610,12 @@ describe("createVercelSandbox", () => {
       templateKey: "template-key",
     });
 
-    expect(create).toHaveBeenCalledTimes(2);
-    const [templateArgs, sessionArgs] = create.mock.calls;
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(fork).toHaveBeenCalledTimes(1);
+    const [templateArgs] = create.mock.calls;
+    const [sessionArgs] = fork.mock.calls;
     expect(templateArgs?.[0]).toMatchObject({
+      image: "vercel/eve:latest",
       name: "template-key",
       persistent: false,
       timeout: 30 * 60 * 1_000,
@@ -580,9 +623,12 @@ describe("createVercelSandbox", () => {
     expect(sessionArgs?.[0]).toMatchObject({
       name: "session-key",
       persistent: true,
+      sourceSandbox: "template-key",
       timeout: 30 * 60 * 1_000,
-      source: { snapshotId: "template-snapshot", type: "snapshot" },
     });
+    expect(sessionArgs?.[0]).not.toHaveProperty("image");
+    expect(sessionArgs?.[0]).not.toHaveProperty("runtime");
+    expect(sessionArgs?.[0]).not.toHaveProperty("source");
   });
 
   it("creates a fresh session without reading or snapshotting a template when templateKey is null", async () => {
@@ -655,7 +701,7 @@ describe("createVercelSandbox", () => {
     expect(sessionSandbox.snapshot).not.toHaveBeenCalled();
   });
 
-  it("forwards factory createOptions to both template and session Sandbox.create", async () => {
+  it("forwards factory createOptions to template creation and session forks", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi
@@ -707,7 +753,7 @@ describe("createVercelSandbox", () => {
       persistent: true,
       ports: [3000, 4000],
       resources: { vcpus: 2 },
-      source: { snapshotId: "template-snapshot", type: "snapshot" },
+      sourceSandbox: "template",
       timeout: 600_000,
     });
     expect(templateSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
@@ -765,7 +811,7 @@ describe("createVercelSandbox", () => {
     });
     expect(templateSandbox.snapshot).toHaveBeenCalledTimes(1);
     expect(sessionArgs?.[0]).toMatchObject({
-      source: { snapshotId: "template-snapshot", type: "snapshot" },
+      sourceSandbox: "template",
     });
   });
 
@@ -813,7 +859,7 @@ describe("createVercelSandbox", () => {
     expect(existingTemplate.snapshot).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0]).toMatchObject({
-      source: { snapshotId: "template-key-snapshot", type: "snapshot" },
+      sourceSandbox: "template-key",
     });
   });
 
@@ -886,7 +932,7 @@ describe("createVercelSandbox", () => {
     expect(create).toHaveBeenCalledTimes(3);
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       name: "session-key",
-      source: { snapshotId: "expired-template-snapshot", type: "snapshot" },
+      sourceSandbox: "template-key",
     });
     expect(create.mock.calls[1]?.[0]).toMatchObject({
       name: "template-key",
@@ -894,7 +940,7 @@ describe("createVercelSandbox", () => {
     });
     expect(create.mock.calls[2]?.[0]).toMatchObject({
       name: "session-key",
-      source: { snapshotId: "template-key-snapshot", type: "snapshot" },
+      sourceSandbox: "template-key",
     });
   });
 
@@ -1067,7 +1113,7 @@ describe("createVercelSandbox", () => {
       expect.objectContaining({
         name: "deleted-sandbox",
         persistent: true,
-        source: { snapshotId: "template-snapshot", type: "snapshot" },
+        sourceSandbox: "template-key",
       }),
     );
     expect(handle.session).toBeDefined();
