@@ -300,7 +300,7 @@
   },
   "dependencies": {
     "nitro": "3.0.260610-beta",
-    "undici": "7.28.0"
+    "undici": "8.9.0"
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "catalog:",
