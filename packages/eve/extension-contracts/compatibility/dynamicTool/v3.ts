@@ -7,8 +7,7 @@ import {
 
 /**
  * Epoch 3 resolvers take the stream event as `unknown` and read session
- * identity from the resolve context. Adding `meta.id` to the event envelope
- * must not disturb either.
+ * identity from the resolve context.
  */
 const events = {
   "session.started": (_event, ctx): DynamicToolResult => ({

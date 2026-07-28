@@ -1672,14 +1672,13 @@ async function* eveEventsToTUIStream(
   } = input;
   const textParts = new Map<string, StreamPartState>();
   const reasoningParts = new Map<string, StreamPartState>();
-  // A reconnect re-delivers chunks under the ids they were emitted with.
-  // Dropping them here means every case below is a new emission.
+  // Dropping re-delivered events here means every case below is a new emission.
   const seenEvents = createEventDeduper();
   // Counts `step.started` events. The harness reuses `stepIndex` across the
   // model calls of one turn (e.g. the post-subagent call restarts at the same
   // index), so a part key alone cannot distinguish a new message under a
-  // reused key from a re-emission of the finished one. A fresh `step.started`
-  // since the part completed is the discriminator.
+  // reused key from a re-emission. A fresh `step.started` since the part
+  // completed is the discriminator.
   let stepEpoch = 0;
   const knownToolCalls = new Set<string>();
   const seenInputRequestIds = new Set<string>();
@@ -1734,9 +1733,7 @@ async function* eveEventsToTUIStream(
         const next = appended.data.messageSoFar;
 
         if (state.completed) {
-          // Text under a completed key without an intervening `step.started`
-          // is a retry of the same model call — drop it rather than mixing
-          // attempts.
+          // No intervening `step.started`: a retry of the same model call.
           if (stepEpoch <= state.completedEpoch) break;
           // A fresh model call reusing this part key (the harness restarts
           // `stepIndex` after a park/resume, e.g. post-subagent): open a new

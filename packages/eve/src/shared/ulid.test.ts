@@ -25,9 +25,8 @@ describe("createUlid", () => {
 
 describe("createUlidFactory", () => {
   it("encodes the timestamp exactly as the ULID spec does", () => {
-    // Golden vectors taken from the reference `ulid` package's `encodeTime`.
-    // They pin the Crockford timestamp so a change to the encoder cannot
-    // silently produce ids that other ULID tooling misreads.
+    // Golden vectors from the reference `ulid` package's `encodeTime`, so an
+    // encoder change cannot silently produce ids other tooling misreads.
     vi.useFakeTimers();
     const mint = createUlidFactory();
 
@@ -82,8 +81,8 @@ describe("createUlidFactory", () => {
     const settled = createUlidFactory();
     settled();
 
-    // A fresh generator has observed no clock, so it is free to mint an
-    // earlier timestamp than one that has already run past it.
+    // A fresh generator has observed no clock, so it may mint an earlier
+    // timestamp than one that already ran past it.
     vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
     const fresh = createUlidFactory();
 

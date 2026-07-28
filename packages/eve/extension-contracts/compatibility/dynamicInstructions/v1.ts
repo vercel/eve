@@ -1,9 +1,8 @@
 import { defineDynamic, defineInstructions } from "#public/instructions/index.js";
 
 /**
- * Epoch 1 resolves the per-session system prompt from `session.started`. The
- * resolver reads only the resolve context, so the added `meta.id` on the event
- * envelope must stay invisible to it.
+ * Epoch 1 resolves the per-session system prompt from `session.started`,
+ * reading only the resolve context. The event envelope stays invisible to it.
  */
 export default defineDynamic({
   events: {

@@ -291,8 +291,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   const writer = input.parentWritable.getWriter();
 
-  // Stamp once and reuse: the persisted chunk and the hooks below must agree
-  // on this event's `meta.id`.
+  // Stamp once: the persisted chunk and the hooks below must agree on the id.
   const emit = async (
     event: HandleMessageStreamEvent,
   ): Promise<StampedHandleMessageStreamEvent> => {

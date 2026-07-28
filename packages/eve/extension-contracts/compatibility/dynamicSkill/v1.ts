@@ -2,8 +2,7 @@ import { defineDynamic, defineSkill } from "#public/skills/index.js";
 
 /**
  * Epoch 1 resolves a per-principal skill from `session.started` and
- * `turn.started`. The resolver ignores the event body entirely, so the added
- * `meta.id` on the envelope must stay invisible to it.
+ * `turn.started`, ignoring the event body entirely.
  */
 export default defineDynamic({
   events: {

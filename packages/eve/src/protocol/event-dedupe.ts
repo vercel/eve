@@ -11,26 +11,24 @@ export type EventDeduper = {
 /**
  * Creates an {@link EventDeduper} keyed on the durable `meta.id`.
  *
- * Re-delivery is not only a reconnect concern. Stream writes are batched, and
- * a batch that fails partway can re-send pages that already landed, so the
- * durable log itself can hold the same chunk twice — callers need this even
- * when they never rewind.
+ * Catches a reconnect that overlaps handled events, a rewind to an earlier
+ * `startIndex`, and a saved log merged with the prefix a live stream replays.
+ * A retried step is not a duplicate: it re-emits under new ids.
  *
- * The window is unbounded on purpose. A bounded one cannot survive a rewind
- * past its capacity: the oldest id has already been evicted, so re-admitting
- * it evicts the next, and the whole replay cascades back in. Every caller
- * already retains at least one object per event, so a set of ids costs
- * strictly less than the state it guards.
+ * The window is unbounded because a bounded one cannot survive a rewind past
+ * its capacity — the oldest id is already evicted, so re-admitting it evicts
+ * the next and the whole replay cascades back in. Callers here retain an
+ * object per event anyway; one that retains nothing should bound its reads
+ * with the `startIndex` cursor instead.
  */
 export function createEventDeduper(): EventDeduper {
   const seen = new Set<string>();
 
   return {
     isDuplicate(event) {
-      // `meta.id` arrived in stream version 20; `meta.at` predates it. An
-      // event written by an older agent still carries the envelope but no id,
-      // so this is absent on the wire despite the type. Admit those rather
-      // than dropping a whole legacy replay.
+      // Absent on the wire for events persisted before stream version 20,
+      // despite being required by `HandleMessageStreamEventMeta`. Admit them:
+      // there is nothing to deduplicate on.
       const id: string | undefined = event.meta?.id;
       if (id === undefined) return false;
       if (seen.has(id)) return true;

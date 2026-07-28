@@ -1,9 +1,8 @@
 import { defineHook } from "#public/hooks/index.js";
 
 /**
- * Epoch 2 predates `meta.id` on the event envelope, so authors keyed their own
- * bookkeeping off the turn coordinates carried in `data` and read `meta`
- * defensively. Both patterns must keep compiling now that `meta` is guaranteed.
+ * Epoch 2 authors keyed their own bookkeeping off the turn coordinates in
+ * `data` and read `meta` defensively. Both patterns must keep compiling.
  */
 export default defineHook({
   events: {

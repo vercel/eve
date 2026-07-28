@@ -48,15 +48,20 @@ export interface StepCompletedProviderMetadata {
 /**
  * Durable metadata attached to one persisted session stream event.
  *
- * Runtime code stamps this once, immediately before the event is written to
- * the workflow-owned stream, and it is stored with the event. Re-reading the
- * stream — reconnecting from a cursor, rewinding to `startIndex: 0`, or
- * replaying a finished session — yields the same `id` and `at` every time.
+ * Stamped once, immediately before the event is written to the workflow-owned
+ * stream, and stored with it. Re-reading the stream — reconnecting, rewinding,
+ * or replaying a finished session — yields the same values every time.
  */
 export interface HandleMessageStreamEventMeta {
   /** ISO-8601 emission time. */
   readonly at: string;
-  /** Unique, lexicographically sortable identifier for this event. */
+  /**
+   * Unique, lexicographically sortable identifier for this event.
+   *
+   * Stamped from stream version 20 on: rewinding into a session that started
+   * before the upgrade yields events whose `id` is absent despite this type,
+   * and those cannot be deduplicated.
+   */
   readonly id: string;
 }
 
@@ -635,9 +640,6 @@ export type TurnFailureStreamEvent =
  *
  * Every event read from a session stream is stamped, so this — not
  * {@link HandleMessageStreamEvent} — is the type consumers receive.
- *
- * Runtime/execution code owns the stamping boundary. Replays must preserve the
- * original `meta` values instead of recomputing them.
  */
 export type StampedHandleMessageStreamEvent = HandleMessageStreamEvent & {
   readonly meta: HandleMessageStreamEventMeta;
@@ -1416,10 +1418,9 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
 /**
  * Stamps one session event with its durable identity and emission time.
  *
- * Only runtime/execution code should call this, once per event, immediately
- * before the event is written to the workflow-owned stream. Stamping in one
- * place ensures the persisted stream and authored hooks observe the same
- * `meta.id`, and that replay never invents a new id or timestamp.
+ * Runtime/execution code only, once per event, immediately before the write.
+ * One stamping seam is what makes the persisted stream and authored hooks
+ * observe the same `meta.id`.
  */
 export function stampMessageStreamEvent(
   event: HandleMessageStreamEvent,

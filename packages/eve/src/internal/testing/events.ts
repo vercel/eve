@@ -171,10 +171,8 @@ async function readUntilBoundary(
 }
 
 /**
- * Stamps a constructed event so a test fixture satisfies the stamped stream
- * contract without going through a real emit seam.
- *
- * Ids are sequential and deterministic so failure output stays readable. Use
+ * Stamps a constructed event so a fixture satisfies the stamped stream
+ * contract without a real emit seam. Ids are sequential and readable; use
  * `stampMessageStreamEvent` when a test asserts on real id format.
  */
 export function stampTestEvent(

@@ -30,8 +30,7 @@ describe("createEventDeduper", () => {
   });
 
   it("drops the whole replay when a long session rewinds to the start", () => {
-    // A bounded window would have evicted the oldest ids by now, and
-    // re-admitting the first event would cascade the entire stream back in.
+    // Long enough that a bounded window would have evicted its own oldest ids.
     const stream = Array.from({ length: 25_000 }, (_, index) => sessionStarted(index));
     const deduper = createEventDeduper();
 
@@ -41,8 +40,7 @@ describe("createEventDeduper", () => {
 
   it("admits events written before ids existed", () => {
     const deduper = createEventDeduper();
-    // Stream version 19 and earlier: the envelope is present, but carries
-    // only `at`.
+    // Stream version 19 and earlier: envelope present, but only `at`.
     const preV20 = {
       type: "session.started",
       data: {},

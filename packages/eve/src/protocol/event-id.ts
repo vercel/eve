@@ -4,12 +4,11 @@ import { createUlid, isUlid } from "#shared/ulid.js";
 export const EVENT_ID_PREFIX = "evt_";
 
 /**
- * Mints the id carried on one session stream event's `meta.id`.
+ * Mints the id carried on one session stream event's `meta.id`:
+ * {@link EVENT_ID_PREFIX} followed by a ULID.
  *
- * The value is {@link EVENT_ID_PREFIX} followed by a ULID, so ids lead with
- * their emission timestamp. See `#shared/ulid.js` for the ordering guarantee
- * and its limits — notably that it holds within a process, not across the
- * separate steps of one session.
+ * See `#shared/ulid.js` for the ordering guarantee — it holds within a
+ * process, not across the separate steps of one session.
  */
 export function createEventId(): string {
   return `${EVENT_ID_PREFIX}${createUlid()}`;

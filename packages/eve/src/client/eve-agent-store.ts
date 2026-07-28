@@ -98,11 +98,7 @@ export class EveAgentStore<TData> {
   readonly #reducer: EveAgentReducer<TData>;
   readonly #subscribers = new Set<() => void>();
 
-  /**
-   * Events already folded into the projection. A server-rendered
-   * `initialEvents` prefix and a reconnect both re-deliver events under the
-   * ids they were emitted with.
-   */
+  /** Ids already folded into the projection: `initialEvents` and a reconnect can overlap. */
   #seenEvents = createEventDeduper();
 
   #abortController: AbortController | undefined;

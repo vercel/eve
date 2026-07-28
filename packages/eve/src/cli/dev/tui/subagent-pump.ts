@@ -89,9 +89,8 @@ export type SubagentRun = {
   nextSectionKey: number;
   tools: Map<string, SubagentToolState>;
   /**
-   * Child events already folded into this run. A pump is removed from
-   * `#pumps` when its stream ends, so a later `subagent.called` for the same
-   * call restarts it at `streamIndex: 0` while `steps` survives.
+   * Child events already folded into this run. A restarted pump replays the
+   * child stream from `streamIndex: 0` while this run's state survives.
    */
   seenChildEvents: EventDeduper;
 };

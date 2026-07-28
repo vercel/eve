@@ -96,7 +96,7 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
 
 `meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
 
-`meta.at` has always been there; `meta.id` arrived in stream version 20. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is missing. Read it as `event.meta?.id` and fall back for anything empty, if your agent has live sessions that predate the upgrade.
+`meta.at` has always been there; `meta.id` arrived in stream version 20. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is absent, even though the type says it is always a string. eve passes those events through rather than dropping them, and they cannot be deduplicated. The exposure ends when the sessions that predate your upgrade do.
 
 That makes it the key for ingesting a stream into a database without duplicating rows when you re-read it:
 
@@ -108,12 +108,11 @@ on conflict (id) do nothing;
 
 Because ids lead with a timestamp, a `primary key (id)` stays roughly append-ordered and keeps inserts clustered.
 
-**What the id covers.** Reconnecting is not the only way the same event reaches you twice, and the durable log does not guarantee it holds each event exactly once — writes are batched, and a batch that fails partway can re-send pages that already landed, leaving the same chunk in the log more than once. Keying on `meta.id` is what makes ingestion correct in all of these:
+**What the id covers.** Reconnecting is not the only way the same event reaches you twice. Keying on `meta.id` is what makes ingestion correct in all of these:
 
 - Reconnecting mid-turn and overlapping events you already handled.
 - Rewinding with `startIndex=0`, or reading back from the tail with a negative `startIndex`.
 - Restoring a saved event log that overlaps the prefix the live stream replays.
-- Duplicate chunks in the durable log itself.
 
 **What it does not cover: a retried step re-emits under new ids.** eve runs each durable step up to four times. If a step is interrupted partway — a crash, a timeout, a model error it retries through — whatever it already wrote stays on the stream, and the new attempt emits its own events with their own ids. Both attempts carry the same `turnId`, `stepIndex`, and `sequence`, because the retry restores that state from the step's input, but they are distinct events and no field records which attempt finished.
 

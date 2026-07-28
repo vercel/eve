@@ -81,8 +81,8 @@ export async function emitProxiedSubagentEvent(input: {
   let proxyEntries: ProxyInputRequestEntries | undefined;
   let scopedSession: HarnessSession;
   try {
-    // A child event re-emitted here is a distinct event on the parent stream,
-    // so it gets its own id rather than reusing the child's.
+    // A re-emitted child event is a distinct event on the parent stream, so it
+    // gets its own id rather than the child's.
     const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
       const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
       await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));

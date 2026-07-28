@@ -1,23 +1,12 @@
 /**
- * ULID generation, implemented here rather than taken from npm.
- *
- * This is a deliberate exception to reaching for a well-known package, made
- * for two reasons. The canonical `ulid` package ships separate Node and
- * browser builds — the Node one hard-imports `node:crypto` — and this module
- * is bundled into browser clients, the Nitro server, and the workflow step
- * sandbox, so a single Web Crypto path is more predictable than trusting
- * conditional exports to resolve correctly in all three. And eve needs
- * monotonic-by-default generation, which that package only offers through a
- * separate `monotonicFactory()`, so a wrapper would exist either way.
- *
- * The encoding is spec-conformant: output has been cross-validated against
- * the reference implementation's `isValid` and `decodeTime`, and
- * `ulid.test.ts` pins the timestamp encoding with golden vectors taken from
- * it. Ids produced here are readable by any other ULID tooling.
+ * Spec-conformant ULID generation, vendored rather than taken from npm: the
+ * `ulid` package's Node build hard-imports `node:crypto`, and this module is
+ * bundled into browser clients, the Nitro server, and the workflow step
+ * sandbox. `ulid.test.ts` pins the encoding against the reference
+ * implementation's golden vectors.
  */
 
-// Crockford base32: no I, L, O, or U, so a transcribed id cannot be confused
-// with 1/0 and the alphabet stays sort-order-compatible with the raw bits.
+// Crockford base32: omits I, L, O, and U, and sorts in raw-bit order.
 const ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const TIME_CHARS = 10;
 const RANDOM_BYTES = 10;
@@ -32,14 +21,10 @@ export type UlidFactory = () => string;
 /**
  * Creates an independent ULID generator with its own monotonic state.
  *
- * Prefer {@link createUlid} unless you need isolation. A separate generator
- * is useful in tests, where the shared one carries state between cases, and
- * anywhere a caller must not have its sequence perturbed by unrelated code.
- *
- * Each generator emits ids that sort in the order it produced them: ids
- * minted within one millisecond increment the random component instead of
- * re-randomizing it, and a clock that moves backwards is pinned to the last
- * millisecond the generator observed.
+ * Prefer {@link createUlid} unless a caller needs a sequence that unrelated
+ * code cannot perturb. Ids sort in the order one generator produced them:
+ * those minted within a millisecond increment the random tail, and a
+ * backwards clock pins to the last millisecond observed.
  */
 export function createUlidFactory(): UlidFactory {
   let lastTimeMs = -1;
@@ -52,8 +37,7 @@ export function createUlidFactory(): UlidFactory {
       lastTimeMs = now;
       randomFill(lastRandom);
     } else if (!incrementRandom(lastRandom)) {
-      // 2^80 ids inside one millisecond. Unreachable in practice; advancing
-      // the logical clock keeps the generator monotonic rather than blocking.
+      // 2^80 ids in one millisecond: advance the logical clock rather than block.
       lastTimeMs += 1;
       randomFill(lastRandom);
     }
@@ -66,15 +50,11 @@ export function createUlidFactory(): UlidFactory {
  * Mints a ULID from the process-wide generator: a 48-bit millisecond
  * timestamp then 80 bits of randomness, in Crockford base32.
  *
- * Ids lead with their timestamp, so they are broadly time-ordered and a
- * primary key built on one stays clustered. Ordering is only guaranteed
- * within a single process: separate processes have independent clocks and
- * random tails, so ids from different machines are not a total order and
- * must not be used as a lossless pagination cursor.
+ * Ids lead with their timestamp, so they are broadly time-ordered. Ordering
+ * holds within one process only — separate processes have independent clocks
+ * and random tails — so a ULID is not a lossless pagination cursor.
  *
- * Requires Web Crypto. Throws on the first call in an environment without
- * `globalThis.crypto.getRandomValues` rather than silently weakening the
- * randomness.
+ * Throws when Web Crypto is unavailable rather than weakening the randomness.
  */
 export const createUlid: UlidFactory = createUlidFactory();
 
@@ -93,9 +73,6 @@ export function isUlid(value: string): boolean {
 }
 
 function randomFill(target: Uint8Array<ArrayBuffer>): void {
-  // Web Crypto rather than `node:crypto`, because this module is bundled into
-  // browser clients and into the workflow step sandbox. `getRandomValues` is
-  // also available in insecure browser contexts, unlike `randomUUID`.
   const webCrypto = globalThis.crypto;
   if (typeof webCrypto?.getRandomValues !== "function") {
     throw new Error("Cannot mint a ULID: globalThis.crypto.getRandomValues is unavailable.");

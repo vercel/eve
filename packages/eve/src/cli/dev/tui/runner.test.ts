@@ -57,11 +57,9 @@ function stubSession(): ClientSession {
 }
 
 /**
- * Wraps literal stream events in a real `MessageResponse`.
- *
- * Each literal is stamped as its own emission, so a fixture that repeats an
- * identical payload models two distinct events. Model a re-delivery by
- * passing the same already-stamped event twice.
+ * Wraps literal stream events in a real `MessageResponse`. Each literal is
+ * stamped as its own emission; pass the same stamped event twice to model a
+ * re-delivery.
  */
 function messageResponseOf(events: readonly unknown[]): MessageResponse {
   const stamped = events.map((event, index) =>
