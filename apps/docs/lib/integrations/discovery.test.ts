@@ -80,6 +80,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(githubTools!)).toContain("code review");
   });
 
+  it("renders the Pushary channel setup", () => {
+    const pushary = getIntegration("pushary");
+    expect(pushary).toBeDefined();
+
+    expect(pushary!.type).toBe("channel");
+    const markdown = integrationMarkdown(pushary!);
+    expect(markdown).toContain("npm install @pushary/eve");
+    expect(markdown).toContain('import { pusharyChannel } from "@pushary/eve"');
+    expect(markdown).toContain("PUSHARY_CALLBACK_ORIGIN");
+    expect(integrationSearchText(pushary!)).toContain("human-in-the-loop");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();
