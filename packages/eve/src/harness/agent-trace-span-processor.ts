@@ -43,11 +43,18 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     for (const child of this.#children) child.onEnd(span);
   }
 
-  releaseSession(sessionId: string): void {
+  /** Trace ids whose session is still open, so retention never evicts them. */
+  activeTraceIds(): ReadonlySet<string> {
+    return this.#ownedTraceIds;
+  }
+
+  /** Forgets one session's trace, returning the trace id it released. */
+  releaseSession(sessionId: string): string | undefined {
     const traceId = this.#sessionTraceIds.get(sessionId);
-    if (traceId === undefined) return;
+    if (traceId === undefined) return undefined;
     this.#ownedTraceIds.delete(traceId);
     this.#sessionTraceIds.delete(sessionId);
+    return traceId;
   }
 
   async shutdown(): Promise<void> {

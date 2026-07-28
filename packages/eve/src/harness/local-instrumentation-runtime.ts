@@ -13,6 +13,10 @@ import {
   registerInstrumentationRuntime,
   type InstrumentationRuntime,
 } from "#harness/instrumentation-runtime.js";
+import {
+  requestLocalTraceStorePrune,
+  resolveLocalTraceRetentionSettings,
+} from "#harness/local-trace-retention.js";
 import { LocalTraceSpanProcessor } from "#harness/local-trace-span-processor.js";
 
 /** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
@@ -24,8 +28,12 @@ export function installLocalInstrumentationRuntime(input: {
   const existing = getInstrumentationRuntime();
   if (existing !== undefined) return existing;
 
-  const persistence = new LocalTraceSpanProcessor(input.appRoot);
-  const processor = new AgentTraceSpanProcessor([persistence]);
+  const retention = resolveLocalTraceRetentionSettings();
+  // `EVE_TRACES=off` removes the writer but keeps the runtime: agent context
+  // still has to propagate so AI SDK and user spans nest correctly.
+  const processor = new AgentTraceSpanProcessor(
+    retention.enabled ? [new LocalTraceSpanProcessor(input.appRoot)] : [],
+  );
   registerOTel({
     autoDetectResources: false,
     instrumentations: [],
@@ -51,13 +59,33 @@ export function installLocalInstrumentationRuntime(input: {
       "session.failed": releaseSessionTrace,
     },
   };
+  // Startup sweep: a store left oversized by a killed dev server is bounded
+  // before this worker adds to it.
+  requestPrune();
+
   return registerInstrumentationRuntime({
     forceFlush: () => processor.forceFlush(),
     hooks: createInstrumentationHooks([agentOtel.hook, releaseTrace]),
     runInContext: agentOtel.runInContext,
   });
 
-  function releaseSessionTrace(event: { readonly sessionId: string }): void {
-    processor.releaseSession(event.sessionId);
+  async function releaseSessionTrace(event: { readonly sessionId: string }): Promise<void> {
+    const released = processor.releaseSession(event.sessionId);
+    if (released === undefined) return;
+    // The released trace is now evictable, so settle its pending segment writes
+    // before a sweep can measure or remove it.
+    await processor.forceFlush();
+    requestPrune();
+  }
+
+  function requestPrune(): void {
+    if (!retention.enabled) return;
+    requestLocalTraceStorePrune({
+      activeTraceIds: processor.activeTraceIds(),
+      appRoot: input.appRoot,
+      maxAgeMs: retention.maxAgeMs,
+      maxTotalBytes: retention.maxTotalBytes,
+      retainCount: retention.retainCount,
+    });
   }
 }

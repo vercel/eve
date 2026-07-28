@@ -30,6 +30,24 @@ describe("AgentTraceSpanProcessor", () => {
     expect(child.onEnd).toHaveBeenCalledTimes(2);
   });
 
+  it("reports open sessions so retention never evicts a live trace", () => {
+    const processor = new AgentTraceSpanProcessor([]);
+    expect([...processor.activeTraceIds()]).toEqual([]);
+
+    processor.onStart(span("trace-1", { "agent.session.id": "session-1" }), {});
+    processor.onStart(span("trace-2", { "agent.session.id": "session-2" }), {});
+    expect([...processor.activeTraceIds()].sort()).toEqual(["trace-1", "trace-2"]);
+
+    expect(processor.releaseSession("session-1")).toBe("trace-1");
+    expect([...processor.activeTraceIds()]).toEqual(["trace-2"]);
+  });
+
+  it("returns nothing when releasing a session it never owned", () => {
+    const processor = new AgentTraceSpanProcessor([]);
+
+    expect(processor.releaseSession("session-unknown")).toBeUndefined();
+  });
+
   it("excludes Workflow instrumentation from an agent trace", () => {
     const child = {
       forceFlush: vi.fn(async () => {}),

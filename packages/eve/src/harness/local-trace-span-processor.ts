@@ -13,6 +13,28 @@ interface ReadableSpanLike {
 
 const log = createLogger("harness.local-trace-span-processor");
 
+const LOCAL_TRACE_SCHEMA_DIRECTORY = "v1";
+const LOCAL_TRACE_SEGMENTS_DIRECTORY = "segments";
+
+function resolveLocalTraceStoreDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "traces");
+}
+
+/** Resolves the directory holding one trace per subdirectory. */
+export function resolveLocalTraceSchemaDirectory(appRoot: string): string {
+  return join(resolveLocalTraceStoreDirectory(appRoot), LOCAL_TRACE_SCHEMA_DIRECTORY);
+}
+
+/**
+ * Resolves the directory holding one trace's span segments.
+ *
+ * Segments are added, never rewritten, so this directory's mtime is the instant
+ * the trace last received a span.
+ */
+export function resolveLocalTraceSegmentsDirectory(appRoot: string, traceId: string): string {
+  return join(resolveLocalTraceSchemaDirectory(appRoot), traceId, LOCAL_TRACE_SEGMENTS_DIRECTORY);
+}
+
 /** Persists spans from agent-owned traces as immutable OTLP/JSON segments. */
 export class LocalTraceSpanProcessor implements SpanProcessor {
   readonly #appRoot: string;
@@ -38,7 +60,7 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
 
     this.#queue = this.#queue
       .then(async () => {
-        const directory = join(this.#appRoot, ".eve", "traces", "v1", traceId, "segments");
+        const directory = resolveLocalTraceSegmentsDirectory(this.#appRoot, traceId);
         await mkdir(directory, { recursive: true });
         await atomicWriteFile(join(directory, `${spanId}.otlp.json`), payload);
       })

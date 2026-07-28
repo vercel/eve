@@ -11,11 +11,34 @@ If you intend to export telemetry, review the exporter destination, data categor
 
 When no authored `instrumentation.ts` exists, `eve dev` records agent, AI SDK, and user-created OpenTelemetry spans under `.eve/traces/v1`. Each session has one trace, rooted independently from Workflow telemetry, with turns, model steps, and tool actions represented explicitly. Spans created by application code while a model or tool is executing inherit that active agent context.
 
-The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
+The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits, subject to the [retention policy](#local-trace-retention) below. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
 
 Use `eve trace ls` to list captured traces and `eve trace <trace>` to inspect a session's span tree.
 
 The local writer is an internal development default, not a second provider layered over authored instrumentation. When `instrumentation.ts` exists, its setup retains control and the zero-config writer is not installed.
+
+### Local trace retention
+
+The store is bounded, so it cannot grow without limit on a development machine. eve sweeps it when a session finishes and once when the dev server starts. A trace is kept when **any** of these holds:
+
+- its session is still open;
+- it is one of the newest `EVE_TRACES_RETAIN_COUNT` traces;
+- it last received a span within `EVE_TRACES_MAX_AGE_MS`.
+
+Whatever survives is then evicted oldest-first while the store exceeds `EVE_TRACES_MAX_TOTAL_BYTES`. The keep-newest floor always wins: eve will exceed the size budget rather than drop below it, because a trace records something that happened and cannot be regenerated.
+
+| Variable                     | Default              | Effect                                        |
+| ---------------------------- | -------------------- | --------------------------------------------- |
+| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping |
+| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted        |
+| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store               |
+| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size  |
+
+Set these in `.env.local`, which `eve dev` loads automatically. Each bound accepts `off` to disable it individually — note that `EVE_TRACES_RETAIN_COUNT=off` removes the keep-newest guarantee rather than retaining everything.
+
+`EVE_TRACES=off` disables writing _and_ sweeping, so an existing store is left exactly as it is; eve will not reclaim it later.
+
+A sweep that deletes something records one line naming the count, the bytes reclaimed, and which bound triggered it. Read it with [`eve logs`](../reference/cli#eve-logs).
 
 ## Three observability surfaces
 
