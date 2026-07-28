@@ -26,6 +26,34 @@ let activeCase: RegressionCase | undefined;
 const checkpointAdvanceCallCounts = new Map<RegressionCase, number>();
 const toolCallCounts = new Map<RegressionCase, number>();
 
+/** One entry per content-output-file-stub model call, rendered by {@link renderHistoryShape}. */
+const contentOutputHistoryShapes: string[] = [];
+
+/**
+ * Renders one request's message list as a stable role:kind sequence so the
+ * eval can assert the exact conversation shape around a compaction. Kinds are
+ * derived from framework-owned sentinels, not content the summarizer writes.
+ */
+function renderHistoryShape(request: MockModelRequest): string {
+  return request.messages
+    .map((message, index) => {
+      if (message.role === "system") return "system";
+      if (message.role === "tool") return "tool:result";
+      if (message.role === "assistant") {
+        const previous = request.messages[index - 1];
+        if (previous?.role === "user" && previous.text === COMPACTION_CHECKPOINT_TEXT) {
+          return "assistant:checkpoint";
+        }
+        return message.text.trim().length === 0 ? "assistant:tool-call" : "assistant:text";
+      }
+      if (message.text === COMPACTION_CHECKPOINT_TEXT) return "user:checkpoint-marker";
+      if (message.text.includes("[case: content-output-file-stub]")) return "user:task";
+      if (message.text === "Continue.") return "user:resume";
+      return `user:other(${message.text.replace(/\s+/g, " ").slice(0, 32)})`;
+    })
+    .join(" > ");
+}
+
 let requestCount = 0;
 
 const taskModel = mockModel({
@@ -57,6 +85,7 @@ const taskModel = mockModel({
     const regressionCase = activeCase;
 
     if (regressionCase === "content-output-file-stub") {
+      contentOutputHistoryShapes.push(renderHistoryShape(request));
       const compacted = request.messages.some(
         (message) => message.role === "user" && message.text === COMPACTION_CHECKPOINT_TEXT,
       );
@@ -85,9 +114,14 @@ const taskModel = mockModel({
         const honored =
           !diagnostics.some((entry) => entry.endsWith("_LOST")) &&
           !diagnostics.includes("PAYLOAD_LEAKED");
+        const history = contentOutputHistoryShapes
+          .map((shape, index) => `${index + 1}: ${shape}`)
+          .join(" ;; ");
         return honored
-          ? `Checkpoint honored the content-output contract (${diagnostics.join(", ")}): ${CONTENT_OUTPUT_COMPACTION_MARKER}`
-          : `Checkpoint violated the content-output contract: ${diagnostics.join(", ")}`;
+          ? `Checkpoint honored the content-output contract (${diagnostics.join(", ")}): ` +
+              `${CONTENT_OUTPUT_COMPACTION_MARKER} HISTORY<${history}>`
+          : `Checkpoint violated the content-output contract: ${diagnostics.join(", ")} ` +
+              `HISTORY<${history}>`;
       }
 
       const contentOutputCalls = toolCallCounts.get(regressionCase) ?? 0;

@@ -11,6 +11,16 @@ import { CONTENT_OUTPUT_COMPACTION_MARKER } from "../constants";
 // - the surrounding conversation was untouched (the case's own user text).
 // On violation the model emits granular *_LOST / PAYLOAD_LEAKED diagnostics
 // instead, so a failing run names the broken clause.
+// The exact conversation shape, rendered by the mock model per request:
+// the pre-compaction call sees only the task; the post-compaction call sees
+// the checkpoint pair and the replayed task — the tool call and its 12KB
+// result must be gone entirely, summarized rather than kept. The shape is
+// deterministic: the payload can never fit the fixture's keep threshold, so
+// the stripped-tail path always runs.
+const EXPECTED_HISTORY =
+  "HISTORY<1: system > user:task ;; " +
+  "2: system > user:checkpoint-marker > assistant:checkpoint > user:task>";
+
 export default defineEval({
   description: "Compaction stubs a large inline file content part without losing its sibling text.",
   async test(t) {
@@ -31,5 +41,6 @@ export default defineEval({
     });
     t.event("compaction.completed", { count: 1 });
     t.messageIncludes(CONTENT_OUTPUT_COMPACTION_MARKER);
+    t.messageIncludes(EXPECTED_HISTORY);
   },
 });
