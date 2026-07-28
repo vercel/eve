@@ -23,7 +23,17 @@
  * session total crosses into it.
  */
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import {
+  findRuntimeTokenLimitViolation,
+  grantRuntimeTokenLimits,
+  remainingRuntimeTokenQuota,
+  resolveRuntimeTokenLimits,
+  type SessionRuntimeTokenLimits,
+  type SessionTokenLimitViolation,
+} from "#harness/session-token-limits.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+
+export type { SessionRuntimeTokenLimits, SessionTokenLimitViolation };
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 const SESSION_RUNTIME_TOKEN_LIMIT_KEY = "eve.harness.sessionRuntimeTokenLimit";
@@ -65,18 +75,6 @@ export function getTurnUsageState(state: SessionStateMap | undefined): TurnUsage
   return state?.[HARNESS_TURN_USAGE_STATE_KEY] as TurnUsageState | undefined;
 }
 
-export type SessionTokenLimitViolation =
-  | {
-      readonly kind: "input";
-      readonly limit: number;
-      readonly usedTokens: number;
-    }
-  | {
-      readonly kind: "output";
-      readonly limit: number;
-      readonly usedTokens: number;
-    };
-
 export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): TokenUsageTotals {
   return getTurnUsageState(session.state)?.session ?? ZERO_TOKEN_USAGE;
 }
@@ -98,28 +96,16 @@ export function toUsage(totals: TokenUsageTotals): TokenUsage {
  * re-anchors it to `usage + configured limit` via
  * {@link bumpSessionRuntimeTokenLimits}.
  */
-export interface SessionRuntimeTokenLimits {
-  readonly inputTokens?: number;
-  readonly outputTokens?: number;
-}
-
-/** Reads the runtime token limits: stored grants first, configured limits otherwise. */
 export function getSessionRuntimeTokenLimits(
   session: Pick<HarnessSession, "limits" | "state">,
 ): SessionRuntimeTokenLimits {
   const stored = session.state?.[SESSION_RUNTIME_TOKEN_LIMIT_KEY] as
     | SessionRuntimeTokenLimits
     | undefined;
-  const limits: { inputTokens?: number; outputTokens?: number } = {};
-  const inputTokens = stored?.inputTokens ?? session.limits?.maxInputTokensPerSession;
-  if (inputTokens !== undefined) {
-    limits.inputTokens = inputTokens;
-  }
-  const outputTokens = stored?.outputTokens ?? session.limits?.maxOutputTokensPerSession;
-  if (outputTokens !== undefined) {
-    limits.outputTokens = outputTokens;
-  }
-  return limits;
+  return resolveRuntimeTokenLimits({
+    configured: configuredSessionTokenLimits(session),
+    stored,
+  });
 }
 
 /**
@@ -132,13 +118,10 @@ export function getSessionRuntimeTokenLimits(
  */
 export function bumpSessionRuntimeTokenLimits(session: HarnessSession): HarnessSession {
   const usage = getSessionTokenUsage(session);
-  const bumped: { inputTokens?: number; outputTokens?: number } = {};
-  if (session.limits?.maxInputTokensPerSession !== undefined) {
-    bumped.inputTokens = usage.inputTokens + session.limits.maxInputTokensPerSession;
-  }
-  if (session.limits?.maxOutputTokensPerSession !== undefined) {
-    bumped.outputTokens = usage.outputTokens + session.limits.maxOutputTokensPerSession;
-  }
+  const bumped = grantRuntimeTokenLimits({
+    configured: configuredSessionTokenLimits(session),
+    usage,
+  });
   return {
     ...session,
     state: {
@@ -159,16 +142,7 @@ export function getSessionRemainingTokenQuota(session: Pick<HarnessSession, "lim
 } {
   const usage = getSessionTokenUsage(session);
   const runtime = getSessionRuntimeTokenLimits(session);
-  return {
-    inputTokens:
-      runtime.inputTokens === undefined
-        ? false
-        : Math.max(0, runtime.inputTokens - usage.inputTokens),
-    outputTokens:
-      runtime.outputTokens === undefined
-        ? false
-        : Math.max(0, runtime.outputTokens - usage.outputTokens),
-  };
+  return remainingRuntimeTokenQuota({ runtime, usage });
 }
 
 export function getSessionTokenLimitViolation(
@@ -176,33 +150,20 @@ export function getSessionTokenLimitViolation(
 ): SessionTokenLimitViolation | null {
   const usage = getSessionTokenUsage(session);
   const runtime = getSessionRuntimeTokenLimits(session);
-  // `violation.limit` reports the configured limit — the window size one
-  // approval grants — which is defined whenever the runtime axis is.
-  const configuredInput = session.limits?.maxInputTokensPerSession;
-  if (
-    runtime.inputTokens !== undefined &&
-    configuredInput !== undefined &&
-    usage.inputTokens >= runtime.inputTokens
-  ) {
-    return {
-      kind: "input",
-      limit: configuredInput,
-      usedTokens: usage.inputTokens,
-    };
-  }
-  const configuredOutput = session.limits?.maxOutputTokensPerSession;
-  if (
-    runtime.outputTokens !== undefined &&
-    configuredOutput !== undefined &&
-    usage.outputTokens >= runtime.outputTokens
-  ) {
-    return {
-      kind: "output",
-      limit: configuredOutput,
-      usedTokens: usage.outputTokens,
-    };
-  }
-  return null;
+  return findRuntimeTokenLimitViolation({
+    configured: configuredSessionTokenLimits(session),
+    runtime,
+    usage,
+  });
+}
+
+function configuredSessionTokenLimits(
+  session: Pick<HarnessSession, "limits">,
+): SessionRuntimeTokenLimits {
+  return {
+    inputTokens: session.limits?.maxInputTokensPerSession,
+    outputTokens: session.limits?.maxOutputTokensPerSession,
+  };
 }
 
 /** Writes per-turn token state onto a new copy of the session. */
