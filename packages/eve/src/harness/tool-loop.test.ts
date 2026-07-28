@@ -1322,7 +1322,33 @@ describe("createToolLoopHarness", () => {
     expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
   });
 
-  it("re-raises the limit prompt when the user replies without answering it", async () => {
+  it("fails a zero-budget task instead of raising a continuation that cannot grant tokens", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("task", emit, { capabilities: { requestInput: true } }),
+    );
+    const session = createTestSession({ limits: { maxInputTokensPerSession: 0 } });
+
+    const result = await runStep(session, { message: "Hi again" });
+
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    expect(result.next).toEqual({
+      done: true,
+      isError: true,
+      output: "The session reached its configured input token limit.",
+    });
+    expect(events.some((event) => event.type === "input.requested")).toBe(false);
+  });
+
+  it("keeps one limit prompt pending when the user replies without answering it", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
@@ -1331,7 +1357,17 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(reparked.next).toBeNull();
-    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(2);
+    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
+
+    const resumed = await runStep(reparked.session, {
+      inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
+    });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(resumed.session.history).toContainEqual({
+      content: "also do this other thing",
+      role: "user",
+    });
   });
 
   it("preserves approval gates on step-scoped dynamic tools", async () => {

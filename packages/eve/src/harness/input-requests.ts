@@ -121,13 +121,12 @@ export function hasDeferredStepInput(session: HarnessSession): boolean {
 /**
  * Resolves pending input at the start of a harness step.
  *
- * When the pending batch contains tool-approval requests and the step input
- * also carries a follow-up user message, the message is deferred to the next
- * internal harness step rather than appended to the current turn. This is
- * necessary because AI SDK cannot process tool-approval responses and a new
- * user message in the same request -- the approval must be resolved in
- * isolation first, and the user message replayed on the subsequent step via
- * {@link consumeDeferredStepInput}.
+ * When a pending tool approval or session-limit continuation has not received
+ * an explicit answer, follow-up input is deferred instead of dismissing and
+ * recreating the request. Tool approval responses also resolve in isolation
+ * because AI SDK cannot process an approval response and a new user message in
+ * the same request. {@link consumeDeferredStepInput} replays deferred input on
+ * the subsequent step.
  */
 export function resolvePendingInput(input: {
   readonly history?: readonly ModelMessage[];
@@ -150,12 +149,15 @@ export function resolvePendingInput(input: {
   const resolvedStepInput = resolveTextMessageInput(pendingBatch, stepInput);
   const responses = resolvedStepInput?.inputResponses ?? [];
   const resolvesApprovalBatch = pendingBatch.requests.some((request) => isApprovalRequest(request));
+  const requiresExplicitResponse = pendingBatch.requests.some(
+    (request) => isApprovalRequest(request) || isSessionLimitContinuationRequest(request),
+  );
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  if (resolvesApprovalBatch && hasUnansweredApproval({ pendingBatch, responses })) {
+  if (requiresExplicitResponse && hasUnansweredExplicitRequest({ pendingBatch, responses })) {
     session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
     return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
   }
@@ -302,13 +304,15 @@ function compactStepInput(
   return result;
 }
 
-function hasUnansweredApproval(input: {
+function hasUnansweredExplicitRequest(input: {
   readonly pendingBatch: PendingInputBatch;
   readonly responses: readonly InputResponse[];
 }): boolean {
   const responseIds = new Set(input.responses.map((response) => response.requestId));
   return input.pendingBatch.requests.some(
-    (request) => isApprovalRequest(request) && !responseIds.has(request.requestId),
+    (request) =>
+      (isApprovalRequest(request) || isSessionLimitContinuationRequest(request)) &&
+      !responseIds.has(request.requestId),
   );
 }
 

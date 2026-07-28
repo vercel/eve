@@ -26,7 +26,7 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
-const SESSION_TOKEN_BUDGET_BASELINE_KEY = "eve.harness.sessionTokenBudgetBaseline";
+const SESSION_RUNTIME_TOKEN_LIMIT_KEY = "eve.harness.sessionRuntimeTokenLimit";
 
 export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
@@ -92,49 +92,82 @@ export function toUsage(totals: TokenUsageTotals): TokenUsage {
 }
 
 /**
- * Usage totals recorded when the user last granted a session token budget
- * continuation. Limits are checked against usage measured from this
- * baseline, so each grant opens a fresh window of the configured size.
+ * The lifetime-usage ceilings currently in force, per axis. An axis is
+ * absent when the configured limit leaves it uncapped. Before any granted
+ * continuation the runtime limit equals the configured limit; each grant
+ * re-anchors it to `usage + configured limit` via
+ * {@link bumpSessionRuntimeTokenLimits}.
  */
-interface SessionTokenBudgetBaseline {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
+export interface SessionRuntimeTokenLimits {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
 }
 
-const ZERO_BUDGET_BASELINE: SessionTokenBudgetBaseline = {
-  inputTokens: 0,
-  outputTokens: 0,
-};
-
-function getSessionTokenBudgetBaseline(
-  state: SessionStateMap | undefined,
-): SessionTokenBudgetBaseline {
-  return (
-    (state?.[SESSION_TOKEN_BUDGET_BASELINE_KEY] as SessionTokenBudgetBaseline | undefined) ??
-    ZERO_BUDGET_BASELINE
-  );
+/** Reads the runtime token limits: stored grants first, configured limits otherwise. */
+export function getSessionRuntimeTokenLimits(
+  session: Pick<HarnessSession, "limits" | "state">,
+): SessionRuntimeTokenLimits {
+  const stored = session.state?.[SESSION_RUNTIME_TOKEN_LIMIT_KEY] as
+    | SessionRuntimeTokenLimits
+    | undefined;
+  const limits: { inputTokens?: number; outputTokens?: number } = {};
+  const inputTokens = stored?.inputTokens ?? session.limits?.maxInputTokensPerSession;
+  if (inputTokens !== undefined) {
+    limits.inputTokens = inputTokens;
+  }
+  const outputTokens = stored?.outputTokens ?? session.limits?.maxOutputTokensPerSession;
+  if (outputTokens !== undefined) {
+    limits.outputTokens = outputTokens;
+  }
+  return limits;
 }
 
 /**
- * Resets the session token budget windows to the current usage totals.
- *
- * Called when the user grants a continuation after a session token limit was
- * reached. The configured limits keep their values and act as the size of the
- * next budget window, measured from the moment of the grant. Both windows
- * reset together so a session near two limits gets one prompt, not two
- * back-to-back.
+ * Bumps the runtime token limits after the user grants a continuation:
+ * each capped axis is re-anchored to `current usage + configured limit`, so
+ * one approval always buys one full configured window from the moment of
+ * the grant (even when the last model call overshot by more than a window).
+ * Both axes bump together so a session near two limits gets one prompt, not
+ * two back-to-back. The configured limits never change.
  */
-export function extendSessionTokenBudget(session: HarnessSession): HarnessSession {
+export function bumpSessionRuntimeTokenLimits(session: HarnessSession): HarnessSession {
   const usage = getSessionTokenUsage(session);
+  const bumped: { inputTokens?: number; outputTokens?: number } = {};
+  if (session.limits?.maxInputTokensPerSession !== undefined) {
+    bumped.inputTokens = usage.inputTokens + session.limits.maxInputTokensPerSession;
+  }
+  if (session.limits?.maxOutputTokensPerSession !== undefined) {
+    bumped.outputTokens = usage.outputTokens + session.limits.maxOutputTokensPerSession;
+  }
   return {
     ...session,
     state: {
       ...session.state,
-      [SESSION_TOKEN_BUDGET_BASELINE_KEY]: {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-      } satisfies SessionTokenBudgetBaseline,
+      [SESSION_RUNTIME_TOKEN_LIMIT_KEY]: bumped satisfies SessionRuntimeTokenLimits,
     },
+  };
+}
+
+/**
+ * Remaining lifetime-token quota under the runtime limits, per axis.
+ * `false` marks an uncapped axis. This is the pool a delegated child's
+ * budget is granted from.
+ */
+export function getSessionRemainingTokenQuota(session: Pick<HarnessSession, "limits" | "state">): {
+  inputTokens: number | false;
+  outputTokens: number | false;
+} {
+  const usage = getSessionTokenUsage(session);
+  const runtime = getSessionRuntimeTokenLimits(session);
+  return {
+    inputTokens:
+      runtime.inputTokens === undefined
+        ? false
+        : Math.max(0, runtime.inputTokens - usage.inputTokens),
+    outputTokens:
+      runtime.outputTokens === undefined
+        ? false
+        : Math.max(0, runtime.outputTokens - usage.outputTokens),
   };
 }
 
@@ -142,26 +175,31 @@ export function getSessionTokenLimitViolation(
   session: Pick<HarnessSession, "limits" | "state">,
 ): SessionTokenLimitViolation | null {
   const usage = getSessionTokenUsage(session);
-  const baseline = getSessionTokenBudgetBaseline(session.state);
-  const maxInputTokensPerSession = session.limits?.maxInputTokensPerSession;
-  const maxOutputTokensPerSession = session.limits?.maxOutputTokensPerSession;
-  const inputTokensInWindow = usage.inputTokens - baseline.inputTokens;
-  const outputTokensInWindow = usage.outputTokens - baseline.outputTokens;
-  if (maxInputTokensPerSession !== undefined && inputTokensInWindow >= maxInputTokensPerSession) {
+  const runtime = getSessionRuntimeTokenLimits(session);
+  // `violation.limit` reports the configured limit — the window size one
+  // approval grants — which is defined whenever the runtime axis is.
+  const configuredInput = session.limits?.maxInputTokensPerSession;
+  if (
+    runtime.inputTokens !== undefined &&
+    configuredInput !== undefined &&
+    usage.inputTokens >= runtime.inputTokens
+  ) {
     return {
       kind: "input",
-      limit: maxInputTokensPerSession,
-      usedTokens: inputTokensInWindow,
+      limit: configuredInput,
+      usedTokens: usage.inputTokens,
     };
   }
+  const configuredOutput = session.limits?.maxOutputTokensPerSession;
   if (
-    maxOutputTokensPerSession !== undefined &&
-    outputTokensInWindow >= maxOutputTokensPerSession
+    runtime.outputTokens !== undefined &&
+    configuredOutput !== undefined &&
+    usage.outputTokens >= runtime.outputTokens
   ) {
     return {
       kind: "output",
-      limit: maxOutputTokensPerSession,
-      usedTokens: outputTokensInWindow,
+      limit: configuredOutput,
+      usedTokens: usage.outputTokens,
     };
   }
   return null;

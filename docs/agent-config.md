@@ -147,12 +147,14 @@ still over budget, the next message re-raises the prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree — the delegating parent never receives an error result it
 could retry against a fresh quota share. A reply that answers neither option
-re-raises the prompt; the reply stays in history and is processed once the
-budget is granted.
+is queued while the existing prompt stays pending; eve does not raise another
+copy. The reply is processed once the budget is granted.
 
 Sessions that cannot reach a human — task-mode runs such as schedules and
 subagents without input proxying — skip the prompt and fail the next model
-call with `SESSION_TOKEN_LIMIT_REACHED`.
+call with `SESSION_TOKEN_LIMIT_REACHED`. A delegated task with no inherited
+quota also fails instead of raising a continuation prompt that could only
+grant another zero-token window.
 
 When `maxInputTokensPerSession` is omitted, root sessions apply a default
 input budget of `40_000_000` provider-reported input tokens.
@@ -161,11 +163,13 @@ to `false` uncaps that axis — the session never stops on it.
 
 Delegated subagent sessions have no fixed default. Each child receives a
 share of the delegating parent's remaining quota at dispatch time — the
-remainder (limit minus accumulated usage) split evenly across the batch's
-local subagent calls — and a completed child's usage counts against the
-parent's quota, so a delegation tree can never outspend the budget configured
-at its root. An authored child limit applies only when it is tighter than the
-parent's grant; an uncapped parent delegates uncapped children.
+remainder in the current budget window split evenly across the batch's local
+subagent calls — and a completed child's usage counts against the parent's
+quota, so a delegation tree can never outspend the budget configured at its
+root. Approving a continuation opens a fresh parent window for later child
+grants without erasing lifetime usage. An authored child limit applies only
+when it is tighter than the parent's grant; an uncapped parent delegates
+uncapped children.
 
 ## Workflow world
 

@@ -12,7 +12,6 @@ const VIOLATION = { kind: "input", limit: 40_000_000, usedTokens: 40_120_500 } a
 function createTestRequest() {
   return createSessionLimitContinuationRequest({
     sessionId: "sess-test",
-    totalUsedTokens: 40_120_500,
     violation: VIOLATION,
   });
 }
@@ -58,7 +57,6 @@ describe("createSessionLimitContinuationRequest", () => {
     const promptFor = (limit: number): string =>
       createSessionLimitContinuationRequest({
         sessionId: "sess-test",
-        totalUsedTokens: limit + 1,
         violation: { kind: "input", limit, usedTokens: limit + 1 },
       }).prompt;
 
@@ -74,8 +72,7 @@ describe("createSessionLimitContinuationRequest", () => {
     // response to an earlier prompt never resolves a later one.
     const later = createSessionLimitContinuationRequest({
       sessionId: "sess-test",
-      totalUsedTokens: 80_500_000,
-      violation: VIOLATION,
+      violation: { ...VIOLATION, usedTokens: 80_500_000 },
     });
 
     expect(later.requestId).not.toBe(createTestRequest().requestId);
