@@ -6,6 +6,7 @@ import {
   setReadFileStamp,
 } from "#runtime/framework-tools/file-state.js";
 import { validateAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import { resolveSkillFilePathCandidates } from "#shared/skill-paths.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -58,8 +59,19 @@ export async function executeReadFileOnSandbox(
 ): Promise<ReadFileResult> {
   const { filePath, offset, limit } = args;
 
-  validateAbsoluteFilePath(filePath);
-  const normalizedPath = normalizeModelPath(filePath);
+  // ── Resolve skill-root candidates (documented order: $HOME first) ───
+  // Skill files are documented to resolve from `$HOME/.agents/skills/`
+  // first with `/workspace/skills/` as the fallback. The model may name
+  // either root (or the symbolic `$HOME` form); reads honor the
+  // documented order regardless. Non-skill paths resolve to themselves.
+  const candidatePaths = await resolveSkillFilePathCandidates({
+    path: filePath,
+    sandbox,
+  });
+
+  for (const candidatePath of candidatePaths) {
+    validateAbsoluteFilePath(candidatePath);
+  }
 
   // ── Validate offset / limit ─────────────────────────────────────────
   const effectiveOffset = offset ?? DEFAULT_OFFSET;
@@ -70,13 +82,26 @@ export async function executeReadFileOnSandbox(
   }
 
   // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = await sandbox.readTextFile({ path: filePath });
+  let rawContent: string | null = null;
+  let resolvedReadPath = candidatePaths[0] ?? filePath;
+
+  for (const candidatePath of candidatePaths) {
+    rawContent = await sandbox.readTextFile({ path: candidatePath });
+    if (rawContent !== null) {
+      resolvedReadPath = candidatePath;
+      break;
+    }
+  }
 
   if (rawContent === null) {
+    const checkedLocations =
+      candidatePaths.length > 1 ? ` Checked: ${candidatePaths.join(", ")}.` : "";
     throw new Error(
-      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
+      `File not found: ${filePath}.${checkedLocations} Verify the path exists and is accessible in the sandbox.`,
     );
   }
+
+  const normalizedPath = normalizeModelPath(resolvedReadPath);
 
   // ── Reject non-text (NUL bytes) ─────────────────────────────────────
   if (rawContent.includes("\0")) {

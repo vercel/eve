@@ -68,6 +68,42 @@ export async function resolveSandboxSkillWritePath(input: {
   });
 }
 
+/**
+ * Resolves the ordered candidate read paths for one model-supplied file
+ * path that targets a skill file.
+ *
+ * Implements the documented resolution order: the `$HOME/.agents/skills`
+ * root is checked first, with `/workspace/skills` as the fallback when the
+ * file is absent there or `$HOME` is unavailable. Accepts the symbolic
+ * `$HOME/.agents/skills/...` form the system prompt advertises, a concrete
+ * home-rooted `.agents/skills` path, or a `/workspace/skills/...` path.
+ * Paths that do not target a skill root pass through unchanged as the
+ * single candidate.
+ */
+export async function resolveSkillFilePathCandidates(input: {
+  readonly path: string;
+  readonly sandbox: SandboxSession;
+}): Promise<readonly string[]> {
+  const relativePath = extractSkillFileRelativePath(input.path);
+  if (relativePath === null) {
+    return [input.path];
+  }
+
+  const root = await resolveSandboxSkillRoot({ sandbox: input.sandbox });
+  const candidates = [`${root}/${relativePath}`];
+
+  if (input.path !== candidates[0] && !input.path.startsWith("$")) {
+    candidates.push(input.path);
+  }
+
+  const fallbackPath = `${FALLBACK_SKILL_ROOT}/${relativePath}`;
+  if (!candidates.includes(fallbackPath)) {
+    candidates.push(fallbackPath);
+  }
+
+  return candidates;
+}
+
 export async function resolveSandboxSeedFilePath(input: {
   readonly path: string;
   readonly sandbox: SandboxSession;
@@ -78,6 +114,30 @@ export async function resolveSandboxSeedFilePath(input: {
 
   const root = await resolveSandboxSkillRoot({ sandbox: input.sandbox });
   return `${root}${input.path.slice(MODEL_SKILL_ROOT.length)}`;
+}
+
+function extractSkillFileRelativePath(path: string): string | null {
+  const modelPrefix = `${MODEL_SKILL_ROOT}/`;
+  if (path.startsWith(modelPrefix)) {
+    return emptyToNull(path.slice(modelPrefix.length));
+  }
+
+  const fallbackPrefix = `${FALLBACK_SKILL_ROOT}/`;
+  if (path.startsWith(fallbackPrefix)) {
+    return emptyToNull(path.slice(fallbackPrefix.length));
+  }
+
+  const homeMarker = `/${HOME_SKILL_SUFFIX}/`;
+  const markerIndex = path.indexOf(homeMarker);
+  if (markerIndex !== -1) {
+    return emptyToNull(path.slice(markerIndex + homeMarker.length));
+  }
+
+  return null;
+}
+
+function emptyToNull(value: string): string | null {
+  return value.length > 0 ? value : null;
 }
 
 function formatSkillPath(input: {
