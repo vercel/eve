@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/embat",
+  "title": "Embat",
+  "description": "Ask Embat about cash, debt, payments, and accounting.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/embat.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://tellme.embat.io/mcp\",\n  description: \"Embat: cash, debt, payments, and accounting.\",\n  auth: connect(\"embat\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/embat.ts"
+    }
+  ],
+  "type": "registry:item"
+}

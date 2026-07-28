@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "connection/local-falcon",
+  "title": "Local Falcon",
+  "description": "AI visibility and local search intelligence.",
+  "dependencies": ["@vercel/connect"],
+  "files": [
+    {
+      "path": "registry/connections/local-falcon.ts",
+      "content": "import { connect } from \"@vercel/connect/eve\";\nimport { defineMcpClientConnection } from \"eve/connections\";\n\nexport default defineMcpClientConnection({\n  url: \"https://mcp.localfalcon.com\",\n  description: \"Local Falcon: local search rankings and AI visibility reports.\",\n  auth: connect(\"local-falcon\"),\n});\n",
+      "type": "registry:file",
+      "target": "agent/connections/local-falcon.ts"
+    }
+  ],
+  "type": "registry:item"
+}

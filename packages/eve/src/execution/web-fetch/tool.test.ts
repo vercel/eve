@@ -1,8 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { MAX_OUTPUT_BYTES, MAX_OUTPUT_LINES } from "#execution/sandbox/truncate-output.js";
 import { convertHtmlToMarkdown, extractTextFromHtml } from "#execution/web-fetch/html.js";
+import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { executeWebFetchTool } from "#execution/web-fetch/tool.js";
+
+vi.mock("#execution/web-fetch/request.js", () => ({
+  requestPublicUrl: vi.fn(),
+}));
+
+const requestPublicUrlMock = vi.mocked(requestPublicUrl);
 
 describe("convertHtmlToMarkdown", () => {
   it("converts headings to ATX-style markdown", () => {
@@ -100,24 +107,18 @@ describe("extractTextFromHtml", () => {
 });
 
 describe("executeWebFetchTool", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
+  beforeEach(() => {
+    requestPublicUrlMock.mockReset();
   });
 
-  it("rejects URLs that do not start with http:// or https://", async () => {
-    await expect(executeWebFetchTool({ url: "ftp://example.com" })).rejects.toThrow(
-      "URL must start with http:// or https://",
-    );
-
-    await expect(executeWebFetchTool({ url: "file:///etc/passwd" })).rejects.toThrow(
-      "URL must start with http:// or https://",
-    );
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("fetches a URL and returns content in the default markdown format", async () => {
     const html = "<html><body><h1>Hello</h1><p>World</p></body></html>";
 
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    requestPublicUrlMock.mockResolvedValueOnce(
       new Response(html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
         status: 200,
@@ -137,7 +138,7 @@ describe("executeWebFetchTool", () => {
   it("returns raw HTML when format is html", async () => {
     const html = "<html><body><h1>Hello</h1></body></html>";
 
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    requestPublicUrlMock.mockResolvedValueOnce(
       new Response(html, {
         headers: { "Content-Type": "text/html" },
         status: 200,
@@ -155,7 +156,7 @@ describe("executeWebFetchTool", () => {
   it("extracts plain text from HTML when format is text", async () => {
     const html = "<html><body><script>evil()</script><h1>Title</h1><p>Body text.</p></body></html>";
 
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    requestPublicUrlMock.mockResolvedValueOnce(
       new Response(html, {
         headers: { "Content-Type": "text/html" },
         status: 200,
@@ -175,7 +176,7 @@ describe("executeWebFetchTool", () => {
   it("returns non-HTML content as-is regardless of format", async () => {
     const json = '{"key": "value"}';
 
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    requestPublicUrlMock.mockResolvedValueOnce(
       new Response(json, {
         headers: { "Content-Type": "application/json" },
         status: 200,
@@ -190,36 +191,21 @@ describe("executeWebFetchTool", () => {
   });
 
   it("throws on non-ok responses", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
+    requestPublicUrlMock.mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
 
     await expect(executeWebFetchTool({ url: "https://example.com/missing" })).rejects.toThrow(
       "Request failed with status code: 404",
     );
   });
 
-  it("throws when Content-Length exceeds the 5 MB limit", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response("", {
-        headers: { "Content-Length": String(6 * 1024 * 1024) },
-        status: 200,
-      }),
-    );
-
-    await expect(executeWebFetchTool({ url: "https://example.com/large" })).rejects.toThrow(
-      "Response too large",
-    );
-  });
-
   it("retries with honest user-agent on Cloudflare challenge", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    fetchSpy.mockResolvedValueOnce(
+    requestPublicUrlMock.mockResolvedValueOnce(
       new Response("Blocked", {
         headers: { "cf-mitigated": "challenge" },
         status: 403,
       }),
     );
-    fetchSpy.mockResolvedValueOnce(
+    requestPublicUrlMock.mockResolvedValueOnce(
       new Response("OK content", {
         headers: { "Content-Type": "text/plain" },
         status: 200,
@@ -231,19 +217,17 @@ describe("executeWebFetchTool", () => {
     })) as { content: string };
 
     expect(result.content).toBe("OK content");
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(requestPublicUrlMock).toHaveBeenCalledTimes(2);
 
-    const retryCall = fetchSpy.mock.calls[1];
+    const retryCall = requestPublicUrlMock.mock.calls[1];
     expect(retryCall).toBeDefined();
-    const retryHeaders = (retryCall![1] as RequestInit).headers as Record<string, string>;
+    const retryHeaders = retryCall![1].headers;
 
     expect(retryHeaders["User-Agent"]).toBe(EVE_PACKAGE_NAME);
   });
 
   it("sends format-aware Accept headers", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    fetchSpy.mockResolvedValueOnce(
+    requestPublicUrlMock.mockResolvedValueOnce(
       new Response("content", {
         headers: { "Content-Type": "text/plain" },
         status: 200,
@@ -255,9 +239,9 @@ describe("executeWebFetchTool", () => {
       url: "https://example.com",
     });
 
-    const firstCall = fetchSpy.mock.calls[0];
+    const firstCall = requestPublicUrlMock.mock.calls[0];
     expect(firstCall).toBeDefined();
-    const headers = (firstCall![1] as RequestInit).headers as Record<string, string>;
+    const headers = firstCall![1].headers;
 
     expect(headers.Accept).toContain("text/markdown");
   });
@@ -265,7 +249,7 @@ describe("executeWebFetchTool", () => {
   it("truncates large bodies to the shared tool-output budget", async () => {
     const huge = "line of content\n".repeat(MAX_OUTPUT_LINES + 500);
 
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    requestPublicUrlMock.mockResolvedValueOnce(
       new Response(huge, {
         headers: { "Content-Type": "text/plain" },
         status: 200,

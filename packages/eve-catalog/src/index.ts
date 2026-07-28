@@ -48,7 +48,7 @@ export interface ConnectionIdentity {
 
 /** Which eve surfaces an integration is available on today. */
 export interface IntegrationSurfaces {
-  /** The eve CLI can scaffold this integration without further work. */
+  /** eve's interactive setup flow can provision and scaffold this integration. */
   scaffoldable: boolean;
   /** Listed in the docs integrations gallery. */
   gallery: boolean;
@@ -81,10 +81,11 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  * carries only shared identity; the scaffolder and docs overlay their own
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
  *
- * `surfaces.scaffoldable` reflects what the CLI can scaffold today: Slack and
- * Web Chat for channels, and every curated connection. The remaining
- * channels are runtime modules that are still configured by hand, so they
- * appear in the gallery but not the CLI picker.
+ * `surfaces.scaffoldable` reflects what eve's interactive setup flow can
+ * provision and scaffold today: Slack and Web Chat for channels, plus its
+ * curated connections. Registry installation is independent of this flag.
+ * The remaining channels are runtime modules configured by hand, so they
+ * appear in the gallery but not the setup picker.
  */
 export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {

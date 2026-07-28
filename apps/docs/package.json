@@ -13,7 +13,8 @@
     "test:unit": "vitest run --config vitest.config.ts",
     "render:eve-5": "NODE_OPTIONS=--loader=./scripts/wgsl-node-loader.mjs tsx scripts/render-eve-5.ts",
     "registry:build": "shadcn build",
-    "registry:check": "pnpm run registry:build && tsc --project registry/tsconfig.json"
+    "registry:check": "pnpm run registry:build && pnpm run registry:validate && tsc --project registry/tsconfig.json",
+    "registry:validate": "tsx scripts/validate-connection-registry.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "3.0.193",
@@ -72,6 +73,8 @@
     "@types/pngjs": "^6.0.5",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@upstash/agentkit-eve-extension": "^0.4.0",
+    "@vercel/connect": "catalog:",
     "@vgpu/adapter-node": "0.0.7",
     "@webgpu/types": "^0.1.69",
     "eve": "workspace:*",

@@ -12,5 +12,9 @@
       "target": "agent/extensions/jetty.ts"
     }
   ],
+  "envVars": {
+    "JETTY_API_TOKEN": "",
+    "JETTY_COLLECTION": ""
+  },
   "type": "registry:item"
 }

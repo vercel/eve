@@ -59,10 +59,13 @@ const buildSnippet = (
     fields.push(
       `  auth: connect({`,
       `    connector: "${connector}",`,
-      `    principalToSubject: (principal) => ({`,
-      `      type: "jwt-bearer",`,
-      `      sub: principal.attributes.email,`,
-      `    }),`,
+      `    principalToSubject: (principal) => {`,
+      `      const email = principal.type === "user" ? principal.attributes?.email : undefined;`,
+      `      if (typeof email !== "string") {`,
+      `        throw new Error("JWT bearer authentication requires a user principal with an email.");`,
+      `      }`,
+      `      return { type: "jwt-bearer", sub: email };`,
+      `    },`,
       `  }),`,
     );
   }
@@ -138,18 +141,14 @@ export const buildConnectionSetup = (integration: Integration): ConnectionSetup 
 
 /** Generated Install markdown for a connection. */
 export const buildConnectionInstall = (integration: Integration): string => {
-  const spec = integration.connection;
-  if (!spec) {
+  if (!integration.connection) {
     return "";
   }
-  const usesConnect = spec.authModes.some((auth) => auth !== "apiKey");
   return [
-    usesConnect
-      ? "Connections live under `agent/connections/`. Auth is brokered by [Vercel Connect](https://vercel.com/docs/connect), so install the framework and the Connect SDK:"
-      : "Connections live under `agent/connections/`. Install the framework:",
+    "Add the connection from eve's registry. This writes the initial definition under `agent/connections/` and installs its authentication dependency when needed:",
     ``,
     "```bash",
-    usesConnect ? "npm install eve@latest @vercel/connect" : "npm install eve@latest",
+    `eve add connection/${integration.slug}`,
     "```",
   ].join("\n");
 };

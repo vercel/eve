@@ -12,5 +12,8 @@
       "target": "agent/extensions/browserbase.ts"
     }
   ],
+  "envVars": {
+    "BROWSERBASE_API_KEY": ""
+  },
   "type": "registry:item"
 }

@@ -37,7 +37,7 @@ describe("integration discovery", () => {
     expect(browserbase).toBeDefined();
 
     const markdown = integrationMarkdown(browserbase!);
-    expect(markdown).toContain("pnpm add @browserbasehq/eve");
+    expect(markdown).toContain("eve add extension/browserbase");
     expect(markdown).toContain('import browserbase from "@browserbasehq/eve"');
     expect(markdown).toContain("BROWSERBASE_API_KEY");
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
@@ -48,7 +48,7 @@ describe("integration discovery", () => {
     expect(jetty).toBeDefined();
 
     const markdown = integrationMarkdown(jetty!);
-    expect(markdown).toContain("pnpm add @jetty/eve");
+    expect(markdown).toContain("eve add extension/jetty");
     expect(markdown).toContain('import jetty from "@jetty/eve"');
     expect(markdown).toContain('import { Jetty } from "@jetty/eve/reporter"');
     expect(markdown).toContain("JETTY_API_TOKEN");
@@ -60,7 +60,7 @@ describe("integration discovery", () => {
     expect(agentkit).toBeDefined();
 
     const markdown = integrationMarkdown(agentkit!);
-    expect(markdown).toContain("pnpm add @upstash/agentkit-eve-extension");
+    expect(markdown).toContain("eve add extension/upstash-agentkit");
     expect(markdown).toContain('import agentkit from "@upstash/agentkit-eve-extension"');
     expect(markdown).toContain("UPSTASH_REDIS_REST_URL");
     expect(markdown).toContain("agentkit__recall_memory");
@@ -73,7 +73,7 @@ describe("integration discovery", () => {
     expect(githubTools).toBeDefined();
 
     const markdown = integrationMarkdown(githubTools!);
-    expect(markdown).toContain("pnpm add @github-tools/eve-extension");
+    expect(markdown).toContain("eve add extension/github-tools");
     expect(markdown).toContain('connector: "github/my-connector"');
     expect(markdown).toContain('preset: "maintainer"');
     expect(markdown).toContain("github__addPullRequestComment");

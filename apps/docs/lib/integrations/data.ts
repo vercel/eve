@@ -1159,7 +1159,7 @@ const extensionPresentations: Record<string, ExtensionPresentation> = {
     install: `Install the Browserbase extension for eve:
 
 \`\`\`bash
-pnpm add @browserbasehq/eve
+eve add extension/browserbase
 \`\`\`
 
 The extension requires Node.js 24 or later. A Browserbase API key covers both cloud browser sessions and Stagehand inference through Browserbase Model Gateway, so you do not need a separate model-provider key.`,
@@ -1212,7 +1212,7 @@ Browserbase uses keep-alive sessions and eve's durable per-session state to reco
     install: `Install the Kernel extension for eve:
 
 \`\`\`bash
-pnpm add @onkernel/eve-extension
+eve add extension/kernel
 \`\`\`
 
 The extension requires Node.js 24 or later and eve 0.25 or later. It mounts Kernel's hosted MCP browser tools and a \`browse\` skill without requiring you to maintain browser tool code.`,
@@ -1252,12 +1252,12 @@ The default mount can execute JavaScript in the browser VM and reuse authenticat
       "chat history",
       "search",
       "rag",
-      "vector search",
+      "full-text search",
     ],
     install: `Install the Upstash AgentKit extension for eve:
 
 \`\`\`bash
-pnpm add @upstash/agentkit-eve-extension
+eve add extension/upstash-agentkit
 \`\`\`
 
 The extension requires eve 0.25.2 or later. Add an Upstash Redis database's REST credentials to the agent's environment; the default Redis client reads them automatically:
@@ -1271,11 +1271,15 @@ UPSTASH_REDIS_REST_TOKEN=...
 \`\`\`ts title="agent/extensions/agentkit.ts"
 import agentkit from "@upstash/agentkit-eve-extension";
 
-export default agentkit();
+export default agentkit({});
 \`\`\`
 
 The filename supplies the \`agentkit\` namespace. This minimal mount adds \`agentkit__recall_memory\` and \`agentkit__save_memory\`, plus instructions that teach the model when to use them. By default, memory is isolated by the authenticated principal when available and otherwise by the eve session ID.`,
-    configure: `Enable durable transcript capture with \`chatHistory: true\`. To add RAG over a Redis Search index, install \`@upstash/redis\` and provide a schema:
+    configure: `Two further capabilities are opt-in, and they are independent of each other: chat history covers the agent's own past conversations, while search is retrieval over documents you seed into your own Redis Search index.
+
+Enable durable transcript capture with \`chatHistory: true\`. A hook writes every user and assistant message to Redis as the session streams, and the model gains \`agentkit__search_chat_history\` to find earlier conversations by what was said and \`agentkit__read_chat_history\` to read one back — so a user can ask about something settled in a previous session. Both tools take \`userId\` from the session rather than from model input, so they only ever reach the current user's own transcripts.
+
+To add RAG over your own data, install \`@upstash/redis\` and provide a Redis Search schema:
 
 \`\`\`bash
 pnpm add @upstash/redis
@@ -1298,7 +1302,7 @@ export default agentkit({
 });
 \`\`\`
 
-Search configuration adds the dynamic \`agentkit__search\`, \`agentkit__search_aggregate\`, and \`agentkit__search_count\` tools. Chat history stores each session's user and assistant messages in Redis and makes their text searchable; it does not add a model-facing tool.
+Search configuration adds the dynamic \`agentkit__search\`, \`agentkit__search_aggregate\`, and \`agentkit__search_count\` tools over that index, whose documents you write yourself; it is separate from chat history, which keeps its own keyspace and index. Both tool groups resolve at session start, so an unconfigured capability contributes no tools at all.
 
 For multi-tenant agents, set \`userId\` to a stable tenant-scoped value or derive it from the request context, and never use a shared constant across tenants. You can also tune memory recall, search limits, chat-history keys and TTL, or supply an explicit Redis client. See the [Upstash AgentKit eve extension guide](https://upstash.com/docs/redis/sdks/agentkit/eve) for the complete configuration and override reference.`,
   },
@@ -1318,7 +1322,7 @@ For multi-tenant agents, set \`userId\` to a stable tenant-scoped value or deriv
     install: `Install the Jetty extension for eve:
 
 \`\`\`bash
-pnpm add @jetty/eve
+eve add extension/jetty
 \`\`\`
 
 The extension requires Node.js 24 or later and eve 0.25 or later. It can ingest every completed turn as a durable Jetty trajectory, grade turns inline, steer experiments from their grades, and report native \`eve eval\` results.`,
@@ -1377,7 +1381,7 @@ Jetty trajectories persist agent inputs and outputs. Redact PII before grading, 
     install: `Install the GitHub Tools extension and Vercel Connect client:
 
 \`\`\`bash
-pnpm add @github-tools/eve-extension @vercel/connect
+eve add extension/github-tools
 \`\`\`
 
 The extension provides the GitHub toolset as a versioned eve package. Use a Vercel Connect connector for short-lived, scoped GitHub tokens, or omit \`@vercel/connect\` and authenticate with a GitHub token.`,
@@ -1442,7 +1446,7 @@ For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`
     install: `Install the agent-browser extension for eve:
 
 \`\`\`bash
-pnpm add @agent-browser/eve
+eve add extension/agent-browser
 \`\`\`
 
 The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox, Docker, or microsandbox.`,

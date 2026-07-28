@@ -723,7 +723,7 @@ describe("app runtime dependency tracing", () => {
       "This tool requires sandbox access on the runtime context.",
     );
     expect(serverModuleSource).toContain("The dynamic skill");
-    expect(serverModuleSource).toContain("URL must start with http:// or https://");
+    expect(serverModuleSource).toContain("URL must start with https://");
   }, 30_000);
 
   it("does not bundle local-only runtime infrastructure into hosted Vercel output", async () => {
