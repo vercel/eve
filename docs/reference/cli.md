@@ -115,6 +115,10 @@ eve build [--profile <path>] [--skip-sandbox-prewarm]
 
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure.
 
+Because eve's authored, Workflow, and host bundles all execute on the server, build-only
+`server-only` and `client-only` marker imports (including Next.js's compiled variants) are
+treated as no-ops.
+
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
 | `--profile <path>`       | string | off     | Best-effort versioned JSON report with build-phase timings and final output-size measurements |

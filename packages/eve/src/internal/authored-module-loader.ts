@@ -29,6 +29,7 @@ import {
   buildSingleRolldownChunk,
   buildWithNitroRolldown,
 } from "#internal/bundler/nitro-rolldown.js";
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-package-plugin.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
@@ -202,6 +203,7 @@ export async function bundleExtensionDistributionGraph(input: {
 }): Promise<ReadonlyMap<string, string>> {
   const plugins = [
     createAuthoredDirectiveGuardPlugin(),
+    createPseudoPackagePlugin(),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin(),
     createAuthoredPackageTsConfigPathsPlugin({
@@ -280,6 +282,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     }),
     createAuthoredDirectiveGuardPlugin(),
     extensionScopePlugin,
+    createPseudoPackagePlugin(),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin(),
     createAuthoredPackageTsConfigPathsPlugin({
@@ -390,6 +393,7 @@ async function buildAuthoredModuleBundle(
   const plugins = [
     channelIdentityPlugin,
     ...configuration.plugins,
+    createPseudoPackagePlugin(),
     options.extensionScopeNamespace === undefined
       ? null
       : createFixedNamespaceScopePlugin(options.extensionScopeNamespace),

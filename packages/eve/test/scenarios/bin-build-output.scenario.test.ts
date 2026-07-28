@@ -162,6 +162,39 @@ async function runEveBuild(appRoot: string): Promise<ProcessResult> {
 }
 
 describe("eve build process output", () => {
+  it("builds authored modules that import framework-only marker packages", async () => {
+    const appRoot = await createTemporaryAppRoot({
+      prefix: "eve-bin-build-output-marker-packages-",
+    });
+
+    await mkdir(join(appRoot, "agent", "tools"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(appRoot, "agent", "tools", "uses-markers.ts"),
+      [
+        'import "server-only";',
+        'import "client-only";',
+        'import "next/dist/compiled/server-only";',
+        'import "next/dist/compiled/client-only";',
+        "",
+        "export default {",
+        '  description: "Framework-only marker package test.",',
+        '  inputSchema: { type: "object", properties: {}, required: [] },',
+        '  execute: async () => "loaded",',
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runEveBuild(appRoot);
+
+    expect(result.code).toBe(0);
+    expect(result.signal).toBeNull();
+    expect(removeRolldownPluginTimingWarningBlock(result.stderr)).toBe("");
+    expect(result.stdout).toContain("[BUILD] built output at");
+  }, 120_000);
+
   it("prints successful build output to stdout", async () => {
     const appRoot = await createTemporaryAppRoot({
       prefix: "eve-bin-build-output-success-",

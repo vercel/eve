@@ -18,6 +18,7 @@ import {
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-package-plugin.js";
 import {
   configureDevelopmentNitroRoutes,
   configureProductionNitroRoutes,
@@ -641,6 +642,7 @@ function createApplicationNitroBundlerConfiguration(
     })),
   );
   const nitroBundlerPlugins = [
+    createPseudoPackagePlugin(),
     compiledSandboxBackendPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     extensionScopePlugin,
