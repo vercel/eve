@@ -12,7 +12,14 @@ interface RegistryItem {
   name: string;
   dependencies?: string[];
   files?: RegistryFile[];
-  meta?: { eve?: { channel?: string } };
+  meta?: {
+    eve?: {
+      setup?: {
+        command?: string;
+        args?: string[];
+      };
+    };
+  };
 }
 
 interface Registry {
@@ -85,9 +92,11 @@ for (const [index, item] of items.entries()) {
   const registrySlug = expectedSlugs[index];
 
   if (entry.slug === "slack" || entry.slug === "eve") {
-    if (item.files !== undefined || item.meta?.eve?.channel !== registrySlug) {
+    const setup = item.meta?.eve?.setup;
+    const expectedArgs = ["integration", "setup", registrySlug];
+    if (setup?.command !== "eve" || JSON.stringify(setup.args) !== JSON.stringify(expectedArgs)) {
       throw new Error(
-        `Registry item "${item.name}" must delegate to eve channels add ${registrySlug}.`,
+        `Registry item "${item.name}" must delegate setup to eve integration setup ${registrySlug}.`,
       );
     }
     continue;
