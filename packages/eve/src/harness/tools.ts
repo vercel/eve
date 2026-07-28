@@ -29,8 +29,18 @@ import { withToolOutputSerializationError } from "#harness/tool-output-serializa
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 type ToolModelOutputValue =
+  | { readonly type: "content"; readonly value: ToolModelContentPart[] }
   | { readonly type: "json"; readonly value: JSONValue }
   | { readonly type: "text"; readonly value: string };
+
+type ToolModelContentPart =
+  | { readonly type: "text"; readonly text: string }
+  | {
+      readonly type: "file";
+      readonly data: { readonly type: "data"; readonly data: string };
+      readonly mediaType: string;
+      readonly filename?: string;
+    };
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -244,9 +254,64 @@ function normalizeToolModelOutput(input: {
         };
       }
 
-      throw new TypeError('Expected tool model output type to be "text" or "json".');
+      if (output.type === "content") {
+        if (!Array.isArray(output.value)) {
+          throw new TypeError('Expected content model output to include an array "value".');
+        }
+
+        return {
+          type: "content",
+          value: output.value.map(normalizeToolModelContentPart),
+        };
+      }
+
+      throw new TypeError('Expected tool model output type to be "text", "json", or "content".');
     },
   );
+}
+
+function normalizeToolModelContentPart(part: unknown): ToolModelContentPart {
+  if (!isObject(part)) {
+    throw new TypeError('Expected content model output part type to be "text" or "file".');
+  }
+
+  if (part.type === "text") {
+    if (typeof part.text !== "string") {
+      throw new TypeError('Expected content text part to include a string "text".');
+    }
+    return { type: "text", text: part.text };
+  }
+
+  if (part.type !== "file") {
+    throw new TypeError('Expected content model output part type to be "text" or "file".');
+  }
+  if (!isObject(part.data) || part.data.type !== "data" || !isBase64Data(part.data.data)) {
+    throw new TypeError("Expected content file part to include base64 string data.");
+  }
+  if (typeof part.mediaType !== "string") {
+    throw new TypeError('Expected content file part to include a string "mediaType".');
+  }
+  if (part.filename !== undefined && typeof part.filename !== "string") {
+    throw new TypeError('Expected content file part "filename" to be a string when provided.');
+  }
+
+  const normalized = {
+    type: "file",
+    data: { type: "data", data: part.data.data },
+    mediaType: part.mediaType,
+  } as const;
+  return part.filename === undefined ? normalized : { ...normalized, filename: part.filename };
+}
+
+function isBase64Data(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+
+  const match = /^([A-Za-z0-9+/]*)(={0,2})$/.exec(value);
+  if (match === null) return false;
+
+  const payloadLength = match[1]!.length;
+  const paddingLength = match[2]!.length;
+  return payloadLength % 4 !== 1 && (paddingLength === 0 || value.length % 4 === 0);
 }
 
 /**

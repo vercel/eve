@@ -662,6 +662,158 @@ describe("buildToolSet", () => {
     });
   });
 
+  it("passes valid content toModelOutput values through", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "screenshot",
+        {
+          description: "Return a screenshot.",
+          execute: async () => ({ ok: true }),
+          inputSchema: jsonSchema({}),
+          name: "screenshot",
+          toModelOutput: () => ({
+            type: "content",
+            value: [
+              { type: "text", text: "Screenshot captured." },
+              {
+                type: "file",
+                data: { type: "data", data: "iVBORw0KGgo=" },
+                filename: "screenshot.png",
+                mediaType: "image/png",
+              },
+            ],
+          }),
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      projectSdkToolOutput({
+        output: { ok: true },
+        tool: result.screenshot,
+      }),
+    ).resolves.toEqual({
+      type: "content",
+      value: [
+        { type: "text", text: "Screenshot captured." },
+        {
+          type: "file",
+          data: { type: "data", data: "iVBORw0KGgo=" },
+          filename: "screenshot.png",
+          mediaType: "image/png",
+        },
+      ],
+    });
+  });
+
+  const contentFilePart = {
+    type: "file",
+    data: { type: "data", data: "iVBORw0KGgo=" },
+    mediaType: "image/png",
+  } as const;
+
+  it.each([
+    [
+      "a non-array value",
+      {},
+      'Tool "screenshot" call "call_1" returned a non-JSON-serializable model output. Expected content model output to include an array "value".',
+    ],
+    [
+      "an unknown part",
+      [{ type: "audio" }],
+      'Expected content model output part type to be "text" or "file".',
+    ],
+    [
+      "non-string text",
+      [{ type: "text", text: 1 }],
+      'Expected content text part to include a string "text".',
+    ],
+    [
+      "URL file data",
+      [
+        {
+          ...contentFilePart,
+          data: { type: "url", url: new URL("https://example.com/screenshot.png") },
+        },
+      ],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "provider reference file data",
+      [{ ...contentFilePart, data: { type: "reference", reference: "file_123" } }],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "raw byte file data",
+      [{ ...contentFilePart, data: { type: "data", data: new Uint8Array([1]) } }],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "a data URL string",
+      [
+        {
+          ...contentFilePart,
+          data: { type: "data", data: "data:image/png;base64,iVBORw0KGgo=" },
+        },
+      ],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "a URL string",
+      [
+        {
+          ...contentFilePart,
+          data: { type: "data", data: "https://example.com/screenshot.png" },
+        },
+      ],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "empty file data",
+      [{ ...contentFilePart, data: { type: "data", data: "" } }],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "a non-base64 string",
+      [{ ...contentFilePart, data: { type: "data", data: "not base64 data" } }],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "a non-string media type",
+      [{ ...contentFilePart, mediaType: 1 }],
+      'Expected content file part to include a string "mediaType".',
+    ],
+    [
+      "a non-string filename",
+      [{ ...contentFilePart, filename: 1 }],
+      'Expected content file part "filename" to be a string when provided.',
+    ],
+  ])("rejects content model output with %s", async (_description, value, expectedMessage) => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "screenshot",
+        {
+          description: "Return a screenshot.",
+          execute: async () => ({ ok: true }),
+          inputSchema: jsonSchema({}),
+          name: "screenshot",
+          toModelOutput: () => ({ type: "content", value }),
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      projectSdkToolOutput({
+        output: { ok: true },
+        tool: result.screenshot,
+      }),
+    ).rejects.toThrow(expectedMessage);
+  });
+
   describe("tool-level approval override", () => {
     it("normalizes boolean approval results", async () => {
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([

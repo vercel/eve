@@ -75,4 +75,18 @@ export interface PublicToolDefinitionWithExecuteFn<
  */
 export type ToolModelOutput =
   | { readonly type: "text"; readonly value: string }
-  | { readonly type: "json"; readonly value: unknown };
+  | { readonly type: "json"; readonly value: unknown }
+  | {
+      /** Ordered text and file parts sent to the model as one tool result. */
+      readonly type: "content";
+      readonly value: readonly (
+        | { readonly type: "text"; readonly text: string }
+        | {
+            readonly type: "file";
+            /** Base64-encoded file data. */
+            readonly data: { readonly type: "data"; readonly data: string };
+            readonly mediaType: string;
+            readonly filename?: string;
+          }
+      )[];
+    };
