@@ -68,6 +68,25 @@ function isBuildOutputPackageRoot(directoryPath: string): boolean {
 }
 
 function resolvePackageBuildRoot(): string | null {
+  // Check if we are running in the source checkout of the eve monorepo.
+  // In the source tree, we want to return null so it resolves to src/ instead of dist/.
+  const currentFilePath = realpathSync(resolveCurrentModulePath()).replace(/\\/g, "/");
+  const isSourceCheckout = currentFilePath.toLowerCase().includes("/packages/eve/");
+
+  if (!isSourceCheckout) {
+    try {
+      // Attempt to locate the installed package root dynamically using require.resolve
+      const packageJsonPath = require.resolve("eve/package.json");
+      const packageRoot = dirname(packageJsonPath);
+      const distPath = join(packageRoot, "dist");
+      if (existsSync(distPath)) {
+        return distPath;
+      }
+    } catch {
+      // Fall back to filename-based directory traversal
+    }
+  }
+
   let currentDirectory = dirname(realpathSync(resolveCurrentModulePath()));
 
   while (true) {
@@ -110,6 +129,19 @@ function findNearestPackageRoot(startDirectory: string): string {
  * Resolves the installed eve package root.
  */
 export function resolvePackageRoot(): string {
+  const currentFilePath = realpathSync(resolveCurrentModulePath()).replace(/\\/g, "/");
+  const isSourceCheckout = currentFilePath.toLowerCase().includes("/packages/eve/");
+
+  if (!isSourceCheckout) {
+    try {
+      // Attempt to locate the installed package root dynamically using require.resolve
+      const packageJsonPath = require.resolve("eve/package.json");
+      return dirname(packageJsonPath);
+    } catch {
+      // Fall back to filename-based directory traversal
+    }
+  }
+
   // Canonicalize the current module path so workspace symlinks such as
   // app-local `node_modules/<package-name>` resolve back to the real package root.
   return findNearestPackageRoot(dirname(realpathSync(resolveCurrentModulePath())));
