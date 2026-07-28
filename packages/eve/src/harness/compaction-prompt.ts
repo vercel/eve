@@ -238,6 +238,37 @@ function contentToolOutputParts(value: unknown): readonly unknown[] | undefined 
     : undefined;
 }
 
+/**
+ * Replaces the file parts of a `content` tool output with their text stubs,
+ * leaving every other output shape untouched. History capping uses this so a
+ * capped content output can never carry — or truncate into — a raw payload;
+ * the stub matches the one the summarizer transcript renders.
+ */
+export function stubContentOutputFileParts(output: unknown): unknown {
+  const parts = contentToolOutputParts(output);
+  if (parts === undefined) return output;
+
+  let changed = false;
+  const value = parts.map((part) => {
+    if (part === null || typeof part !== "object") return part;
+    const candidate = part as {
+      readonly type?: unknown;
+      readonly filename?: unknown;
+      readonly mediaType?: unknown;
+    };
+    if (candidate.type !== "file" && candidate.type !== "media") return part;
+    changed = true;
+    return {
+      text: renderAttachedFileStub(
+        typeof candidate.filename === "string" ? candidate.filename : undefined,
+        typeof candidate.mediaType === "string" ? candidate.mediaType : "unknown",
+      ),
+      type: "text",
+    };
+  });
+  return changed ? { type: "content", value } : output;
+}
+
 function renderContentToolOutputPart(part: unknown, limit: number): string {
   if (part === null || typeof part !== "object") return renderPayload(part, limit);
   const candidate = part as {
