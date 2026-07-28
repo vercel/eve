@@ -1,4 +1,4 @@
-import { chmod, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
@@ -39,8 +39,7 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
     this.#queue = this.#queue
       .then(async () => {
         const directory = join(this.#appRoot, ".eve", "traces", "v1", traceId, "segments");
-        await mkdir(directory, { mode: 0o700, recursive: true });
-        await chmod(directory, 0o700);
+        await mkdir(directory, { recursive: true });
         await atomicWriteFile(join(directory, `${spanId}.otlp.json`), payload);
       })
       .catch((error: unknown) => {
