@@ -408,6 +408,179 @@ describe("development runtime artifact snapshots", () => {
     expect(acceptableMountLocations.some((location) => existsSync(location))).toBe(true);
   });
 
+  // https://github.com/vercel/eve/issues/1242 — withEve bare-agent-dir
+  // expression: the agent root has no package.json or tsconfig.json of its
+  // own; the parent Next.js-style package owns both, and its tsconfig path
+  // aliases must keep resolving from dev runtime snapshots exactly like in
+  // production builds.
+  it("resolves parent package tsconfig path aliases from dev runtime snapshots", async () => {
+    const workspaceRoot = await createScratchDirectory("eve-dev-runtime-parent-tsconfig-paths-");
+    const hostRoot = join(workspaceRoot, "apps", "nextjs");
+    const appRoot = join(hostRoot, "agents", "app-agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+
+    await mkdir(join(appRoot, "tools"), { recursive: true });
+    await mkdir(join(hostRoot, "lib"), { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n");
+    await writeFile(join(workspaceRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(hostRoot, "package.json"), '{"name":"nextjs-host","type":"module"}\n');
+    await writeFile(
+      join(hostRoot, "tsconfig.json"),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            baseUrl: ".",
+            paths: {
+              "@/*": ["./*"],
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(hostRoot, "lib", "utils.ts"),
+      'export const findFirstOrUndefined = "parent-lib-utils";\n',
+    );
+    await writeFile(
+      join(appRoot, "tools", "query-data.ts"),
+      [
+        'import { findFirstOrUndefined } from "@/lib/utils";',
+        "",
+        "export const resolved = findFirstOrUndefined;",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot: appRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+    const snapshotHostRoot = join(snapshot.snapshotSourceRoot, "apps", "nextjs");
+
+    // The owning package's tsconfig and alias-target sources are part of the
+    // snapshot.
+    expect(existsSync(join(snapshotHostRoot, "tsconfig.json"))).toBe(true);
+    expect(existsSync(join(snapshotHostRoot, "lib", "utils.ts"))).toBe(true);
+    // No synthetic package.json shadows the owning package boundary that
+    // production bundling resolves the tsconfig through.
+    expect(existsSync(join(snapshotHostRoot, "package.json"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "package.json"))).toBe(false);
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(snapshot.runtimeAppRoot, "tools", "query-data.ts"),
+    );
+
+    expect(moduleNamespace.resolved).toBe("parent-lib-utils");
+  });
+
+  // https://github.com/vercel/eve/issues/1242 — end-to-end expression: the
+  // materialized dev generation must hydrate an agent module that imports
+  // parent application code through the parent tsconfig's path aliases.
+  it("hydrates parent tsconfig alias imports from materialized dev generations", async () => {
+    const workspaceRoot = await createScratchDirectory("eve-dev-runtime-parent-alias-hydrate-");
+    const hostRoot = join(workspaceRoot, "apps", "nextjs");
+    const appRoot = join(hostRoot, "agents", "app-agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
+    const moduleMapPath = join(compileDirectoryPath, "module-map.mjs");
+
+    await mkdir(appRoot, { recursive: true });
+    await mkdir(join(hostRoot, "lib"), { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n");
+    await writeFile(join(workspaceRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(hostRoot, "package.json"), '{"name":"nextjs-host","type":"module"}\n');
+    await writeFile(
+      join(hostRoot, "tsconfig.json"),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            baseUrl: ".",
+            paths: {
+              "@/*": ["./*"],
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(hostRoot, "lib", "auth.ts"),
+      'export const eveAuth = "parent-auth-config";\n',
+    );
+    await writeFile(
+      join(appRoot, "agent.ts"),
+      [
+        'import { eveAuth } from "@/lib/auth";',
+        "",
+        "export const routed = `router:${eveAuth}`;",
+        "",
+      ].join("\n"),
+    );
+
+    const manifest = createCompiledAgentManifest({
+      agentRoot: appRoot,
+      appRoot,
+      config: {
+        model: {
+          id: "openai/gpt-5.4-mini",
+          routing: {
+            kind: "gateway",
+            target: "openai/gpt-5.4-mini",
+          },
+        },
+        name: "Parent Alias Agent",
+        source: {
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
+      },
+      instructions: {
+        logicalPath: "instructions.md",
+        markdown: "Use the routed model.",
+        name: "instructions",
+        sourceId: "instructions.md",
+        sourceKind: "markdown",
+      },
+    });
+
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await writeFile(
+      moduleMapPath,
+      createCompiledModuleMapSource({
+        manifest,
+        moduleMapPath,
+      }),
+    );
+
+    await publishDevelopmentGeneration({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    await withRuntimeSession(createRuntimeSession("parent-alias-imports-regression"), async () => {
+      const bundle = await getCompiledRuntimeAgentBundle({
+        compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
+          createDevelopmentNitroArtifactsConfig({ appRoot }),
+        ),
+      });
+      const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
+
+      expect(agentModule).toMatchObject({
+        routed: "router:parent-auth-config",
+      });
+    });
+  });
+
   it("stops copying at nested git repository boundaries", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-nested-git-");
     const agentRoot = join(appRoot, "agent");
