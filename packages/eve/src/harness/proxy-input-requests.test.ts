@@ -128,13 +128,15 @@ describe("getProxyInputRequests type safety", () => {
     const session = createSession({
       "eve.runtime.proxyInputRequests": {
         "req-1": 42,
-        "req-2": { childContinuationToken: "child-b", kind: "question" },
+        "req-2": { childContinuationToken: 42, kind: "question" },
+        "req-3": { childContinuationToken: "child-c", kind: "other" },
+        "req-4": { childContinuationToken: "child-d", kind: "question" },
       },
     });
     const entries = getProxyInputRequests(session.state);
     expect(entries.size).toBe(1);
-    expect(entries.get("req-2")).toEqual({
-      childContinuationToken: "child-b",
+    expect(entries.get("req-4")).toEqual({
+      childContinuationToken: "child-d",
       kind: "question",
     });
   });

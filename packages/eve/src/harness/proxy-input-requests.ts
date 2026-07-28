@@ -1,14 +1,18 @@
+import { z } from "#compiled/zod/index.js";
+
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import type { InputRequestKind } from "#runtime/input/types.js";
+import { inputRequestKindSchema } from "#runtime/input/types.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
+const proxyInputRequestSchema = z.object({
+  childContinuationToken: z.string(),
+  kind: inputRequestKindSchema,
+});
+
 /** Routing and control metadata for one descendant-owned input request. */
-export interface ProxyInputRequest {
-  readonly childContinuationToken: string;
-  readonly kind: InputRequestKind;
-}
+export type ProxyInputRequest = Readonly<z.infer<typeof proxyInputRequestSchema>>;
 
 /** `requestId → route` map stored on the parent session. */
 type ProxyInputRequestMap = Readonly<Record<string, ProxyInputRequest>>;
@@ -151,14 +155,5 @@ function writeMap(
 }
 
 function isProxyInputRequest(value: unknown): value is ProxyInputRequest {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  if (!("childContinuationToken" in value) || !("kind" in value)) {
-    return false;
-  }
-  return (
-    typeof value.childContinuationToken === "string" &&
-    (value.kind === "question" || value.kind === "session-limit" || value.kind === "tool-approval")
-  );
+  return proxyInputRequestSchema.safeParse(value).success;
 }
