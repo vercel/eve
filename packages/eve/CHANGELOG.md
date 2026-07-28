@@ -1,5 +1,18 @@
 # eve
 
+## 0.27.11
+
+### Patch Changes
+
+- 1e35a26: Bound the zero-config local trace store so `.eve/traces` no longer grows without limit. `eve dev` now sweeps it when a session finishes and at startup, keeping open sessions, the twenty newest traces, and anything from the last seven days before evicting oldest-first above 512 MB. Tune it with `EVE_TRACES_MAX_AGE_MS`, `EVE_TRACES_MAX_TOTAL_BYTES`, and `EVE_TRACES_RETAIN_COUNT`, or set `EVE_TRACES=off` to turn local tracing off entirely.
+- 1c0347f: Expose schedules from generated `withEve` services to Vercel's project-level Cron Jobs. Single and named agents now register routable jobs without requiring duplicate `vercel.json` entries.
+- 0755e97: Resolve package-owned runtime files from the installed eve package when generated host bundles execute outside its package root, including on Windows.
+- 4deab71: Keep traced external dependencies resolvable from queue-triggered Vercel workflow functions, including dependency graphs that contain multiple versions of the same package.
+- cf40283: Development runtime snapshots no longer copy legacy root-level `.workflow-data` directories. Projects with large local workflow histories avoid redundant multi-gigabyte snapshot copies and related disk-space failures.
+- 0f5fcdb: Allow `eve add channel/web` and `eve add channel/slack` to install their package dependencies and run the existing channel setup flows. The official registry now lists Web Chat and Slack channel items with trusted built-in setup metadata.
+- 41cc919: Retry model calls when undici terminates a response stream after a headers or body timeout, so transient provider stalls no longer immediately fail task runs.
+- a45e4cb: Keep `t.judge.autoevals.*` assertions working when Braintrust reporting is active by preserving the judge client's OpenAI-compatible interface during autoevals wrapping checks.
+
 ## 0.27.10
 
 ### Patch Changes
