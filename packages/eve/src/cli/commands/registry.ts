@@ -95,14 +95,25 @@ function validateRegistrySource(source: string | undefined): void {
 
 function printSearchResults(
   logger: RegistryCommandLogger,
-  items: Array<{ addCommandArgument: string; description?: string }>,
+  result: Awaited<ReturnType<typeof searchRegistries>>,
+  options: { query: string | undefined; sources: string[] },
 ): void {
-  if (items.length === 0) {
+  if (result.items.length === 0) {
     logger.log("No registry items found.");
     return;
   }
-  for (const item of items) {
-    logger.log(`${item.addCommandArgument}${item.description ? ` — ${item.description}` : ""}`);
+
+  const count = `${result.pagination.total} item${result.pagination.total === 1 ? "" : "s"}`;
+  const query = options.query === undefined ? "" : ` matching "${options.query}"`;
+  const registries = `${options.sources.length} registr${options.sources.length === 1 ? "y" : "ies"}`;
+  logger.log(`Found ${count}${query} in ${registries}`);
+  logger.log("");
+
+  for (const item of result.items) {
+    const address = item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument;
+    const description =
+      options.query === undefined && item.description ? ` — ${item.description}` : "";
+    logger.log(`${address}${description}`);
   }
 }
 
@@ -122,7 +133,7 @@ async function browseRegistryItems(
   });
   const errors = result.errors ?? [];
   if (errors.length < sources.length) {
-    printSearchResults(logger, result.items);
+    printSearchResults(logger, result, { query, sources });
   }
   for (const error of errors) {
     logger.error(`${error.registry}: ${error.message}`);

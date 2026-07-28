@@ -185,10 +185,39 @@ describe("registry commands", () => {
     expect(logger.logs).toEqual(["No registry items found."]);
   });
 
+  it("preserves explicit registry URLs in list output", async () => {
+    const logger = createLogger();
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "https://example.com/r/registry.json",
+          name: "search",
+          addCommandArgument: "https://example.com/r/search.json",
+          description: "External search tools",
+        },
+      ],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    });
+
+    await runRegistryListCommand(logger, "/project", "https://example.com/r/registry.json");
+
+    expect(logger.logs).toEqual([
+      "Found 1 item in 1 registry",
+      "",
+      "https://example.com/r/search.json — External search tools",
+    ]);
+  });
+
   it("searches the official catalog and configured registries", async () => {
     const logger = createLogger();
     searchRegistries.mockResolvedValue({
       items: [
+        {
+          registry: "https://eve.dev/r/registry.json",
+          name: "extension/agent-browser",
+          addCommandArgument: "https://eve.dev/r/extension/agent-browser.json",
+          description: "Browser automation",
+        },
         {
           registry: "@acme",
           name: "browser",
@@ -196,7 +225,7 @@ describe("registry commands", () => {
           description: "Browser tools",
         },
       ],
-      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+      pagination: { total: 2, offset: 0, limit: 2, hasMore: false },
     });
 
     await runRegistrySearchCommand(logger, "/project", "browser");
@@ -208,7 +237,12 @@ describe("registry commands", () => {
       continueOnError: true,
       query: "browser",
     });
-    expect(logger.logs).toEqual(["@acme/browser — Browser tools"]);
+    expect(logger.logs).toEqual([
+      'Found 2 items matching "browser" in 2 registries',
+      "",
+      "extension/agent-browser",
+      "@acme/browser",
+    ]);
   });
 
   it("reports total registry failure without describing it as an empty result", async () => {
