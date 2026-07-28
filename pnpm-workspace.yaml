@@ -7,6 +7,7 @@ packages:
 allowBuilds:
   # Registry templates import types only; this optional build is not needed.
   "@google/genai": false
+  braintrust: false
   "@mongodb-js/zstd": true
   "@nestjs/core": true
   "@parcel/watcher": false

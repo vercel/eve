@@ -2,14 +2,22 @@
   "$schema": "https://ui.shadcn.com/schema/registry-item.json",
   "name": "instrumentation/braintrust",
   "title": "Braintrust",
-  "description": "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
-  "dependencies": ["@braintrust/otel", "@vercel/otel"],
+  "description": "Trace eve agent sessions in Braintrust, including turns, steps, tool calls, and subagent interactions.",
+  "dependencies": [
+    "braintrust"
+  ],
   "files": [
     {
       "path": "registry/instrumentation/braintrust.ts",
-      "content": "import { BraintrustExporter } from \"@braintrust/otel\";\nimport { registerOTel } from \"@vercel/otel\";\nimport { defineInstrumentation } from \"eve/instrumentation\";\n\nexport default defineInstrumentation({\n  setup: ({ agentName }) =>\n    registerOTel({\n      serviceName: agentName,\n      traceExporter: new BraintrustExporter({\n        parent: `project_name:${agentName}`,\n        filterAISpans: true,\n      }),\n    }),\n});\n",
+      "content": "import { braintrustEveInstrumentation, initLogger } from \"braintrust\";\nimport { defineState } from \"eve/context\";\nimport { defineInstrumentation } from \"eve/instrumentation\";\n\nexport default defineInstrumentation(\n  braintrustEveInstrumentation({\n    defineState,\n    setup: ({ agentName }) => {\n      initLogger({\n        projectName: agentName,\n        apiKey: process.env.BRAINTRUST_API_KEY,\n      });\n    },\n  }) as Parameters<typeof defineInstrumentation>[0],\n);\n",
       "type": "registry:file",
       "target": "agent/instrumentation.ts"
+    },
+    {
+      "path": "registry/instrumentation/braintrust-hook.ts",
+      "content": "import { braintrustEveHook } from \"braintrust\";\nimport { defineState } from \"eve/context\";\nimport { defineHook } from \"eve/hooks\";\n\nexport default defineHook(\n  braintrustEveHook({\n    defineState,\n    metadata: {\n      app: \"my-eve-agent\", // Replace with your app name\n    },\n  }) as Parameters<typeof defineHook>[0],\n);\n",
+      "type": "registry:file",
+      "target": "agent/hooks/braintrust.ts"
     }
   ],
   "envVars": {
