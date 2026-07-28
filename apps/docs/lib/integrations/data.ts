@@ -1748,11 +1748,12 @@ const instrumentationPresentations: Record<string, InstrumentationPresentation> 
     logo: "braintrust",
     docsHref: "/docs/guides/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "evals", "monitoring"],
-    install: `Install the framework, the Vercel OpenTelemetry wrapper, and Braintrust's exporter:
+    install: `Add Braintrust instrumentation from eve's registry:
 
 \`\`\`bash
-npm install eve@latest @vercel/otel @braintrust/otel
+eve add instrumentation/braintrust
 \`\`\``,
+
     quickStart: `Create \`agent/instrumentation.ts\`. eve auto-discovers it and runs it at server startup, and its presence enables telemetry:
 
 \`\`\`ts
@@ -1778,11 +1779,12 @@ export default defineInstrumentation({
     logo: "sentry",
     docsHref: "/docs/guides/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "otlp", "errors"],
-    install: `Install the framework and the Vercel OpenTelemetry wrapper. Sentry ingests OTLP directly, so no Sentry SDK is required:
+    install: `Add Sentry instrumentation from eve's registry. Sentry ingests OTLP directly, so no Sentry SDK is required:
 
 \`\`\`bash
-npm install eve@latest @vercel/otel
+eve add instrumentation/sentry
 \`\`\``,
+
     quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at your project's Sentry traces endpoint:
 
 \`\`\`ts
@@ -1809,10 +1811,10 @@ export default defineInstrumentation({
     logo: "datadog",
     docsHref: "/docs/guides/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "apm", "otlp"],
-    install: `Install the framework and the Vercel OpenTelemetry wrapper:
+    install: `Add Datadog instrumentation from eve's registry:
 
 \`\`\`bash
-npm install eve@latest @vercel/otel
+eve add instrumentation/datadog
 \`\`\``,
     quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at Datadog's intake for your site, authenticated with your API key:
 
@@ -1838,11 +1840,12 @@ export default defineInstrumentation({
     logo: "honeycomb",
     docsHref: "/docs/guides/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "queries", "otlp"],
-    install: `Install the framework and the Vercel OpenTelemetry wrapper. Honeycomb ingests OTLP directly:
+    install: `Add Honeycomb instrumentation from eve's registry. Honeycomb ingests OTLP directly:
 
 \`\`\`bash
-npm install eve@latest @vercel/otel
+eve add instrumentation/honeycomb
 \`\`\``,
+
     quickStart: `Create \`agent/instrumentation.ts\` and send traces to Honeycomb's OTLP endpoint with your ingest key:
 
 \`\`\`ts
@@ -1867,11 +1870,12 @@ export default defineInstrumentation({
     logo: "arize",
     docsHref: "/docs/guides/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "llm observability", "evaluation", "otlp"],
-    install: `Install the framework and the Vercel OpenTelemetry wrapper. Arize AX ingests OTLP directly:
+    install: `Add Arize instrumentation from eve's registry. Arize AX ingests OTLP directly:
 
 \`\`\`bash
-npm install eve@latest @vercel/otel
+eve add instrumentation/arize
 \`\`\``,
+
     quickStart: `Create \`agent/instrumentation.ts\` and send traces to Arize's OTLP endpoint with your space ID and API key:
 
 \`\`\`ts
@@ -1900,11 +1904,12 @@ export default defineInstrumentation({
     logo: "raindrop",
     docsHref: "/docs/guides/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "ai issues", "otlp"],
-    install: `Install the framework and the Vercel OpenTelemetry wrapper. Raindrop ingests OTLP directly:
+    install: `Add Raindrop instrumentation from eve's registry. Raindrop ingests OTLP directly:
 
 \`\`\`bash
-npm install eve@latest @vercel/otel
+eve add instrumentation/raindrop
 \`\`\``,
+
     quickStart: `Create \`agent/instrumentation.ts\` and send traces to Raindrop's OTLP endpoint with your write key:
 
 \`\`\`ts
@@ -1931,10 +1936,10 @@ export default defineInstrumentation({
     logo: "jaeger",
     docsHref: "/docs/guides/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "local", "self-hosted"],
-    install: `Install the framework and the Vercel OpenTelemetry wrapper:
+    install: `Add Jaeger instrumentation from eve's registry:
 
 \`\`\`bash
-npm install eve@latest @vercel/otel
+eve add instrumentation/jaeger
 \`\`\``,
     quickStart: `Create \`agent/instrumentation.ts\` and point the OTLP exporter at your Jaeger collector:
 
