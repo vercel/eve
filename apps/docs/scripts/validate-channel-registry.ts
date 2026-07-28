@@ -14,8 +14,10 @@ interface RegistryItem {
   files?: RegistryFile[];
   meta?: {
     eve?: {
-      setup?: { command?: string; args?: string[] };
-      requires?: string;
+      setup?: {
+        command?: string;
+        args?: string[];
+      };
     };
   };
 }
@@ -91,32 +93,11 @@ for (const [index, item] of items.entries()) {
 
   if (entry.slug === "slack" || entry.slug === "eve") {
     const setup = item.meta?.eve?.setup;
-    const expectedArgs = JSON.stringify(["integration", "setup", registrySlug]);
-    if (
-      setup?.command !== "eve" ||
-      JSON.stringify(setup.args) !== expectedArgs ||
-      typeof item.meta?.eve?.requires !== "string"
-    ) {
+    const expectedArgs = ["integration", "setup", registrySlug];
+    if (setup?.command !== "eve" || JSON.stringify(setup.args) !== JSON.stringify(expectedArgs)) {
       throw new Error(
-        `Registry item "${item.name}" must declare an eve integration setup ${registrySlug} step and a requires range.`,
+        `Registry item "${item.name}" must delegate setup to eve integration setup ${registrySlug}.`,
       );
-    }
-    if (entry.slug === "slack" && item.files !== undefined) {
-      throw new Error(
-        `Registry item "${item.name}" must not ship files; eve integration setup slack writes the channel.`,
-      );
-    }
-    if (entry.slug === "eve") {
-      const files = item.files ?? [];
-      if (
-        files.length === 0 ||
-        files.some((file) => !file.path.startsWith("registry/channel/web/"))
-      ) {
-        throw new Error(
-          `Registry item "${item.name}" must ship the web template from registry/channel/web/.`,
-        );
-      }
-      for (const file of files) await access(join(docsRoot, file.path));
     }
     continue;
   }

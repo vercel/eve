@@ -1726,9 +1726,8 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
 
 /**
  * Instrumentation overlay: presentation plus hand-authored setup markdown.
- * Instrumentation providers are OpenTelemetry backends configured in
- * `agent/instrumentation.ts`, so they follow the channel shape (markdown)
- * rather than the generated connection shape.
+ * Instrumentation providers use hand-authored setup files, so they follow the
+ * channel shape (markdown) rather than the generated connection shape.
  */
 type InstrumentationPresentation = ChannelPresentation;
 
@@ -1737,32 +1736,49 @@ const instrumentationPresentations: Record<string, InstrumentationPresentation> 
     logo: "braintrust",
     docsHref: "/docs/guides/instrumentation",
     keywords: ["otel", "opentelemetry", "tracing", "observability", "evals", "monitoring"],
-    install: `Add Braintrust instrumentation from eve's registry:
+    install: `Add the Braintrust integration from eve's registry:
 
 \`\`\`bash
 eve add instrumentation/braintrust
 \`\`\``,
 
-    quickStart: `Create \`agent/instrumentation.ts\`. eve auto-discovers it and runs it at server startup, and its presence enables telemetry:
+    quickStart: `eve installs a hook that traces agent activity and an instrumentation file that initializes the Braintrust logger:
+
+\`\`\`ts
+// agent/hooks/braintrust.ts
+import { braintrustEveHook } from "braintrust";
+import { defineState } from "eve/context";
+import { defineHook } from "eve/hooks";
+
+export default defineHook(
+  braintrustEveHook({
+    defineState,
+    metadata: {
+      app: "my-eve-agent", // Replace with your app name
+    },
+  }) as Parameters<typeof defineHook>[0],
+);
+\`\`\`
 
 \`\`\`ts
 // agent/instrumentation.ts
-import { BraintrustExporter } from "@braintrust/otel";
+import { braintrustEveInstrumentation, initLogger } from "braintrust";
+import { defineState } from "eve/context";
 import { defineInstrumentation } from "eve/instrumentation";
-import { registerOTel } from "@vercel/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new BraintrustExporter({
-        parent: \`project_name:\${agentName}\`,
-        filterAISpans: true,
-      }),
-    }),
-});
+export default defineInstrumentation(
+  braintrustEveInstrumentation({
+    defineState,
+    setup: ({ agentName }) => {
+      initLogger({
+        projectName: agentName,
+        apiKey: process.env.BRAINTRUST_API_KEY,
+      });
+    },
+  }) as Parameters<typeof defineInstrumentation>[0],
+);
 \`\`\``,
-    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   "sentry-instrumentation": {
     logo: "sentry",

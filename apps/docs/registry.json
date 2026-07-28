@@ -1319,8 +1319,8 @@
       "name": "instrumentation/braintrust",
       "type": "registry:item",
       "title": "Braintrust",
-      "description": "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
-      "dependencies": ["@braintrust/otel", "@vercel/otel"],
+      "description": "Trace eve agent sessions in Braintrust, including turns, steps, tool calls, and subagent interactions.",
+      "dependencies": ["braintrust"],
       "envVars": {
         "BRAINTRUST_API_KEY": ""
       },
@@ -1329,6 +1329,11 @@
           "path": "registry/instrumentation/braintrust.ts",
           "type": "registry:file",
           "target": "agent/instrumentation.ts"
+        },
+        {
+          "path": "registry/instrumentation/braintrust-hook.ts",
+          "type": "registry:file",
+          "target": "agent/hooks/braintrust.ts"
         }
       ]
     },

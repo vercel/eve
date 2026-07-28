@@ -1,14 +1,15 @@
-import { BraintrustExporter } from "@braintrust/otel";
-import { registerOTel } from "@vercel/otel";
+import { braintrustEveInstrumentation, initLogger } from "braintrust";
+import { defineState } from "eve/context";
 import { defineInstrumentation } from "eve/instrumentation";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new BraintrustExporter({
-        parent: `project_name:${agentName}`,
-        filterAISpans: true,
-      }),
-    }),
-});
+export default defineInstrumentation(
+  braintrustEveInstrumentation({
+    defineState,
+    setup: ({ agentName }) => {
+      initLogger({
+        projectName: agentName,
+        apiKey: process.env.BRAINTRUST_API_KEY,
+      });
+    },
+  }) as Parameters<typeof defineInstrumentation>[0],
+);
