@@ -14,7 +14,7 @@ import { ReadFileStateKey } from "../src/runtime/framework-tools/file-state.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
+function createFakeAccess(files: Record<string, string | null>, home?: string): SandboxAccess {
   return {
     async captureState() {
       return { initialized: false, session: null };
@@ -40,7 +40,7 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
           return path;
         },
         async run(_options: { command: string }) {
-          return { exitCode: 0, stderr: "", stdout: "" };
+          return { exitCode: 0, stderr: "", stdout: home === undefined ? "" : `${home}\n` };
         },
         async spawn() {
           return stubSpawnProcess();
@@ -56,8 +56,9 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
 async function runInContext(
   files: Record<string, string | null>,
   fn: (sandbox: SandboxSession) => Promise<unknown>,
+  home?: string,
 ): Promise<unknown> {
-  const access = createFakeAccess(files);
+  const access = createFakeAccess(files, home);
   const ctx = new ContextContainer();
   ctx.set(SandboxKey, access);
   ctx.set(ReadFileStateKey, { byTarget: {} });
@@ -299,5 +300,104 @@ describe("executeReadFileOnSandbox", () => {
     const state = ctx.require(ReadFileStateKey);
     // The stamp should be under the normalized path
     expect(state.byTarget["/workspace/foo.ts"]).toBeDefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Skill file resolution order (docs: $HOME/.agents/skills first,
+  // /workspace/skills as the fallback — see issue #1234)
+  // ---------------------------------------------------------------------------
+
+  describe("skill file resolution order", () => {
+    const HOME = "/home/agent";
+    const HOME_PATH = `${HOME}/.agents/skills/research/references/notes.md`;
+    const WORKSPACE_PATH = "/workspace/skills/research/references/notes.md";
+
+    it("prefers the $HOME skill root when the file exists in both locations", async () => {
+      const result = (await runInContext(
+        {
+          [HOME_PATH]: "home copy\n",
+          [WORKSPACE_PATH]: "workspace copy\n",
+        },
+        (sandbox) => executeReadFileOnSandbox(sandbox, { filePath: WORKSPACE_PATH }),
+        HOME,
+      )) as ReadFileResult;
+
+      expect(result.content).toContain("1: home copy");
+      expect(result.path).toBe(HOME_PATH);
+    });
+
+    it("falls back to /workspace/skills when the $HOME root misses", async () => {
+      const result = (await runInContext(
+        { [WORKSPACE_PATH]: "workspace copy\n" },
+        (sandbox) => executeReadFileOnSandbox(sandbox, { filePath: WORKSPACE_PATH }),
+        HOME,
+      )) as ReadFileResult;
+
+      expect(result.content).toContain("1: workspace copy");
+      expect(result.path).toBe(WORKSPACE_PATH);
+    });
+
+    it("resolves the symbolic $HOME skill path advertised in the prompt", async () => {
+      const result = (await runInContext(
+        { [HOME_PATH]: "home copy\n" },
+        (sandbox) =>
+          executeReadFileOnSandbox(sandbox, {
+            filePath: "$HOME/.agents/skills/research/references/notes.md",
+          }),
+        HOME,
+      )) as ReadFileResult;
+
+      expect(result.content).toContain("1: home copy");
+      expect(result.path).toBe(HOME_PATH);
+    });
+
+    it("reads a concrete home-rooted skill path directly", async () => {
+      const result = (await runInContext(
+        { [HOME_PATH]: "home copy\n" },
+        (sandbox) => executeReadFileOnSandbox(sandbox, { filePath: HOME_PATH }),
+        HOME,
+      )) as ReadFileResult;
+
+      expect(result.content).toContain("1: home copy");
+      expect(result.path).toBe(HOME_PATH);
+    });
+
+    it("resolves skill paths to /workspace/skills when $HOME is unusable", async () => {
+      const result = (await runInContext({ [WORKSPACE_PATH]: "workspace copy\n" }, (sandbox) =>
+        executeReadFileOnSandbox(sandbox, {
+          filePath: "$HOME/.agents/skills/research/references/notes.md",
+        }),
+      )) as ReadFileResult;
+
+      expect(result.content).toContain("1: workspace copy");
+      expect(result.path).toBe(WORKSPACE_PATH);
+    });
+
+    it("lists both checked locations when a skill file is missing everywhere", async () => {
+      await expect(
+        runInContext(
+          {},
+          (sandbox) => executeReadFileOnSandbox(sandbox, { filePath: WORKSPACE_PATH }),
+          HOME,
+        ),
+      ).rejects.toThrow(`Checked: ${HOME_PATH}, ${WORKSPACE_PATH}.`);
+    });
+
+    it("stamps the resolved path so follow-up writes target the real file", async () => {
+      const access = createFakeAccess({ [HOME_PATH]: "home copy\n" }, HOME);
+      const sandbox = (await access.get())!;
+
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, access);
+      ctx.set(ReadFileStateKey, { byTarget: {} });
+
+      await contextStorage.run(ctx, () =>
+        executeReadFileOnSandbox(sandbox, { filePath: WORKSPACE_PATH }),
+      );
+
+      const state = ctx.require(ReadFileStateKey);
+      expect(state.byTarget[HOME_PATH]).toBeDefined();
+      expect(state.byTarget[WORKSPACE_PATH]).toBeUndefined();
+    });
   });
 });
