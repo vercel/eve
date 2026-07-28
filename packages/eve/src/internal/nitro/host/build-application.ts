@@ -25,7 +25,10 @@ import {
   RecoverablePublicationError,
 } from "#internal/application/output-publication.js";
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
-import { normalizeEveVercelFunctionOutput } from "#internal/workflow-bundle/vercel-workflow-output.js";
+import {
+  materializeVercelWorkflowFunctionOutput,
+  normalizeEveVercelFunctionOutput,
+} from "#internal/workflow-bundle/vercel-workflow-output.js";
 import { createProductionApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
@@ -420,6 +423,11 @@ async function buildApplicationInWorkspace(
       );
     }
     await buildNitroOutput(nitro, profiler, "nitro");
+    if (isVercelBuild) {
+      await measureBuildPhase(profiler, "vercel.workflow-function.materialize", () =>
+        materializeVercelWorkflowFunctionOutput(workspace.publication.output.stagedDir),
+      );
+    }
     if (servicePrefix !== undefined) {
       await measureBuildPhase(profiler, "vercel.functions.normalize", () =>
         normalizeEveVercelFunctionOutput(workspace.publication.output.stagedDir, {
