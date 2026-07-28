@@ -10,6 +10,10 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const UNSAFE_DESTINATION_ERROR =
   "URL must not target localhost, private, link-local, or reserved IP addresses.";
 
+type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
+  readonly dispatcher: Dispatcher1Wrapper;
+};
+
 /** Options for an SSRF-safe HTTPS request. */
 export interface PublicUrlRequestOptions {
   readonly headers: Readonly<Record<string, string>>;
@@ -77,18 +81,23 @@ async function requestOnce(
   const dispatcher = new Dispatcher1Wrapper(agent);
 
   try {
-    const fetchOptions: RequestInit & { dispatcher: Dispatcher1Wrapper } = {
+    const response = await fetchWithDispatcher(url, {
       dispatcher,
       headers: options.headers,
       redirect: "manual",
       signal: options.signal,
-    };
-    const response = await fetch(url, fetchOptions);
+    });
     return { dispatcher, response };
   } catch (error) {
     await dispatcher.close();
     throw error;
   }
+}
+
+function fetchWithDispatcher(url: URL, options: DispatcherRequestInit): Promise<Response> {
+  // Node's fetch types describe its bundled undici version, while the wrapper
+  // adapts the installed undici dispatcher to that runtime protocol.
+  return fetch(url, options as unknown as RequestInit);
 }
 
 function assertPublicHostname(hostname: string): void {
