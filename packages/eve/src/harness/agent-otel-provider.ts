@@ -113,8 +113,9 @@ export function createAgentOtelInstrumentation(
     InstrumentationAttemptScope,
     { readonly models: Map<string, Context>; readonly tools: Map<string, Context> }
   >();
-  // Attempt scopes are object identities retained by the bridge for one
-  // atomic invocation; WeakMap state cannot outlive an abandoned attempt.
+  // A serverless turn runs inside one `turnStep` "use step" invocation. If
+  // that worker is lost, Workflow retries the whole step from entry rather
+  // than resuming this callback sequence in a replacement process.
   const steps = new WeakMap<InstrumentationAttemptScope, SpanState>();
 
   const onSessionStarted = async (event: InstrumentationSessionStartedEvent): Promise<void> => {

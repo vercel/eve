@@ -46,6 +46,7 @@ async function emitAttempt(input: {
   readonly runInContext: InstrumentationContextRunner;
   readonly sessionId: string;
   readonly toolError?: Error;
+  readonly turnAlreadyStarted?: boolean;
   readonly turnId: string;
   readonly turnSequence: number;
 }): Promise<void> {
@@ -57,20 +58,9 @@ async function emitAttempt(input: {
     stepIndex: 0,
     turnId: input.turnId,
   };
-  await input.hooks.publish({
-    agentName: "weather",
-    channelKind: "http",
-    rootSessionId: input.sessionId,
-    sessionId: input.sessionId,
-    type: "session.started",
-  });
-  await input.hooks.publish({
-    rootSessionId: input.sessionId,
-    sequence: input.turnSequence,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    type: "turn.started",
-  });
+  if (input.turnAlreadyStarted !== true) {
+    await publishTurnStarted(input);
+  }
 
   const bridge = createAiSdkHookBridge(scope, input.hooks, input.runInContext);
   Reflect.apply(bridge.onStart!, bridge, [
@@ -132,6 +122,28 @@ async function emitAttempt(input: {
     sessionId: input.sessionId,
     turnId: input.turnId,
     type: "session.waiting",
+  });
+}
+
+async function publishTurnStarted(input: {
+  readonly hooks: InstrumentationHooks;
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly turnSequence: number;
+}): Promise<void> {
+  await input.hooks.publish({
+    agentName: "weather",
+    channelKind: "http",
+    rootSessionId: input.sessionId,
+    sessionId: input.sessionId,
+    type: "session.started",
+  });
+  await input.hooks.publish({
+    rootSessionId: input.sessionId,
+    sequence: input.turnSequence,
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    type: "turn.started",
   });
 }
 
@@ -218,6 +230,38 @@ describe("createAgentOtelInstrumentation", () => {
     expect(
       turns.flatMap((turn) => turn.events).filter((event) => event.name === "session.started"),
     ).toHaveLength(1);
+  });
+
+  it("restores durable turn context when a replacement worker runs the attempt", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    const firstRuntime = createRuntime(stateStore);
+    await publishTurnStarted({
+      hooks: firstRuntime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await firstRuntime.provider.forceFlush();
+
+    const replacementRuntime = createRuntime(stateStore);
+    await emitAttempt({
+      hooks: replacementRuntime.hooks,
+      runInContext: replacementRuntime.runInContext,
+      sessionId: "session-1",
+      turnAlreadyStarted: true,
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await replacementRuntime.provider.forceFlush();
+
+    const turn = byName(firstRuntime.exporter.getFinishedSpans(), "agent.turn")[0]!;
+    const replacementSpans = replacementRuntime.exporter.getFinishedSpans();
+    const step = byName(replacementSpans, "agent.step")[0]!;
+    const action = byName(replacementSpans, "agent.action")[0]!;
+
+    expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
+    expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
+    expect(step.spanContext().traceId).toBe(turn.spanContext().traceId);
   });
 
   it("marks a failed action without failing its turn", async () => {
