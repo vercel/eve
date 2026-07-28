@@ -1,0 +1,126 @@
+import type { SessionAuthContext } from "#channel/types.js";
+import { vercelOidc } from "#public/channels/auth.js";
+import {
+  chatSdkChannel,
+  messageToUserContent,
+  type ChatSdkChannel,
+  type ChatSdkChannelBridge,
+  type ChatSdkChannelEvents,
+} from "#public/channels/chat-sdk/index.js";
+import type { Message, Thread } from "#compiled/chat/index.js";
+import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
+import {
+  createiMessageAdapter,
+  type iMessageAdapter,
+  type iMessageCredentialProvider,
+  type iMessageWebhookVerifier,
+} from "#compiled/@photon-ai/chat-adapter-imessage/index.js";
+
+/** Photon project credentials used by {@link photonChannel}. */
+export type PhotonChannelCredentials = iMessageCredentialProvider;
+
+/** Context passed to {@link PhotonChannelConfig.onMessage}. */
+export interface PhotonInboundMessageContext {
+  /** Returns whether this iMessage thread already has an active eve session. */
+  isSubscribed(): Promise<boolean>;
+  /** Low-level Chat SDK thread for iMessage-specific operations. */
+  readonly thread: Thread;
+}
+
+/** Result of {@link PhotonChannelConfig.onMessage}. Return `null` to drop the message. */
+export type PhotonInboundResult = {
+  readonly auth: SessionAuthContext | null;
+  readonly context?: readonly string[];
+} | null;
+
+/** Sync or async {@link PhotonInboundResult}. */
+export type PhotonInboundResultOrPromise = PhotonInboundResult | Promise<PhotonInboundResult>;
+
+/** Configuration for {@link photonChannel}. */
+export interface PhotonChannelConfig {
+  /** Lazy Photon project credentials, such as `connectPhotonCredentials(...)`. */
+  readonly credentials: PhotonChannelCredentials;
+  /** Per-event overrides for the underlying Chat SDK channel. */
+  readonly events?: ChatSdkChannelEvents<{ imessage: iMessageAdapter }>;
+  /** Inbound message policy. Defaults to dispatching every message with no user auth. */
+  readonly onMessage?: (
+    ctx: PhotonInboundMessageContext,
+    message: Message,
+  ) => PhotonInboundResultOrPromise;
+  /** Override the default webhook route (`/eve/v1/photon`). */
+  readonly route?: string;
+  /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
+  readonly userName?: string;
+  /** Trusted webhook verifier. Defaults to same-project Vercel OIDC. */
+  readonly webhookVerifier?: iMessageWebhookVerifier;
+}
+
+/** First-class eve channel backed by Photon iMessage. */
+export interface PhotonChannel extends ChatSdkChannel {}
+
+/**
+ * Creates an eve channel for Photon-powered iMessage.
+ *
+ * @example
+ * ```ts
+ * import { connectPhotonCredentials } from "@vercel/connect/eve";
+ * import { photonChannel } from "eve/channels/photon";
+ *
+ * export default photonChannel({
+ *   credentials: connectPhotonCredentials(process.env.PHOTON_CONNECTOR_ID!),
+ * });
+ * ```
+ */
+export function photonChannel(config: PhotonChannelConfig): PhotonChannel {
+  const imessage = createiMessageAdapter({
+    credentials: config.credentials,
+    webhookVerifier: config.webhookVerifier ?? vercelOidc(),
+  });
+  const bridge = chatSdkChannel({
+    adapters: { imessage },
+    events: config.events,
+    routes: { imessage: config.route ?? "/eve/v1/photon" },
+    state: createMemoryState(),
+    streaming: false,
+    userName: config.userName ?? "eve",
+  });
+  const onMessage = config.onMessage ?? defaultOnMessage;
+
+  bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
+    await dispatchMessage(bridge, onMessage, thread, message, true);
+  });
+  bridge.bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
+    await dispatchMessage(bridge, onMessage, thread, message, false);
+  });
+
+  return bridge.channel;
+}
+
+async function defaultOnMessage(): Promise<PhotonInboundResult> {
+  return { auth: null };
+}
+
+async function dispatchMessage(
+  bridge: ChatSdkChannelBridge<{ imessage: iMessageAdapter }>,
+  onMessage: NonNullable<PhotonChannelConfig["onMessage"]>,
+  thread: Thread,
+  message: Message,
+  subscribe: boolean,
+): Promise<void> {
+  const result = await onMessage(
+    {
+      isSubscribed: () => thread.isSubscribed(),
+      thread,
+    },
+    message,
+  );
+  if (result === null) return;
+  if (subscribe) await thread.subscribe();
+  await bridge.send(
+    {
+      context: [...(result.context ?? [])],
+      message: messageToUserContent(message),
+    },
+    { auth: result.auth, thread },
+  );
+}

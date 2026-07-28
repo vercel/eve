@@ -1258,6 +1258,9 @@ importers:
       '@opentelemetry/sdk-trace-base':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
+      '@photon-ai/chat-adapter-imessage':
+        specifier: 3.2.0
+        version: 3.2.0(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.4.3)
       '@standard-schema/spec':
         specifier: 1.1.0
         version: 1.1.0

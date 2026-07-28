@@ -79,6 +79,7 @@ minimumReleaseAgeExclude:
   - chat
   - chat-adapter-sendblue
   - "@ai-sdk/*"
+  - "@photon-ai/chat-adapter-imessage"
   - "@rolldown/*"
   - "@typescript/typescript-*"
   - "@turbo/*"

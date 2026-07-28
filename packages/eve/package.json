@@ -236,6 +236,11 @@
       "import": "./dist/src/public/channels/chat-sdk/index.js",
       "default": "./dist/src/public/channels/chat-sdk/index.js"
     },
+    "./channels/photon": {
+      "types": "./dist/src/public/channels/photon/index.d.ts",
+      "import": "./dist/src/public/channels/photon/index.js",
+      "default": "./dist/src/public/channels/photon/index.js"
+    },
     "./channels/github": {
       "types": "./dist/src/public/channels/github/index.d.ts",
       "import": "./dist/src/public/channels/github/index.js",
@@ -323,6 +328,7 @@
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/otlp-transformer": "0.214.0",
     "@opentelemetry/sdk-trace-base": "catalog:",
+    "@photon-ai/chat-adapter-imessage": "3.2.0",
     "@standard-schema/spec": "1.1.0",
     "@sveltejs/kit": "^2.0.0",
     "@types/json-schema": "7.0.15",
