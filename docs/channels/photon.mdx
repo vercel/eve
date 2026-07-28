@@ -17,23 +17,26 @@ export default photonChannel({
 ```
 
 The default webhook route is `/eve/v1/photon`. The channel verifies forwarded
-webhooks with same-project Vercel OIDC by default, subscribes the first inbound
-message thread, and continues the same eve session for later messages.
+webhooks with same-project Vercel OIDC by default, marks accepted messages as
+read, subscribes the first inbound message thread, and continues the same eve
+session for later messages.
 
 Customize inbound dispatch with `onMessage`. Return `null` to ignore a message:
 
 ```ts
 export default photonChannel({
   credentials: connectPhotonCredentials(process.env.PHOTON_CONNECTOR_ID!),
-  async onMessage(ctx, message) {
+  onMessage(_ctx, message) {
     if (message.author.isBot) return null;
     return {
       auth: null,
-      context: ctx.isSubscribed() ? [] : [`The sender is ${message.author.fullName}.`],
+      context: [`The sender is ${message.author.fullName}.`],
     };
   },
 });
 ```
 
 Set `route` to override the webhook path or `webhookVerifier` to use a different
-trusted-forwarder verifier.
+trusted-forwarder verifier. For direct Photon webhooks, pass `webhookSecret` or
+set `IMESSAGE_WEBHOOK_SECRET`; the signing secret takes precedence over the
+default OIDC verifier.

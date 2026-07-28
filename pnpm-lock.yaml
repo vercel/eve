@@ -1377,7 +1377,7 @@ importers:
         version: 7.8.4
       shadcn:
         specifier: 4.16.0
-        version: 4.16.0(supports-color@10.2.2)(typescript@6.0.3)
+        version: 4.16.0(supports-color@10.2.2)(typescript@7.0.2)
       svelte:
         specifier: ^5.0.0
         version: 5.56.1(@typescript-eslint/types@8.59.4)
@@ -18427,6 +18427,20 @@ snapshots:
       - typescript
       - zod
 
+  '@photon-ai/chat-adapter-imessage@3.2.0(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.4.3)':
+    dependencies:
+      '@chat-adapter/shared': 4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      '@spectrum-ts/core': 10.0.0(supports-color@10.2.2)(typescript@7.0.2)
+      '@spectrum-ts/imessage': 10.0.0(@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@7.0.2))(supports-color@10.2.2)(typescript@7.0.2)
+      chat: 4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      mime-types: 3.0.2
+    transitivePeerDependencies:
+      - ai
+      - ffmpeg-static
+      - supports-color
+      - typescript
+      - zod
+
   '@photon-ai/otel@3.3.0(supports-color@10.2.2)(typescript@6.0.3)':
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -18442,6 +18456,27 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.10.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/semantic-conventions': 1.43.0
       typescript: 6.0.3
+    optionalDependencies:
+      '@opentelemetry/instrumentation': 0.219.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2)
+      '@opentelemetry/instrumentation-undici': 0.29.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2)
+    transitivePeerDependencies:
+      - supports-color
+
+  '@photon-ai/otel@3.3.0(supports-color@10.2.2)(typescript@7.0.2)':
+    dependencies:
+      '@opentelemetry/api': 1.9.1
+      '@opentelemetry/api-logs': 0.218.0
+      '@opentelemetry/context-async-hooks': 2.10.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/core': 2.10.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/exporter-logs-otlp-http': 0.218.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/exporter-metrics-otlp-http': 0.218.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/exporter-trace-otlp-http': 0.218.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/resources': 2.10.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/sdk-logs': 0.218.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/sdk-metrics': 2.10.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/sdk-trace-base': 2.10.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/semantic-conventions': 1.43.0
+      typescript: 7.0.2
     optionalDependencies:
       '@opentelemetry/instrumentation': 0.219.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2)
       '@opentelemetry/instrumentation-undici': 0.29.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2)
@@ -19835,6 +19870,20 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@7.0.2)':
+    dependencies:
+      '@photon-ai/otel': 3.3.0(supports-color@10.2.2)(typescript@7.0.2)
+      '@photon-ai/proto': 0.2.4
+      '@repeaterjs/repeater': 3.1.0
+      marked: 18.0.7
+      mime-types: 3.0.2
+      open-graph-scraper: 6.12.0
+      typescript: 7.0.2
+      vcf: 2.1.2
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+
   '@spectrum-ts/imessage@10.0.0(@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@6.0.3))(supports-color@10.2.2)(typescript@6.0.3)':
     dependencies:
       '@photon-ai/advanced-imessage': 1.0.0
@@ -19843,6 +19892,18 @@ snapshots:
       lru-cache: 11.5.2
       marked: 18.0.7
       typescript: 6.0.3
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@spectrum-ts/imessage@10.0.0(@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@7.0.2))(supports-color@10.2.2)(typescript@7.0.2)':
+    dependencies:
+      '@photon-ai/advanced-imessage': 1.0.0
+      '@photon-ai/otel': 3.3.0(supports-color@10.2.2)(typescript@7.0.2)
+      '@spectrum-ts/core': 10.0.0(supports-color@10.2.2)(typescript@7.0.2)
+      lru-cache: 11.5.2
+      marked: 18.0.7
+      typescript: 7.0.2
       zod: 4.4.3
     transitivePeerDependencies:
       - supports-color
@@ -22585,6 +22646,15 @@ snapshots:
       parse-json: 5.2.0
     optionalDependencies:
       typescript: 6.0.3
+
+  cosmiconfig@9.0.2(typescript@7.0.2):
+    dependencies:
+      env-paths: 2.2.1
+      import-fresh: 3.3.1
+      js-yaml: 4.1.1
+      parse-json: 5.2.0
+    optionalDependencies:
+      typescript: 7.0.2
 
   crc-32@1.2.2: {}
 
@@ -29248,6 +29318,46 @@ snapshots:
       browserslist: 4.28.6
       commander: 14.0.3
       cosmiconfig: 9.0.2(typescript@6.0.3)
+      dedent: 1.7.2
+      deepmerge: 4.3.1
+      diff: 8.0.4
+      execa: 9.6.1
+      fast-glob: 3.3.3
+      fs-extra: 11.3.6
+      fuzzysort: 3.1.0
+      kleur: 4.1.5
+      open: 11.0.0
+      ora: 8.2.0
+      postcss: 8.5.15
+      postcss-selector-parser: 7.1.4
+      prompts: 2.4.2
+      recast: 0.23.12
+      stringify-object: 5.0.0
+      tailwind-merge: 3.6.0
+      ts-morph: 26.0.0
+      tsconfig-paths: 4.2.0
+      undici: 7.28.0
+      validate-npm-package-name: 7.0.2
+      zod: 3.25.76
+      zod-to-json-schema: 3.25.2(zod@3.25.76)
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - babel-plugin-macros
+      - supports-color
+      - typescript
+
+  shadcn@4.16.0(supports-color@10.2.2)(typescript@7.0.2):
+    dependencies:
+      '@babel/core': 7.29.0(supports-color@10.2.2)
+      '@babel/parser': 7.29.7
+      '@babel/plugin-transform-typescript': 7.29.7(@babel/core@7.29.0(supports-color@10.2.2))(supports-color@10.2.2)
+      '@babel/preset-typescript': 7.29.7(@babel/core@7.29.0(supports-color@10.2.2))(supports-color@10.2.2)
+      '@dotenvx/dotenvx': 1.75.1
+      '@modelcontextprotocol/sdk': 1.29.0(supports-color@10.2.2)(zod@3.25.76)
+      '@types/validate-npm-package-name': 4.0.2
+      browserslist: 4.28.6
+      commander: 14.0.3
+      cosmiconfig: 9.0.2(typescript@7.0.2)
       dedent: 1.7.2
       deepmerge: 4.3.1
       diff: 8.0.4

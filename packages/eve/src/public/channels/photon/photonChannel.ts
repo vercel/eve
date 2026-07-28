@@ -21,8 +21,6 @@ export type PhotonChannelCredentials = iMessageCredentialProvider;
 
 /** Context passed to {@link PhotonChannelConfig.onMessage}. */
 export interface PhotonInboundMessageContext {
-  /** Returns whether this iMessage thread already has an active eve session. */
-  isSubscribed(): Promise<boolean>;
   /** Low-level Chat SDK thread for iMessage-specific operations. */
   readonly thread: Thread;
 }
@@ -51,7 +49,9 @@ export interface PhotonChannelConfig {
   readonly route?: string;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
   readonly userName?: string;
-  /** Trusted webhook verifier. Defaults to same-project Vercel OIDC. */
+  /** Photon webhook signing secret. Falls back to `IMESSAGE_WEBHOOK_SECRET`. */
+  readonly webhookSecret?: string;
+  /** Trusted webhook verifier. Takes precedence over `webhookSecret`. */
   readonly webhookVerifier?: iMessageWebhookVerifier;
 }
 
@@ -72,9 +72,14 @@ export interface PhotonChannel extends ChatSdkChannel {}
  * ```
  */
 export function photonChannel(config: PhotonChannelConfig): PhotonChannel {
+  const webhookSecret = config.webhookSecret ?? process.env.IMESSAGE_WEBHOOK_SECRET;
   const imessage = createiMessageAdapter({
     credentials: config.credentials,
-    webhookVerifier: config.webhookVerifier ?? vercelOidc(),
+    ...(config.webhookVerifier
+      ? { webhookVerifier: config.webhookVerifier }
+      : webhookSecret
+        ? { webhookSecret }
+        : { webhookVerifier: vercelOidc() }),
   });
   const bridge = chatSdkChannel({
     adapters: { imessage },
@@ -107,14 +112,9 @@ async function dispatchMessage(
   message: Message,
   subscribe: boolean,
 ): Promise<void> {
-  const result = await onMessage(
-    {
-      isSubscribed: () => thread.isSubscribed(),
-      thread,
-    },
-    message,
-  );
+  const result = await onMessage({ thread }, message);
   if (result === null) return;
+  await markReadBestEffort(bridge.bot.getAdapter("imessage"), thread, message);
   if (subscribe) await thread.subscribe();
   await bridge.send(
     {
@@ -123,4 +123,16 @@ async function dispatchMessage(
     },
     { auth: result.auth, thread },
   );
+}
+
+async function markReadBestEffort(
+  adapter: iMessageAdapter,
+  thread: Thread,
+  message: Message,
+): Promise<void> {
+  try {
+    await adapter.markRead(thread.id, message.id);
+  } catch {
+    // A read receipt should never prevent the user's message from reaching eve.
+  }
 }
