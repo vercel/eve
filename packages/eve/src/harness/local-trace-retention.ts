@@ -287,11 +287,24 @@ async function directorySize(path: string): Promise<number> {
   return total;
 }
 
+/**
+ * Reads a directory, reporting "no directory here" for both a missing path and
+ * a path occupied by a file.
+ *
+ * A stray inode where the layout expects a directory must not disable the
+ * sweep: the store would then grow forever, which is the failure this module
+ * exists to prevent. Whatever occupies the path is measured as ordinary bytes
+ * and aged out with the trace that holds it.
+ */
 async function readDirectoryEntries(path: string): Promise<Dirent<string>[] | undefined> {
   try {
     return await readdir(path, { withFileTypes: true });
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error.code === "ENOENT" || error.code === "ENOTDIR")
+    ) {
       return undefined;
     }
     throw error;

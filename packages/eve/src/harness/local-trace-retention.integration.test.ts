@@ -176,6 +176,33 @@ describe("pruneLocalTraceStore", () => {
     await expect(stat(partial)).rejects.toThrow();
   });
 
+  it("keeps sweeping when stray files sit where directories are expected", async () => {
+    const appRoot = await createScratchDirectory("eve-trace-retention-stray-");
+    await writeTrace({ appRoot, modifiedAtMs: NOW - 30 * DAY_MS, traceId: "old" });
+    // Finder leaves these behind in any browsed directory, and a sweep that
+    // throws on one would stop bounding the store forever.
+    await writeFile(join(resolveLocalTraceSchemaDirectory(appRoot), ".DS_Store"), "junk");
+    const occupied = join(resolveLocalTraceSchemaDirectory(appRoot), "occupied");
+    await mkdir(occupied, { recursive: true });
+    const strayPath = join(occupied, "segments");
+    await writeFile(strayPath, "not a directory");
+    const staleAt = new Date(NOW - 30 * DAY_MS);
+    await utimes(strayPath, staleAt, staleAt);
+    await utimes(occupied, staleAt, staleAt);
+
+    const result = await pruneLocalTraceStore({
+      activeTraceIds: new Set(),
+      appRoot,
+      maxAgeMs: 7 * DAY_MS,
+      now: NOW,
+      retainCount: 0,
+    });
+
+    // Both aged-out entries go, and the stray file is simply not a trace.
+    expect(result.removedTraces).toBe(2);
+    await expect(listTraceIds(appRoot)).resolves.toEqual([".DS_Store"]);
+  });
+
   it("never evicts a trace written inside the quiescence window", async () => {
     const appRoot = await createScratchDirectory("eve-trace-retention-quiescent-");
     // Another dev worker could still be writing this one: liveness is tracked
