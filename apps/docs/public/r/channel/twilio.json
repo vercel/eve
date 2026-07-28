@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/twilio",
+  "title": "Twilio",
+  "description": "Put your agent on a phone number: SMS and speech-transcribed calls.",
+  "files": [
+    {
+      "path": "registry/channels/twilio.ts",
+      "content": "import { twilioChannel } from \"eve/channels/twilio\";\n\nexport default twilioChannel({\n  allowFrom: \"+15551234567\",\n  messaging: { from: \"+15557654321\" },\n});\n",
+      "type": "registry:file",
+      "target": "agent/channels/twilio.ts"
+    }
+  ],
+  "envVars": {
+    "TWILIO_ACCOUNT_SID": "",
+    "TWILIO_AUTH_TOKEN": ""
+  },
+  "type": "registry:item"
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/chat-sdk-beeper",
+  "title": "Beeper",
+  "description": "Matrix rooms and bridged messaging networks through Beeper.",
+  "dependencies": ["chat", "@beeper/chat-adapter-matrix", "@chat-adapter/state-memory"],
+  "files": [
+    {
+      "path": "registry/channels/chat-sdk-beeper.ts",
+      "content": "import { createMatrixAdapter } from \"@beeper/chat-adapter-matrix\";\nimport { createMemoryState } from \"@chat-adapter/state-memory\";\nimport type { Message, Thread } from \"chat\";\nimport { chatSdkChannel } from \"eve/channels/chat-sdk\";\n\nexport const { bot, channel, send } = chatSdkChannel({\n  userName: \"My Agent\",\n  adapters: {\n    matrix: createMatrixAdapter(),\n  },\n  state: createMemoryState(),\n});\n\nbot.onNewMention(async (thread: Thread, message: Message) => {\n  await thread.subscribe();\n  await send(message.text, { thread });\n});\n\nbot.onSubscribedMessage(async (thread: Thread, message: Message) => {\n  await send(message.text, { thread });\n});\n\nawait bot.initialize();\n\nexport default channel;\n",
+      "type": "registry:file",
+      "target": "agent/channels/beeper.ts"
+    }
+  ],
+  "envVars": {
+    "MATRIX_BASE_URL": "",
+    "MATRIX_ACCESS_TOKEN": ""
+  },
+  "type": "registry:item"
+}

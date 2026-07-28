@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/chat-sdk-messenger",
+  "title": "Messenger",
+  "description": "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
+  "dependencies": ["chat", "@chat-adapter/messenger", "@chat-adapter/state-memory"],
+  "files": [
+    {
+      "path": "registry/channels/chat-sdk-messenger.ts",
+      "content": "import { createMessengerAdapter } from \"@chat-adapter/messenger\";\nimport { createMemoryState } from \"@chat-adapter/state-memory\";\nimport type { Message, Thread } from \"chat\";\nimport { chatSdkChannel } from \"eve/channels/chat-sdk\";\n\nexport const { bot, channel, send } = chatSdkChannel({\n  userName: \"My Agent\",\n  adapters: { messenger: createMessengerAdapter() },\n  state: createMemoryState(),\n});\n\nbot.onNewMention(async (thread: Thread, message: Message) => {\n  await thread.subscribe();\n  await send(message.text, { thread });\n});\n\nbot.onSubscribedMessage(async (thread: Thread, message: Message) => {\n  await send(message.text, { thread });\n});\n\nexport default channel;\n",
+      "type": "registry:file",
+      "target": "agent/channels/messenger.ts"
+    }
+  ],
+  "envVars": {
+    "FACEBOOK_APP_SECRET": "",
+    "FACEBOOK_PAGE_ACCESS_TOKEN": "",
+    "FACEBOOK_VERIFY_TOKEN": ""
+  },
+  "type": "registry:item"
+}

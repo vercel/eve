@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/github",
+  "title": "GitHub",
+  "description": "Drive your agent from issues, pull requests, and comments.",
+  "files": [
+    {
+      "path": "registry/channels/github.ts",
+      "content": "import { githubChannel } from \"eve/channels/github\";\n\nexport default githubChannel({\n  credentials: {\n    appId: () => process.env.GITHUB_APP_ID!,\n    privateKey: () => process.env.GITHUB_APP_PRIVATE_KEY!,\n    webhookSecret: () => process.env.GITHUB_WEBHOOK_SECRET!,\n  },\n});\n",
+      "type": "registry:file",
+      "target": "agent/channels/github.ts"
+    }
+  ],
+  "envVars": {
+    "GITHUB_APP_ID": "",
+    "GITHUB_APP_PRIVATE_KEY": "",
+    "GITHUB_WEBHOOK_SECRET": ""
+  },
+  "type": "registry:item"
+}

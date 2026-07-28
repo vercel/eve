@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/linear-agent",
+  "title": "Linear Agent",
+  "description": "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
+  "files": [
+    {
+      "path": "registry/channels/linear-agent.ts",
+      "content": "import { linearChannel } from \"eve/channels/linear\";\n\nexport default linearChannel({\n  credentials: {\n    accessToken: () => process.env.LINEAR_AGENT_ACCESS_TOKEN!,\n    webhookSecret: () => process.env.LINEAR_WEBHOOK_SECRET!,\n  },\n});\n",
+      "type": "registry:file",
+      "target": "agent/channels/linear.ts"
+    }
+  ],
+  "envVars": {
+    "LINEAR_AGENT_ACCESS_TOKEN": "",
+    "LINEAR_WEBHOOK_SECRET": ""
+  },
+  "type": "registry:item"
+}

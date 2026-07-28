@@ -151,7 +151,7 @@ Run:
 pnpm --filter eve-docs registry:check
 ```
 
-This runs `shadcn build`, which reads each referenced source file and embeds it as the escaped `content` field in `apps/docs/public/r/<kind>/<slug>.json`. It also rebuilds `apps/docs/public/r/registry.json`, validates connection coverage, and typechecks the registry source files. Never edit `content` or another file under `apps/docs/public/r/` by hand; edit the reference file under `apps/docs/registry/`, rebuild, and commit both the source and generated output.
+This runs `shadcn build`, which reads each referenced source file and embeds it as the escaped `content` field in `apps/docs/public/r/<kind>/<slug>.json`. It also rebuilds `apps/docs/public/r/registry.json`, validates channel, connection, and instrumentation coverage, and typechecks the registry source files. Never edit `content` or another file under `apps/docs/public/r/` by hand; edit the reference file under `apps/docs/registry/`, rebuild, and commit both the source and generated output.
 
 ### Extension requirements
 

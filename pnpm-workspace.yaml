@@ -50,13 +50,28 @@ catalog:
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
-  # Registry extension packages are explicitly reviewed before they are added to the eve registry.
+  # Registry packages are explicitly reviewed before they are added to the eve registry.
   - "@agent-browser/eve"
   - "@agent-browser/sandbox"
+  - "@agentphone/chat-sdk-adapter"
+  - "@beeper/chat-adapter-matrix"
   - "@browserbasehq/eve"
+  - "@chat-adapter/*"
+  - "@getdial/chat-sdk-adapter"
   - "@github-tools/eve-extension"
   - "@github-tools/sdk"
+  - "@kapso/chat-adapter"
+  - "@larksuite/vercel-chat-adapter"
+  - "@linqapp/chat-sdk-adapter"
+  - "@liveblocks/chat-sdk-adapter"
+  - "@novu/chat-sdk-adapter"
+  - "@photon-ai/chat-adapter-imessage"
+  - "@resend/chat-sdk-adapter"
   - "@upstash/agentkit-eve-extension"
+  - "@veltdev/chat-sdk-adapter"
+  - "@zernio/chat-sdk-adapter"
+  - chat
+  - chat-adapter-sendblue
   - "@ai-sdk/*"
   - "@rolldown/*"
   - "@typescript/typescript-*"

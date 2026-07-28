@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel/chat-sdk-novu",
+  "title": "Novu",
+  "description": "Reach Slack, Teams, WhatsApp, Telegram, and email through Novu.",
+  "dependencies": ["chat", "@novu/chat-sdk-adapter", "@chat-adapter/state-memory"],
+  "files": [
+    {
+      "path": "registry/channels/chat-sdk-novu.ts",
+      "content": "import { createNovuAdapter } from \"@novu/chat-sdk-adapter\";\nimport { createMemoryState } from \"@chat-adapter/state-memory\";\nimport type { Message, Thread } from \"chat\";\nimport { chatSdkChannel } from \"eve/channels/chat-sdk\";\n\nexport const { bot, channel, send } = chatSdkChannel({\n  userName: \"My Agent\",\n  adapters: {\n    novu: createNovuAdapter(),\n  },\n  state: createMemoryState(),\n});\n\nbot.onNewMention(async (thread: Thread, message: Message) => {\n  await thread.subscribe();\n  await send(message.text, { thread });\n});\n\nbot.onSubscribedMessage(async (thread: Thread, message: Message) => {\n  await send(message.text, { thread });\n});\n\nexport default channel;\n",
+      "type": "registry:file",
+      "target": "agent/channels/novu.ts"
+    }
+  ],
+  "envVars": {
+    "NOVU_SECRET_KEY": "",
+    "NOVU_AGENT_IDENTIFIER": ""
+  },
+  "type": "registry:item"
+}
