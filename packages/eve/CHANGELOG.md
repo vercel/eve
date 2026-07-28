@@ -1,5 +1,17 @@
 # eve
 
+## 0.27.9
+
+### Patch Changes
+
+- f736533: Update the bundled AI SDK to 7.0.38.
+- 0d2d0cd: Persist zero-config agent, AI SDK, and user-created OpenTelemetry spans under `.eve/traces` during `eve dev` when authored instrumentation is absent.
+- 71bb2c6: Compaction no longer reproduces base64 file payloads from `content` tool outputs. In the summarizer transcript and in capped kept-history results alike, file parts are replaced with a text stub naming the file and media type (matching how message attachments are summarized); sibling text parts survive instead of being truncated away behind the serialized payload.
+- ebeedd6: Add `eve trace ls` and `eve trace [trace]` commands for inspecting locally persisted agent traces after or during `eve dev`.
+- 5e4b70f: Allow `eve add channel/web` and `eve add channel/slack` to use the existing channel setup flows. The official registry now lists Web Chat and Slack channel items.
+- 83c753e: Harden `web_fetch` against SSRF by requiring HTTPS, rejecting non-public destinations during DNS resolution, and returning redirect targets without following them automatically.
+- c804141: `toModelOutput` can now return `{ type: "content", value }` with text and file parts, so a tool can send images (screenshots, rendered charts) to vision-capable models as actual pixels instead of descriptions. Build outputs with the new `toolOutput.text` / `toolOutput.json` / `toolOutput.content` helpers and parts with `toolOutputPart.text` / `toolOutputPart.file`, all from `eve/tools`; file payloads must be base64 strings.
+
 ## 0.27.8
 
 ### Patch Changes
