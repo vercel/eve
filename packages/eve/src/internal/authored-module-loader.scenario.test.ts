@@ -15,6 +15,29 @@ import { useScenarioApp } from "#internal/testing/scenario-app.js";
 describe("loadAuthoredModuleNamespace", () => {
   const scenarioApp = useScenarioApp();
 
+  it("treats framework-only marker packages as no-ops", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/uses-markers.ts": [
+          'import "server-only";',
+          'import "client-only";',
+          'import "next/dist/compiled/server-only";',
+          'import "next/dist/compiled/client-only";',
+          "",
+          'export const result = "loaded";',
+          "",
+        ].join("\n"),
+      },
+      name: "framework-only-marker-packages",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "uses-markers.ts"),
+    );
+
+    expect(moduleNamespace.result).toBe("loaded");
+  });
+
   it("preserves cached channel identity for relative channel imports", async () => {
     const app = await scenarioApp({
       files: {

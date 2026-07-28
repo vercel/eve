@@ -22,7 +22,6 @@ import {
   createEvePackageImportsPlugin,
   createWorkflowImport,
   createWorkflowNodeBuiltinGuardPlugin,
-  createWorkflowPseudoPackagePlugin,
   createWorkflowTransformPlugin,
   createWorkflowVirtualEntryPlugin,
   WORKFLOW_VIRTUAL_ENTRY_ID,
@@ -33,6 +32,7 @@ import {
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
 import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-package-plugin.js";
 import { writeNitroStepEntrypoint } from "#internal/workflow-bundle/nitro-step-entry.js";
 import {
   WORKFLOW_BUILDER_DEFERRED_PACKAGES,
@@ -272,7 +272,7 @@ export class WorkflowBundleBuilder {
         platform: "neutral",
         plugins: [
           createWorkflowVirtualEntryPlugin(virtualEntrySource),
-          createWorkflowPseudoPackagePlugin(),
+          createPseudoPackagePlugin(),
           createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
           createWorkflowTransformPlugin({
             manifest: workflowManifest,

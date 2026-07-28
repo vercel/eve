@@ -202,6 +202,25 @@ describe("application Nitro creation", () => {
     );
   });
 
+  it("installs the shared pseudo-package plugin in both hosted bundlers", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = createPreparedHost();
+    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+
+    const nitroOptions = createNitroMock.mock.calls[0]?.[0] as {
+      rolldownConfig: { plugins: Array<{ name?: string }> };
+      rollupConfig: { plugins: Array<{ name?: string }> };
+    };
+
+    for (const config of [nitroOptions.rolldownConfig, nitroOptions.rollupConfig]) {
+      expect(config.plugins.map((plugin) => plugin.name)).toContain("eve-pseudo-packages");
+    }
+  });
+
   it("preserves workflow bundle side effects and skips workflow transform for cached bundles", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
