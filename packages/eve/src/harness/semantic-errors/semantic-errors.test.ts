@@ -152,6 +152,22 @@ describe("summarizeKnownError (catalog table)", () => {
       error: new TypeError("fetch failed"),
       id: "network-request-failed",
     },
+    {
+      // undici kills a response stream that exceeds its body timeout with
+      // `TypeError: terminated`, cause BodyTimeoutError (UND_ERR_BODY_TIMEOUT).
+      title: "stream killed by the undici body timeout",
+      error: new TypeError("terminated", {
+        cause: Object.assign(new Error("Body Timeout Error"), {
+          code: "UND_ERR_BODY_TIMEOUT",
+        }),
+      }),
+      id: "network-request-failed",
+    },
+    {
+      title: "bare stream termination without a structured code",
+      error: new TypeError("terminated"),
+      id: "network-request-failed",
+    },
   ];
 
   for (const testCase of cases) {
