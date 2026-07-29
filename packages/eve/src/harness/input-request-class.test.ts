@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { classifyInputRequest, isApprovalRequest } from "#harness/input-request-class.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
+
 describe("classifyInputRequest", () => {
   const action = {
     callId: "call_1",
@@ -14,6 +16,7 @@ describe("classifyInputRequest", () => {
     expect(
       classifyInputRequest({
         action,
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Approve" },
           { id: "deny", label: "Deny" },
@@ -38,8 +41,9 @@ describe("classifyInputRequest", () => {
   it("classifies model questions as dismissable", () => {
     expect(
       classifyInputRequest({
-        action,
+        action: { ...action, toolName: ASK_QUESTION_TOOL_NAME },
         allowFreeform: true,
+        kind: "question",
         options: [{ id: "blue", label: "Blue" }],
         prompt: "Which color?",
         requestId: "call_1",
@@ -48,17 +52,31 @@ describe("classifyInputRequest", () => {
   });
 
   it("does not mistake non-approval two-option requests for approvals", () => {
-    expect(
-      classifyInputRequest({
-        action,
-        options: [
-          { id: "blue", label: "Blue" },
-          { id: "red", label: "Red" },
-        ],
-        prompt: "Which color?",
-        requestId: "call_1",
-      }),
-    ).toBe("dismissable");
+    const request = {
+      action: { ...action, toolName: ASK_QUESTION_TOOL_NAME },
+      kind: "question" as const,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "deny", label: "Deny" },
+      ],
+      prompt: "Should we proceed?",
+      requestId: "call_1",
+    };
+
+    expect(isApprovalRequest(request)).toBe(false);
+    expect(classifyInputRequest(request)).toBe("dismissable");
+  });
+
+  it("uses the request kind rather than the action tool name", () => {
+    const request = {
+      action,
+      kind: "question" as const,
+      prompt: "What should happen next?",
+      requestId: "call_1",
+    };
+
+    expect(isApprovalRequest(request)).toBe(false);
+    expect(classifyInputRequest(request)).toBe("dismissable");
   });
 });
 
@@ -70,28 +88,38 @@ describe("isApprovalRequest", () => {
     toolName: "bash",
   } as const;
 
-  it("matches exactly the approve/deny option pair, in order", () => {
-    const options = (ids: readonly string[]) => ids.map((id) => ({ id, label: id }));
-
+  it("distinguishes approval requests from framework-owned input requests", () => {
     expect(
       isApprovalRequest({
         action,
-        options: options(["approve", "deny"]),
+        kind: "tool-approval",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Deny" },
+        ],
         prompt: "?",
         requestId: "r",
       }),
     ).toBe(true);
     expect(
       isApprovalRequest({
-        action,
-        options: options(["deny", "approve"]),
+        action: { ...action, toolName: ASK_QUESTION_TOOL_NAME },
+        kind: "question",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Deny" },
+        ],
         prompt: "?",
         requestId: "r",
       }),
     ).toBe(false);
     expect(
-      isApprovalRequest({ action, options: options(["approve"]), prompt: "?", requestId: "r" }),
+      isApprovalRequest(
+        createSessionLimitContinuationRequest({
+          sessionId: "sess-test",
+          violation: { kind: "input", limit: 12, usedTokens: 12 },
+        }),
+      ),
     ).toBe(false);
-    expect(isApprovalRequest({ action, prompt: "?", requestId: "r" })).toBe(false);
   });
 });

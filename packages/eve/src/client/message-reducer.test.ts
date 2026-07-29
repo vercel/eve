@@ -368,6 +368,7 @@ describe("defaultMessageReducer", () => {
               toolName: "bash",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
               { id: "deny", label: "No", style: "danger" },
@@ -404,6 +405,7 @@ describe("defaultMessageReducer", () => {
                 inputRequest: {
                   allowFreeform: undefined,
                   display: "confirmation",
+                  kind: "tool-approval",
                   options: [
                     { id: "approve", label: "Yes", style: "primary" },
                     { id: "deny", label: "No", style: "danger" },
@@ -437,6 +439,7 @@ describe("defaultMessageReducer", () => {
               toolName: "bash",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
               { id: "deny", label: "No", style: "danger" },
@@ -481,6 +484,7 @@ describe("defaultMessageReducer", () => {
                 inputRequest: {
                   allowFreeform: undefined,
                   display: "confirmation",
+                  kind: "tool-approval",
                   options: [
                     { id: "approve", label: "Yes", style: "primary" },
                     { id: "deny", label: "No", style: "danger" },
@@ -515,6 +519,7 @@ describe("defaultMessageReducer", () => {
               toolName: "bash",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
               { id: "deny", label: "No", style: "danger" },

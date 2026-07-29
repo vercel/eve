@@ -719,6 +719,7 @@ function inputRequested(
           action: { callId: "call_1", input: { command: "pwd" }, kind: "tool-call", toolName },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Approve" },
             { id: "deny", label: "Deny" },

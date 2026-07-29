@@ -140,6 +140,7 @@ function buildApprovalRequest(requestId: string): InputRequest {
       toolName: "create_issue",
     },
     display: "confirmation",
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve", style: "primary" },
       { id: "deny", label: "Deny", style: "danger" },

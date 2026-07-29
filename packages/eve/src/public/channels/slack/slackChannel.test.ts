@@ -445,6 +445,7 @@ describe("slackChannel() default event handlers", () => {
               toolName: "mongodb-mutate",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -553,6 +554,7 @@ describe("slackChannel() default event handlers", () => {
               toolName: "ask_question",
             },
             display: "text",
+            kind: "question",
             prompt: longPrompt,
             requestId: "call_long",
           },
@@ -594,6 +596,7 @@ describe("slackChannel() default event handlers", () => {
         toolName: "mongodb-mutate",
       },
       display: "confirmation" as const,
+      kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes" },
         { id: "deny", label: "No" },
@@ -2364,6 +2367,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
               toolName: "escalate_issue",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -2379,6 +2383,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
               toolName: "escalate_issue",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },

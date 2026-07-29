@@ -1482,6 +1482,7 @@ describe("runProxySubagentEventStep", () => {
               kind: "tool-call",
               toolName: "dangerous_tool",
             },
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Approve" },
               { id: "deny", label: "Deny" },

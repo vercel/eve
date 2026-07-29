@@ -129,6 +129,7 @@ describe("resolvePendingInput", () => {
             toolName: "ask_question",
           },
           display: "select",
+          kind: "question",
           prompt: "Pick one.",
           requestId: "question-call",
         },
@@ -141,6 +142,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -204,6 +206,7 @@ describe("resolvePendingInput", () => {
             toolName: "ask_question",
           },
           display: "text",
+          kind: "question",
           prompt: "Pick one.",
           requestId: "question-call",
         } satisfies InputRequest,
@@ -265,6 +268,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -332,6 +336,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -391,6 +396,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -455,6 +461,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -521,6 +528,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -590,6 +598,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -647,6 +656,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -683,6 +693,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -723,6 +734,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -782,6 +794,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -959,6 +972,7 @@ describe("clearPendingSessionLimitPrompt", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },

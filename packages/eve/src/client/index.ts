@@ -127,9 +127,15 @@ export type {
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 
-export type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
+export type {
+  InputOption,
+  InputRequest,
+  InputRequestKind,
+  InputResponse,
+} from "#runtime/input/types.js";
 export {
   inputOptionSchema,
+  inputRequestKindSchema,
   inputRequestSchema,
   inputResponseSchema,
   isInputRequest,

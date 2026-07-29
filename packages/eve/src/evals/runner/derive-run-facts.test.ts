@@ -100,6 +100,7 @@ function inputRequested(requestIds: readonly string[]): UnstampedMessageStreamEv
           kind: "tool-call" as const,
           toolName: "bash",
         },
+        kind: "tool-approval" as const,
         prompt: "Approve?",
         requestId,
       })),

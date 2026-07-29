@@ -10,6 +10,7 @@ describe("summarizeTurnEvents", () => {
   it("projects the complete waiting-turn lifecycle in one pass", () => {
     const request = {
       action: { callId: "call_1", input: {}, kind: "tool-call" as const, toolName: "bash" },
+      kind: "tool-approval" as const,
       display: "confirmation" as const,
       options: [{ id: "approve", label: "Approve" }],
       prompt: "Approve?",

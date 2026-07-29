@@ -53,6 +53,7 @@ function sampleRequest(): InputRequest {
       kind: "tool-call",
       toolName: "create_issue",
     },
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve" },
       { id: "deny", label: "Deny" },

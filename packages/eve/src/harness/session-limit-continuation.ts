@@ -49,6 +49,7 @@ export function createSessionLimitContinuationRequest(input: {
     },
     allowFreeform: false,
     display: "confirmation",
+    kind: "session-limit",
     options: [
       {
         description: "Grant a fresh token budget",
@@ -96,7 +97,7 @@ function trimTrailingZero(value: number): string {
  * continuation prompt.
  */
 export function isSessionLimitContinuationRequest(request: InputRequest): boolean {
-  return request.action.toolName === SESSION_LIMIT_CONTINUATION_TOOL_NAME;
+  return request.kind === "session-limit";
 }
 
 /**

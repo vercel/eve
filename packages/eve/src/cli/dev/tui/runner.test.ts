@@ -924,6 +924,7 @@ describe("EveTUIRunner native continuation state", () => {
                   toolName: "get_weather",
                 },
                 display: "confirmation",
+                kind: "tool-approval",
                 options: [
                   { id: "approve", label: "Approve" },
                   { id: "deny", label: "Deny" },

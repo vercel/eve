@@ -17,6 +17,7 @@ const localTarget = {
 const resume = { session: cursor, target };
 const request = {
   action: { callId: "call-1", input: {}, kind: "tool-call" as const, toolName: "bash" },
+  kind: "tool-approval" as const,
   display: "confirmation" as const,
   options: [
     { id: "approve", label: "Approve" },
@@ -240,8 +241,18 @@ describe("resolveInvokeOperation", () => {
     const previous = parseInvokeResumeInput({
       status: "input-required",
       requests: [
-        { options: request.options, prompt: request.prompt, requestId: request.requestId },
-        { options: request.options, prompt: request.prompt, requestId: "approval-2" },
+        {
+          kind: request.kind,
+          options: request.options,
+          prompt: request.prompt,
+          requestId: request.requestId,
+        },
+        {
+          kind: request.kind,
+          options: request.options,
+          prompt: request.prompt,
+          requestId: "approval-2",
+        },
       ],
       resume,
     });

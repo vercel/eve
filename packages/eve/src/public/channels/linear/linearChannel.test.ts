@@ -153,6 +153,7 @@ function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
     prompt: "Approve deployment?",
     requestId: "call_1",
     ...overrides,
+    kind: overrides.kind ?? "question",
   };
 }
 

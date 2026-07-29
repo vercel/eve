@@ -262,6 +262,7 @@ describe("discordChannel() inbound route", () => {
     const { privateKey, publicKeyHex } = testKeys();
     const components = renderInputRequestComponents({
       action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
+      kind: "question",
       options: [{ id: "approve", label: "Approve" }],
       prompt: "Approve?",
       requestId: "call_1",
@@ -299,6 +300,7 @@ describe("discordChannel() inbound route", () => {
     const components = renderInputRequestComponents({
       action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
       allowFreeform: true,
+      kind: "question",
       prompt: "Explain",
       requestId: "call_1",
     });

@@ -1879,7 +1879,11 @@ async function* eveEventsToTUIStream(
         for (const request of requests) {
           const toolCallId = request.action.callId;
 
-          if (!knownToolCalls.has(toolCallId)) {
+          // The session-limit continuation is harness-authored — no model
+          // tool call exists behind it, so fabricating a transcript entry
+          // would render a phantom call. Its question rendering already
+          // carries the prompt copy.
+          if (request.kind !== "session-limit" && !knownToolCalls.has(toolCallId)) {
             knownToolCalls.add(toolCallId);
             yield {
               type: "tool-call",
@@ -1893,7 +1897,7 @@ async function* eveEventsToTUIStream(
           seenInputRequestIds.add(request.requestId);
           pendingInputRequests.set(request.requestId, request);
 
-          if (isQuestionRequest(request)) {
+          if (request.kind !== "tool-approval") {
             upsertPendingQuestion(turnState, request);
             continue;
           }
@@ -2210,12 +2214,6 @@ function toFailureEvent(
   const detail = formatFailureDetail(event);
   if (detail !== undefined) failure.detail = detail;
   return failure;
-}
-
-function isQuestionRequest(request: InputRequest): boolean {
-  if (request.display === "select" || request.display === "text") return true;
-  if (request.display === "confirmation") return false;
-  return request.options !== undefined && request.options.length > 0;
 }
 
 function toAgentTUIInputQuestion(request: InputRequest): AgentTUIInputQuestion {

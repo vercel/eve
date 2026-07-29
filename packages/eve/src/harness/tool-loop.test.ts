@@ -441,6 +441,7 @@ function createPendingBashApprovalSession(): HarnessSession {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Yes" },
           { id: "deny", label: "No" },
@@ -491,6 +492,7 @@ function createPendingProtectedActionApprovalSession(): HarnessSession {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Yes" },
           { id: "deny", label: "No" },
@@ -1222,6 +1224,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "session-limit",
           options: [
             { id: "continue", label: "Approve", style: "primary" },
             { id: "stop", label: "Stop", style: "danger" },
@@ -2332,6 +2335,7 @@ describe("createToolLoopHarness", () => {
             },
             allowFreeform: false,
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -6517,6 +6521,7 @@ describe("createToolLoopHarness", () => {
             },
             allowFreeform: false,
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -6704,6 +6709,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -6868,6 +6874,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -7115,6 +7122,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -7269,6 +7277,7 @@ describe("createToolLoopHarness", () => {
               toolName: "ask_question",
             },
             display: "select",
+            kind: "question",
             options: [{ id: "one", label: "One" }],
             prompt: "Choose one.",
             requestId: "question-1",
@@ -7359,6 +7368,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: true,
           display: "select",
+          kind: "question",
           options: questionInput.options,
           prompt: questionInput.prompt,
           requestId: "question-1",
@@ -7445,6 +7455,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: true,
           display: "select",
+          kind: "question",
           options: questionInput.options,
           prompt: questionInput.prompt,
           requestId: "question-1",

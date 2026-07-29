@@ -31,6 +31,7 @@ describe("createSessionLimitContinuationRequest", () => {
       },
       allowFreeform: false,
       display: "confirmation",
+      kind: "session-limit",
       options: [
         {
           description: "Grant a fresh token budget",

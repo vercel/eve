@@ -83,9 +83,10 @@ export type InvokeAuthenticationFailure = Extract<
 
 /** Projects a runtime input request to the stable invocation-facing contract. */
 export function projectInvocationInputRequest(request: InputRequest): InvocationInputRequest {
-  const { allowFreeform, options, prompt, requestId } = request;
+  const { allowFreeform, kind, options, prompt, requestId } = request;
   return {
     allowFreeform,
+    kind,
     options: options?.map(({ description, id, label }) => ({ description, id, label })),
     prompt,
     requestId,
