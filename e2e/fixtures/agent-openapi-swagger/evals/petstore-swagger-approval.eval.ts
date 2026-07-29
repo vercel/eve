@@ -21,7 +21,7 @@ export default defineEval({
 
     t.requireInputRequest({
       display: "confirmation",
-      optionIds: ["approve", "deny"],
+      optionIds: ["approve", "cancel"],
       toolName: PETSTORE_APPROVAL_INVENTORY_TOOL,
     });
     parked.calledTool(PETSTORE_APPROVAL_INVENTORY_TOOL, { status: "pending", count: 1 });

@@ -134,7 +134,7 @@ export function isHitlAction(actionId: string): boolean {
  * - `display === "select"` with more options → `static_select`
  *   dropdown so the picker stays scrollable.
  * - Anything else with options → Slack `card` blocks with action
- *   buttons. Best for visually distinct choices (approve / deny /
+ *   buttons. Best for visually distinct choices (allow / cancel /
  *   cancel).
  * - No options (or `allowFreeform: true`) → a single "Type your answer"
  *   button that opens a Slack modal with a plain_text_input. The modal
@@ -323,13 +323,13 @@ function cardButtonOptions(request: InputRequest): CardButtonOption[] {
   const options = request.options ?? [];
   if (!isApprovalRequest(request)) return options.map(toCardButtonOption);
 
-  const approve = options.find((option) => option.id === "approve");
-  const deny = options.find((option) => option.id === "deny");
-  if (!approve || !deny) return options.map(toCardButtonOption);
+  const allow = options.find((option) => option.id === "approve");
+  const cancel = options.find((option) => option.id === "cancel");
+  if (!allow || !cancel) return options.map(toCardButtonOption);
 
   return [
-    { id: deny.id, label: "Deny" },
-    { id: approve.id, label: "Allow", style: "primary" },
+    { id: cancel.id, label: "Cancel" },
+    { id: allow.id, label: "Approve", style: "primary" },
   ];
 }
 

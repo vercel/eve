@@ -61,10 +61,10 @@ it("converts a stale approval into a non-authorizing user message", () => {
     throw new Error("Expected the stale response to be converted.");
   }
 
-  expect(result.displayMessage).toBe("Yes");
+  expect(result.displayMessage).toBe("Approve");
   expect(result.stepInput.inputResponses).toBeUndefined();
   expect(result.stepInput.message).toEqual(expect.stringContaining("Approve tool call: bash"));
-  expect(result.stepInput.message).toEqual(expect.stringContaining('"label": "Yes"'));
+  expect(result.stepInput.message).toEqual(expect.stringContaining('"label": "Approve"'));
   expect(result.stepInput.message).toEqual(
     expect.stringContaining("This does not authorize an earlier action"),
   );

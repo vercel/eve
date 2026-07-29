@@ -530,7 +530,7 @@ function resolveApprovalOutcome(response: InputResponse | undefined): {
     };
   }
 
-  if (response.optionId === "deny") {
+  if (response.optionId === "cancel") {
     return {
       approved: false,
       reason: TOOL_EXECUTION_DENIED_MESSAGE,
@@ -629,7 +629,7 @@ function buildToolResponsePartsForRequest(
       },
     ];
     /*
-     * On denial (explicit "deny" or auto-deny when the user continues
+     * On denial (explicit "cancel" or auto-deny when the user continues
      * without responding), splice in the matching `execution-denied`
      * tool-result. AI SDK's `streamText` synthesizes this for the
      * current turn's `initialResponseMessages`, but that synthesis is

@@ -552,7 +552,7 @@ describe("chatSdkChannel", () => {
             display: "confirmation",
             options: [
               { id: "approve", label: "Approve", style: "primary" },
-              { id: "deny", label: "Deny", style: "danger" },
+              { id: "cancel", label: "Cancel", style: "danger" },
             ],
             prompt: "Deploy?",
             requestId: "request-1",
@@ -579,11 +579,11 @@ describe("chatSdkChannel", () => {
               value: "approve",
             },
             {
-              id: "eve_input:request-1:deny",
-              label: "Deny",
+              id: "eve_input:request-1:cancel",
+              label: "Cancel",
               style: "danger",
               type: "button",
-              value: "deny",
+              value: "cancel",
             },
           ],
           type: "actions",

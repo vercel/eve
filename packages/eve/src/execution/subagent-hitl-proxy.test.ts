@@ -35,7 +35,7 @@ describe("routeDeliverPayload", () => {
       payload: {
         inputResponses: [
           { optionId: "approve", requestId: "req-a" },
-          { optionId: "deny", requestId: "req-b" },
+          { optionId: "cancel", requestId: "req-b" },
           { optionId: "ignore", requestId: "req-parent" },
         ],
       },
@@ -46,7 +46,7 @@ describe("routeDeliverPayload", () => {
     const childA = routed.forChildren.find((c) => c.childContinuationToken === "child-a");
     const childB = routed.forChildren.find((c) => c.childContinuationToken === "child-b");
     expect(childA?.payload.inputResponses).toEqual([{ optionId: "approve", requestId: "req-a" }]);
-    expect(childB?.payload.inputResponses).toEqual([{ optionId: "deny", requestId: "req-b" }]);
+    expect(childB?.payload.inputResponses).toEqual([{ optionId: "cancel", requestId: "req-b" }]);
 
     expect(routed.forSelf?.inputResponses).toEqual([
       { optionId: "ignore", requestId: "req-parent" },

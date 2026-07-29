@@ -21,7 +21,7 @@ describe("inputRequestSchema", () => {
       kind: "tool-approval",
       options: [
         { id: "approve", label: "Approve", style: "primary" },
-        { id: "deny", label: "Deny", style: "danger" },
+        { id: "cancel", label: "Cancel", style: "danger" },
       ],
       prompt: 'Approve tool "bash"?',
       requestId: "approval-1",

@@ -2048,7 +2048,7 @@ describe("runProxySubagentEventStep", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Approve" },
-              { id: "deny", label: "Deny" },
+              { id: "cancel", label: "Cancel" },
             ],
             prompt: "Approve?",
             requestId: "req-1",
