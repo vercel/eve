@@ -133,23 +133,6 @@ eve registry add @acme=https://registry.acme.com/r/{name}.json
 eve add @acme/analytics
 ```
 
-For a private registry, replace the string mapping in `package.json#registries` with an object that supplies headers or query parameters. Environment variable placeholders are resolved when eve accesses the registry:
-
-```json title="package.json"
-{
-  "registries": {
-    "@acme": {
-      "url": "https://registry.acme.com/r/{name}.json",
-      "headers": {
-        "Authorization": "Bearer ${ACME_REGISTRY_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Keep the token in the environment, never in `package.json`, and serve authenticated registries over HTTPS.
-
 ## Configure generated files
 
 Integrations add project files. Read the generated mount before you run the agent, then add the configuration the extension requires.
