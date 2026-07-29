@@ -2,6 +2,7 @@ export type PromptCommandExtensionName =
   | "model"
   | "channels"
   | "connect"
+  | "add"
   | "deploy"
   | "vc:install"
   | "vc:login";
@@ -111,6 +112,14 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Add an MCP server through Vercel Connect",
     takesArgument: false,
     build: () => ({ type: "extension", name: "connect", argument: "" }),
+    targets: ["local"],
+  },
+  {
+    name: "add",
+    aliases: [],
+    description: "Browse and add registry integrations",
+    takesArgument: false,
+    build: () => ({ type: "extension", name: "add", argument: "" }),
     targets: ["local"],
   },
   {

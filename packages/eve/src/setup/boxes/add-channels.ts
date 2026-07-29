@@ -11,6 +11,7 @@ import { createPromptCommandOutput, withPhase, type ChannelSetupLog } from "#set
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { formatNodeEngineOverrideWarning } from "#setup/node-engine.js";
 import { runPackageManagerInstall } from "#setup/primitives/pm/run.js";
+import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
 import { runVercel } from "#setup/primitives/run-vercel.js";
 
 import {
@@ -128,6 +129,8 @@ export interface AddChannelsDeps {
   reconcileSlackUid: typeof reconcileSlackUid;
   detectPackageManager: typeof detectPackageManager;
   runPackageManagerInstall: typeof runPackageManagerInstall;
+  /** Parent-rendered project flow; legacy test seams may omit it. */
+  ensureVercelProject?: typeof ensureVercelProject;
   runVercel: typeof runVercel;
   detectDeployment: typeof detectDeployment;
 }
@@ -261,6 +264,7 @@ export function addChannels(
     reconcileSlackUid,
     detectPackageManager,
     runPackageManagerInstall,
+    ensureVercelProject,
     runVercel,
     detectDeployment,
   };
@@ -318,16 +322,30 @@ export function addChannels(
         reason: "Slackbot creation needs this directory linked to a Vercel project.",
       });
     }
-    // No onOutput: `vercel link` (without --project) is interactive, so it must
-    // own the terminal. Piping its prompt through the rail renderer line-buffers
-    // the unterminated question and deadlocks the CLI waiting on hidden input.
     log.message("Linking this directory to a Vercel project...");
-    if (!(await deps.runVercel(["link"], { cwd: projectPath, signal }))) {
-      signal?.throwIfAborted();
-      throw new Error("Vercel project linking failed. Slackbot creation did not start.");
+    let project: ProjectResolution;
+    if (deps.ensureVercelProject !== undefined) {
+      const linked = await deps.ensureVercelProject({
+        appRoot: projectPath,
+        prompter: options.prompter,
+        signal,
+      });
+      project = mergeProjectResolution(current, { kind: "linked", projectId: linked.projectId });
+    } else if (deps.runVercel !== runVercel) {
+      const link = () => deps.runVercel(["link"], { cwd: projectPath, signal });
+      const linked = await (options.prompter.withInheritedStdio?.(link) ?? link());
+      if (!linked)
+        throw new Error("Vercel project linking failed. Slackbot creation did not start.");
+      const deployment = await deps.detectDeployment(projectPath, { signal });
+      project = mergeProjectResolution(current, projectResolutionFromDeployment(deployment));
+    } else {
+      const linked = await ensureVercelProject({
+        appRoot: projectPath,
+        prompter: options.prompter,
+        signal,
+      });
+      project = mergeProjectResolution(current, { kind: "linked", projectId: linked.projectId });
     }
-    const deployment = await deps.detectDeployment(projectPath, { signal });
-    const project = mergeProjectResolution(current, projectResolutionFromDeployment(deployment));
     if (!isProjectResolved(project)) {
       throw new Error("Vercel project linking failed. Slackbot creation did not start.");
     }

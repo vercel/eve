@@ -232,6 +232,7 @@ function idleSetupFlow(): SetupFlowRenderer {
     setStatus: vi.fn(),
     renderLine: vi.fn(),
     renderOutput: vi.fn(),
+    withInheritedStdio: (task) => task(),
     waitForInterrupt: () => ({
       promise: new Promise<void>(() => {}),
       dispose: vi.fn(),
@@ -2564,10 +2565,13 @@ describe("EveTUIRunner boot setup detection", () => {
       detectProjectIdentity: vi.fn(async () => undefined),
       getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       promptCommandHandler: {
-        handle: async () => ({
-          message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
-          effect: { kind: "model-access-changed" },
-        }),
+        handle: async (command) =>
+          command.name === "model"
+            ? {
+                message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+                effect: { kind: "model-access-changed" },
+              }
+            : { message: "/add dismissed." },
       },
     });
 
@@ -2627,7 +2631,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
     await runner.run();
 
-    expect(order).toEqual(["vc:install", "vc:login", "model", "prompt"]);
+    expect(order).toEqual(["vc:install", "vc:login", "model", "add", "prompt"]);
     expect(handle).toHaveBeenNthCalledWith(
       1,
       { type: "extension", name: "vc:install", argument: "" },
@@ -2641,6 +2645,10 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(handle).toHaveBeenCalledWith(
       { type: "extension", name: "model", argument: "" },
       { renderer, title: "Weather Agent", initialModelStep: "provider" },
+    );
+    expect(handle).toHaveBeenCalledWith(
+      { type: "extension", name: "add", argument: "" },
+      { renderer, title: "Weather Agent" },
     );
   });
 

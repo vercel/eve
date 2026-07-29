@@ -36,14 +36,15 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
     setStatus: vi.fn(),
     renderLine: vi.fn(),
     renderOutput: vi.fn(),
-    waitForInterrupt: () => ({
+    withInheritedStdio: (task) => task(),
+    waitForInterrupt: vi.fn(() => ({
       promise: new Promise<void>((resolve) => {
         fire = resolve;
       }),
       dispose: () => {
         disposed = true;
       },
-    }),
+    })),
     fireInterrupt: () => fire(),
     interruptDisposed: () => disposed,
   };
@@ -67,6 +68,10 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
       kind: "done",
       addedConnections: [],
     })),
+    runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
+      kind: "done",
+      addedItems: [],
+    })),
     runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => ({
       kind: "deployed",
       productionUrl: "https://my-agent.vercel.app",
@@ -76,7 +81,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
 }
 
 function run(input: {
-  command: "vc:install" | "vc:login" | "model" | "channels" | "connect" | "deploy";
+  command: "vc:install" | "vc:login" | "model" | "channels" | "connect" | "add" | "deploy";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
@@ -100,6 +105,18 @@ function run(input: {
 }
 
 describe("runTuiSetupCommand", () => {
+  it("keeps registry setup interruptible through the parent drawer", async () => {
+    const renderer = fakePanelRenderer();
+    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
+      kind: "done",
+      addedItems: [],
+    }));
+
+    await run({ command: "add", flows: fakeFlows({ runRegistryFlow }), renderer });
+
+    expect(renderer.waitForInterrupt).toHaveBeenCalledWith();
+  });
+
   it("uses the build pulse for every setup command except deploy", () => {
     expect(
       Object.fromEntries(
@@ -111,6 +128,7 @@ describe("runTuiSetupCommand", () => {
       model: "pulse",
       channels: "pulse",
       connect: "pulse",
+      add: "pulse",
       deploy: "spinner",
     });
   });
@@ -490,6 +508,30 @@ describe("runTuiSetupCommand", () => {
     expect(runConnectionsFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
   });
 
+  it.each([
+    [
+      "added",
+      { kind: "done", addedItems: ["extension/browser"] },
+      "Registry items added: extension/browser.",
+    ],
+    ["empty", { kind: "done", addedItems: [] }, "No registry items added."],
+    ["cancelled", { kind: "cancelled" }, "/add dismissed."],
+  ] as const)("reports a %s registry flow", async (_case, result, message) => {
+    const runRegistryFlow = vi.fn(async () => result);
+    const outcome = await run({ command: "add", flows: fakeFlows({ runRegistryFlow }) });
+    const expected: {
+      message: string;
+      tone?: "success";
+      preserveFlowDiagnostics: boolean;
+    } = {
+      message,
+      preserveFlowDiagnostics: true,
+    };
+    if (result.kind === "done" && result.addedItems.length > 0) expected.tone = "success";
+    expect(outcome).toEqual(expected);
+    expect(runRegistryFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+  });
+
   it("keeps deploy pending when channel files landed before a sub-flow failure", async () => {
     const flows = fakeFlows({
       runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
@@ -527,6 +569,7 @@ describe("runTuiSetupCommand", () => {
     });
     await expect(run({ command: "channels", flows: failing })).resolves.toEqual({
       message: "/channels failed: vercel CLI not found",
+      tone: "error",
       preserveFlowDiagnostics: true,
     });
 
@@ -552,6 +595,7 @@ describe("runTuiSetupCommand", () => {
 
     await expect(run({ command: "channels", flows, renderer })).resolves.toEqual({
       message: "/channels failed: network down",
+      tone: "error",
       preserveFlowDiagnostics: true,
     });
     expect(renderer.setStatus).toHaveBeenLastCalledWith(undefined);

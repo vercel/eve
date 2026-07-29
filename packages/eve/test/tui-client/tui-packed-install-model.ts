@@ -144,6 +144,11 @@ void (async () => {
       await screen.waitForText("Change model", 5_000);
       input.send("\x1b");
       await screen.waitForText("/model dismissed.", 5_000);
+      // Fresh-model onboarding now follows the picker with the registry hub.
+      // Dismiss it too before asserting that the runner returns to chat.
+      await screen.waitForText("Add to your agent", 5_000);
+      input.send("\x1b");
+      await screen.waitForText("/add dismissed.", 5_000);
       await screen.waitForIdlePrompt(5_000);
 
       input.type("/exit");

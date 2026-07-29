@@ -247,6 +247,7 @@ export async function runVercel(args: string[], options: RunVercelOptions): Prom
 export interface RunVercelCaptureResult {
   ok: boolean;
   stdout: string;
+  stderr?: string;
 }
 
 /**
@@ -262,7 +263,7 @@ export async function runVercelCaptureStdout(
   args: string[],
   options: RunVercelOptions,
 ): Promise<RunVercelCaptureResult> {
-  if (options.signal?.aborted === true) return { ok: false, stdout: "" };
+  if (options.signal?.aborted === true) return { ok: false, stdout: "", stderr: "" };
   return new Promise<RunVercelCaptureResult>((resolvePromise) => {
     const cwd = existingDir(options.cwd);
     const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
@@ -280,15 +281,21 @@ export async function runVercelCaptureStdout(
     });
     const disarmAbort = armProcessAbort(child, options.signal);
     const chunks: string[] = [];
+    const errorChunks: string[] = [];
     child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk.toString("utf8")));
-    child.stderr?.on("data", (chunk: Buffer) => outputBuffer?.write("stderr", chunk));
+    child.stderr?.on("data", (chunk: Buffer) => {
+      errorChunks.push(chunk.toString("utf8"));
+      outputBuffer?.write("stderr", chunk);
+    });
 
     let settled = false;
     function settle(ok: boolean): void {
       if (settled) return;
       settled = true;
       outputBuffer?.flush();
-      resolvePromise({ ok, stdout: chunks.join("") });
+      const stdout = chunks.join("");
+      const stderr = errorChunks.join("");
+      resolvePromise(stderr.length === 0 ? { ok, stdout } : { ok, stdout, stderr });
     }
     function reportFailure(message: string): void {
       if (options.onOutput) {

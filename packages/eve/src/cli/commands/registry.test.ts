@@ -12,6 +12,7 @@ import {
 
 const {
   addRegistryItems,
+  applyPackageManagerWorkspaceConfiguration,
   getRegistryItems,
   isEveProject,
   readFile,
@@ -20,6 +21,7 @@ const {
   writeFile,
 } = vi.hoisted(() => ({
   addRegistryItems: vi.fn(),
+  applyPackageManagerWorkspaceConfiguration: vi.fn(),
   getRegistryItems: vi.fn(),
   isEveProject: vi.fn(),
   readFile: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock("#compiled/shadcn-registry/index.js", () => ({
 }));
 
 vi.mock("#setup/scaffold/index.js", () => ({ isEveProject }));
+vi.mock("#setup/scaffold/workspace-root.js", () => ({ applyPackageManagerWorkspaceConfiguration }));
 vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
 vi.mock("node:fs/promises", () => ({ readFile, writeFile }));
 
@@ -84,6 +87,7 @@ describe("registry commands", () => {
       },
       cwd: "/project",
       overwrite: true,
+      silent: undefined,
     });
     expect(logger.errors).toEqual([]);
   });
@@ -92,7 +96,7 @@ describe("registry commands", () => {
     "installs the official %s item before running its declared setup",
     async (kind) => {
       const logger = createLogger();
-      const runSetupCommand = vi.fn(async () => "completed" as const);
+      const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
       getRegistryItems.mockResolvedValue([
         {
           name: `channel/${kind}`,
@@ -127,13 +131,14 @@ describe("registry commands", () => {
           args: ["integration", "setup", kind, "--yes"],
         },
         `channel/${kind}`,
+        expect.objectContaining({ prompter: expect.any(Object) }),
       );
     },
   );
 
   it("skips setup in non-interactive use and prints the resume command", async () => {
     const logger = createLogger();
-    const runSetup = vi.fn(async () => "completed" as const);
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     getRegistryItems.mockResolvedValue([
       {
         meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
@@ -159,7 +164,7 @@ describe("registry commands", () => {
 
   it("asks before setup and prints the resume command when declined", async () => {
     const logger = createLogger();
-    const runSetup = vi.fn(async () => "completed" as const);
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     const fake = createFakePrompter({ single: () => "no" });
     getRegistryItems.mockResolvedValue([
       {
@@ -188,7 +193,7 @@ describe("registry commands", () => {
 
   it("prints the resume command when the setup CLI cancels", async () => {
     const logger = createLogger();
-    const runSetup = vi.fn(async () => "cancelled" as const);
+    const runSetup = vi.fn(async () => ({ kind: "cancelled" as const }));
     getRegistryItems.mockResolvedValue([
       {
         meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
@@ -213,7 +218,7 @@ describe("registry commands", () => {
 
   it("runs setup directly without installing the item", async () => {
     const logger = createLogger();
-    const runSetup = vi.fn(async () => "completed" as const);
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     getRegistryItems.mockResolvedValue([
       {
         meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
@@ -235,6 +240,7 @@ describe("registry commands", () => {
       "/project",
       { package: "@acme/slack", bin: "eve-slack", args: ["setup", "--yes"] },
       "channel/slack",
+      expect.objectContaining({ prompter: expect.any(Object) }),
     );
   });
 
@@ -286,7 +292,7 @@ describe("registry commands", () => {
 
   it("does not infer setup from the item address", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => "completed" as const);
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     getRegistryItems.mockResolvedValue([{ name: "channel/web", type: "registry:item" }]);
 
     await runAddCommand(
@@ -305,7 +311,7 @@ describe("registry commands", () => {
 
   it("does not execute setup metadata from a URL item", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => "completed" as const);
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     getRegistryItems.mockResolvedValue([
       {
         name: "channel/web",
@@ -330,6 +336,7 @@ describe("registry commands", () => {
 
     expect(runSetupCommand).not.toHaveBeenCalled();
     expect(addRegistryItems).toHaveBeenCalledOnce();
+    expect(applyPackageManagerWorkspaceConfiguration).not.toHaveBeenCalled();
   });
 
   it("accepts any declared package binary from trusted official metadata", async () => {

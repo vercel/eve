@@ -27,8 +27,18 @@ import {
   registerRuntimeInvokeCommand,
   type InvokeCliRuntimeDependencies,
 } from "#cli/invoke/command.js";
-import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import {
+  parseContextSizeOption,
+  parseDisplayMode,
+  parseLogsMode,
+  parsePortOption,
+  parseStatsMode,
+} from "#cli/option-parsers.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
+import {
+  resumeDevelopmentRuntimeArtifacts,
+  suspendDevelopmentRuntimeArtifacts,
+} from "#services/dev-client/runtime-artifacts.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -150,64 +160,6 @@ const loadIsActiveDevelopmentServerForApp = async () =>
 
 async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startProductionHost"]> {
   return (await import("#internal/nitro/host.js")).startProductionServer;
-}
-
-function parsePortOption(value: string): number {
-  if (!/^-?\d+$/.test(value)) {
-    throw new InvalidArgumentError(`Expected a numeric port, received "${value}".`);
-  }
-
-  const port = Number(value);
-
-  if (port < 0 || port > 65_535) {
-    throw new InvalidArgumentError(`Expected a port between 0 and 65535, received "${value}".`);
-  }
-
-  return port;
-}
-
-const DISPLAY_MODES = new Set(["full", "collapsed", "auto-collapsed", "hidden"]);
-const STATS_MODES = new Set(["tokens", "tokensPerSecond"]);
-
-function parseDisplayMode(value: string): TerminalPartDisplayMode {
-  if (!DISPLAY_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...DISPLAY_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as TerminalPartDisplayMode;
-}
-
-function parseStatsMode(value: string): AssistantResponseStatsMode {
-  if (!STATS_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...STATS_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as AssistantResponseStatsMode;
-}
-
-function parseLogsMode(value: string): LogDisplayMode {
-  const mode = parseLogDisplayMode(value);
-  if (mode === undefined) {
-    throw new InvalidArgumentError(
-      `Expected one of ${LOG_DISPLAY_MODES.join(", ")}, received "${value}".`,
-    );
-  }
-
-  return mode;
-}
-
-function parseContextSizeOption(value: string): number {
-  const size = Number(value);
-
-  if (!Number.isFinite(size) || size <= 0) {
-    throw new InvalidArgumentError(`Expected a positive number, received "${value}".`);
-  }
-
-  return size;
 }
 
 function hasInteractiveTerminal(): boolean {
@@ -450,13 +402,31 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
         const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
-        const tuiInput = {
+        const tuiInput: RunDevelopmentTuiInput = {
           target,
           initialInput: options.input,
           onBootProgress: report,
           lifecycle,
           ...display,
-        } satisfies RunDevelopmentTuiInput;
+        };
+        if (target.kind === "local") {
+          tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
+            const run = async (): Promise<T> => {
+              if (!(await suspendDevelopmentRuntimeArtifacts({ serverUrl: input.serverUrl }))) {
+                throw new Error("Could not pause the development server for integration setup.");
+              }
+              try {
+                return await task();
+              } finally {
+                await resumeDevelopmentRuntimeArtifacts({
+                  serverUrl: input.serverUrl,
+                  silent: true,
+                });
+              }
+            };
+            return await run();
+          };
+        }
         if (remoteTarget?.headers !== undefined) {
           await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
         } else {

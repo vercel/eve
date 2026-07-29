@@ -374,8 +374,10 @@ describe("addChannels box", () => {
     const state = resolvedState(["slack"]);
     state.project = { kind: "unresolved" };
     state.vercelProject = { kind: "none" };
+    const prompter = createPrompter();
+    prompter.withInheritedStdio = vi.fn((task) => task());
     const box = makeBox({
-      prompter: createPrompter(),
+      prompter,
       presetCreateSlackbot: true,
       ensureLinkedProject: "interactive-vercel-link",
       deps,
@@ -385,6 +387,7 @@ describe("addChannels box", () => {
 
     // The engine's exact fallback: a bare interactive `vercel link` with NO
     // onOutput, then a fresh deployment detection.
+    expect(prompter.withInheritedStdio).toHaveBeenCalledOnce();
     expect(deps.runVercel).toHaveBeenCalledWith(["link"], { cwd: "/tmp/project" });
     expect(deps.runVercel.mock.invocationCallOrder[0]).toBeLessThan(
       deps.provisionSlackbot.mock.invocationCallOrder[0]!,

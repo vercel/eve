@@ -117,6 +117,7 @@ export function createPromptCommandHandler(
           appRoot: target.workspaceRoot,
           renderer: flow,
           disabledConnectionReasons: context.disabledConnectionReasons,
+          withExclusiveTerminal: context.withExclusiveTerminal,
         };
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
@@ -125,6 +126,7 @@ export function createPromptCommandHandler(
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
         const outcome: PromptCommandOutcome = { message: result.message };
+        if (result.tone !== undefined) outcome.tone = result.tone;
         if (result.effect !== undefined) outcome.effect = result.effect;
         return outcome;
       } finally {

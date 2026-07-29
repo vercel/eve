@@ -15,6 +15,7 @@ function fakeRenderer(overrides: Partial<TuiPrompterRenderer> = {}): TuiPrompter
     setStatus: vi.fn(),
     renderLine: vi.fn(),
     renderOutput: vi.fn(),
+    withInheritedStdio: (task) => task(),
     ...overrides,
   };
 }
@@ -36,6 +37,26 @@ describe("createTuiPrompter", () => {
 
     expect(picked).toBe(true);
     expect(renderer.readSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: "single" }));
+  });
+
+  it("forwards question-level descriptions and metadata to the panel", async () => {
+    const renderer = fakeRenderer({ readSelect: vi.fn(async () => ["option-0"]) });
+    const prompter = createTuiPrompter(renderer);
+
+    await prompter.select({
+      message: "extension/agent-browser",
+      description: "Add browser automation tools to an eve agent.",
+      metadata: [{ label: "Source", value: "Official eve registry" }],
+      options: [{ value: "add", label: "Add to project" }],
+    });
+
+    expect(renderer.readSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "single",
+        description: "Add browser automation tools to an eve agent.",
+        metadata: [{ label: "Source", value: "Official eve registry" }],
+      }),
+    );
   });
 
   it("maps a searchable action back to its typed value", async () => {

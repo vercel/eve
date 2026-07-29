@@ -22,7 +22,6 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
 | `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
 | `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
-| `eve channels add [kind]`     | Scaffold a channel interactively, or by kind (`slack` \| `web`)                                                                                       |
 | `eve channels list`           | List user-authored channels                                                                                                                           |
 | `eve extension init [target]` | Create a new extension package                                                                                                                        |
 | `eve extension build`         | Build the current package as an extension                                                                                                             |
@@ -47,9 +46,9 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 After scaffolding, a human terminal usually continues into `eve dev` (or a coding-agent REPL if one is on `PATH` and you pick it). Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                   | Type | Default | Description                                                                                           |
-| ---------------------- | ---- | ------- | ----------------------------------------------------------------------------------------------------- |
-| `--channel-web-nextjs` | flag | off     | Add the Web Chat app (Next.js). Not for existing projects — run `eve channels add web` there instead. |
+| Flag                   | Type | Default | Description                                                                                          |
+| ---------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `--channel-web-nextjs` | flag | off     | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead. |
 
 ## `eve extension`
 
@@ -184,7 +183,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
 
-A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, then opens `/model`. Other input stays editable in the prompt.
+A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, opens `/model`, then offers categorized registry next steps before the first prompt. Other input stays editable in the prompt.
 
 For a URL target protected by HTTP Basic auth, put the credentials in the URL. eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
 
@@ -294,19 +293,6 @@ Runs all discovered evals when no eval ids are given; ids match exactly or by di
 | `--verbose`              | flag   | off     | Stream per-eval `t.log` lines to stdout                       |
 
 See [Evals](../evals/overview) for authoring evals.
-
-## `eve channels add`
-
-```bash
-eve channels add [kind] [-f] [-y]
-```
-
-Scaffolds a channel into `agent/channels/`. With no `kind` it prompts interactively; pass a `kind` (`slack` \| `web`) to scaffold one directly. When the Vercel CLI has an authenticated session, eve scaffolds the Vercel-integrated variant and asks whether to deploy after setup. Without one, Slack setup asks whether to set up Vercel Connect or use portable credentials. The portable variant reads `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` and adds both names to `.env.example`.
-
-| Flag          | Type | Default | Description                                               |
-| ------------- | ---- | ------- | --------------------------------------------------------- |
-| `-f, --force` | flag | off     | Overwrite existing channel files                          |
-| `-y, --yes`   | flag | off     | Assume yes for confirmations; requires an explicit `kind` |
 
 ## `eve channels list`
 

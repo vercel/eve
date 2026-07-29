@@ -9,6 +9,7 @@ import {
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
 import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
+import { runRegistryFlow } from "#setup/flows/registry.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import type { Prompter } from "#setup/prompter.js";
 import { slackMessageDeepLink } from "#setup/slack-connect.js";
@@ -32,6 +33,7 @@ export const SETUP_FLOW_CONFIG = {
   model: { title: "Configure the agent model", indicator: "pulse" },
   channels: { title: "Agent channels", indicator: "pulse" },
   connect: { title: "Agent connections", indicator: "pulse" },
+  add: { title: "Add to your agent", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
 } satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
 
@@ -51,6 +53,8 @@ export interface TuiSetupCommandInput {
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
   disabledConnectionReasons?: Readonly<Record<string, string>>;
+  /** Suspends development runtime artifacts while registry installation and setup mutate them. */
+  withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
   /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   /** Test seam; defaults to the real setup flows. */
@@ -64,11 +68,14 @@ export interface TuiSetupFlows {
   runModelFlow: typeof runModelFlow;
   runChannelsFlow: typeof runChannelsFlow;
   runConnectionsFlow: typeof runConnectionsFlow;
+  runRegistryFlow: typeof runRegistryFlow;
   runDeployFlow: typeof runDeployFlow;
 }
 
 export interface TuiSetupCommandResult {
   message: string;
+  /** Promotes an outcome to a top-level status. */
+  tone?: "success" | "error";
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
   /** Status refresh required after the command settles. */
@@ -83,6 +90,7 @@ export interface TuiSetupCommandResult {
 function muteableRenderer(
   renderer: TuiSetupCommandRenderer,
   isMuted: () => boolean,
+  withSuspendedRuntime?: TuiSetupCommandInput["withExclusiveTerminal"],
 ): MuteableSetupRenderer {
   return {
     readSelect: (options) =>
@@ -111,11 +119,15 @@ function muteableRenderer(
     renderOutput: (text) => {
       if (!isMuted()) renderer.renderOutput(text);
     },
+    withInheritedStdio: (task) => renderer.withInheritedStdio(task),
+    // Registry setup keeps the parent renderer attached; this capability now
+    // pauses runtime artifacts without handing the terminal to the child.
+    withExclusiveTerminal: (task) => withSuspendedRuntime?.(task) ?? task(),
   };
 }
 
 /**
- * Runs one TUI setup command (/model, /channels, /connect, /deploy) over the
+ * Runs one TUI setup command (/model, /channels, /connect, /add, /deploy) over the
  * shared setup flows, asking through the TUI's own bordered panel. Never throws:
  * every outcome — done, cancelled, failed — folds into the returned command
  * result. Ctrl-C or Esc on the working indicator (no question open) aborts the
@@ -128,7 +140,7 @@ export async function runTuiSetupCommand(
   const { command } = input;
   let interrupted = false;
   const controller = new AbortController();
-  const renderer = muteableRenderer(input.renderer, () => interrupted);
+  const renderer = muteableRenderer(input.renderer, () => interrupted, input.withExclusiveTerminal);
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
   const interrupt = input.renderer.waitForInterrupt();
@@ -166,6 +178,7 @@ async function executeSetupCommand(
     runModelFlow,
     runChannelsFlow,
     runConnectionsFlow,
+    runRegistryFlow,
     runDeployFlow,
     ...input.flows,
   };
@@ -290,6 +303,23 @@ async function executeSetupCommand(
             };
         }
       }
+      case "add": {
+        const result = await flows.runRegistryFlow({ appRoot, prompter, signal });
+        if (result.kind === "cancelled") {
+          return { message: "/add dismissed.", preserveFlowDiagnostics: true };
+        }
+        if (result.addedItems.length > 0) {
+          return {
+            message: [
+              `Registry items added: ${result.addedItems.join(", ")}.`,
+              ...(result.output ?? []),
+            ].join("\n"),
+            tone: "success",
+            preserveFlowDiagnostics: true,
+          };
+        }
+        return { message: "No registry items added.", preserveFlowDiagnostics: true };
+      }
       case "deploy": {
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
         if (result.kind === "cancelled") {
@@ -329,6 +359,7 @@ async function executeSetupCommand(
     if (routed !== undefined) return routed;
     return {
       message: `/${command} failed: ${error instanceof Error ? error.message : String(error)}`,
+      tone: "error",
       preserveFlowDiagnostics: true,
     };
   }

@@ -223,8 +223,8 @@ function completedTurnStatus(input: {
 type SetupFlowIndicatorState = { kind: "spinner" } | { kind: "pulse"; startedAtMs: number };
 
 type SetupFlowStatusState =
-  | { kind: "progress"; text: string }
-  | { kind: "external-action"; text: string; emphasis: string };
+  | { kind: "progress"; text: string; startedAtMs: number }
+  | { kind: "external-action"; text: string; emphasis: string; startedAtMs: number };
 
 type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: number };
 
@@ -560,7 +560,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     setStatus: (text) => this.#setFlowStatus(text),
     renderLine: (text, tone) => this.#renderFlowLine(text, tone),
     renderOutput: (text) => this.#renderFlowOutput(text),
-    waitForInterrupt: () => this.#waitForFlowInterrupt(),
+    withInheritedStdio: (task) => this.#withInheritedStdio(task),
+    withExclusiveTerminal: (task) => this.#withInheritedStdio(task),
+    waitForInterrupt: (options) => this.#waitForFlowInterrupt(options),
   };
 
   constructor(options?: TerminalRendererOptions) {
@@ -1607,15 +1609,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /**
-   * Commits one command's outcome under its invocation with the elbow
-   * connector (` ⎿  /model cancelled.`), Claude Code's sub-result grammar.
-   */
-  renderCommandResult(text: string): void {
+  /** Commits one command outcome, promoting explicit status to a top-level result. */
+  renderCommandResult(text: string, tone?: "success" | "error"): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
     this.#start();
-    this.#pushBlock({ kind: "result", body: content, live: false });
+    this.#pushBlock(
+      tone === undefined
+        ? { kind: "result", body: content, live: false }
+        : { kind: "flow", title: tone, body: content, live: false },
+    );
     this.#paint();
   }
 
@@ -1842,7 +1845,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
   ): ReturnType<SetupFlowRenderer["readChoice"]> {
     this.#start();
     const flow = this.#requireSetupFlow();
-    flow.status = { kind: "progress", text: stripTerminalControls(opts.status) };
+    flow.status = {
+      kind: "progress",
+      text: stripTerminalControls(opts.status),
+      startedAtMs: Date.now(),
+    };
     // No action is pre-selected: the user must move into the action group before
     // Enter can act, rather than firing "Try again" by reflex.
     let cursor: number | undefined;
@@ -2409,13 +2416,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /** See {@link SetupFlowRenderer.waitForInterrupt}. */
-  #waitForFlowInterrupt(): { promise: Promise<void>; dispose(): void } {
+  #waitForFlowInterrupt(options?: { interruptible?: boolean }): {
+    promise: Promise<void>;
+    dispose(): void;
+  } {
     let fire!: () => void;
     const promise = new Promise<void>((resolve) => {
       fire = resolve;
     });
     this.#flowInterrupt = fire;
-    this.#armFlowIdleTrap();
+    this.#armFlowIdleTrap(options?.interruptible ?? true);
     return {
       promise,
       dispose: () => {
@@ -2428,13 +2438,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /**
    * Installs the working-state key consumer (Ctrl-C/Esc fires the armed flow
-   * interrupt) while no question owns the keys. Questions overwrite
-   * `#consumeKey` for their lifetime; {@link #closeSetupQuestion} re-arms.
+   * interrupt) while no question owns the keys. All other input is discarded:
+   * carrying typeahead keystrokes across an install into the next setup prompt
+   * makes that prompt feel laggy and can select an unintended answer. Questions
+   * overwrite `#consumeKey` for their lifetime; {@link #closeSetupQuestion}
+   * re-arms.
    */
-  #armFlowIdleTrap(): void {
+  #armFlowIdleTrap(interruptible = true): void {
     if (this.#flowInterrupt === undefined) return;
     const consumer = (key: TerminalKey): void => {
-      if (key.type === "ctrl-c" || key.type === "escape") {
+      if (interruptible && (key.type === "ctrl-c" || key.type === "escape")) {
         if (key.type === "ctrl-c") {
           this.#requestExit();
         }
@@ -2473,11 +2486,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       status === undefined
         ? undefined
         : typeof status === "string"
-          ? { kind: "progress", text: stripTerminalControls(status) }
+          ? { kind: "progress", text: stripTerminalControls(status), startedAtMs: Date.now() }
           : {
               kind: "external-action",
               text: stripTerminalControls(status.text),
               emphasis: stripTerminalControls(status.emphasis),
+              startedAtMs: Date.now(),
             };
     if (this.#setupFlow !== undefined) {
       this.#setupFlow.status = content;
@@ -2549,6 +2563,42 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.outputBuffer.push(content);
     if (flow.outputBuffer.length > FLOW_OUTPUT_BUFFER_CAP) flow.outputBuffer.shift();
     this.#paint();
+  }
+
+  /** Gives an interactive subprocess the real terminal, then restores the live region. */
+  async #withInheritedStdio<T>(task: () => Promise<T>): Promise<T> {
+    // Setup questions can resolve from the first key in a buffered terminal
+    // chunk. The remaining bytes belong to the child process, not the next
+    // TUI question after it exits.
+    this.#keyBuffer = "";
+    this.#clearKeyFlush();
+    this.#flowInterrupt = undefined;
+    this.#disarmFlowIdleTrap();
+    this.#detachInput();
+    this.#stopTicker();
+    this.#live.clear();
+    this.#live.showCursor();
+    this.#removeLogCapture();
+    if (this.#input.isTTY) this.#input.setRawMode?.(false);
+    this.#input.pause();
+    try {
+      return await task();
+    } finally {
+      if (this.#input.isTTY) this.#input.setRawMode?.(true);
+      // The parent stream must remain paused while the child owns the terminal.
+      // Resume only after its raw mode and key consumer are ready again.
+      this.#input.resume();
+      this.#keyBuffer = "";
+      this.#clearKeyFlush();
+      this.#live.hideCursor();
+      this.#installLogCapture();
+      if (this.#setupFlow !== undefined) {
+        this.#startTicker();
+        this.#armFlowIdleTrap();
+      }
+      this.#live.reset();
+      this.#paint();
+    }
   }
 
   /** Last server session id the runner reported; named in the parting line. */
@@ -3681,8 +3731,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // values are guaranteed stale; it reappears, refreshed, when the
       // panel closes.
       const indicator = this.#setupFlowIndicator(flow, flow.status);
-      const status: FlowPanelStatus | undefined =
-        flow.status === undefined ? undefined : { ...flow.status, indicator };
+      let status: FlowPanelStatus | undefined;
+      if (flow.status !== undefined) {
+        const { startedAtMs, ...flowStatus } = flow.status;
+        const elapsedMs = Date.now() - startedAtMs;
+        const elapsed = elapsedMs >= 5_000 ? ` ${formatTurnDuration(elapsedMs)}` : "";
+        status = { ...flowStatus, text: `${flowStatus.text}${elapsed}`, indicator };
+      }
       let content: FlowPanelContent;
       // A live status indicator rides alongside an open question only when one is
       // explicitly set (the install wait); ordinary questions leave it cleared,

@@ -134,11 +134,11 @@ describe("buildAgentHeader", () => {
     expect(remote.join("\n")).not.toContain("/channels");
   });
 
-  it("renders the /connect tip with a blue command", () => {
+  it("renders the /add tip with a blue command", () => {
     const colorTheme = createTheme({ color: true, unicode: false });
-    const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/connect"));
+    const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/add"));
 
-    expect(tip).toBe("Tip: /connect to seamlessly add MCP Connections to your agent");
+    expect(tip).toBe("Use /add to install integrations from the registry.");
     if (tip === undefined) return;
 
     const line = buildAgentHeader({
@@ -150,7 +150,7 @@ describe("buildAgentHeader", () => {
     }).at(-1);
 
     expect(stripAnsi(line ?? "")).toBe(` ${tip}`);
-    expect(line).toContain(colorTheme.colors.blue("/connect"));
+    expect(line).toContain(colorTheme.colors.blue("/add"));
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {

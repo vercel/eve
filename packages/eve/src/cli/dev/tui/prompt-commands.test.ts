@@ -55,6 +55,11 @@ describe("parsePromptCommand", () => {
       name: "deploy",
       argument: "",
     });
+    expect(parsePromptCommand("/add")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "",
+    });
   });
 
   it("parses bare /loglevel and /loglevel with a mode argument", () => {
@@ -95,6 +100,7 @@ describe("promptCommandsFor", () => {
     expect(names).toContain("model");
     expect(names).toContain("channels");
     expect(names).toContain("connect");
+    expect(names).toContain("add");
     expect(names).toContain("deploy");
     expect(names).toContain("vc:install");
     expect(names).toContain("vc:login");
@@ -109,6 +115,7 @@ describe("promptCommandsFor", () => {
     expect(names).not.toContain("model");
     expect(names).not.toContain("channels");
     expect(names).not.toContain("connect");
+    expect(names).not.toContain("add");
     expect(names).not.toContain("deploy");
   });
 

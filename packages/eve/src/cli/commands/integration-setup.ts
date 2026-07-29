@@ -12,6 +12,7 @@ import {
 } from "#setup/channel-setup-integrations.js";
 import { detectDeployment, projectResolutionFromDeployment } from "#setup/project-resolution.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
+import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
 import { isEveProject, type ChannelKind } from "#setup/scaffold/index.js";
 import { createDefaultSetupState, type SetupState } from "#setup/state.js";
 import { getVercelAuthStatus } from "#setup/vercel-project.js";
@@ -21,6 +22,7 @@ import type { RegistryCommandLogger } from "./registry.js";
 
 export interface IntegrationSetupOptions {
   yes?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface IntegrationSetupDependencies {
@@ -50,6 +52,7 @@ export async function runIntegrationSetupCommand(
     return;
   }
 
+  const client = createRegistrySetupClient({ signal: options.signal });
   try {
     if (kind !== "slack" && kind !== "web") {
       throw new Error(
@@ -57,12 +60,13 @@ export async function runIntegrationSetupCommand(
       );
     }
     const channelKind: ChannelKind = kind;
-    const prompter = dependencies.createPrompter?.() ?? createPrompter();
+    const prompter = client?.prompter ?? dependencies.createPrompter?.() ?? createPrompter();
+    const signal = client?.signal ?? options.signal;
     prompter.intro(`Set up ${channelSetupIntegration(channelKind).label}`);
     prompter.log.message("Checking Vercel setup...");
     const [deployment, authStatus] = await Promise.all([
-      dependencies.detectDeployment(appRoot),
-      dependencies.getVercelAuthStatus(appRoot),
+      dependencies.detectDeployment(appRoot, { signal }),
+      dependencies.getVercelAuthStatus(appRoot, { signal }),
     ]);
     const project = projectResolutionFromDeployment(deployment);
     const environment = channelSetupEnvironment(authStatus, project);
@@ -81,8 +85,10 @@ export async function runIntegrationSetupCommand(
       presetPortableCredentials: options.yes ? true : undefined,
       skipDependencyMutation: true,
       deps: dependencies.addChannelsDeps,
+      signal,
     });
     if (result.kind === "cancelled") {
+      client?.cancel();
       if (process.env.EVE_SETUP === "1") process.exitCode = 130;
       return;
     }
@@ -106,7 +112,9 @@ export async function runIntegrationSetupCommand(
     prompter.outro(
       finalState.channels.includes(channelKind) ? "Integration set up." : "No changes made.",
     );
+    client?.complete();
   } catch (error) {
+    client?.fail(error);
     logger.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }

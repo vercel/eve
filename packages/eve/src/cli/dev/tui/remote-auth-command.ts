@@ -63,6 +63,9 @@ function mutedRenderer(
     renderOutput: (text) => {
       if (!isMuted()) renderer.renderOutput(text);
     },
+    withInheritedStdio: (task) => renderer.withInheritedStdio(task),
+    withExclusiveTerminal: (task) =>
+      renderer.withExclusiveTerminal?.(task) ?? renderer.withInheritedStdio(task),
   };
 }
 
