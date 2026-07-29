@@ -1,5 +1,13 @@
 # eve
 
+## 0.27.12
+
+### Patch Changes
+
+- 9df880e: Upgrade the runtime HTTP client to undici 8 while preserving Node fetch compatibility for SSRF-safe web requests.
+- 9ddb890: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- c27b44a: Invoke an agent without a TUI using `eve invoke`, which returns pretty JSON at terminal or blocking events. Durable session coordinates support follow-up turns, human input, authorization, interrupted waits, and machine discovery through `--json-schema`.
+
 ## 0.27.11
 
 ### Patch Changes
