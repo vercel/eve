@@ -6,6 +6,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
+  sessionTimeoutWorkflowReference,
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
@@ -58,6 +59,11 @@ describe("workflowEntryReference", () => {
     expect(turnWorkflowReference.workflowId).toBe(`workflow//${packageInfo.name}//turnWorkflow`);
     expect(turnWorkflowReference.workflowId).not.toContain("/src/execution/");
     expect(turnWorkflowReference.workflowId).not.toContain("@");
+    expect(sessionTimeoutWorkflowReference.workflowId).toBe(
+      `workflow//${packageInfo.name}//sessionTimeoutWorkflow`,
+    );
+    expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("/src/execution/");
+    expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("@");
   });
 });
 

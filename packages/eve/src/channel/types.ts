@@ -149,6 +149,11 @@ export interface DeliverHookPayload {
   readonly payloads: readonly DeliverPayload[];
 }
 
+/** Internal deadline signal sent through the session's delivery hook. */
+export interface SessionTimeoutHookPayload {
+  readonly kind: "session-timeout";
+}
+
 /**
  * Runtime-action results resumed back into a parked parent workflow.
  */
@@ -213,6 +218,7 @@ export interface SubagentAuthorizationEventHookPayload {
 export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
+  | SessionTimeoutHookPayload
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 

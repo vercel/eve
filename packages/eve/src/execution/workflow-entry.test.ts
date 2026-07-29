@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHook, sleep } from "#compiled/@workflow/core/index.js";
+import { createHook } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
@@ -9,6 +9,10 @@ import { notifyDelegatedParentStep } from "#execution/delegated-parent-notificat
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
+import {
+  createSessionTimeoutControl,
+  type SessionTimeoutControl,
+} from "#execution/session-timeout-control.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -21,6 +25,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: vi.fn(() => ({
     url: "https://eve.example.com",
     workflowRunId: "wrun_test_123",
+    workflowStartedAt: new Date("2026-01-01T00:00:00.000Z"),
   })),
   getWritable: vi.fn(
     () =>
@@ -28,7 +33,6 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
         write() {},
       }),
   ),
-  sleep: vi.fn(() => new Promise<void>(() => {})),
 }));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
@@ -68,6 +72,10 @@ vi.mock("./terminal-session-completion-step.js", () => ({
 
 vi.mock("./settle-cancelled-turn-step.js", () => ({
   settleCancelledTurnStep: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("./session-timeout-control.js", () => ({
+  createSessionTimeoutControl: vi.fn(),
 }));
 
 function createSessionStateForMock(
@@ -112,6 +120,7 @@ describe("workflowEntry", () => {
   beforeEach(() => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
     vi.stubEnv("VERCEL_ENV", "");
+    vi.mocked(createSessionTimeoutControl).mockReturnValue(createTimeoutControl());
   });
 
   afterEach(() => {
@@ -141,7 +150,9 @@ describe("workflowEntry", () => {
     });
 
     expect(result).toEqual({ output: "ok" });
-    expect(sleep).toHaveBeenCalledWith(30 * 24 * 60 * 60 * 1_000);
+    expect(createSessionTimeoutControl).toHaveBeenCalledWith({
+      deadline: new Date("2026-01-31T00:00:00.000Z"),
+    });
     expect(createSessionStep).toHaveBeenCalledWith({
       compiledArtifactsSource: {},
       continuationToken: "http:test",
@@ -298,15 +309,15 @@ describe("workflowEntry", () => {
   it("completes a parked session when its durable deadline elapses", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
-    const pendingDelivery = vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {}));
-    vi.mocked(sleep).mockResolvedValueOnce();
+    const timeoutControl = createTimeoutControl();
+    vi.mocked(createSessionTimeoutControl).mockReturnValueOnce(timeoutControl);
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
       deliveryHooks: [
         {
           dispose,
-          next: pendingDelivery,
           token: "http:test",
+          values: [{ kind: "session-timeout" }],
         },
       ],
       turnControls: [turnResult({ action: "park", sessionState })],
@@ -320,7 +331,11 @@ describe("workflowEntry", () => {
       }),
     ).resolves.toEqual({ output: "" });
 
-    expect(sleep).toHaveBeenCalledWith(1_000);
+    expect(createSessionTimeoutControl).toHaveBeenCalledWith({
+      deadline: new Date("2026-01-01T00:00:01.000Z"),
+    });
+    expect(timeoutControl.rekey).toHaveBeenCalledWith("http:test");
+    expect(timeoutControl.dispose).toHaveBeenCalledOnce();
     expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(emitTerminalSessionCompletionStep).toHaveBeenCalledWith({
       parentWritable: expect.any(WritableStream),
@@ -340,13 +355,11 @@ describe("workflowEntry", () => {
   it("does not complete at the deadline until the active turn settles", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
-    const pendingDelivery = new Promise<IteratorResult<HookPayload>>(() => {});
     let settleTurn: ((result: IteratorResult<TurnControlPayload>) => void) | undefined;
     const activeTurn = new Promise<IteratorResult<TurnControlPayload>>((resolve) => {
       settleTurn = resolve;
     });
 
-    vi.mocked(sleep).mockResolvedValueOnce();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
       const token = options?.token ?? "";
@@ -362,9 +375,8 @@ describe("workflowEntry", () => {
       }
       return createMockHook({
         dispose,
-        next: () => pendingDelivery,
         token,
-        values: [],
+        values: [{ kind: "session-timeout" }],
       }) as never;
     });
 
@@ -401,7 +413,7 @@ describe("workflowEntry", () => {
       sessionTimeoutMs: false,
     });
 
-    expect(sleep).not.toHaveBeenCalled();
+    expect(createSessionTimeoutControl).not.toHaveBeenCalled();
   });
 
   it("notifies a delegated parent once when a turn fails terminally", async () => {
@@ -1026,6 +1038,13 @@ function installHookMocks(input: {
       values: config.values ?? [],
     }) as never;
   });
+}
+
+function createTimeoutControl(): SessionTimeoutControl {
+  return {
+    dispose: vi.fn(async () => undefined),
+    rekey: vi.fn(async () => undefined),
+  };
 }
 
 function createMockHook<T>(input: {
