@@ -52,6 +52,17 @@ describe("buildNodeEsmCompatBanner", () => {
     expect(banner).not.toContain('from "node:path"');
   });
 
+  it("does not read a chunk-provided __filename before it initializes", () => {
+    const chunk = ["const __filename = '/x/file.js';", 'export const value = "noop";'].join("\n");
+
+    const banner = buildNodeEsmCompatBanner(chunk);
+
+    expect(banner).not.toContain("const __filename");
+    expect(banner).toContain(
+      "const __dirname = __eveDirname(__eveFileURLToPath(import.meta.url));",
+    );
+  });
+
   it("omits the require shim when the chunk binds require", () => {
     const chunk = [
       'import { createRequire } from "node:module";',
