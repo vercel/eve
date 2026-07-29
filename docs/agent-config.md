@@ -136,21 +136,12 @@ export default defineAgent({
 });
 ```
 
-`sessionTimeoutMs` limits the lifetime of every session created for this
-agent, including delegated subagent sessions. The deadline starts when the
-session is created and is durable across restarts and redeployments. It
-defaults to 30 days. If the deadline passes during an active turn, eve lets
-that turn settle before completing the session normally with
-`session.completed`; a parked session completes as soon as the deadline
-arrives. Set
-`sessionTimeoutMs: false` to disable the timeout.
-
-Completing an expired session releases its continuation hooks and prevents
-later resumption. The next qualifying channel message for the same
-continuation token starts a fresh session with a new session id and deadline.
-Expiration does not delete the previous session's durable event stream,
-sandbox files, or provider data; configure retention and deletion separately
-for the selected backends.
+`sessionTimeoutMs` sets an absolute lifetime for every session, including
+delegated sessions. It defaults to 30 days, starts at creation, and survives
+restarts and redeployments. At the deadline, eve lets an active turn settle,
+then emits `session.completed` and releases the continuation; the next
+qualifying channel message starts fresh. Set it to `false` to disable the
+timeout. Expiration does not delete stored session data.
 
 Input and output budgets are checked independently. The model call that crosses
 either limit is allowed to finish because providers only report exact token
