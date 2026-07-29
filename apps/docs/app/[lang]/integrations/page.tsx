@@ -43,6 +43,21 @@ const IntegrationsPage = async ({ searchParams }: PageProps<"/[lang]/integration
         </p>
       </section>
       <Gallery filter={filter} integrations={integrations} />
+      <section className="mt-12 rounded-lg border border-dashed px-6 py-10 text-center">
+        <h2 className="font-medium text-gray-1000 text-xl tracking-tight">
+          Don&apos;t see your integration?
+        </h2>
+        <p className="mt-2 text-gray-800 text-sm">
+          Help grow the official registry. Read the{" "}
+          <a
+            className="font-medium text-gray-1000 underline underline-offset-4"
+            href="https://github.com/vercel/eve/blob/main/CONTRIBUTING.md#adding-an-integration-to-the-registry"
+          >
+            integration contribution guide
+          </a>
+          .
+        </p>
+      </section>
     </main>
   );
 };
