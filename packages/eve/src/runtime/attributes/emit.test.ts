@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const setAttributesMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
-  experimental_setAttributes: (...args: unknown[]) => setAttributesMock(...args),
+  setAttributes: (...args: unknown[]) => setAttributesMock(...args),
 }));
 
 const { EVE_ATTRIBUTE_VALUE_MAX_BYTES, setEveAttributes, truncateForTag } =

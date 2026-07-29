@@ -1318,7 +1318,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // --- Step-side observability tags ---------------------------------------
     //
     // Tag the **turn workflow run** (the current `"use step"` is hosted by
-    // that workflow, so `experimental_setAttributes` writes to its
+    // that workflow, so `setAttributes` writes to its
     // attributes table) with the model id and per-turn cumulative token
     // counts. Per-turn totals are accumulated on `session.state` because
     // each tool-loop iteration is a fresh `"use step"` and the workflow
