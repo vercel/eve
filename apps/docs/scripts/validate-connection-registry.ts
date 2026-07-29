@@ -13,6 +13,16 @@ interface RegistryItem {
   dependencies?: string[];
   envVars?: Record<string, string>;
   files?: RegistryFile[];
+  meta?: {
+    eve?: {
+      setup?: {
+        command?: string;
+        package?: string;
+        bin?: string;
+        args?: string[];
+      };
+    };
+  };
 }
 
 interface Registry {
@@ -34,6 +44,19 @@ if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
 }
 
 for (const item of items) {
+  const setup = item.meta?.eve?.setup;
+  if (
+    setup !== undefined &&
+    (setup.command === undefined ||
+      setup.package === undefined ||
+      setup.bin === undefined ||
+      setup.args === undefined)
+  ) {
+    throw new Error(
+      `Registry item "${item.name}" setup must declare command, package, bin, and args during the migration.`,
+    );
+  }
+
   const slug = item.name.slice("connection/".length);
   const expectedPath = `registry/connections/${slug}.ts`;
   const expectedTarget = `agent/connections/${slug}.ts`;

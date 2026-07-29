@@ -82,7 +82,10 @@ export async function runIntegrationSetupCommand(
       skipDependencyMutation: true,
       deps: dependencies.addChannelsDeps,
     });
-    if (result.kind === "cancelled") return;
+    if (result.kind === "cancelled") {
+      if (process.env.EVE_SETUP === "1") process.exitCode = 130;
+      return;
+    }
     let finalState = result.state;
     const addedVercelChannel =
       finalState.slackbotAttached ||

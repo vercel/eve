@@ -52,7 +52,7 @@ describe("runChannelsAddCompatibilityCommand", () => {
     });
   });
 
-  it("forwards --yes to the hidden setup command", async () => {
+  it("forwards --yes to registry setup", async () => {
     const output = logger();
     const runAdd = vi.fn(async () => {});
 
@@ -64,7 +64,7 @@ describe("runChannelsAddCompatibilityCommand", () => {
     );
 
     expect(runAdd).toHaveBeenCalledWith(output, "/project", "channel/slack", {
-      setupArgs: ["--yes"],
+      yes: true,
     });
   });
 

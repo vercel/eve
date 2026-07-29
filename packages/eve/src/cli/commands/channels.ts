@@ -53,7 +53,7 @@ export async function runChannelsAddCompatibilityCommand(
       const runAdd = await dependencies.loadAddCommand();
       const addOptions: AddCommandOptions = {};
       if (args.options.force === true) addOptions.overwrite = true;
-      if (args.options.yes === true) addOptions.setupArgs = ["--yes"];
+      if (args.options.yes === true) addOptions.yes = true;
       await runAdd(logger, appRoot, `channel/${kind}`, addOptions);
       return;
     }

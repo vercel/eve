@@ -53,10 +53,10 @@ describe("CLI command registration", () => {
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).toContain("registry");
-    expect(help).not.toContain("setup");
+    expect(help).not.toContain("setup [options] <item>");
   });
 
-  it("keeps registry installation options minimal", async () => {
+  it("lists registry installation and setup options", async () => {
     const output: string[] = [];
     const logger = {
       error: (message: string) => output.push(message),
@@ -67,7 +67,9 @@ describe("CLI command registration", () => {
 
     const help = output.join("\n");
     expect(help).toContain("--overwrite");
-    expect(help).not.toContain("--yes");
+    expect(help).toContain("--skip-install");
+    expect(help).toContain("--skip-setup");
+    expect(help).toContain("--yes");
     expect(help).not.toContain("--silent");
     expect(help).not.toContain("--skip-fonts");
     expect(help).not.toContain("--path");
