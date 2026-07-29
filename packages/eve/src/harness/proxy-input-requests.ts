@@ -1,18 +1,20 @@
-import { z } from "#compiled/zod/index.js";
-
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import { inputRequestKindSchema } from "#runtime/input/types.js";
+import type { InputRequestKind } from "#runtime/input/types.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
-const proxyInputRequestSchema = z.object({
-  childContinuationToken: z.string(),
-  kind: inputRequestKindSchema,
-});
+const PROXY_INPUT_REQUEST_KINDS = {
+  question: true,
+  "session-limit": true,
+  "tool-approval": true,
+} satisfies Readonly<Record<InputRequestKind, true>>;
 
 /** Routing and control metadata for one descendant-owned input request. */
-export type ProxyInputRequest = Readonly<z.infer<typeof proxyInputRequestSchema>>;
+export interface ProxyInputRequest {
+  readonly childContinuationToken: string;
+  readonly kind: InputRequestKind;
+}
 
 /** `requestId → route` map stored on the parent session. */
 type ProxyInputRequestMap = Readonly<Record<string, ProxyInputRequest>>;
@@ -129,8 +131,9 @@ function readMap(state: SessionStateMap | undefined): ProxyInputRequestMap {
 
   const result: Record<string, ProxyInputRequest> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (isProxyInputRequest(value)) {
-      result[key] = value;
+    const request = parseProxyInputRequest(value);
+    if (request !== undefined) {
+      result[key] = request;
     }
   }
   return result;
@@ -154,6 +157,22 @@ function writeMap(
   return { ...session, state };
 }
 
-function isProxyInputRequest(value: unknown): value is ProxyInputRequest {
-  return proxyInputRequestSchema.safeParse(value).success;
+function parseProxyInputRequest(value: unknown): ProxyInputRequest | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  if (!("childContinuationToken" in value) || !("kind" in value)) {
+    return undefined;
+  }
+  if (typeof value.childContinuationToken !== "string" || !isInputRequestKind(value.kind)) {
+    return undefined;
+  }
+  return {
+    childContinuationToken: value.childContinuationToken,
+    kind: value.kind,
+  };
+}
+
+function isInputRequestKind(value: unknown): value is InputRequestKind {
+  return typeof value === "string" && Object.hasOwn(PROXY_INPUT_REQUEST_KINDS, value);
 }
