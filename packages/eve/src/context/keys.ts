@@ -80,7 +80,7 @@ export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
 
 /**
- * Optional framework-owned terminal callback metadata for this session.
+ * Optional framework-owned caller callback captured when the session is created.
  */
 export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCallback");
 

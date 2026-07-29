@@ -9,6 +9,7 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -166,12 +167,24 @@ export interface StepDone {
  */
 export type StepNext = StepDone | StepFn | null;
 
+/** User-facing answer produced when a conversation turn settles. */
+export interface SettledTurn {
+  readonly output: unknown;
+  readonly isError?: boolean;
+  readonly usage?: TokenUsage;
+}
+
 /**
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
   readonly next: StepNext;
   readonly session: HarnessSession;
+  /**
+   * Present when a conversation turn settled with a user-facing answer; carried
+   * across the park boundary so a delegated parent can be notified.
+   */
+  readonly settledTurn?: SettledTurn;
 }
 
 /**

@@ -15,6 +15,12 @@ export const COMPACTION_RESUMPTION_MESSAGE = "Continue.";
 export const TODO_COMPACTION_PRESERVATION_LABEL =
   "[Your task list was preserved across context compaction]";
 
+/**
+ * Label line of the framework-injected agents snippet. Owned here
+ * so compaction can recognize the snippet as synthetic.
+ */
+export const AGENTS_SNIPPET_LABEL = "[Agents]";
+
 const COMPACTION_SYSTEM_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 
 Include:
