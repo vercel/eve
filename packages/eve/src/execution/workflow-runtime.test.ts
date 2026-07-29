@@ -281,9 +281,17 @@ describe("createWorkflowRuntime#run", () => {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
 
-  function mockBundleAndRun(compiledArtifactsSource: RuntimeCompiledArtifactsSource): void {
+  function mockBundleAndRun(
+    compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+    sessionTimeoutMs?: number | false,
+  ): void {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource,
+      resolvedAgent: {
+        config: {
+          limits: sessionTimeoutMs === undefined ? undefined : { sessionTimeoutMs },
+        },
+      },
     } as never);
     getRunMock.mockReturnValue({
       getReadable: () =>
@@ -351,6 +359,25 @@ describe("createWorkflowRuntime#run", () => {
     expect(startOptions.attributes["$eve.title"]).toBe("ship it");
   });
 
+  it("passes the configured session timeout to the durable workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 86_400_000);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: null,
+      input: { message: "hello" },
+      mode: "conversation",
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput).toMatchObject({
+      input: { message: "hello" },
+      sessionTimeoutMs: 86_400_000,
+    });
+  });
+
   it("serializes the channel request id into workflow context", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
@@ -393,6 +420,7 @@ describe("createWorkflowRuntime#run", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource,
       nodeId: "researcher",
+      resolvedAgent: { config: {} },
     } as never);
     startMock.mockResolvedValue({ runId: "subagent-run" });
 
@@ -500,6 +528,7 @@ describe("createWorkflowRuntime#run", () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource,
+      resolvedAgent: { config: {} },
     } as never);
     const bytes = new TextEncoder().encode('{"type":"test.event"}\n');
     const getReadable = vi.fn(

@@ -25,6 +25,7 @@ describe("definition helper exact inputs", () => {
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
+        sessionTimeoutMs: 86_400_000,
       },
       model: "anthropic/claude-sonnet-5",
     });
@@ -37,6 +38,7 @@ describe("definition helper exact inputs", () => {
     expect(agent.description).toBe("type-test");
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
     expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });

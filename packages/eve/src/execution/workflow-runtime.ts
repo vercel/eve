@@ -46,6 +46,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import {
   sessionCancelHookToken,
@@ -120,6 +121,17 @@ export function createWorkflowRuntime(config: {
       const ctx = buildRunContext({ bundle, run: input });
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
+      const sessionTimeoutMs = bundle.resolvedAgent.config.limits?.sessionTimeoutMs;
+      const workflowInput: {
+        -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
+      } = {
+        input: input.input,
+        limits: input.limits,
+        serializedContext,
+      };
+      if (sessionTimeoutMs !== undefined) {
+        workflowInput.sessionTimeoutMs = sessionTimeoutMs;
+      }
       const attributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
@@ -137,20 +149,10 @@ export function createWorkflowRuntime(config: {
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
-        run = await startWorkflowPreferLatest(
-          workflowEntryReference,
-          [
-            {
-              input: input.input,
-              limits: input.limits,
-              serializedContext,
-            },
-          ],
-          {
-            allowReservedAttributes: true,
-            attributes: normalizeEveAttributes(attributes),
-          },
-        );
+        run = await startWorkflowPreferLatest(workflowEntryReference, [workflowInput], {
+          allowReservedAttributes: true,
+          attributes: normalizeEveAttributes(attributes),
+        });
       } catch (error) {
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,

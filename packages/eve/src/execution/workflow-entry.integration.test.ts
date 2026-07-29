@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
-import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import {
+  captureEvents,
+  captureTurnEvents,
+  filterEventsByType,
+} from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -350,6 +354,45 @@ describe("workflowEntry integration", () => {
         expect(replayedIds).toEqual(ids);
       } finally {
         await run.cancel();
+      }
+    });
+  });
+
+  it("terminally expires a parked conversation at its durable session deadline", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
+    const continuationToken = "http:workflow-entry-timeout";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+          sessionTimeoutMs: 25,
+        },
+      ]);
+      const stream = captureEvents(run);
+
+      try {
+        const events = await stream.nextUntil(
+          "session timeout",
+          (event) => event.type === "session.failed",
+        );
+        const failure = filterEventsByType(events, "session.failed").at(-1);
+
+        expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+        expect(failure?.data).toMatchObject({
+          code: "SessionTimeoutError",
+          message: "Session timed out after 25ms.",
+        });
+        await expect(run.returnValue).rejects.toThrow(
+          /Agent workflow failed\. Inspect the private session trace for details\./,
+        );
+      } finally {
+        stream.dispose();
       }
     });
   });

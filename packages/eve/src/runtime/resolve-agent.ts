@@ -249,6 +249,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     config.limits = {
       maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
+      sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
     };
   }
 
