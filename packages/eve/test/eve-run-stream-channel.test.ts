@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { StampedHandleMessageStreamEvent } from "../src/protocol/message.js";
+import type { MessageStreamEvent } from "../src/protocol/message.js";
 import { stampTestEvents } from "../src/internal/testing/events.js";
 import type { RouteHandlerArgs, GetSessionFn } from "../src/channel/routes.js";
 import type { Session } from "../src/channel/session.js";
@@ -156,10 +156,8 @@ describe("eveChannel GET stream", () => {
   });
 });
 
-function createEvents(
-  events: readonly StampedHandleMessageStreamEvent[],
-): ReadableStream<StampedHandleMessageStreamEvent> {
-  return new ReadableStream<StampedHandleMessageStreamEvent>({
+function createEvents(events: readonly MessageStreamEvent[]): ReadableStream<MessageStreamEvent> {
+  return new ReadableStream<MessageStreamEvent>({
     start(controller) {
       for (const event of events) {
         controller.enqueue(event);
@@ -169,7 +167,7 @@ function createEvents(
   });
 }
 
-function createMockGetSession(events: ReadableStream<StampedHandleMessageStreamEvent>) {
+function createMockGetSession(events: ReadableStream<MessageStreamEvent>) {
   return vi.fn<GetSessionFn>().mockReturnValue({
     id: "session_xyz",
     continuationToken: "",

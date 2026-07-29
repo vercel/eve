@@ -10,7 +10,7 @@ import {
   createMessageReceivedEvent,
   createSessionFailedEvent,
   createSessionWaitingEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
@@ -26,7 +26,7 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createEagerStreamResponse(events: readonly HandleMessageStreamEvent[]): Response {
+function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -151,7 +151,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
       reducer: defaultMessageReducer(),
     });
 
-    const seenEvents: HandleMessageStreamEvent[] = [];
+    const seenEvents: UnstampedMessageStreamEvent[] = [];
     const seenSessions: SessionState[] = [];
     store.setCallbacks({
       onEvent(event) {

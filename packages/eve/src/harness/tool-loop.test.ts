@@ -26,7 +26,7 @@ import {
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
@@ -197,16 +197,16 @@ function setDelegatedParent(ctx: ContextContainer): void {
 
 function createEventCollector(): {
   emit: HarnessEmitFn;
-  events: HandleMessageStreamEvent[];
+  events: UnstampedMessageStreamEvent[];
 } {
-  const events: HandleMessageStreamEvent[] = [];
+  const events: UnstampedMessageStreamEvent[] = [];
   const emit: HarnessEmitFn = async (event) => {
     events.push(event);
   };
   return { emit, events };
 }
 
-function getCompatibilityEventTypes(events: readonly HandleMessageStreamEvent[]): string[] {
+function getCompatibilityEventTypes(events: readonly UnstampedMessageStreamEvent[]): string[] {
   return events
     .filter((event) => event.type !== "message.appended" && event.type !== "reasoning.appended")
     .map((event) => event.type);
@@ -9004,7 +9004,7 @@ describe("createToolLoopHarness", () => {
       });
 
       const order: string[] = [];
-      const events: HandleMessageStreamEvent[] = [];
+      const events: UnstampedMessageStreamEvent[] = [];
       const emit: HarnessEmitFn = async (event) => {
         order.push(event.type);
         events.push(event);

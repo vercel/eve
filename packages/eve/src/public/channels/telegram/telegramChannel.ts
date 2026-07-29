@@ -6,7 +6,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   answerTelegramCallbackQuery,
   callTelegramApi,
@@ -57,8 +57,8 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Minimal Telegram context (only `telegram`, no `state` or session ops), passed to `onMessage` and `onCallbackQuery` hooks before a session exists. Event handlers receive the richer {@link TelegramEventContext}. */
 export interface TelegramContext {
@@ -113,7 +113,7 @@ export type TelegramInboundResult = {
 /** Sync or async {@link TelegramInboundResult}. */
 export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
-type TelegramEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type TelegramEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: TelegramEventContext,
   ctx: SessionContext,

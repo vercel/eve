@@ -1,12 +1,10 @@
-import type { ActionResultStreamEvent, StampedHandleMessageStreamEvent } from "eve/client";
+import type { ActionResultStreamEvent, MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "streamed-action";
 const LABEL = "streaming-e2e";
 
-function streamedBeforeLocalExecutionCompletes(
-  events: readonly StampedHandleMessageStreamEvent[],
-): boolean {
+function streamedBeforeLocalExecutionCompletes(events: readonly MessageStreamEvent[]): boolean {
   const matchingRequests = events.flatMap((event) => {
     if (event.type !== "actions.requested") return [];
 
@@ -24,7 +22,7 @@ function streamedBeforeLocalExecutionCompletes(
   }
 
   const result = events.find(
-    (event): event is ActionResultStreamEvent & StampedHandleMessageStreamEvent =>
+    (event): event is ActionResultStreamEvent & MessageStreamEvent =>
       event.type === "action.result" &&
       event.data.result.kind === "tool-result" &&
       event.data.result.callId === request.action.callId,

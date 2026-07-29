@@ -1,4 +1,4 @@
-import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 /** Remembers which session-stream events have already been consumed. */
 export type EventDeduper = {
@@ -6,7 +6,7 @@ export type EventDeduper = {
    * Records `event` and returns true when it is new — false when its id was
    * already admitted, so the caller should drop it.
    */
-  admit(event: StampedHandleMessageStreamEvent): boolean;
+  admit(event: MessageStreamEvent): boolean;
   /** Number of ids currently remembered. */
   readonly size: number;
 };
@@ -30,7 +30,7 @@ export function createEventDeduper(): EventDeduper {
   return {
     admit(event) {
       // Absent on the wire for events persisted before stream version 20,
-      // despite being required by `HandleMessageStreamEventMeta`. Admit them:
+      // despite being required by `MessageStreamEventMeta`. Admit them:
       // there is nothing to deduplicate on.
       const id: string | undefined = event.meta?.id;
       if (id === undefined) return true;

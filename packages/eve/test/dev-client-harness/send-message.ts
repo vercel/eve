@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
@@ -79,17 +79,17 @@ async function openDevelopmentSessionStream(input: {
 async function readDevelopmentTurnEvents(input: {
   readonly headers?: DevelopmentRequestHeaders;
   readonly initialStartIndex: number;
-  onEvent?(event: HandleMessageStreamEvent): void;
+  onEvent?(event: MessageStreamEvent): void;
   readonly sessionId: string;
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
   readonly stream: ReturnType<typeof openDevelopmentMessageStream>;
 }): Promise<{
-  readonly events: HandleMessageStreamEvent[];
+  readonly events: MessageStreamEvent[];
   readonly stream: ReturnType<typeof openDevelopmentMessageStream>;
 }> {
   let currentStream = input.stream;
-  const events: HandleMessageStreamEvent[] = [];
+  const events: MessageStreamEvent[] = [];
   let currentStreamIndex = input.initialStartIndex;
   let remainingReconnectAttempts = DEVELOPMENT_TURN_STREAM_RECONNECT_LIMIT;
 
@@ -135,14 +135,14 @@ async function readDevelopmentTurnEvents(input: {
 export async function sendDevelopmentMessage(input: {
   headers?: DevelopmentRequestHeaders;
   message: string;
-  onEvent?(event: HandleMessageStreamEvent): void;
+  onEvent?(event: MessageStreamEvent): void;
   onResponseStart?(response: { sessionId?: string }): void;
   signal?: AbortSignal;
   session: DevelopmentSessionState;
   serverUrl: string;
 }): Promise<{
   completedMessage?: string;
-  events: HandleMessageStreamEvent[];
+  events: MessageStreamEvent[];
   sessionId?: string;
   session: DevelopmentSessionState;
 }> {

@@ -11,7 +11,7 @@ import { createEventDeduper, type EventDeduper } from "#protocol/event-dedupe.js
 import {
   isCurrentTurnBoundaryEvent,
   type ActionResultStreamEvent,
-  type StampedHandleMessageStreamEvent,
+  type MessageStreamEvent,
   type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -365,7 +365,7 @@ export class SubagentPump {
     }
   }
 
-  #applyChildEvent(callId: string, event: StampedHandleMessageStreamEvent) {
+  #applyChildEvent(callId: string, event: MessageStreamEvent) {
     const run = this.#runs.get(callId);
     if (!run) return;
     if (!run.seenChildEvents.admit(event)) return;

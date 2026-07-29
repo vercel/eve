@@ -1,7 +1,7 @@
 "use client";
 
 import type { UserContent } from "ai";
-import { Client, type HandleMessageStreamEvent } from "eve/client";
+import { Client, type MessageStreamEvent } from "eve/client";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
@@ -63,7 +63,7 @@ export function AgentChat() {
   );
 
   const handleEvent = useCallback(
-    (event: HandleMessageStreamEvent) => {
+    (event: MessageStreamEvent) => {
       if (event.type !== "turn.started") {
         return;
       }

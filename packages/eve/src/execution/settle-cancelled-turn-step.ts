@@ -28,7 +28,7 @@ import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
   encodeMessageStreamEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -77,7 +77,7 @@ export async function settleCancelledTurnStep(input: {
     const writer = input.parentWritable.getWriter();
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-        const baseEmit = async (event: HandleMessageStreamEvent): Promise<void> => {
+        const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
           const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
           setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
           // Stamp once: the persisted chunk and the hooks must agree on the id.

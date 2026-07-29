@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import { ContextContainer, contextStorage } from "./container.js";
 import { dispatchStreamEventHooks } from "./hook-lifecycle.js";
@@ -67,7 +67,7 @@ describe("dispatchStreamEventHooks", () => {
       hook("metrics", {
         events: {
           "*": async (event) => {
-            calls.push(`wildcard:${(event as HandleMessageStreamEvent).type}`);
+            calls.push(`wildcard:${(event as UnstampedMessageStreamEvent).type}`);
           },
         },
       }),

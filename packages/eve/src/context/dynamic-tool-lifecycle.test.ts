@@ -29,7 +29,7 @@ import {
   TurnDynamicToolMetadataKey,
 } from "#context/keys.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
-import { createSessionStartedEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
+import { createSessionStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 // Re-implement the naming logic here to test it independently
 // (the production function is unexported — testing via the public behavior)
@@ -472,8 +472,8 @@ function createApprovalContext(input: {
   } as ApprovalContext;
 }
 
-function makeEvent(type: string): HandleMessageStreamEvent {
-  return { type, data: {} } as HandleMessageStreamEvent;
+function makeEvent(type: string): UnstampedMessageStreamEvent {
+  return { type, data: {} } as UnstampedMessageStreamEvent;
 }
 
 const registrySym = Symbol.for("@workflow/core//registeredSteps");

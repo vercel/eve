@@ -1,7 +1,7 @@
 import type { LanguageModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { RuntimeIdentity, StampedHandleMessageStreamEvent } from "#protocol/message.js";
+import type { RuntimeIdentity, MessageStreamEvent } from "#protocol/message.js";
 import type { CancelSessionResult, SendTurnInput, SessionState } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -82,7 +82,7 @@ export interface EveEvalDerivedFacts {
  */
 export interface EveEvalSessionResult {
   readonly derived: EveEvalDerivedFacts;
-  readonly events: readonly StampedHandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly primary: boolean;
   readonly sessionId?: string;
   readonly state: SessionState;
@@ -107,7 +107,7 @@ export interface EveEvalTaskResult {
    */
   readonly status: "completed" | "failed" | "waiting";
   /** The captured stream events from the run. */
-  readonly events: readonly StampedHandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   /** Lines written through `t.log` while the eval ran. */
   readonly logs?: readonly string[];
   /** Facts extracted from the stream (tool calls, message counts, etc.). */
@@ -195,18 +195,18 @@ export interface EveEvalAssertions {
   maxToolCalls(max: number): AssertionHandle;
   calledSubagent(name: string, options?: EveEvalSubagentCallMatchOptions): AssertionHandle;
   noFailedActions(): AssertionHandle;
-  event<TType extends StampedHandleMessageStreamEvent["type"]>(
+  event<TType extends MessageStreamEvent["type"]>(
     type: TType,
     options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type">,
   ): AssertionHandle;
-  notEvent<TType extends StampedHandleMessageStreamEvent["type"]>(
+  notEvent<TType extends MessageStreamEvent["type"]>(
     type: TType,
     options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type" | "count">,
   ): AssertionHandle;
   eventOrder(matchers: readonly EveEvalEventMatch[]): AssertionHandle;
   eventsSatisfy(
     label: string,
-    predicate: (events: readonly StampedHandleMessageStreamEvent[]) => boolean,
+    predicate: (events: readonly MessageStreamEvent[]) => boolean,
   ): AssertionHandle;
 }
 
@@ -218,12 +218,14 @@ export interface EveEvalOutputAssertions {
 
 /** Typed stream event returned by {@link EveEvalLiveTurn.waitForEvent}. */
 export type EveEvalStreamEvent<
-  TType extends StampedHandleMessageStreamEvent["type"] = StampedHandleMessageStreamEvent["type"],
-> = Extract<StampedHandleMessageStreamEvent, { type: TType }>;
+  TType extends MessageStreamEvent["type"] = MessageStreamEvent["type"],
+> = Extract<MessageStreamEvent, { type: TType }>;
 
 /** Matcher options for waiting until one live turn emits a specific event. */
-export type EveEvalWaitForEventOptions<TType extends StampedHandleMessageStreamEvent["type"]> =
-  Omit<Extract<EveEvalEventMatch, { type: TType }>, "count" | "type">;
+export type EveEvalWaitForEventOptions<TType extends MessageStreamEvent["type"]> = Omit<
+  Extract<EveEvalEventMatch, { type: TType }>,
+  "count" | "type"
+>;
 
 /**
  * One accepted turn whose event stream is still in progress.
@@ -233,7 +235,7 @@ export type EveEvalWaitForEventOptions<TType extends StampedHandleMessageStreamE
  */
 export interface EveEvalLiveTurn {
   /** Events observed on this turn so far. */
-  readonly events: readonly StampedHandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   /** Session driver that started or owns this turn. */
   readonly session: EveEvalSession;
   /** Durable session id available as soon as the turn is accepted or attached. */
@@ -243,7 +245,7 @@ export interface EveEvalLiveTurn {
   /** Wait for the turn boundary and return the recorded immutable result. */
   result(): Promise<EveEvalTurn>;
   /** Wait until the live stream emits one typed event matching `options`. */
-  waitForEvent<TType extends StampedHandleMessageStreamEvent["type"]>(
+  waitForEvent<TType extends MessageStreamEvent["type"]>(
     type: TType,
     options?: EveEvalWaitForEventOptions<TType>,
   ): Promise<EveEvalStreamEvent<TType>>;
@@ -252,7 +254,7 @@ export interface EveEvalLiveTurn {
 /** Operations and state shared by the primary eval context and independent sessions. */
 export interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
-  readonly events: readonly StampedHandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   /** Input requests left pending by the last parked turn. */
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
@@ -284,7 +286,7 @@ export interface EveEvalSession
  */
 export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {
   readonly data: unknown;
-  readonly events: readonly StampedHandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
   readonly sessionId: string;

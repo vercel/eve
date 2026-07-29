@@ -1,7 +1,7 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   createLinearAgentActivity,
   createLinearAgentSessionOnComment,
@@ -39,8 +39,8 @@ import type { JsonObject } from "#shared/json.js";
 
 const log = createLogger("linear.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** JSON-serializable state for one Linear Agent Session conversation. */
 export interface LinearChannelState {
@@ -124,7 +124,7 @@ export interface LinearHandle {
   ): Promise<{ readonly success: boolean }>;
 }
 
-type LinearEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type LinearEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: LinearEventContext,
   ctx: SessionContext,

@@ -1,4 +1,4 @@
-import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
 import type { MessageResult } from "#client/types.js";
@@ -8,7 +8,7 @@ import type { MessageResult } from "#client/types.js";
  */
 interface MessageResponseInput {
   readonly continuationToken?: string;
-  readonly createStream: () => AsyncGenerator<StampedHandleMessageStreamEvent>;
+  readonly createStream: () => AsyncGenerator<MessageStreamEvent>;
   readonly sessionId: string;
 }
 
@@ -19,9 +19,7 @@ interface MessageResponseInput {
  * token) as soon as the POST completes. Collect the event stream via
  * {@link result} or iterate it with `for await...of`.
  */
-export class MessageResponse<
-  TOutput = unknown,
-> implements AsyncIterable<StampedHandleMessageStreamEvent> {
+export class MessageResponse<TOutput = unknown> implements AsyncIterable<MessageStreamEvent> {
   /**
    * Continuation token returned by the server for follow-up messages.
    */
@@ -33,7 +31,7 @@ export class MessageResponse<
   readonly sessionId: string;
 
   #consumed = false;
-  readonly #createStream: () => AsyncGenerator<StampedHandleMessageStreamEvent>;
+  readonly #createStream: () => AsyncGenerator<MessageStreamEvent>;
 
   /** @internal */
   constructor(input: MessageResponseInput) {
@@ -47,7 +45,7 @@ export class MessageResponse<
    * {@link MessageResult}.
    */
   async result(): Promise<MessageResult<TOutput>> {
-    const events: StampedHandleMessageStreamEvent[] = [];
+    const events: MessageStreamEvent[] = [];
 
     for await (const event of this) {
       events.push(event);
@@ -69,7 +67,7 @@ export class MessageResponse<
    *
    * Each response can only be consumed once.
    */
-  [Symbol.asyncIterator](): AsyncIterator<StampedHandleMessageStreamEvent> {
+  [Symbol.asyncIterator](): AsyncIterator<MessageStreamEvent> {
     if (this.#consumed) {
       throw new Error("MessageResponse has already been consumed.");
     }

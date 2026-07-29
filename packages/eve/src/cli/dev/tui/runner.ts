@@ -13,7 +13,7 @@ import {
   type ReasoningAppendedStreamEvent,
   type SessionFailedStreamEvent,
   type StepCompletedStreamEvent,
-  type StampedHandleMessageStreamEvent,
+  type MessageStreamEvent,
   type SubagentCalledStreamEvent,
   type SubagentCompletedStreamEvent,
   Client,
@@ -1185,7 +1185,7 @@ export class EveTUIRunner {
   }
 
   #createTUIStreamResult(
-    events: AsyncIterable<StampedHandleMessageStreamEvent>,
+    events: AsyncIterable<MessageStreamEvent>,
     abort: () => void,
   ): AgentTUIStreamResult {
     const turnState = createTurnState();
@@ -1633,7 +1633,7 @@ function formatAgentUpdateNotice(
 }
 
 type EveStreamTranslatorInput = {
-  events: AsyncIterable<StampedHandleMessageStreamEvent>;
+  events: AsyncIterable<MessageStreamEvent>;
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
@@ -2147,7 +2147,7 @@ function* closeOpenParts(
   }
 }
 
-function isPostTurnVisibleEvent(event: StampedHandleMessageStreamEvent): boolean {
+function isPostTurnVisibleEvent(event: MessageStreamEvent): boolean {
   switch (event.type) {
     case "actions.requested":
     case "authorization.completed":

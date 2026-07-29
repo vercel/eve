@@ -1,4 +1,4 @@
-import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 /**
  * Returns true when an error looks like a stream socket disconnection that
@@ -27,7 +27,7 @@ export function isStreamDisconnectError(error: unknown): boolean {
 /**
  * Reads newline-delimited JSON events from a `ReadableStream<Uint8Array>`.
  *
- * Yields one parsed {@link StampedHandleMessageStreamEvent} per complete NDJSON line.
+ * Yields one parsed {@link MessageStreamEvent} per complete NDJSON line.
  * Handles partial lines across chunks via an internal buffer.
  *
  * All read errors — including socket disconnections — propagate to the caller.
@@ -35,7 +35,7 @@ export function isStreamDisconnectError(error: unknown): boolean {
  */
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
-): AsyncGenerator<StampedHandleMessageStreamEvent> {
+): AsyncGenerator<MessageStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -63,7 +63,7 @@ export async function* readNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1);
 
         if (line.length > 0) {
-          yield JSON.parse(line) as StampedHandleMessageStreamEvent;
+          yield JSON.parse(line) as MessageStreamEvent;
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -73,7 +73,7 @@ export async function* readNdjsonStream(
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) {
-      yield JSON.parse(trailing) as StampedHandleMessageStreamEvent;
+      yield JSON.parse(trailing) as MessageStreamEvent;
     }
   } finally {
     if (!reachedEof) {

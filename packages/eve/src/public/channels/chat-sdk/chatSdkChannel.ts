@@ -2,7 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type {
   ActionEvent,
@@ -44,8 +44,8 @@ const MAX_TYPING_STATUS = 80;
 
 type ChatSdkAdapters = Record<string, Adapter>;
 type ChatSdkSendInput = Parameters<SendFn<ChatSdkChannelState>>[0];
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 interface ActiveWebhookContext {
   readonly send: SendFn<ChatSdkChannelState>;

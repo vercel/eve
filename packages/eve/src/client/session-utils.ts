@@ -1,8 +1,8 @@
 import type {
   AuthorizationRequiredStreamEvent,
-  HandleMessageStreamEvent,
   MessageCompletedStreamEvent,
   TurnFailureStreamEvent,
+  UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 import type { SessionState } from "#client/types.js";
@@ -25,7 +25,7 @@ export function createInitialSessionState(): SessionState {
  */
 export function advanceSession(input: {
   readonly continuationToken?: string;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly UnstampedMessageStreamEvent[];
   readonly preserveCompletedSessions?: boolean;
   readonly sessionId: string;
   readonly session: SessionState;
@@ -68,7 +68,7 @@ export interface PendingAuthorization {
 
 /** Canonical projection of the lifecycle state represented by one turn's events. */
 export interface TurnEventSummary {
-  readonly boundary: HandleMessageStreamEvent | undefined;
+  readonly boundary: UnstampedMessageStreamEvent | undefined;
   readonly failure: TurnFailureStreamEvent | undefined;
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
@@ -77,8 +77,10 @@ export interface TurnEventSummary {
 }
 
 /** Reduces one turn's protocol events into their client-facing lifecycle state. */
-export function summarizeTurnEvents(events: readonly HandleMessageStreamEvent[]): TurnEventSummary {
-  let boundary: HandleMessageStreamEvent | undefined;
+export function summarizeTurnEvents(
+  events: readonly UnstampedMessageStreamEvent[],
+): TurnEventSummary {
+  let boundary: UnstampedMessageStreamEvent | undefined;
   let failure: TurnFailureStreamEvent | undefined;
   let message: string | undefined;
   const inputRequests: InputRequest[] = [];
@@ -114,9 +116,9 @@ export function summarizeTurnEvents(events: readonly HandleMessageStreamEvent[])
 
 /** Collects one segment of an event stream through its current-turn boundary. */
 export async function collectTurnEvents(
-  stream: AsyncIterable<HandleMessageStreamEvent>,
-): Promise<readonly HandleMessageStreamEvent[]> {
-  const events: HandleMessageStreamEvent[] = [];
+  stream: AsyncIterable<UnstampedMessageStreamEvent>,
+): Promise<readonly UnstampedMessageStreamEvent[]> {
+  const events: UnstampedMessageStreamEvent[] = [];
   for await (const event of stream) {
     events.push(event);
     if (isCurrentTurnBoundaryEvent(event)) break;
@@ -125,8 +127,8 @@ export async function collectTurnEvents(
 }
 
 function findBoundaryEvent(
-  events: readonly HandleMessageStreamEvent[],
-): HandleMessageStreamEvent | undefined {
+  events: readonly UnstampedMessageStreamEvent[],
+): UnstampedMessageStreamEvent | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event !== undefined && isCurrentTurnBoundaryEvent(event)) return event;
@@ -135,7 +137,7 @@ function findBoundaryEvent(
 }
 
 function isFinalMessageCompleted(
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
 ): event is MessageCompletedStreamEvent {
   return event.type === "message.completed" && event.data.finishReason !== "tool-calls";
 }

@@ -12,7 +12,7 @@ import {
   createSessionWaitingEvent,
   createStepFailedEvent,
   createTurnFailedEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import type { SessionState } from "#client/types.js";
@@ -27,7 +27,7 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createEagerStreamResponse(events: readonly HandleMessageStreamEvent[]): Response {
+function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
   const encoder = new TextEncoder();
 
   return new Response(
@@ -164,7 +164,7 @@ describe("useEveAgent", () => {
       .mockReturnValueOnce(startResponse.promise)
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
-    const seenEvents: HandleMessageStreamEvent[] = [];
+    const seenEvents: UnstampedMessageStreamEvent[] = [];
     const seenSessions: SessionState[] = [];
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
 

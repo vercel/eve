@@ -5,7 +5,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callDiscordApi,
   createDiscordFollowupMessage,
@@ -52,8 +52,8 @@ import { defineChannel, POST, type Channel, type SendFn } from "#public/definiti
 
 const log = createLogger("discord.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Discord context passed to inbound command hooks. */
 export interface DiscordContext {
@@ -113,7 +113,7 @@ export type DiscordCommandResult = {
 /** Sync or async {@link DiscordCommandResult}. */
 export type DiscordCommandResultOrPromise = DiscordCommandResult | Promise<DiscordCommandResult>;
 
-type DiscordEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type DiscordEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: DiscordEventContext,
   ctx: SessionContext,

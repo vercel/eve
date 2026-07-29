@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "render-stripes";
@@ -50,7 +50,7 @@ function isRenderStripesOutput(value: unknown): boolean {
   );
 }
 
-function renderedColors(events: readonly HandleMessageStreamEvent[]): readonly string[] {
+function renderedColors(events: readonly MessageStreamEvent[]): readonly string[] {
   for (const event of events) {
     if (event.type !== "action.result" || event.data.result.kind !== "tool-result") continue;
     if (event.data.result.toolName !== TOOL_NAME) continue;
@@ -63,7 +63,7 @@ function renderedColors(events: readonly HandleMessageStreamEvent[]): readonly s
 }
 
 /** Final (non-tool-call) assistant messages, in turn order. */
-function assistantAnswers(events: readonly HandleMessageStreamEvent[]): readonly string[] {
+function assistantAnswers(events: readonly MessageStreamEvent[]): readonly string[] {
   return events.flatMap((event) =>
     event.type === "message.completed" &&
     event.data.finishReason !== "tool-calls" &&
@@ -74,7 +74,7 @@ function assistantAnswers(events: readonly HandleMessageStreamEvent[]): readonly
   );
 }
 
-function namesColorsInOrder(events: readonly HandleMessageStreamEvent[], answer: string): boolean {
+function namesColorsInOrder(events: readonly MessageStreamEvent[], answer: string): boolean {
   const colors = renderedColors(events);
   if (colors.length === 0) return false;
   const pattern = new RegExp(colors.map((color) => `\\b${color}\\b`).join("[\\s\\S]*"), "iu");

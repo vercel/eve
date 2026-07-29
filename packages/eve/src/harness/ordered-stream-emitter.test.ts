@@ -6,7 +6,7 @@ import {
   createMessageCompletedEvent,
   createReasoningAppendedEvent,
 } from "#protocol/message.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 function deferred(): { readonly promise: Promise<void>; resolve(): void } {
   let resolve!: () => void;
@@ -37,39 +37,30 @@ function reasoning(delta: string, soFar: string) {
 }
 
 describe("createOrderedStreamEmitter", () => {
-  it("keeps consuming while a write is active and preserves the latest event metadata", async () => {
+  it("keeps consuming while a write is active and preserves the latest event payload", async () => {
     const firstWrite = deferred();
-    const events: HandleMessageStreamEvent[] = [];
-    const emitFn = vi.fn(async (event: HandleMessageStreamEvent) => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
     const emitter = createOrderedStreamEmitter(emitFn);
 
     await emitter.emit(message("A", "A"));
-    await emitter.emit({
-      ...message("B", "AB"),
-      meta: { at: "2026-07-10T18:00:00.000Z", id: "evt_test_0000" },
-    });
-    await emitter.emit({
-      ...message("C", "ABC"),
-      meta: { at: "2026-07-10T18:00:01.000Z", id: "evt_test_0001" },
-    });
+    await emitter.emit(message("B", "AB"));
+    await emitter.emit(message("C", "ABC"));
 
     expect(emitFn).toHaveBeenCalledTimes(1);
     firstWrite.resolve();
     await emitter.closeAndDrain();
 
-    expect(events).toEqual([
-      message("A", "A"),
-      { ...message("BC", "ABC"), meta: { at: "2026-07-10T18:00:01.000Z", id: "evt_test_0001" } },
-    ]);
+    expect(events).toEqual([message("A", "A"), message("BC", "ABC")]);
   });
 
   it("treats other event types and stream coordinates as ordering barriers", async () => {
     const firstWrite = deferred();
-    const events: HandleMessageStreamEvent[] = [];
-    const emitFn = vi.fn(async (event: HandleMessageStreamEvent) => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
@@ -123,7 +114,7 @@ describe("createOrderedStreamEmitter", () => {
 
   it("counts merged empty deltas toward the pending-event limit", async () => {
     const firstWrite = deferred();
-    const events: HandleMessageStreamEvent[] = [];
+    const events: UnstampedMessageStreamEvent[] = [];
     const emitter = createOrderedStreamEmitter(
       async (event) => {
         events.push(event);

@@ -1,9 +1,9 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
 
-function providerRequestsPrecedeResults(events: readonly HandleMessageStreamEvent[]): boolean {
+function providerRequestsPrecedeResults(events: readonly MessageStreamEvent[]): boolean {
   const requestIndexByCallId = new Map<string, number>();
   const resultIndexByCallId = new Map<string, number>();
   let requestCount = 0;

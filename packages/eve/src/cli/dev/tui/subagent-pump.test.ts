@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { Client, type StampedHandleMessageStreamEvent } from "#client/index.js";
+import { Client, type MessageStreamEvent } from "#client/index.js";
 import { stampTestEvent } from "#internal/testing/events.js";
-import type { HandleMessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
 
 import { SubagentPump, type SubagentView } from "./subagent-pump.js";
 
@@ -22,17 +22,17 @@ function fakeView(): SubagentView {
  * the pump must never reach the view.
  */
 function pushableChildStream() {
-  const queue: StampedHandleMessageStreamEvent[] = [];
+  const queue: MessageStreamEvent[] = [];
   let wake: (() => void) | undefined;
   let aborted = false;
 
   return {
-    push(event: StampedHandleMessageStreamEvent) {
+    push(event: MessageStreamEvent) {
       queue.push(event);
       wake?.();
       wake = undefined;
     },
-    stream(options?: { signal?: AbortSignal }): AsyncIterable<StampedHandleMessageStreamEvent> {
+    stream(options?: { signal?: AbortSignal }): AsyncIterable<MessageStreamEvent> {
       const signal = options?.signal;
       return {
         async *[Symbol.asyncIterator]() {
@@ -73,7 +73,7 @@ function subagentCalled(callId: string): SubagentCalledStreamEvent {
   } as SubagentCalledStreamEvent;
 }
 
-function reasoningEvent(delta: string, index = 0): StampedHandleMessageStreamEvent {
+function reasoningEvent(delta: string, index = 0): MessageStreamEvent {
   return stampTestEvent(
     {
       type: "reasoning.appended",
@@ -84,14 +84,14 @@ function reasoningEvent(delta: string, index = 0): StampedHandleMessageStreamEve
         stepIndex: 0,
         turnId: "child-turn",
       },
-    } as HandleMessageStreamEvent,
+    } as UnstampedMessageStreamEvent,
     index,
   );
 }
 
-function boundaryEvent(index: number): StampedHandleMessageStreamEvent {
+function boundaryEvent(index: number): MessageStreamEvent {
   return stampTestEvent(
-    { type: "session.waiting", data: { wait: "next-user-message" } } as HandleMessageStreamEvent,
+    { type: "session.waiting", data: { wait: "next-user-message" } } as UnstampedMessageStreamEvent,
     index,
   );
 }

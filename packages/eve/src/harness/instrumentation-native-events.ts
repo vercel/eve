@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   InstrumentationHooks,
   InstrumentationPointEvent,
@@ -33,7 +33,7 @@ export function createInstrumentationHandleEvent(
 }
 
 function toLifecycleEvent(
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   input: CreateInstrumentationHandleEventInput,
   activeTurnId: string | undefined,
 ): InstrumentationPointEvent | undefined {

@@ -44,9 +44,9 @@ import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,
   encodeMessageStreamEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
   stampMessageStreamEvent,
-  type StampedHandleMessageStreamEvent,
+  type MessageStreamEvent,
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
@@ -293,9 +293,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const writer = input.parentWritable.getWriter();
 
   // Stamp once: the persisted chunk and the hooks below must agree on the id.
-  const emit = async (
-    event: HandleMessageStreamEvent,
-  ): Promise<StampedHandleMessageStreamEvent> => {
+  const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     const stamped = stampMessageStreamEvent(toEmit);
@@ -304,7 +302,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   };
 
   const handleEvent = async (
-    event: HandleMessageStreamEvent,
+    event: UnstampedMessageStreamEvent,
     messages?: readonly import("ai").ModelMessage[],
   ): Promise<void> => {
     const emitted = await emit(event);

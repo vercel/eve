@@ -14,7 +14,7 @@ import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createEveCancelTurnRoutePath } from "#protocol/routes.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createCancelFn } from "#channel/cancel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createSession } from "#channel/session.js";
@@ -197,7 +197,7 @@ async function expectNoStepRetries(runId: string): Promise<void> {
   expect([...completions.entries()].filter(([, count]) => count > 1)).toEqual([]);
 }
 
-function expectNoFailureEvents(events: readonly HandleMessageStreamEvent[]): void {
+function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): void {
   const types = events.map((event) => event.type);
   for (const failureType of FAILURE_EVENT_TYPES) {
     expect(types).not.toContain(failureType);

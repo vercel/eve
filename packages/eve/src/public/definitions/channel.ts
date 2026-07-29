@@ -16,10 +16,7 @@ import type {
   RunInput,
 } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import type {
-  HandleMessageStreamEvent,
-  StampedHandleMessageStreamEvent,
-} from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/channel-definition.js";
 
@@ -163,7 +160,7 @@ export interface Agent {
   getEventStream(
     sessionId: string,
     options?: GetEventStreamOptions,
-  ): Promise<ReadableStream<StampedHandleMessageStreamEvent>>;
+  ): Promise<ReadableStream<MessageStreamEvent>>;
 }
 
 /**
@@ -204,8 +201,8 @@ export function isDisabledRouteSentinel(value: unknown): value is DisabledRouteS
   );
 }
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * Session operations on the `channel` argument of every channel event handler.
@@ -221,7 +218,7 @@ export interface ChannelSessionOps {
  */
 export type ChannelContext<TCtx> = TCtx & ChannelSessionOps;
 
-type ChannelEventHandler<T extends HandleMessageStreamEvent["type"], TCtx> = (
+type ChannelEventHandler<T extends UnstampedMessageStreamEvent["type"], TCtx> = (
   data: EventData<T>,
   channel: ChannelContext<TCtx>,
   ctx: SessionContext,

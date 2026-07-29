@@ -10,7 +10,7 @@ import type {
   SendTurnPayload,
   SessionState,
 } from "#client/types.js";
-import type { StampedHandleMessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
@@ -40,7 +40,7 @@ import type { EveEvalInputRequestMatchOptions, EveEvalToolCallMatchOptions } fro
  * Error thrown by {@link EveEvalTurn.expectOk} when a turn failed.
  */
 export class EveEvalTurnFailedError extends Error {
-  readonly event: (TurnFailureStreamEvent & StampedHandleMessageStreamEvent) | undefined;
+  readonly event: (TurnFailureStreamEvent & MessageStreamEvent) | undefined;
   readonly turn: EveEvalTurn;
 
   constructor(turn: EveEvalTurn) {
@@ -62,7 +62,7 @@ export class EvalSessionDriver implements EveEvalSession {
   readonly #session: ClientSession;
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
-  readonly #events: StampedHandleMessageStreamEvent[] = [];
+  readonly #events: MessageStreamEvent[] = [];
   #lastTurn: EvalTurn | undefined;
   #pendingInputRequests: readonly InputRequest[] = [];
 
@@ -87,7 +87,7 @@ export class EvalSessionDriver implements EveEvalSession {
     );
   }
 
-  get events(): readonly StampedHandleMessageStreamEvent[] {
+  get events(): readonly MessageStreamEvent[] {
     return this.#events;
   }
 
@@ -216,7 +216,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
   #recordTurn(input: {
     readonly data: unknown;
-    readonly events: readonly StampedHandleMessageStreamEvent[];
+    readonly events: readonly MessageStreamEvent[];
     readonly inputRequests: readonly InputRequest[];
     readonly message: string | undefined;
     readonly sessionId: string;
@@ -241,10 +241,7 @@ export class EvalSessionDriver implements EveEvalSession {
     return turn;
   }
 
-  #recordObservedTurn(
-    sessionId: string,
-    events: readonly StampedHandleMessageStreamEvent[],
-  ): EveEvalTurn {
+  #recordObservedTurn(sessionId: string, events: readonly MessageStreamEvent[]): EveEvalTurn {
     const summary = summarizeTurnEvents(events);
     return this.#recordTurn({
       data: extractCompletedResult(events),
@@ -274,22 +271,22 @@ export class EvalSessionDriver implements EveEvalSession {
 }
 
 interface LiveEventWaiter {
-  readonly matches: (event: StampedHandleMessageStreamEvent) => boolean;
+  readonly matches: (event: MessageStreamEvent) => boolean;
   readonly reject: (error: Error) => void;
-  readonly resolve: (event: StampedHandleMessageStreamEvent) => void;
+  readonly resolve: (event: MessageStreamEvent) => void;
 }
 
 class EvalLiveTurn implements EveEvalLiveTurn {
   readonly session: EveEvalSession;
   readonly sessionId: string;
   readonly #completion: Promise<EveEvalTurn>;
-  readonly #events: StampedHandleMessageStreamEvent[] = [];
+  readonly #events: MessageStreamEvent[] = [];
   readonly #waiters = new Set<LiveEventWaiter>();
   #waitError: Error | undefined;
 
   constructor(input: {
-    readonly events: AsyncIterable<StampedHandleMessageStreamEvent>;
-    readonly record: (events: readonly StampedHandleMessageStreamEvent[]) => EveEvalTurn;
+    readonly events: AsyncIterable<MessageStreamEvent>;
+    readonly record: (events: readonly MessageStreamEvent[]) => EveEvalTurn;
     readonly session: EveEvalSession;
     readonly sessionId: string;
   }) {
@@ -299,7 +296,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     void this.#completion.catch(() => {});
   }
 
-  get events(): readonly StampedHandleMessageStreamEvent[] {
+  get events(): readonly MessageStreamEvent[] {
     return this.#events;
   }
 
@@ -311,11 +308,11 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     return await this.#completion;
   }
 
-  async waitForEvent<TType extends StampedHandleMessageStreamEvent["type"]>(
+  async waitForEvent<TType extends MessageStreamEvent["type"]>(
     type: TType,
     options?: EveEvalWaitForEventOptions<TType>,
   ): Promise<EveEvalStreamEvent<TType>> {
-    const matches = (event: StampedHandleMessageStreamEvent): boolean =>
+    const matches = (event: MessageStreamEvent): boolean =>
       event.type === type &&
       (options?.data === undefined ||
         matchesValue(options.data, "data" in event ? event.data : undefined));
@@ -334,8 +331,8 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   }
 
   async #consume(
-    source: AsyncIterable<StampedHandleMessageStreamEvent>,
-    record: (events: readonly StampedHandleMessageStreamEvent[]) => EveEvalTurn,
+    source: AsyncIterable<MessageStreamEvent>,
+    record: (events: readonly MessageStreamEvent[]) => EveEvalTurn,
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
@@ -372,7 +369,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     }
   }
 
-  #resolveWaiters(event: StampedHandleMessageStreamEvent): void {
+  #resolveWaiters(event: MessageStreamEvent): void {
     for (const waiter of this.#waiters) {
       if (!waiter.matches(event)) continue;
       this.#waiters.delete(waiter);
@@ -394,7 +391,7 @@ interface EvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {}
 
 class EvalTurn implements EveEvalTurn {
   readonly data: unknown;
-  readonly events: readonly StampedHandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
   readonly sessionId: string;
@@ -407,7 +404,7 @@ class EvalTurn implements EveEvalTurn {
     readonly collector: AssertionCollector;
     readonly data: unknown;
     readonly derived: EveEvalDerivedFacts;
-    readonly events: readonly StampedHandleMessageStreamEvent[];
+    readonly events: readonly MessageStreamEvent[];
     readonly inputRequests: readonly InputRequest[];
     readonly message: string | undefined;
     readonly sessionId: string;

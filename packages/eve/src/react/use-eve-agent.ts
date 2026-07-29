@@ -11,7 +11,7 @@ import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
-import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#client/types.js";
 
 export type { PrepareSend };
@@ -75,7 +75,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default ""
    */
   readonly host?: string;
-  readonly initialEvents?: readonly StampedHandleMessageStreamEvent[];
+  readonly initialEvents?: readonly MessageStreamEvent[];
   readonly initialSession?: SessionState;
   /**
    * Project submitted user messages before eve confirms them with a

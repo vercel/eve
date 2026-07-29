@@ -1,7 +1,7 @@
 import type { CompiledHookDefinition } from "../compiler/manifest.js";
 import type { CompiledModuleMap } from "../compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "../internal/authored-module.js";
-import type { HandleMessageStreamEvent } from "../protocol/message.js";
+import type { MessageStreamEvent } from "../protocol/message.js";
 import type { StreamEventHook } from "../public/definitions/hook.js";
 import { toErrorMessage } from "../shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "./resolve-helpers.js";
@@ -33,7 +33,7 @@ export async function resolveHookDefinition(
       describe(definition, "to return an object"),
     );
 
-    const events: Record<string, StreamEventHook<HandleMessageStreamEvent>> = {};
+    const events: Record<string, StreamEventHook<MessageStreamEvent>> = {};
 
     const eventsRaw = resolvedRecord.events;
     if (eventsRaw !== undefined) {
@@ -47,7 +47,7 @@ export async function resolveHookDefinition(
           value,
           describe(definition, `to provide a function for "events.${key}"`),
         );
-        events[key] = handler as StreamEventHook<HandleMessageStreamEvent>;
+        events[key] = handler as StreamEventHook<MessageStreamEvent>;
       }
     }
 

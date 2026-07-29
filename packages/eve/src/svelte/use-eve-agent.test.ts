@@ -6,7 +6,7 @@ import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionWaitingEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 
@@ -20,7 +20,7 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createEagerStreamResponse(events: readonly HandleMessageStreamEvent[]): Response {
+function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -92,7 +92,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
       .mockResolvedValueOnce(createEagerStreamResponse(events));
-    const seenEvents: HandleMessageStreamEvent[] = [];
+    const seenEvents: UnstampedMessageStreamEvent[] = [];
 
     const agent = useEveAgent({
       onEvent(event) {

@@ -1,7 +1,4 @@
-import type {
-  HandleMessageStreamEvent,
-  StampedHandleMessageStreamEvent,
-} from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 
 /**
@@ -30,7 +27,7 @@ export interface CapturedTurnStream {
    * `session.completed`, or `session.failed`) and returns every event
    * observed in that turn.
    */
-  nextTurn(): Promise<StampedHandleMessageStreamEvent[]>;
+  nextTurn(): Promise<MessageStreamEvent[]>;
   /** Releases the reader lock on the underlying `ReadableStream`. */
   dispose(): void;
 }
@@ -80,8 +77,8 @@ export function captureTurnEvents(
  * timing or retries involved.
  */
 export function containsEventSequence(
-  events: readonly HandleMessageStreamEvent[],
-  types: readonly HandleMessageStreamEvent["type"][],
+  events: readonly UnstampedMessageStreamEvent[],
+  types: readonly UnstampedMessageStreamEvent["type"][],
 ): boolean {
   if (types.length === 0) {
     return true;
@@ -107,12 +104,12 @@ export function containsEventSequence(
  * discriminants. Handy for assertion blocks that only care about a
  * subset of the full turn envelope.
  */
-export function filterEventsByType<T extends HandleMessageStreamEvent["type"]>(
-  events: readonly HandleMessageStreamEvent[],
+export function filterEventsByType<T extends UnstampedMessageStreamEvent["type"]>(
+  events: readonly UnstampedMessageStreamEvent[],
   type: T,
-): Array<Extract<HandleMessageStreamEvent, { type: T }>> {
+): Array<Extract<UnstampedMessageStreamEvent, { type: T }>> {
   return events.filter(
-    (event): event is Extract<HandleMessageStreamEvent, { type: T }> => event.type === type,
+    (event): event is Extract<UnstampedMessageStreamEvent, { type: T }> => event.type === type,
   );
 }
 
@@ -136,8 +133,8 @@ async function readUntilBoundary(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: StreamState,
   decoder: InstanceType<typeof TextDecoder>,
-): Promise<StampedHandleMessageStreamEvent[]> {
-  const events: StampedHandleMessageStreamEvent[] = [];
+): Promise<MessageStreamEvent[]> {
+  const events: MessageStreamEvent[] = [];
 
   while (true) {
     const { done, value } = await reader.read();
@@ -160,7 +157,7 @@ async function readUntilBoundary(
         continue;
       }
 
-      const event = JSON.parse(line) as StampedHandleMessageStreamEvent;
+      const event = JSON.parse(line) as MessageStreamEvent;
       events.push(event);
 
       if (isCurrentTurnBoundaryEvent(event)) {
@@ -175,10 +172,7 @@ async function readUntilBoundary(
  * contract without a real emit seam. Ids are sequential and readable; use
  * `stampMessageStreamEvent` when a test asserts on real id format.
  */
-export function stampTestEvent(
-  event: HandleMessageStreamEvent,
-  index = 0,
-): StampedHandleMessageStreamEvent {
+export function stampTestEvent(event: UnstampedMessageStreamEvent, index = 0): MessageStreamEvent {
   return {
     ...event,
     meta: {
@@ -190,7 +184,7 @@ export function stampTestEvent(
 
 /** Stamps every event in a fixture list. See {@link stampTestEvent}. */
 export function stampTestEvents(
-  events: readonly HandleMessageStreamEvent[],
-): StampedHandleMessageStreamEvent[] {
+  events: readonly UnstampedMessageStreamEvent[],
+): MessageStreamEvent[] {
   return events.map((event, index) => stampTestEvent(event, index));
 }

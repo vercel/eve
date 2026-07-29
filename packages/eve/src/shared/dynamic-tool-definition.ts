@@ -8,7 +8,7 @@ import type {
 import type { Approval } from "#public/definitions/approval.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { SessionAuth } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
  * Stream event types allowed for dynamic tool resolvers. Dispatch
@@ -16,7 +16,7 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
  * more events are validated.
  */
 export type DynamicToolEventName = Extract<
-  HandleMessageStreamEvent["type"],
+  UnstampedMessageStreamEvent["type"],
   "session.started" | "turn.started" | "step.started"
 >;
 

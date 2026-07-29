@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { stampTestEvent } from "#internal/testing/events.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
-import {
-  stampMessageStreamEvent,
-  type StampedHandleMessageStreamEvent,
-} from "#protocol/message.js";
+import { stampMessageStreamEvent, type MessageStreamEvent } from "#protocol/message.js";
 
 function sessionStarted(index: number) {
   return stampTestEvent({ type: "session.started", data: {} }, index);
@@ -48,7 +45,7 @@ describe("createEventDeduper", () => {
       type: "session.started",
       data: {},
       meta: { at: "2026-07-27T18:04:11.912Z" },
-    } as StampedHandleMessageStreamEvent;
+    } as MessageStreamEvent;
 
     expect(deduper.admit(preV20)).toBe(true);
     expect(deduper.admit(preV20)).toBe(true);
@@ -57,7 +54,7 @@ describe("createEventDeduper", () => {
 
   it("admits events with no envelope at all", () => {
     const deduper = createEventDeduper();
-    const bare = { type: "session.started", data: {} } as StampedHandleMessageStreamEvent;
+    const bare = { type: "session.started", data: {} } as MessageStreamEvent;
 
     expect(deduper.admit(bare)).toBe(true);
     expect(deduper.size).toBe(0);

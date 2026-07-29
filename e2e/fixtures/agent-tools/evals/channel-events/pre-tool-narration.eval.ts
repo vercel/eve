@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -18,7 +18,7 @@ function firstNonEmptyLine(message: string): string | undefined {
   return undefined;
 }
 
-function preToolNarration(events: readonly HandleMessageStreamEvent[]): string | undefined {
+function preToolNarration(events: readonly MessageStreamEvent[]): string | undefined {
   const actionRequestIndex = events.findIndex(
     (event) =>
       event.type === "actions.requested" &&
@@ -41,7 +41,7 @@ function preToolNarration(events: readonly HandleMessageStreamEvent[]): string |
   return undefined;
 }
 
-function narratedStreamedActionOrder(events: readonly HandleMessageStreamEvent[]): boolean {
+function narratedStreamedActionOrder(events: readonly MessageStreamEvent[]): boolean {
   const requests = events.flatMap((event, eventIndex) => {
     if (event.type !== "actions.requested") return [];
 

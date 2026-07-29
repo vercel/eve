@@ -10,7 +10,7 @@ import {
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
  * Declining a session-limit continuation prompt cancels the in-flight turn
@@ -37,7 +37,7 @@ function buildSerializedContext(overrides: {
   };
 }
 
-function expectNoFailureEvents(events: readonly HandleMessageStreamEvent[]): void {
+function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): void {
   const types = events.map((event) => event.type);
   for (const failureType of FAILURE_EVENT_TYPES) {
     expect(types).not.toContain(failureType);
@@ -98,7 +98,7 @@ async function waitForRunCompletion(runId: string, timeout = 15_000): Promise<vo
   throw new Error(`Timed out waiting for run "${runId}" to complete.`);
 }
 
-function requestIdFromPromptTurn(events: readonly HandleMessageStreamEvent[]): string {
+function requestIdFromPromptTurn(events: readonly UnstampedMessageStreamEvent[]): string {
   const requested = filterEventsByType(events, "input.requested");
   expect(requested).toHaveLength(1);
   const requestId = requested[0]?.data.requests[0]?.requestId;

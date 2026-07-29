@@ -8,11 +8,11 @@ import {
   createMessageReceivedEvent,
   createSessionWaitingEvent,
   EVE_SESSION_ID_HEADER,
-  type HandleMessageStreamEvent,
-  type StampedHandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
+  type MessageStreamEvent,
 } from "#protocol/message.js";
 
-function turnEvents(): StampedHandleMessageStreamEvent[] {
+function turnEvents(): MessageStreamEvent[] {
   return stampTestEvents([
     createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
     createMessageCompletedEvent({
@@ -23,7 +23,7 @@ function turnEvents(): StampedHandleMessageStreamEvent[] {
       turnId: "turn_1",
     }),
     createSessionWaitingEvent("http:session_1"),
-  ] as HandleMessageStreamEvent[]);
+  ] as UnstampedMessageStreamEvent[]);
 }
 
 function startedResponse(): Response {
@@ -36,7 +36,7 @@ function startedResponse(): Response {
   );
 }
 
-function streamResponse(events: readonly StampedHandleMessageStreamEvent[]): Response {
+function streamResponse(events: readonly MessageStreamEvent[]): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -68,7 +68,7 @@ describe("EveAgentStore stream overlap", () => {
       reducer: defaultMessageReducer(),
     });
 
-    const seen: StampedHandleMessageStreamEvent[] = [];
+    const seen: MessageStreamEvent[] = [];
     store.setCallbacks({ onEvent: (event) => seen.push(event) });
 
     await store.send({ message: "Hello" });

@@ -60,13 +60,15 @@ for await (const event of response) {
 
 ## Handle event types
 
-Import event types from `eve/client` when you want exhaustiveness or helpers. Events read from a stream are `StampedHandleMessageStreamEvent`: the same union, with the `meta` envelope guaranteed present.
+Import event types from `eve/client` when you want exhaustiveness or helpers. Events read from a stream are `MessageStreamEvent`: the same union, with the `meta` envelope guaranteed present.
+
+`HandleMessageStreamEvent` remains available as a deprecated alias, so existing type imports continue to compile.
 
 ```ts
-import type { StampedHandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { isCurrentTurnBoundaryEvent } from "eve/client";
 
-function handleEvent(event: StampedHandleMessageStreamEvent) {
+function handleEvent(event: MessageStreamEvent) {
   console.log(event.meta.id, event.meta.at);
 
   if (isCurrentTurnBoundaryEvent(event)) {

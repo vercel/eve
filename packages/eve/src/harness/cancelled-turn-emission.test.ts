@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 describe("emitCancelledTurn", () => {
   it("emits turn.cancelled → session.waiting and no failure events", async () => {
-    const events: HandleMessageStreamEvent[] = [];
+    const events: UnstampedMessageStreamEvent[] = [];
     const next = await emitCancelledTurn(
       async (event) => {
         events.push(event);
@@ -31,7 +31,7 @@ describe("emitCancelledTurn", () => {
     // is persisted: the persisted state still has the between-turns
     // turnId "", but `turn.started` for `turn_${sequence}` is already on
     // the stream.
-    const events: HandleMessageStreamEvent[] = [];
+    const events: UnstampedMessageStreamEvent[] = [];
     const next = await emitCancelledTurn(
       async (event) => {
         events.push(event);

@@ -52,7 +52,7 @@ export interface StepCompletedProviderMetadata {
  * stream, and stored with it. Re-reading the stream — reconnecting, rewinding,
  * or replaying a finished session — yields the same values every time.
  */
-export interface HandleMessageStreamEventMeta {
+export interface MessageStreamEventMeta {
   /** ISO-8601 emission time. */
   readonly at: string;
   /**
@@ -293,7 +293,7 @@ export interface SubagentStartedStreamEvent {
 export interface SubagentChildEventStreamEvent {
   data: {
     callId: string;
-    event: HandleMessageStreamEvent;
+    event: UnstampedMessageStreamEvent;
     subagentName: string;
   };
   type: "subagent.event";
@@ -592,9 +592,12 @@ export interface SessionCompletedStreamEvent {
 }
 
 /**
- * Serializable stream event union for the durable message session flow.
+ * Serializable event before eve stamps the durable stream envelope.
+ *
+ * Internal emitters use this type while constructing events. Public stream
+ * consumers receive {@link MessageStreamEvent}.
  */
-export type HandleMessageStreamEvent = (
+export type UnstampedMessageStreamEvent =
   | CompactionCompletedStreamEvent
   | CompactionRequestedStreamEvent
   | AuthorizationCompletedStreamEvent
@@ -622,10 +625,7 @@ export type HandleMessageStreamEvent = (
   | TurnCancelledStreamEvent
   | TurnCompletedStreamEvent
   | TurnFailedStreamEvent
-  | TurnStartedStreamEvent
-) & {
-  readonly meta?: HandleMessageStreamEventMeta;
-};
+  | TurnStartedStreamEvent;
 
 /**
  * Stream events that represent an unrecovered turn/session failure.
@@ -636,14 +636,18 @@ export type TurnFailureStreamEvent =
   | TurnFailedStreamEvent;
 
 /**
- * One public session stream event after runtime metadata has been stamped.
+ * One event read from an eve session stream.
  *
- * Every event read from a session stream is stamped, so this — not
- * {@link HandleMessageStreamEvent} — is the type consumers receive.
+ * eve stamps the durable identity and emission time before writing the event.
  */
-export type StampedHandleMessageStreamEvent = HandleMessageStreamEvent & {
-  readonly meta: HandleMessageStreamEventMeta;
+export type MessageStreamEvent = UnstampedMessageStreamEvent & {
+  readonly meta: MessageStreamEventMeta;
 };
+
+/**
+ * @deprecated Use {@link MessageStreamEvent}.
+ */
+export type HandleMessageStreamEvent = MessageStreamEvent;
 
 const textEncoder = new TextEncoder();
 
@@ -651,7 +655,7 @@ const textEncoder = new TextEncoder();
  * Returns true when the current stream has reached a turn boundary or terminal
  * session outcome.
  */
-export function isCurrentTurnBoundaryEvent(event: HandleMessageStreamEvent): boolean {
+export function isCurrentTurnBoundaryEvent(event: UnstampedMessageStreamEvent): boolean {
   return (
     event.type === "session.completed" ||
     event.type === "session.failed" ||
@@ -663,9 +667,9 @@ export function isCurrentTurnBoundaryEvent(event: HandleMessageStreamEvent): boo
  * Narrows a stream event to the failure events that terminate or poison a turn.
  *
  * Generic so narrowing keeps the input's stamping: a
- * {@link StampedHandleMessageStreamEvent} narrows to a stamped failure event.
+ * {@link MessageStreamEvent} narrows to a stamped failure event.
  */
-export function isTurnFailureEvent<TEvent extends HandleMessageStreamEvent>(
+export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
   event: TEvent,
 ): event is TEvent & TurnFailureStreamEvent {
   return (
@@ -1425,9 +1429,7 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
  * One stamping seam is what makes the persisted stream and authored hooks
  * observe the same `meta.id`.
  */
-export function stampMessageStreamEvent(
-  event: HandleMessageStreamEvent,
-): StampedHandleMessageStreamEvent {
+export function stampMessageStreamEvent(event: UnstampedMessageStreamEvent): MessageStreamEvent {
   return {
     ...event,
     meta: {
@@ -1440,7 +1442,7 @@ export function stampMessageStreamEvent(
 /**
  * Encodes one message stream event as newline-delimited JSON.
  */
-export function encodeMessageStreamEvent(event: StampedHandleMessageStreamEvent): Uint8Array {
+export function encodeMessageStreamEvent(event: MessageStreamEvent): Uint8Array {
   return textEncoder.encode(`${JSON.stringify(event)}\n`);
 }
 

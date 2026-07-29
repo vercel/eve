@@ -15,10 +15,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
-import type {
-  HandleMessageStreamEvent,
-  StampedHandleMessageStreamEvent,
-} from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import { isEventId } from "#protocol/event-id.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { AuthorizationDefinition, TokenResult } from "#runtime/connections/types.js";
@@ -316,7 +313,7 @@ describe("workflowEntry integration", () => {
       ]);
 
       const stream = captureTurnEvents(run);
-      let firstTurn: readonly StampedHandleMessageStreamEvent[];
+      let firstTurn: readonly MessageStreamEvent[];
       try {
         firstTurn = await stream.nextTurn();
       } finally {
@@ -648,8 +645,8 @@ interface CapturedEventStream {
   dispose(): void;
   nextUntil(
     label: string,
-    predicate: (event: HandleMessageStreamEvent) => boolean,
-  ): Promise<HandleMessageStreamEvent[]>;
+    predicate: (event: UnstampedMessageStreamEvent) => boolean,
+  ): Promise<UnstampedMessageStreamEvent[]>;
 }
 
 function captureEvents(run: Parameters<typeof captureTurnEvents>[0]): CapturedEventStream {
@@ -680,9 +677,9 @@ async function readUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   decoder: InstanceType<typeof TextDecoder>,
   initialBuffer: string,
-  predicate: (event: HandleMessageStreamEvent) => boolean,
-): Promise<{ buffer: string; events: HandleMessageStreamEvent[] }> {
-  const events: HandleMessageStreamEvent[] = [];
+  predicate: (event: UnstampedMessageStreamEvent) => boolean,
+): Promise<{ buffer: string; events: UnstampedMessageStreamEvent[] }> {
+  const events: UnstampedMessageStreamEvent[] = [];
   let buffer = initialBuffer;
 
   while (true) {
@@ -706,7 +703,7 @@ async function readUntil(
         continue;
       }
 
-      const event = JSON.parse(line) as HandleMessageStreamEvent;
+      const event = JSON.parse(line) as UnstampedMessageStreamEvent;
       events.push(event);
 
       if (predicate(event)) {

@@ -20,7 +20,7 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { emitProxiedInputRequest } from "#execution/subagent-hitl-proxy.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -83,7 +83,7 @@ export async function emitProxiedSubagentEvent(input: {
   try {
     // A re-emitted child event is a distinct event on the parent stream, so it
     // gets its own id rather than the child's.
-    const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
+    const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
       const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
       await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
     };

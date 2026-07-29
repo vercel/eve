@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultMessageReducer } from "#client/message-reducer.js";
+import { defaultMessageReducer as createProductionMessageReducer } from "#client/message-reducer.js";
+import type { EveAgentReducerEvent } from "#client/reducer.js";
 import {
   createActionResultEvent,
   createActionsRequestedEvent,
@@ -14,7 +15,21 @@ import {
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+
+function defaultMessageReducer() {
+  const reducer = createProductionMessageReducer();
+  return {
+    initial: () => reducer.initial(),
+    reduce(
+      data: ReturnType<typeof reducer.initial>,
+      event: EveAgentReducerEvent | UnstampedMessageStreamEvent,
+    ) {
+      return reducer.reduce(data, event as EveAgentReducerEvent);
+    },
+  };
+}
 
 describe("defaultMessageReducer", () => {
   it("projects messages, reasoning, and actions into UIMessage-compatible parts", () => {

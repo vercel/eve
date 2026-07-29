@@ -8,7 +8,7 @@ import {
   type ActionResultStreamEvent,
   type AuthorizationCompletedStreamEvent,
   type AuthorizationRequiredStreamEvent,
-  type HandleMessageStreamEvent,
+  type MessageStreamEvent,
 } from "eve/client";
 
 import { startMcpStubServer } from "./lib/mcp-stub-server.ts";
@@ -150,7 +150,7 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   let toolResultMatched = false;
   let markerEchoedInMessage = false;
 
-  for await (const event of stream as AsyncIterable<HandleMessageStreamEvent>) {
+  for await (const event of stream as AsyncIterable<MessageStreamEvent>) {
     if (event.type === "authorization.required" && event.data.name === "stub-mcp-user") {
       requiredEvent = event;
       const challengeUrl = event.data.authorization?.url;
@@ -286,7 +286,7 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   }
 
   let followupTokenEchoed = false;
-  let followupBoundary: HandleMessageStreamEvent["type"] | undefined;
+  let followupBoundary: MessageStreamEvent["type"] | undefined;
   const followupAbort = new AbortController();
   const followupTimer = setTimeout(() => followupAbort.abort(), 60_000);
 

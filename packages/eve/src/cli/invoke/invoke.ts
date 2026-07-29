@@ -2,7 +2,7 @@ import {
   Client,
   ClientError,
   type ClientSession,
-  type HandleMessageStreamEvent,
+  type MessageStreamEvent,
   type SendTurnPayload,
   type SessionState,
 } from "#client/index.js";
@@ -136,7 +136,7 @@ async function createInvokeClient(input: RunInvokeInput): Promise<{
 async function observeSafely(
   input: RunInvokeInput,
   session: ClientSession,
-  response: AsyncIterable<HandleMessageStreamEvent>,
+  response: AsyncIterable<MessageStreamEvent>,
   deploymentResolution?: VercelDeploymentResolution,
 ): Promise<InvokeResult> {
   try {
@@ -156,7 +156,7 @@ async function observeSafely(
 async function observeInvocation(
   target: DevelopmentTarget,
   session: ClientSession,
-  response: AsyncIterable<HandleMessageStreamEvent>,
+  response: AsyncIterable<MessageStreamEvent>,
 ): Promise<InvokeResult> {
   const summary = summarizeTurnEvents(await collectTurnEvents(response));
   if (summary.boundary === undefined) return runningResult(target, session.state);

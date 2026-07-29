@@ -6,11 +6,11 @@ import {
   MessageResponse,
   type AgentInfoResult,
   type ClientSession,
-  type StampedHandleMessageStreamEvent,
+  type MessageStreamEvent,
 } from "#client/index.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 
@@ -63,7 +63,7 @@ function stubSession(): ClientSession {
  */
 function messageResponseOf(events: readonly unknown[]): MessageResponse {
   const stamped = events.map((event, index) =>
-    isStamped(event) ? event : stampTestEvent(event as HandleMessageStreamEvent, index),
+    isStamped(event) ? event : stampTestEvent(event as UnstampedMessageStreamEvent, index),
   );
   return new MessageResponse({
     continuationToken: "eve:test",
@@ -74,8 +74,8 @@ function messageResponseOf(events: readonly unknown[]): MessageResponse {
   });
 }
 
-function isStamped(event: unknown): event is StampedHandleMessageStreamEvent {
-  return typeof (event as StampedHandleMessageStreamEvent).meta?.id === "string";
+function isStamped(event: unknown): event is MessageStreamEvent {
+  return typeof (event as MessageStreamEvent).meta?.id === "string";
 }
 
 const AGENT_INFO: AgentInfoResult = {
@@ -578,7 +578,7 @@ describe("EveTUIRunner development session continuity", () => {
                         continuationToken: "token-session-1",
                         wait: "next-user-message",
                       },
-                    } as HandleMessageStreamEvent),
+                    } as UnstampedMessageStreamEvent),
                   )}\n`,
                 ),
               );
@@ -989,11 +989,11 @@ describe("EveTUIRunner connection authorization", () => {
       yield stampTestEvent({
         type: "authorization.completed",
         data: { name: "linear", outcome: "authorized" },
-      } as HandleMessageStreamEvent);
+      } as UnstampedMessageStreamEvent);
       yield stampTestEvent({
         type: "session.waiting",
         data: { wait: "next-user-message" },
-      } as HandleMessageStreamEvent);
+      } as UnstampedMessageStreamEvent);
     });
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
@@ -1193,7 +1193,7 @@ describe("EveTUIRunner replay guards", () => {
           stepIndex: 0,
           turnId: "turn_0",
         },
-      } as HandleMessageStreamEvent,
+      } as UnstampedMessageStreamEvent,
       1,
     );
     const prompts: Array<string | undefined> = ["weather", undefined];
@@ -1989,14 +1989,14 @@ describe("EveTUIRunner renderer teardown", () => {
               stepIndex: 0,
               turnId: "turn-child",
             },
-          } as HandleMessageStreamEvent,
+          } as UnstampedMessageStreamEvent,
           0,
         );
         yield stampTestEvent(
           {
             type: "session.waiting",
             data: { wait: "next-user-message" },
-          } as HandleMessageStreamEvent,
+          } as UnstampedMessageStreamEvent,
           1,
         );
       },
@@ -2079,7 +2079,7 @@ describe("EveTUIRunner renderer teardown", () => {
             {
               type: "session.waiting",
               data: { wait: "next-user-message" },
-            } as HandleMessageStreamEvent,
+            } as UnstampedMessageStreamEvent,
             1,
           );
         },
@@ -2914,7 +2914,7 @@ describe("EveTUIRunner mid-turn message queue", () => {
               {
                 type: "turn.started",
                 data: { turnId: "turn-1", sequence: 1 },
-              } as HandleMessageStreamEvent,
+              } as UnstampedMessageStreamEvent,
               0,
             );
             // Hold the stream mid-turn until the retry loop has proven both
@@ -2924,10 +2924,10 @@ describe("EveTUIRunner mid-turn message queue", () => {
               {
                 type: "turn.cancelled",
                 data: { turnId: "turn-1", sequence: 2 },
-              } as HandleMessageStreamEvent,
+              } as UnstampedMessageStreamEvent,
               1,
             );
-            yield stampTestEvent({ type: "session.waiting" } as HandleMessageStreamEvent, 2);
+            yield stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 2);
           },
           sessionId: "session_test",
         }),

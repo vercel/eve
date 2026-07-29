@@ -1,13 +1,10 @@
-import type {
-  HandleMessageStreamEvent,
-  StampedHandleMessageStreamEvent,
-} from "../../protocol/message.js";
+import type { MessageStreamEvent } from "../../protocol/message.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
 
 // Stamped, so a hook can read `event.meta` unguarded.
-type ProtocolEvent<TType extends HandleMessageStreamEvent["type"]> = Extract<
-  StampedHandleMessageStreamEvent,
+type ProtocolEvent<TType extends MessageStreamEvent["type"]> = Extract<
+  MessageStreamEvent,
   { type: TType }
 >;
 

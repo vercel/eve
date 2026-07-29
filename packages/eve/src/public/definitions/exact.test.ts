@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
@@ -42,7 +42,7 @@ describe("definition helper exact inputs", () => {
   });
 
   it("keeps the public hook event map aligned with runtime stream events", () => {
-    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<HandleMessageStreamEvent["type"]>();
+    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<UnstampedMessageStreamEvent["type"]>();
   });
 });
 

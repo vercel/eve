@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import {
   Client,
   ClientError,
   type AgentInfoResult,
   type HandleMessageStreamEvent,
+  type MessageStreamEvent,
 } from "../src/client/index.js";
 import {
   EVE_SESSION_ID_HEADER,
@@ -16,6 +17,7 @@ import {
   createSessionWaitingEvent,
   createTurnCompletedEvent,
   createTurnStartedEvent,
+  type UnstampedMessageStreamEvent,
 } from "../src/protocol/message.js";
 
 // ---------------------------------------------------------------------------
@@ -88,7 +90,7 @@ function singleTurnEvents(input: {
   message: string;
   sequence: number;
   turnId: string;
-}): HandleMessageStreamEvent[] {
+}): UnstampedMessageStreamEvent[] {
   return [
     createTurnStartedEvent({ sequence: input.sequence, turnId: input.turnId }),
     createMessageReceivedEvent({
@@ -109,6 +111,10 @@ function singleTurnEvents(input: {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+it("keeps HandleMessageStreamEvent as an alias for MessageStreamEvent", () => {
+  expectTypeOf<HandleMessageStreamEvent>().toEqualTypeOf<MessageStreamEvent>();
 });
 
 // ---------------------------------------------------------------------------
@@ -386,7 +392,7 @@ describe("Session.send (result)", () => {
   });
 
   it("returns status 'failed' when the session fails without throwing", async () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createSessionFailedEvent({
         code: "internal_error",
@@ -408,7 +414,7 @@ describe("Session.send (result)", () => {
   });
 
   it("returns status 'completed' when the session completes", async () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
         message: "Done",
@@ -437,7 +443,7 @@ describe("Session.send (result)", () => {
       required: ["title"],
       type: "object",
     } as const;
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageReceivedEvent({
         message: "Summarize",
@@ -478,7 +484,7 @@ describe("Session.send (result)", () => {
   });
 
   it("resets session state after session.completed", async () => {
-    const firstEvents: HandleMessageStreamEvent[] = [
+    const firstEvents: UnstampedMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
         message: "Done",
@@ -538,7 +544,7 @@ describe("Session.send (stream)", () => {
 
     const session = new Client({ host: "http://localhost:3000" }).session();
     const res = await session.send("Hello");
-    const collected: HandleMessageStreamEvent[] = [];
+    const collected: UnstampedMessageStreamEvent[] = [];
 
     const iterationPromise = (async () => {
       for await (const event of res) {
@@ -615,7 +621,7 @@ describe("Session.send (stream)", () => {
 describe("Session.send (reconnection)", () => {
   it("reconnects when the stream disconnects mid-turn", async () => {
     const firstStream = createControlledStreamResponse();
-    const reconnectEvents: HandleMessageStreamEvent[] = [
+    const reconnectEvents: UnstampedMessageStreamEvent[] = [
       createMessageReceivedEvent({ message: "Hello", sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
         message: "Reply",
@@ -808,7 +814,7 @@ describe("Session.stream", () => {
   });
 
   it("uses the session sessionId and streamIndex", async () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       createMessageCompletedEvent({
         message: "Hi",
         sequence: 2,
@@ -829,7 +835,7 @@ describe("Session.stream", () => {
       streamIndex: 10,
     });
 
-    const collected: HandleMessageStreamEvent[] = [];
+    const collected: UnstampedMessageStreamEvent[] = [];
     for await (const event of session.stream()) {
       collected.push(event);
       // stream() follows the durable log across transport ends; the boundary
