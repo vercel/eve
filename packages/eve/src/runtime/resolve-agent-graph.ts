@@ -15,8 +15,11 @@ import {
 } from "#runtime/framework-channels/index.js";
 import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
 import {
+  CONNECTION_SEARCH_TOOL_NAME,
   getAllFrameworkToolNames,
+  getBuiltInToolPolicyNames,
   getFrameworkToolDefinitions,
+  isFrameworkToolAllowed,
 } from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -141,6 +144,7 @@ async function resolveRuntimeAgentNode(
   });
   const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
   const allFrameworkToolNames = getAllFrameworkToolNames();
+  const builtInToolPolicyNames = getBuiltInToolPolicyNames();
 
   // Authored tools whose filename slug matches a framework default replace
   // it. Authored disable sentinels (whose target is also taken from the
@@ -163,9 +167,25 @@ async function resolveRuntimeAgentNode(
     }
   }
 
+  for (const allowedName of agent.config.builtInTools?.allow ?? []) {
+    if (!builtInToolPolicyNames.has(allowedName)) {
+      throw new ResolveRuntimeAgentGraphError(
+        `defineAgent({ builtInTools }) allows "${allowedName}", but it is not a framework tool. ` +
+          `Use one of: ${[...builtInToolPolicyNames].sort().join(", ")}.`,
+        {
+          nodeId,
+          sourceId: input.sourceId,
+        },
+      );
+    }
+  }
+
   const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
   const activeFrameworkTools = frameworkTools.filter(
-    (tool) => !authoredToolNames.has(tool.name) && !disabledFrameworkTools.has(tool.name),
+    (tool) =>
+      isFrameworkToolAllowed(agent.config.builtInTools, tool.name) &&
+      !authoredToolNames.has(tool.name) &&
+      !disabledFrameworkTools.has(tool.name),
   );
 
   const toolRegistry = await createRuntimeToolRegistry(
@@ -231,7 +251,12 @@ async function resolveRuntimeAgentNode(
   const resolvedAgent = hasConnections
     ? {
         ...agent,
-        dynamicToolResolvers: [...agent.dynamicToolResolvers, createConnectionSearchResolver()],
+        dynamicToolResolvers: isFrameworkToolAllowed(
+          agent.config.builtInTools,
+          CONNECTION_SEARCH_TOOL_NAME,
+        )
+          ? [...agent.dynamicToolResolvers, createConnectionSearchResolver()]
+          : agent.dynamicToolResolvers,
       }
     : agent;
 

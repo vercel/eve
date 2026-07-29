@@ -19,6 +19,7 @@ export { ReadFileStateKey } from "#runtime/framework-tools/file-state.js";
 export type { TodoItem, TodoState } from "#runtime/framework-tools/todo.js";
 export { TodoStateKey } from "#runtime/framework-tools/todo.js";
 
+import type { AgentBuiltInToolsDefinition } from "#shared/agent-definition.js";
 import type { ResolvedSkillDefinition, ResolvedToolDefinition } from "#runtime/types.js";
 
 const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
@@ -38,6 +39,17 @@ const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ...REGISTERED_FRAMEWORK_TOOLS,
   AGENT_TOOL_DEFINITION,
 ];
+
+/** Stable model-visible name for framework connection discovery. */
+export const CONNECTION_SEARCH_TOOL_NAME = "connection_search";
+
+/** Returns whether a framework tool is enabled by the agent's opt-in policy. */
+export function isFrameworkToolAllowed(
+  policy: AgentBuiltInToolsDefinition | undefined,
+  name: string,
+): boolean {
+  return policy === undefined || policy.allow.includes(name);
+}
 
 /**
  * Returns framework-owned tool definitions registered in the tool registry
@@ -79,4 +91,14 @@ export function getAllFrameworkToolDefinitions(): readonly ResolvedToolDefinitio
  */
 export function getAllFrameworkToolNames(): ReadonlySet<string> {
   return new Set(ALL_FRAMEWORK_TOOLS.map((definition) => definition.name));
+}
+
+/**
+ * Returns every name accepted by `defineAgent({ builtInTools.allow })`.
+ *
+ * This includes conditional dynamic framework tools that cannot be disabled
+ * with a filesystem sentinel.
+ */
+export function getBuiltInToolPolicyNames(): ReadonlySet<string> {
+  return new Set([...getAllFrameworkToolNames(), CONNECTION_SEARCH_TOOL_NAME]);
 }

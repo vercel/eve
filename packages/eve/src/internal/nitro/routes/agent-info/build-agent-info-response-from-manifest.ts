@@ -1,4 +1,8 @@
-import { getAllFrameworkToolNames } from "#runtime/framework-tools/index.js";
+import {
+  CONNECTION_SEARCH_TOOL_NAME,
+  getAllFrameworkToolNames,
+  isFrameworkToolAllowed,
+} from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
@@ -66,6 +70,7 @@ export function buildAgentInfoResponseFromManifest(
   );
   const frameworkToolInfo = buildFrameworkToolInfo({
     authoredToolNames,
+    builtInTools: manifest.config.builtInTools,
     delegationToolNames: getRootDelegationToolNames(manifest),
     disabledFrameworkToolNames: disabledFrameworkTools,
   });
@@ -200,9 +205,14 @@ export function buildAgentInfoResponseFromManifest(
     tools: {
       available: [...frameworkToolInfo.available, ...authoredTools],
       authored: authoredTools,
+      builtInPolicy:
+        manifest.config.builtInTools === undefined
+          ? { mode: "all" }
+          : { mode: "allowlist", allow: [...manifest.config.builtInTools.allow] },
       disabledFramework: [...manifest.disabledFrameworkTools],
       dynamic: [
-        ...(manifest.connections.length > 0
+        ...(manifest.connections.length > 0 &&
+        isFrameworkToolAllowed(manifest.config.builtInTools, CONNECTION_SEARCH_TOOL_NAME)
           ? [renderDynamicResolver(createConnectionSearchResolver(), { origin: "framework" })]
           : []),
         ...manifest.dynamicTools.map((resolver) =>

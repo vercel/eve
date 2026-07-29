@@ -179,6 +179,20 @@ export interface AgentLimitsDefinition {
 }
 
 /**
+ * Opt-in policy for framework-provided tools.
+ *
+ * This policy only controls tools owned by eve itself. Authored tools and
+ * same-slug authored overrides remain available so an application can retain
+ * its own implementation while denying the corresponding framework default.
+ */
+export interface AgentBuiltInToolsDefinition {
+  /** Deny every framework tool except the explicitly named entries. */
+  readonly mode: "allowlist";
+  /** Names of framework tools that remain available. */
+  readonly allow: readonly string[];
+}
+
+/**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
@@ -235,6 +249,7 @@ export interface AgentWorkflowDefinition {
  * stamps the path-derived `agentId` onto every compiled agent node.
  */
 export type InternalAgentDefinition = {
+  builtInTools?: AgentBuiltInToolsDefinition;
   name: string;
   description?: string;
   build?: AgentBuildDefinition;
@@ -255,6 +270,11 @@ export type InternalAgentDefinition = {
  * a `name` field.
  */
 export type PublicAgentDefinition = {
+  /**
+   * Optional deny-by-default policy for eve framework tools. Omit this to
+   * preserve eve's backward-compatible default of enabling all built-ins.
+   */
+  readonly builtInTools?: AgentBuiltInToolsDefinition;
   /**
    * Human-readable description of the agent's purpose. Required for
    * subagents (authored under `subagents/<id>/agent.ts`): surfaced to

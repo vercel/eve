@@ -167,6 +167,35 @@ parent's quota, so a delegation tree can never outspend the budget configured
 at its root. An authored child limit applies only when it is tighter than the
 parent's grant; an uncapped parent delegates uncapped children.
 
+## Built-in tool allowlist
+
+By default, eve enables its framework-provided tools. To make production
+capabilities deny-by-default, opt into `builtInTools.mode: "allowlist"` and
+name the framework tools this agent needs:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  builtInTools: {
+    mode: "allowlist",
+    allow: ["ask_question", "todo", "web_fetch", "load_skill"],
+  },
+});
+```
+
+The policy applies only to eve-built tools. Your authored tools, dynamic
+tools, and same-slug authored overrides still work normally. This means a
+custom `agent/tools/web_fetch.ts` continues to be available even when
+`"web_fetch"` is absent from the allowlist. `disableTool()` remains available
+for explicitly removing a known framework tool. New framework tools introduced
+by a future eve upgrade are denied unless you add them to `allow`.
+
+`GET /eve/v1/info` reports the effective policy in `tools.builtInPolicy`, the
+final model-visible static inventory in `tools.available`, and marks framework
+tools omitted by policy with `deniedByPolicy: true`.
+
 ## Workflow world
 
 By default, eve selects the Workflow SDK world for the host: Vercel Workflow on
@@ -213,6 +242,7 @@ installed package must stay external in hosted output, list it in
 | `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                              |
 | `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                                     |
 | `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. `maxInputTokensPerSession` defaults to `40_000_000` for root sessions, and delegated subagent sessions inherit the parent's remaining quota; `maxOutputTokensPerSession` is unset unless configured; `false` uncaps a session token limit. |
+| `builtInTools` | `AgentBuiltInToolsDefinition`           | all built-ins    | Opt-in deny-by-default allowlist for eve framework tools. Authored tools and same-slug overrides remain available.                                                                                                                                                         |
 | `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent.                                                              |
 | `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                                                 |
 | `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                   |

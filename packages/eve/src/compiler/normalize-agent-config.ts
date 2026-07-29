@@ -67,6 +67,7 @@ export async function compileAgentConfig(
 
   const compiledConfig: {
     build?: CompiledAgentDefinition["build"];
+    builtInTools?: CompiledAgentDefinition["builtInTools"];
     compaction: {
       model?: CompiledRuntimeModelReference;
       thresholdPercent?: number;
@@ -114,6 +115,13 @@ export async function compileAgentConfig(
         definition.build.externalDependencies === undefined
           ? undefined
           : [...definition.build.externalDependencies],
+    };
+  }
+
+  if (definition.builtInTools !== undefined) {
+    compiledConfig.builtInTools = {
+      mode: definition.builtInTools.mode,
+      allow: [...definition.builtInTools.allow],
     };
   }
 

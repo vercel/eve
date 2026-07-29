@@ -742,6 +742,93 @@ describe("dispatchRuntimeActionsStep", () => {
     );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
+
+  it("blocks a stale recursive agent call denied by the built-in tool policy", async () => {
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: {
+          builtInTools: { mode: "allowlist", allow: [] },
+        },
+      },
+      subagentRegistry: {
+        subagentsByNodeId: new Map(),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Delegate the work.",
+          input: { message: "try a stale action" },
+          kind: "subagent-call",
+          name: "agent",
+          nodeId: "__root__",
+          subagentName: "agent",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "root-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const sessionState = createStubSessionState({
+      continuationToken: "http:parent",
+      sessionId: "root-session",
+    });
+
+    await expect(
+      dispatchRuntimeActionsStep({
+        parentContinuationToken: "turn-inbox",
+        parentWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState,
+      }),
+    ).resolves.toEqual({
+      results: [
+        {
+          callId: "call-1",
+          isError: true,
+          kind: "subagent-result",
+          output: {
+            code: "FRAMEWORK_TOOL_DENIED_BY_POLICY",
+            message: 'The built-in "agent" tool is denied by this agent\'s built-in tool policy.',
+          },
+          subagentName: "agent",
+        },
+      ],
+      sessionState,
+    });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:execution.dispatch-runtime-actions] recursive agent call blocked by built-in tool policy",
+      expect.objectContaining({
+        callId: "call-1",
+        subagentName: "agent",
+      }),
+    );
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
+  });
 });
 
 describe("turnStep", () => {

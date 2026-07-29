@@ -152,6 +152,7 @@ function createResolvedInstructionsDefinition(
 
 function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): ResolvedAgent["config"] {
   const config: {
+    builtInTools?: ResolvedAgent["config"]["builtInTools"];
     compaction?: ResolvedAgent["config"]["compaction"];
     dynamicModel?: ResolvedAgent["config"]["dynamicModel"];
     experimental?: ResolvedAgent["config"]["experimental"];
@@ -215,6 +216,13 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     }
 
     config.compaction = compaction;
+  }
+
+  if (manifest.config.builtInTools !== undefined) {
+    config.builtInTools = {
+      mode: manifest.config.builtInTools.mode,
+      allow: [...manifest.config.builtInTools.allow],
+    };
   }
 
   if (manifest.config.dynamicModel !== undefined) {

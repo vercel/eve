@@ -24,6 +24,10 @@ Compaction also preserves the framework's own tool state automatically. It reset
 
 Built-in tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
 
+Agents that need deny-by-default capabilities can configure a
+[`builtInTools` allowlist](../agent-config#built-in-tool-allowlist). Authored
+tools are not affected by that framework-tool policy.
+
 The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) run in the app and proxy their work into the agent's [sandbox](../sandbox). The table shows where each tool's effect lands.
 
 | Tool                | Does                                                                                                                                                                                                                | Where it runs |

@@ -56,6 +56,35 @@ describe("compileAgentConfig", () => {
       sourceKind: "module",
     });
   });
+
+  it("preserves a framework built-in tool allowlist", async () => {
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      model: "openai/gpt-5.5",
+      builtInTools: {
+        mode: "allowlist",
+        allow: ["todo", "connection_search"],
+      },
+    });
+
+    const manifest = createAgentSourceManifest({
+      agentId: "app",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "agent.ts",
+        sourceId: "agent-config",
+      }),
+    });
+
+    const compiled = await compileAgentConfig(manifest, {
+      modelCatalog: createModelCatalog(),
+    });
+
+    expect(compiled.builtInTools).toEqual({
+      mode: "allowlist",
+      allow: ["todo", "connection_search"],
+    });
+  });
 });
 
 function createModelCatalog(): ManifestCompileContext["modelCatalog"] {

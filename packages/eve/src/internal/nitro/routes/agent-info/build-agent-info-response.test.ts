@@ -30,6 +30,22 @@ describe("buildFrameworkToolInfo", () => {
     });
   });
 
+  it("reports an allowlist-denied framework tool separately from disableTool", () => {
+    const info = buildFrameworkToolInfo({
+      authoredToolNames: new Set(),
+      builtInTools: { mode: "allowlist", allow: ["todo"] },
+      delegationToolNames: new Set(),
+      disabledFrameworkToolNames: new Set(),
+    });
+
+    expect(info.available.map((tool) => tool.name)).toEqual(["todo"]);
+    expect(info.framework.find((tool) => tool.name === "bash")).toMatchObject({
+      deniedByPolicy: true,
+      disabledByAuthor: false,
+      status: "disabled",
+    });
+  });
+
   it("reports a declared agent delegation tool as replacing the recursive action", () => {
     const info = buildFrameworkToolInfo({
       authoredToolNames: new Set(),

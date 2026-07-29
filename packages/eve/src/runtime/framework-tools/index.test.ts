@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
+  getBuiltInToolPolicyNames,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
 import { isToolSchema } from "#shared/tool-schema.js";
@@ -37,6 +38,15 @@ describe("framework-tools/index", () => {
 
     expect(names).toContain("agent");
     expect(getFrameworkToolDefinitions().map((tool) => tool.name)).not.toContain("agent");
+  });
+
+  it("accepts static and dynamic framework tool names in built-in policies", () => {
+    const policyNames = getBuiltInToolPolicyNames();
+
+    expect(policyNames.has("connection_search")).toBe(true);
+    for (const name of getAllFrameworkToolNames()) {
+      expect(policyNames.has(name)).toBe(true);
+    }
   });
 
   it("uses one validated runtime schema for every framework-defined input", () => {

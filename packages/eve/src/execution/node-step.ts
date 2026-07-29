@@ -17,6 +17,7 @@ import {
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
+import { isFrameworkToolAllowed } from "#runtime/framework-tools/index.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
@@ -189,6 +190,7 @@ export function createNodeHarnessTools(input: {
 
   if (
     input.node.nodeId === ROOT_RUNTIME_AGENT_NODE_ID &&
+    isFrameworkToolAllowed(input.node.agent.config?.builtInTools, AGENT_TOOL_NAME) &&
     !input.node.agent.disabledFrameworkTools.includes(AGENT_TOOL_NAME) &&
     !tools.has(AGENT_TOOL_NAME)
   ) {
