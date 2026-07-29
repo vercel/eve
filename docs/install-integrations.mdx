@@ -71,6 +71,85 @@ Install a known integration URL directly when you do not need a namespace:
 eve add https://registry.acme.com/r/analytics.json
 ```
 
+## Host your own registry
+
+An eve registry is a standard [shadcn registry](https://ui.shadcn.com/docs/registry), so it can be hosted by any service that serves JSON over HTTP. It needs two kinds of endpoint:
+
+- A catalog such as `https://registry.acme.com/r/registry.json` for `eve registry list` and `eve registry search`
+- One JSON document per integration, such as `https://registry.acme.com/r/analytics.json`, for `eve registry view` and `eve add`
+
+Start with a source file for the integration and a `registry.json` that describes where to install it:
+
+```text
+registry.json
+registry/
+└── analytics.ts
+```
+
+```json title="registry.json"
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "acme",
+  "homepage": "https://registry.acme.com",
+  "items": [
+    {
+      "name": "analytics",
+      "type": "registry:item",
+      "title": "Acme Analytics",
+      "description": "Add Acme analytics tools to an eve agent.",
+      "dependencies": ["@acme/eve-analytics"],
+      "envVars": {
+        "ACME_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/analytics.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/analytics.ts"
+        }
+      ]
+    }
+  ]
+}
+```
+
+`files[].path` is relative to `registry.json`. `files[].target` is relative to the root of the eve project that installs the item. Use `registry:item` with explicit `registry:file` targets for eve integrations so installation does not depend on a UI framework or shadcn project aliases.
+
+Validate the source registry, then build its static JSON:
+
+```bash
+pnpm dlx shadcn@latest registry validate
+pnpm dlx shadcn@latest build
+```
+
+By default, the build writes the catalog to `public/r/registry.json` and each item to `public/r/<name>.json`. Deploy the `public` directory to a static host, or use the shadcn registry APIs to serve the same payloads from dynamic routes.
+
+Test the deployed endpoints from an eve project before sharing the registry:
+
+```bash
+eve registry list --registry https://registry.acme.com/r/registry.json
+eve registry view https://registry.acme.com/r/analytics.json
+eve registry add @acme=https://registry.acme.com/r/{name}.json
+eve add @acme/analytics
+```
+
+For a private registry, replace the string mapping in `package.json#registries` with an object that supplies headers or query parameters. Environment variable placeholders are resolved when eve accesses the registry:
+
+```json title="package.json"
+{
+  "registries": {
+    "@acme": {
+      "url": "https://registry.acme.com/r/{name}.json",
+      "headers": {
+        "Authorization": "Bearer ${ACME_REGISTRY_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Keep the token in the environment, never in `package.json`, and serve authenticated registries over HTTPS.
+
 ## Configure generated files
 
 Integrations add project files. Read the generated mount before you run the agent, then add the configuration the extension requires.
