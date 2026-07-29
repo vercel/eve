@@ -967,6 +967,82 @@ describe("EveTUIRunner native continuation state", () => {
       signal: expect.any(AbortSignal),
     });
   });
+
+  it.each([{ chosenOptionId: "continue" }, { chosenOptionId: "stop" }])(
+    "renders a session-limit continuation as a question and submits $chosenOptionId",
+    async ({ chosenOptionId }) => {
+      const prompts: Array<string | undefined> = ["keep going", undefined];
+      const session = sessionYieldingTurns([
+        [
+          {
+            type: "input.requested",
+            data: {
+              requests: [
+                {
+                  action: {
+                    callId: "wrun_1:limit:input:19093",
+                    input: { kind: "input", limit: 10_000, usedTokens: 19_093 },
+                    kind: "tool-call",
+                    toolName: "session_limit_continuation",
+                  },
+                  allowFreeform: false,
+                  display: "confirmation",
+                  kind: "session-limit",
+                  options: [
+                    { id: "continue", label: "Approve" },
+                    { id: "stop", label: "Stop" },
+                  ],
+                  prompt: "This session has hit the input-token limit (10K) per session.",
+                  requestId: "wrun_1:limit:input:19093",
+                },
+              ],
+            },
+          },
+          { type: "session.waiting", data: { wait: "next-user-message" } },
+        ],
+        [{ type: "session.waiting", data: { wait: "next-user-message" } }],
+      ]);
+      const readToolApproval = vi.fn(async () => ({ approved: true }));
+      const readInputQuestion = vi.fn(async () => ({ optionId: chosenOptionId }));
+      const renderer: AgentTUIRenderer = {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        readToolApproval,
+        readInputQuestion,
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) {
+            void event;
+          }
+        }),
+      };
+
+      const runner = new EveTUIRunner({
+        session,
+        renderer,
+        name: "Limit Agent",
+      });
+
+      await runner.run();
+
+      // Renders in the question pane with the prompt copy and labeled
+      // options — never through the y/n tool-approval flow.
+      expect(readToolApproval).not.toHaveBeenCalled();
+      expect(readInputQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          display: "select",
+          prompt: "This session has hit the input-token limit (10K) per session.",
+          options: [
+            expect.objectContaining({ id: "continue", label: "Approve" }),
+            expect.objectContaining({ id: "stop", label: "Stop" }),
+          ],
+        }),
+        expect.anything(),
+      );
+      expect(session.send).toHaveBeenNthCalledWith(2, {
+        inputResponses: [{ requestId: "wrun_1:limit:input:19093", optionId: chosenOptionId }],
+        signal: expect.any(AbortSignal),
+      });
+    },
+  );
 });
 
 describe("EveTUIRunner connection authorization", () => {
