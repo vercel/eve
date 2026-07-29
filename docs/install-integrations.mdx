@@ -44,7 +44,7 @@ eve registry view extension/agent-browser
 
 ## Add a third-party source
 
-Give a registry a namespace and an integration URL template:
+Use the integration URL template provided by the registry publisher and give the source a namespace:
 
 ```bash
 eve registry add @acme=https://registry.acme.com/r/{name}.json
@@ -72,6 +72,8 @@ eve add https://registry.acme.com/r/analytics.json
 ```
 
 ## Host your own registry
+
+Hosting your own registry is the publishing side of the [third-party source workflow](#add-a-third-party-source). Once it is deployed, other eve projects can give it a namespace and pull integrations from it.
 
 An eve registry is a standard [shadcn registry](https://ui.shadcn.com/docs/registry), so it can be hosted by any service that serves JSON over HTTP. It needs two kinds of endpoint:
 
@@ -124,11 +126,16 @@ pnpm dlx shadcn@latest build
 
 By default, the build writes the catalog to `public/r/registry.json` and each item to `public/r/<name>.json`. Deploy the `public` directory to a static host, or use the shadcn registry APIs to serve the same payloads from dynamic routes.
 
-Test the deployed endpoints from an eve project before sharing the registry:
+Before sharing the registry, test its deployed catalog and item endpoints from an eve project:
 
 ```bash
 eve registry list --registry https://registry.acme.com/r/registry.json
 eve registry view https://registry.acme.com/r/analytics.json
+```
+
+Share the item URL template with consumers. From another eve project, they can add the hosted registry as a third-party source and pull the integration through its namespace:
+
+```bash
 eve registry add @acme=https://registry.acme.com/r/{name}.json
 eve add @acme/analytics
 ```
