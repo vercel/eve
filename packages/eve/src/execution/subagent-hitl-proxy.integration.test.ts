@@ -143,7 +143,7 @@ function buildApprovalRequest(requestId: string): InputRequest {
     kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve", style: "primary" },
-      { id: "deny", label: "Deny", style: "danger" },
+      { id: "cancel", label: "Cancel", style: "danger" },
     ],
     prompt: "Approve?",
     requestId,
@@ -430,7 +430,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       payload: {
         inputResponses: [
           { optionId: "approve", requestId: "req-a" },
-          { optionId: "deny", requestId: "req-b" },
+          { optionId: "cancel", requestId: "req-b" },
         ],
       },
       state: parkedSession.state,
@@ -449,7 +449,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       inputResponses: [{ optionId: "approve", requestId: "req-a" }],
     });
     expect(byChild.get("subagent:parent:call-b")).toEqual({
-      inputResponses: [{ optionId: "deny", requestId: "req-b" }],
+      inputResponses: [{ optionId: "cancel", requestId: "req-b" }],
     });
 
     // A response whose requestId does not match any proxy entry

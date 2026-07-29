@@ -99,7 +99,7 @@ describe("executeTask", () => {
         const request = t.requireInputRequest({
           display: "confirmation",
           input: { command: "pwd" },
-          optionIds: ["approve", "deny"],
+          optionIds: ["approve", "cancel"],
           prompt: /Approve/,
           toolName: "bash",
         });
@@ -738,7 +738,7 @@ function inputRequested(
           kind: "tool-approval",
           options: [
             { id: "approve", label: "Approve" },
-            { id: "deny", label: "Deny" },
+            { id: "cancel", label: "Cancel" },
           ],
           prompt: "Approve?",
           requestId,

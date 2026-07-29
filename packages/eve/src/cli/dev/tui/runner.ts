@@ -1005,7 +1005,7 @@ export class EveTUIRunner {
                 const response = await this.#renderer.readToolApproval(request, { title });
                 responses.push({
                   requestId: request.approvalId,
-                  optionId: response.approved ? "approve" : "deny",
+                  optionId: response.approved ? "approve" : "cancel",
                 });
                 this.#pendingInputRequests.delete(request.approvalId);
               }

@@ -446,8 +446,8 @@ function createPendingBashApprovalSession(): HarnessSession {
         display: "confirmation",
         kind: "tool-approval",
         options: [
-          { id: "approve", label: "Yes" },
-          { id: "deny", label: "No" },
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
         ],
         prompt: "Approve tool call: bash",
         requestId: "approval-1",
@@ -497,8 +497,8 @@ function createPendingProtectedActionApprovalSession(): HarnessSession {
         display: "confirmation",
         kind: "tool-approval",
         options: [
-          { id: "approve", label: "Yes" },
-          { id: "deny", label: "No" },
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
         ],
         prompt: "Approve tool call: protected_action",
         requestId: "approval-1",
@@ -2628,8 +2628,8 @@ describe("createToolLoopHarness", () => {
             display: "confirmation",
             kind: "tool-approval",
             options: [
-              { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
             ],
             prompt: "Approve tool call: bash",
             requestId: "approval-1",
@@ -6968,8 +6968,8 @@ describe("createToolLoopHarness", () => {
             display: "confirmation",
             kind: "tool-approval",
             options: [
-              { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
             ],
             prompt: "Approve tool call: bash",
             requestId: "approval-1",
@@ -7156,8 +7156,8 @@ describe("createToolLoopHarness", () => {
           display: "confirmation",
           kind: "tool-approval",
           options: [
-            { id: "approve", label: "Yes" },
-            { id: "deny", label: "No" },
+            { id: "approve", label: "Approve" },
+            { id: "cancel", label: "Cancel" },
           ],
           prompt: "Approve tool call: bash",
           requestId: "approval-1",
@@ -7214,7 +7214,7 @@ describe("createToolLoopHarness", () => {
     expect(hasDeferredStepInput(firstResult.session)).toBe(true);
 
     const deniedResult = await createToolLoopHarness(config)(firstResult.session, {
-      inputResponses: [{ requestId: "approval-1", optionId: "deny" }],
+      inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
 
     expect(typeof deniedResult.next).toBe("function");
@@ -7321,8 +7321,8 @@ describe("createToolLoopHarness", () => {
           display: "confirmation",
           kind: "tool-approval",
           options: [
-            { id: "approve", label: "Yes" },
-            { id: "deny", label: "No" },
+            { id: "approve", label: "Approve" },
+            { id: "cancel", label: "Cancel" },
           ],
           prompt: "Approve tool call: guarded_echo",
           requestId: "approval-1",
@@ -7569,8 +7569,8 @@ describe("createToolLoopHarness", () => {
           display: "confirmation",
           kind: "tool-approval",
           options: [
-            { id: "approve", label: "Yes" },
-            { id: "deny", label: "No" },
+            { id: "approve", label: "Approve" },
+            { id: "cancel", label: "Cancel" },
           ],
           prompt: "Approve tool call: bash",
           requestId: "approval-1",
@@ -7629,7 +7629,7 @@ describe("createToolLoopHarness", () => {
 
     // Step 2: user denies the approval; the deferred message is NOT in this call.
     const deniedResult = await createToolLoopHarness(config)(firstResult.session, {
-      inputResponses: [{ requestId: "approval-1", optionId: "deny" }],
+      inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
     expect(typeof deniedResult.next).toBe("function");
     const step2Last = generateCalls[0]?.at(-1);

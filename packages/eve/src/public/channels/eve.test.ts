@@ -712,14 +712,14 @@ describe("eveChannel — onMessage", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
-        inputResponses: [{ requestId: "req-1", optionId: "deny" }],
+        inputResponses: [{ requestId: "req-1", optionId: "cancel" }],
       }),
     );
 
     expect(response.status).toBe(202);
     expect(onMessage).not.toHaveBeenCalled();
     expect(handler.respond).toHaveBeenCalledWith(
-      [{ requestId: "req-1", optionId: "deny" }],
+      [{ requestId: "req-1", optionId: "cancel" }],
       expect.objectContaining({ auth: ACCEPTED_AUTH }),
     );
     expect(handler.send).not.toHaveBeenCalled();
@@ -1441,13 +1441,13 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
-        inputResponses: [{ requestId: "req-1", optionId: "deny" }],
+        inputResponses: [{ requestId: "req-1", optionId: "cancel" }],
       }),
     );
 
     expect(response.status).toBe(202);
     expect(handler.respond).toHaveBeenCalledWith(
-      [{ requestId: "req-1", optionId: "deny" }],
+      [{ requestId: "req-1", optionId: "cancel" }],
       expect.any(Object),
     );
     expect(handler.send).not.toHaveBeenCalled();
