@@ -53,14 +53,11 @@ export default defineEval({
     terminal.notEvent("turn.failed");
     terminal.notEvent("session.failed");
 
-    let owner: OwnerResponse = { sessionId: expiredSessionId };
-    for (let attempt = 0; attempt < 50 && owner.sessionId !== null; attempt += 1) {
-      owner = await postJson<OwnerResponse>(t.target, `/threads/${threadId}/owner`, {});
-      if (owner.sessionId !== null) {
-        await t.sleep(100);
-      }
-    }
-    await t.require(owner.sessionId, equals(null));
+    await t.eventually(
+      async () =>
+        (await postJson<OwnerResponse>(t.target, `/threads/${threadId}/owner`, {})).sessionId,
+      equals(null),
+    );
 
     const replacement = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
       message: "REPLACEMENT-TURN",

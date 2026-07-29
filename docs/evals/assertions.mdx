@@ -147,6 +147,20 @@ const call = turn.requireToolCall("search");
 const request = session.requireInputRequest({ toolName: "guarded" });
 ```
 
+For asynchronously settling state, `await t.eventually(sample, assertion, options?)` retries a
+fresh sample until the assertion passes, records one gate, and returns the passing value. It
+defaults to a 5-second timeout and 100-millisecond interval:
+
+```ts
+await t.eventually(
+  async () => (await t.target.fetch("/status")).json(),
+  satisfies((status) => status.ready === true, "target becomes ready"),
+);
+```
+
+Callback errors fail immediately. `timeoutMs` controls the retry window, `intervalMs` controls the
+delay between attempts, and the eval timeout signal interrupts pending waits.
+
 ## Severity
 
 Every assertion returns a chainable handle. Severity rides on the assertion, so there is no separate thresholds map to keep in sync.

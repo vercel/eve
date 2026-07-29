@@ -4,6 +4,7 @@ import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createScopedAssertions } from "#evals/assertions/scoped.js";
 import { buildJudgeContext } from "#evals/judge.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
+import { requireEventually } from "#evals/eventually.js";
 import type {
   Assertion,
   AssertionHandle,
@@ -84,6 +85,14 @@ export function createEvalContext(deps: {
     // Value-level assertion over an explicit value.
     check: (value, assertion) => recordCheck(collector, value, assertion),
     require: (value, assertion) => requireCheck(collector, value, assertion),
+    eventually: (sample, assertion, options) =>
+      requireEventually({
+        assertion,
+        collector,
+        options,
+        sample,
+        signal: deps.signal,
+      }),
     skip: (reason) => {
       if (reason.trim().length === 0) throw new Error("skip() requires a non-empty reason.");
       if (collector.hasEntries || deps.manager.hasActivity()) {

@@ -373,6 +373,17 @@ export interface EveEvalContext extends EveEvalSessionDriver, EveEvalAssertions 
   check(value: unknown, assertion: Assertion): AssertionHandle;
   /** Record an immediate gate and abort dependent control flow when it fails. */
   require<T>(value: T, assertion: Assertion): Promise<T>;
+  /**
+   * Retry an async or synchronous sample until its assertion passes.
+   *
+   * Records one gate and returns the passing value. A callback error fails
+   * immediately; the eval timeout signal interrupts waits between attempts.
+   */
+  eventually<T>(
+    sample: () => T | Promise<T>,
+    assertion: Assertion,
+    options?: EveEvalEventuallyOptions,
+  ): Promise<T>;
   /** Mark this eval as intentionally skipped and stop executing its test body. */
   skip(reason: string): never;
 
@@ -397,6 +408,14 @@ export interface EveEvalTarget {
 
 export interface EveEvalTargetCapabilities {
   readonly devRoutes: boolean;
+}
+
+/** Timing controls for {@link EveEvalContext.eventually}. */
+export interface EveEvalEventuallyOptions {
+  /** Delay between attempts. Defaults to 100 milliseconds. */
+  readonly intervalMs?: number;
+  /** Maximum retry window. Defaults to 5 seconds. */
+  readonly timeoutMs?: number;
 }
 
 export interface EveEvalScheduleDispatchResult {

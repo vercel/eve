@@ -35,6 +35,7 @@ export type {
   EveEvalAssertions,
   EveEvalContext,
   EveEvalDerivedFacts,
+  EveEvalEventuallyOptions,
   EveEvalJudgeConfig,
   EveEvalRunSummary,
   EveEvalSession,
