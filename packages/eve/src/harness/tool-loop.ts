@@ -42,6 +42,8 @@ import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js
 import { toErrorMessage } from "#shared/errors.js";
 import {
   createActionResultEvent,
+  createApprovalCandidateEvent,
+  createApprovalSettledEvent,
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createContextClearedEvent,
@@ -112,6 +114,12 @@ import {
 } from "#harness/input-extraction.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import {
+  getApprovalAuditState,
+  markApprovalCandidateHistoryEventEmitted,
+  markApprovalCandidatePendingEventEmitted,
+  markApprovalSettlementEventEmitted,
+} from "#harness/approval-candidates.js";
 import {
   coordinateApprovalDelivery,
   shouldPrepareApprovalPolicyTools,
@@ -711,7 +719,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }),
     });
     session = coordinated.session;
-    if (emit !== undefined) {
+    if (emit) {
       for (const message of coordinated.feedback) {
         await emit(
           createMessageCompletedEvent({
@@ -721,6 +729,74 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             turnId: emissionState.turnId,
           }),
         );
+      }
+      const audit = getApprovalAuditState(session.state);
+      for (const candidate of audit.activeCandidates.filter(
+        (entry) => entry.pendingEventEmitted !== true,
+      )) {
+        await emit(
+          createApprovalCandidateEvent({
+            candidateId: candidate.candidateId,
+            outcome: "pending",
+            requestId: candidate.requestId,
+            responderPrincipalId: candidate.responder.principalId,
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+        session = {
+          ...session,
+          state: markApprovalCandidatePendingEventEmitted({
+            candidateId: candidate.candidateId,
+            state: session.state,
+          }),
+        };
+      }
+      for (const candidate of audit.candidateHistory.filter(
+        (entry) => entry.eventEmitted !== true && entry.status !== "allowed",
+      )) {
+        await emit(
+          createApprovalCandidateEvent({
+            candidateId: candidate.candidateId,
+            outcome: candidate.status as Exclude<
+              typeof candidate.status,
+              "allowed" | "authorization-required"
+            >,
+            requestId: candidate.requestId,
+            responderPrincipalId: candidate.responder.principalId,
+            safeReason: candidate.safeReason,
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+        session = {
+          ...session,
+          state: markApprovalCandidateHistoryEventEmitted({
+            candidateId: candidate.candidateId,
+            state: session.state,
+          }),
+        };
+      }
+      for (const settlement of audit.settlements.filter((entry) => entry.eventEmitted !== true)) {
+        await emit(
+          createApprovalSettledEvent({
+            outcome: settlement.outcome === "allowed" ? "approved" : "cancelled",
+            requestId: settlement.requestId,
+            responderPrincipalId: settlement.actor.principalId,
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+        session = {
+          ...session,
+          state: markApprovalSettlementEventEmitted({
+            requestId: settlement.requestId,
+            state: session.state,
+          }),
+        };
       }
     }
     if (coordinated.kind === "continue-coordination") {
@@ -736,6 +812,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           await emit(
             createAuthorizationRequiredEvent({
               authorization: challenge.challenge,
+              candidateId: challenge.candidateId,
               description:
                 challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
               name: challenge.name,

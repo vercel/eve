@@ -42,10 +42,6 @@ import {
   isHitlAction,
   type HitlFreeformModalMetadata,
 } from "#public/channels/slack/hitl.js";
-import {
-  SLACK_CARD_SUBTEXT_MAX_LENGTH,
-  truncateCardSubtext,
-} from "#public/channels/slack/limits.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
@@ -180,6 +176,23 @@ function extractActionLabel(action: Record<string, unknown>): string | undefined
   return undefined;
 }
 
+function buildPendingApprovalCards(
+  interaction: ParsedBlockActionsPayload,
+): NonNullable<SlackChannelState["pendingApprovalCards"]> {
+  const cards: NonNullable<SlackChannelState["pendingApprovalCards"]> = {};
+  for (const action of interaction.actions) {
+    const response = deriveHitlResponse(action);
+    if (response === null || !action.messageTs) continue;
+    cards[response.requestId] = {
+      actionId: action.actionId,
+      messageBlocks: interaction.messageBlocks,
+      messageTs: action.messageTs,
+      userId: action.user.id,
+    };
+  }
+  return cards;
+}
+
 function findPromptBlock(blocks: readonly unknown[]): unknown {
   return findPromptBlocks(blocks)[0];
 }
@@ -205,117 +218,6 @@ function readPromptTextFromBlocks(blocks: readonly unknown[]): string | undefine
   const prompt = findPromptBlock(blocks) as { text?: { text?: unknown } } | undefined;
   const text = prompt?.text?.text;
   return typeof text === "string" && text.length > 0 ? text : undefined;
-}
-
-function buildAnsweredHitlMessageBlocks(input: {
-  readonly actionId: string;
-  readonly answerLabel: string;
-  readonly messageBlocks: readonly unknown[];
-  readonly userId: string;
-}): unknown[] {
-  const actionBlockIndex = findActionBlockIndex(input.messageBlocks, input.actionId);
-  if (actionBlockIndex === -1) {
-    return buildAnsweredBlocks({
-      promptBlocks: findPromptBlocks(input.messageBlocks),
-      answerLabel: input.answerLabel,
-      userId: input.userId,
-    });
-  }
-
-  const actionBlock = input.messageBlocks[actionBlockIndex];
-  const answeredBlocks =
-    answeredBlocksFromActionBlock({
-      answerLabel: input.answerLabel,
-      block: actionBlock,
-      userId: input.userId,
-    }) ??
-    buildAnsweredBlocks({
-      promptBlocks: promptBlocksFromActionBlock(actionBlock),
-      answerLabel: input.answerLabel,
-      userId: input.userId,
-    });
-  return [
-    ...input.messageBlocks.slice(0, actionBlockIndex),
-    ...answeredBlocks,
-    ...input.messageBlocks.slice(actionBlockIndex + 1),
-  ];
-}
-
-function findActionBlockIndex(blocks: readonly unknown[], actionId: string): number {
-  return blocks.findIndex((block) => blockContainsActionId(block, actionId));
-}
-
-function blockContainsActionId(block: unknown, actionId: string): boolean {
-  if (!isObjectRecord(block)) return false;
-  return (
-    actionsContainActionId(block.elements, actionId) ||
-    actionsContainActionId(block.actions, actionId)
-  );
-}
-
-function actionsContainActionId(actions: unknown, actionId: string): boolean {
-  if (!Array.isArray(actions)) return false;
-  return actions.some((element) => isObjectRecord(element) && element.action_id === actionId);
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function answeredBlocksFromActionBlock(input: {
-  readonly answerLabel: string;
-  readonly block: unknown;
-  readonly userId: string;
-}): unknown[] | undefined {
-  if (!isObjectRecord(input.block) || input.block.type !== "card") return undefined;
-
-  const { actions: _actions, subtext: _subtext, ...blockWithoutActions } = input.block;
-  const answeredCard = {
-    ...blockWithoutActions,
-    subtext: {
-      type: "mrkdwn",
-      text: formatAnsweredCardSubtext(input),
-      verbatim: false,
-    },
-  };
-  return hasCardContent(answeredCard) ? [answeredCard] : undefined;
-}
-
-const ANSWERED_CARD_SUBTEXT_PREFIX = ":white_check_mark: *";
-const ANSWERED_CARD_SUBTEXT_SUFFIX = "*";
-
-function formatAnsweredCardSubtext(input: {
-  readonly answerLabel: string;
-  readonly userId: string;
-}): string {
-  const attribution = input.userId.length > 0 ? ` by <@${input.userId}>` : "";
-  const labelBudget =
-    SLACK_CARD_SUBTEXT_MAX_LENGTH -
-    ANSWERED_CARD_SUBTEXT_PREFIX.length -
-    ANSWERED_CARD_SUBTEXT_SUFFIX.length -
-    attribution.length;
-  const label = truncateWithEllipsis(input.answerLabel, labelBudget);
-  return truncateCardSubtext(
-    `${ANSWERED_CARD_SUBTEXT_PREFIX}${label}${ANSWERED_CARD_SUBTEXT_SUFFIX}${attribution}`,
-  );
-}
-
-function truncateWithEllipsis(value: string, maxLength: number): string {
-  if (maxLength <= 0) return "";
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
-}
-
-function promptBlocksFromActionBlock(block: unknown): unknown[] {
-  if (!isObjectRecord(block) || block.type !== "card") return [];
-
-  const { actions: _actions, ...blockWithoutActions } = block;
-  return hasCardContent(blockWithoutActions) ? [blockWithoutActions] : [];
-}
-
-function hasCardContent(block: Record<string, unknown>): boolean {
-  return block.body !== undefined || block.title !== undefined || block.hero_image !== undefined;
 }
 
 /**
@@ -385,7 +287,7 @@ export async function handleInteractionPost(
     ctx.waitUntil(
       ctx
         .send(
-          { inputResponses },
+          { inputResponses, pendingApprovalCards: buildPendingApprovalCards(interaction) },
           {
             auth: buildSlackAuthContext({
               channelId: interaction.channelId,
@@ -400,18 +302,13 @@ export async function handleInteractionPost(
               threadTs: interaction.threadTs,
               teamId: interaction.teamId ?? null,
               triggeringUserId: user.id,
+              pendingApprovalCards: buildPendingApprovalCards(interaction),
             },
           },
         )
         .catch((error: unknown) => {
           log.error("HITL interaction delivery failed", { error });
         }),
-    );
-
-    ctx.waitUntil(
-      updateAnsweredHitlCard(interaction, deps).catch((error: unknown) => {
-        log.error("HITL answered-card update failed", { error });
-      }),
     );
   }
 
@@ -587,42 +484,6 @@ async function handleViewSubmission(
   );
 
   return ack;
-}
-
-async function updateAnsweredHitlCard(
-  interaction: ParsedBlockActionsPayload,
-  deps: InteractionHandlerDeps,
-): Promise<void> {
-  const hitlAction = interaction.actions.find((a) => isHitlAction(a.actionId));
-  if (!hitlAction || !hitlAction.messageTs) return;
-
-  const answerLabel = hitlAction.label ?? hitlAction.selectedOptionValue ?? hitlAction.value;
-  if (!answerLabel) return;
-
-  const blocks = buildAnsweredHitlMessageBlocks({
-    actionId: hitlAction.actionId,
-    answerLabel,
-    messageBlocks: interaction.messageBlocks,
-    userId: hitlAction.user.id,
-  });
-
-  const token = await resolveSlackBotToken(deps.config.credentials?.botToken);
-  const response = await fetch("https://slack.com/api/chat.update", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({
-      channel: interaction.channelId,
-      ts: hitlAction.messageTs,
-      blocks,
-      text: `Answered: ${answerLabel}`,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Slack chat.update returned HTTP ${response.status}`);
-  }
 }
 
 async function updateAnsweredFreeformCard(input: {

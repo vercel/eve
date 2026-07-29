@@ -51,6 +51,142 @@ function authRequiredEvent(
   };
 }
 
+describe("defaultEvents approval lifecycle", () => {
+  it("sends candidate progress privately", async () => {
+    const { channel, postEphemeral } = buildChannelStub();
+    const ctx = sessionContext({
+      attributes: { user_id: "U777" },
+      authenticator: "slack-webhook",
+      principalId: "slack:T1:U777",
+      principalType: "user",
+    });
+
+    await defaultEvents["approval.candidate"]!(
+      {
+        candidateId: "candidate-1",
+        outcome: "pending",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U777",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      ctx,
+    );
+
+    expect(postEphemeral).toHaveBeenCalledWith(
+      "U777",
+      "Checking whether you can approve this action…",
+    );
+  });
+
+  it("delivers an immediate rejection to the current responder without prior mapping", async () => {
+    const { channel, postEphemeral } = buildChannelStub();
+    const ctx = sessionContext({
+      attributes: { user_id: "U777" },
+      authenticator: "slack-webhook",
+      principalId: "slack:T1:U777",
+      principalType: "user",
+    });
+
+    await defaultEvents["approval.candidate"]!(
+      {
+        candidateId: "candidate-1",
+        outcome: "rejected",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U777",
+        safeReason: "GitHub write access is required.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      ctx,
+    );
+
+    expect(postEphemeral).toHaveBeenCalledWith("U777", "GitHub write access is required.");
+  });
+
+  it("updates the shared card only after settlement", async () => {
+    const { channel, request } = buildChannelStub({
+      pendingApprovalCards: {
+        "approval-1": {
+          actionId: "eve_input:approval-1:button:1",
+          messageBlocks: [
+            {
+              actions: [{ action_id: "eve_input:approval-1:button:1" }],
+              body: { text: "Approve?", type: "mrkdwn" },
+              type: "card",
+            },
+          ],
+          messageTs: "123.456",
+          userId: "U777",
+        },
+      },
+    });
+
+    await defaultEvents["approval.settled"]!(
+      {
+        outcome: "approved",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U777",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(request).toHaveBeenCalledWith(
+      "chat.update",
+      expect.objectContaining({ channel: "C123", text: "Answered: Approve", ts: "123.456" }),
+    );
+    expect(channel.state.pendingApprovalCards).toEqual({});
+  });
+
+  it("settles the request even when the stored click id differs from its sibling button", async () => {
+    const { channel, request } = buildChannelStub({
+      pendingApprovalCards: {
+        "approval-1": {
+          actionId: "eve_input:approval-1:button:1",
+          messageBlocks: [
+            {
+              actions: [
+                { action_id: "eve_input:approval-1:button:0" },
+                { action_id: "eve_input:approval-1:button:1" },
+              ],
+              body: { text: "Approve?", type: "mrkdwn" },
+              type: "card",
+            },
+          ],
+          messageTs: "123.456",
+          userId: "U777",
+        },
+      },
+    });
+
+    await defaultEvents["approval.settled"]!(
+      {
+        outcome: "approved",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U777",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
+      blocks?: unknown[];
+    };
+    expect(JSON.stringify(update.blocks)).not.toContain("eve_input:approval-1");
+  });
+});
+
 describe("defaultEvents authorization.required", () => {
   it("posts a public status and delivers the challenge ephemerally to the triggering user", async () => {
     const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
@@ -66,6 +202,19 @@ describe("defaultEvents authorization.required", () => {
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(message.text).toContain("https://connect.example.com/a/sca_1");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
+  });
+
+  it("does not post a public status for candidate-scoped authorization", async () => {
+    const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
+
+    await defaultEvents["authorization.required"]!(
+      { ...authRequiredEvent(), candidateId: "candidate-1" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).not.toHaveBeenCalled();
+    expect(postEphemeral).toHaveBeenCalledTimes(1);
   });
 
   it("targets the current Slack caller instead of stale channel state", async () => {

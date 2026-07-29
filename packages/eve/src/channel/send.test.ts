@@ -4,12 +4,12 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { createSendFn } from "#channel/send.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 function createMockRunHandle(): RunHandle {
   return {
     continuationToken: "test:token",
-    events: new ReadableStream<MessageStreamEvent>(),
+    events: new ReadableStream<HandleMessageStreamEvent>(),
     sessionId: "mock-session-id",
   };
 }
@@ -22,7 +22,7 @@ function createRuntime(deliverError: unknown): Runtime {
     deliver: vi.fn().mockRejectedValue(deliverError),
     resolveSession: vi.fn(),
     run: vi.fn().mockResolvedValue(createMockRunHandle()),
-    getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+    getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     terminateSession: vi.fn(),
   };
@@ -95,6 +95,33 @@ describe("createSendFn", () => {
     expect(runtime.run).not.toHaveBeenCalled();
   });
 
+  it("preserves channel-specific fields through delivery", async () => {
+    const runtime: Runtime = {
+      cancelTurn: vi.fn(),
+      clearSession: vi.fn(),
+      compactSession: vi.fn(),
+      deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
+      resolveSession: vi.fn(),
+      run: vi.fn(),
+      getEventStream: vi.fn(),
+      getStreamTailIndex: vi.fn(),
+      terminateSession: vi.fn(),
+    };
+    const send = createSendFn(runtime, ADAPTER, "test");
+
+    await send(
+      {
+        inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+        pendingApprovalCards: { "approval-1": { messageTs: "123.456" } },
+      },
+      { auth: null, continuationToken: "token" },
+    );
+
+    expect(vi.mocked(runtime.deliver).mock.calls[0]?.[0].payload).toMatchObject({
+      pendingApprovalCards: { "approval-1": { messageTs: "123.456" } },
+    });
+  });
+
   it("forwards context through deliver and run payloads", async () => {
     const context = ["thread background"];
     const deliverRuntime: Runtime = {
@@ -104,7 +131,7 @@ describe("createSendFn", () => {
       deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
       resolveSession: vi.fn(),
       run: vi.fn().mockResolvedValue(createMockRunHandle()),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
       getStreamTailIndex: vi.fn().mockResolvedValue(-1),
       terminateSession: vi.fn(),
     };
@@ -141,7 +168,7 @@ describe("createSendFn", () => {
       deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
       resolveSession: vi.fn(),
       run: vi.fn().mockResolvedValue(createMockRunHandle()),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
       getStreamTailIndex: vi.fn().mockResolvedValue(-1),
       terminateSession: vi.fn(),
     };
@@ -173,7 +200,7 @@ describe("createSendFn", () => {
       deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
       resolveSession: vi.fn(),
       run: vi.fn().mockResolvedValue(createMockRunHandle()),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
       getStreamTailIndex: vi.fn().mockResolvedValue(-1),
       terminateSession: vi.fn(),
     };
@@ -205,7 +232,7 @@ describe("createSendFn", () => {
       deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
       resolveSession: vi.fn(),
       run: vi.fn().mockResolvedValue(createMockRunHandle()),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
       getStreamTailIndex: vi.fn().mockResolvedValue(-1),
       terminateSession: vi.fn(),
     };

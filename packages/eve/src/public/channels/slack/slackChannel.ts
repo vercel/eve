@@ -1,5 +1,6 @@
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
+import { defaultDeliverResult } from "#channel/adapter.js";
 import type { CrossChannelReceiveOptions } from "#channel/cross-channel-receive.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { CancelTurnResult, SessionAuthContext } from "#channel/types.js";
@@ -8,7 +9,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -69,8 +70,8 @@ import { markEventHandled } from "./utils.js";
 
 const log = createLogger("slack.channel");
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends HandleMessageStreamEvent["type"]> =
+  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * Base Slack context for inbound webhook handlers. These hooks run before the
@@ -111,7 +112,7 @@ export type {
 } from "#public/channels/slack/api.js";
 export type { SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 
-type SlackEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
+type SlackEventHandler<T extends HandleMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: SlackEventContext,
   ctx: SessionContext,
@@ -167,6 +168,13 @@ type SlackSessionFailedHandler = (
  * step boundaries. Anything written here must round-trip through
  * `JSON.stringify` / `JSON.parse`.
  */
+export interface SlackPendingApprovalCard {
+  readonly actionId: string;
+  readonly messageBlocks: readonly unknown[];
+  readonly messageTs: string;
+  readonly userId: string;
+}
+
 export interface SlackChannelState {
   /** Slack channel id seeded by the inbound mention. */
   channelId: string | null;
@@ -204,6 +212,8 @@ export interface SlackChannelState {
    * resolution outcome.
    */
   pendingAuthMessageTs?: Record<string, string>;
+  pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
+  pendingApprovalCandidateUsers?: Record<string, string>;
 }
 
 /**
@@ -448,6 +458,8 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  * {@link SessionContext}; `session.failed` receives only data and context.
  */
 export interface SlackChannelEvents {
+  readonly "approval.candidate"?: SlackEventHandler<"approval.candidate">;
+  readonly "approval.settled"?: SlackEventHandler<"approval.settled">;
   readonly "turn.started"?: SlackEventHandler<"turn.started">;
   readonly "actions.requested"?: SlackEventHandler<"actions.requested">;
   readonly "action.result"?: SlackEventHandler<"action.result">;
@@ -686,6 +698,8 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       lastReasoningTypingAtMs: null,
       lastReasoningTypingStatus: null,
       pendingAuthMessageTs: {},
+      pendingApprovalCards: {},
+      pendingApprovalCandidateUsers: {},
     },
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
@@ -699,6 +713,17 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     context(state, session) {
       return rebuildSlackContext(state, session, config.credentials);
+    },
+
+    deliver(payload, channel) {
+      const incoming = payload["pendingApprovalCards"];
+      if (typeof incoming === "object" && incoming !== null) {
+        channel.state.pendingApprovalCards = {
+          ...channel.state.pendingApprovalCards,
+          ...(incoming as SlackChannelState["pendingApprovalCards"]),
+        };
+      }
+      return defaultDeliverResult(payload);
     },
 
     routes: [

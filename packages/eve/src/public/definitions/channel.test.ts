@@ -268,6 +268,46 @@ describe("defineChannel", () => {
     });
   });
 
+  it("runs authored deliver behavior with the live context", async () => {
+    const channel = defineChannel({
+      state: { seen: [] as string[] },
+      context(state) {
+        return {
+          record(value: string) {
+            state.seen.push(value);
+          },
+        };
+      },
+      deliver(payload, ctx) {
+        ctx.record(String(payload["marker"]));
+        return { inputResponses: payload.inputResponses };
+      },
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+    const adapter = getAdapter(channel);
+    const session: Session = {
+      auth: { current: null, initiator: null },
+      sessionId: "sess-deliver-test",
+      turn: { id: "turn-1", sequence: 0 },
+    };
+    const context = new ContextContainer();
+    context.set(SessionKey, session);
+    const adapterCtx = buildAdapterContext(adapter, context);
+
+    const result = await adapter.deliver?.(
+      {
+        inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+        marker: "card-1",
+      },
+      adapterCtx,
+    );
+
+    expect(result).toEqual({
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
+    expect(adapterCtx.state).toEqual({ seen: ["card-1"] });
+  });
+
   it("preserves state + context + events when fetchFile is also declared", () => {
     const fetchFile = async (_url: string) => {
       return Buffer.alloc(0);

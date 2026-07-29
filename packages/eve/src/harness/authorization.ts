@@ -46,6 +46,7 @@ const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
 // ---------------------------------------------------------------------------
 
 export interface AuthorizationChallenge {
+  readonly candidateId?: string;
   readonly name: string;
   readonly challenge: ConnectionAuthorizationChallenge;
   readonly hookUrl: string;
@@ -104,6 +105,7 @@ export function requestAuthorization(
 export function redactSignalResume(signal: AuthorizationSignal): AuthorizationSignal {
   return requestAuthorization(
     signal.challenges.map((entry) => ({
+      candidateId: entry.candidateId,
       name: entry.name,
       challenge: entry.challenge,
       hookUrl: entry.hookUrl,
@@ -240,7 +242,13 @@ export function setPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
   value: PendingAuthorizationState,
 ): Record<string, unknown> {
-  return { ...sessionState, [PENDING_AUTHORIZATION_KEY]: value };
+  const existing = getPendingAuthorization(sessionState)?.challenges ?? [];
+  const byName = new Map(existing.map((challenge) => [challenge.name, challenge]));
+  for (const challenge of value.challenges) byName.set(challenge.name, challenge);
+  return {
+    ...sessionState,
+    [PENDING_AUTHORIZATION_KEY]: { challenges: [...byName.values()] },
+  };
 }
 
 export function clearPendingAuthorization(
