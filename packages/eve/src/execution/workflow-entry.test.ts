@@ -8,6 +8,7 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
+import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -59,6 +60,10 @@ vi.mock("./workflow-steps.js", () => ({
 
 vi.mock("./terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("./terminal-session-completion-step.js", () => ({
+  emitTerminalSessionCompletionStep: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("./settle-cancelled-turn-step.js", () => ({
@@ -290,14 +295,16 @@ describe("workflowEntry", () => {
     );
   });
 
-  it("terminally fails a parked session when its durable timeout elapses", async () => {
+  it("completes a parked session when its durable deadline elapses", async () => {
     const sessionState = createBaseSessionState();
+    const dispose = vi.fn();
     const pendingDelivery = vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {}));
     vi.mocked(sleep).mockResolvedValueOnce();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
       deliveryHooks: [
         {
+          dispose,
           next: pendingDelivery,
           token: "http:test",
         },
@@ -311,27 +318,74 @@ describe("workflowEntry", () => {
         serializedContext: createSerializedContext(),
         sessionTimeoutMs: 1_000,
       }),
-    ).rejects.toMatchObject({
-      message: "Agent workflow failed. Inspect the private session trace for details.",
-      name: "EveWorkflowFailure",
-    });
+    ).resolves.toEqual({ output: "" });
 
     expect(sleep).toHaveBeenCalledWith(1_000);
-    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          message: "Session timed out after 1000ms.",
-          name: "SessionTimeoutError",
-          timeoutMs: 1_000,
-        }),
-      }),
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledWith({
+      parentWritable: expect.any(WritableStream),
+      serializedContext: { "eve.sessionId": "wrun_test_123" },
+    });
+    expect(dispose.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(emitTerminalSessionCompletionStep).mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY,
     );
-    expect(fireSessionCallbackStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({ name: "SessionTimeoutError" }),
-        status: "failed",
-      }),
-    );
+    expect(fireSessionCallbackStep).toHaveBeenCalledWith({
+      output: "",
+      serializedContext: { "eve.sessionId": "wrun_test_123" },
+      status: "completed",
+    });
+  });
+
+  it("does not complete at the deadline until the active turn settles", async () => {
+    const sessionState = createBaseSessionState();
+    const dispose = vi.fn();
+    const pendingDelivery = new Promise<IteratorResult<HookPayload>>(() => {});
+    let settleTurn: ((result: IteratorResult<TurnControlPayload>) => void) | undefined;
+    const activeTurn = new Promise<IteratorResult<TurnControlPayload>>((resolve) => {
+      settleTurn = resolve;
+    });
+
+    vi.mocked(sleep).mockResolvedValueOnce();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
+      const token = options?.token ?? "";
+      if (isTurnCompletionToken(token)) {
+        return createMockHook({
+          next: () => activeTurn,
+          token,
+          values: [],
+        }) as never;
+      }
+      if (token.endsWith(":auth")) {
+        return createMockHook({ token, values: [] }) as never;
+      }
+      return createMockHook({
+        dispose,
+        next: () => pendingDelivery,
+        token,
+        values: [],
+      }) as never;
+    });
+
+    const result = workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext(),
+      sessionTimeoutMs: 1,
+    });
+
+    await vi.waitFor(() => {
+      expect(dispatchTurnStep).toHaveBeenCalledOnce();
+    });
+    expect(emitTerminalSessionCompletionStep).not.toHaveBeenCalled();
+
+    settleTurn?.({
+      done: false,
+      value: turnResult({ action: "park", sessionState }),
+    });
+
+    await expect(result).resolves.toEqual({ output: "" });
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledOnce();
   });
 
   it("allows the session timeout to be disabled", async () => {

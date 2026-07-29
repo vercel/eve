@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
+import { createSendFn } from "#channel/send.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
@@ -295,9 +296,12 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("terminally expires a parked conversation at its durable session deadline", async () => {
+  it("completes an expired conversation and lets its channel start a fresh session", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
     const continuationToken = "http:workflow-entry-timeout";
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
 
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
@@ -312,24 +316,38 @@ describe("workflowEntry integration", () => {
         },
       ]);
       const stream = captureEvents(run);
+      let replacementSessionId: string | undefined;
 
       try {
         const events = await stream.nextUntil(
-          "session timeout",
-          (event) => event.type === "session.failed",
+          "session completion",
+          (event) => event.type === "session.completed",
         );
-        const failure = filterEventsByType(events, "session.failed").at(-1);
 
         expect(events.some((event) => event.type === "session.waiting")).toBe(true);
-        expect(failure?.data).toMatchObject({
-          code: "SessionTimeoutError",
-          message: "Session timed out after 25ms.",
+        expect(events.at(-1)?.type).toBe("session.completed");
+        expect(filterEventsByType(events, "session.failed")).toHaveLength(0);
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+
+        const send = createSendFn(workflowRuntime, { kind: "http" }, "http");
+        const replacement = await send("start fresh", {
+          auth: null,
+          continuationToken: "workflow-entry-timeout",
         });
-        await expect(run.returnValue).rejects.toThrow(
-          /Agent workflow failed\. Inspect the private session trace for details\./,
+        replacementSessionId = replacement.id;
+
+        expect(replacement.id).not.toBe(run.runId);
+        await waitForHook(
+          { runId: replacement.id },
+          {
+            token: continuationToken,
+          },
         );
       } finally {
         stream.dispose();
+        if (replacementSessionId !== undefined) {
+          await workflowRuntime.terminateSession({ sessionId: replacementSessionId });
+        }
       }
     });
   });

@@ -154,7 +154,7 @@ export interface AgentLimitsDefinition {
    *
    * The deadline starts when the session is created and survives process
    * restarts and redeployments. If it elapses during an active turn, eve lets
-   * that turn settle before terminally expiring the session.
+   * that turn settle before completing the session normally.
    *
    * `false` disables the timeout.
    *

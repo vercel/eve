@@ -140,14 +140,17 @@ export default defineAgent({
 agent, including delegated subagent sessions. The deadline starts when the
 session is created and is durable across restarts and redeployments. It
 defaults to 30 days. If the deadline passes during an active turn, eve lets
-that turn settle before failing the session with `SessionTimeoutError`; a
-parked session fails as soon as the deadline arrives. Set
+that turn settle before completing the session normally with
+`session.completed`; a parked session completes as soon as the deadline
+arrives. Set
 `sessionTimeoutMs: false` to disable the timeout.
 
-Timing out a session releases its continuation hooks and prevents later
-resumption. It does not delete the durable event stream, sandbox files, or
-provider data; configure retention and deletion separately for the selected
-backends.
+Completing an expired session releases its continuation hooks and prevents
+later resumption. The next qualifying channel message for the same
+continuation token starts a fresh session with a new session id and deadline.
+Expiration does not delete the previous session's durable event stream,
+sandbox files, or provider data; configure retention and deletion separately
+for the selected backends.
 
 Input and output budgets are checked independently. The model call that crosses
 either limit is allowed to finish because providers only report exact token
@@ -226,7 +229,7 @@ installed package must stay external in hosted output, list it in
 | -------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                 |
 | `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                        |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions time out after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
+| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
 | `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
 | `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                    |
 | `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |

@@ -35,7 +35,8 @@ import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
 } from "#execution/session-delivery-hook.js";
-import { DEFAULT_SESSION_TIMEOUT_MS, SessionTimeoutError } from "#execution/session-timeout.js";
+import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
+import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
@@ -60,6 +61,23 @@ export interface WorkflowEntryInput {
 export interface WorkflowEntryResult {
   readonly output: unknown;
 }
+
+type DriverLoopOutcome =
+  | {
+      readonly kind: "expired";
+      readonly serializedContext: Record<string, unknown>;
+    }
+  | {
+      readonly kind: "result";
+      readonly result: WorkflowEntryResult;
+    };
+
+type NextSessionAction =
+  | {
+      readonly delivery: DeliverHookPayload | null;
+      readonly kind: "delivery";
+    }
+  | { readonly kind: "expired" };
 
 /**
  * Long-lived workflow entrypoint. Handles both root sessions and
@@ -112,7 +130,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       subagentDepth,
     });
 
-    return await runDriverLoop({
+    const outcome = await runDriverLoop({
       capabilities,
       driverWritable,
       initialInput: {
@@ -130,6 +148,13 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       serializedContext: input.serializedContext,
       sessionState,
       sessionTimeoutMs: input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS,
+    });
+    if (outcome.kind === "result") {
+      return outcome.result;
+    }
+    return await finalizeExpiredSession({
+      driverWritable,
+      serializedContext: outcome.serializedContext,
     });
   } catch (error) {
     // Safety net for failures the tool-loop harness does not already
@@ -168,7 +193,7 @@ async function runDriverLoop(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutMs: number | false;
-}): Promise<WorkflowEntryResult> {
+}): Promise<DriverLoopOutcome> {
   // Per-session auth hook. Created before any turns so it exists
   // when authorization.required events trigger OAuth callbacks.
   // getHookUrl() builds callback URLs with this token.
@@ -185,10 +210,11 @@ async function runDriverLoop(input: {
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
-  const sessionTimeout =
+  // Start once before the first turn so follow-ups never extend the lifetime.
+  const sessionDeadline =
     input.sessionTimeoutMs === false
       ? undefined
-      : sleep(input.sessionTimeoutMs).then(() => ({ kind: "session-timeout" as const }));
+      : sleep(input.sessionTimeoutMs).then(() => ({ kind: "expired" as const }));
 
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
@@ -226,10 +252,13 @@ async function runDriverLoop(input: {
 
     while (true) {
       if (action.kind === "done") {
-        return await finalizeDone({
-          action,
-          driverWritable: input.driverWritable,
-        });
+        return {
+          kind: "result",
+          result: await finalizeDone({
+            action,
+            driverWritable: input.driverWritable,
+          }),
+        };
       }
 
       if (action.kind !== "park") {
@@ -288,15 +317,22 @@ async function runDriverLoop(input: {
         continue;
       }
 
-      const nextDeliver = await waitForNextDeliverOrTimeout({
+      const nextAction = await waitForNextSessionAction({
         bufferedDeliveries,
+        deadline: sessionDeadline,
         deliveryHook,
-        sessionTimeout,
-        sessionTimeoutMs: input.sessionTimeoutMs,
       });
 
+      if (nextAction.kind === "expired") {
+        return {
+          kind: "expired",
+          serializedContext: action.serializedContext,
+        };
+      }
+
+      const nextDeliver = nextAction.delivery;
       if (nextDeliver === null) {
-        return { output: "" };
+        return { kind: "result", result: { output: "" } };
       }
 
       const remainder = await routeDeliverToChildren({
@@ -332,29 +368,45 @@ async function runDriverLoop(input: {
   }
 }
 
-async function waitForNextDeliverOrTimeout(input: {
+async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly deadline?: Promise<{ readonly kind: "expired" }>;
   readonly deliveryHook: SessionDeliveryHook;
-  readonly sessionTimeout?: Promise<{ readonly kind: "session-timeout" }>;
-  readonly sessionTimeoutMs: number | false;
-}): Promise<DeliverHookPayload | null> {
-  if (input.sessionTimeout === undefined || input.sessionTimeoutMs === false) {
-    return await waitForNextDeliver(input);
+}): Promise<NextSessionAction> {
+  if (input.deadline === undefined) {
+    return {
+      delivery: await waitForNextDeliver(input),
+      kind: "delivery",
+    };
   }
 
-  const result = await Promise.race([
+  return await Promise.race([
+    input.deadline,
     waitForNextDeliver(input).then((delivery) => ({
       delivery,
       kind: "delivery" as const,
     })),
-    input.sessionTimeout,
   ]);
+}
 
-  if (result.kind === "session-timeout") {
-    throw new SessionTimeoutError(input.sessionTimeoutMs);
-  }
-
-  return result.delivery;
+async function finalizeExpiredSession(input: {
+  readonly driverWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
+}): Promise<WorkflowEntryResult> {
+  await emitTerminalSessionCompletionStep({
+    parentWritable: input.driverWritable,
+    serializedContext: input.serializedContext,
+  });
+  await fireSessionCallbackStep({
+    output: "",
+    serializedContext: input.serializedContext,
+    status: "completed",
+  });
+  await notifyDelegatedParentStep({
+    result: createDelegatedSubagentSuccessResult(input.serializedContext, ""),
+    serializedContext: input.serializedContext,
+  });
+  return { output: "" };
 }
 
 async function finalizeDone(input: {
