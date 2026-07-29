@@ -192,21 +192,9 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       },
     });
 
-  const channels = program
+  program
     .command("channels")
-    .description("Manage user-authored channels in the current project.");
-
-  channels
-    .command("add [kind]")
-    .description("Add channels interactively, or scaffold a channel kind (slack | web).")
-    .option("-f, --force", "Overwrite existing channel files")
-    .option("-y, --yes", "Assume yes for confirmations; requires an explicit channel kind")
-    .action(async (kind: string | undefined, options: { force?: boolean; yes?: boolean }) => {
-      const { runChannelsAddCompatibilityCommand } = await import("#cli/commands/channels.js");
-      await runChannelsAddCompatibilityCommand(logger, appRoot, { kind, options });
-    });
-
-  channels
+    .description("Manage user-authored channels in the current project.")
     .command("list")
     .description("List user-authored channels in the current project.")
     .option("--json", "Output as JSON")

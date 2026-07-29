@@ -1,8 +1,8 @@
-import { addChannels } from "./boxes/add-channels.js";
-import type { ChannelSetupContext, ChannelSetupResult } from "./channel-setup-integration.js";
-import { runInteractive } from "./runner.js";
-import { snapshotSetupState, type SetupState } from "./state.js";
-import type { OutputSink } from "./step.js";
+import { addChannels } from "./setup.js";
+import type { ChannelSetupContext, ChannelSetupResult } from "./types.js";
+import { runInteractive } from "../../runner.js";
+import type { AddChannelsState } from "./setup.js";
+import type { OutputSink } from "../../step.js";
 
 /** Runs the shared scaffold box with decisions supplied by a channel integration. */
 export async function runChannelSetup(
@@ -26,8 +26,7 @@ export async function runChannelSetup(
     deps: context.deps,
   });
   const sink: OutputSink = { write: (line) => context.ui.prompter.log.message(line) };
-  const result = await runInteractive([box], context.state as SetupState, sink, {
-    snapshot: snapshotSetupState,
+  const result = await runInteractive([box], context.state as AddChannelsState, sink, {
     signal: context.signal,
   });
   return result.kind === "done" ? { kind: "done", state: result.state } : { kind: "cancelled" };

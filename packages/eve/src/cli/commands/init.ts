@@ -158,7 +158,7 @@ async function addToExistingProject(
   if (options.channelWebNextjs === true) {
     throw new Error(
       "`--channel-web-nextjs` is not supported when adding an agent to an existing project. " +
-        "Run `eve channels add web` from the project afterwards instead.",
+        "Run `eve add channel/web` from the project afterwards instead.",
     );
   }
 

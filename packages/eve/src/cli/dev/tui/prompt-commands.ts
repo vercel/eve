@@ -1,6 +1,5 @@
 export type PromptCommandExtensionName =
   | "model"
-  | "channels"
   | "connect"
   | "add"
   | "deploy"
@@ -97,14 +96,6 @@ const PROMPT_COMMAND_DEFINITIONS = [
     takesArgument: true,
     build: (argument) => ({ type: "loglevel", argument }),
     targets: ["local", "remote"],
-  },
-  {
-    name: "channels",
-    aliases: [],
-    description: "Add chat channels to the agent",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "channels", argument: "" }),
-    targets: ["local"],
   },
   {
     name: "connect",

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  channelSetupEnvironment,
-  describeChannelSetupEnvironment,
-} from "./channel-setup-environment.js";
+import { channelSetupEnvironment, describeChannelSetupEnvironment } from "./environment.js";
 
 describe("channel setup environment", () => {
   it("keeps authenticated and unlinked as an available Vercel setup", () => {

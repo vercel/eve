@@ -71,7 +71,7 @@ function mutedRenderer(
 
 /** Runs remote `/vc:login` through one TUI panel, connection operation, and auth flow. */
 export async function runRemoteAuthCommand(input: RemoteAuthCommandInput): Promise<string> {
-  // The pulsing square, matching /vc:install and /vc:login (and model/channels).
+  // The pulsing square, matching /vc:install, /vc:login, and /model.
   input.renderer.begin("Authenticate via Vercel OIDC", "pulse");
   let preserveFlowDiagnostics = true;
   let interrupted = false;

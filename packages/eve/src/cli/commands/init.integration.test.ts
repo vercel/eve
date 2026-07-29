@@ -950,7 +950,7 @@ describe("runInitCommand", () => {
 
     await expect(
       runInitCommand(output, parentDirectory, "host-app", { channelWebNextjs: true }, deps),
-    ).rejects.toThrow("eve channels add web");
+    ).rejects.toThrow("eve add channel/web");
 
     await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();

@@ -1,5 +1,5 @@
-import type { ChannelSetupIntegration } from "./channel-setup-integration.js";
-import { runChannelSetup } from "./channel-setup-runner.js";
+import type { ChannelSetupIntegration } from "./types.js";
+import { runChannelSetup } from "./runner.js";
 
 /** Web Chat's channel-owned setup behavior. */
 export const WEB_CHANNEL_SETUP: ChannelSetupIntegration = {

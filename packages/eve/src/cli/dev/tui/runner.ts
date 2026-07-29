@@ -330,10 +330,8 @@ export type AgentTUIRenderer = {
   flushDelayedDevBuildErrors?(): void;
   /**
    * Sets the workspace-scoped Vercel segment of the persistent bottom
-   * status line: linked project identity and the session's pending-deploy
-   * flag. Pushed by the runner at startup (async probe) and after
-   * /vercel, /channels, /deploy outcomes. Renderers without a status
-   * line ignore it.
+   * status line. Pushed by the runner at startup and after Vercel-related
+   * setup outcomes. Renderers without a status line ignore it.
    */
   setVercelStatus?(status: VercelStatusSnapshot): void;
   /** Sets the remote deployment badge and its current connection/authentication state. */

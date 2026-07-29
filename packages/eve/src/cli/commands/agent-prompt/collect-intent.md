@@ -7,7 +7,7 @@ the coding harness's prompt tools when available, and do not guess.
 2. Where should it be reachable? Every agent ships the built-in HTTP channel. On
    top of that:
    - **Web Chat** (a Next.js app): add it at init with `--channel-web-nextjs`.
-   - **Slack** and other platforms: add after deploy with `eve channels add slack`.
+   - **Slack** and other platforms: add after deploy with `eve add channel/slack`.
      Credentials run through **Vercel Connect**, which provisions the bot token
      and verifies inbound webhooks, so there is no `SLACK_BOT_TOKEN` or signing
      secret to manage.

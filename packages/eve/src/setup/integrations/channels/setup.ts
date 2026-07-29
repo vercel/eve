@@ -20,23 +20,34 @@ import {
   mergeProjectResolution,
   projectResolutionFromDeployment,
   type ProjectResolution,
-} from "../project-resolution.js";
-import type { Asker } from "../ask.js";
-import type { Prompter } from "../prompter.js";
+} from "../../project-resolution.js";
+import type { Asker } from "../../ask.js";
+import type { Prompter } from "../../prompter.js";
 import {
   provisionSlackbot,
   reconcileSlackUid,
   type ProvisionSlackbotOptions,
   type ProvisionSlackbotResult,
-} from "../slackbot.js";
-import { hasVercelProject, requireProjectPath, type SetupState } from "../state.js";
-import { WizardCancelledError, type SetupBox } from "../step.js";
+} from "../../slackbot.js";
+import { WizardCancelledError, type SetupBox } from "../../step.js";
 
-const SLACK_REQUIRES_VERCEL =
-  "Slack requires a Vercel project. Re-run and choose to deploy to Vercel to add Slack.";
+/** State required by channel setup, kept narrow so the integration can move packages. */
+export interface AddChannelsState {
+  projectPath:
+    | string
+    | { kind: "unresolved"; inPlace: boolean }
+    | { kind: "resolved"; inPlace: boolean; path: string };
+  project: ProjectResolution;
+  channelSelection: ChannelKind[];
+  channels: ChannelKind[];
+  webScaffolded: boolean;
+  slackScaffolded: boolean;
+}
+
+const SLACK_REQUIRES_VERCEL = "Slack setup with Vercel Connect requires a linked Vercel project.";
 
 const SLACK_HEADLESS_ERROR =
-  "Slack setup is interactive. Run `eve channels add slack` from an interactive terminal.";
+  "Slack setup is interactive. Run `eve add channel/slack` from an interactive terminal.";
 
 const SLACKBOT_NOT_ATTACHED_ERROR =
   "Slackbot provisioning did not attach this project. Slack channel was not added.";
@@ -75,7 +86,7 @@ function slackbotFailureCopy(result: SlackbotFailure): SlackbotFailureCopy {
       return {
         reason: SLACKBOT_NOT_INSTALLED_ERROR,
         followUp:
-          "Continuing without Slack — the install timed out and was cleaned up; re-run `eve channels add slack` to try again.",
+          "Continuing without Slack — the install timed out and was cleaned up; re-run `eve add channel/slack` to try again.",
       };
     case "cleanup-failed":
       return {
@@ -87,13 +98,13 @@ function slackbotFailureCopy(result: SlackbotFailure): SlackbotFailureCopy {
       return {
         reason: SLACKBOT_LOOKUP_FAILED_ERROR,
         followUp:
-          "Continuing without Slack — restore Vercel CLI access, then re-run `eve channels add slack`.",
+          "Continuing without Slack — restore Vercel CLI access, then re-run `eve add channel/slack`.",
       };
     case "installation-check-failed":
       return {
         reason: SLACKBOT_INSTALLATION_CHECK_FAILED_ERROR,
         followUp:
-          "Continuing without Slack — verify Vercel Connect is reachable, then re-run `eve channels add slack`.",
+          "Continuing without Slack — verify Vercel Connect is reachable, then re-run `eve add channel/slack`.",
       };
     case "existing-not-installed":
       return {
@@ -116,7 +127,7 @@ function slackbotFailureCopy(result: SlackbotFailure): SlackbotFailureCopy {
     case "create-failed":
       return {
         reason: "Slackbot creation failed.",
-        followUp: "Continuing without Slack — add it later with `eve channels add slack`.",
+        followUp: "Continuing without Slack — add it later with `eve add channel/slack`.",
       };
   }
 }
@@ -157,7 +168,7 @@ export interface AddChannelsOptions {
   evePackage?: EvePackageContract;
   /** Reuse the preferred existing Slack connector without prompting. */
   presetCreateSlackbot?: boolean;
-  /** Overwrite existing channel files (`eve channels add --force`). */
+  /** Overwrite existing channel files (`eve add --overwrite channel/slack`). */
   force?: boolean;
   /** Credential source for Slack. Defaults to Vercel Connect. */
   slackCredentials?: "vercel-connect" | "environment";
@@ -170,16 +181,15 @@ export interface AddChannelsOptions {
   /**
    * Opt-in fallback when Slack is chosen interactively but `state.project` is
    * unresolved: run the interactive bare `vercel link` before provisioning the
-   * slackbot. Only the `eve channels add` composition sets this; onboarding
-   * resolves the project up front via the link box and keeps the hard gate.
+   * slackbot. The Slack integration sets this so Vercel Connect setup can link
+   * an unlinked project before provisioning.
    */
   ensureLinkedProject?: "interactive-vercel-link";
   /**
    * What a failed slackbot provision (create or attach) does to the run. The
-   * default, "abort", fails the whole box — right for `eve channels add slack`,
-   * where Slack is the point. Onboarding passes "warn-and-continue": the agent
-   * still scaffolds, deploys, and chats without Slack (recorded as nothing, so
-   * a later `eve channels add slack` starts clean).
+   * default, "abort", fails the whole box — right for `eve add channel/slack`,
+   * where Slack is the point. "warn-and-continue" records nothing so a later
+   * `eve add channel/slack` starts clean.
    */
   slackbotFailure?: "abort" | "warn-and-continue";
   deps?: AddChannelsDeps;
@@ -217,8 +227,7 @@ export interface AddChannelsPayload {
   slackScaffolded: boolean;
   /**
    * Whether the post-scaffold dependency install succeeded. False both when no
-   * channels were recorded (nothing ran) and when the install failed; only a
-   * success lets `apply` mark the deploy-time install as already done.
+   * channels were recorded and when the install failed.
    */
   dependenciesChanged: boolean;
   dependenciesInstalled: boolean;
@@ -244,8 +253,7 @@ function warnCompetingNextConfigFiles(
 }
 
 /**
- * THE CHANNEL SCAFFOLD BOX. Scaffolds the channels chosen up front by the
- * select-channels box (`state.channelSelection`): writes the Web Chat files,
+ * Channel integration setup. Scaffolds the requested channel: writes the Web Chat files,
  * provisions the Slackbot through Vercel Connect, writes the Slack channel
  * definition, reconciles a Connect-assigned connector UID, and installs the
  * dependencies the scaffold added to `package.json` so a running `eve dev`
@@ -254,9 +262,9 @@ function warnCompetingNextConfigFiles(
  * and reads `state.project` directly, resolved earlier by the link box or the
  * in-project seed.
  */
-export function addChannels(
+export function addChannels<State extends AddChannelsState = AddChannelsState>(
   options: AddChannelsOptions,
-): SetupBox<SetupState, AddChannelsInput, AddChannelsPayload> {
+): SetupBox<State, AddChannelsInput, AddChannelsPayload> {
   const deps = options.deps ?? {
     ensureChannel,
     deriveSlackConnectorSlug,
@@ -271,7 +279,7 @@ export function addChannels(
 
   async function scaffoldSlackChannel(
     log: ChannelSetupLog,
-    state: Readonly<SetupState>,
+    state: Readonly<AddChannelsState>,
     projectPath: string,
     slug: SlackConnectorSlug,
     payload: AddChannelsPayload,
@@ -297,8 +305,7 @@ export function addChannels(
       wroteExactConnectorUid = result.action !== "skipped";
       payload.slackScaffolded = true;
     }
-    // Slack is recorded even when the file already existed: the channel is
-    // live either way and the pending deploy must carry it.
+    // Slack is recorded even when the file already existed: the channel is live either way.
     payload.channelsAdded.push("slack");
     return wroteExactConnectorUid;
   }
@@ -354,7 +361,7 @@ export function addChannels(
 
   async function addWebChannelToPayload(
     log: ChannelSetupLog,
-    state: Readonly<SetupState>,
+    state: Readonly<AddChannelsState>,
     projectPath: string,
     packageManager: PackageManagerKind,
     payload: AddChannelsPayload,
@@ -374,7 +381,7 @@ export function addChannels(
       kind: "web",
       packageManager,
       force: options.force,
-      configureVercelServices: options.configureVercelServices ?? hasVercelProject(state),
+      configureVercelServices: options.configureVercelServices ?? isProjectResolved(state.project),
       skipDependencyMutation: options.skipDependencyMutation,
     };
     if (options.evePackage !== undefined) {
@@ -402,14 +409,13 @@ export function addChannels(
       return;
     }
 
-    // A skipped Web scaffold (the project already runs Next.js) records
-    // nothing, so it cannot arm a deploy for files that were never written.
+    // A skipped Web scaffold (the project already runs Next.js) records nothing.
     log.info("Next.js project detected. Skipping Web Chat scaffolding.");
   }
 
-  function assertSlackProjectReady(state: Readonly<SetupState>): void {
+  function assertSlackProjectReady(state: Readonly<AddChannelsState>): void {
     if (options.ensureLinkedProject !== undefined) return;
-    if (!hasVercelProject(state)) throw new Error(SLACK_REQUIRES_VERCEL);
+    if (!isProjectResolved(state.project)) throw new Error(SLACK_REQUIRES_VERCEL);
     if (!isProjectResolved(state.project)) {
       throw new Error("Expected a linked Vercel project for Slack, but none was resolved.");
     }
@@ -451,7 +457,7 @@ export function addChannels(
 
   async function scaffoldAttachedSlackChannel(
     log: ChannelSetupLog,
-    state: Readonly<SetupState>,
+    state: Readonly<AddChannelsState>,
     projectPath: string,
     slug: SlackConnectorSlug,
     payload: AddChannelsPayload,
@@ -475,7 +481,7 @@ export function addChannels(
 
   async function addSlackChannelToPayload(
     log: ChannelSetupLog,
-    state: Readonly<SetupState>,
+    state: Readonly<AddChannelsState>,
     input: AddChannelsInput,
     projectPath: string,
     payload: AddChannelsPayload,
@@ -483,7 +489,7 @@ export function addChannels(
   ): Promise<void> {
     if (!state.channelSelection.includes("slack")) return;
 
-    const slug = await deps.deriveSlackConnectorSlug(projectPath, state.agentName);
+    const slug = await deps.deriveSlackConnectorSlug(projectPath);
     if (options.slackCredentials === "environment") {
       if (!state.slackScaffolded) {
         const result = await deps.ensureChannel({
@@ -508,22 +514,6 @@ export function addChannels(
     }
 
     assertSlackProjectReady(state);
-    if (state.slackbotCreated) {
-      // Rerun with a provisioned slackbot: never create a second connector.
-      if (!state.slackbotAttached) throw new Error(SLACKBOT_NOT_ATTACHED_ERROR);
-      if (!state.deploymentPending) return;
-
-      const connectorUid = state.slackConnectorUid;
-      if (connectorUid === undefined) {
-        throw new Error("Slack connector UID was not resolved. Slack deployment did not start.");
-      }
-      await scaffoldAttachedSlackChannel(log, state, projectPath, slug, payload, {
-        state: "attached",
-        connectorUid,
-      });
-      return;
-    }
-
     if (!isProjectResolved(payload.project)) {
       // Only reachable with the ensureLinkedProject seam; without it the gate
       // above already required a resolved project.
@@ -539,8 +529,7 @@ export function addChannels(
     const slackbot = await provisionSlackbotWithControls(log, projectPath, slug, signal);
     signal?.throwIfAborted();
     if (slackbot.state === "cancelled") {
-      // Provisioning already cleaned up its connector. Fold into a cancelled
-      // run so /channels repaints the list like any other cancelled sub-flow.
+      // Provisioning already cleaned up its connector.
       throw new WizardCancelledError();
     }
     if (slackbot.state !== "attached") {
@@ -592,13 +581,19 @@ export function addChannels(
   }
 
   async function performAddChannels(
-    state: Readonly<SetupState>,
+    state: Readonly<AddChannelsState>,
     input: AddChannelsInput,
     signal?: AbortSignal,
   ): Promise<AddChannelsPayload> {
     signal?.throwIfAborted();
     const log = options.prompter.log;
-    const projectPath = requireProjectPath(state);
+    const projectPath =
+      typeof state.projectPath === "string"
+        ? state.projectPath
+        : state.projectPath.kind === "resolved"
+          ? state.projectPath.path
+          : undefined;
+    if (projectPath === undefined) throw new Error("Project path has not been resolved.");
     const payload: AddChannelsPayload = {
       channelsAdded: [],
       webScaffolded: state.webScaffolded,
@@ -654,29 +649,17 @@ export function addChannels(
           channels.push(channel);
         }
       }
-      const next: SetupState = {
+      const next: State = {
         ...state,
         channels,
         webScaffolded: payload.webScaffolded,
         slackScaffolded: payload.slackScaffolded,
-        deploymentPending: state.deploymentPending || payload.channelsAdded.length > 0,
-        // Only manifest mutations invalidate an earlier dependency install.
-        deploymentDependenciesInstalled: payload.dependenciesChanged
-          ? payload.dependenciesInstalled
-          : state.deploymentDependenciesInstalled,
         project: mergeProjectResolution(state.project, payload.project),
-      };
+      } as State;
       if (payload.slackbot === undefined) {
         return next;
       }
-      return {
-        ...next,
-        slackbotCreated: true,
-        slackbotAttached: true,
-        slackConnectorUid: payload.slackbot.connectorUid,
-        slackChatUrl: payload.slackbot.chatUrl,
-        slackWorkspaceName: payload.slackbot.workspaceName,
-      };
+      return next;
     },
   };
 }

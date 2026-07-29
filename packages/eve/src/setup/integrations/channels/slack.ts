@@ -1,6 +1,6 @@
-import type { ChannelSetupIntegration } from "./channel-setup-integration.js";
-import { runChannelSetup } from "./channel-setup-runner.js";
-import { WizardCancelledError } from "./step.js";
+import type { ChannelSetupIntegration } from "./types.js";
+import { runChannelSetup } from "./runner.js";
+import { WizardCancelledError } from "../../step.js";
 
 async function choosePortableCredentials(
   context: Parameters<ChannelSetupIntegration["setup"]>[0],

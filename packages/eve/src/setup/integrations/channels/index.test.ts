@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import { interactiveAsker } from "./ask.js";
-import type { AddChannelsDeps } from "./boxes/add-channels.js";
-import { channelSetupEnvironment } from "./channel-setup-environment.js";
-import { channelSetupIntegration, createChannelSetupUi } from "./channel-setup-integrations.js";
-import { createDefaultSetupState } from "./state.js";
-import { WizardCancelledError } from "./step.js";
+import { interactiveAsker } from "../../ask.js";
+import type { AddChannelsDeps } from "./setup.js";
+import { channelSetupEnvironment } from "./environment.js";
+import { channelSetupIntegration, createChannelSetupUi } from "./index.js";
+import { createDefaultSetupState } from "../../state.js";
+import { WizardCancelledError } from "../../step.js";
 
 function context(prompter = createFakePrompter().prompter) {
   return {

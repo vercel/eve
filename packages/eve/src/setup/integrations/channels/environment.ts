@@ -1,5 +1,5 @@
-import type { ProjectResolution } from "./project-resolution.js";
-import type { VercelAuthStatus } from "./vercel-project.js";
+import type { ProjectResolution } from "../../project-resolution.js";
+import type { VercelAuthStatus } from "../../vercel-project.js";
 
 /** Read-only hosting facts available to channel-owned setup hooks. */
 export interface ChannelSetupEnvironment {

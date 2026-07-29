@@ -1,5 +1,5 @@
-import { confirm, SkippedSignal, type Asker } from "./ask.js";
-import type { Prompter } from "./prompter.js";
+import { confirm, SkippedSignal, type Asker } from "../../ask.js";
+import type { Prompter } from "../../prompter.js";
 
 /** UI capabilities available to a channel-owned setup hook. */
 export interface ChannelSetupUi {

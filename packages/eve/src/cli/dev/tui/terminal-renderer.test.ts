@@ -4531,7 +4531,6 @@ describe("TerminalRenderer command typeahead", () => {
 describe("TerminalRenderer status line", () => {
   const vercelStatus = {
     identity: { projectName: "my-agent", teamName: "acme" },
-    pendingDeploy: false,
   };
 
   it("renders the local server, model, and Vercel link under the prompt row", async () => {
@@ -4578,16 +4577,6 @@ describe("TerminalRenderer status line", () => {
     input.type("done");
     input.enter();
     await prompt;
-    renderer.shutdown();
-  });
-
-  it("marks a pending deploy in yellow", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderNotice("anchor");
-    renderer.setVercelStatus({ ...vercelStatus, pendingDeploy: true });
-
-    expect(screen.snapshot()).toContain("/deploy pending");
-    expect(screen.rawOutput()).toContain("[33m/deploy pending");
     renderer.shutdown();
   });
 
@@ -4737,7 +4726,7 @@ describe("TerminalRenderer status line", () => {
         credential: "oidc",
       }),
     });
-    renderer.setVercelStatus({ ...vercelStatus, pendingDeploy: true });
+    renderer.setVercelStatus({ ...vercelStatus });
     await renderer.renderStream(
       streamOf([
         { type: "step-start" },
@@ -4754,7 +4743,6 @@ describe("TerminalRenderer status line", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("anthropic/claude-sonnet-5");
     expect(snapshot).toContain("via ai-gateway(oidc:my-agent)");
-    expect(snapshot).toContain("/deploy pending");
     // A fresh conversation clears the token flow entirely (↑ 0 ↓ 0 is noise).
     expect(snapshot).not.toContain("↑ 0");
     expect(snapshot).not.toContain("↑ 500");

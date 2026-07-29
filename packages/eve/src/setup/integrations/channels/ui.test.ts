@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import { interactiveAsker } from "./ask.js";
-import { createChannelSetupUi } from "./channel-setup-ui.js";
+import { interactiveAsker } from "../../ask.js";
+import { createChannelSetupUi } from "./ui.js";
 
 describe("createChannelSetupUi", () => {
   it("renders integration-owned next steps through the shared notice", () => {

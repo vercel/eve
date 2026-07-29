@@ -5,12 +5,12 @@ import { normalizeSlackConnectorSlug } from "#setup/scaffold/index.js";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import { headlessAsker, interactiveAsker } from "../ask.js";
-import type { Prompter } from "../prompter.js";
-import { createDefaultSetupState, snapshotSetupState, type SetupState } from "../state.js";
-import type { OutputSink } from "../step.js";
-import { runHeadless, runInteractive } from "../runner.js";
-import { addChannels, type AddChannelsDeps, type AddChannelsOptions } from "./add-channels.js";
+import { headlessAsker, interactiveAsker } from "../../ask.js";
+import type { Prompter } from "../../prompter.js";
+import { createDefaultSetupState, snapshotSetupState, type SetupState } from "../../state.js";
+import type { OutputSink } from "../../step.js";
+import { runHeadless, runInteractive } from "../../runner.js";
+import { addChannels, type AddChannelsDeps, type AddChannelsOptions } from "./setup.js";
 
 const silentSink: OutputSink = { write: () => {} };
 const snapshot = { snapshot: snapshotSetupState };
@@ -29,9 +29,9 @@ function createPrompter(): Prompter {
  */
 function makeBox(
   options: Omit<AddChannelsOptions, "asker" | "headless"> & { headless?: boolean },
-): ReturnType<typeof addChannels> {
+): ReturnType<typeof addChannels<SetupState>> {
   const headless = options.headless ?? false;
-  return addChannels({
+  return addChannels<SetupState>({
     ...options,
     asker: headless ? headlessAsker() : interactiveAsker(options.prompter),
     headless,
@@ -136,7 +136,7 @@ describe("addChannels box", () => {
     const run = runHeadless([box], resolvedState(["web", "slack"]), silentSink, snapshot);
 
     await expect(run).rejects.toThrow(
-      "Slack setup is interactive. Run `eve channels add slack` from an interactive terminal.",
+      "Slack setup is interactive. Run `eve add channel/slack` from an interactive terminal.",
     );
     // This is a command-mode mismatch, not a browser action the caller can resume.
     await expect(run).rejects.not.toBeInstanceOf(HumanActionRequiredError);
@@ -209,7 +209,6 @@ describe("addChannels box", () => {
     );
     expect(next.channels).toEqual(["web"]);
     expect(next.webScaffolded).toBe(true);
-    expect(next.deploymentPending).toBe(true);
   });
 
   it("installs dependencies after recording channels and marks the deploy install done", async () => {
@@ -222,7 +221,6 @@ describe("addChannels box", () => {
       onOutput: expect.any(Function),
     });
     expect(next.channels).toEqual(["web"]);
-    expect(next.deploymentDependenciesInstalled).toBe(true);
   });
 
   it("keeps channels recorded when the install fails, leaving the deploy install pending", async () => {
@@ -232,19 +230,12 @@ describe("addChannels box", () => {
     const box = makeBox({ prompter, evePackage: TEST_EVE_PACKAGE, deps });
 
     // An earlier success must go stale: the scaffold just changed package.json.
-    const next = await runHeadless(
-      [box],
-      { ...resolvedState(), deploymentDependenciesInstalled: true },
-      silentSink,
-      snapshot,
-    );
+    const next = await runHeadless([box], resolvedState(), silentSink, snapshot);
 
     expect(prompter.log.warning).toHaveBeenCalledWith(
       "Dependency installation failed. The new channels stay unloadable until `pnpm install` or a deploy succeeds.",
     );
     expect(next.channels).toEqual(["web"]);
-    expect(next.deploymentPending).toBe(true);
-    expect(next.deploymentDependenciesInstalled).toBe(false);
   });
 
   it("skips the install when no channel was recorded", async () => {
@@ -259,21 +250,14 @@ describe("addChannels box", () => {
     });
     const box = makeBox({ prompter: createPrompter(), evePackage: TEST_EVE_PACKAGE, deps });
 
-    const next = await runHeadless(
-      [box],
-      { ...resolvedState(), deploymentDependenciesInstalled: true },
-      silentSink,
-      snapshot,
-    );
+    await runHeadless([box], resolvedState(), silentSink, snapshot);
 
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    // Nothing recorded, nothing installed: the earlier install stays valid.
-    expect(next.deploymentDependenciesInstalled).toBe(true);
   });
 
   it("honors the configureVercelServices override over the Vercel-project gate", async () => {
     const deps = createDeps();
-    // `eve channels add` pins the services config on even when unlinked, the
+    // The integration setup can pin the services config on even when unlinked, the
     // behavior the dissolved engine had (ensureChannel defaulted it to true).
     const box = makeBox({
       prompter: createPrompter(),
@@ -365,7 +349,6 @@ describe("addChannels box", () => {
     expect(next.kind).toBe("done");
     if (next.kind === "done") {
       expect(next.state.channels).toEqual([]);
-      expect(next.state.deploymentPending).toBe(false);
     }
   });
 
@@ -446,12 +429,6 @@ describe("addChannels box", () => {
     expect(result.kind).toBe("done");
     if (result.kind === "done") {
       expect(result.state.channels).toEqual(["slack"]);
-      expect(result.state.slackbotCreated).toBe(true);
-      expect(result.state.slackbotAttached).toBe(true);
-      expect(result.state.slackConnectorUid).toBe("slack/my-agent-2");
-      expect(result.state.slackChatUrl).toBe("https://slack.com/app_redirect?app=A0&team=T0");
-      expect(result.state.slackWorkspaceName).toBe("Vercel");
-      expect(result.state.deploymentPending).toBe(true);
     }
   });
 
@@ -558,7 +535,6 @@ describe("addChannels box", () => {
     // cannot arm a deploy; a skipped Slack file write still records the channel.
     expect(next.channels).toEqual([]);
     expect(next.webScaffolded).toBe(false);
-    expect(next.deploymentPending).toBe(false);
   });
 
   it("continues without Slack when creation fails under warn-and-continue", async () => {
@@ -589,7 +565,7 @@ describe("addChannels box", () => {
     expect(result.state.slackScaffolded).toBe(false);
     expect(result.state.slackbotCreated).toBe(false);
     expect(prompter.log.warning).toHaveBeenCalledWith(
-      "Slackbot creation failed. Continuing without Slack — add it later with `eve channels add slack`.",
+      "Slackbot creation failed. Continuing without Slack — add it later with `eve add channel/slack`.",
     );
     // The slack channel scaffold never ran (only web's).
     expect(deps.ensureChannel).toHaveBeenCalledTimes(1);
@@ -660,7 +636,7 @@ describe("addChannels box", () => {
     if (result.kind !== "done") return;
     expect(result.state.channels).toEqual([]);
     expect(result.state.slackbotCreated).toBe(false);
-    // Not "eve channels add slack": re-creating would orphan the connector
+    // Not "eve add channel/slack": re-creating would orphan the connector
     // that already exists; the attach remediation was printed by the provision.
     expect(prompter.log.warning).toHaveBeenCalledWith(
       "Slackbot provisioning did not attach this project. Slack channel was not added. Continuing without Slack — finish event delivery with the `vercel connect attach` command above.",
@@ -737,7 +713,7 @@ describe("addChannels box", () => {
     expect(result.state.channels).toEqual([]);
     expect(result.state.slackScaffolded).toBe(false);
     expect(prompter.log.warning).toHaveBeenCalledWith(
-      "Slackbot is not connected to a Slack workspace. Slack channel was not added. Continuing without Slack — the install timed out and was cleaned up; re-run `eve channels add slack` to try again.",
+      "Slackbot is not connected to a Slack workspace. Slack channel was not added. Continuing without Slack — the install timed out and was cleaned up; re-run `eve add channel/slack` to try again.",
     );
   });
 
@@ -851,59 +827,6 @@ describe("addChannels box", () => {
     expect(state.slackbotCreated).toBe(false);
   });
 
-  it("reuses an attached slackbot on rerun and scaffolds its exact UID", async () => {
-    const deps = createDeps();
-    const state: SetupState = {
-      ...resolvedState(["slack"]),
-      slackbotCreated: true,
-      slackbotAttached: true,
-      slackConnectorUid: "slack/my-agent",
-      deploymentPending: true,
-    };
-    const box = makeBox({
-      prompter: createPrompter(),
-      evePackage: TEST_EVE_PACKAGE,
-      presetCreateSlackbot: true,
-      deps,
-    });
-
-    const result = await runInteractive([box], state, silentSink, snapshot);
-
-    expect(deps.provisionSlackbot).not.toHaveBeenCalled();
-    expect(deps.ensureChannel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "slack",
-        slackConnectorUid: "slack/my-agent",
-        slackConnectorSlug: "my-agent",
-      }),
-    );
-    expect(deps.reconcileSlackUid).not.toHaveBeenCalled();
-    expect(result.kind).toBe("done");
-    if (result.kind === "done") {
-      expect(result.state.channels).toEqual(["slack"]);
-    }
-  });
-
-  it("throws on rerun when the recorded slackbot never attached", async () => {
-    const deps = createDeps();
-    const state: SetupState = {
-      ...resolvedState(["slack"]),
-      slackbotCreated: true,
-      slackbotAttached: false,
-    };
-    const box = makeBox({
-      prompter: createPrompter(),
-      evePackage: TEST_EVE_PACKAGE,
-      presetCreateSlackbot: true,
-      deps,
-    });
-
-    await expect(runInteractive([box], state, silentSink, snapshot)).rejects.toThrow(
-      "Slackbot provisioning did not attach this project. Slack channel was not added.",
-    );
-    expect(deps.provisionSlackbot).not.toHaveBeenCalled();
-  });
-
   it("throws when Slack is selected without a Vercel project", async () => {
     const deps = createDeps();
     const state: SetupState = { ...noVercelState(), channelSelection: ["slack"] };
@@ -915,12 +838,12 @@ describe("addChannels box", () => {
     });
 
     await expect(runInteractive([box], state, silentSink, snapshot)).rejects.toThrow(
-      /Slack requires a Vercel project/,
+      /requires a linked Vercel project/,
     );
     expect(deps.provisionSlackbot).not.toHaveBeenCalled();
   });
 
-  it("throws when the project resolution is missing while deploying to Vercel", async () => {
+  it("throws when the project resolution is missing", async () => {
     const deps = createDeps();
     const state = resolvedState(["slack"]);
     // project stays unresolved: the link box did not record a resolution.
@@ -933,7 +856,7 @@ describe("addChannels box", () => {
     });
 
     await expect(runInteractive([box], state, silentSink, snapshot)).rejects.toThrow(
-      /none was resolved/,
+      /requires a linked Vercel project/,
     );
     expect(deps.provisionSlackbot).not.toHaveBeenCalled();
   });
@@ -959,7 +882,6 @@ describe("addChannels box", () => {
 
     expect(next.channels).toEqual(["web"]);
     expect(next.webScaffolded).toBe(true);
-    expect(next.deploymentPending).toBe(true);
     expect(state.channels).toEqual([]);
     expect(state.webScaffolded).toBe(false);
   });
