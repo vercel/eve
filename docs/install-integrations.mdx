@@ -71,6 +71,10 @@ Install a known integration URL directly when you do not need a namespace:
 eve add https://registry.acme.com/r/analytics.json
 ```
 
+## Contribute an official integration
+
+Community contributions to the official registry are welcome. Open an issue and get maintainer agreement before submitting a pull request, then follow the [registry contribution guide](https://github.com/vercel/eve/blob/main/CONTRIBUTING.md#adding-an-integration-to-the-registry) for the required source files, metadata, validation, and extension requirements.
+
 ## Host your own registry
 
 Hosting your own registry is the publishing side of the [third-party source workflow](#add-a-third-party-source). Once it is deployed, other eve projects can give it a namespace and pull integrations from it.
@@ -165,10 +169,6 @@ eve add extension/agent-browser --overwrite
 ```
 
 Update the installed package with your package manager. Check the publisher's release notes before changing the generated mount or package version.
-
-## Contribute an official integration
-
-Community contributions to the official registry are welcome. Open an issue and get maintainer agreement before submitting a pull request, then follow the [registry contribution guide](https://github.com/vercel/eve/blob/main/CONTRIBUTING.md#adding-an-integration-to-the-registry) for the required source files, metadata, validation, and extension requirements.
 
 ## Choose trusted sources
 
