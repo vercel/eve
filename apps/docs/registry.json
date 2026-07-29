@@ -1426,6 +1426,28 @@
       ]
     },
     {
+      "name": "instrumentation/telemetry-dev",
+      "type": "registry:item",
+      "title": "telemetry.dev",
+      "description": "Send agent traces to telemetry.dev with tokens, cost, and latency on every turn.",
+      "dependencies": ["@telemetry-dev/eve"],
+      "envVars": {
+        "TELEMETRY_DEV_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/telemetry-dev.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        },
+        {
+          "path": "registry/instrumentation/telemetry-dev-hook.ts",
+          "type": "registry:file",
+          "target": "agent/hooks/telemetry-dev.ts"
+        }
+      ]
+    },
+    {
       "name": "instrumentation/jaeger",
       "type": "registry:item",
       "title": "Jaeger",

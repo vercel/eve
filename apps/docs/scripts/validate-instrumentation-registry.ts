@@ -24,6 +24,7 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "honeycomb-instrumentation": "honeycomb",
   arize: "arize",
   raindrop: "raindrop",
+  "telemetry-dev": "telemetry-dev",
   jaeger: "jaeger",
 };
 
@@ -57,6 +58,14 @@ for (const item of items) {
           {
             path: "registry/instrumentation/braintrust-hook.ts",
             target: "agent/hooks/braintrust.ts",
+          },
+        ]
+      : []),
+    ...(slug === "telemetry-dev"
+      ? [
+          {
+            path: "registry/instrumentation/telemetry-dev-hook.ts",
+            target: "agent/hooks/telemetry-dev.ts",
           },
         ]
       : []),

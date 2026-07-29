@@ -1937,6 +1937,35 @@ export default defineInstrumentation({
 \`\`\``,
     configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
+  "telemetry-dev": {
+    logo: "telemetry-dev",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "tokens", "cost", "llm"],
+    install: `Add the telemetry.dev integration from eve's registry:
+
+\`\`\`bash
+eve add instrumentation/telemetry-dev
+\`\`\``,
+
+    quickStart: `eve installs an instrumentation file that registers telemetry.dev as the OpenTelemetry provider and a hook that emits lifecycle logs for sessions, turns, steps, tool results, and subagent calls:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { telemetryDevInstrumentation } from "@telemetry-dev/eve";
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation(telemetryDevInstrumentation());
+\`\`\`
+
+\`\`\`ts
+// agent/hooks/telemetry-dev.ts
+import { telemetryDevHook } from "@telemetry-dev/eve";
+import { defineHook } from "eve/hooks";
+
+export default defineHook(telemetryDevHook());
+\`\`\``,
+    configure: `Create an ingest API key in the [telemetry.dev](https://telemetry.dev) dashboard and expose it as \`TELEMETRY_DEV_API_KEY\`; without the key the integration is a no-op. Traces and lifecycle logs land in your telemetry.dev project joined by \`gen_ai.conversation.id\`, with tokens, cost, and latency attached to every turn. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+  },
   jaeger: {
     logo: "jaeger",
     docsHref: "/docs/guides/instrumentation",
