@@ -1158,6 +1158,49 @@ See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/ven
   },
 };
 const extensionPresentations: Record<string, ExtensionPresentation> = {
+  blitzreels: {
+    logo: "blitzreels",
+    docsHref: "https://www.npmjs.com/package/@blitzreels/eve",
+    keywords: [
+      "video editing",
+      "long form video",
+      "short clips",
+      "shorts",
+      "vertical video",
+      "visual qa",
+      "media generation",
+      "exports",
+    ],
+    install: `Install the BlitzReels extension for eve:
+
+\`\`\`bash
+eve add extension/blitzreels
+\`\`\`
+
+The extension requires Node.js 24 or later. It wraps the BlitzReels API with typed tools for clipping, project inspection, visual-QA repair, AI media generation, and exports.`,
+    quickStart: `Add a BlitzReels API key to the agent's environment:
+
+\`\`\`bash title=".env.local"
+BLITZREELS_API_KEY=br_live_...
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/blitzreels.ts"
+import blitzreels from "@blitzreels/eve";
+
+export default blitzreels({
+  apiKey: process.env.BLITZREELS_API_KEY!,
+});
+\`\`\`
+
+The filename supplies the \`blitzreels\` namespace. The extension adds project, media, clipping, repair, generation, snapshot, and export tools such as \`blitzreels__create_clip_batch\`, \`blitzreels__repair_clip\`, and \`blitzreels__start_export\`. It also ships a clipping skill that teaches the agent the long-form-to-shorts workflow and visual-QA repair loop.`,
+    configure: `Keep the API key in the environment rather than prompts or source control. Keys are environment-bounded: use \`br_live_...\` with the production API, and use \`br_test_...\` only with the matching local or development \`baseUrl\`.
+
+Source imports, clipping, generation, and exports call the configured BlitzReels API. Credit-spending, download, and render tools require eve approval by default, and durable retries reuse the original call receipt instead of spending twice. Override an individual tool from a directory mount when it needs stricter \`always()\` approval, or use \`disableTool()\` to remove it.
+
+See the [BlitzReels extension package](https://www.npmjs.com/package/@blitzreels/eve) for the complete tool list, configuration, approval defaults, error contract, and OAuth-backed MCP alternative.`,
+  },
   browserbase: {
     logo: "browserbase",
     docsHref: "https://www.npmjs.com/package/@browserbasehq/eve",

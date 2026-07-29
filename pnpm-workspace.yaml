@@ -57,6 +57,7 @@ catalog:
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
+  - "@blitzreels/eve"
   - "@vercel/*"
   - "@workflow/*"
   - nitro

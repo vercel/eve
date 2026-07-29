@@ -50,6 +50,7 @@
     "@agent-browser/eve": "^0.33.0",
     "@agentphone/chat-sdk-adapter": "0.1.0",
     "@beeper/chat-adapter-matrix": "0.2.0",
+    "@blitzreels/eve": "^0.1.0",
     "@browserbasehq/eve": "^0.1.0",
     "@chat-adapter/gchat": "4.34.0",
     "@chat-adapter/messenger": "4.34.0",

@@ -277,6 +277,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "blitzreels",
+    name: "BlitzReels",
+    kind: "extension",
+    tagline: "Turn long videos into short clips, generate media, repair edits, and export.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "browserbase",
     name: "Browserbase",
     kind: "extension",
