@@ -164,17 +164,22 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
-    const session = byName(spans, "agent.session")[0]!;
     const turn = byName(spans, "agent.turn")[0]!;
     const turnTerminal = byName(spans, "agent.turn.terminal")[0]!;
     const step = byName(spans, "agent.step")[0]!;
+    const operation = byName(spans, "ai.streamText")[0]!;
+    const model = byName(spans, "ai.streamText.doStream")[0]!;
     const action = byName(spans, "agent.action")[0]!;
+    const tool = byName(spans, "ai.toolCall")[0]!;
 
-    expect(session.parentSpanContext).toBeUndefined();
-    expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
+    expect(byName(spans, "agent.session")).toHaveLength(0);
+    expect(turn.parentSpanContext?.spanId).toBeDefined();
     expect(turnTerminal.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
+    expect(operation.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
+    expect(model.parentSpanContext?.spanId).toBe(operation.spanContext().spanId);
     expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
+    expect(tool.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
     expect(new Set(spans.map((span) => span.spanContext().traceId))).toHaveLength(1);
     expect(turn.events.map((event) => event.name)).toEqual(["turn.started", "session.started"]);
     expect(turnTerminal.events.map((event) => event.name)).toEqual([
@@ -262,6 +267,29 @@ describe("createAgentOtelInstrumentation", () => {
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(step.spanContext().traceId).toBe(turn.spanContext().traceId);
+  });
+
+  it("derives the same session trace id when a durable attempt replays before checkpoint", async () => {
+    const firstRuntime = createRuntime();
+    const replayRuntime = createRuntime();
+    await emitAttempt({
+      hooks: firstRuntime.hooks,
+      runInContext: firstRuntime.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await emitAttempt({
+      hooks: replayRuntime.hooks,
+      runInContext: replayRuntime.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+
+    const firstTurn = byName(firstRuntime.exporter.getFinishedSpans(), "agent.turn")[0]!;
+    const replayTurn = byName(replayRuntime.exporter.getFinishedSpans(), "agent.turn")[0]!;
+    expect(replayTurn.spanContext().traceId).toBe(firstTurn.spanContext().traceId);
   });
 
   it("marks a failed action without failing its turn", async () => {

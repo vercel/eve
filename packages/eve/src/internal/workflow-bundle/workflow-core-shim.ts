@@ -115,12 +115,12 @@ export function getStepMetadata(): never {
 }
 
 /**
- * Options accepted by {@link experimental_setAttributes}.
+ * Options accepted by {@link setAttributes}.
  *
- * Mirrors `ExperimentalSetAttributesOptions` from `@workflow/core` so the
+ * Mirrors `SetAttributesOptions` from `@workflow/core` so the
  * eve workflow-body bundle does not have to pull the real type in.
  */
-export interface ExperimentalSetAttributesOptions {
+export interface SetAttributesOptions {
   /**
    * Permit attribute keys that start with the reserved `$` prefix. eve
    * framework code passes `true` so it can write the `$eve.*` namespace;
@@ -130,7 +130,7 @@ export interface ExperimentalSetAttributesOptions {
 }
 
 /**
- * Workflow-body implementation of `experimental_setAttributes` for the eve
+ * Workflow-body implementation of `setAttributes` for the eve
  * bundle. Mirrors the dispatch path of `@workflow/core`'s workflow-body
  * export (`dist/workflow/set-attributes.js`):
  *
@@ -148,9 +148,9 @@ export interface ExperimentalSetAttributesOptions {
  * validator would require pulling `@workflow/world` into the workflow body
  * bundle.
  */
-export async function experimental_setAttributes(
+export async function setAttributes(
   attrs: Record<string, string | undefined>,
-  options: ExperimentalSetAttributesOptions = {},
+  options: SetAttributesOptions = {},
 ): Promise<void> {
   const entries = Object.entries(attrs);
   if (entries.length === 0) {
@@ -166,9 +166,7 @@ export async function experimental_setAttributes(
     | undefined;
 
   if (useStep === undefined) {
-    throw new Error(
-      "`experimental_setAttributes()` can only be called inside a workflow runtime context",
-    );
+    throw new Error("`setAttributes()` can only be called inside a workflow runtime context");
   }
 
   const changes = entries.map(([key, value]) => ({

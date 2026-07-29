@@ -11,6 +11,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import {
   getHarnessEmissionState,
@@ -22,6 +23,8 @@ import {
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
   encodeMessageStreamEvent,
@@ -53,6 +56,7 @@ export async function settleCancelledTurnStep(input: {
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
+  const instrumentation = getInstrumentationRuntime();
 
   let session = hydrateDurableSession({
     compactionOverrides: {
@@ -73,7 +77,7 @@ export async function settleCancelledTurnStep(input: {
     const writer = input.parentWritable.getWriter();
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-        const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
+        const baseEmit = async (event: HandleMessageStreamEvent): Promise<void> => {
           const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
           setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
           // Stamp once: the persisted chunk and the hooks must agree on the id.
@@ -85,6 +89,14 @@ export async function settleCancelledTurnStep(input: {
             registry: bundle.hookRegistry,
           });
         };
+        const emit =
+          createInstrumentationHandleEvent({
+            agentName: bundle.resolvedAgent.config.name,
+            handleEvent: baseEmit,
+            hooks: instrumentation?.hooks,
+            sessionId: session.sessionId,
+            turnId: activeTurnId(emissionState),
+          }) ?? baseEmit;
         return {
           result: await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
           session: enrichedSession,
@@ -93,6 +105,7 @@ export async function settleCancelledTurnStep(input: {
       emissionState = scoped.result;
       session = scoped.session;
     } finally {
+      await instrumentation?.forceFlush();
       writer.releaseLock();
     }
   }

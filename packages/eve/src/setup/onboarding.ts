@@ -7,6 +7,7 @@ import { applyAiGatewayCredential } from "./boxes/apply-ai-gateway-credential.js
 import { deployProject } from "./boxes/deploy-project.js";
 import { detectAiGateway } from "./boxes/detect-ai-gateway.js";
 import { linkVercelProject } from "./boxes/link-project.js";
+import { installChannelRegistryItems } from "./boxes/install-channel-registry-items.js";
 import { oneShotNextSteps } from "./boxes/one-shot-next-steps.js";
 import { preflight } from "./boxes/preflight.js";
 import { resolveProvisioning } from "./boxes/resolve-provisioning.js";
@@ -184,6 +185,7 @@ export function composeOnboardingBoxes(options: OnboardingBoxesOptions): AnySetu
       detectAiGateway(),
       linkVercelProject({ prompter: options.prompter, headless: options.headless }),
       applyAiGatewayCredential({ prompter: options.prompter }),
+      installChannelRegistryItems(),
       addChannels({
         asker,
         prompter: options.prompter,
@@ -193,6 +195,7 @@ export function composeOnboardingBoxes(options: OnboardingBoxesOptions): AnySetu
         // A failed slackbot must not abort onboarding: the agent still
         // scaffolds, deploys, and chats; Slack can be added later.
         slackbotFailure: "warn-and-continue",
+        skipDependencyMutation: true,
       }),
       addConnections({ prompter: options.prompter }),
     ].map(completeSetupOnly),

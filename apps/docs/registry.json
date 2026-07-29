@@ -653,33 +653,674 @@
       ]
     },
     {
-      "name": "channel/web",
-      "type": "registry:item",
-      "title": "Web Chat",
-      "description": "Add the built-in Next.js Web Chat channel to an eve agent.",
-      "meta": {
-        "eve": {
-          "channel": "web"
-        }
-      }
-    },
-    {
       "name": "channel/slack",
       "type": "registry:item",
       "title": "Slack",
       "description": "Connect an eve agent to Slack with Vercel Connect or portable credentials.",
       "meta": {
         "eve": {
-          "channel": "slack"
+          "setup": {
+            "command": "eve",
+            "args": ["integration", "setup", "slack"]
+          },
+          "requires": ">=0.27.8"
         }
+      },
+      "dependencies": ["@vercel/connect@0.4.2"]
+    },
+    {
+      "name": "channel/discord",
+      "type": "registry:item",
+      "title": "Discord",
+      "description": "Run your agent as a Discord bot across servers and threads.",
+      "envVars": {
+        "DISCORD_APPLICATION_ID": "",
+        "DISCORD_BOT_TOKEN": "",
+        "DISCORD_PUBLIC_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/discord.ts",
+          "type": "registry:file",
+          "target": "agent/channels/discord.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/teams",
+      "type": "registry:item",
+      "title": "Microsoft Teams",
+      "description": "Bring your agent into Teams chats and channels.",
+      "envVars": {
+        "TEAMS_APP_ID": "",
+        "TEAMS_APP_PASSWORD": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/teams.ts",
+          "type": "registry:file",
+          "target": "agent/channels/teams.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/telegram",
+      "type": "registry:item",
+      "title": "Telegram",
+      "description": "Connect your agent to a Telegram bot for 1:1 and group chats.",
+      "envVars": {
+        "TELEGRAM_BOT_TOKEN": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/telegram.ts",
+          "type": "registry:file",
+          "target": "agent/channels/telegram.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/twilio",
+      "type": "registry:item",
+      "title": "Twilio",
+      "description": "Put your agent on a phone number: SMS and speech-transcribed calls.",
+      "envVars": {
+        "TWILIO_ACCOUNT_SID": "",
+        "TWILIO_AUTH_TOKEN": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/twilio.ts",
+          "type": "registry:file",
+          "target": "agent/channels/twilio.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/github",
+      "type": "registry:item",
+      "title": "GitHub",
+      "description": "Drive your agent from issues, pull requests, and comments.",
+      "envVars": {
+        "GITHUB_APP_ID": "",
+        "GITHUB_APP_PRIVATE_KEY": "",
+        "GITHUB_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/github.ts",
+          "type": "registry:file",
+          "target": "agent/channels/github.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/linear-agent",
+      "type": "registry:item",
+      "title": "Linear Agent",
+      "description": "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
+      "envVars": {
+        "LINEAR_AGENT_ACCESS_TOKEN": "",
+        "LINEAR_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/linear-agent.ts",
+          "type": "registry:file",
+          "target": "agent/channels/linear.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/web",
+      "type": "registry:item",
+      "title": "Web Chat",
+      "description": "Add the built-in Next.js Web Chat channel to an eve agent.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "args": ["integration", "setup", "web"]
+          },
+          "requires": ">=0.27.8"
+        }
+      },
+      "dependencies": [
+        "@radix-ui/react-use-controllable-state@1.2.2",
+        "@shikijs/core@4.1.0",
+        "@shikijs/engine-javascript@4.1.0",
+        "@shikijs/engine-oniguruma@4.1.0",
+        "@streamdown/cjk@1.0.3",
+        "@streamdown/code@1.1.1",
+        "@streamdown/math@1.0.2",
+        "@streamdown/mermaid@1.0.2",
+        "@tailwindcss/postcss@4.3.0",
+        "ai@^7.0.38",
+        "class-variance-authority@0.7.1",
+        "clsx@2.1.1",
+        "cmdk@1.1.1",
+        "lucide-react@1.16.0",
+        "motion@12.40.0",
+        "nanoid@5.1.11",
+        "next@16.3.0-preview.6",
+        "radix-ui@1.4.3",
+        "react@19.2.6",
+        "react-dom@19.2.6",
+        "shiki@4.1.0",
+        "streamdown@2.5.0",
+        "tailwind-merge@3.6.0",
+        "tailwindcss@4.3.0",
+        "use-stick-to-bottom@1.1.4",
+        "zod@4.4.3"
+      ],
+      "devDependencies": [
+        "@types/node@26",
+        "@types/react@19.2.15",
+        "@types/react-dom@19.2.3",
+        "typescript@6.0.3"
+      ],
+      "files": [
+        {
+          "path": "registry/channel/web/agent/channels/eve.ts",
+          "type": "registry:file",
+          "target": "agent/channels/eve.ts"
+        },
+        {
+          "path": "registry/channel/web/app/_components/agent-chat.tsx",
+          "type": "registry:file",
+          "target": "app/_components/agent-chat.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/agent-message.tsx",
+          "type": "registry:file",
+          "target": "app/_components/agent-message.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/globals.css",
+          "type": "registry:file",
+          "target": "app/globals.css"
+        },
+        {
+          "path": "registry/channel/web/app/layout.tsx",
+          "type": "registry:file",
+          "target": "app/layout.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/page.tsx",
+          "type": "registry:file",
+          "target": "app/page.tsx"
+        },
+        {
+          "path": "registry/channel/web/components.json",
+          "type": "registry:file",
+          "target": "components.json"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/chain-of-thought.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/code-block.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/code-block.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/conversation.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/conversation.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/message.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/message.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/prompt-input.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/prompt-input.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/reasoning.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/shimmer.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/shimmer.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/tool.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/tool.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/badge.tsx",
+          "type": "registry:file",
+          "target": "components/ui/badge.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/button-group.tsx",
+          "type": "registry:file",
+          "target": "components/ui/button-group.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/button.tsx",
+          "type": "registry:file",
+          "target": "components/ui/button.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/collapsible.tsx",
+          "type": "registry:file",
+          "target": "components/ui/collapsible.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/command.tsx",
+          "type": "registry:file",
+          "target": "components/ui/command.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/dialog.tsx",
+          "type": "registry:file",
+          "target": "components/ui/dialog.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/dropdown-menu.tsx",
+          "type": "registry:file",
+          "target": "components/ui/dropdown-menu.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/hover-card.tsx",
+          "type": "registry:file",
+          "target": "components/ui/hover-card.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/input-group.tsx",
+          "type": "registry:file",
+          "target": "components/ui/input-group.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/input.tsx",
+          "type": "registry:file",
+          "target": "components/ui/input.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/select.tsx",
+          "type": "registry:file",
+          "target": "components/ui/select.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/separator.tsx",
+          "type": "registry:file",
+          "target": "components/ui/separator.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/spinner.tsx",
+          "type": "registry:file",
+          "target": "components/ui/spinner.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/textarea.tsx",
+          "type": "registry:file",
+          "target": "components/ui/textarea.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/tooltip.tsx",
+          "type": "registry:file",
+          "target": "components/ui/tooltip.tsx"
+        },
+        {
+          "path": "registry/channel/web/css.d.ts",
+          "type": "registry:file",
+          "target": "css.d.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/utils.ts",
+          "type": "registry:file",
+          "target": "lib/utils.ts"
+        },
+        {
+          "path": "registry/channel/web/next-env.d.ts",
+          "type": "registry:file",
+          "target": "next-env.d.ts"
+        },
+        {
+          "path": "registry/channel/web/next.config.ts",
+          "type": "registry:file",
+          "target": "next.config.ts"
+        },
+        {
+          "path": "registry/channel/web/postcss.config.mjs",
+          "type": "registry:file",
+          "target": "postcss.config.mjs"
+        },
+        {
+          "path": "registry/channel/web/tsconfig.json",
+          "type": "registry:file",
+          "target": "tsconfig.json"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-gchat",
+      "type": "registry:item",
+      "title": "Google Chat",
+      "description": "Google Chat spaces and DMs via the Chat SDK.",
+      "dependencies": ["chat", "@chat-adapter/gchat", "@chat-adapter/state-memory"],
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-gchat.ts",
+          "type": "registry:file",
+          "target": "agent/channels/gchat.ts"
+        }
+      ],
+      "envVars": {
+        "GOOGLE_CHAT_CREDENTIALS": ""
       }
+    },
+    {
+      "name": "channel/chat-sdk-whatsapp",
+      "type": "registry:item",
+      "title": "WhatsApp",
+      "description": "Customer messaging through WhatsApp Business Cloud via the Chat SDK.",
+      "dependencies": ["chat", "@chat-adapter/whatsapp", "@chat-adapter/state-memory"],
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-whatsapp.ts",
+          "type": "registry:file",
+          "target": "agent/channels/whatsapp.ts"
+        }
+      ],
+      "envVars": {
+        "WHATSAPP_ACCESS_TOKEN": "",
+        "WHATSAPP_APP_SECRET": "",
+        "WHATSAPP_PHONE_NUMBER_ID": "",
+        "WHATSAPP_VERIFY_TOKEN": ""
+      }
+    },
+    {
+      "name": "channel/chat-sdk-x",
+      "type": "registry:item",
+      "title": "X",
+      "description": "Public mentions and DMs on X via the Chat SDK.",
+      "dependencies": ["chat", "@chat-adapter/x", "@chat-adapter/state-memory"],
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-x.ts",
+          "type": "registry:file",
+          "target": "agent/channels/x.ts"
+        }
+      ],
+      "envVars": {
+        "X_CONSUMER_SECRET": "",
+        "X_USER_ACCESS_TOKEN": ""
+      }
+    },
+    {
+      "name": "channel/chat-sdk-messenger",
+      "type": "registry:item",
+      "title": "Messenger",
+      "description": "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
+      "dependencies": ["chat", "@chat-adapter/messenger", "@chat-adapter/state-memory"],
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-messenger.ts",
+          "type": "registry:file",
+          "target": "agent/channels/messenger.ts"
+        }
+      ],
+      "envVars": {
+        "FACEBOOK_APP_SECRET": "",
+        "FACEBOOK_PAGE_ACCESS_TOKEN": "",
+        "FACEBOOK_VERIFY_TOKEN": ""
+      }
+    },
+    {
+      "name": "channel/chat-sdk-zernio",
+      "type": "registry:item",
+      "title": "Zernio",
+      "description": "Reach seven social and messaging platforms through one Zernio integration.",
+      "dependencies": ["chat", "@zernio/chat-sdk-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "ZERNIO_API_KEY": "",
+        "ZERNIO_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-zernio.ts",
+          "type": "registry:file",
+          "target": "agent/channels/zernio.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-velt",
+      "type": "registry:item",
+      "title": "Velt",
+      "description": "Add agents to anchored comments across documents, canvases, PDFs, and video.",
+      "dependencies": ["chat", "@veltdev/chat-sdk-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "VELT_API_KEY": "",
+        "VELT_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-velt.ts",
+          "type": "registry:file",
+          "target": "agent/channels/velt.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-sendblue",
+      "type": "registry:item",
+      "title": "Sendblue",
+      "description": "Send and receive iMessage, SMS, and RCS through Sendblue.",
+      "dependencies": ["chat", "chat-adapter-sendblue", "@chat-adapter/state-memory"],
+      "envVars": {
+        "SENDBLUE_API_KEY": "",
+        "SENDBLUE_API_SECRET": "",
+        "SENDBLUE_FROM_NUMBER": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-sendblue.ts",
+          "type": "registry:file",
+          "target": "agent/channels/sendblue.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-novu",
+      "type": "registry:item",
+      "title": "Novu",
+      "description": "Reach Slack, Teams, WhatsApp, Telegram, and email through Novu.",
+      "dependencies": ["chat", "@novu/chat-sdk-adapter", "@chat-adapter/state-memory"],
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-novu.ts",
+          "type": "registry:file",
+          "target": "agent/channels/novu.ts"
+        }
+      ],
+      "envVars": {
+        "NOVU_SECRET_KEY": "",
+        "NOVU_AGENT_IDENTIFIER": ""
+      }
+    },
+    {
+      "name": "channel/chat-sdk-liveblocks",
+      "type": "registry:item",
+      "title": "Liveblocks",
+      "description": "Bring your agent into Liveblocks comment threads, mentions, and reactions.",
+      "dependencies": ["chat", "@liveblocks/chat-sdk-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "LIVEBLOCKS_SECRET_KEY": "",
+        "LIVEBLOCKS_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-liveblocks.ts",
+          "type": "registry:file",
+          "target": "agent/channels/liveblocks.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-linq",
+      "type": "registry:item",
+      "title": "Linq",
+      "description": "iMessage and SMS conversations, media, and tapbacks through Linq.",
+      "dependencies": ["chat", "@linqapp/chat-sdk-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "LINQ_API_KEY": "",
+        "LINQ_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-linq.ts",
+          "type": "registry:file",
+          "target": "agent/channels/linq.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-kapso",
+      "type": "registry:item",
+      "title": "Kapso",
+      "description": "Managed WhatsApp conversations, media, buttons, and history through Kapso.",
+      "dependencies": ["chat", "@kapso/chat-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "KAPSO_API_KEY": "",
+        "KAPSO_PHONE_NUMBER_ID": "",
+        "KAPSO_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-kapso.ts",
+          "type": "registry:file",
+          "target": "agent/channels/kapso.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-photon",
+      "type": "registry:item",
+      "title": "Photon",
+      "description": "Cloud, self-hosted, and local iMessage messaging through Photon.",
+      "dependencies": ["chat", "@photon-ai/chat-adapter-imessage", "@chat-adapter/state-memory"],
+      "envVars": {
+        "IMESSAGE_PROJECT_ID": "",
+        "IMESSAGE_PROJECT_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-photon.ts",
+          "type": "registry:file",
+          "target": "agent/channels/imessage.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-dial",
+      "type": "registry:item",
+      "title": "Dial",
+      "description": "Give your agent a phone number for SMS, MMS, iMessage, and voice transcripts.",
+      "dependencies": ["chat", "@getdial/chat-sdk-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "DIAL_API_KEY": "",
+        "DIAL_FROM_NUMBER_ID": "",
+        "DIAL_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-dial.ts",
+          "type": "registry:file",
+          "target": "agent/channels/dial.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-agentphone",
+      "type": "registry:item",
+      "title": "AgentPhone",
+      "description": "SMS, MMS, iMessage, and voice conversations through AgentPhone.",
+      "dependencies": ["chat", "@agentphone/chat-sdk-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "AGENTPHONE_API_KEY": "",
+        "AGENTPHONE_AGENT_ID": "",
+        "AGENTPHONE_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-agentphone.ts",
+          "type": "registry:file",
+          "target": "agent/channels/agentphone.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-lark",
+      "type": "registry:item",
+      "title": "Lark / Feishu",
+      "description": "Lark and Feishu chats with native card streaming via the Chat SDK.",
+      "dependencies": ["chat", "@larksuite/vercel-chat-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "LARK_APP_ID": "",
+        "LARK_APP_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-lark.ts",
+          "type": "registry:file",
+          "target": "agent/channels/lark.ts"
+        }
+      ]
+    },
+    {
+      "name": "channel/chat-sdk-beeper",
+      "type": "registry:item",
+      "title": "Beeper",
+      "description": "Matrix rooms and bridged messaging networks through Beeper.",
+      "dependencies": ["chat", "@beeper/chat-adapter-matrix", "@chat-adapter/state-memory"],
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-beeper.ts",
+          "type": "registry:file",
+          "target": "agent/channels/beeper.ts"
+        }
+      ],
+      "envVars": {
+        "MATRIX_BASE_URL": "",
+        "MATRIX_ACCESS_TOKEN": ""
+      }
+    },
+    {
+      "name": "channel/chat-sdk-resend",
+      "type": "registry:item",
+      "title": "Resend",
+      "description": "Send and receive threaded email through Resend via the Chat SDK.",
+      "dependencies": ["chat", "@resend/chat-sdk-adapter", "@chat-adapter/state-memory"],
+      "envVars": {
+        "RESEND_API_KEY": "",
+        "RESEND_WEBHOOK_SECRET": "",
+        "RESEND_FROM_ADDRESS": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/chat-sdk-resend.ts",
+          "type": "registry:file",
+          "target": "agent/channels/resend.ts"
+        }
+      ]
     },
     {
       "name": "instrumentation/braintrust",
       "type": "registry:item",
       "title": "Braintrust",
-      "description": "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
-      "dependencies": ["@braintrust/otel", "@vercel/otel"],
+      "description": "Trace eve agent sessions in Braintrust, including turns, steps, tool calls, and subagent interactions.",
+      "dependencies": ["braintrust"],
       "envVars": {
         "BRAINTRUST_API_KEY": ""
       },
@@ -688,6 +1329,11 @@
           "path": "registry/instrumentation/braintrust.ts",
           "type": "registry:file",
           "target": "agent/instrumentation.ts"
+        },
+        {
+          "path": "registry/instrumentation/braintrust-hook.ts",
+          "type": "registry:file",
+          "target": "agent/hooks/braintrust.ts"
         }
       ]
     },

@@ -70,4 +70,24 @@ describe("createInstrumentationHandleEvent", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("uses the restored turn id when a continuation step emits a session transition", async () => {
+    const events: unknown[] = [];
+    const handleEvent = createInstrumentationHandleEvent({
+      handleEvent: async () => {},
+      hooks: {
+        after: async () => {},
+        before: async () => {},
+        publish: async (event) => {
+          events.push(event);
+        },
+      },
+      sessionId: "session-1",
+      turnId: "turn-1",
+    })!;
+
+    await handleEvent(createSessionWaitingEvent("continue-1"));
+
+    expect(events).toEqual([{ sessionId: "session-1", turnId: "turn-1", type: "session.waiting" }]);
+  });
 });

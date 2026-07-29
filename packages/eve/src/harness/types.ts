@@ -12,7 +12,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { InstrumentationHooks } from "#harness/instrumentation-lifecycle.js";
+import type { HarnessInstrumentation } from "#harness/instrumentation-runtime.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -245,7 +245,7 @@ export interface ToolLoopHarnessConfig {
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.
    */
-  readonly instrumentationHooks?: InstrumentationHooks;
+  readonly instrumentation?: HarnessInstrumentation;
   /**
    * Execution mode for the current harness.
    *

@@ -1,4 +1,5 @@
 import type { ChannelKind } from "#setup/scaffold/index.js";
+import type { AddCommandOptions } from "#cli/commands/registry.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import { interactiveAsker } from "../ask.js";
@@ -29,6 +30,7 @@ export interface ChannelsFlowDeps {
   inspectExistingChannelRegistrations: typeof inspectExistingChannelRegistrations;
   getVercelAuthStatus: typeof getVercelAuthStatus;
   addChannels?: AddChannelsDeps;
+  installRegistryItem(appRoot: string, item: string, options?: AddCommandOptions): Promise<void>;
 }
 
 export type ChannelsFlowResult =
@@ -198,6 +200,10 @@ export async function runChannelsFlow(input: {
     detectDeployment,
     inspectExistingChannelRegistrations,
     getVercelAuthStatus,
+    installRegistryItem: async (projectRoot, item, options) => {
+      const { installOfficialRegistryItem } = await import("#cli/commands/registry.js");
+      await installOfficialRegistryItem(projectRoot, item, options);
+    },
     ...input.deps,
   };
 
@@ -244,6 +250,7 @@ export async function runChannelsFlow(input: {
     if (pick === "repl" || channelAlreadyAdded(registrations, pick)) continue;
 
     assertCanAddSelectedChannels([pick], registrations);
+    await deps.installRegistryItem(appRoot, `channel/${pick}`);
     let result: Awaited<ReturnType<ReturnType<typeof channelSetupIntegration>["setup"]>>;
     try {
       result = await channelSetupIntegration(pick).setup({
@@ -251,6 +258,7 @@ export async function runChannelsFlow(input: {
         state: { ...state, channelSelection: [pick] },
         ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
         signal,
+        skipDependencyMutation: true,
         deps: deps.addChannels,
       });
     } catch (error) {

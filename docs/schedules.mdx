@@ -100,7 +100,11 @@ The route is dev-only. Production builds never mount it, and it needs no auth si
 
 ## On Vercel
 
-Hosted Vercel builds turn every `defineSchedule(...)` into a Vercel Cron Job, with each `cron` written as an entry in `.vercel/output/config.json`. Vercel evaluates these expressions in UTC. Confirm discovery under **Settings → Cron Jobs** and watch execution history under **Observability → Cron Jobs**. Per-run logs land under **Observability → Logs**.
+Hosted Vercel builds turn every `defineSchedule(...)` into a Vercel Cron Job, with each `cron` written as an entry in `.vercel/output/config.json`. This also applies when [`withEve`](./guides/frontend/nextjs) embeds one or more agents in a Next.js deployment: Vercel assembles each generated eve service's schedules into the project Build Output config while preserving existing project cron entries. Named agents use their public `/eve/agents/<name>` route prefix automatically.
+
+When running `vercel build` locally, use Vercel CLI 56.4.0 or later so generated-service cron entries are included in the project output.
+
+Vercel evaluates cron expressions in UTC. Confirm discovery under **Settings → Cron Jobs** and watch execution history under **Observability → Cron Jobs**. Per-run logs land under **Observability → Logs**.
 
 ## Self-deployed hosts
 

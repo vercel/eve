@@ -1,5 +1,10 @@
-import type { HandleMessageStreamEvent, MessageCompletedStreamEvent } from "#protocol/message.js";
-import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
+import type {
+  AuthorizationRequiredStreamEvent,
+  HandleMessageStreamEvent,
+  MessageCompletedStreamEvent,
+  TurnFailureStreamEvent,
+} from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 import type { SessionState } from "#client/types.js";
 import type { InputRequest } from "#runtime/input/types.js";
 
@@ -53,53 +58,70 @@ export function advanceSession(input: {
   return createInitialSessionState();
 }
 
-/**
- * Extracts the final completed assistant message text from a turn's events.
- *
- * Only considers terminal messages (finish reason is not `"tool-calls"`).
- */
-export function extractCompletedMessage(
-  events: readonly HandleMessageStreamEvent[],
-): string | undefined {
-  let lastMessage: string | undefined;
+/** A connection authorization challenge that remains unresolved at a turn boundary. */
+export interface PendingAuthorization {
+  readonly authorization?: AuthorizationRequiredStreamEvent["data"]["authorization"];
+  readonly description: string;
+  readonly name: string;
+  readonly webhookUrl?: string;
+}
+
+/** Canonical projection of the lifecycle state represented by one turn's events. */
+export interface TurnEventSummary {
+  readonly boundary: HandleMessageStreamEvent | undefined;
+  readonly failure: TurnFailureStreamEvent | undefined;
+  readonly inputRequests: readonly InputRequest[];
+  readonly message: string | undefined;
+  readonly pendingAuthorizations: readonly PendingAuthorization[];
+  readonly status: "completed" | "failed" | "waiting";
+}
+
+/** Reduces one turn's protocol events into their client-facing lifecycle state. */
+export function summarizeTurnEvents(events: readonly HandleMessageStreamEvent[]): TurnEventSummary {
+  let boundary: HandleMessageStreamEvent | undefined;
+  let failure: TurnFailureStreamEvent | undefined;
+  let message: string | undefined;
+  const inputRequests: InputRequest[] = [];
+  const pendingAuthorizations = new Map<string, PendingAuthorization>();
 
   for (const event of events) {
-    if (isFinalMessageCompleted(event)) {
-      lastMessage = event.data.message ?? undefined;
+    if (isCurrentTurnBoundaryEvent(event)) boundary = event;
+    if (isTurnFailureEvent(event)) failure = event;
+    if (isFinalMessageCompleted(event)) message = event.data.message ?? undefined;
+    if (event.type === "input.requested") inputRequests.push(...event.data.requests);
+    if (event.type === "authorization.required") {
+      pendingAuthorizations.set(event.data.name, event.data);
+    }
+    if (event.type === "authorization.completed") {
+      pendingAuthorizations.delete(event.data.name);
     }
   }
 
-  return lastMessage;
+  return {
+    boundary,
+    failure,
+    inputRequests,
+    message,
+    pendingAuthorizations: [...pendingAuthorizations.values()],
+    status:
+      boundary?.type === "session.waiting"
+        ? "waiting"
+        : boundary?.type === "session.failed"
+          ? "failed"
+          : "completed",
+  };
 }
 
-/**
- * Derives the result status from a turn's boundary event.
- */
-export function deriveResultStatus(
-  events: readonly HandleMessageStreamEvent[],
-): "completed" | "failed" | "waiting" {
-  const boundary = findBoundaryEvent(events);
-
-  if (boundary?.type === "session.waiting") return "waiting";
-  if (boundary?.type === "session.failed") return "failed";
-  return "completed";
-}
-
-/**
- * Collects HITL input requests emitted during one consumed turn.
- */
-export function extractInputRequests(
-  events: readonly HandleMessageStreamEvent[],
-): readonly InputRequest[] {
-  const requests: InputRequest[] = [];
-
-  for (const event of events) {
-    if (event.type === "input.requested") {
-      requests.push(...event.data.requests);
-    }
+/** Collects one segment of an event stream through its current-turn boundary. */
+export async function collectTurnEvents(
+  stream: AsyncIterable<HandleMessageStreamEvent>,
+): Promise<readonly HandleMessageStreamEvent[]> {
+  const events: HandleMessageStreamEvent[] = [];
+  for await (const event of stream) {
+    events.push(event);
+    if (isCurrentTurnBoundaryEvent(event)) break;
   }
-
-  return requests;
+  return events;
 }
 
 function findBoundaryEvent(

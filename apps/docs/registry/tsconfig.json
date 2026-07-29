@@ -4,6 +4,11 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["connections/**/*.ts", "extensions/**/*.ts", "instrumentation/**/*.ts"],
+  "include": [
+    "channels/**/*.ts",
+    "connections/**/*.ts",
+    "extensions/**/*.ts",
+    "instrumentation/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

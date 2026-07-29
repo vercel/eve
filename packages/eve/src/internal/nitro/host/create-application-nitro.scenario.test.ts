@@ -186,7 +186,7 @@ describe("application Nitro creation", () => {
     delete process.env.VERCEL;
   });
 
-  it("installs compiled artifacts before constructing the Workflow world", async () => {
+  it("installs local tracing and compiled artifacts before constructing the Workflow world", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -196,9 +196,33 @@ describe("application Nitro creation", () => {
     await createDevelopmentApplicationNitro(preparedHost);
 
     const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
+    const localTracing = plugins.findIndex((plugin) =>
+      plugin.includes("local-tracing-runtime-plugin.ts"),
+    );
 
+    expect(localTracing).toBeGreaterThanOrEqual(0);
+    expect(localTracing).toBeLessThan(
+      plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath),
+    );
     expect(plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath)).toBeLessThan(
       plugins.indexOf(preparedHost.compiledArtifacts.workflowWorldPluginPath),
+    );
+  });
+
+  it("preserves authored instrumentation instead of installing local tracing", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+    const { createDevelopmentApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = createPreparedHost();
+    preparedHost.compiledArtifacts.instrumentationPluginPath = "/app/instrumentation.mjs";
+
+    await createDevelopmentApplicationNitro(preparedHost);
+
+    const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
+    expect(plugins).toContain("/app/instrumentation.mjs");
+    expect(plugins).not.toEqual(
+      expect.arrayContaining([expect.stringContaining("local-tracing-runtime-plugin.ts")]),
     );
   });
 

@@ -5,6 +5,7 @@ import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
+import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
@@ -21,6 +22,10 @@ import {
   type DevelopmentRequestHeaders,
 } from "#cli/dev/url-target.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import {
+  registerRuntimeInvokeCommand,
+  type InvokeCliRuntimeDependencies,
+} from "#cli/invoke/command.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
@@ -80,6 +85,7 @@ interface CliRuntimeDependencies {
     options?: { json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
+  runInvoke: InvokeCliRuntimeDependencies["runInvoke"];
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
@@ -158,14 +164,6 @@ async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startP
   return (await import("#internal/nitro/host.js")).startProductionServer;
 }
 
-function shouldPrintCliBootBanner(actionCommand: Command): boolean {
-  return (
-    actionCommand.name() === "info" ||
-    actionCommand.name() === "dev" ||
-    actionCommand.name() === "init"
-  );
-}
-
 function parsePortOption(value: string): number {
   if (!/^-?\d+$/.test(value)) {
     throw new InvalidArgumentError(`Expected a numeric port, received "${value}".`);
@@ -241,7 +239,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .showHelpAfterError()
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
-      if (shouldPrintCliBootBanner(actionCommand)) {
+      if (["info", "dev", "init"].includes(actionCommand.name())) {
         logger.log(eveCliBanner());
       }
     })
@@ -264,8 +262,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .option("-f, --force", "Overwrite existing channel files")
     .option("-y, --yes", "Assume yes for confirmations; requires an explicit channel kind")
     .action(async (kind: string | undefined, options: { force?: boolean; yes?: boolean }) => {
-      const { runChannelsAddCommand } = await import("#cli/commands/channels.js");
-      await runChannelsAddCommand(logger, appRoot, { kind, options });
+      const { runChannelsAddCompatibilityCommand } = await import("#cli/commands/channels.js");
+      await runChannelsAddCompatibilityCommand(logger, appRoot, { kind, options });
     });
 
   channels
@@ -276,6 +274,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       const { runChannelsListCommand } = await import("#cli/commands/channels.js");
       await runChannelsListCommand(logger, appRoot, options);
     });
+
+  registerIntegrationCommands({ program, logger, appRoot });
 
   const extension = program
     .command("extension")
@@ -367,6 +367,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
       await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });
+
+  registerRuntimeInvokeCommand({ appRoot, logger, program, runtime });
 
   program
     .command("dev")
@@ -601,6 +603,24 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .action(async (options: { json?: boolean }) => {
       const { runLogsListCommand } = await import("#cli/commands/logs.js");
       await runLogsListCommand(logger, appRoot, options);
+    });
+
+  const traces = program
+    .command("trace [trace]")
+    .usage("[options] [trace]\n       eve trace ls [options]")
+    .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
+    .action(async (reference: string | undefined) => {
+      const { runTraceShowCommand } = await import("#cli/commands/trace.js");
+      await runTraceShowCommand(logger, appRoot, reference);
+    });
+
+  traces
+    .command("ls")
+    .description("List local traces, most recent first.")
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean }) => {
+      const { runTraceListCommand } = await import("#cli/commands/trace.js");
+      await runTraceListCommand(logger, appRoot, options);
     });
 
   program

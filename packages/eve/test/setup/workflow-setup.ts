@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { createLocalWorld } from "@workflow/world-local";
+import { createWorld } from "@workflow/world-local";
 import { afterAll } from "vitest";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
@@ -19,7 +19,7 @@ const packageRoot = resolvePackageRoot();
 const outDir = resolveWorkflowTestOutputDirectory(packageRoot);
 const poolId = process.env.VITEST_POOL_ID ?? "0";
 installEveWorkflowQueueNamespace(WORKFLOW_TEST_AGENT_NAME);
-const world = createLocalWorld({
+const world = createWorld({
   dataDir: join(resolveLocalWorkflowWorldDataDirectory(packageRoot), `vitest-${poolId}`),
   tag: `vitest-${poolId}`,
 });

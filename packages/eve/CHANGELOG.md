@@ -1,5 +1,44 @@
 # eve
 
+## 0.27.12
+
+### Patch Changes
+
+- 9df880e: Upgrade the runtime HTTP client to undici 8 while preserving Node fetch compatibility for SSRF-safe web requests.
+- 9ddb890: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- c27b44a: Invoke an agent without a TUI using `eve invoke`, which returns pretty JSON at terminal or blocking events. Durable session coordinates support follow-up turns, human input, authorization, interrupted waits, and machine discovery through `--json-schema`.
+
+## 0.27.11
+
+### Patch Changes
+
+- 1e35a26: Bound the zero-config local trace store so `.eve/traces` no longer grows without limit. `eve dev` now sweeps it when a session finishes and at startup, keeping open sessions, the twenty newest traces, and anything from the last seven days before evicting oldest-first above 512 MB. Tune it with `EVE_TRACES_MAX_AGE_MS`, `EVE_TRACES_MAX_TOTAL_BYTES`, and `EVE_TRACES_RETAIN_COUNT`, or set `EVE_TRACES=off` to turn local tracing off entirely.
+- 1c0347f: Expose schedules from generated `withEve` services to Vercel's project-level Cron Jobs. Single and named agents now register routable jobs without requiring duplicate `vercel.json` entries.
+- 0755e97: Resolve package-owned runtime files from the installed eve package when generated host bundles execute outside its package root, including on Windows.
+- 4deab71: Keep traced external dependencies resolvable from queue-triggered Vercel workflow functions, including dependency graphs that contain multiple versions of the same package.
+- cf40283: Development runtime snapshots no longer copy legacy root-level `.workflow-data` directories. Projects with large local workflow histories avoid redundant multi-gigabyte snapshot copies and related disk-space failures.
+- 0f5fcdb: Allow `eve add channel/web` and `eve add channel/slack` to install their package dependencies and run the existing channel setup flows. The official registry now lists Web Chat and Slack channel items with trusted built-in setup metadata.
+- 41cc919: Retry model calls when undici terminates a response stream after a headers or body timeout, so transient provider stalls no longer immediately fail task runs.
+- a45e4cb: Keep `t.judge.autoevals.*` assertions working when Braintrust reporting is active by preserving the judge client's OpenAI-compatible interface during autoevals wrapping checks.
+
+## 0.27.10
+
+### Patch Changes
+
+- 15478d2: Show result counts and concise kind-and-slug addresses for official items in `eve registry list` and `eve registry search` instead of their full registry URLs.
+
+## 0.27.9
+
+### Patch Changes
+
+- f736533: Update the bundled AI SDK to 7.0.38.
+- 0d2d0cd: Persist zero-config agent, AI SDK, and user-created OpenTelemetry spans under `.eve/traces` during `eve dev` when authored instrumentation is absent.
+- 71bb2c6: Compaction no longer reproduces base64 file payloads from `content` tool outputs. In the summarizer transcript and in capped kept-history results alike, file parts are replaced with a text stub naming the file and media type (matching how message attachments are summarized); sibling text parts survive instead of being truncated away behind the serialized payload.
+- ebeedd6: Add `eve trace ls` and `eve trace [trace]` commands for inspecting locally persisted agent traces after or during `eve dev`.
+- 5e4b70f: Allow `eve add channel/web` and `eve add channel/slack` to use the existing channel setup flows. The official registry now lists Web Chat and Slack channel items.
+- 83c753e: Harden `web_fetch` against SSRF by requiring HTTPS, rejecting non-public destinations during DNS resolution, and returning redirect targets without following them automatically.
+- c804141: `toModelOutput` can now return `{ type: "content", value }` with text and file parts, so a tool can send images (screenshots, rendered charts) to vision-capable models as actual pixels instead of descriptions. Build outputs with the new `toolOutput.text` / `toolOutput.json` / `toolOutput.content` helpers and parts with `toolOutputPart.text` / `toolOutputPart.file`, all from `eve/tools`; file payloads must be base64 strings.
+
 ## 0.27.8
 
 ### Patch Changes

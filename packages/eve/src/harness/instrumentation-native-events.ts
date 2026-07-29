@@ -11,6 +11,7 @@ export interface CreateInstrumentationHandleEventInput {
   readonly hooks?: InstrumentationHooks;
   readonly rootSessionId?: string;
   readonly sessionId: string;
+  readonly turnId?: string;
 }
 
 /** Publishes eve-native lifecycle transitions after durable event acceptance. */
@@ -22,7 +23,7 @@ export function createInstrumentationHandleEvent(
 
   const handleEvent = input.handleEvent;
   const hooks = input.hooks;
-  let activeTurnId: string | undefined;
+  let activeTurnId = input.turnId;
   return async (event, messages) => {
     await handleEvent(event, messages);
     const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);

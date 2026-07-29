@@ -1,23 +1,15 @@
 import { basename } from "node:path";
 
-interface DevelopmentTargetBase {
-  readonly serverUrl: string;
-  /** Local workspace root for app files and the fallback Vercel project link. */
-  readonly workspaceRoot: string;
-}
+import type {
+  DevelopmentTarget,
+  LocalDevelopmentTarget,
+  RemoteDevelopmentTarget,
+} from "#services/dev-client/target.js";
 
-/** A development TUI session backed by the local `eve dev` server. */
-export interface LocalDevelopmentTarget extends DevelopmentTargetBase {
-  readonly kind: "local";
-}
-
-/** A development TUI session connected to an existing remote server. */
-export interface RemoteDevelopmentTarget extends DevelopmentTargetBase {
-  readonly kind: "remote";
-}
+export type { LocalDevelopmentTarget, RemoteDevelopmentTarget };
 
 /** Local or remote server backing one development TUI session. */
-export type DevelopmentTuiTarget = LocalDevelopmentTarget | RemoteDevelopmentTarget;
+export type DevelopmentTuiTarget = DevelopmentTarget;
 
 /** Resolves the explicit name, remote host, or humanized local folder shown by the TUI. */
 export function resolveTuiTitle(input: {

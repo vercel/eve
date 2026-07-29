@@ -51,7 +51,10 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import { createInstrumentationHooks } from "#harness/instrumentation-lifecycle.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationContextRunner,
+} from "#harness/instrumentation-lifecycle.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -3224,6 +3227,65 @@ describe("createToolLoopHarness", () => {
     expect(eventTypes).not.toContain("session.failed");
   });
 
+  it("retries a model call after an undici body timeout", async () => {
+    vi.useFakeTimers();
+    const timeout = new TypeError("terminated", {
+      cause: Object.assign(new Error("Body Timeout Error"), {
+        code: "UND_ERR_BODY_TIMEOUT",
+      }),
+    });
+    const success = {
+      finishReason: "stop",
+      response: { messages: [{ content: "Recovered", role: "assistant" }] },
+      text: "Recovered",
+      toolCalls: [],
+      toolResults: [],
+    };
+    const modelCallMock = vi.fn();
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: ToolLoopAgent,
+      settings: MockAgentSettings,
+    ) {
+      const { onStepFinish, prepareStep } = settings;
+      this.generate = modelCallMock.mockImplementation(async (options: { messages: unknown[] }) => {
+        if (prepareStep) {
+          await prepareStep({
+            context: undefined,
+            messages: options.messages,
+            model: {},
+            stepNumber: 0,
+            steps: [],
+          });
+        }
+        if (modelCallMock.mock.calls.length === 1) {
+          throw timeout;
+        }
+        if (onStepFinish) {
+          void Promise.resolve().then(() => onStepFinish(success));
+        }
+        return createMockGenerateResult(success);
+      });
+      this.stream = vi.fn();
+      return this;
+    } as MockAgentConstructor);
+
+    try {
+      const runStep = createToolLoopHarness(createTestConfig());
+      const pending = runStep(createTestSession(), { message: "Hi" });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+
+      expect(modelCallMock).toHaveBeenCalledTimes(2);
+      expect(result.session.history).toEqual([
+        { content: "Hi", role: "user" },
+        { content: "Recovered", role: "assistant" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not start a model call when the turn signal is already aborted", async () => {
     const abortController = new AbortController();
     const cancellation = new TurnCancelledError();
@@ -3838,7 +3900,10 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        instrumentationHooks: createInstrumentationHooks([]),
+        instrumentation: {
+          hooks: createInstrumentationHooks([]),
+          runInContext: (_operation, execute) => execute(),
+        },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -8853,8 +8918,9 @@ describe("createToolLoopHarness", () => {
       const hooks = createInstrumentationHooks([
         { events: { "attempt.completed": attemptCompleted } },
       ]);
+      const runInContext: InstrumentationContextRunner = (_operation, execute) => execute();
       const config = createTestConfig("conversation", undefined, {
-        instrumentationHooks: hooks,
+        instrumentation: { hooks, runInContext },
       });
 
       const runStep = createToolLoopHarness(config);
@@ -8869,6 +8935,7 @@ describe("createToolLoopHarness", () => {
           turnId: "turn_0",
         }),
         hooks,
+        runInContext,
       );
       const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
@@ -8903,7 +8970,10 @@ describe("createToolLoopHarness", () => {
       const hooks = createInstrumentationHooks([]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
-          instrumentationHooks: hooks,
+          instrumentation: {
+            hooks,
+            runInContext: (_operation, execute) => execute(),
+          },
         }),
       );
 

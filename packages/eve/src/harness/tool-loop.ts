@@ -540,9 +540,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
       handleEvent: baseEmit,
-      hooks: config.instrumentationHooks,
+      hooks: config.instrumentation?.hooks,
       rootSessionId: parent?.rootSessionId,
       sessionId: session.sessionId,
+      turnId: activeTurnId(emissionState),
     });
 
     // Resolve deferred input, runtime actions, then HITL input; each stage
@@ -897,7 +898,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
-      const instrumentationHooks = config.instrumentationHooks;
+      const instrumentationHooks = config.instrumentation?.hooks;
       const instrumentationTurnId = activeTurnId(emissionState);
       const attemptScope: InstrumentationAttemptScope | undefined =
         instrumentationHooks === undefined
@@ -914,7 +915,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const bridgeIntegration =
         attemptScope === undefined || instrumentationHooks === undefined
           ? undefined
-          : createAiSdkHookBridge(attemptScope, instrumentationHooks);
+          : createAiSdkHookBridge(
+              attemptScope,
+              instrumentationHooks,
+              config.instrumentation?.runInContext,
+            );
 
       const hooks = buildStepHooks({
         cachePath,
@@ -1313,7 +1318,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // --- Step-side observability tags ---------------------------------------
     //
     // Tag the **turn workflow run** (the current `"use step"` is hosted by
-    // that workflow, so `experimental_setAttributes` writes to its
+    // that workflow, so `setAttributes` writes to its
     // attributes table) with the model id and per-turn cumulative token
     // counts. Per-turn totals are accumulated on `session.state` because
     // each tool-loop iteration is a fresh `"use step"` and the workflow

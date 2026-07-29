@@ -6,6 +6,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
@@ -81,12 +82,14 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.node.turnAgent.dynamicModel,
         );
   const tools = createNodeHarnessTools({ node: input.node });
-  return createToolLoopHarness({
+  const instrumentation = getInstrumentationRuntime();
+  const step = createToolLoopHarness({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
+    instrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
     dispatchDynamicModelEvent: dispatchModelEvent,
@@ -94,6 +97,14 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
   });
+  if (instrumentation === undefined) return step;
+  return async (session, stepInput) => {
+    try {
+      return await step(session, stepInput);
+    } finally {
+      await instrumentation.forceFlush();
+    }
+  };
 }
 
 /**

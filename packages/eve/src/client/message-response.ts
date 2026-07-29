@@ -1,10 +1,6 @@
 import type { StampedHandleMessageStreamEvent } from "#protocol/message.js";
 import { extractCompletedResult } from "#client/output-schema.js";
-import {
-  deriveResultStatus,
-  extractCompletedMessage,
-  extractInputRequests,
-} from "#client/session-utils.js";
+import { summarizeTurnEvents } from "#client/session-utils.js";
 import type { MessageResult } from "#client/types.js";
 
 /**
@@ -57,13 +53,14 @@ export class MessageResponse<
       events.push(event);
     }
 
+    const summary = summarizeTurnEvents(events);
     return {
       data: extractCompletedResult<TOutput>(events),
       events,
-      inputRequests: extractInputRequests(events),
-      message: extractCompletedMessage(events),
+      inputRequests: summary.inputRequests,
+      message: summary.message,
       sessionId: this.sessionId,
-      status: deriveResultStatus(events),
+      status: summary.status,
     };
   }
 

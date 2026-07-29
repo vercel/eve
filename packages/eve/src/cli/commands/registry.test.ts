@@ -9,15 +9,23 @@ import {
   type RegistryCommandLogger,
 } from "./registry.js";
 
-const { addRegistryItems, getRegistryItems, isEveProject, readFile, searchRegistries, writeFile } =
-  vi.hoisted(() => ({
-    addRegistryItems: vi.fn(),
-    getRegistryItems: vi.fn(),
-    isEveProject: vi.fn(),
-    readFile: vi.fn(),
-    searchRegistries: vi.fn(),
-    writeFile: vi.fn(),
-  }));
+const {
+  addRegistryItems,
+  getRegistryItems,
+  isEveProject,
+  readFile,
+  resolveInstalledPackageInfo,
+  searchRegistries,
+  writeFile,
+} = vi.hoisted(() => ({
+  addRegistryItems: vi.fn(),
+  getRegistryItems: vi.fn(),
+  isEveProject: vi.fn(),
+  readFile: vi.fn(),
+  resolveInstalledPackageInfo: vi.fn(() => ({ name: "eve", version: "0.27.8" })),
+  searchRegistries: vi.fn(),
+  writeFile: vi.fn(),
+}));
 
 vi.mock("#compiled/shadcn-registry/index.js", () => ({
   addRegistryItems,
@@ -26,6 +34,7 @@ vi.mock("#compiled/shadcn-registry/index.js", () => ({
 }));
 
 vi.mock("#setup/scaffold/index.js", () => ({ isEveProject }));
+vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
 vi.mock("node:fs/promises", () => ({ readFile, writeFile }));
 
 function createLogger(): RegistryCommandLogger & { errors: string[]; logs: string[] } {
@@ -79,15 +88,19 @@ describe("registry commands", () => {
   });
 
   it.each(["web", "slack"] as const)(
-    "routes registry metadata for %s through channel setup",
+    "installs the official %s item before running its declared setup",
     async (kind) => {
       const logger = createLogger();
-      const runChannelsAddCommand = vi.fn(async () => {});
+      const runSetupCommand = vi.fn(async () => {});
       getRegistryItems.mockResolvedValue([
         {
           name: `channel/${kind}`,
           type: "registry:item",
-          meta: { eve: { channel: kind } },
+          meta: {
+            eve: {
+              setup: { command: "eve", args: ["integration", "setup", kind] },
+            },
+          },
         },
       ]);
 
@@ -96,20 +109,25 @@ describe("registry commands", () => {
         "/project",
         `channel/${kind}`,
         { overwrite: true },
-        { loadChannelsAddCommand: async () => runChannelsAddCommand },
+        {
+          loadSetupCommandRunner: async () => runSetupCommand,
+        },
       );
 
-      expect(runChannelsAddCommand).toHaveBeenCalledWith(logger, "/project", {
-        kind,
-        options: {},
+      expect(addRegistryItems).toHaveBeenCalledOnce();
+      expect(addRegistryItems.mock.invocationCallOrder[0]).toBeLessThan(
+        runSetupCommand.mock.invocationCallOrder[0]!,
+      );
+      expect(runSetupCommand).toHaveBeenCalledWith("/project", {
+        command: "eve",
+        args: ["integration", "setup", kind],
       });
-      expect(addRegistryItems).not.toHaveBeenCalled();
     },
   );
 
-  it("does not infer channel setup from the item address", async () => {
+  it("does not infer setup from the item address", async () => {
     const logger = createLogger();
-    const runChannelsAddCommand = vi.fn(async () => {});
+    const runSetupCommand = vi.fn(async () => {});
     getRegistryItems.mockResolvedValue([{ name: "channel/web", type: "registry:item" }]);
 
     await runAddCommand(
@@ -118,28 +136,84 @@ describe("registry commands", () => {
       "channel/web",
       {},
       {
-        loadChannelsAddCommand: async () => runChannelsAddCommand,
+        loadSetupCommandRunner: async () => runSetupCommand,
       },
     );
 
-    expect(runChannelsAddCommand).not.toHaveBeenCalled();
+    expect(runSetupCommand).not.toHaveBeenCalled();
     expect(addRegistryItems).toHaveBeenCalledOnce();
   });
 
-  it("rejects unknown channel metadata", async () => {
+  it("does not execute setup metadata from a URL item", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => {});
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web",
+        type: "registry:item",
+        meta: {
+          eve: {
+            setup: { command: "eve", args: ["integration", "setup", "web"] },
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "https://example.com/channel/web.json",
+      {},
+      {
+        loadSetupCommandRunner: async () => runSetupCommand,
+      },
+    );
+
+    expect(runSetupCommand).not.toHaveBeenCalled();
+    expect(addRegistryItems).toHaveBeenCalledOnce();
+  });
+
+  it("rejects invalid official setup metadata before installation", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([
       {
         name: "channel/unknown",
         type: "registry:item",
-        meta: { eve: { channel: "unknown" } },
+        meta: {
+          eve: {
+            setup: { command: "sh", args: ["-c", "echo nope"] },
+          },
+        },
       },
     ]);
 
     await runAddCommand(logger, "/project", "channel/unknown", {});
 
     expect(logger.errors).toHaveLength(1);
-    expect(logger.errors[0]).toContain("Unknown eve channel kind in registry metadata: unknown");
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("rejects an item that requires a newer eve before installation", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/photon",
+        type: "registry:item",
+        meta: {
+          eve: {
+            requires: ">=0.30.0",
+            setup: { command: "eve", args: ["integration", "setup", "web"] },
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(logger, "/project", "channel/photon", {});
+
+    expect(logger.errors).toEqual([
+      "This registry item requires eve >=0.30.0, but this project is using eve 0.27.8. Upgrade eve and run the command again.",
+    ]);
     expect(addRegistryItems).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
@@ -185,10 +259,39 @@ describe("registry commands", () => {
     expect(logger.logs).toEqual(["No registry items found."]);
   });
 
+  it("preserves explicit registry URLs in list output", async () => {
+    const logger = createLogger();
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "https://example.com/r/registry.json",
+          name: "search",
+          addCommandArgument: "https://example.com/r/search.json",
+          description: "External search tools",
+        },
+      ],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    });
+
+    await runRegistryListCommand(logger, "/project", "https://example.com/r/registry.json");
+
+    expect(logger.logs).toEqual([
+      "Found 1 item in 1 registry",
+      "",
+      "https://example.com/r/search.json — External search tools",
+    ]);
+  });
+
   it("searches the official catalog and configured registries", async () => {
     const logger = createLogger();
     searchRegistries.mockResolvedValue({
       items: [
+        {
+          registry: "https://eve.dev/r/registry.json",
+          name: "extension/agent-browser",
+          addCommandArgument: "https://eve.dev/r/extension/agent-browser.json",
+          description: "Browser automation",
+        },
         {
           registry: "@acme",
           name: "browser",
@@ -196,7 +299,7 @@ describe("registry commands", () => {
           description: "Browser tools",
         },
       ],
-      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+      pagination: { total: 2, offset: 0, limit: 2, hasMore: false },
     });
 
     await runRegistrySearchCommand(logger, "/project", "browser");
@@ -208,7 +311,12 @@ describe("registry commands", () => {
       continueOnError: true,
       query: "browser",
     });
-    expect(logger.logs).toEqual(["@acme/browser — Browser tools"]);
+    expect(logger.logs).toEqual([
+      'Found 2 items matching "browser" in 2 registries',
+      "",
+      "extension/agent-browser",
+      "@acme/browser",
+    ]);
   });
 
   it("reports total registry failure without describing it as an empty result", async () => {

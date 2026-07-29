@@ -100,11 +100,16 @@ providers.
 
 The local provider:
 
-- uses its own tracer provider;
+- is registered privately by eve while using the process OTel runtime so nested user spans share
+  agent context;
 - creates one trace per eve session, independently from Workflow context;
-- never installs a global tracer provider or context manager;
+- explicitly roots session context instead of inheriting the ambient Workflow span;
 - never captures Workflow spans;
 - persists traces as OTLP/JSON for later inspection.
+
+Immutable OTLP/JSON segments are the canonical local store. A future DuckDB or dashboard index is a
+rebuildable consumer of that spool, not a second source of trace identity or Workflow continuation
+state.
 
 Authored instrumentation and local capture may observe the same attempt concurrently without
 executing the model or tool more than once.
@@ -192,7 +197,7 @@ local-tracing work.
    convention and proves the trace tree in memory. Production remains unchanged.
 4. **Persistence.** Write session traces as OTLP/JSON, restore provider-owned session context across
    dev worker restarts, and apply payload capture policy. No browser UI.
-5. **Inspection.** Add minimal `eve trace ls` and `eve trace show` commands. A graphical viewer is a
+5. **Inspection.** Add minimal `eve trace ls` and `eve trace [trace]` commands. A graphical viewer is a
    separate design after the trace model stabilizes.
 6. **Public providers.** Promote the proven lifecycle contract into public hooks and migrate OTel,
    Vercel, Braintrust, and custom instrumentation onto it.

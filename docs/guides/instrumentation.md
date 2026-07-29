@@ -7,15 +7,51 @@ description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the 
 
 If you intend to export telemetry, review the exporter destination, data categories, and required legal approvals before enabling telemetry.
 
+## Zero-config local traces
+
+When no authored `instrumentation.ts` exists, `eve dev` records agent, AI SDK, and user-created OpenTelemetry spans under `.eve/traces/v1`. Each session has one trace, rooted independently from Workflow telemetry, with turns, model steps, and tool actions represented explicitly. Spans created by application code while a model or tool is executing inherit that active agent context.
+
+The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits, subject to the [retention policy](#local-trace-retention) below. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
+
+Use `eve trace ls` to list captured traces and `eve trace <trace>` to inspect a session's span tree.
+
+The local writer is an internal development default, not a second provider layered over authored instrumentation. When `instrumentation.ts` exists, its setup retains control and the zero-config writer is not installed.
+
+### Local trace retention
+
+The store is bounded, so it cannot grow without limit on a development machine. eve sweeps it when a session finishes and once when the dev server starts. A trace is kept when **any** of these holds:
+
+- its session is open in the running dev worker;
+- it received a span in the last five minutes;
+- it is one of the newest `EVE_TRACES_RETAIN_COUNT` traces;
+- it last received a span within `EVE_TRACES_MAX_AGE_MS`.
+
+Whatever survives is then evicted oldest-first while the store exceeds `EVE_TRACES_MAX_TOTAL_BYTES`. The keep-newest floor always wins: eve will exceed the size budget rather than drop below it, because a trace records something that happened and cannot be regenerated.
+
+Open sessions are tracked per dev worker, so a session waiting across a restart, or a trace a draining worker is still writing, is not covered by the first rule. The five-minute write-recency rule is what protects those, and it applies even when you set `EVE_TRACES_MAX_AGE_MS=0`.
+
+| Variable                     | Default              | Effect                                        |
+| ---------------------------- | -------------------- | --------------------------------------------- |
+| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping |
+| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted        |
+| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store               |
+| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size  |
+
+Set these in `.env.local`, which `eve dev` loads automatically. Each bound accepts `off` to disable it individually — note that `EVE_TRACES_RETAIN_COUNT=off` removes the keep-newest guarantee rather than retaining everything.
+
+`EVE_TRACES=off` disables writing _and_ sweeping, so an existing store is left exactly as it is; eve will not reclaim it later.
+
+A sweep that deletes something records one line naming the count, the bytes reclaimed, and which bound triggered it. Read it with [`eve logs`](../reference/cli#eve-logs).
+
 ## Three observability surfaces
 
 eve observes an agent through three distinct surfaces. They do not all live in this file, and they write to different places:
 
-| Surface                          | Configured in `instrumentation.ts`?                         | What it is                                                                                                                                                    |
-| -------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Workflow run tags** (`$eve.*`) | No (automatic)                                              | Framework-owned attributes on each Vercel Workflow run. Let dashboards stitch session, turn, and subagent runs into a tree and surface model and token usage. |
-| **OpenTelemetry export**         | Yes: `setup`, `recordInputs`, `recordOutputs`, `functionId` | Where AI SDK spans are exported and what they record.                                                                                                         |
-| **Runtime context events**       | Yes: `events["step.started"]`                               | Per-model-call values written into the AI SDK's runtime context, which the AI SDK carries onto its spans.                                                     |
+| Surface                          | Configured in `instrumentation.ts`?                      | What it is                                                                                                                                                    |
+| -------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Workflow run tags** (`$eve.*`) | No (automatic)                                           | Framework-owned attributes on each Vercel Workflow run. Let dashboards stitch session, turn, and subagent runs into a tree and surface model and token usage. |
+| **OpenTelemetry export**         | Local: automatic. Authored: `setup` and capture settings | Where agent and AI spans are exported and what they record.                                                                                                   |
+| **Runtime context events**       | Yes: `events["step.started"]`                            | Per-model-call values written into the AI SDK's runtime context, which the AI SDK carries onto its spans.                                                     |
 
 The two configurable surfaces send AI SDK spans to your OpenTelemetry backend. Workflow run tags are a separate system, queryable in the Workflow dashboard rather than on your OTel spans. The sections below cover what you configure here; [Workflow run tags](#workflow-run-tags) documents what eve emits on its own.
 
@@ -98,9 +134,9 @@ A channel exposes its identity through `kind`. For authored channels it is `chan
 
 Channel metadata is channel-owned. Built-in channels expose only the fields they choose to make observable; Slack, for example, projects `channelId`, `teamId`, `threadTs`, and `triggeringUserId` from its durable channel state. User-authored channels expose their own projection by returning `metadata(state)` from `defineChannel`. Runtime instrumentation never falls back to raw channel state.
 
-## Trace hierarchy
+## Authored trace hierarchy
 
-When telemetry is enabled, each turn produces a trace like:
+The existing authored `instrumentation.ts` path remains separate from zero-config local traces. When authored telemetry is enabled, each turn currently produces a trace like:
 
 ```text
 ai.eve.turn  {eve.session.id}
