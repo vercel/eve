@@ -48,15 +48,10 @@ export default defineEval({
     const terminal = await t.target
       .watchTurn(expiredSessionId, { startIndex: activeTurn.events.length })
       .result();
-    await t.require(terminal.status, equals("failed"));
-    terminal.event("session.failed", {
-      data: {
-        code: "SessionTimeoutError",
-        message: "Session timed out after 750ms.",
-        sessionId: expiredSessionId,
-      },
-    });
+    await t.require(terminal.status, equals("completed"));
+    terminal.event("session.completed");
     terminal.notEvent("turn.failed");
+    terminal.notEvent("session.failed");
 
     let owner: OwnerResponse = { sessionId: expiredSessionId };
     for (let attempt = 0; attempt < 50 && owner.sessionId !== null; attempt += 1) {
