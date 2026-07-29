@@ -50,14 +50,14 @@ const IntegrationsPage = async ({ searchParams }: PageProps<"/[lang]/integration
         <p className="mt-2 text-gray-800 text-sm">
           <a
             className="font-medium text-gray-1000 underline underline-offset-4"
-            href="/install-integrations#contribute-an-official-integration"
+            href="/docs/install-integrations#contribute-an-official-integration"
           >
             Contribute to the official registry
           </a>{" "}
           or{" "}
           <a
             className="font-medium text-gray-1000 underline underline-offset-4"
-            href="/install-integrations#host-your-own-registry"
+            href="/docs/install-integrations#host-your-own-registry"
           >
             host a third-party registry
           </a>
