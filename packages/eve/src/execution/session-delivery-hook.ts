@@ -22,6 +22,7 @@ interface SessionDeliveryHookState {
 /** Reads and rekeys the public delivery hook for one session driver. */
 export interface SessionDeliveryHook {
   consumeNext(): void;
+  consumeSessionTimeout(): boolean;
   next(): Promise<IteratorResult<HookPayload>>;
   rekey(token: string): Promise<void>;
 }
@@ -48,6 +49,7 @@ export function createSessionDeliveryHook(
   let nextOrder = 0;
   let offered: Promise<IteratorResult<HookPayload>> | null = null;
   let offeredRead: HookRead | undefined;
+  let sessionTimedOut = false;
   let wake: (() => void) | undefined;
 
   const enqueue = (read: HookRead): void => {
@@ -115,6 +117,8 @@ export function createSessionDeliveryHook(
         read.state.closed = true;
       } else if (read.result.value.kind === "deliver") {
         bufferedDeliveries.push(read.result.value);
+      } else if (read.result.value.kind === "session-timeout") {
+        sessionTimedOut = true;
       }
 
       arm(read.state);
@@ -128,11 +132,20 @@ export function createSessionDeliveryHook(
         throw new Error("Cannot consume a public delivery before it resolves.");
       }
 
+      if (!offeredRead.result.done && offeredRead.result.value.kind === "session-timeout") {
+        sessionTimedOut = true;
+      }
       offeredRead.state.pending = false;
       offeredRead.state.resolved = undefined;
       if (offeredRead.result.done) offeredRead.state.closed = true;
       offeredRead = undefined;
       offered = null;
+    },
+
+    consumeSessionTimeout(): boolean {
+      const timedOut = sessionTimedOut;
+      sessionTimedOut = false;
+      return timedOut;
     },
 
     async dispose(): Promise<void> {

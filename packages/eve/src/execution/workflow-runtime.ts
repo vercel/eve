@@ -55,6 +55,7 @@ import {
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
+const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
@@ -73,6 +74,7 @@ export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
 export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
+  SESSION_TIMEOUT_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -102,6 +104,11 @@ export const workflowEntryReference = {
  */
 export const turnWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TURN_WORKFLOW_NAME}`,
+};
+
+/** Stable workflow reference for session deadline timers. */
+export const sessionTimeoutWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_TIMEOUT_WORKFLOW_NAME}`,
 };
 
 /**
