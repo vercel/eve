@@ -1,10 +1,4 @@
-export type PromptCommandExtensionName =
-  | "model"
-  | "connect"
-  | "add"
-  | "deploy"
-  | "vc:install"
-  | "vc:login";
+export type PromptCommandExtensionName = "model" | "add" | "deploy" | "vc:install" | "vc:login";
 
 type PromptCommandTarget = "local" | "remote";
 
@@ -96,14 +90,6 @@ const PROMPT_COMMAND_DEFINITIONS = [
     takesArgument: true,
     build: (argument) => ({ type: "loglevel", argument }),
     targets: ["local", "remote"],
-  },
-  {
-    name: "connect",
-    aliases: [],
-    description: "Add an MCP server through Vercel Connect",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "connect", argument: "" }),
-    targets: ["local"],
   },
   {
     name: "add",

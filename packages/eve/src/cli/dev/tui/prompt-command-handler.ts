@@ -116,7 +116,6 @@ export function createPromptCommandHandler(
           command: command.name,
           appRoot: target.workspaceRoot,
           renderer: flow,
-          disabledConnectionReasons: context.disabledConnectionReasons,
           withExclusiveTerminal: context.withExclusiveTerminal,
         };
         if (context.initialModelStep !== undefined) {
