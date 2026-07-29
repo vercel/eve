@@ -75,6 +75,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default ""
    */
   readonly host?: string;
+  /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly MessageStreamEvent[];
   readonly initialSession?: SessionState;
   /**

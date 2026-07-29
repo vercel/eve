@@ -2,11 +2,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createUlid, createUlidFactory, isUlid, ULID_LENGTH } from "#shared/ulid.js";
 
-const CROCKFORD = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+const CROCKFORD = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+const TIME_MAX = 2 ** 48 - 1;
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+
+function stubRandomBytes(bytes: readonly number[]): void {
+  vi.stubGlobal("crypto", {
+    getRandomValues(target: Uint8Array<ArrayBuffer>) {
+      target.set(bytes);
+      return target;
+    },
+  });
+}
 
 describe("createUlid", () => {
   it("produces a 26-character Crockford base32 value", () => {
@@ -24,6 +36,16 @@ describe("createUlid", () => {
 });
 
 describe("createUlidFactory", () => {
+  it("matches the ULID spec's canonical full encoding", () => {
+    // The spec's 01ARZ3NDEKTSV4RRFFQ69G5FAV example decodes to this
+    // timestamp and 80-bit random value.
+    stubRandomBytes([0xd6, 0x76, 0x4c, 0x61, 0xef, 0xb9, 0x93, 0x02, 0xbd, 0x5b]);
+    vi.useFakeTimers();
+    vi.setSystemTime(1_469_922_850_259);
+
+    expect(createUlidFactory()()).toBe("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  });
+
   it("encodes the timestamp exactly as the ULID spec does", () => {
     // Golden vectors from the reference `ulid` package's `encodeTime`, so an
     // encoder change cannot silently produce ids other tooling misreads.
@@ -38,6 +60,36 @@ describe("createUlidFactory", () => {
 
     vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     expect(mint().slice(0, 10)).toBe("01Q3DCBD00");
+  });
+
+  it("accepts the largest 48-bit timestamp and rejects overflow", () => {
+    stubRandomBytes(Array.from({ length: 10 }, () => 0));
+    vi.useFakeTimers();
+
+    vi.setSystemTime(TIME_MAX);
+    expect(createUlidFactory()()).toBe("7ZZZZZZZZZ0000000000000000");
+
+    vi.setSystemTime(TIME_MAX + 1);
+    expect(() => createUlidFactory()()).toThrow(/timestamp must be an integer/);
+  });
+
+  it("throws when the random component overflows at the maximum timestamp", () => {
+    stubRandomBytes(Array.from({ length: 10 }, () => 0xff));
+    vi.useFakeTimers();
+    vi.setSystemTime(TIME_MAX);
+    const mint = createUlidFactory();
+
+    expect(mint()).toBe("7ZZZZZZZZZZZZZZZZZZZZZZZZZ");
+    expect(() => mint()).toThrow(/random component overflowed/);
+    expect(() => mint()).toThrow(/random component overflowed/);
+  });
+
+  it("throws when Web Crypto is unavailable", () => {
+    vi.stubGlobal("crypto", undefined);
+
+    expect(() => createUlidFactory()()).toThrow(
+      "Cannot mint a ULID: globalThis.crypto.getRandomValues is unavailable.",
+    );
   });
 
   it("sorts in emission order when many ids share one millisecond", () => {
@@ -100,6 +152,7 @@ describe("isUlid", () => {
 
     expect(isUlid(ulid.slice(1))).toBe(false);
     expect(isUlid(`${ulid}0`)).toBe(false);
+    expect(isUlid(`8${"0".repeat(25)}`)).toBe(false);
     // U is excluded from the Crockford alphabet.
     expect(isUlid(`U${ulid.slice(1)}`)).toBe(false);
   });

@@ -62,11 +62,14 @@ export interface EveAgentStoreCallbacks<TData> {
  * server confirms them. `host` defaults to `""`. `initialEvents` and
  * `initialSession` seed prior state on construction. Passing `session` makes
  * `reset()` reuse that external session rather than create a new one.
+ * `initialEvents` must be an ordered prefix of the same session's stream; its
+ * endpoint may overlap the cursor because repeated ids are applied once.
  */
 export interface EveAgentStoreInit<TData> {
   readonly auth?: ClientAuth;
   readonly headers?: HeadersValue;
   readonly host?: string;
+  /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly MessageStreamEvent[];
   readonly initialSession?: SessionState;
   readonly optimistic?: boolean;

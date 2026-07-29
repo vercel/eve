@@ -50,6 +50,19 @@ function streamResponse(events: readonly MessageStreamEvent[]): Response {
   );
 }
 
+function preV20MessageCompletedEvent(): MessageStreamEvent {
+  return {
+    ...createMessageCompletedEvent({
+      finishReason: "stop",
+      message: "Legacy response.",
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "turn_legacy",
+    }),
+    meta: { at: "2026-07-27T18:04:11.912Z" },
+  } as MessageStreamEvent;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -86,6 +99,28 @@ describe("EveAgentStore stream overlap", () => {
     expect(assistant[0]?.parts).toEqual([
       { type: "step-start" },
       { state: "done", stepIndex: 0, text: "Hi there.", type: "text" },
+    ]);
+  });
+
+  it("applies a pre-v20 event whose envelope has no id", async () => {
+    const legacy = preV20MessageCompletedEvent();
+    const boundary = stampTestEvents([createSessionWaitingEvent("http:session_1")])[0]!;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse([legacy, boundary]));
+
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const seen: MessageStreamEvent[] = [];
+    store.setCallbacks({ onEvent: (event) => seen.push(event) });
+
+    await store.send({ message: "Hello" });
+
+    expect(seen).toEqual([legacy, boundary]);
+    expect(store.snapshot.events).toEqual([legacy, boundary]);
+    const assistant = store.snapshot.data.messages.find((message) => message.role === "assistant");
+    expect(assistant?.parts).toEqual([
+      { type: "step-start" },
+      { state: "done", stepIndex: 0, text: "Legacy response.", type: "text" },
     ]);
   });
 

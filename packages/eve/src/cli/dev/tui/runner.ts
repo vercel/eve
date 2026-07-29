@@ -1999,8 +1999,8 @@ async function* eveEventsToTUIStream(
         break;
 
       case "subagent.called": {
-        // Run creation (idempotent for SSE-resume re-entries) lives in the
-        // pump's begin().
+        // Re-delivery within this translator was filtered above; run creation
+        // and re-entry from a later translator live in the pump's begin().
         onSubagentCalled?.(event as SubagentCalledStreamEvent);
         break;
       }

@@ -90,7 +90,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default ""
    */
   readonly host?: string;
-  /** Seed events for resuming a prior conversation. */
+  /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly MessageStreamEvent[];
   /** Seed session identity and stream cursor for resuming a prior conversation. */
   readonly initialSession?: SessionState;

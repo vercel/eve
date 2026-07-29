@@ -1,5 +1,5 @@
 /**
- * Spec-conformant ULID generation, vendored rather than taken from npm: the
+ * ULID-compatible generation, vendored rather than taken from npm: the
  * `ulid` package's Node build hard-imports `node:crypto`, and this module is
  * bundled into browser clients, the Nitro server, and the workflow step
  * sandbox. `ulid.test.ts` pins the encoding against the reference
@@ -9,6 +9,7 @@
 // Crockford base32: omits I, L, O, and U, and sorts in raw-bit order.
 const ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const TIME_CHARS = 10;
+const TIME_MAX = 2 ** 48 - 1;
 const RANDOM_BYTES = 10;
 const RANDOM_CHARS = 16;
 
@@ -32,12 +33,20 @@ export function createUlidFactory(): UlidFactory {
 
   return function createUlidFromFactory(): string {
     const now = Date.now();
+    if (!Number.isInteger(now) || now < 0 || now > TIME_MAX) {
+      throw new Error(`Cannot mint a ULID: timestamp must be an integer from 0 to ${TIME_MAX}.`);
+    }
 
     if (now > lastTimeMs) {
       lastTimeMs = now;
       randomFill(lastRandom);
     } else if (!incrementRandom(lastRandom)) {
       // 2^80 ids in one millisecond: advance the logical clock rather than block.
+      if (lastTimeMs === TIME_MAX) {
+        throw new Error(
+          "Cannot mint a ULID: random component overflowed at the maximum timestamp.",
+        );
+      }
       lastTimeMs += 1;
       randomFill(lastRandom);
     }
@@ -54,7 +63,8 @@ export function createUlidFactory(): UlidFactory {
  * holds within one process only — separate processes have independent clocks
  * and random tails — so a ULID is not a lossless pagination cursor.
  *
- * Throws when Web Crypto is unavailable rather than weakening the randomness.
+ * Throws when the clock is outside the 48-bit timestamp range or Web Crypto
+ * is unavailable rather than weakening the randomness.
  */
 export const createUlid: UlidFactory = createUlidFactory();
 
@@ -66,6 +76,7 @@ export const createUlid: UlidFactory = createUlidFactory();
  */
 export function isUlid(value: string): boolean {
   if (value.length !== ULID_LENGTH) return false;
+  if (ENCODING.indexOf(value[0] ?? "") > 7) return false;
   for (const character of value) {
     if (!ENCODING.includes(character)) return false;
   }
@@ -115,9 +126,9 @@ function incrementRandom(bytes: Uint8Array): boolean {
     const byte = bytes[index] ?? 0;
     if (byte < 0xff) {
       bytes[index] = byte + 1;
+      bytes.fill(0, index + 1);
       return true;
     }
-    bytes[index] = 0;
   }
   return false;
 }

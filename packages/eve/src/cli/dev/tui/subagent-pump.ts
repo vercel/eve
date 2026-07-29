@@ -140,8 +140,8 @@ export class SubagentPump {
    * placeholder — subagent dispatches never upgrade one, since their
    * actions are not tool-call kind). Without this the placeholder is
    * swept at the step boundary and nothing shows until the child's first
-   * content arrives. Idempotent for SSE-resume re-entries, which only
-   * refresh the name.
+   * content arrives. A later parent-stream translator may replay the call;
+   * re-entry only refreshes the name.
    */
   begin(called: SubagentCalledStreamEvent): void {
     const callId = called.data.callId;
