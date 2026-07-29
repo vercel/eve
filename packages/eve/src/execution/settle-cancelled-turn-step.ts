@@ -21,6 +21,7 @@ import {
 } from "#harness/emission.js";
 import {
   clearAllProxyInputRequests,
+  getProxyInputRequests,
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
@@ -71,8 +72,14 @@ export async function settleCancelledTurnStep(input: {
   // A descendant HITL wait already streamed this turn's waiting boundary
   // (the proxy epilogue clears the turn id); re-emitting would fabricate
   // a turn id and duplicate the boundary.
+  const proxyRequests = getProxyInputRequests(durableSession.state);
+  const stoppedAtDescendantLimit = [...proxyRequests.values()].some(
+    (request) => request.kind === "session-limit",
+  );
   const alreadyEpilogued =
-    isHarnessBetweenTurns(session) && hasProxyInputRequests(durableSession.state);
+    isHarnessBetweenTurns(session) &&
+    hasProxyInputRequests(durableSession.state) &&
+    !stoppedAtDescendantLimit;
 
   if (!alreadyEpilogued) {
     const writer = input.parentWritable.getWriter();

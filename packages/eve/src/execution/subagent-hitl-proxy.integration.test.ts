@@ -238,7 +238,15 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     expect((afterEmitAdapter.state as SlackishState | undefined)?.pendingRequests).toEqual([
       approvalRequest,
     ]);
-    expect(entries).toEqual([["req-approve-1", "subagent:parent:call-1"]]);
+    expect(entries).toEqual([
+      [
+        "req-approve-1",
+        {
+          childContinuationToken: "subagent:parent:call-1",
+          kind: "tool-approval",
+        },
+      ],
+    ]);
 
     // The parent is in conversation mode, so the helper follows the
     // proxied `input.requested` with a `turn.completed` +

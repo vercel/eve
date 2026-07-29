@@ -19,6 +19,7 @@ import {
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
@@ -336,14 +337,32 @@ async function runDriverLoop(input: {
         return { kind: "result", result: { output: "" } };
       }
 
-      const remainder = await routeDeliverToChildren({
+      const routed = await routeDeliverToChildren({
         auth: nextDeliver.auth,
         parentWritable: input.driverWritable,
         payloads: nextDeliver.payloads,
         sessionState: action.sessionState,
       });
 
-      if (remainder === undefined) {
+      if (routed.kind === "cancel-turn") {
+        await cancelDescendantTurnsStep({
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        const settled = await settleCancelledTurnStep({
+          parentWritable: input.driverWritable,
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        action = {
+          ...action,
+          serializedContext: settled.serializedContext,
+          sessionState: settled.sessionState,
+        };
+        continue;
+      }
+
+      if (routed.remainder === undefined) {
         // Fully routed to a descendant; parent has no turn to run.
         continue;
       }
@@ -352,7 +371,7 @@ async function runDriverLoop(input: {
         delivery: {
           auth: nextDeliver.auth,
           kind: "deliver",
-          payloads: [remainder],
+          payloads: [routed.remainder],
           requestId: nextDeliver.requestId,
         },
         serializedContext: action.serializedContext,

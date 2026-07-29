@@ -51,7 +51,10 @@ vi.mock("./create-session-step.js", () => ({
 }));
 
 vi.mock("./route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => payloads[0]),
+  routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => ({
+    kind: "continue",
+    remainder: payloads[0],
+  })),
 }));
 
 vi.mock("./delegated-parent-notification.js", () => ({

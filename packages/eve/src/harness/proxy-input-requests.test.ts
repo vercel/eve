@@ -27,64 +27,76 @@ describe("upsertProxyInputRequests", () => {
   it("records a fresh batch of proxy entries", () => {
     const session = createSession();
     const next = upsertProxyInputRequests({
-      entries: [["req-1", "child-a"]],
+      entries: [["req-1", { childContinuationToken: "child-a", kind: "question" }]],
       forChildContinuationToken: "child-a",
       session,
     });
 
     expect(hasProxyInputRequests(next.state)).toBe(true);
-    expect(getProxyInputRequests(next.state).get("req-1")).toBe("child-a");
+    expect(getProxyInputRequests(next.state).get("req-1")).toEqual({
+      childContinuationToken: "child-a",
+      kind: "question",
+    });
   });
 
   it("replaces prior entries for the same child continuation token", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-1", "child-a"]],
+      entries: [["req-1", { childContinuationToken: "child-a", kind: "question" }]],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
     session = upsertProxyInputRequests({
-      entries: [["req-2", "child-a"]],
+      entries: [["req-2", { childContinuationToken: "child-a", kind: "question" }]],
       forChildContinuationToken: "child-a",
       session,
     });
 
     const entries = getProxyInputRequests(session.state);
     expect(entries.size).toBe(1);
-    expect(entries.get("req-2")).toBe("child-a");
+    expect(entries.get("req-2")).toEqual({
+      childContinuationToken: "child-a",
+      kind: "question",
+    });
     expect(entries.has("req-1")).toBe(false);
   });
 
   it("keeps entries from other children when upserting", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-a", "child-a"]],
+      entries: [["req-a", { childContinuationToken: "child-a", kind: "question" }]],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
     session = upsertProxyInputRequests({
-      entries: [["req-b", "child-b"]],
+      entries: [["req-b", { childContinuationToken: "child-b", kind: "tool-approval" }]],
       forChildContinuationToken: "child-b",
       session,
     });
 
     const entries = getProxyInputRequests(session.state);
     expect(entries.size).toBe(2);
-    expect(entries.get("req-a")).toBe("child-a");
-    expect(entries.get("req-b")).toBe("child-b");
+    expect(entries.get("req-a")).toEqual({
+      childContinuationToken: "child-a",
+      kind: "question",
+    });
+    expect(entries.get("req-b")).toEqual({
+      childContinuationToken: "child-b",
+      kind: "tool-approval",
+    });
   });
 });
 
 describe("clearProxyInputRequestsForChild", () => {
   it("removes only the target child's entries", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-a", "child-a"]],
+      entries: [["req-a", { childContinuationToken: "child-a", kind: "question" }]],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
     session = upsertProxyInputRequests({
-      entries: [["req-b", "child-b"]],
+      entries: [["req-b", { childContinuationToken: "child-b", kind: "tool-approval" }]],
       forChildContinuationToken: "child-b",
       session,
     });
@@ -93,7 +105,10 @@ describe("clearProxyInputRequestsForChild", () => {
     const entries = getProxyInputRequests(session.state);
 
     expect(entries.size).toBe(1);
-    expect(entries.get("req-b")).toBe("child-b");
+    expect(entries.get("req-b")).toEqual({
+      childContinuationToken: "child-b",
+      kind: "tool-approval",
+    });
   });
 
   it("returns the same session when there is nothing to clear", () => {
@@ -111,11 +126,17 @@ describe("getProxyInputRequests type safety", () => {
 
   it("ignores malformed values in the state map", () => {
     const session = createSession({
-      "eve.runtime.proxyInputRequests": { "req-1": 42, "req-2": "child-b" },
+      "eve.runtime.proxyInputRequests": {
+        "req-1": 42,
+        "req-2": { childContinuationToken: "child-b", kind: "question" },
+      },
     });
     const entries = getProxyInputRequests(session.state);
     expect(entries.size).toBe(1);
-    expect(entries.get("req-2")).toBe("child-b");
+    expect(entries.get("req-2")).toEqual({
+      childContinuationToken: "child-b",
+      kind: "question",
+    });
   });
 
   it("ignores a legacy array-shaped value", () => {

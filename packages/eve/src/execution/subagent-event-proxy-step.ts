@@ -19,6 +19,7 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession } from "#execution/session.js";
 import { emitProxiedInputRequest } from "#execution/subagent-hitl-proxy.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import type { ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
@@ -28,10 +29,7 @@ type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
-type ProxyInputRequestEntries = readonly (readonly [
-  requestId: string,
-  childContinuationToken: string,
-])[];
+type ProxyInputRequestEntries = readonly (readonly [requestId: string, route: ProxyInputRequest])[];
 
 interface ProxySubagentEventResult {
   readonly serializedContext: Record<string, unknown>;
