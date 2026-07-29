@@ -51,7 +51,7 @@ const IntegrationsPage = async ({ searchParams }: PageProps<"/[lang]/integration
           Help grow the official registry. Read the{" "}
           <a
             className="font-medium text-gray-1000 underline underline-offset-4"
-            href="https://github.com/vercel/eve/blob/main/CONTRIBUTING.md#adding-an-integration-to-the-registry"
+            href="/install-integrations#contribute-an-official-integration"
           >
             integration contribution guide
           </a>
