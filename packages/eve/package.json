@@ -303,6 +303,7 @@
     "undici": "8.9.0"
   },
   "devDependencies": {
+    "@agentclientprotocol/sdk": "1.3.0",
     "@ai-sdk/anthropic": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/mcp": "catalog:",

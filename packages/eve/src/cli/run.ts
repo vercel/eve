@@ -9,6 +9,7 @@ import { registerIntegrationCommands } from "#cli/commands/register-integration-
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
+import { registerAcpCommand, type RunAcpServer } from "#cli/acp/command.js";
 import {
   FORCED_EXIT_BACKSTOP_MS,
   installShutdownSignal,
@@ -16,11 +17,8 @@ import {
   waitForShutdownSignal,
 } from "#cli/shutdown.js";
 import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
-import {
-  parseDevelopmentHeaderOption,
-  resolveDevelopmentUrlTarget,
-  type DevelopmentRequestHeaders,
-} from "#cli/dev/url-target.js";
+import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
+import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import {
   registerRuntimeInvokeCommand,
@@ -50,28 +48,6 @@ interface CliLogger {
   log(message: string): void;
 }
 
-interface DevelopmentCliOptions {
-  assistantResponseStats?: AssistantResponseStatsMode;
-  connectionAuth?: TerminalPartDisplayMode;
-  contextSize?: number;
-  header?: DevelopmentRequestHeaders;
-  host?: string;
-  input?: string;
-  logs?: LogDisplayMode;
-  name?: string;
-  port?: number;
-  reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
-  tools?: TerminalPartDisplayMode;
-  ui?: boolean;
-  url?: string;
-}
-
-interface ProductionCliOptions {
-  host?: string;
-  port?: number;
-}
-
 interface CliRuntimeDependencies {
   isCodingAgentLaunch(): Promise<boolean>;
   isActiveDevelopmentServerForApp(input: {
@@ -79,6 +55,7 @@ interface CliRuntimeDependencies {
     readonly serverUrl: string;
   }): Promise<boolean>;
   buildHost: BuildHost;
+  runAcpServer: RunAcpServer;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
@@ -369,6 +346,14 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     });
 
   registerRuntimeInvokeCommand({ appRoot, logger, program, runtime });
+
+  registerAcpCommand({
+    appRoot,
+    eveVersion: packageVersion,
+    program,
+    runAcpServer: runtime.runAcpServer,
+    startHost: runtime.startHost,
+  });
 
   program
     .command("dev")

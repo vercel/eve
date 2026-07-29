@@ -488,6 +488,68 @@ describe("eve dev --logs", () => {
   });
 });
 
+describe("eve acp", () => {
+  it("starts an isolated local server and hands it to the ACP stdio adapter", async () => {
+    const close = vi.fn(async () => {});
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close,
+    }));
+    const runAcpServer = vi.fn(async () => {});
+    const output: string[] = [];
+
+    await runCli(
+      ["acp"],
+      { error: (message) => output.push(message), log: (message) => output.push(message) },
+      { runAcpServer, startHost },
+    );
+
+    expect(startHost).toHaveBeenCalledWith(expect.any(String), {
+      existing: "reject",
+      host: "127.0.0.1",
+      output: "stderr",
+      port: 0,
+    });
+    expect(runAcpServer).toHaveBeenCalledWith({
+      appRoot: "/canonical/app",
+      eveVersion: expect.any(String),
+      serverUrl: "http://127.0.0.1:4321/",
+      signal: expect.any(AbortSignal),
+      validateWorkspaceRoot: true,
+    });
+    expect(close).toHaveBeenCalledOnce();
+    expect(output).toEqual([]);
+  });
+
+  it("connects ACP to a remote agent without starting a local server", async () => {
+    const startHost = vi.fn();
+    const runAcpServer = vi.fn(async () => {});
+
+    await runCli(
+      ["acp", "https://user:pass@example.com", "-H", "X-Tenant: acme"],
+      { error: () => {}, log: () => {} },
+      { runAcpServer, startHost },
+    );
+
+    expect(startHost).not.toHaveBeenCalled();
+    expect(runAcpServer).toHaveBeenCalledWith({
+      appRoot: process.cwd(),
+      eveVersion: expect.any(String),
+      headers: {
+        Authorization: `Basic ${btoa("user:pass")}`,
+        "X-Tenant": "acme",
+      },
+      serverUrl: "https://example.com/",
+      signal: expect.any(AbortSignal),
+      validateWorkspaceRoot: false,
+    });
+  });
+});
+
 describe("eve dev boot progress", () => {
   it("passes one reporter through local startup and clears the row on failure", async () => {
     const writes: string[] = [];
@@ -553,6 +615,7 @@ describe("eve dev local server ownership", () => {
       existing: "attach-if-unconfigured",
       host: undefined,
       onBootProgress: expect.any(Function),
+      output: undefined,
       port: undefined,
     });
     expect(runDevelopmentTui).toHaveBeenCalledWith(

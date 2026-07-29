@@ -3,6 +3,7 @@
  * the orchestrator passes to `runVendor`. Adding a new vendored package
  * means writing a new per-package file and importing it here.
  */
+import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
 import google from "./@ai-sdk/google.mjs";
 import mcp from "./@ai-sdk/mcp.mjs";
@@ -48,6 +49,7 @@ import zod from "./zod.mjs";
 import zodValidationError from "./zod-validation-error.mjs";
 
 export const MODULES = [
+  acpSdk,
   anthropic,
   chat,
   chatAdapterSlack,
