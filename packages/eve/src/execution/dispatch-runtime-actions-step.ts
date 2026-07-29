@@ -45,6 +45,8 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
+import { isFrameworkToolAllowed } from "#runtime/framework-tools/index.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 
@@ -99,6 +101,19 @@ export async function dispatchRuntimeActionsStep(input: {
 
   try {
     for (const action of batch.actions) {
+      if (
+        isRecursiveAgentAction(action, bundle.subagentRegistry.subagentsByNodeId) &&
+        !isFrameworkToolAllowed(bundle.resolvedAgent.config.builtInTools, AGENT_TOOL_NAME)
+      ) {
+        log.warn("recursive agent call blocked by built-in tool policy", {
+          callId: action.callId,
+          nodeId: action.nodeId,
+          subagentName: action.subagentName,
+        });
+        results.push(createRecursiveAgentPolicyDeniedResult(action));
+        continue;
+      }
+
       if (
         isRecursiveAgentAction(action, bundle.subagentRegistry.subagentsByNodeId) &&
         (session.rootSessionId !== undefined || subagentDepth.currentDepth > 0)
@@ -258,6 +273,21 @@ function createRemoteAgentStartFailureResult(input: {
       message: toErrorMessage(input.error),
     },
     subagentName: input.action.remoteAgentName,
+  };
+}
+
+function createRecursiveAgentPolicyDeniedResult(
+  action: RuntimeSubagentCallActionRequest,
+): RuntimeSubagentResultActionResult {
+  return {
+    callId: action.callId,
+    isError: true,
+    kind: "subagent-result",
+    output: {
+      code: "FRAMEWORK_TOOL_DENIED_BY_POLICY",
+      message: 'The built-in "agent" tool is denied by this agent\'s built-in tool policy.',
+    },
+    subagentName: action.subagentName,
   };
 }
 

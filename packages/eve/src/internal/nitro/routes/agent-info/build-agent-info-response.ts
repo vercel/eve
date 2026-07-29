@@ -1,7 +1,9 @@
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
+  CONNECTION_SEARCH_TOOL_NAME,
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
+  isFrameworkToolAllowed,
 } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
@@ -50,6 +52,8 @@ export interface AgentInfoToolEntry extends AgentInfoSource {
 
 export interface AgentInfoFrameworkToolEntry extends AgentInfoToolEntry {
   readonly disabledByAuthor: boolean;
+  /** True when the framework tool is omitted by `defineAgent({ builtInTools })`. */
+  readonly deniedByPolicy?: boolean;
   readonly replacedByAuthoredTool: boolean;
   readonly status: "active" | "disabled" | "replaced";
 }
@@ -63,6 +67,10 @@ export interface AgentInfoDynamicResolverEntry extends AgentInfoSource {
 export interface AgentInfoTools {
   readonly available: readonly AgentInfoToolEntry[];
   readonly authored: readonly AgentInfoToolEntry[];
+  /** Effective policy. `all` is the backward-compatible default. */
+  readonly builtInPolicy:
+    | { readonly mode: "all" }
+    | { readonly mode: "allowlist"; readonly allow: readonly string[] };
   readonly disabledFramework: readonly string[];
   readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
   readonly framework: readonly AgentInfoFrameworkToolEntry[];
@@ -366,6 +374,7 @@ function buildToolInfo(
   );
   const frameworkInfo = buildFrameworkToolInfo({
     authoredToolNames,
+    builtInTools: agent.config.builtInTools,
     delegationToolNames,
     disabledFrameworkToolNames: disabledFrameworkTools,
   });
@@ -373,11 +382,17 @@ function buildToolInfo(
   return {
     available: [...frameworkInfo.available, ...authored],
     authored,
+    builtInPolicy:
+      agent.config.builtInTools === undefined
+        ? { mode: "all" }
+        : { mode: "allowlist", allow: [...agent.config.builtInTools.allow] },
     disabledFramework: [...agent.disabledFrameworkTools],
     dynamic: [
-      ...dynamicFrameworkResolvers.map((resolver) =>
-        renderDynamicResolver(resolver, { origin: "framework" }),
-      ),
+      ...(isFrameworkToolAllowed(agent.config.builtInTools, CONNECTION_SEARCH_TOOL_NAME)
+        ? dynamicFrameworkResolvers.map((resolver) =>
+            renderDynamicResolver(resolver, { origin: "framework" }),
+          )
+        : []),
       ...agent.dynamicToolResolvers.map((resolver) =>
         renderDynamicResolver(resolver, { origin: "authored" }),
       ),
@@ -389,6 +404,7 @@ function buildToolInfo(
 
 export function buildFrameworkToolInfo(input: {
   readonly authoredToolNames: ReadonlySet<string>;
+  readonly builtInTools?: ResolvedAgent["config"]["builtInTools"];
   readonly delegationToolNames: ReadonlySet<string>;
   readonly disabledFrameworkToolNames: ReadonlySet<string>;
 }): Pick<AgentInfoTools, "available" | "framework"> {
@@ -398,12 +414,14 @@ export function buildFrameworkToolInfo(input: {
 
   for (const definition of getAllFrameworkToolDefinitions()) {
     const disabledByAuthor = input.disabledFrameworkToolNames.has(definition.name);
+    const deniedByPolicy = !isFrameworkToolAllowed(input.builtInTools, definition.name);
     const replacedByAuthoredTool = input.authoredToolNames.has(definition.name);
-    const status: AgentInfoFrameworkToolEntry["status"] = disabledByAuthor
-      ? "disabled"
-      : occupiedToolNames.has(definition.name)
-        ? "replaced"
-        : "active";
+    const status: AgentInfoFrameworkToolEntry["status"] =
+      disabledByAuthor || deniedByPolicy
+        ? "disabled"
+        : occupiedToolNames.has(definition.name)
+          ? "replaced"
+          : "active";
     const rendered = renderTool(definition, {
       origin: "framework",
       replacesFrameworkTool: false,
@@ -416,6 +434,7 @@ export function buildFrameworkToolInfo(input: {
     framework.push({
       ...rendered,
       disabledByAuthor,
+      deniedByPolicy,
       replacedByAuthoredTool,
       status,
     });

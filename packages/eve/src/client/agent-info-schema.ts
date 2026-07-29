@@ -39,6 +39,7 @@ const tool = entry.extend({
 
 const frameworkTool = tool.extend({
   disabledByAuthor: z.boolean(),
+  deniedByPolicy: z.boolean().optional(),
   replacedByAuthoredTool: z.boolean(),
   status: z.enum(["active", "disabled", "replaced"]),
 });
@@ -173,6 +174,12 @@ export const AgentInfoResultSchema = z.object({
   tools: z.object({
     authored: z.array(tool),
     available: z.array(tool),
+    builtInPolicy: z
+      .discriminatedUnion("mode", [
+        z.object({ mode: z.literal("all") }),
+        z.object({ mode: z.literal("allowlist"), allow: z.array(z.string()) }),
+      ])
+      .optional(),
     disabledFramework: z.array(z.string()),
     dynamic: z.array(dynamicResolver),
     framework: z.array(frameworkTool),

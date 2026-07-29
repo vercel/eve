@@ -41,7 +41,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 36;
+export const COMPILED_AGENT_MANIFEST_VERSION = 37;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -406,6 +406,13 @@ const compiledAgentLimitsDefinitionSchema = z
   })
   .strict();
 
+const compiledAgentBuiltInToolsDefinitionSchema = z
+  .object({
+    allow: z.array(z.string()).readonly(),
+    mode: z.literal("allowlist"),
+  })
+  .strict();
+
 const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefinition> = z
   .object({
     maxSubagents: z.number().int().positive().optional(),
@@ -415,6 +422,7 @@ const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefini
 const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
   .object({
     build: compiledAgentBuildDefinitionSchema.optional(),
+    builtInTools: compiledAgentBuiltInToolsDefinitionSchema.optional(),
     compaction: compiledAgentCompactionDefinitionSchema.optional(),
     description: z.string().optional(),
     dynamicModel: compiledDynamicModelDefinitionSchema.optional(),
@@ -789,6 +797,13 @@ export function createCompiledAgentNodeManifest(input: {
                 input.config.build.externalDependencies === undefined
                   ? undefined
                   : [...input.config.build.externalDependencies],
+            },
+      builtInTools:
+        input.config.builtInTools === undefined
+          ? undefined
+          : {
+              allow: [...input.config.builtInTools.allow],
+              mode: input.config.builtInTools.mode,
             },
       compaction: {
         model:

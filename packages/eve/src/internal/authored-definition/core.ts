@@ -48,6 +48,7 @@ export function normalizeAgentDefinition(
     record,
     [
       "build",
+      "builtInTools",
       "compaction",
       "description",
       "experimental",
@@ -80,6 +81,10 @@ export function normalizeAgentDefinition(
     definition.build = normalizeAgentBuildDefinition(record.build, message);
   }
 
+  if (record.builtInTools !== undefined) {
+    definition.builtInTools = normalizeAgentBuiltInToolsDefinition(record.builtInTools, message);
+  }
+
   if (record.experimental !== undefined) {
     definition.experimental = normalizeAgentExperimentalDefinition(record.experimental, message);
   }
@@ -108,6 +113,21 @@ export function normalizeAgentDefinition(
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;
+}
+
+function normalizeAgentBuiltInToolsDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<NormalizedAgentDefinition["builtInTools"]> {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["allow", "mode"], message);
+  if (record.mode !== "allowlist" || !Array.isArray(record.allow)) {
+    throw new Error(`${message} "builtInTools" must use mode "allowlist" with an "allow" array.`);
+  }
+  return {
+    mode: "allowlist",
+    allow: record.allow.map((name) => expectString(name, message)),
+  };
 }
 
 function normalizeAgentReasoningDefinition(

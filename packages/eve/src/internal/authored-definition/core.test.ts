@@ -9,6 +9,41 @@ import { defineDynamic } from "#public/definitions/tool.js";
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
+  it("accepts a framework built-in tool allowlist", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        builtInTools: {
+          mode: "allowlist",
+          allow: ["todo", "connection_search"],
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.builtInTools).toEqual({
+      mode: "allowlist",
+      allow: ["todo", "connection_search"],
+    });
+  });
+
+  it.each([
+    [{ mode: "denylist", allow: ["todo"] }],
+    [{ mode: "allowlist", allow: "todo" }],
+    [{ mode: "allowlist", allow: [42] }],
+    [{ mode: "allowlist", allow: ["todo"], extra: true }],
+  ])("rejects an invalid framework built-in tool policy: %j", (builtInTools) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          builtInTools,
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {
