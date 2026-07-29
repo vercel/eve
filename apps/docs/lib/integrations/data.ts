@@ -1963,8 +1963,29 @@ import { telemetryDevHook } from "@telemetry-dev/eve";
 import { defineHook } from "eve/hooks";
 
 export default defineHook(telemetryDevHook());
+\`\`\`
+
+telemetry.dev also ingests OTLP directly, so you can skip the package and point \`@vercel/otel\` at its endpoint instead — either setup works:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      traceExporter: new OTLPHttpProtoTraceExporter({
+        url: "https://ingest.telemetry.dev/v1/traces",
+        headers: {
+          Authorization: \`Bearer \${process.env.TELEMETRY_DEV_API_KEY}\`,
+        },
+      }),
+    }),
+});
 \`\`\``,
-    configure: `Create an ingest API key in the [telemetry.dev](https://telemetry.dev) dashboard and expose it as \`TELEMETRY_DEV_API_KEY\`; without the key the integration is a no-op. Traces and lifecycle logs land in your telemetry.dev project joined by \`gen_ai.conversation.id\`, with tokens, cost, and latency attached to every turn. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
+    configure: `Create an ingest API key in the [telemetry.dev](https://telemetry.dev) dashboard and expose it as \`TELEMETRY_DEV_API_KEY\`; without the key the packaged integration is a no-op. Traces and lifecycle logs land in your telemetry.dev project joined by \`gen_ai.conversation.id\`, with tokens, cost, and latency attached to every turn. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
   jaeger: {
     logo: "jaeger",
