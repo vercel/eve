@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHook } from "#compiled/@workflow/core/index.js";
+import { createHook, sleep } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
@@ -27,6 +27,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
         write() {},
       }),
   ),
+  sleep: vi.fn(() => new Promise<void>(() => {})),
 }));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
@@ -91,6 +92,7 @@ vi.mock("./session-callback-step.js", () => ({
 interface DeliveryHookConfig {
   readonly dispose?: () => void;
   readonly getConflict?: () => Promise<{ readonly runId: string } | null>;
+  readonly next?: () => Promise<IteratorResult<HookPayload>>;
   readonly return?: () => Promise<IteratorResult<HookPayload>>;
   readonly token: string;
   readonly values?: readonly HookPayload[];
@@ -134,6 +136,7 @@ describe("workflowEntry", () => {
     });
 
     expect(result).toEqual({ output: "ok" });
+    expect(sleep).toHaveBeenCalledWith(30 * 24 * 60 * 60 * 1_000);
     expect(createSessionStep).toHaveBeenCalledWith({
       compiledArtifactsSource: {},
       continuationToken: "http:test",
@@ -285,6 +288,66 @@ describe("workflowEntry", () => {
         subagentDepth: 3,
       }),
     );
+  });
+
+  it("terminally fails a parked session when its durable timeout elapses", async () => {
+    const sessionState = createBaseSessionState();
+    const pendingDelivery = vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {}));
+    vi.mocked(sleep).mockResolvedValueOnce();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      deliveryHooks: [
+        {
+          next: pendingDelivery,
+          token: "http:test",
+        },
+      ],
+      turnControls: [turnResult({ action: "park", sessionState })],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello there" },
+        serializedContext: createSerializedContext(),
+        sessionTimeoutMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      message: "Agent workflow failed. Inspect the private session trace for details.",
+      name: "EveWorkflowFailure",
+    });
+
+    expect(sleep).toHaveBeenCalledWith(1_000);
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: "Session timed out after 1000ms.",
+          name: "SessionTimeoutError",
+          timeoutMs: 1_000,
+        }),
+      }),
+    );
+    expect(fireSessionCallbackStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ name: "SessionTimeoutError" }),
+        status: "failed",
+      }),
+    );
+  });
+
+  it("allows the session timeout to be disabled", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    await workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext(),
+      sessionTimeoutMs: false,
+    });
+
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("notifies a delegated parent once when a turn fails terminally", async () => {
@@ -902,6 +965,7 @@ function installHookMocks(input: {
     return createMockHook({
       dispose: config.dispose,
       getConflict: config.getConflict,
+      next: config.next,
       return: config.return,
       symbolDispose: input.symbolDispose,
       token,

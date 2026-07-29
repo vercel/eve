@@ -14,6 +14,13 @@ Two handles do two jobs, and mixing them up is the most common mistake. One hand
 
 A session has one active continuation at a time: each follow-up uses the current `continuationToken`, and a stale one is rejected.
 
+Sessions have a durable 30-day lifetime by default. Configure
+`limits.sessionTimeoutMs` in `agent.ts`, or set it to `false` to disable the
+deadline. When the deadline arrives, a parked session fails with
+`SessionTimeoutError`; an active turn is allowed to settle first. Expiration
+releases the continuation but does not delete the recorded event stream or
+backend data. See [Agent config](../agent-config#runtime-limits).
+
 React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
 ## Start a session

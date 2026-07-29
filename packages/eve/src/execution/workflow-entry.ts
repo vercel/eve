@@ -1,4 +1,9 @@
-import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
+import {
+  createHook,
+  getWorkflowMetadata,
+  getWritable,
+  sleep,
+} from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
@@ -30,6 +35,7 @@ import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
 } from "#execution/session-delivery-hook.js";
+import { DEFAULT_SESSION_TIMEOUT_MS, SessionTimeoutError } from "#execution/session-timeout.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
@@ -47,6 +53,7 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
 export interface WorkflowEntryInput {
   readonly input: RunInput["input"];
   readonly limits?: RunInput["limits"];
+  readonly sessionTimeoutMs?: number | false;
   readonly serializedContext: Record<string, unknown>;
 }
 
@@ -122,6 +129,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       mode,
       serializedContext: input.serializedContext,
       sessionState,
+      sessionTimeoutMs: input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS,
     });
   } catch (error) {
     // Safety net for failures the tool-loop harness does not already
@@ -159,6 +167,7 @@ async function runDriverLoop(input: {
   readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly sessionTimeoutMs: number | false;
 }): Promise<WorkflowEntryResult> {
   // Per-session auth hook. Created before any turns so it exists
   // when authorization.required events trigger OAuth callbacks.
@@ -176,6 +185,10 @@ async function runDriverLoop(input: {
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+  const sessionTimeout =
+    input.sessionTimeoutMs === false
+      ? undefined
+      : sleep(input.sessionTimeoutMs).then(() => ({ kind: "session-timeout" as const }));
 
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
@@ -275,9 +288,11 @@ async function runDriverLoop(input: {
         continue;
       }
 
-      const nextDeliver = await waitForNextDeliver({
+      const nextDeliver = await waitForNextDeliverOrTimeout({
         bufferedDeliveries,
         deliveryHook,
+        sessionTimeout,
+        sessionTimeoutMs: input.sessionTimeoutMs,
       });
 
       if (nextDeliver === null) {
@@ -315,6 +330,31 @@ async function runDriverLoop(input: {
     // async iterator only honors `return()` after that read settles.
     await disposeHook(authHook);
   }
+}
+
+async function waitForNextDeliverOrTimeout(input: {
+  readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly deliveryHook: SessionDeliveryHook;
+  readonly sessionTimeout?: Promise<{ readonly kind: "session-timeout" }>;
+  readonly sessionTimeoutMs: number | false;
+}): Promise<DeliverHookPayload | null> {
+  if (input.sessionTimeout === undefined || input.sessionTimeoutMs === false) {
+    return await waitForNextDeliver(input);
+  }
+
+  const result = await Promise.race([
+    waitForNextDeliver(input).then((delivery) => ({
+      delivery,
+      kind: "delivery" as const,
+    })),
+    input.sessionTimeout,
+  ]);
+
+  if (result.kind === "session-timeout") {
+    throw new SessionTimeoutError(input.sessionTimeoutMs);
+  }
+
+  return result.delivery;
 }
 
 async function finalizeDone(input: {
