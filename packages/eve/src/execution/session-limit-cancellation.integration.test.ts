@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeHook, start } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
@@ -8,7 +8,6 @@ import {
   filterEventsByType,
 } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
@@ -65,37 +64,6 @@ async function deliver(
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
-}
-
-/** Polls the world for a hook row by token (hooks are per-run; the token is global). */
-async function waitForHookByToken(token: string, timeout = 15_000): Promise<{ runId: string }> {
-  const world = await getWorld();
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    try {
-      const hook = await world.hooks.getByToken(token);
-      if (hook !== null && hook !== undefined) {
-        return hook;
-      }
-    } catch {
-      // Not registered yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`Timed out waiting for hook token "${token}".`);
-}
-
-/** Polls the world until the given run reaches `completed`. */
-async function waitForRunCompletion(runId: string, timeout = 15_000): Promise<void> {
-  const world = await getWorld();
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const page = await world.runs.list({ pagination: { limit: 100 } });
-    const row = page.data.find((entry: { runId?: string }) => entry.runId === runId);
-    if (row?.status === "completed") return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`Timed out waiting for run "${runId}" to complete.`);
 }
 
 function requestIdFromPromptTurn(events: readonly UnstampedMessageStreamEvent[]): string {
@@ -182,7 +150,7 @@ describe("session-limit continuation decline integration", () => {
     });
   }, 60_000);
 
-  it("cancels the root turn when the user declines a delegated child's prompt", async () => {
+  it("fails a zero-quota delegation fast and declines the root's own prompt", async () => {
     const runtime = createTestRuntime({
       agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-child" },
     });
@@ -205,30 +173,38 @@ describe("session-limit continuation decline integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        // The root's first model call spends the budget, so the delegated
-        // child inherits a zero remainder and parks on its continuation
-        // prompt before any model call. The proxy epilogue streams this
-        // turn's waiting boundary while the root keeps waiting on the child.
+        // The root's first model call spends the whole budget, so the
+        // delegated child inherits a zero remainder and fails fast --
+        // approving a zero-token window could never grant tokens, so no
+        // child prompt is raised (`violation.limit > 0` in
+        // `enforceSessionTokenLimit`). The root receives the child's error
+        // result, reaches its own pre-model gate, and parks on its OWN
+        // continuation prompt.
         const hitlTurn = await stream.nextTurn();
         expect(hitlTurn.at(-1)?.type).toBe("session.waiting");
         expect(filterEventsByType(hitlTurn, "subagent.called")).toHaveLength(1);
+        expect(filterEventsByType(hitlTurn, "input.requested")).toHaveLength(1);
         const requestId = requestIdFromPromptTurn(hitlTurn);
+        // The prompt belongs to the root, not the delegated child.
+        expect(requestId.startsWith(`${run.runId}:limit:`)).toBe(true);
 
-        const cancelHook = await waitForHookByToken(sessionCancelHookToken(run.runId));
-
-        // Declining the child's prompt cancels the root turn. The waiting
-        // boundary is already on the stream, so settling emits nothing new;
-        // the turn run completing is the settle barrier.
+        // Declining the root's own prompt is a user action the stream must
+        // show: the turn settles as cancelled and the session stays
+        // resumable -- same contract as the direct-decline case above.
         await deliver(continuationToken, {
           kind: "deliver",
           payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
         });
-        await waitForRunCompletion(cancelHook.runId);
+        const declinedTurn = await stream.nextTurn();
+        expect(declinedTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(declinedTurn, "turn.cancelled")).toHaveLength(1);
+        expect(filterEventsByType(declinedTurn, "session.completed")).toHaveLength(0);
+        expect(filterEventsByType(declinedTurn, "subagent.called")).toHaveLength(0);
+        expectNoFailureEvents(declinedTurn);
 
-        // The session accepts the next message; the root itself is over
-        // budget, so it re-raises its own prompt. Anything from the old
-        // decline path — a parent-visible subagent error, a retry
-        // re-dispatch, a model reply — would surface here instead.
+        // The session accepts the next message; the root is still over
+        // budget, so it re-raises its own prompt (fail-closed) instead of
+        // running a model call or re-dispatching the delegation.
         await deliver(continuationToken, {
           kind: "deliver",
           payloads: [{ message: "follow up after decline" }],
@@ -240,6 +216,7 @@ describe("session-limit continuation decline integration", () => {
         expect(filterEventsByType(followUpTurn, "subagent.called")).toHaveLength(0);
         expect(filterEventsByType(followUpTurn, "message.completed")).toHaveLength(0);
         expect(filterEventsByType(followUpTurn, "session.completed")).toHaveLength(0);
+        expect(filterEventsByType(followUpTurn, "turn.cancelled")).toHaveLength(0);
         expectNoFailureEvents(followUpTurn);
       } finally {
         stream.dispose();
