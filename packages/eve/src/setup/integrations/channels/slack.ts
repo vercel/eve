@@ -5,7 +5,6 @@ import { WizardCancelledError } from "../../step.js";
 async function choosePortableCredentials(
   context: Parameters<ChannelSetupIntegration["setup"]>[0],
 ): Promise<"vercel-connect" | "environment" | "cancelled"> {
-  if (context.environment.vercel.kind === "available") return "vercel-connect";
   if (context.presetPortableCredentials !== undefined) {
     return context.presetPortableCredentials ? "environment" : "vercel-connect";
   }
@@ -41,6 +40,11 @@ export const SLACK_CHANNEL_SETUP: ChannelSetupIntegration = {
   async setup(context) {
     const credentials = await choosePortableCredentials(context);
     if (credentials === "cancelled") return { kind: "cancelled" };
+    if (credentials === "vercel-connect" && context.environment.vercel.kind === "unavailable") {
+      throw new Error(
+        "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Slack setup.",
+      );
+    }
 
     const result = await runChannelSetup(
       context,

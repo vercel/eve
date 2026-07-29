@@ -4121,6 +4121,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #handleForeignOutput(source: "stdout" | "stderr", text: string): void {
     const combined = (source === "stdout" ? this.#stdoutLogBuffer : this.#stderrLogBuffer) + text;
+    if (source === "stdout" && parseDevRebuildLogLine(combined.trimEnd()) !== undefined) {
+      this.#stdoutLogBuffer = "";
+      this.#diagnostics?.append({ source, detail: combined.trimEnd() });
+      this.#handleCapturedStdout(combined.trimEnd());
+      this.#paint();
+      return;
+    }
     const lastNewline = combined.lastIndexOf("\n");
     const remainder = lastNewline === -1 ? combined : combined.slice(lastNewline + 1);
 

@@ -3035,6 +3035,28 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("tui/setup-panel.ts changed · rebuilt");
   });
 
+  it("updates the rebuild status before the watcher writes a newline", () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      logs: "all",
+      unicode: true,
+    });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+    process.stdout.write(
+      formatChangeDetectedLogLine("/app", [{ event: "change", path: "/app/package.json" }]),
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("package.json changed · rebuilding…");
+    expect(snapshot).not.toContain("[eve:dev] change detected");
+    renderer.shutdown();
+  });
+
   it("flips the status row to reloading on a structural change", () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();

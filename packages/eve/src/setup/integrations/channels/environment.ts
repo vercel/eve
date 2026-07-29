@@ -22,11 +22,11 @@ export function describeChannelSetupEnvironment(environment: ChannelSetupEnviron
   }
   switch (environment.vercel.reason) {
     case "logged-out":
-      return "No authenticated Vercel account found; using portable channel setup.";
+      return "No authenticated Vercel account found; choose Vercel Connect or portable credentials.";
     case "cli-missing":
-      return "Vercel CLI not found; using portable channel setup.";
+      return "Vercel CLI not found; choose Vercel Connect or portable credentials.";
     case "unavailable":
-      return "Could not verify the Vercel account; using portable channel setup.";
+      return "Could not verify the Vercel account; choose Vercel Connect or portable credentials.";
   }
 }
 

@@ -13,11 +13,11 @@ describe("channel setup environment", () => {
     );
   });
 
-  it("reports the portable fallback when logged out", () => {
+  it("reports the credential choice when logged out", () => {
     const environment = channelSetupEnvironment("logged-out", { kind: "unresolved" });
     expect(environment).toEqual({ vercel: { kind: "unavailable", reason: "logged-out" } });
     expect(describeChannelSetupEnvironment(environment)).toBe(
-      "No authenticated Vercel account found; using portable channel setup.",
+      "No authenticated Vercel account found; choose Vercel Connect or portable credentials.",
     );
   });
 });
