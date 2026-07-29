@@ -61,8 +61,7 @@ describe("channel setup integrations", () => {
           source: "default",
         })),
         runPackageManagerInstall: vi.fn(),
-        runVercel: vi.fn(),
-        detectDeployment: vi.fn(),
+        ensureVercelProject: vi.fn(),
       },
     });
 

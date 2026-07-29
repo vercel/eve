@@ -91,9 +91,8 @@ function createDeps() {
       source: "default",
     })),
     runPackageManagerInstall: vi.fn<AddChannelsDeps["runPackageManagerInstall"]>(async () => true),
-    runVercel: vi.fn<AddChannelsDeps["runVercel"]>(async () => true),
-    detectDeployment: vi.fn<AddChannelsDeps["detectDeployment"]>(async () => ({
-      state: "linked",
+    ensureVercelProject: vi.fn<AddChannelsDeps["ensureVercelProject"]>(async () => ({
+      orgId: "team_demo",
       projectId: "prj_demo",
     })),
   };
@@ -161,7 +160,7 @@ describe("addChannels box", () => {
     );
 
     expect(deps.provisionSlackbot).not.toHaveBeenCalled();
-    expect(deps.runVercel).not.toHaveBeenCalled();
+    expect(deps.ensureVercelProject).not.toHaveBeenCalled();
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
     expect(deps.ensureChannel).toHaveBeenCalledWith({
       projectRoot: "/tmp/project",
@@ -358,7 +357,6 @@ describe("addChannels box", () => {
     state.project = { kind: "unresolved" };
     state.vercelProject = { kind: "none" };
     const prompter = createPrompter();
-    prompter.withInheritedStdio = vi.fn((task) => task());
     const box = makeBox({
       prompter,
       presetCreateSlackbot: true,
@@ -368,14 +366,14 @@ describe("addChannels box", () => {
 
     const result = await runInteractive([box], state, silentSink, snapshot);
 
-    // The engine's exact fallback: a bare interactive `vercel link` with NO
-    // onOutput, then a fresh deployment detection.
-    expect(prompter.withInheritedStdio).toHaveBeenCalledOnce();
-    expect(deps.runVercel).toHaveBeenCalledWith(["link"], { cwd: "/tmp/project" });
-    expect(deps.runVercel.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(deps.ensureVercelProject).toHaveBeenCalledWith({
+      appRoot: "/tmp/project",
+      prompter,
+      signal: undefined,
+    });
+    expect(deps.ensureVercelProject.mock.invocationCallOrder[0]).toBeLessThan(
       deps.provisionSlackbot.mock.invocationCallOrder[0]!,
     );
-    expect(deps.detectDeployment).toHaveBeenCalledWith("/tmp/project", { signal: undefined });
     expect(result.kind).toBe("done");
     if (result.kind === "done") {
       expect(result.state.project).toEqual({ kind: "linked", projectId: "prj_demo" });
@@ -385,7 +383,7 @@ describe("addChannels box", () => {
 
   it("fails the link fallback with the engine's copy when `vercel link` fails", async () => {
     const deps = createDeps();
-    deps.runVercel.mockResolvedValue(false);
+    deps.ensureVercelProject.mockRejectedValue(new Error("Vercel project linking failed."));
     const state = resolvedState(["slack"]);
     state.project = { kind: "unresolved" };
     state.vercelProject = { kind: "none" };
@@ -397,7 +395,7 @@ describe("addChannels box", () => {
     });
 
     await expect(runInteractive([box], state, silentSink, snapshot)).rejects.toThrow(
-      "Vercel project linking failed. Slackbot creation did not start.",
+      "Vercel project linking failed.",
     );
     expect(deps.provisionSlackbot).not.toHaveBeenCalled();
   });

@@ -36,10 +36,7 @@ function addChannelsDeps(): AddChannelsDeps {
       source: "default",
     })),
     runPackageManagerInstall: vi.fn(async () => true),
-    runVercel: vi.fn(async () => true),
-    detectDeployment: vi.fn<AddChannelsDeps["detectDeployment"]>(async () => ({
-      state: "unlinked",
-    })),
+    ensureVercelProject: vi.fn(async () => ({ orgId: "team-id", projectId: "project-id" })),
   };
 }
 

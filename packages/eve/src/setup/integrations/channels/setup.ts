@@ -12,13 +12,9 @@ import { detectPackageManager, type PackageManagerKind } from "#setup/package-ma
 import { formatNodeEngineOverrideWarning } from "#setup/node-engine.js";
 import { runPackageManagerInstall } from "#setup/primitives/pm/run.js";
 import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
-import { runVercel } from "#setup/primitives/run-vercel.js";
-
 import {
-  detectDeployment,
   isProjectResolved,
   mergeProjectResolution,
-  projectResolutionFromDeployment,
   type ProjectResolution,
 } from "../../project-resolution.js";
 import type { Asker } from "../../ask.js";
@@ -140,10 +136,7 @@ export interface AddChannelsDeps {
   reconcileSlackUid: typeof reconcileSlackUid;
   detectPackageManager: typeof detectPackageManager;
   runPackageManagerInstall: typeof runPackageManagerInstall;
-  /** Parent-rendered project flow; legacy test seams may omit it. */
-  ensureVercelProject?: typeof ensureVercelProject;
-  runVercel: typeof runVercel;
-  detectDeployment: typeof detectDeployment;
+  ensureVercelProject: typeof ensureVercelProject;
 }
 
 export interface AddChannelsOptions {
@@ -180,9 +173,8 @@ export interface AddChannelsOptions {
   configureVercelServices?: boolean;
   /**
    * Opt-in fallback when Slack is chosen interactively but `state.project` is
-   * unresolved: run the interactive bare `vercel link` before provisioning the
-   * slackbot. The Slack integration sets this so Vercel Connect setup can link
-   * an unlinked project before provisioning.
+   * unresolved: link the project before provisioning the slackbot. The Slack
+   * integration sets this so Vercel Connect setup can link an unlinked project.
    */
   ensureLinkedProject?: "interactive-vercel-link";
   /**
@@ -273,8 +265,6 @@ export function addChannels<State extends AddChannelsState = AddChannelsState>(
     detectPackageManager,
     runPackageManagerInstall,
     ensureVercelProject,
-    runVercel,
-    detectDeployment,
   };
 
   async function scaffoldSlackChannel(
@@ -308,55 +298,6 @@ export function addChannels<State extends AddChannelsState = AddChannelsState>(
     // Slack is recorded even when the file already existed: the channel is live either way.
     payload.channelsAdded.push("slack");
     return wroteExactConnectorUid;
-  }
-
-  /**
-   * The {@link AddChannelsOptions.ensureLinkedProject} fallback: link the
-   * directory interactively, then re-detect the on-disk resolution. The copy
-   * and command shape are the dissolved engine's, byte for byte.
-   */
-  async function linkProjectForSlackbot(
-    log: ChannelSetupLog,
-    projectPath: string,
-    current: ProjectResolution,
-    headless: boolean,
-    signal?: AbortSignal,
-  ): Promise<ProjectResolution> {
-    if (headless) {
-      throw new HumanActionRequiredError({
-        kind: "vercel-link",
-        command: "vercel link",
-        reason: "Slackbot creation needs this directory linked to a Vercel project.",
-      });
-    }
-    log.message("Linking this directory to a Vercel project...");
-    let project: ProjectResolution;
-    if (deps.ensureVercelProject !== undefined) {
-      const linked = await deps.ensureVercelProject({
-        appRoot: projectPath,
-        prompter: options.prompter,
-        signal,
-      });
-      project = mergeProjectResolution(current, { kind: "linked", projectId: linked.projectId });
-    } else if (deps.runVercel !== runVercel) {
-      const link = () => deps.runVercel(["link"], { cwd: projectPath, signal });
-      const linked = await (options.prompter.withInheritedStdio?.(link) ?? link());
-      if (!linked)
-        throw new Error("Vercel project linking failed. Slackbot creation did not start.");
-      const deployment = await deps.detectDeployment(projectPath, { signal });
-      project = mergeProjectResolution(current, projectResolutionFromDeployment(deployment));
-    } else {
-      const linked = await ensureVercelProject({
-        appRoot: projectPath,
-        prompter: options.prompter,
-        signal,
-      });
-      project = mergeProjectResolution(current, { kind: "linked", projectId: linked.projectId });
-    }
-    if (!isProjectResolved(project)) {
-      throw new Error("Vercel project linking failed. Slackbot creation did not start.");
-    }
-    return project;
   }
 
   async function addWebChannelToPayload(
@@ -517,13 +458,22 @@ export function addChannels<State extends AddChannelsState = AddChannelsState>(
     if (!isProjectResolved(payload.project)) {
       // Only reachable with the ensureLinkedProject seam; without it the gate
       // above already required a resolved project.
-      payload.project = await linkProjectForSlackbot(
-        log,
-        projectPath,
-        payload.project,
-        input.headless,
+      if (input.headless) {
+        throw new HumanActionRequiredError({
+          kind: "vercel-link",
+          command: "vercel link",
+          reason: "Slackbot creation needs this directory linked to a Vercel project.",
+        });
+      }
+      const linked = await deps.ensureVercelProject({
+        appRoot: projectPath,
+        prompter: options.prompter,
         signal,
-      );
+      });
+      payload.project = mergeProjectResolution(payload.project, {
+        kind: "linked",
+        projectId: linked.projectId,
+      });
     }
 
     const slackbot = await provisionSlackbotWithControls(log, projectPath, slug, signal);
