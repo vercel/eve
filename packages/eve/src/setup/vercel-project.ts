@@ -96,7 +96,7 @@ export async function resolveProjectByNameOrId(
   if (isNotFoundApiFailure(result.failure)) {
     return null;
   }
-  if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
+  if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure, team);
   throw new Error(
     `Could not resolve project "${projectNameOrId}" in ${team}. ${result.failure.message}`,
   );

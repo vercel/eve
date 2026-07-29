@@ -11,6 +11,8 @@ export interface HumanAction {
   readonly command: string;
   /** Why the flow needs it, in one human-readable sentence. */
   readonly reason: string;
+  /** Account or workspace scope associated with the action, when applicable. */
+  readonly scope?: string;
 }
 
 /**

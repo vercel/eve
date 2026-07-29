@@ -65,13 +65,15 @@ export function parseVercelJson(stdout: string, description: string): unknown {
 }
 
 /** Converts a scoped API denial into the Vercel re-authentication action. */
-export function requireVercelTeamAccess(failure: VercelCaptureFailure): never {
+export function requireVercelTeamAccess(failure: VercelCaptureFailure, team?: string): never {
   const stderr = failure.stderr.trim();
   const detail = stderr ? ` ${stderr}` : "";
+  const deniedScope = team === undefined ? "the current Vercel scope" : `Vercel team "${team}"`;
   throw new HumanActionRequiredError({
     kind: "vercel-forbidden",
     command: "vercel login",
-    reason: `Vercel denied access to this scope.${detail} Re-authenticate (for example to complete a team's SSO) or switch to a team you can access.`,
+    reason: `Access denied to ${deniedScope}.${detail} Re-authenticate (for example to complete a team's SSO) or switch to a team you can access.`,
+    scope: team,
   });
 }
 
@@ -138,7 +140,7 @@ async function fetchProjectPage(
   });
   options.signal?.throwIfAborted();
   if (!result.ok) {
-    if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
+    if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure, team);
     throw new Error(`Could not list Vercel projects in ${team}. ${result.failure.message}`);
   }
   const parsed = VercelProjectPageSchema.safeParse(parseVercelJson(result.stdout, "projects"));

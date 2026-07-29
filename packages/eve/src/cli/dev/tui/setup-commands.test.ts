@@ -749,19 +749,37 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("routes a forbidden (SSO) scope error to /vc:login with a re-auth message", async () => {
+  it("names the inaccessible team in a forbidden scope message", async () => {
     const flows = fakeFlows({
       runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
         throw new HumanActionRequiredError({
           kind: "vercel-forbidden",
           command: "vercel login",
-          reason: "Vercel denied access to this scope. Re-authenticate to complete SSO.",
+          reason: "Access denied.",
+          scope: "acme",
         });
       }),
     });
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message:
-        "Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /deploy.",
+        'Access denied to Vercel team "acme". Run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /deploy.',
+      preserveFlowDiagnostics: true,
+    });
+  });
+
+  it("uses the current scope when a forbidden action has no team", async () => {
+    const flows = fakeFlows({
+      runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-forbidden",
+          command: "vercel login",
+          reason: "Access denied.",
+        });
+      }),
+    });
+    await expect(run({ command: "deploy", flows })).resolves.toEqual({
+      message:
+        "Access denied to the current Vercel scope. Run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /deploy.",
       preserveFlowDiagnostics: true,
     });
   });

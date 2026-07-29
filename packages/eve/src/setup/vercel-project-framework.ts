@@ -97,7 +97,7 @@ async function fetchProjectFramework(
   if (result.ok) {
     return parseProjectFramework(result.stdout, `project ${projectId}`);
   }
-  if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
+  if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure, team);
   throw new Error(`Could not inspect Vercel project "${projectId}". ${result.failure.message}`);
 }
 
@@ -131,7 +131,7 @@ async function setProjectFramework(
     ),
   );
   if (result.ok) return;
-  if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
+  if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure, team);
   throw new Error(
     `Could not set Vercel project "${projectId}" framework to ${framework}. ${result.failure.message}`,
   );

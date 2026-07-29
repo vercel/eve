@@ -92,7 +92,14 @@ describe("listRecentProjects", () => {
 
     await expect(listRecentProjects("/repo", "team-a")).rejects.toMatchObject({
       name: "HumanActionRequiredError",
-      action: { kind: "vercel-forbidden", command: "vercel login" },
+      action: {
+        kind: "vercel-forbidden",
+        command: "vercel login",
+        reason:
+          'Access denied to Vercel team "team-a". This team requires SAML Single Sign-On. ' +
+          "Re-authenticate (for example to complete a team's SSO) or switch to a team you can access.",
+        scope: "team-a",
+      },
     });
   });
 

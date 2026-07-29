@@ -1,4 +1,4 @@
-import { HumanActionRequiredError } from "#setup/human-action.js";
+import { HumanActionRequiredError, type HumanAction } from "#setup/human-action.js";
 import { runChannelsFlow } from "#setup/flows/channels.js";
 import { runConnectionsFlow } from "#setup/flows/connections.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
@@ -434,17 +434,20 @@ function vercelCliUpgradeFailureMessage(command: string, reason?: string): strin
  */
 function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandResult | undefined {
   if (!(error instanceof HumanActionRequiredError)) return undefined;
-  const message = vercelActionMessage(error.action.kind, command);
+  const message = vercelActionMessage(error.action, command);
   return message === undefined ? undefined : { message, preserveFlowDiagnostics: true };
 }
 
 /** The one-line fix message per Vercel action kind, or `undefined` for others. */
-function vercelActionMessage(kind: string, command: string): string | undefined {
-  switch (kind) {
+function vercelActionMessage(action: HumanAction, command: string): string | undefined {
+  switch (action.kind) {
     case "vercel-login":
       return `You're not logged in to Vercel — run /vc:login, then retry /${command}.`;
-    case "vercel-forbidden":
-      return `Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
+    case "vercel-forbidden": {
+      const deniedScope =
+        action.scope === undefined ? "the current Vercel scope" : `Vercel team "${action.scope}"`;
+      return `Access denied to ${deniedScope}. Run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
+    }
     case "vercel-cli-missing":
       return `The Vercel CLI isn't installed — run /vc:install to install it, then retry /${command}.`;
     case "vercel-cli-upgrade":
