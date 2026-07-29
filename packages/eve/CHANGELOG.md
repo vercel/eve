@@ -1,5 +1,13 @@
 # eve
 
+## 0.27.13
+
+### Patch Changes
+
+- c1bf6d4: Fix `eve dev` startup for bundled extensions whose output declares `__filename` without `__dirname`.
+- 5d25b16: Render user-scoped connection authorization in Linear Agent Sessions. Linear users now receive the native account-linking affordance, and the channel posts the authorization outcome before a parked turn resumes.
+- d257866: `eve add` now asks before running an official registry item's setup and prints a resumable command when setup is skipped or cancelled. Run `eve add <item> --skip-install` to launch setup later without reinstalling the item.
+
 ## 0.27.12
 
 ### Patch Changes
