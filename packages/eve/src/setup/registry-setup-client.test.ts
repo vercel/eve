@@ -27,7 +27,7 @@ afterEach(() => {
 function client(processStub: SetupProcessStub): RegistrySetupClient {
   process.env.EVE_SETUP_PROTOCOL = "1";
   const result = createRegistrySetupClient({
-    process: processStub as NodeJS.Process,
+    process: processStub,
   });
   if (result === undefined) throw new Error("Expected a registry setup client.");
   return result;
