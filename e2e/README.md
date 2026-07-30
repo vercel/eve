@@ -11,12 +11,12 @@ world-infrastructure coverage (and vice versa):
   provider declare `"e2e": { "modelMatrix": "full" }` in `package.json` and
   run on every matrix model; all other fixtures run once on the default
   model.
-- **World suites** (`e2e-vercel.yml`, and one workflow per additional
-  workflow world): every fixture builds, deploys, and runs once with
-  deterministic mock models (`EVE_E2E_MODEL=mock`), proving the world's
-  infrastructure — build, deploy, boot, streaming, durability — without live
-  models. Evals whose assertions need a real model carry the `real-model`
-  tag and are excluded there via `--exclude-tag real-model`.
+- **World suites** (`e2e-vercel.yml`, `e2e-postgres.yml`, and one workflow
+  per additional workflow world): every fixture builds, deploys, and runs
+  once with deterministic mock models (`EVE_E2E_MODEL=mock`), proving the
+  world's infrastructure — build, deploy, boot, streaming, durability —
+  without live models. Evals whose assertions need a real model carry the
+  `real-model` tag and are excluded there via `--exclude-tag real-model`.
 
 ## Harness config (`@eve-e2e/config`)
 
@@ -174,10 +174,12 @@ When adding e2e coverage:
 
 The short model name is the stable Actions check identifier; the full id
 selects the provider model. Updating a model version does not rename required
-checks. Each workflow also publishes one stable aggregate check, `e2e-local`
-or `e2e-vercel`, which succeeds only when every leg succeeds. Require those
-aggregate checks in the repository ruleset so newly added fixtures and models
-become required automatically.
+checks. Each workflow also publishes one stable aggregate check —
+`e2e-local`, `e2e-vercel`, or `e2e-postgres` — which succeeds only when every
+leg succeeds. Require those aggregate checks in the repository ruleset so
+newly added fixtures and models become required automatically. Add a new
+aggregate to the ruleset only after its workflow lands on `main`: a required
+check nothing reports blocks every PR as permanently "expected".
 
 `.github/workflows/e2e-local.yml` (the model suite) builds the eve package
 once per leg, then runs one fixture directory with the leg's real model:
@@ -203,6 +205,14 @@ DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview \
 npx eve eval --strict --exclude-tag real-model \
   --url "$DEPLOYMENT_URL" --junit "$JUNIT_PATH"
 ```
+
+`.github/workflows/e2e-postgres.yml` (the Postgres world suite) starts a
+PostgreSQL service container, bootstraps the `@workflow/world-postgres`
+schema, builds each fixture with `EVE_E2E_WORKFLOW_WORLD=@workflow/world-postgres`,
+runs the mock-compatible evals against a local production server
+(`eve start`), and asserts the traffic produced Postgres-backed workflow
+runs. Every fixture carries `@workflow/world-postgres` as a dependency so
+the world module resolves at build time.
 
 A world suite for another workflow world follows the same shape: consume
 `world_matrix`, set `EVE_E2E_MODEL=mock`, point fixtures at the world with

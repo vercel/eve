@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
+    "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"
   },

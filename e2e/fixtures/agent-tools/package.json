@@ -16,6 +16,7 @@
     "@opentelemetry/core": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@vercel/otel": "catalog:",
+    "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"
   },

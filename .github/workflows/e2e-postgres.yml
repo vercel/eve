@@ -1,0 +1,244 @@
+name: E2E Tests (Postgres)
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: e2e-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The stable aggregate check must report on every PR. This job decides
+  # relevance so the matrix can skip at the job level without starting a
+  # PostgreSQL service container for every fixture on unrelated changes; the
+  # aggregate below treats an irrelevant diff as satisfied.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Check changed paths
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
+          # this diff is exactly the PR's changed files.
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|\.github/workflows/e2e-postgres\.yml$|\.github/scripts/discover-e2e-fixtures\.sh$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  discover-fixtures:
+    name: discover-fixtures
+    runs-on: ubuntu-latest
+    outputs:
+      world_matrix: ${{ steps.discover.outputs.world_matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Discover eval fixtures
+        id: discover
+        run: .github/scripts/discover-e2e-fixtures.sh
+
+  # The Postgres world suite: every fixture builds and runs once against a
+  # production server backed by @workflow/world-postgres, with deterministic
+  # mock models (EVE_E2E_MODEL=mock). Evals that need a real model carry the
+  # `real-model` tag and run only in the model suite (e2e-local).
+  e2e:
+    name: e2e-postgres (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    needs: [changes, discover-fixtures]
+    if: needs.changes.outputs.relevant == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover-fixtures.outputs.world_matrix) }}
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: world
+          POSTGRES_PASSWORD: world
+          POSTGRES_USER: world
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username=world --dbname=world"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      # Mock models never reach the gateway; the placeholder keeps any
+      # credential-presence checks satisfied without granting live access.
+      AI_GATEWAY_API_KEY: invalid-e2e-world-suite-key
+      EVE_E2E_MODEL: mock
+      EVE_E2E_WORKFLOW_WORLD: "@workflow/world-postgres"
+      EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
+      WORKFLOW_POSTGRES_MAX_POOL_SIZE: "52"
+      WORKFLOW_POSTGRES_URL: postgres://world:world@127.0.0.1:5432/world
+      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "50"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build eve package
+        # Full build, not build:js: the deployed/runtime bundles must carry the
+        # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
+        run: pnpm --filter eve run build
+
+      - name: Build extension fixtures
+        # Extension fixtures ship no committed `dist/`; produce it here so
+        # consuming fixtures resolve the built artifacts. `--if-present` skips
+        # extension fixtures without a build script. The update re-packs the
+        # `file:`-protocol store copies so they pick up the fresh dist —
+        # a plain reinstall short-circuits and leaves them stale.
+        run: |
+          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
+          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+
+      - name: Stage workspace extension fixtures as dist-only
+        # Removing author source proves the production build consumes the same
+        # agent-shaped dist trees registry packages ship.
+        run: |
+          mv e2e/fixtures/toolkit-extension/extension "$RUNNER_TEMP/toolkit-extension-source"
+          mv e2e/fixtures/js-only-extension/extension "$RUNNER_TEMP/js-only-extension-source"
+
+      - name: Bootstrap Workflow Postgres schema
+        working-directory: ${{ matrix.dir }}
+        run: pnpm exec bootstrap
+
+      - name: Build fixture, start production server, and run evals
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVE_EVAL_JUNIT_DIR"
+          cd "${{ matrix.dir }}"
+
+          pnpm exec eve build
+
+          server_log="$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-server.log"
+          pnpm exec eve start --host 127.0.0.1 --port 3000 >"$server_log" 2>&1 &
+          server_pid=$!
+
+          cleanup() {
+            set +e
+            kill "$server_pid" 2>/dev/null
+            wait "$server_pid" 2>/dev/null
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _ in {1..120}; do
+            if curl --fail --silent http://127.0.0.1:3000/eve/v1/health >/dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat "$server_log"
+              exit 1
+            fi
+            sleep 0.5
+          done
+          if [ "$ready" != "true" ]; then
+            cat "$server_log"
+            echo "Timed out waiting for the Postgres-backed eve server."
+            exit 1
+          fi
+
+          if ! pnpm exec eve eval --strict --verbose --exclude-tag real-model \
+            --url http://127.0.0.1:3000 \
+            --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"; then
+            cat "$server_log"
+            exit 1
+          fi
+
+          # Durability proof: the eval traffic above must have produced
+          # Postgres-backed workflow runs, not silently fallen back to the
+          # local world.
+          run_count="$(
+            docker exec "$POSTGRES_CONTAINER_ID" \
+              psql --username=world --dbname=world --tuples-only --no-align \
+              --command="SELECT count(*) FROM workflow.workflow_runs;"
+          )"
+          if ! [[ "$run_count" =~ ^[0-9]+$ ]] || [ "$run_count" -lt 1 ]; then
+            cat "$server_log"
+            echo "Expected Postgres-backed workflow runs, found: $run_count"
+            exit 1
+          fi
+          echo "Verified $run_count workflow run(s) in PostgreSQL."
+
+      - name: Upload eval artifacts
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v6
+        with:
+          name: eval-artifacts-postgres-${{ matrix.name }}
+          path: |
+            .junit
+            e2e/fixtures/*/.eve/evals
+            apps/fixtures/*/.eve/evals
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-required:
+    name: e2e-postgres
+    runs-on: ubuntu-latest
+    needs: [changes, discover-fixtures, e2e]
+    if: always()
+    steps:
+      - name: Require successful e2e matrix when relevant
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          DISCOVERY_RESULT: ${{ needs.discover-fixtures.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+        run: |
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "Change detection result: $CHANGES_RESULT"
+            exit 1
+          fi
+          if [ "$DISCOVERY_RESULT" != "success" ]; then
+            echo "Fixture discovery result: $DISCOVERY_RESULT"
+            exit 1
+          fi
+          if [ "$RELEVANT" != "true" ]; then
+            echo "No Postgres e2e-relevant changes."
+            exit 0
+          fi
+          if [ "$E2E_RESULT" != "success" ]; then
+            echo "World suite result: $E2E_RESULT"
+            exit 1
+          fi

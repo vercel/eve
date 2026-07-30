@@ -60,8 +60,8 @@ jobs:
   # The model suite: every fixture runs here against the local world with
   # real matrix models. Model-sensitive fixtures (`"e2e": { "modelMatrix":
   # "full" }` in package.json) run on every matrix model; the rest run once
-  # on the default model. The world suites (e2e-vercel) cover the other
-  # workflow worlds with deterministic mock models.
+  # on the default model. The world suites (e2e-vercel, e2e-postgres) cover
+  # the other workflow worlds with deterministic mock models.
   e2e:
     name: e2e-local (${{ matrix.name }}, ${{ matrix.model_name }})
     runs-on: ubuntu-latest
