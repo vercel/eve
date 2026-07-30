@@ -86,7 +86,11 @@ async function emitAttempt(input: {
       finishReason: "tool-calls",
       performance: { responseTimeMs: 10 },
       responseId: "response-1",
-      usage: { inputTokens: 10, outputTokens: 5 },
+      usage: {
+        inputTokenDetails: { cacheReadTokens: 4, cacheWriteTokens: 2 },
+        inputTokens: 10,
+        outputTokens: 5,
+      },
     },
   ]);
   await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
@@ -202,6 +206,8 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.root.session.id": "session-1",
       "agent.usage.input_tokens": 10,
       "agent.usage.output_tokens": 5,
+      "gen_ai.usage.cache_creation.input_tokens": 2,
+      "gen_ai.usage.cache_read.input_tokens": 4,
     });
     expect(action.attributes).toMatchObject({
       "agent.action.kind": "tool",

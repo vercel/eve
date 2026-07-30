@@ -17,6 +17,8 @@ Use `eve trace ls` to list captured traces and `eve trace <trace>` to inspect a 
 
 When a model call is served by Vercel AI Gateway, its `agent.step` span also carries the cost the gateway reported: `gen_ai.usage.cost` (raw inference, USD), `gen_ai.usage.gateway_cost` (with the gateway surcharge), `gen_ai.usage.input_cost` / `gen_ai.usage.output_cost` (the split), and `gen_ai.generation.id` for reconciliation with the gateway dashboard. These attributes only exist for gateway-served calls — other providers emit nothing. Cost per turn is the sum across the turn's step spans.
 
+Model and step spans also split token usage when the provider reports details: `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_creation.input_tokens` (named for the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)) alongside the `agent.usage.input_tokens` / `agent.usage.output_tokens` totals — cached tokens price differently, so the split makes cost attribution exact. Providers without detailed usage emit only the totals.
+
 The local writer is an internal development default, not a second provider layered over authored instrumentation. When `instrumentation.ts` exists, its setup retains control and the zero-config writer is not installed.
 
 ### Local trace retention

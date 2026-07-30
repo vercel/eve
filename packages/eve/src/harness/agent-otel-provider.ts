@@ -516,13 +516,30 @@ function modelSpanName(operationName: string): string {
 
 function setUsage(
   span: Span,
-  usage: { readonly inputTokens?: number; readonly outputTokens?: number },
+  usage: {
+    readonly inputTokenDetails?: {
+      readonly cacheReadTokens?: number;
+      readonly cacheWriteTokens?: number;
+    };
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+  },
 ): void {
   if (usage.inputTokens !== undefined) {
     span.setAttribute("agent.usage.input_tokens", usage.inputTokens);
   }
   if (usage.outputTokens !== undefined) {
     span.setAttribute("agent.usage.output_tokens", usage.outputTokens);
+  }
+  // Cached tokens price differently from plain input, so keep the split.
+  // Named for the OTel GenAI semantic conventions; present only when the
+  // provider reports details — others emit nothing.
+  const details = usage.inputTokenDetails;
+  if (details?.cacheReadTokens !== undefined) {
+    span.setAttribute("gen_ai.usage.cache_read.input_tokens", details.cacheReadTokens);
+  }
+  if (details?.cacheWriteTokens !== undefined) {
+    span.setAttribute("gen_ai.usage.cache_creation.input_tokens", details.cacheWriteTokens);
   }
 }
 
