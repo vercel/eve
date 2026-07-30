@@ -170,6 +170,10 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
+  if (experimental.subagentPersistentSessions !== undefined) {
+    compiledExperimental.subagentPersistentSessions = experimental.subagentPersistentSessions;
+  }
+
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
       world: experimental.workflow.world,
