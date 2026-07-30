@@ -10,7 +10,6 @@ import {
   type LocalAgentHandle,
   type RemoteAgentHandle,
 } from "#harness/agent-handles.js";
-import { AGENTS_SNIPPET_LABEL } from "#harness/compaction-prompt.js";
 import type { HarnessSession } from "#harness/types.js";
 
 function createSession(state?: HarnessSession["state"]): HarnessSession {
@@ -110,7 +109,7 @@ describe("renderAgentsSnippet", () => {
     };
     const snippet = renderAgentsSnippet({ handles: [remoteHandle] });
 
-    expect(snippet.startsWith(`${AGENTS_SNIPPET_LABEL}\n<agents>`)).toBe(true);
+    expect(snippet.startsWith("[Agents]\n<agents>")).toBe(true);
     expect(snippet).toContain(
       '<agent id="ag_research:visible-id" name="research">waiting for input</agent>',
     );

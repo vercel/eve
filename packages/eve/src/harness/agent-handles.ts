@@ -1,10 +1,10 @@
 import { z } from "#compiled/zod/index.js";
 
-import { AGENTS_SNIPPET_LABEL } from "#harness/compaction-prompt.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 
 /** Session-state key for delegated agent handles. */
 export const AGENT_HANDLES_STATE_KEY = "eve.agent.handles";
+const AGENTS_SNIPPET_LABEL = "[Agents]";
 
 /** Delivery category for a delegated agent handle. */
 export type AgentHandleKind = AgentHandle["kind"];
