@@ -26,8 +26,15 @@ export interface InstrumentationSessionStartedEvent {
   readonly type: "session.started";
   readonly agentName?: string;
   readonly channelKind?: string;
+  readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
   readonly sessionId: string;
+}
+
+export interface InstrumentationTraceContext {
+  readonly spanId: string;
+  readonly traceFlags: number;
+  readonly traceId: string;
 }
 
 export interface InstrumentationSessionTransitionEvent {
@@ -39,6 +46,7 @@ export interface InstrumentationSessionTransitionEvent {
 
 export interface InstrumentationTurnStartedEvent {
   readonly type: "turn.started";
+  readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly sessionId: string;

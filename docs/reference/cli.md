@@ -252,7 +252,13 @@ eve traces                 # show the most recent span tree
 eve traces <trace>         # show one span tree
 ```
 
-`eve traces ls` reads the immutable OTLP/JSON segments captured under `.eve/traces/v1`; `eve dev` does not need to be running. `eve traces` accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed or incomplete segments are skipped without hiding valid spans from the same trace.
+Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
+
+A subagent keeps its own session id but records into the trace its parent had open at dispatch, so delegated work appears under the session that caused it, tagged with `agent.root.session.id`. Either session id resolves to that trace. A remote agent traces under its own deployment and is not recorded here.
+
+A session long enough to outgrow one trace — far longer than anything you will drive locally — continues into a new one. Each is a session window, numbered from zero on `agent.session.window`; passing a session id shows every window it produced, oldest first, and a trace id shows just that window.
+
+`agent.session` and `agent.turn` outlive the worker that opened them, so they are recorded as zero-duration markers. The span tree shows their descendant extent instead; `agent.step` and the model and tool spans beneath it carry real durations. A third-party OTel backend reports zero for the markers.
 
 ## `eve link`
 

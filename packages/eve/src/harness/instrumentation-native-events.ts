@@ -2,6 +2,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   InstrumentationHooks,
   InstrumentationPointEvent,
+  InstrumentationTraceContext,
 } from "#harness/instrumentation-lifecycle.js";
 import type { HandleEventFn } from "#harness/types.js";
 
@@ -9,6 +10,7 @@ export interface CreateInstrumentationHandleEventInput {
   readonly agentName?: string;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
+  readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly turnId?: string;
@@ -41,6 +43,7 @@ function toLifecycleEvent(
     case "session.started":
       return {
         agentName: input.agentName,
+        parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
         sessionId: input.sessionId,
         type: "session.started",
@@ -57,6 +60,7 @@ function toLifecycleEvent(
       };
     case "turn.started":
       return {
+        parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
         sequence: event.data.sequence,
         sessionId: input.sessionId,

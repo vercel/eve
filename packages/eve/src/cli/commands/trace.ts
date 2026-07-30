@@ -28,13 +28,20 @@ export interface LocalTraceSpan {
   readonly traceId: string;
 }
 
+interface SpanExtent {
+  readonly endTimeNs: bigint;
+  readonly startTimeNs: bigint;
+}
+
 export interface LocalTrace {
   readonly agentName?: string;
   readonly endTimeNs: bigint;
   readonly sessionId?: string;
+  readonly sessionIds: readonly string[];
   readonly spans: readonly LocalTraceSpan[];
   readonly startTimeNs: bigint;
   readonly traceId: string;
+  readonly window?: number;
 }
 
 /** Reads valid local traces, newest first, while ignoring malformed segments. */
@@ -63,31 +70,50 @@ export async function listLocalTraces(appRoot: string): Promise<LocalTrace[]> {
   );
 }
 
-/** Resolves an exact trace/session id or an unambiguous prefix. */
-export function resolveLocalTrace(traces: readonly LocalTrace[], reference: string): LocalTrace {
+/**
+ * Resolves an exact trace/session id or an unambiguous prefix. One session id
+ * can match several traces, since a long session windows into more than one.
+ */
+export function resolveLocalTraces(
+  traces: readonly LocalTrace[],
+  reference: string,
+): readonly LocalTrace[] {
   const raw = reference.replaceAll("\\", "/");
   const normalized = basename(raw);
   const references = raw === normalized ? [raw] : [raw, normalized];
   const exactTrace = traces.find((trace) => references.includes(trace.traceId));
-  if (exactTrace !== undefined) return exactTrace;
-  const exactSessions = traces.filter(
-    (trace) => trace.sessionId !== undefined && references.includes(trace.sessionId),
+  if (exactTrace !== undefined) return [exactTrace];
+  const exactSessions = traces.filter((trace) =>
+    trace.sessionIds.some((sessionId) => references.includes(sessionId)),
   );
-  if (exactSessions.length === 1) return exactSessions[0]!;
-  if (exactSessions.length > 1) throw ambiguousTraceError(exactSessions, reference);
+  if (exactSessions.length > 0) return orderWindows(exactSessions);
 
   const matches = traces.filter((trace) =>
     references.some(
-      (candidate) => trace.traceId.startsWith(candidate) || trace.sessionId?.startsWith(candidate),
+      (candidate) =>
+        trace.traceId.startsWith(candidate) ||
+        trace.sessionIds.some((sessionId) => sessionId.startsWith(candidate)),
     ),
   );
-  if (matches.length === 1) return matches[0]!;
   if (matches.length === 0) {
     throw new Error(
       `No local trace matches "${sanitizeForTerminal(reference)}". Run \`eve traces ls\` to list traces.`,
     );
   }
-  throw ambiguousTraceError(matches, reference);
+  if (matches.length === 1) return matches;
+  const sessions = new Set(matches.map((trace) => trace.sessionId ?? trace.traceId));
+  if (sessions.size > 1) throw ambiguousTraceError(matches, reference);
+  return orderWindows(matches);
+}
+
+function orderWindows(traces: readonly LocalTrace[]): readonly LocalTrace[] {
+  return [...traces].sort((left, right) =>
+    left.startTimeNs === right.startTimeNs
+      ? left.traceId.localeCompare(right.traceId)
+      : left.startTimeNs < right.startTimeNs
+        ? -1
+        : 1,
+  );
 }
 
 export async function runTraceListCommand(
@@ -154,26 +180,33 @@ export async function runTraceShowCommand(
     logger.log(message);
     return;
   }
-  const trace = reference === undefined ? traces[0]! : resolveLocalTrace(traces, reference);
+  const selected = reference === undefined ? [traces[0]!] : resolveLocalTraces(traces, reference);
   const theme = createCliTheme();
   logger.log(
-    [
-      renderCliSection(theme, {
-        rows: [
-          { label: "Trace ID", value: trace.traceId },
-          { label: "Session ID", value: trace.sessionId ?? "unknown" },
-          { label: "Agent", value: trace.agentName ?? "unknown" },
-          { label: "Started", value: toDate(trace.startTimeNs).toISOString() },
-          {
-            label: "Duration",
-            value: formatElapsed(durationMs(trace.startTimeNs, trace.endTimeNs)),
-          },
-          { label: "Spans", value: String(trace.spans.length) },
-        ],
-        title: "Trace",
-      }),
-      `${theme.accent("Spans")}\n${renderSpanTree(trace.spans)}`,
-    ].join("\n\n"),
+    selected
+      .map((trace) =>
+        [
+          renderCliSection(theme, {
+            rows: [
+              { label: "Trace ID", value: trace.traceId },
+              { label: "Session ID", value: trace.sessionId ?? "unknown" },
+              ...(trace.window === undefined
+                ? []
+                : [{ label: "Window", value: String(trace.window) }]),
+              { label: "Agent", value: trace.agentName ?? "unknown" },
+              { label: "Started", value: toDate(trace.startTimeNs).toISOString() },
+              {
+                label: "Duration",
+                value: formatElapsed(durationMs(trace.startTimeNs, trace.endTimeNs)),
+              },
+              { label: "Spans", value: String(trace.spans.length) },
+            ],
+            title: "Trace",
+          }),
+          `${theme.accent("Spans")}\n${renderSpanTree(trace.spans)}`,
+        ].join("\n\n"),
+      )
+      .join("\n\n"),
   );
 }
 
@@ -204,19 +237,22 @@ async function readTrace(root: string, traceId: string): Promise<LocalTrace | un
   if (spans.size === 0) return undefined;
   const ordered = [...spans.values()].sort(compareSpans);
   const attributes = ordered.map((span) => span.attributes);
+  const sessionIds = distinctAttributes(attributes, "agent.session.id");
   return {
     agentName: firstAttribute(attributes, "agent.name"),
     endTimeNs: ordered.reduce(
       (value, span) => (span.endTimeNs > value ? span.endTimeNs : value),
       0n,
     ),
-    sessionId: firstAttribute(attributes, "agent.session.id"),
+    sessionId: sessionIds[0],
+    sessionIds,
     spans: ordered,
     startTimeNs: ordered.reduce(
       (value, span) => (span.startTimeNs < value ? span.startTimeNs : value),
       ordered[0]!.startTimeNs,
     ),
     traceId,
+    window: firstNumberAttribute(attributes, "agent.session.window"),
   };
 }
 
@@ -315,13 +351,14 @@ function renderSpanTree(spans: readonly LocalTraceSpan[]): string {
   }
   roots.sort(compareSpans);
   for (const siblings of children.values()) siblings.sort(compareSpans);
+  const extents = subtreeExtents(spans, children);
 
   const lines: string[] = [];
   const visited = new Set<string>();
   const render = (span: LocalTraceSpan, prefix: string, connector: string): void => {
     if (visited.has(span.spanId)) return;
     visited.add(span.spanId);
-    lines.push(`${prefix}${connector}${spanLabel(span)}`);
+    lines.push(`${prefix}${connector}${spanLabel(span, extents.get(span.spanId))}`);
     const descendants = children.get(span.spanId) ?? [];
     descendants.forEach((child, index) => {
       const last = index === descendants.length - 1;
@@ -339,7 +376,35 @@ function renderSpanTree(spans: readonly LocalTraceSpan[]): string {
   return lines.join("\n");
 }
 
-function spanLabel(span: LocalTraceSpan): string {
+function subtreeExtents(
+  spans: readonly LocalTraceSpan[],
+  children: ReadonlyMap<string, readonly LocalTraceSpan[]>,
+): ReadonlyMap<string, SpanExtent> {
+  const extents = new Map<string, SpanExtent>();
+  const pending = new Set<string>();
+  const visit = (span: LocalTraceSpan): SpanExtent => {
+    const cached = extents.get(span.spanId);
+    if (cached !== undefined) return cached;
+    if (pending.has(span.spanId))
+      return { endTimeNs: span.endTimeNs, startTimeNs: span.startTimeNs };
+    pending.add(span.spanId);
+    let endTimeNs = span.endTimeNs;
+    let startTimeNs = span.startTimeNs;
+    for (const child of children.get(span.spanId) ?? []) {
+      const extent = visit(child);
+      if (extent.startTimeNs < startTimeNs) startTimeNs = extent.startTimeNs;
+      if (extent.endTimeNs > endTimeNs) endTimeNs = extent.endTimeNs;
+    }
+    pending.delete(span.spanId);
+    const extent = { endTimeNs, startTimeNs };
+    extents.set(span.spanId, extent);
+    return extent;
+  };
+  for (const span of spans) visit(span);
+  return extents;
+}
+
+function spanLabel(span: LocalTraceSpan, extent?: SpanExtent): string {
   const details: string[] = [];
   const turnId = stringAttribute(span, "agent.turn.id");
   const stepIndex = valueAttribute(span, "agent.step.index");
@@ -368,13 +433,42 @@ function spanLabel(span: LocalTraceSpan): string {
   }
   const detail = details.length === 0 ? "" : ` [${details.join(", ")}]`;
   const error = span.statusCode === 2 ? " ERROR" : "";
-  return `${sanitizeForTerminal(span.name)}${detail}  ${formatElapsed(durationMs(span.startTimeNs, span.endTimeNs))}${error}`;
+  const recorded = durationMs(span.startTimeNs, span.endTimeNs);
+  const elapsed =
+    recorded === 0 && extent !== undefined
+      ? durationMs(extent.startTimeNs, extent.endTimeNs)
+      : recorded;
+  return `${sanitizeForTerminal(span.name)}${detail}  ${formatElapsed(elapsed)}${error}`;
 }
 
 function compareSpans(left: LocalTraceSpan, right: LocalTraceSpan): number {
   if (left.startTimeNs !== right.startTimeNs) return left.startTimeNs < right.startTimeNs ? -1 : 1;
   if (left.endTimeNs !== right.endTimeNs) return left.endTimeNs < right.endTimeNs ? -1 : 1;
   return left.name.localeCompare(right.name) || left.spanId.localeCompare(right.spanId);
+}
+
+function firstNumberAttribute(
+  attributes: readonly Readonly<Record<string, unknown>>[],
+  key: string,
+): number | undefined {
+  for (const values of attributes) {
+    const value = values[key];
+    if (typeof value === "number") return value;
+    if (typeof value === "bigint") return Number(value);
+  }
+  return undefined;
+}
+
+function distinctAttributes(
+  attributes: readonly Readonly<Record<string, unknown>>[],
+  key: string,
+): readonly string[] {
+  const values = new Set<string>();
+  for (const entry of attributes) {
+    const value = entry[key];
+    if (typeof value === "string" && value.length > 0) values.add(value);
+  }
+  return [...values];
 }
 
 function firstAttribute(

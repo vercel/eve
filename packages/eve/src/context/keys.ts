@@ -13,6 +13,7 @@ import type {
   SessionCallback,
   SessionCapabilities,
   SessionParent,
+  SessionTraceContext,
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
@@ -67,6 +68,8 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
 );
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
+/** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
+export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
 export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
 
 /**

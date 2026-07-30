@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   ROOT_CONTEXT,
   SpanStatusCode,
@@ -21,6 +19,7 @@ import type {
   InstrumentationModelCallStartedEvent,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
+  InstrumentationTraceContext,
   InstrumentationSessionTransitionEvent,
   InstrumentationToolCallStartedEvent,
   InstrumentationToolCallTerminalEvent,
@@ -42,12 +41,16 @@ interface ToolSpanState extends SpanState {
   readonly toolSpan: Span;
 }
 
+/** Sized so an ordinary session stays one trace and only an outsized one rolls. */
+export const SESSION_WINDOW_TURN_LIMIT = 200;
+
 export interface AgentSessionTraceState {
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly context: SpanContext;
-  readonly pendingStarted: boolean;
   readonly rootSessionId: string;
+  readonly turnsInWindow: number;
+  readonly window: number;
 }
 
 export interface AgentTurnTraceState {
@@ -135,13 +138,17 @@ export function createAgentOtelInstrumentation(
   };
 
   const onTurnStarted = async (event: InstrumentationTurnStartedEvent): Promise<void> => {
-    const session = await ensureSessionContext({
-      agentName: undefined,
-      channelKind: undefined,
-      rootSessionId: event.rootSessionId,
-      sessionId: event.sessionId,
-      type: "session.started",
-    });
+    const session = advanceSessionWindow(
+      event.sessionId,
+      await ensureSessionContext({
+        agentName: undefined,
+        channelKind: undefined,
+        parentTraceContext: event.parentTraceContext,
+        rootSessionId: event.rootSessionId,
+        sessionId: event.sessionId,
+        type: "session.started",
+      }),
+    );
     const span = input.tracer.startSpan(
       "agent.turn",
       {
@@ -151,6 +158,7 @@ export function createAgentOtelInstrumentation(
           "agent.name": session.agentName,
           "agent.root.session.id": event.rootSessionId,
           "agent.session.id": event.sessionId,
+          "agent.session.window": session.window,
           "agent.turn.id": event.turnId,
           "agent.turn.sequence": event.sequence,
         },
@@ -158,12 +166,9 @@ export function createAgentOtelInstrumentation(
       contextFromSpanContext(session.context),
     );
     span.addEvent("turn.started");
-    if (session.pendingStarted) {
-      span.addEvent("session.started");
-    }
     await input.stateStore.setSession(event.sessionId, {
       ...session,
-      pendingStarted: false,
+      turnsInWindow: session.turnsInWindow + 1,
     });
     await input.stateStore.setTurn(event.sessionId, event.turnId, {
       context: span.spanContext(),
@@ -371,6 +376,34 @@ export function createAgentOtelInstrumentation(
     state.span.end();
   };
 
+  const openSessionWindow = (window: {
+    readonly agentName?: string;
+    readonly index: number;
+    readonly previousTraceId?: string;
+    readonly rootSessionId: string;
+    readonly sessionId: string;
+  }): SpanContext => {
+    const span = input.tracer.startSpan("agent.session", {
+      attributes: {
+        "agent.framework.name": "eve",
+        "agent.framework.version": input.frameworkVersion,
+        "agent.name": window.agentName,
+        "agent.root.session.id": window.rootSessionId,
+        "agent.session.id": window.sessionId,
+        "agent.session.window": window.index,
+        ...(window.previousTraceId === undefined
+          ? {}
+          : { "agent.session.window.previous.trace.id": window.previousTraceId }),
+      },
+      root: true,
+    });
+    span.addEvent(window.index === 0 ? "session.started" : "session.window.opened");
+    // The window outlives this worker, so the root is recorded as a marker and
+    // later spans parent through its persisted context, as `agent.turn` does.
+    span.end();
+    return span.spanContext();
+  };
+
   const ensureSessionContext = async (
     event: InstrumentationSessionStartedEvent,
   ): Promise<AgentSessionTraceState> => {
@@ -379,13 +412,42 @@ export function createAgentOtelInstrumentation(
       state = {
         agentName: event.agentName,
         channelKind: event.channelKind,
-        context: sessionTraceContext(event.sessionId),
-        pendingStarted: true,
+        context:
+          event.parentTraceContext === undefined
+            ? openSessionWindow({
+                agentName: event.agentName,
+                index: 0,
+                rootSessionId: event.rootSessionId,
+                sessionId: event.sessionId,
+              })
+            : adoptedSpanContext(event.parentTraceContext),
         rootSessionId: event.rootSessionId,
+        turnsInWindow: 0,
+        window: 0,
       };
       await input.stateStore.setSession(event.sessionId, state);
     }
     return state;
+  };
+
+  const advanceSessionWindow = (
+    sessionId: string,
+    session: AgentSessionTraceState,
+  ): AgentSessionTraceState => {
+    if (session.turnsInWindow < SESSION_WINDOW_TURN_LIMIT) return session;
+    const index = session.window + 1;
+    return {
+      ...session,
+      context: openSessionWindow({
+        agentName: session.agentName,
+        index,
+        previousTraceId: session.context.traceId,
+        rootSessionId: session.rootSessionId,
+        sessionId,
+      }),
+      turnsInWindow: 0,
+      window: index,
+    };
   };
 
   const onAttemptMetadata = (event: InstrumentationAttemptMetadataEvent): void => {
@@ -447,16 +509,15 @@ function turnKey(sessionId: string, turnId: string): string {
   return `${sessionId}:${turnId}`;
 }
 
-function sessionTraceContext(sessionId: string): SpanContext {
+function adoptedSpanContext(handed: InstrumentationTraceContext): SpanContext {
   return {
-    spanId: digestId(`eve:session-parent:${sessionId}`, 16),
-    traceFlags: 1,
-    traceId: digestId(`eve:session:${sessionId}`, 32),
+    // Not remote: a subagent crosses the same worker boundary every restored
+    // session context does, not the wire.
+    isRemote: false,
+    spanId: handed.spanId,
+    traceFlags: handed.traceFlags,
+    traceId: handed.traceId,
   };
-}
-
-function digestId(value: string, length: number): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, length);
 }
 
 function contextFromSpanContext(spanContext: SpanContext): Context {
