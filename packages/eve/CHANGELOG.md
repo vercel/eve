@@ -1,5 +1,12 @@
 # eve
 
+## 0.29.2
+
+### Patch Changes
+
+- f3ecdcd: Eval config timeouts are now applied to every eval and enforced even when an eval task does not cooperate with its abort signal, preventing stalled eval runs.
+- f3ecdcd: Malformed raw tool arguments now preserve the original JSON syntax error and return it to the model as a failed tool result instead of reporting a misleading serialization error.
+
 ## 0.29.1
 
 ### Patch Changes
