@@ -101,6 +101,11 @@
       "import": "./dist/src/public/tools/approval/index.js",
       "default": "./dist/src/public/tools/approval/index.js"
     },
+    "./tools/sleep": {
+      "types": "./dist/src/public/tools/sleep/index.d.ts",
+      "import": "./dist/src/public/tools/sleep/index.js",
+      "default": "./dist/src/public/tools/sleep/index.js"
+    },
     "./tools": {
       "types": "./dist/src/public/tools/index.d.ts",
       "import": "./dist/src/public/tools/index.js",
