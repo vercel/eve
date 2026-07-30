@@ -1,13 +1,14 @@
-import { addChannels } from "./setup.js";
+import { addChannels } from "./channel-scaffold.js";
 import type { ChannelSetupContext, ChannelSetupResult } from "./types.js";
-import { runInteractive } from "../../runner.js";
-import type { AddChannelsState } from "./setup.js";
-import type { OutputSink } from "../../step.js";
+import { runInteractive } from "../runner.js";
+import type { AddChannelsState } from "./channel-scaffold.js";
+import type { OutputSink } from "../step.js";
 
 /** Runs the shared scaffold box with decisions supplied by a channel integration. */
 export async function runChannelSetup(
   context: ChannelSetupContext,
   options: {
+    kind: "slack" | "web";
     configureVercelServices?: boolean;
     slackCredentials?: "vercel-connect" | "environment";
     ensureLinkedProject?: "interactive-vercel-link";
@@ -16,6 +17,7 @@ export async function runChannelSetup(
   const box = addChannels({
     asker: context.ui.asker,
     prompter: context.ui.prompter,
+    kind: options.kind,
     headless: context.headless,
     presetCreateSlackbot: context.presetCreateSlackbot,
     force: context.force,

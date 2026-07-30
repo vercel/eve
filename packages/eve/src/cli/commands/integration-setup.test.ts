@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import type { AddChannelsDeps } from "#setup/integrations/channels/setup.js";
+import type { AddChannelsDeps } from "#setup/integrations/channel-scaffold.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 
 import { runIntegrationSetupCommand } from "./integration-setup.js";

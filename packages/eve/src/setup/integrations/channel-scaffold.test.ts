@@ -5,12 +5,12 @@ import { normalizeSlackConnectorSlug } from "#setup/scaffold/index.js";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import { headlessAsker, interactiveAsker } from "../../ask.js";
-import type { Prompter } from "../../prompter.js";
-import { createDefaultSetupState, snapshotSetupState, type SetupState } from "../../state.js";
-import type { OutputSink } from "../../step.js";
-import { runHeadless, runInteractive } from "../../runner.js";
-import { addChannels, type AddChannelsDeps, type AddChannelsOptions } from "./setup.js";
+import { headlessAsker, interactiveAsker } from "../ask.js";
+import type { Prompter } from "../prompter.js";
+import { createDefaultSetupState, snapshotSetupState, type SetupState } from "../state.js";
+import type { OutputSink } from "../step.js";
+import { runHeadless, runInteractive } from "../runner.js";
+import { addChannels, type AddChannelsDeps, type AddChannelsOptions } from "./channel-scaffold.js";
 
 const silentSink: OutputSink = { write: () => {} };
 const snapshot = { snapshot: snapshotSetupState };
@@ -28,11 +28,14 @@ function createPrompter(): Prompter {
  * {@link interactiveAsker} exactly as the old direct `prompter.select` did.
  */
 function makeBox(
-  options: Omit<AddChannelsOptions, "asker" | "headless"> & { headless?: boolean },
+  options: Omit<AddChannelsOptions, "asker" | "headless" | "kind"> & { kind?: "slack" | "web" } & {
+    headless?: boolean;
+  },
 ): ReturnType<typeof addChannels<SetupState>> {
   const headless = options.headless ?? false;
   return addChannels<SetupState>({
     ...options,
+    kind: options.kind ?? "web",
     asker: headless ? headlessAsker() : interactiveAsker(options.prompter),
     headless,
   });
@@ -98,11 +101,10 @@ function createDeps() {
   };
 }
 
-function resolvedState(channelSelection: SetupState["channelSelection"] = ["web"]): SetupState {
+function resolvedState(): SetupState {
   return {
     ...createDefaultSetupState(),
     agentName: "my-agent",
-    channelSelection,
     vercelProject: { kind: "new", project: "my-agent", team: "team" },
     project: { kind: "linked", projectId: "prj_demo" },
     projectPath: { kind: "resolved", inPlace: false, path: "/tmp/project" },
@@ -114,7 +116,6 @@ function noVercelState(): SetupState {
   return {
     ...createDefaultSetupState(),
     agentName: "my-agent",
-    channelSelection: ["web"],
     projectPath: { kind: "resolved", inPlace: false, path: "/tmp/project" },
   };
 }
@@ -123,6 +124,7 @@ describe("addChannels box", () => {
   it("rejects Slack headlessly with a plain error before any effect", async () => {
     const deps = createDeps();
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       // A preset answer must NOT rescue headless Slack: the Connect create flow
@@ -132,7 +134,7 @@ describe("addChannels box", () => {
       deps,
     });
 
-    const run = runHeadless([box], resolvedState(["web", "slack"]), silentSink, snapshot);
+    const run = runHeadless([box], resolvedState(), silentSink, snapshot);
 
     await expect(run).rejects.toThrow(
       "Slack setup is interactive. Run `eve add channel/slack` from an interactive terminal.",
@@ -146,18 +148,14 @@ describe("addChannels box", () => {
   it("uses portable Slack credentials without provisioning when Vercel is unavailable", async () => {
     const deps = createDeps();
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       slackCredentials: "environment",
       deps,
     });
 
-    const next = await runHeadless(
-      [box],
-      { ...noVercelState(), channelSelection: ["slack"] },
-      silentSink,
-      snapshot,
-    );
+    const next = await runHeadless([box], noVercelState(), silentSink, snapshot);
 
     expect(deps.provisionSlackbot).not.toHaveBeenCalled();
     expect(deps.ensureVercelProject).not.toHaveBeenCalled();
@@ -284,25 +282,18 @@ describe("addChannels box", () => {
     expect("webPackageVersions" in ensureOptions).toBe(false);
   });
 
-  it("threads force to both channel scaffolds", async () => {
+  it("threads force to the selected channel scaffold", async () => {
     const deps = createDeps();
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       presetCreateSlackbot: true,
       force: true,
       deps,
     });
 
-    const result = await runInteractive(
-      [box],
-      resolvedState(["web", "slack"]),
-      silentSink,
-      snapshot,
-    );
+    const result = await runInteractive([box], resolvedState(), silentSink, snapshot);
 
-    expect(deps.ensureChannel).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "web", force: true }),
-    );
     expect(deps.ensureChannel).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "slack", force: true }),
     );
@@ -335,29 +326,14 @@ describe("addChannels box", () => {
     );
   });
 
-  it("no-ops cleanly on an empty channel selection", async () => {
-    const deps = createDeps();
-    // The fake prompter throws on any prompt, so reaching the end also proves
-    // the slackbot question is not asked for an empty selection.
-    const box = makeBox({ prompter: createPrompter(), evePackage: TEST_EVE_PACKAGE, deps });
-
-    const next = await runInteractive([box], resolvedState([]), silentSink, snapshot);
-
-    expect(deps.ensureChannel).not.toHaveBeenCalled();
-    expect(deps.provisionSlackbot).not.toHaveBeenCalled();
-    expect(next.kind).toBe("done");
-    if (next.kind === "done") {
-      expect(next.state.channels).toEqual([]);
-    }
-  });
-
   it("links an unresolved project before provisioning when the link seam is set", async () => {
     const deps = createDeps();
-    const state = resolvedState(["slack"]);
+    const state = resolvedState();
     state.project = { kind: "unresolved" };
     state.vercelProject = { kind: "none" };
     const prompter = createPrompter();
     const box = makeBox({
+      kind: "slack",
       prompter,
       presetCreateSlackbot: true,
       ensureLinkedProject: "interactive-vercel-link",
@@ -384,10 +360,11 @@ describe("addChannels box", () => {
   it("fails the link fallback with the engine's copy when `vercel link` fails", async () => {
     const deps = createDeps();
     deps.ensureVercelProject.mockRejectedValue(new Error("Vercel project linking failed."));
-    const state = resolvedState(["slack"]);
+    const state = resolvedState();
     state.project = { kind: "unresolved" };
     state.vercelProject = { kind: "none" };
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       presetCreateSlackbot: true,
       ensureLinkedProject: "interactive-vercel-link",
@@ -409,9 +386,9 @@ describe("addChannels box", () => {
       workspaceName: "Vercel",
     });
     const prompter = createFakePrompter({ single: () => "yes" }).prompter;
-    const box = makeBox({ prompter, evePackage: TEST_EVE_PACKAGE, deps });
+    const box = makeBox({ kind: "slack", prompter, evePackage: TEST_EVE_PACKAGE, deps });
 
-    const result = await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    const result = await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(deps.provisionSlackbot.mock.invocationCallOrder[0]).toBeLessThan(
       deps.ensureChannel.mock.invocationCallOrder[0]!,
@@ -450,9 +427,14 @@ describe("addChannels box", () => {
       expect(selected).toEqual({ uid: "slack/operations", id: "scl_operations" });
       return { state: "attached", connectorUid: "slack/operations" };
     });
-    const box = makeBox({ prompter: fake.prompter, evePackage: TEST_EVE_PACKAGE, deps });
+    const box = makeBox({
+      kind: "slack",
+      prompter: fake.prompter,
+      evePackage: TEST_EVE_PACKAGE,
+      deps,
+    });
 
-    await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(fake.selectMessages).toEqual(["Which Slack app would you like to use?"]);
     expect(pickerOptions).toEqual(
@@ -473,13 +455,14 @@ describe("addChannels box", () => {
     // proves no question was asked.
     const fake = createFakePrompter();
     const box = makeBox({
+      kind: "slack",
       prompter: fake.prompter,
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
       deps,
     });
 
-    const result = await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    const result = await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(fake.selectMessages).toEqual([]);
     expect(deps.provisionSlackbot).toHaveBeenCalledOnce();
@@ -494,12 +477,13 @@ describe("addChannels box", () => {
     }));
     const prompter = { ...createPrompter(), awaitChoice };
     const box = makeBox({
+      kind: "slack",
       prompter,
       presetCreateSlackbot: true,
       deps,
     });
 
-    await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(deps.provisionSlackbot).toHaveBeenCalledWith(
       prompter.log,
@@ -522,7 +506,11 @@ describe("addChannels box", () => {
       packageJsonUpdated: [],
     });
     const prompter = createPrompter();
-    const box = makeBox({ prompter, evePackage: TEST_EVE_PACKAGE, deps });
+    const box = makeBox({
+      prompter,
+      evePackage: TEST_EVE_PACKAGE,
+      deps,
+    });
 
     const next = await runHeadless([box], resolvedState(), silentSink, snapshot);
 
@@ -542,6 +530,7 @@ describe("addChannels box", () => {
     });
     const prompter = createFakePrompter({ single: () => "yes" }).prompter;
     const box = makeBox({
+      kind: "slack",
       prompter,
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -549,24 +538,18 @@ describe("addChannels box", () => {
       deps,
     });
 
-    const result = await runInteractive(
-      [box],
-      resolvedState(["web", "slack"]),
-      silentSink,
-      snapshot,
-    );
+    const result = await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
-    // Web survives; Slack records nothing, so a later add starts clean.
-    expect(result.state.channels).toEqual(["web"]);
+    // Slack records nothing, so a later add starts clean.
+    expect(result.state.channels).toEqual([]);
     expect(result.state.slackScaffolded).toBe(false);
     expect(result.state.slackbotCreated).toBe(false);
     expect(prompter.log.warning).toHaveBeenCalledWith(
       "Slackbot creation failed. Continuing without Slack — add it later with `eve add channel/slack`.",
     );
-    // The slack channel scaffold never ran (only web's).
-    expect(deps.ensureChannel).toHaveBeenCalledTimes(1);
+    expect(deps.ensureChannel).not.toHaveBeenCalled();
     expect(deps.reconcileSlackUid).not.toHaveBeenCalled();
   });
 
@@ -577,12 +560,13 @@ describe("addChannels box", () => {
     });
     const prompter = createPrompter();
     const box = makeBox({
+      kind: "slack",
       prompter,
       presetCreateSlackbot: true,
       deps,
     });
 
-    const result = await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    const result = await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(result).toEqual({ kind: "cancelled" });
     expect(prompter.log.error).not.toHaveBeenCalled();
@@ -597,14 +581,13 @@ describe("addChannels box", () => {
     });
     const prompter = createPrompter();
     const box = makeBox({
+      kind: "slack",
       prompter,
       presetCreateSlackbot: true,
       deps,
     });
 
-    await expect(
-      runInteractive([box], resolvedState(["slack"]), silentSink, snapshot),
-    ).rejects.toThrow(
+    await expect(runInteractive([box], resolvedState(), silentSink, snapshot)).rejects.toThrow(
       "The abandoned Slack connector could not be removed. Slack channel was not added.",
     );
     expect(prompter.log.error).toHaveBeenCalledWith(
@@ -621,6 +604,7 @@ describe("addChannels box", () => {
     });
     const prompter = createFakePrompter({ single: () => "yes" }).prompter;
     const box = makeBox({
+      kind: "slack",
       prompter,
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -628,7 +612,7 @@ describe("addChannels box", () => {
       deps,
     });
 
-    const result = await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    const result = await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
@@ -649,6 +633,7 @@ describe("addChannels box", () => {
     });
     const prompter = createFakePrompter({ single: () => "yes" }).prompter;
     const box = makeBox({
+      kind: "slack",
       prompter,
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -656,7 +641,7 @@ describe("addChannels box", () => {
       deps,
     });
 
-    const result = await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    const result = await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
@@ -672,8 +657,9 @@ describe("addChannels box", () => {
     deps.provisionSlackbot.mockResolvedValue({
       state: "not-installed",
     });
-    const state = resolvedState(["slack"]);
+    const state = resolvedState();
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -697,6 +683,7 @@ describe("addChannels box", () => {
     });
     const prompter = createFakePrompter({ single: () => "yes" }).prompter;
     const box = makeBox({
+      kind: "slack",
       prompter,
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -704,7 +691,7 @@ describe("addChannels box", () => {
       deps,
     });
 
-    const result = await runInteractive([box], resolvedState(["slack"]), silentSink, snapshot);
+    const result = await runInteractive([box], resolvedState(), silentSink, snapshot);
 
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
@@ -722,15 +709,14 @@ describe("addChannels box", () => {
       connectorUid: "slack/my-agent",
     });
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
       deps,
     });
 
-    await expect(
-      runInteractive([box], resolvedState(["slack"]), silentSink, snapshot),
-    ).rejects.toThrow(
+    await expect(runInteractive([box], resolvedState(), silentSink, snapshot)).rejects.toThrow(
       "Slack workspace installation could not be verified. Slack channel was not added.",
     );
     expect(deps.ensureChannel).not.toHaveBeenCalled();
@@ -742,15 +728,14 @@ describe("addChannels box", () => {
       state: "connector-lookup-failed",
     });
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
       deps,
     });
 
-    await expect(
-      runInteractive([box], resolvedState(["slack"]), silentSink, snapshot),
-    ).rejects.toThrow(
+    await expect(runInteractive([box], resolvedState(), silentSink, snapshot)).rejects.toThrow(
       "Existing Slack connectors could not be inspected. Slack channel was not added.",
     );
     expect(deps.ensureChannel).not.toHaveBeenCalled();
@@ -762,8 +747,9 @@ describe("addChannels box", () => {
       state: "attach-failed",
       connectorUid: "slack/my-agent",
     });
-    const state = resolvedState(["slack"]);
+    const state = resolvedState();
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -786,8 +772,9 @@ describe("addChannels box", () => {
       state: "existing-not-installed",
       connectorUid: "slack/my-agent",
     });
-    const state = resolvedState(["slack"]);
+    const state = resolvedState();
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -810,8 +797,9 @@ describe("addChannels box", () => {
       packageJsonUpdated: [],
     });
     deps.reconcileSlackUid.mockResolvedValue(false);
-    const state = resolvedState(["slack"]);
+    const state = resolvedState();
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -827,8 +815,9 @@ describe("addChannels box", () => {
 
   it("throws when Slack is selected without a Vercel project", async () => {
     const deps = createDeps();
-    const state: SetupState = { ...noVercelState(), channelSelection: ["slack"] };
+    const state: SetupState = noVercelState();
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,
@@ -843,10 +832,11 @@ describe("addChannels box", () => {
 
   it("throws when the project resolution is missing", async () => {
     const deps = createDeps();
-    const state = resolvedState(["slack"]);
+    const state = resolvedState();
     // project stays unresolved: the link box did not record a resolution.
     state.project = { kind: "unresolved" };
     const box = makeBox({
+      kind: "slack",
       prompter: createPrompter(),
       evePackage: TEST_EVE_PACKAGE,
       presetCreateSlackbot: true,

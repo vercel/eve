@@ -16,16 +16,16 @@ import {
   isProjectResolved,
   mergeProjectResolution,
   type ProjectResolution,
-} from "../../project-resolution.js";
-import type { Asker } from "../../ask.js";
-import type { Prompter } from "../../prompter.js";
+} from "../project-resolution.js";
+import type { Asker } from "../ask.js";
+import type { Prompter } from "../prompter.js";
 import {
   provisionSlackbot,
   reconcileSlackUid,
   type ProvisionSlackbotOptions,
   type ProvisionSlackbotResult,
-} from "../../slackbot.js";
-import { WizardCancelledError, type SetupBox } from "../../step.js";
+} from "../slackbot.js";
+import { WizardCancelledError, type SetupBox } from "../step.js";
 
 /** State required by channel setup, kept narrow so the integration can move packages. */
 export interface AddChannelsState {
@@ -34,7 +34,6 @@ export interface AddChannelsState {
     | { kind: "unresolved"; inPlace: boolean }
     | { kind: "resolved"; inPlace: boolean; path: string };
   project: ProjectResolution;
-  channelSelection: ChannelKind[];
   channels: ChannelKind[];
   webScaffolded: boolean;
   slackScaffolded: boolean;
@@ -140,6 +139,8 @@ export interface AddChannelsDeps {
 }
 
 export interface AddChannelsOptions {
+  /** The integration channel this operation scaffolds. */
+  kind: ChannelKind;
   /** Resolves the slackbot question; the composed stack decides how. */
   asker: Asker;
   /**
@@ -308,7 +309,7 @@ export function addChannels<State extends AddChannelsState = AddChannelsState>(
     payload: AddChannelsPayload,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (!state.channelSelection.includes("web")) return;
+    if (options.kind !== "web") return;
     if (state.webScaffolded) {
       // Already scaffolded by a prior attempt this run: record without
       // rewriting the files.
@@ -428,7 +429,7 @@ export function addChannels<State extends AddChannelsState = AddChannelsState>(
     payload: AddChannelsPayload,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (!state.channelSelection.includes("slack")) return;
+    if (options.kind !== "slack") return;
 
     const slug = await deps.deriveSlackConnectorSlug(projectPath);
     if (options.slackCredentials === "environment") {
@@ -565,15 +566,11 @@ export function addChannels<State extends AddChannelsState = AddChannelsState>(
   return {
     id: "add-channels",
 
-    async gather({ state }): Promise<AddChannelsInput> {
+    async gather(): Promise<AddChannelsInput> {
       const headless = options.headless ?? false;
       // Connect opens a browser and remains interactive. Environment-backed
       // Slack has no provisioning effect, so headless setup can scaffold it.
-      if (
-        headless &&
-        state.channelSelection.includes("slack") &&
-        options.slackCredentials !== "environment"
-      ) {
+      if (headless && options.kind === "slack" && options.slackCredentials !== "environment") {
         throw new Error(SLACK_HEADLESS_ERROR);
       }
       return { headless, createSlackbot: options.presetCreateSlackbot };

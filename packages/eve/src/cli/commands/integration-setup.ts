@@ -1,13 +1,10 @@
 import { interactiveAsker } from "#setup/ask.js";
-import type { AddChannelsDeps } from "#setup/integrations/channels/setup.js";
+import type { AddChannelsDeps } from "#setup/integrations/channel-scaffold.js";
 import {
   channelSetupEnvironment,
   describeChannelSetupEnvironment,
-} from "#setup/integrations/channels/environment.js";
-import {
-  channelSetupIntegration,
-  createChannelSetupUi,
-} from "#setup/integrations/channels/index.js";
+} from "#setup/integrations/shared/environment.js";
+import { channelSetupIntegration, createChannelSetupUi } from "#setup/integrations/registry.js";
 import { detectDeployment, projectResolutionFromDeployment } from "#setup/project-resolution.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
@@ -75,7 +72,6 @@ export async function runIntegrationSetupCommand(
         ...createDefaultSetupState(),
         project,
         projectPath: { kind: "resolved", inPlace: true, path: appRoot },
-        channelSelection: [channelKind],
       },
       ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
       presetCreateSlackbot: options.yes ? true : undefined,

@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import { interactiveAsker } from "../../ask.js";
-import type { AddChannelsDeps } from "./setup.js";
-import { channelSetupEnvironment } from "./environment.js";
-import { channelSetupIntegration, createChannelSetupUi } from "./index.js";
-import { createDefaultSetupState } from "../../state.js";
-import { WizardCancelledError } from "../../step.js";
+import { interactiveAsker } from "../ask.js";
+import type { AddChannelsDeps } from "./channel-scaffold.js";
+import { channelSetupEnvironment } from "./shared/environment.js";
+import { channelSetupIntegration, createChannelSetupUi } from "./registry.js";
+import { createDefaultSetupState } from "../state.js";
+import { WizardCancelledError } from "../step.js";
 
 function context(prompter = createFakePrompter().prompter) {
   return {
@@ -15,7 +15,6 @@ function context(prompter = createFakePrompter().prompter) {
     state: {
       ...createDefaultSetupState(),
       projectPath: { kind: "resolved", inPlace: true, path: "/tmp/project" } as const,
-      channelSelection: ["slack" as const],
     },
     ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
   };
@@ -49,7 +48,6 @@ describe("channel setup integrations", () => {
       ...context(fake.prompter),
       state: {
         ...context(fake.prompter).state,
-        channelSelection: ["web"],
       },
       deps: {
         ensureChannel,

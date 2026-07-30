@@ -1,5 +1,5 @@
-import type { ChannelSetupIntegration } from "./types.js";
-import { runChannelSetup } from "./runner.js";
+import type { ChannelSetupIntegration } from "../types.js";
+import { runChannelSetup } from "../channel-scaffold-runner.js";
 import { WizardCancelledError } from "../../step.js";
 
 async function choosePortableCredentials(
@@ -46,15 +46,15 @@ export const SLACK_CHANNEL_SETUP: ChannelSetupIntegration = {
       );
     }
 
-    const result = await runChannelSetup(
-      context,
-      credentials === "environment"
+    const result = await runChannelSetup(context, {
+      kind: "slack",
+      ...(credentials === "environment"
         ? { slackCredentials: "environment" }
         : {
             slackCredentials: "vercel-connect",
             ensureLinkedProject: "interactive-vercel-link",
-          },
-    );
+          }),
+    });
     if (
       result.kind === "done" &&
       credentials === "environment" &&

@@ -1,7 +1,7 @@
 import type { ChannelSetupIntegration } from "./types.js";
-import { SLACK_CHANNEL_SETUP } from "./slack.js";
-import { WEB_CHANNEL_SETUP } from "./web.js";
-import type { ChannelKind } from "../../scaffold/index.js";
+import { SLACK_CHANNEL_SETUP } from "./slack/setup.js";
+import { WEB_CHANNEL_SETUP } from "./web/setup.js";
+import type { ChannelKind } from "../scaffold/index.js";
 
 /** Built-in channel integrations in canonical picker order. */
 export const CHANNEL_SETUP_INTEGRATIONS: readonly ChannelSetupIntegration[] = [
@@ -16,4 +16,4 @@ export function channelSetupIntegration(kind: ChannelKind): ChannelSetupIntegrat
   return integration;
 }
 
-export { createChannelSetupUi } from "./ui.js";
+export { createChannelSetupUi } from "./shared/ui.js";

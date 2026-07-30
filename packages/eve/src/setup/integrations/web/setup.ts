@@ -1,5 +1,5 @@
-import type { ChannelSetupIntegration } from "./types.js";
-import { runChannelSetup } from "./runner.js";
+import type { ChannelSetupIntegration } from "../types.js";
+import { runChannelSetup } from "../channel-scaffold-runner.js";
 
 /** Web Chat's channel-owned setup behavior. */
 export const WEB_CHANNEL_SETUP: ChannelSetupIntegration = {
@@ -8,6 +8,7 @@ export const WEB_CHANNEL_SETUP: ChannelSetupIntegration = {
   hint: "Browser-based chat interface",
   setup(context) {
     return runChannelSetup(context, {
+      kind: "web",
       configureVercelServices: context.environment.vercel.kind === "available",
     });
   },

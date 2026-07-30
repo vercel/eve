@@ -137,8 +137,6 @@ export interface SetupState {
   setupMode: SetupMode;
   modelId: string;
   modelWiring: WiringMode;
-  /** Channels chosen in the interview phase; scaffolded later by the channels box. */
-  channelSelection: ChannelKind[];
   /** Connections planned in the interview phase; scaffolded later by the connections box. */
   connectionSelection: ConnectionPlan[];
   /** Decided once by the resolve-provisioning box; executed later by the link box. */
@@ -184,7 +182,6 @@ export function createDefaultSetupState(): SetupState {
     setupMode: "complete",
     modelId: "",
     modelWiring: "gateway",
-    channelSelection: [],
     connectionSelection: [],
     vercelProject: { kind: "none" },
     aiGateway: { kind: "inherit" },
@@ -226,7 +223,6 @@ export function snapshotSetupState(state: SetupState): SetupState {
     ...state,
     aiGatewayCredentials: Object.freeze({ ...state.aiGatewayCredentials }),
     aiGateway: Object.freeze({ ...state.aiGateway }),
-    channelSelection: Object.freeze([...state.channelSelection]) as ChannelKind[],
     connectionSelection: Object.freeze([...state.connectionSelection]) as ConnectionPlan[],
     channels: Object.freeze([...state.channels]) as ChannelKind[],
     project: Object.freeze({ ...state.project }) as ProjectResolution,

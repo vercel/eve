@@ -1,8 +1,8 @@
-import type { AddChannelsDeps } from "./setup.js";
-import type { ChannelSetupEnvironment } from "./environment.js";
-import type { ChannelSetupUi } from "./ui.js";
-import type { ChannelKind } from "../../scaffold/index.js";
-import type { ProjectResolution } from "../../project-resolution.js";
+import type { AddChannelsDeps } from "./channel-scaffold.js";
+import type { ChannelSetupEnvironment } from "./shared/environment.js";
+import type { ChannelSetupUi } from "./shared/ui.js";
+import type { ChannelKind } from "../scaffold/index.js";
+import type { ProjectResolution } from "../project-resolution.js";
 
 /** Narrow state owned by one channel setup invocation. */
 export interface ChannelSetupState {
@@ -11,7 +11,6 @@ export interface ChannelSetupState {
     | { kind: "unresolved"; inPlace: boolean }
     | { kind: "resolved"; inPlace: boolean; path: string };
   readonly project: ProjectResolution;
-  readonly channelSelection: ChannelKind[];
   readonly channels: ChannelKind[];
   readonly webScaffolded: boolean;
   readonly slackScaffolded: boolean;
