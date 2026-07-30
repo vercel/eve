@@ -46,9 +46,12 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
-import { cancelTurnWithDescendantFanout } from "#execution/turn-cancellation-fanout.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
+import {
+  sessionCancelHookToken,
+  type TurnCancelPayload,
+} from "#execution/turn-cancellation-token.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -180,16 +183,7 @@ export function createWorkflowRuntime(config: {
     },
 
     async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
-      return await cancelTurnWithDescendantFanout({
-        ...input,
-        resolveRemoteRegistry: async () => {
-          const bundle = await getCompiledRuntimeAgentBundle({
-            compiledArtifactsSource: config.compiledArtifactsSource,
-            nodeId: config.nodeId,
-          });
-          return bundle.subagentRegistry.subagentsByNodeId;
-        },
-      });
+      return await requestWorkflowTurnCancellation(input);
     },
 
     async terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult> {
@@ -263,6 +257,32 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+/** Requests cancellation through a session's stable workflow hook. */
+export async function requestWorkflowTurnCancellation(
+  input: CancelTurnInput,
+): Promise<CancelTurnResult> {
+  const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
+
+  try {
+    await resumeHook(sessionCancelHookToken(input.sessionId), payload);
+    return { status: "accepted" };
+  } catch (error) {
+    const reason = classifyInactiveCancelTarget(error);
+    if (reason !== undefined) {
+      return { reason, status: "no_active_turn" };
+    }
+    throw error;
+  }
+}
+
+function classifyInactiveCancelTarget(error: unknown): string | undefined {
+  if (HookNotFoundError.is(error)) return "HookNotFoundError";
+  if (WorkflowRunNotFoundError.is(error)) return "WorkflowRunNotFoundError";
+  if (RunExpiredError.is(error)) return "RunExpiredError";
+  if (EntityConflictError.is(error)) return "EntityConflictError";
+  return undefined;
 }
 
 function isAlreadyTerminalSessionError(error: unknown): boolean {

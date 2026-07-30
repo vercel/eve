@@ -7,10 +7,7 @@ import {
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
-import {
-  isRetryableInactiveCancelReason,
-  requestWorkflowTurnCancellation,
-} from "#execution/turn-cancellation-request.js";
+import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type {
@@ -19,13 +16,11 @@ import type {
 } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 
-// This step is the durable backstop behind the request-time fan-out
-// (`cancelTurnWithDescendantFanout`), which usually reaches descendants
-// before the parent's run ever wakes. By the time this step executes, a
-// child with no active turn was most often already cancelled at request
-// time — a terminal outcome, returned immediately. Only reasons that can
-// heal with time (hook-claim conflicts during queue wakes) are retried,
-// and an exhausted retry is logged loudly rather than dropped silently.
+// Descendants listed in a pending batch should be actively running, so a
+// cancel that cannot be delivered is anomalous: retry with backoff long
+// enough to ride out transient world contention (queue wakes, hook-claim
+// conflicts), then log loudly rather than dropping the cancel silently —
+// an uncancelled child otherwise runs to completion with no trace of why.
 const CANCEL_ATTEMPTS = 8;
 const CANCEL_RETRY_INITIAL_DELAY_MS = 250;
 const CANCEL_RETRY_MAX_DELAY_MS = 1_500;
@@ -100,25 +95,15 @@ async function cancelLocalDescendant(input: {
     const final = await requestCancellationWithRetry({
       request: () => requestWorkflowTurnCancellation({ sessionId: input.childSessionId }),
       shouldRetryError: () => false,
-      shouldRetryResult: (result) => isRetryableInactiveCancelReason(result.reason),
     });
     if (final.status !== "accepted") {
-      if (isRetryableInactiveCancelReason(final.reason)) {
-        log.warn("descendant cancel was never accepted; the child may run to completion", {
-          callId: input.action.callId,
-          childSessionId: input.childSessionId,
-          finalStatus: final.status,
-          reason: final.reason,
-          subagentName: input.action.subagentName,
-        });
-      } else {
-        log.info("descendant had no active turn at settle time; already cancelled or finished", {
-          callId: input.action.callId,
-          childSessionId: input.childSessionId,
-          reason: final.reason,
-          subagentName: input.action.subagentName,
-        });
-      }
+      log.warn("descendant cancel was never accepted; the child may run to completion", {
+        callId: input.action.callId,
+        childSessionId: input.childSessionId,
+        finalStatus: final.status,
+        reason: final.reason,
+        subagentName: input.action.subagentName,
+      });
     }
   } catch (error) {
     logError(log, "failed to cancel local descendant turn", error, {
@@ -145,21 +130,15 @@ async function cancelRemoteDescendant(input: {
     const final = await requestCancellationWithRetry({
       request: () => cancelRemoteAgentTurn({ remote, sessionId: input.childSessionId }),
       shouldRetryError: isRetryableRemoteAgentCancelError,
-      // The remote deployment already classified its own turn state; a
-      // remote no_active_turn is terminal.
-      shouldRetryResult: () => false,
     });
     if (final.status !== "accepted") {
-      log.info(
-        "remote descendant had no active turn at settle time; already cancelled or finished",
-        {
-          callId: input.action.callId,
-          childSessionId: input.childSessionId,
-          finalStatus: final.status,
-          reason: final.reason,
-          remoteAgentName: input.action.remoteAgentName,
-        },
-      );
+      log.warn("remote descendant cancel was never accepted; the child may run to completion", {
+        callId: input.action.callId,
+        childSessionId: input.childSessionId,
+        finalStatus: final.status,
+        reason: final.reason,
+        remoteAgentName: input.action.remoteAgentName,
+      });
     }
   } catch (error) {
     logError(log, "failed to cancel remote descendant turn", error, {
@@ -173,7 +152,6 @@ async function cancelRemoteDescendant(input: {
 async function requestCancellationWithRetry(input: {
   readonly request: () => Promise<CancelTurnResult>;
   readonly shouldRetryError: (error: unknown) => boolean;
-  readonly shouldRetryResult: (result: CancelTurnResult) => boolean;
 }): Promise<CancelTurnResult> {
   let delayMs = CANCEL_RETRY_INITIAL_DELAY_MS;
   let lastResult: CancelTurnResult = { status: "no_active_turn" };
@@ -181,13 +159,7 @@ async function requestCancellationWithRetry(input: {
   for (let attempt = 1; attempt <= CANCEL_ATTEMPTS; attempt += 1) {
     try {
       lastResult = await input.request();
-      if (
-        lastResult.status === "accepted" ||
-        !input.shouldRetryResult(lastResult) ||
-        attempt === CANCEL_ATTEMPTS
-      ) {
-        return lastResult;
-      }
+      if (lastResult.status === "accepted" || attempt === CANCEL_ATTEMPTS) return lastResult;
     } catch (error) {
       if (!input.shouldRetryError(error) || attempt === CANCEL_ATTEMPTS) throw error;
     }
