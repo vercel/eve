@@ -29,6 +29,13 @@ export interface CancelTurnInput {
 /** Result of requesting turn cancellation. Both statuses are successful. */
 export interface CancelTurnResult {
   readonly status: CancelTurnStatus;
+  /**
+   * For `no_active_turn`: the error class that classified the target as
+   * inactive (e.g. `HookNotFoundError`, `EntityConflictError`). Lets callers
+   * that expected an active turn distinguish "already finished" from a
+   * transiently unreachable cancel hook.
+   */
+  readonly reason?: string;
 }
 
 /** Identifies a session to transition permanently to a terminal state. */

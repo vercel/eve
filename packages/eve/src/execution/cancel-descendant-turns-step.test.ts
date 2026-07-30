@@ -140,11 +140,11 @@ describe("cancelDescendantTurnsStep", () => {
       serializedContext: {},
       sessionState: createPendingState(),
     });
-    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     await expect(cancellation).resolves.toBeUndefined();
 
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledOnce();
-    expect(cancelRemoteAgentTurn).toHaveBeenCalledTimes(12);
+    expect(cancelRemoteAgentTurn).toHaveBeenCalledTimes(8);
     expect(error).toHaveBeenCalledWith(
       "[eve:execution.cancel-descendant-turns] failed to cancel local descendant turn",
       expect.objectContaining({ callId: "call-local", childSessionId: "local-child" }),
@@ -155,7 +155,34 @@ describe("cancelDescendantTurnsStep", () => {
     );
   });
 
+  it("warns loudly when a descendant cancel is never accepted", async () => {
+    vi.useFakeTimers();
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      reason: "EntityConflictError",
+      status: "no_active_turn",
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const cancellation = cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createPendingState({ includeRemote: false }),
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(cancellation).resolves.toBeUndefined();
+
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledTimes(8);
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:execution.cancel-descendant-turns] descendant cancel was never accepted; the child may run to completion",
+      expect.objectContaining({
+        childSessionId: "local-child",
+        finalStatus: "no_active_turn",
+        reason: "EntityConflictError",
+      }),
+    );
+  });
+
   it("treats pending batches from older deployments as having no descendants", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const session = setPendingRuntimeActionBatch({
       actions: [localAction],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
@@ -171,6 +198,11 @@ describe("cancelDescendantTurnsStep", () => {
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
     expect(deserializeContext).not.toHaveBeenCalled();
+    // The skipped cancellation is observable, not silent.
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:execution.cancel-descendant-turns] pending batch carries no child session ids; descendants cannot be cancelled",
+      expect.objectContaining({ sessionId: expect.any(String) }),
+    );
   });
 });
 
