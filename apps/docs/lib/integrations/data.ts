@@ -856,10 +856,10 @@ eve add channel/photon
 
 \`\`\`ts
 import { connectPhotonCredentials } from "@vercel/connect/eve";
-import { photonChannel } from "eve/channels/photon";
+import { photonIMessageChannel } from "eve/channels/photon";
 
-export default photonChannel({
-  credentials: connectPhotonCredentials(process.env.PHOTON_CONNECTOR_ID!),
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
 });
 \`\`\``,
     configure: `The guided setup can create a dedicated Photon project or use existing credentials, register your phone, and choose Vercel Connect or portable environment credentials. Connect-backed setup creates a native Photon connector and routes verified triggers to \`/eve/v1/photon\`; portable setup registers a signed Photon webhook directly.`,

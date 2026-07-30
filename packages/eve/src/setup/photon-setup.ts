@@ -44,7 +44,7 @@ const defaultDeps: PhotonSetupDeps = {
   writeTextFile,
 };
 
-const PORTABLE_TEMPLATE = `import { photonChannel } from "eve/channels/photon";
+const PORTABLE_TEMPLATE = `import { photonIMessageChannel } from "eve/channels/photon";
 
 async function photonCredentials() {
   const projectId = process.env.IMESSAGE_PROJECT_ID;
@@ -53,7 +53,7 @@ async function photonCredentials() {
   return { projectId, projectSecret };
 }
 
-export default photonChannel({
+export default photonIMessageChannel({
   credentials: photonCredentials,
   webhookSecret: process.env.IMESSAGE_WEBHOOK_SECRET,
 });
@@ -61,9 +61,9 @@ export default photonChannel({
 
 function connectTemplate(connectorUid: string): string {
   return `import { connectPhotonCredentials } from "@vercel/connect/eve";
-import { photonChannel } from "eve/channels/photon";
+import { photonIMessageChannel } from "eve/channels/photon";
 
-export default photonChannel({
+export default photonIMessageChannel({
   credentials: connectPhotonCredentials(${JSON.stringify(connectorUid)}),
 });
 `;
