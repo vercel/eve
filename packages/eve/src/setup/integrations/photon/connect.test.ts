@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import type { ChannelSetupLog } from "./cli/index.js";
-import { parseCreatedPhotonConnector, provisionPhotonConnector } from "./photon-connect.js";
+import { parseCreatedPhotonConnector, provisionPhotonConnector } from "./connect.js";
 
 function log(): ChannelSetupLog {
   return {

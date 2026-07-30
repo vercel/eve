@@ -1,21 +1,21 @@
 import { join } from "node:path";
 
-import { text } from "./ask.js";
-import { appendEnv } from "./append-env.js";
-import { provisionPhotonConnector } from "./photon-connect.js";
+import { text } from "../../ask.js";
+import { appendEnv } from "../../append-env.js";
+import { provisionPhotonConnector } from "./connect.js";
 import {
   provisionPhotonProject,
   usePhotonProject,
   validatePhotonPhoneNumber,
   type PhotonManagedProject,
-} from "./photon-management.js";
-import { openUrl } from "./primitives/open-url.js";
-import { deriveSlackConnectorSlug } from "./scaffold/index.js";
-import { writeTextFile } from "./scaffold/files.js";
-import { WizardCancelledError } from "./step.js";
-import type { ChannelSetupEnvironment } from "./integrations/shared/environment.js";
-import type { ChannelSetupUi } from "./integrations/shared/ui.js";
-import { ensureVercelProject } from "./flows/ensure-vercel-project.js";
+} from "./management.js";
+import { openUrl } from "../../primitives/open-url.js";
+import { deriveSlackConnectorSlug } from "../../scaffold/index.js";
+import { writeTextFile } from "../../scaffold/files.js";
+import { WizardCancelledError } from "../../step.js";
+import type { ChannelSetupEnvironment } from "../shared/environment.js";
+import type { ChannelSetupUi } from "../shared/ui.js";
+import { ensureVercelProject } from "../../flows/ensure-vercel-project.js";
 
 /** Inputs for Photon project provisioning and channel scaffolding. */
 export interface PhotonSetupOptions {

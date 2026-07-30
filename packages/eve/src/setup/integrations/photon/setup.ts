@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 
-import { setupPhoton } from "#setup/photon-setup.js";
+import { setupPhoton } from "#setup/integrations/photon/setup-flow.js";
 
 import type { ChannelSetupIntegration } from "../types.js";
 

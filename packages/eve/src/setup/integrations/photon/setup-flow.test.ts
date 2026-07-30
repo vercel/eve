@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import type { Asker, Question } from "./ask.js";
-import { channelSetupEnvironment } from "./integrations/shared/environment.js";
-import { createChannelSetupUi } from "./integrations/shared/ui.js";
-import { setupPhoton, type PhotonSetupDeps } from "./photon-setup.js";
+import type { Asker, Question } from "../../ask.js";
+import { channelSetupEnvironment } from "../shared/environment.js";
+import { createChannelSetupUi } from "../shared/ui.js";
+import { setupPhoton, type PhotonSetupDeps } from "./setup-flow.js";
 
 function asker(answers: Record<string, string>): Asker {
   return {

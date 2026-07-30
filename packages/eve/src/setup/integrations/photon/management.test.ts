@@ -4,7 +4,7 @@ import {
   provisionPhotonProject,
   usePhotonProject,
   validatePhotonPhoneNumber,
-} from "./photon-management.js";
+} from "./management.js";
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
