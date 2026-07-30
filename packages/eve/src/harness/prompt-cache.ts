@@ -9,6 +9,56 @@ export type PromptCachePath =
   | { readonly kind: "none" };
 
 /**
+ * An explicit author-declared prompt-cache-path override, declared under the
+ * eve-owned `providerOptions.eve` namespace on `modelOptions`.
+ *
+ * Used to force a caching path that cannot be inferred from the resolved
+ * model's `provider`/`modelId` alone — for example an AWS Bedrock application
+ * inference profile whose opaque id omits the underlying `anthropic` provider
+ * family (`modelOptions.providerOptions.eve = { cachePath: "anthropic-direct" }`).
+ */
+export type PromptCachePathOverride = "anthropic-direct" | "none";
+
+/**
+ * The eve-owned namespace inside `modelOptions.providerOptions`. Provider SDKs
+ * do not read this key, so eve may use it to carry framework hints (the same
+ * role as `providerOptions.gateway.byok`) without leaking into the provider's
+ * request payload semantics.
+ */
+const EVE_PROVIDER_OPTIONS_NAMESPACE = "eve";
+
+/**
+ * Reads a strictly-validated prompt-cache-path override out of the model's
+ * authored `modelOptions.providerOptions.eve` block. Returns `undefined` when
+ * no override is declared. Throws on an unrecognized value so a typo cannot
+ * silently fall back to inference.
+ */
+function readCachePathOverride(
+  modelProviderOptions: Readonly<Record<string, unknown>> | undefined,
+): PromptCachePathOverride | undefined {
+  const eve = modelProviderOptions?.[EVE_PROVIDER_OPTIONS_NAMESPACE];
+  if (eve === undefined || eve === null) {
+    return undefined;
+  }
+  if (typeof eve !== "object" || Array.isArray(eve)) {
+    return undefined;
+  }
+
+  const override = (eve as Record<string, unknown>).cachePath;
+  if (override === undefined || override === null) {
+    return undefined;
+  }
+  if (override === "anthropic-direct" || override === "none") {
+    return override;
+  }
+
+  throw new Error(
+    `Unsupported modelOptions.providerOptions.eve.cachePath ${JSON.stringify(override)}. ` +
+      `Expected one of "anthropic-direct" or "none".`,
+  );
+}
+
+/**
  * Cache marker injected on the Anthropic-direct path.
  *
  * The marker carries two provider namespaces because Anthropic models are
@@ -48,9 +98,21 @@ const ANTHROPIC_CACHE_MARKER: AnthropicCacheMarker = Object.freeze({
 /**
  * Detects which prompt caching path applies to a resolved model.
  *
- * Runs once per harness step right after `resolveModel()`.
+ * Runs once per harness step right after `resolveModel()`. An explicit
+ * `modelOptions.providerOptions.eve.cachePath` override (read from
+ * `modelProviderOptions`, the active model reference's `providerOptions`)
+ * takes precedence over inference; when no override is declared the path is
+ * inferred from the resolved model's provider name and model id.
  */
-export function detectPromptCachePath(model: LanguageModel): PromptCachePath {
+export function detectPromptCachePath(
+  model: LanguageModel,
+  modelProviderOptions?: Readonly<Record<string, unknown>>,
+): PromptCachePath {
+  const override = readCachePathOverride(modelProviderOptions);
+  if (override !== undefined) {
+    return { kind: override };
+  }
+
   if (typeof model === "string") {
     return { kind: "gateway-auto" };
   }
@@ -62,8 +124,10 @@ export function detectPromptCachePath(model: LanguageModel): PromptCachePath {
 
   // The standard `@ai-sdk/amazon-bedrock` Converse provider reports its
   // provider as `amazon-bedrock` and carries the Anthropic identity in the
-  // model id (e.g. `anthropic.claude-3-5-sonnet-20241022-v2:0`), so it must be
-  // matched on the model id rather than the provider name.
+  // model id (e.g. `anthropic.claude-3-5-sonnet-20241022-v2:0`). Application
+  // inference profile ids can be opaque and omit that family name; those need
+  // the explicit `eve.cachePath` override above rather than id substring
+  // inference.
   const modelId = typeof model.modelId === "string" ? model.modelId.toLowerCase() : "";
   if (providerName.includes("bedrock") && modelId.includes("anthropic")) {
     return { kind: "anthropic-direct" };

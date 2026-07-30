@@ -700,7 +700,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     session = resolvedModel.session;
     const model = resolvedModel.model;
-    const cachePath = detectPromptCachePath(model);
+    const cachePath = detectPromptCachePath(model, session.agent.modelReference.providerOptions);
     const marker = cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
 
     // --- Compaction ---------------------------------------------------------
