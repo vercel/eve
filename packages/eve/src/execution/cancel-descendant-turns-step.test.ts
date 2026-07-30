@@ -8,7 +8,7 @@ import {
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
-import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
+import { requestWorkflowTurnCancellation } from "#execution/turn-cancellation-request.js";
 import {
   recordPendingSubagentChild,
   setPendingRuntimeActionBatch,
@@ -20,7 +20,8 @@ vi.mock("#context/serialize.js", () => ({
   deserializeContext: vi.fn(),
 }));
 
-vi.mock("./workflow-runtime.js", () => ({
+vi.mock("./turn-cancellation-request.js", () => ({
+  isRetryableInactiveCancelReason: (reason: string | undefined) => reason === "EntityConflictError",
   requestWorkflowTurnCancellation: vi.fn(),
 }));
 
@@ -103,16 +104,14 @@ describe("cancelDescendantTurnsStep", () => {
     expect(deserializeContext).not.toHaveBeenCalled();
   });
 
-  it("retries no-active-turn responses during the child adoption window", async () => {
+  it("retries hook-claim conflicts during the child adoption window", async () => {
     vi.useFakeTimers();
     installRemoteRegistry();
     vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote);
     vi.mocked(requestWorkflowTurnCancellation)
-      .mockResolvedValueOnce({ status: "no_active_turn" })
+      .mockResolvedValueOnce({ reason: "EntityConflictError", status: "no_active_turn" })
       .mockResolvedValueOnce({ status: "accepted" });
-    vi.mocked(cancelRemoteAgentTurn)
-      .mockResolvedValueOnce({ status: "no_active_turn" })
-      .mockResolvedValueOnce({ status: "accepted" });
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({ status: "accepted" });
 
     const cancellation = cancelDescendantTurnsStep({
       serializedContext: {},
@@ -122,7 +121,41 @@ describe("cancelDescendantTurnsStep", () => {
     await cancellation;
 
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledTimes(2);
-    expect(cancelRemoteAgentTurn).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a terminal no-active-turn child as settled after a single attempt", async () => {
+    // The request-time fan-out usually cancels descendants before this
+    // durable backstop runs; a missing hook must not burn the retry budget.
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      reason: "HookNotFoundError",
+      status: "no_active_turn",
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createPendingState({ includeRemote: false }),
+    });
+
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledOnce();
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("descendant cancel was never accepted"),
+      expect.anything(),
+    );
+  });
+
+  it("does not retry a remote no-active-turn result", async () => {
+    installRemoteRegistry();
+    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote);
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({ status: "no_active_turn" });
+
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createPendingState(),
+    });
+
+    expect(cancelRemoteAgentTurn).toHaveBeenCalledOnce();
   });
 
   it("contains unexpected local failures and exhausted remote failures", async () => {
