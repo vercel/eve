@@ -137,7 +137,11 @@ export function deployProject(
           projectResolutionFromDeployment(await deps.detectDeployment(projectPath, { signal })),
         );
         if (!isProjectResolved(project)) {
-          throw new Error("Vercel project linking failed. Deployment did not start.");
+          throw new Error(
+            "`vercel link` finished, but no usable project link was detected in this directory. " +
+              'Run `vercel link` and pick your project via "Search all projects", then re-run ' +
+              "the deploy. Deployment did not start.",
+          );
         }
       }
 

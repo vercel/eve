@@ -50,10 +50,14 @@ const DISCONNECTED_GATEWAY_INFO: AgentInfoResult = {
   workspace: { resourceRoot: null, rootEntries: [] },
 };
 
-async function linkedAppRoot(): Promise<string> {
+async function linkedAppRoot(kind: "project" | "repo" = "project"): Promise<string> {
   const appRoot = await mkdtemp(join(tmpdir(), "eve-boot-detect-"));
   await mkdir(join(appRoot, ".vercel"), { recursive: true });
-  await writeFile(join(appRoot, ".vercel", "project.json"), "{}", "utf8");
+  const link =
+    kind === "project"
+      ? { projectId: "prj_demo", orgId: "team_demo" }
+      : { projects: [{ id: "prj_demo", directory: ".", orgId: "team_demo" }] };
+  await writeFile(join(appRoot, ".vercel", `${kind}.json`), JSON.stringify(link), "utf8");
   return appRoot;
 }
 
@@ -72,6 +76,14 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     const appRoot = await linkedAppRoot();
     const issues = await detectSetupIssues({ appRoot, env: {} });
     expect(issues).toEqual([
+      { kind: "attention", label: "AI Gateway credentials missing", command: "/model" },
+    ]);
+  });
+
+  it("recognizes a repository-level project link", async () => {
+    const appRoot = await linkedAppRoot("repo");
+
+    await expect(detectSetupIssues({ appRoot, env: {} })).resolves.toEqual([
       { kind: "attention", label: "AI Gateway credentials missing", command: "/model" },
     ]);
   });

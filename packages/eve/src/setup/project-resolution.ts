@@ -166,7 +166,7 @@ async function fetchVercelName(
 
 /**
  * Resolves a linked project's human-readable name and team for the dashboard
- * status bar, from local `.vercel/project.json` plus the Vercel API. A
+ * status bar, from local Vercel link metadata plus the Vercel API. A
  * personal-account project (a non-`team_` org) carries no team, so `teamName`
  * is absent; the project name falls back to its id if the API call fails.
  *
@@ -220,8 +220,8 @@ export function projectResolutionFromDeployment(deployment: DeploymentInfo): Pro
 }
 
 /**
- * Side-effect-free fact gathering after a link: reads `.vercel/project.json`
- * to resolve the project. The on-disk link is the single source of truth.
+ * Side-effect-free fact gathering after a link. The on-disk link is the single
+ * source of truth.
  */
 export async function detectProjectResolution(
   projectRoot: string,

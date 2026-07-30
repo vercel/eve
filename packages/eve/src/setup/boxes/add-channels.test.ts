@@ -416,6 +416,26 @@ describe("addChannels box", () => {
     expect(deps.provisionSlackbot).not.toHaveBeenCalled();
   });
 
+  it("fails with recovery guidance when the link finishes but no link is detected", async () => {
+    const deps = createDeps();
+    deps.detectDeployment.mockResolvedValue({ state: "unlinked" });
+    const state = resolvedState(["slack"]);
+    state.project = { kind: "unresolved" };
+    state.vercelProject = { kind: "none" };
+    const box = makeBox({
+      prompter: createPrompter(),
+      presetCreateSlackbot: true,
+      ensureLinkedProject: "interactive-vercel-link",
+      deps,
+    });
+
+    await expect(runInteractive([box], state, silentSink, snapshot)).rejects.toThrow(
+      "`vercel link` finished, but no usable project link was detected in this directory.",
+    );
+    expect(deps.runVercel).toHaveBeenCalledWith(["link"], { cwd: "/tmp/project" });
+    expect(deps.provisionSlackbot).not.toHaveBeenCalled();
+  });
+
   it("scaffolds the exact connector UID without a second patch step", async () => {
     const deps = createDeps();
     deps.provisionSlackbot.mockResolvedValue({

@@ -45,7 +45,7 @@ function fakeDeps(): ResolveProvisioningDeps {
         kind: "unresolved",
       }),
     ),
-    pathExists: vi.fn(async () => true),
+    readProjectLink: vi.fn(async () => undefined),
     validateTeam: vi.fn(async () => {}),
     resolveTeam: vi.fn(async () => "team"),
     pickTeam: vi.fn(async () => "team"),
@@ -347,6 +347,7 @@ describe("resolveProvisioning box", () => {
 
   it("adopts a detected on-disk link with a logged-in CLI, asking nothing", async () => {
     const deps = fakeDeps();
+    deps.readProjectLink = vi.fn(async () => ({ projectId: "prj_demo", orgId: "team_demo" }));
     deps.detectProjectResolution = vi.fn(
       async (): Promise<ProjectResolution> => ({ kind: "linked", projectId: "prj_demo" }),
     );
@@ -383,6 +384,7 @@ describe("resolveProvisioning box", () => {
 
   it("asks the question tree when the linked directory has no CLI login", async () => {
     const deps = fakeDeps();
+    deps.readProjectLink = vi.fn(async () => ({ projectId: "prj_demo", orgId: "team_demo" }));
     deps.detectProjectResolution = vi.fn(
       async (): Promise<ProjectResolution> => ({ kind: "linked", projectId: "prj_demo" }),
     );

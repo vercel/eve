@@ -154,6 +154,20 @@ describe("deployProject box", () => {
     }
   });
 
+  it("explains how to recover when linking finishes without a usable link", async () => {
+    const deps = createDeps();
+    deps.detectDeployment.mockResolvedValue({ state: "unlinked" });
+    const box = deployProject({ prompter: createPrompter(), deps });
+    const state = pendingState();
+    state.project = { kind: "unresolved" };
+
+    await expect(runInteractive([box], state, silentSink)).rejects.toThrow(
+      "`vercel link` finished, but no usable project link was detected in this directory.",
+    );
+    expect(deps.runVercel).toHaveBeenCalledWith(["link"], { cwd: "/tmp/project" });
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
   it("installs dependencies after linking and before deploying", async () => {
     const deps = createDeps();
     const box = deployProject({ prompter: createPrompter(), deps });

@@ -22,7 +22,7 @@ function createBoxDeps() {
       detectProjectResolution: vi.fn<ResolveProvisioningDeps["detectProjectResolution"]>(
         async () => ({ kind: "unresolved" }),
       ),
-      pathExists: vi.fn<ResolveProvisioningDeps["pathExists"]>(async () => false),
+      readProjectLink: vi.fn<ResolveProvisioningDeps["readProjectLink"]>(async () => undefined),
       validateTeam: vi.fn<ResolveProvisioningDeps["validateTeam"]>(async () => {}),
       resolveTeam: vi.fn<ResolveProvisioningDeps["resolveTeam"]>(async () => "acme"),
       pickTeam: vi.fn<ResolveProvisioningDeps["pickTeam"]>(async () => "acme"),
@@ -248,10 +248,13 @@ describe("runLinkFlow", () => {
       },
     });
     const boxDeps = createBoxDeps();
-    // Prime every adoption precondition (link file present, resolvable,
+    // Prime every adoption precondition (valid link present, resolvable,
     // logged in): if detection ran, it would re-adopt the current link and
     // the pickers below would never be reached.
-    boxDeps.resolveProvisioning.pathExists.mockResolvedValue(true);
+    boxDeps.resolveProvisioning.readProjectLink.mockResolvedValue({
+      projectId: "prj_current",
+      orgId: "team_current",
+    });
     boxDeps.resolveProvisioning.detectProjectResolution.mockResolvedValue({
       kind: "linked",
       projectId: "prj_current",

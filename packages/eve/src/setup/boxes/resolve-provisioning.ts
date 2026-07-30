@@ -1,14 +1,14 @@
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { byokProviderEnvVar } from "#setup/scaffold/index.js";
 import { whimsyFor } from "#setup/cli/index.js";
 
 import { select, text, type Asker } from "../ask.js";
-import { pathExists } from "../path-exists.js";
 import {
   detectProjectResolution,
   isProjectResolved,
   mergeProjectResolution,
+  readProjectLink,
   type ProjectResolution,
 } from "../project-resolution.js";
 import type { Prompter } from "../prompter.js";
@@ -40,7 +40,7 @@ export interface ResolveProvisioningDeps {
   requireAuth: typeof requireAuth;
   isVercelAuthenticated: typeof isVercelAuthenticated;
   detectProjectResolution: typeof detectProjectResolution;
-  pathExists: typeof pathExists;
+  readProjectLink: typeof readProjectLink;
   validateTeam: typeof validateTeam;
   resolveTeam: typeof resolveTeam;
   pickTeam: typeof pickTeam;
@@ -150,7 +150,7 @@ export function resolveProvisioning(
     requireAuth,
     isVercelAuthenticated,
     detectProjectResolution,
-    pathExists,
+    readProjectLink,
     validateTeam,
     resolveTeam,
     pickTeam,
@@ -169,7 +169,8 @@ export function resolveProvisioning(
    * are required — a link without a login cannot mint a token, so that run
    * falls back to the question tree (whose Vercel branch enforces login).
    * The network reaches (production-alias read, `whoami`) run behind a
-   * spinner, gated on the link file so the common unlinked case stays silent.
+   * spinner, gated on validated link metadata so the common unlinked case
+   * stays silent.
    */
   async function detectAdoptableLink(
     state: Readonly<SetupState>,
@@ -177,7 +178,7 @@ export function resolveProvisioning(
   ): Promise<ProjectResolution | undefined> {
     if (state.projectPath.kind !== "resolved") return undefined;
     const path = state.projectPath.path;
-    if (!(await deps.pathExists(join(path, ".vercel", "project.json")))) return undefined;
+    if ((await deps.readProjectLink(path)) === undefined) return undefined;
     return withSpinner(options.prompter, whimsyFor("project-detect"), async () => {
       const detected = await deps.detectProjectResolution(path, { signal });
       if (!isProjectResolved(detected)) return undefined;

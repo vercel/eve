@@ -42,7 +42,7 @@ function createProvisioningDeps() {
     detectProjectResolution: vi.fn<ResolveProvisioningDeps["detectProjectResolution"]>(
       async () => ({ kind: "unresolved" }),
     ),
-    pathExists: vi.fn<ResolveProvisioningDeps["pathExists"]>(async () => false),
+    readProjectLink: vi.fn<ResolveProvisioningDeps["readProjectLink"]>(async () => undefined),
     validateTeam: vi.fn<ResolveProvisioningDeps["validateTeam"]>(async () => {}),
     resolveTeam: vi.fn<ResolveProvisioningDeps["resolveTeam"]>(async () => "acme"),
     pickTeam: vi.fn<ResolveProvisioningDeps["pickTeam"]>(async () => "acme"),

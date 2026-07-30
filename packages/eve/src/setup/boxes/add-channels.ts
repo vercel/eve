@@ -301,8 +301,10 @@ export function addChannels(
 
   /**
    * The {@link AddChannelsOptions.ensureLinkedProject} fallback: link the
-   * directory interactively, then re-detect the on-disk resolution. The copy
-   * and command shape are the dissolved engine's, byte for byte.
+   * directory interactively, then re-detect the on-disk resolution. A link
+   * that finishes without a detectable on-disk link (e.g. an ambiguous
+   * repo-level link) fails with recovery guidance instead of claiming the
+   * link command itself failed.
    */
   async function linkProjectForSlackbot(
     log: ChannelSetupLog,
@@ -329,7 +331,11 @@ export function addChannels(
     const deployment = await deps.detectDeployment(projectPath, { signal });
     const project = mergeProjectResolution(current, projectResolutionFromDeployment(deployment));
     if (!isProjectResolved(project)) {
-      throw new Error("Vercel project linking failed. Slackbot creation did not start.");
+      throw new Error(
+        "`vercel link` finished, but no usable project link was detected in this directory. " +
+          'Run `vercel link` and pick your project via "Search all projects", then re-run ' +
+          "`eve channels add slack`. Slackbot creation did not start.",
+      );
     }
     return project;
   }

@@ -358,7 +358,7 @@ export async function provisionSlackbot(
   }
   if (projectId === undefined && existing.connectorUids.size > 0) {
     log.warning(
-      "Could not verify which Slack connectors belong to this Vercel project, so eve did not create another one. Restore `.vercel/project.json`, then try again.",
+      "Could not verify which Slack connectors belong to this Vercel project, so eve did not create another one. Restore a valid Vercel project link, then try again.",
     );
     return { state: "connector-lookup-failed" };
   }

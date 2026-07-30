@@ -1,8 +1,6 @@
-import { join } from "node:path";
-
 import type { AgentInfoResult } from "#client/index.js";
 import { hasEnvValue, resolveGatewayCredential } from "#internal/resolve-model-endpoint-status.js";
-import { pathExists } from "#setup/path-exists.js";
+import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 
 /** One boot-time setup problem the TUI can point at a fixing command. */
 export interface SetupIssue {
@@ -27,7 +25,7 @@ export interface BootDetectionContext {
 /**
  * One installation-state check run at TUI boot, before the user hits the
  * failure mid-conversation. Detections must stay cheap and local (env reads,
- * a single fs stat) — they run between the header and the first prompt.
+ * local link metadata) — they run between the header and the first prompt.
  */
 export interface BootDetection {
   id: string;
@@ -131,7 +129,7 @@ const modelProvider: BootDetection = {
     if (access.kind === "gateway") {
       if (access.runtime.status === "connected") return [];
       if (access.runtime.status === "disconnected") {
-        const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
+        const linked = (await readVercelProjectLink(appRoot)) !== undefined;
         return [
           {
             kind: "attention",
@@ -142,7 +140,7 @@ const modelProvider: BootDetection = {
       }
     }
 
-    const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
+    const linked = (await readVercelProjectLink(appRoot)) !== undefined;
     if (linked) {
       return [{ kind: "attention", label: "AI Gateway credentials missing", command: "/model" }];
     }

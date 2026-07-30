@@ -1,10 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#setup/scaffold/index.js";
 import { createPromptCommandOutput, type ChannelSetupLog } from "#setup/cli/index.js";
 import { captureVercel, runVercel } from "#setup/primitives/run-vercel.js";
-import { z } from "zod";
+import { readVercelProjectLink, type VercelProjectLink } from "#internal/vercel/project-link.js";
 
 import {
   parseSlackConnectorDetails,
@@ -18,11 +15,6 @@ import {
 
 export const CONNECT_LOOKUP_TIMEOUT_MS = 60_000;
 export const CONNECT_MUTATION_TIMEOUT_MS = 2 * 60_000;
-
-const VercelProjectLinkSchema = z.object({
-  projectId: z.string().min(1),
-  orgId: z.string().min(1),
-});
 
 /** Connect subprocess operations needed to inventory and remove Slack connectors. */
 export interface SlackConnectLifecycleDeps {
@@ -79,17 +71,11 @@ export async function listSlackConnectors(
 }
 
 /** Project and team identifiers from a valid on-disk Vercel link. */
-export type VercelProjectLink = z.infer<typeof VercelProjectLinkSchema>;
+export type { VercelProjectLink };
 
-/** Reads the linked Vercel project and team ids from `.vercel/project.json`. */
+/** Reads the linked Vercel project and team ids from the on-disk Vercel link. */
 export async function readProjectLink(projectRoot: string): Promise<VercelProjectLink | undefined> {
-  try {
-    const raw = await readFile(join(projectRoot, ".vercel", "project.json"), "utf8");
-    const parsed = VercelProjectLinkSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
+  return await readVercelProjectLink(projectRoot);
 }
 
 export type SlackConnectorLookup =
