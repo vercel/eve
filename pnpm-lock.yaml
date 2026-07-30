@@ -46,8 +46,8 @@ catalogs:
       specifier: 19.2.3
       version: 19.2.3
     '@vercel/connect':
-      specifier: 0.4.2
-      version: 0.4.2
+      specifier: 0.4.3
+      version: 0.4.3
     '@vercel/otel':
       specifier: 2.1.3
       version: 2.1.3
@@ -245,7 +245,7 @@ importers:
         version: 0.2.0(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(react-native@0.86.0(@babel/core@7.29.0(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3)
       '@github-tools/eve-extension':
         specifier: ^0.1.0
-        version: 0.1.0(@vercel/connect@0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
+        version: 0.1.0(@vercel/connect@0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
       '@jetty/eve':
         specifier: ^0.3.0
         version: 0.3.0(eve@packages+eve)
@@ -299,7 +299,7 @@ importers:
         version: 0.2.4(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
       '@vercel/connect':
         specifier: 'catalog:'
-        version: 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
+        version: 0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
       '@vercel/otel':
         specifier: 'catalog:'
         version: 2.1.3(@opentelemetry/api-logs@0.221.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.219.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
@@ -387,7 +387,7 @@ importers:
         version: 0.41.2
       '@vercel/connect':
         specifier: 'catalog:'
-        version: 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
+        version: 0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
       '@vercel/oidc':
         specifier: 3.8.0
         version: 3.8.0
@@ -7080,12 +7080,15 @@ packages:
   '@vercel/cli-config@0.2.0':
     resolution: {integrity: sha512-fJRRRB7734BDuXZ89yBEaA2ncYhH7bWX30mk04W80J6VAfQc+4iB8lyzAdaGpFV3/vNlkt9VZt+/uoQoWX6UsQ==}
 
+  '@vercel/cli-config@0.2.1':
+    resolution: {integrity: sha512-RhfyXmRLHdbnry8RJqHDc+5rGxMZ0bu+fpysZjtv3bE+BubpuwxTancHOKiH5zKQREsdwFVr3mOI2kOvxlOyxA==}
+
   '@vercel/cli-exec@1.0.0':
     resolution: {integrity: sha512-kQF8LGie/Hbdq9/psJxLE7owRTcqMQMhgybU04gCeR7cbQAr5t8OrjefDNColJv1QSSucFt4pLwRiARVmlOnug==}
     engines: {node: '>= 18'}
 
-  '@vercel/connect@0.4.2':
-    resolution: {integrity: sha512-3Lr2yFI2Z2NPR+T3DWOqrygBpxZUK6H+wCesijT2pV7VmuG8l5ZYSxk4tdzZwF4SWYJOXQFzcELtFLCGvBw5mg==}
+  '@vercel/connect@0.4.3':
+    resolution: {integrity: sha512-NDB5MhjvmeBXWAohLX7wKYnaI18pzvcqmPgSqdPHUcIdYNgHk8KlqjSkII92MgOb+zzP5t0J0yiQScwXKzkmow==}
     peerDependencies:
       '@ai-sdk/mcp': ^1 || ^2
       '@auth/core': '>=0.37.0'
@@ -7207,6 +7210,10 @@ packages:
 
   '@vercel/oidc@3.8.0':
     resolution: {integrity: sha512-r00laGW6Pv778RoR6M2NxX91ycSj+PBwVo+fOb9Bif+F0IyUKt25zrvBzfEzQpeAzbqOgPZyQibEWDdDFApd+A==}
+    engines: {node: '>= 20'}
+
+  '@vercel/oidc@3.8.1':
+    resolution: {integrity: sha512-ufdalm2MWOYksyj8KVpWjoOFPJO6zoYpuyvIggIQ2bB0CFCjTCiTkGXHqAKwG77GVRjOaN3/8S5ITlZpXWmqOw==}
     engines: {node: '>= 20'}
 
   '@vercel/otel@2.1.3':
@@ -16427,26 +16434,26 @@ snapshots:
       - react-native
       - supports-color
 
-  '@github-tools/eve-extension@0.1.0(@vercel/connect@0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)':
+  '@github-tools/eve-extension@0.1.0(@vercel/connect@0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)':
     dependencies:
-      '@github-tools/sdk': 1.8.2(@vercel/connect@0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)(zod@4.4.3)
+      '@github-tools/sdk': 1.8.2(@vercel/connect@0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)(zod@4.4.3)
       eve: link:packages/eve
       zod: 4.4.3
     optionalDependencies:
-      '@vercel/connect': 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
+      '@vercel/connect': 0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
     transitivePeerDependencies:
       - '@ai-sdk/workflow'
       - '@workflow/ai'
       - ai
       - workflow
 
-  '@github-tools/sdk@1.8.2(@vercel/connect@0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)(zod@4.4.3)':
+  '@github-tools/sdk@1.8.2(@vercel/connect@0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)(zod@4.4.3)':
     dependencies:
       ai: 7.0.38(zod@4.4.3)
       octokit: 5.0.5
       zod: 4.4.3
     optionalDependencies:
-      '@vercel/connect': 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
+      '@vercel/connect': 0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
       eve: link:packages/eve
 
   '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.29.0(supports-color@10.2.2)(zod@4.4.3))(bufferutil@4.1.0)(supports-color@10.2.2)':
@@ -17739,7 +17746,7 @@ snapshots:
 
   '@onkernel/eve-extension@0.1.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)':
     dependencies:
-      '@vercel/connect': 0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
+      '@vercel/connect': 0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
       eve: link:packages/eve
       zod: 4.4.3
     transitivePeerDependencies:
@@ -20791,13 +20798,18 @@ snapshots:
       xdg-app-paths: 5.1.0
       zod: 4.1.11
 
+  '@vercel/cli-config@0.2.1':
+    dependencies:
+      xdg-app-paths: 5.1.0
+      zod: 4.1.11
+
   '@vercel/cli-exec@1.0.0':
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@0.4.2(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)':
+  '@vercel/connect@0.4.3(@ai-sdk/mcp@2.0.16(zod@4.4.3))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(ai@7.0.38(zod@4.4.3))(eve@packages+eve)':
     dependencies:
-      '@vercel/oidc': 3.8.0
+      '@vercel/oidc': 3.8.1
     optionalDependencies:
       '@ai-sdk/mcp': 2.0.16(zod@4.4.3)
       '@auth/core': 0.41.2
@@ -21080,6 +21092,12 @@ snapshots:
   '@vercel/oidc@3.8.0':
     dependencies:
       '@vercel/cli-config': 0.2.0
+      '@vercel/cli-exec': 1.0.0
+      jose: 5.10.0
+
+  '@vercel/oidc@3.8.1':
+    dependencies:
+      '@vercel/cli-config': 0.2.1
       '@vercel/cli-exec': 1.0.0
       jose: 5.10.0
 
