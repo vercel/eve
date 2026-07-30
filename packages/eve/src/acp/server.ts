@@ -4,13 +4,14 @@ import { agent, methods, ndJsonStream } from "#compiled/@agentclientprotocol/sdk
 import { EveAcpAdapter } from "#acp/adapter.js";
 import { limitAcpLineBytes } from "#acp/line-limit.js";
 
+/** Configuration for one ACP stdio connection backed by an eve server. */
 export interface RunAcpServerOptions {
-  readonly appRoot: string;
   readonly eveVersion: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
-  readonly validateWorkspaceRoot: boolean;
+  /** Local workspace root to enforce; omit when connecting to a remote deployment. */
+  readonly workspaceRoot?: string;
 }
 
 /** Serves one stable ACP v1 connection over process stdio until the client disconnects. */
@@ -31,7 +32,11 @@ export async function runAcpServer(options: RunAcpServerOptions): Promise<void> 
   );
   const connection = app.connect(ndJsonStream(output, input));
   const close = () => connection.close();
-  options.signal?.addEventListener("abort", close, { once: true });
+  if (options.signal?.aborted) {
+    close();
+  } else {
+    options.signal?.addEventListener("abort", close, { once: true });
+  }
   try {
     await connection.closed;
   } finally {

@@ -10,12 +10,11 @@ import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js
 import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
 export type RunAcpServer = (input: {
-  readonly appRoot: string;
   readonly eveVersion: string;
   readonly headers?: DevelopmentRequestHeaders;
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
-  readonly validateWorkspaceRoot: boolean;
+  readonly workspaceRoot?: string;
 }) => Promise<void>;
 
 export interface RegisterAcpCommandOptions {
@@ -40,7 +39,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
     )
     .addHelpText(
       "after",
-      "\nWithout a URL, eve supervises a local development server. You can also pass a bare URL, for example: eve acp https://example.com\n",
+      "\nWithout a URL, eve supervises a local development server. You can also pass a bare URL, for example: eve acp https://example.com\nACP does not grant the agent access to the client's workspace or terminal.\n",
     )
     .action(async (positionalUrl: string | undefined, commandOptions: AcpCliOptions) => {
       const target = resolveDevelopmentUrlTarget(commandOptions, positionalUrl);
@@ -50,11 +49,9 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
       if (target !== undefined) {
         try {
           await runAcp(options, {
-            appRoot: options.appRoot,
             headers: target.headers,
             serverUrl: target.serverUrl,
             signal: lifecycle.signal,
-            validateWorkspaceRoot: false,
           });
         } finally {
           lifecycle.dispose();
@@ -87,10 +84,9 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
         if (handle === undefined) return;
 
         await runAcp(options, {
-          appRoot: handle.appRoot,
           serverUrl: handle.url,
           signal: lifecycle.signal,
-          validateWorkspaceRoot: true,
+          workspaceRoot: handle.appRoot,
         });
         lifecycle.requestStop();
       } finally {

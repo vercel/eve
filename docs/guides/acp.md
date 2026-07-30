@@ -1,6 +1,6 @@
 ---
 title: "Use eve through ACP"
-description: "Launch a local eve agent from Zed and other Agent Client Protocol clients."
+description: "Use local or deployed eve agents from Agent Client Protocol clients."
 ---
 
 Agent Client Protocol (ACP) clients can launch an authored eve application as a local subprocess. eve serves stable ACP v1 over stdio while its normal development server remains the execution runtime.
@@ -56,7 +56,8 @@ ACP mode does not give the agent access to the editor's host filesystem or termi
 
 The initial adapter does not support:
 
-- a deployed ACP HTTP or WebSocket endpoint;\n- ACP authentication (remote bridges use the deployed eve agent's existing HTTP authentication);
+- a deployed ACP HTTP or WebSocket endpoint;
+- ACP authentication (remote bridges use the deployed eve agent's existing HTTP authentication);
 - ACP v2;
 - client filesystem or terminal methods;
 - client-provided MCP servers;

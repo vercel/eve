@@ -12,9 +12,10 @@ import {
   type NewSessionResponse,
   type PromptRequest,
   type PromptResponse,
-  type ToolCallUpdate,
+  type SessionUpdate,
+  type ToolCall,
 } from "#compiled/@agentclientprotocol/sdk/index.js";
-import { Client } from "#client/index.js";
+import { Client, ClientError } from "#client/index.js";
 import type { SendTurnInput, SessionState } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
@@ -48,16 +49,16 @@ interface AdapterClient {
 interface AcpSession {
   readonly client: AdapterClientSession;
   active?: ActivePrompt;
-  closed: boolean;
-  readonly tools: Map<string, ToolCallUpdate>;
+  readonly tools: Map<string, ToolCall>;
 }
 
+/** Configuration for translating one ACP client connection to an eve server. */
 export interface EveAcpAdapterOptions {
-  readonly appRoot: string;
   readonly eveVersion: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly serverUrl: string;
-  readonly validateWorkspaceRoot?: boolean;
+  /** Local workspace root to enforce; omit when connecting to a remote deployment. */
+  readonly workspaceRoot?: string;
   /** @internal Test seam for the public eve client boundary. */
   readonly client?: AdapterClient;
 }
@@ -70,23 +71,22 @@ export interface EveAcpAdapterOptions {
  * {@link ClientSession}.
  */
 export class EveAcpAdapter {
-  readonly #appRoot: string;
   readonly #client: AdapterClient;
   readonly #eveVersion: string;
-  readonly #validateWorkspaceRoot: boolean;
+  readonly #workspaceRoot: string | undefined;
   #formElicitationSupported = false;
   readonly #sessions = new Map<string, AcpSession>();
 
   constructor(options: EveAcpAdapterOptions) {
-    this.#appRoot = options.appRoot;
     this.#eveVersion = options.eveVersion;
-    this.#validateWorkspaceRoot = options.validateWorkspaceRoot ?? true;
+    this.#workspaceRoot = options.workspaceRoot;
     this.#client =
       options.client ??
       new Client({
         headers: options.headers,
         host: options.serverUrl,
         preserveCompletedSessions: true,
+        redirect: "manual",
       });
   }
 
@@ -116,12 +116,15 @@ export class EveAcpAdapter {
       throw unsupported("Additional workspace directories are not supported by eve ACP mode.");
     }
 
-    if (this.#validateWorkspaceRoot) {
+    if (this.#workspaceRoot !== undefined) {
       const requestedRoot = await normalizedRealpath(params.cwd, "session/new.cwd");
-      const appRoot = await normalizedRealpath(this.#appRoot, "the eve application root");
-      if (requestedRoot !== appRoot) {
+      const workspaceRoot = await normalizedRealpath(
+        this.#workspaceRoot,
+        "the eve application root",
+      );
+      if (requestedRoot !== workspaceRoot) {
         throw RequestError.invalidParams(
-          { appRoot, cwd: params.cwd },
+          { cwd: params.cwd, workspaceRoot },
           "ACP cwd must be the eve application root",
         );
       }
@@ -130,7 +133,6 @@ export class EveAcpAdapter {
     const sessionId = randomUUID();
     this.#sessions.set(sessionId, {
       client: this.#client.session(),
-      closed: false,
       tools: new Map(),
     });
     return { sessionId };
@@ -150,6 +152,7 @@ export class EveAcpAdapter {
     }
 
     const message = promptContent(params);
+    session.tools.clear();
     const settled = Promise.withResolvers<void>();
     const active: ActivePrompt = {
       cancelRequested: false,
@@ -161,25 +164,42 @@ export class EveAcpAdapter {
     session.active = active;
     const onProtocolCancel = () => {
       active.protocolCancelled = true;
-      void this.#cancelActive(session);
+      void this.#cancelActive(session).catch(() => undefined);
     };
-    signal.addEventListener("abort", onProtocolCancel, { once: true });
+    if (signal.aborted) {
+      onProtocolCancel();
+    } else {
+      signal.addEventListener("abort", onProtocolCancel, { once: true });
+    }
 
     try {
+      if (active.protocolCancelled) {
+        throw RequestError.requestCancelled({ sessionId: params.sessionId });
+      }
       let input: SendTurnInput = { message };
       for (;;) {
         const response = await session.client.send(input);
+        if (active.cancelRequested || active.protocolCancelled) {
+          await this.#cancelActive(session);
+        }
+
         const inputRequests: InputRequest[] = [];
         let cancelled = false;
         let failure:
           | Extract<HandleMessageStreamEvent, { type: "turn.failed" | "session.failed" }>
           | undefined;
+        let unsupportedEvent: RequestError | undefined;
 
         for await (const event of response) {
           const turnId = "data" in event && "turnId" in event.data ? event.data.turnId : undefined;
           if (typeof turnId === "string") active.turnId = turnId;
 
           if (event.type === "input.requested") inputRequests.push(...event.data.requests);
+          if (event.type === "authorization.required") {
+            unsupportedEvent = unsupported(
+              "Connection authorization cannot be completed through eve ACP mode.",
+            );
+          }
           if (event.type === "turn.cancelled") cancelled = true;
           if (event.type === "turn.failed" || event.type === "session.failed") failure = event;
           await this.#projectEvent(params.sessionId, session, event, client);
@@ -190,6 +210,7 @@ export class EveAcpAdapter {
         }
         if (cancelled || active.cancelRequested) return { stopReason: "cancelled" };
         if (failure !== undefined) throw eveFailure(failure);
+        if (unsupportedEvent !== undefined) throw unsupportedEvent;
         if (inputRequests.length === 0) return { stopReason: "end_turn" };
 
         let inputResponses: InputResponse[];
@@ -212,8 +233,11 @@ export class EveAcpAdapter {
         if (active.cancelRequested) return { stopReason: "cancelled" };
         input = { inputResponses };
       }
+    } catch (error) {
+      throw acpRequestError(error);
     } finally {
       signal.removeEventListener("abort", onProtocolCancel);
+      session.tools.clear();
       active.resolveSettled();
       if (session.active === active) session.active = undefined;
     }
@@ -221,36 +245,56 @@ export class EveAcpAdapter {
 
   async cancel(sessionId: string): Promise<void> {
     const session = this.#sessions.get(sessionId);
-    if (session === undefined || session.closed || session.active === undefined) return;
+    if (session === undefined || session.active === undefined) return;
     session.active.cancelRequested = true;
     await this.#cancelActive(session);
   }
 
   async closeSession(sessionId: string): Promise<void> {
     const session = this.#getSession(sessionId);
-    if (session.active !== undefined) {
-      const active = session.active;
-      active.cancelRequested = true;
-      await this.#cancelActive(session);
-      await active.settled;
-    }
-    await session.client.reset();
-    session.closed = true;
     this.#sessions.delete(sessionId);
+    await this.#retireSession(session);
   }
 
   async close(): Promise<void> {
-    await Promise.allSettled(
-      [...this.#sessions.values()].map(async (session) => {
-        if (session.active !== undefined) {
-          const active = session.active;
-          active.cancelRequested = true;
-          await this.#cancelActive(session);
-          await active.settled;
-        }
-      }),
-    );
+    const sessions = [...this.#sessions.values()];
     this.#sessions.clear();
+    const results = await Promise.allSettled(
+      sessions.map((session) => this.#retireSession(session)),
+    );
+    const errors = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "Could not close every eve session");
+    }
+  }
+
+  async #retireSession(session: AcpSession): Promise<void> {
+    let cancellationError: unknown;
+    if (session.active !== undefined) {
+      const active = session.active;
+      active.cancelRequested = true;
+      try {
+        await this.#cancelActive(session);
+      } catch (error) {
+        cancellationError = error;
+      }
+      await active.settled;
+    }
+
+    try {
+      await session.client.reset();
+    } catch (resetError) {
+      if (cancellationError !== undefined) {
+        throw new AggregateError(
+          [cancellationError, resetError],
+          "Could not cancel or reset the eve session",
+        );
+      }
+      throw resetError;
+    }
+    if (cancellationError !== undefined) throw cancellationError;
   }
 
   async #cancelActive(session: AcpSession): Promise<void> {
@@ -263,7 +307,7 @@ export class EveAcpAdapter {
 
   #getSession(sessionId: string): AcpSession {
     const session = this.#sessions.get(sessionId);
-    if (session === undefined || session.closed) {
+    if (session === undefined) {
       throw RequestError.invalidParams({ sessionId }, "Unknown or closed ACP session");
     }
     return session;
@@ -280,12 +324,14 @@ export class EveAcpAdapter {
         await notifyUpdate(client, sessionId, {
           sessionUpdate: "agent_message_chunk",
           content: { type: "text", text: event.data.messageDelta },
+          messageId: `${event.data.turnId}:message:${event.data.stepIndex}`,
         });
         return;
       case "reasoning.appended":
         await notifyUpdate(client, sessionId, {
           sessionUpdate: "agent_thought_chunk",
           content: { type: "text", text: event.data.reasoningDelta },
+          messageId: `${event.data.turnId}:thought:${event.data.stepIndex}`,
         });
         return;
       case "actions.requested":
@@ -297,7 +343,7 @@ export class EveAcpAdapter {
         return;
       case "action.result": {
         const result = event.data.result;
-        const status = event.data.status === "failed" || result.isError ? "failed" : "completed";
+        const status = event.data.status !== "completed" || result.isError ? "failed" : "completed";
         await notifyUpdate(client, sessionId, {
           sessionUpdate: "tool_call_update",
           toolCallId: result.callId,
@@ -340,7 +386,7 @@ export class EveAcpAdapter {
         { cancellationSignal },
       );
       if (response.outcome.outcome === "cancelled") {
-        session.active!.cancelRequested = true;
+        this.#cancelClientInput(session);
         return { requestId: request.requestId };
       }
       if (response.outcome.optionId === approveId) {
@@ -377,7 +423,7 @@ export class EveAcpAdapter {
       { cancellationSignal },
     );
     if (response.action !== "accept") {
-      session.active!.cancelRequested = true;
+      this.#cancelClientInput(session);
       return { requestId: request.requestId };
     }
     const content = response.content as Record<string, unknown> | null | undefined;
@@ -396,6 +442,12 @@ export class EveAcpAdapter {
     }
     return { requestId: request.requestId, text: answer };
   }
+
+  #cancelClientInput(session: AcpSession): void {
+    const active = session.active!;
+    active.cancelRequested = true;
+    active.outboundController.abort();
+  }
 }
 
 async function normalizedRealpath(path: string, label: string): Promise<string> {
@@ -410,21 +462,22 @@ async function normalizedRealpath(path: string, label: string): Promise<string> 
 }
 
 function promptContent(params: PromptRequest): Array<{ type: "text"; text: string }> {
-  if (params.prompt.length === 0) {
-    throw RequestError.invalidParams(
-      params.prompt,
-      "ACP prompt must contain at least one text block",
-    );
-  }
-  return params.prompt.map((part) => {
+  const content = params.prompt.map((part) => {
     if (part.type !== "text") {
       throw unsupported(`ACP prompt content type ${JSON.stringify(part.type)} is not supported.`);
     }
-    return { type: "text", text: part.text };
+    return { type: "text" as const, text: part.text };
   });
+  if (content.every((part) => part.text.length === 0)) {
+    throw RequestError.invalidParams(
+      params.prompt,
+      "ACP prompt must contain at least one non-empty text block",
+    );
+  }
+  return content;
 }
 
-function toolCallForAction(action: RuntimeActionRequest): ToolCallUpdate {
+function toolCallForAction(action: RuntimeActionRequest): ToolCall {
   const title =
     action.kind === "tool-call"
       ? action.toolName
@@ -461,9 +514,9 @@ function elicitationProperty(request: InputRequest) {
 async function notifyUpdate(
   client: AgentContext,
   sessionId: string,
-  update: Parameters<AgentContext["notify"]>[1],
+  update: SessionUpdate,
 ): Promise<void> {
-  await client.notify(methods.client.session.update, { sessionId, update } as never);
+  await client.notify(methods.client.session.update, { sessionId, update });
 }
 
 function stringifyOutput(output: RuntimeActionResult["output"]): string {
@@ -481,6 +534,14 @@ function eveFailure(
     code: event.data.code,
     details: event.data.details,
   });
+}
+
+function acpRequestError(error: unknown): RequestError {
+  if (error instanceof RequestError) return error;
+  if (error instanceof ClientError) {
+    return new RequestError(ERROR_CODE_EVE, error.message, { httpStatus: error.status });
+  }
+  return new RequestError(ERROR_CODE_EVE, errorMessage(error));
 }
 
 function errorMessage(error: unknown): string {

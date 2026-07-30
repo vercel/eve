@@ -489,6 +489,19 @@ describe("eve dev --logs", () => {
 });
 
 describe("eve acp", () => {
+  it("documents the client workspace boundary", async () => {
+    const output: string[] = [];
+
+    await runCli(["acp", "--help"], {
+      error: (message) => output.push(message),
+      log: (message) => output.push(message),
+    });
+
+    expect(output.join("\n")).toContain(
+      "ACP does not grant the agent access to the client's workspace or terminal.",
+    );
+  });
+
   it("starts an isolated local server and hands it to the ACP stdio adapter", async () => {
     const close = vi.fn(async () => {});
     const startHost = vi.fn(() => ({
@@ -515,11 +528,10 @@ describe("eve acp", () => {
       port: 0,
     });
     expect(runAcpServer).toHaveBeenCalledWith({
-      appRoot: "/canonical/app",
       eveVersion: expect.any(String),
       serverUrl: "http://127.0.0.1:4321/",
       signal: expect.any(AbortSignal),
-      validateWorkspaceRoot: true,
+      workspaceRoot: "/canonical/app",
     });
     expect(close).toHaveBeenCalledOnce();
     expect(output).toEqual([]);
@@ -537,7 +549,6 @@ describe("eve acp", () => {
 
     expect(startHost).not.toHaveBeenCalled();
     expect(runAcpServer).toHaveBeenCalledWith({
-      appRoot: process.cwd(),
       eveVersion: expect.any(String),
       headers: {
         Authorization: `Basic ${btoa("user:pass")}`,
@@ -545,7 +556,6 @@ describe("eve acp", () => {
       },
       serverUrl: "https://example.com/",
       signal: expect.any(AbortSignal),
-      validateWorkspaceRoot: false,
     });
   });
 });
