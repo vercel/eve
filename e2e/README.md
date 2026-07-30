@@ -162,15 +162,18 @@ When adding e2e coverage:
 
 ## CI
 
-`.github/scripts/discover-e2e-fixtures.sh` discovers every fixture with an
-`evals/` directory and emits both suite matrices:
+The matrix models and worlds are registered in [`e2e/matrix.json`](./matrix.json)
+— edit that file to add either. `.github/scripts/discover-e2e-fixtures.mjs`
+discovers every fixture with an `evals/` directory and emits the suite
+matrices from the registry:
 
-- `model_matrix` — fixture × model legs for `e2e-local.yml`. The matrix
-  models are:
-  - `openai-sol` → `openai/gpt-5.6-sol` (default; every fixture)
-  - `anthropic-opus` → `anthropic/claude-opus-5` (only fixtures with
-    `"e2e": { "modelMatrix": "full" }`)
-- `world_matrix` — one leg per fixture for the world suites.
+- `model_matrix` — fixture × model legs for `e2e-local.yml`. The first
+  registry model is the default that every fixture runs on; the rest run only
+  on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
+- `world_matrix_<world>` — one leg per fixture for that world's suite
+  workflow. A registered world's `package` reaches the job as
+  `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
+  deploy target's default).
 
 The short model name is the stable Actions check identifier; the full id
 selects the provider model. Updating a model version does not rename required
@@ -214,9 +217,11 @@ runs the mock-compatible evals against a local production server
 runs. Every fixture carries `@workflow/world-postgres` as a dependency so
 the world module resolves at build time.
 
-A world suite for another workflow world follows the same shape: consume
-`world_matrix`, set `EVE_E2E_MODEL=mock`, point fixtures at the world with
-`EVE_E2E_WORKFLOW_WORLD=<package>` (plus any backing services), and run with
+A world suite for another workflow world follows the same shape: register
+the world in `e2e/matrix.json`, add an `e2e-<world>.yml` that consumes its
+`world_matrix_<world>` output (the registered `package` arrives as
+`matrix.world_package` for `EVE_E2E_WORKFLOW_WORLD`), set
+`EVE_E2E_MODEL=mock` (plus any backing services), and run with
 `--exclude-tag real-model`.
 
 TUI smoke scripts are not e2e. They live under

@@ -34,7 +34,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|\.github/workflows/e2e-postgres\.yml$|\.github/scripts/discover-e2e-fixtures\.sh$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|\.github/workflows/e2e-postgres\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -44,7 +44,7 @@ jobs:
     name: discover-fixtures
     runs-on: ubuntu-latest
     outputs:
-      world_matrix: ${{ steps.discover.outputs.world_matrix }}
+      world_matrix: ${{ steps.discover.outputs.world_matrix_postgres }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -53,7 +53,7 @@ jobs:
 
       - name: Discover eval fixtures
         id: discover
-        run: .github/scripts/discover-e2e-fixtures.sh
+        run: node .github/scripts/discover-e2e-fixtures.mjs
 
   # The Postgres world suite: every fixture builds and runs once against a
   # production server backed by @workflow/world-postgres, with deterministic
@@ -89,7 +89,8 @@ jobs:
       # credential-presence checks satisfied without granting live access.
       AI_GATEWAY_API_KEY: invalid-e2e-world-suite-key
       EVE_E2E_MODEL: mock
-      EVE_E2E_WORKFLOW_WORLD: "@workflow/world-postgres"
+      # The world package comes from this world's e2e/matrix.json entry.
+      EVE_E2E_WORKFLOW_WORLD: ${{ matrix.world_package }}
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
       WORKFLOW_POSTGRES_MAX_POOL_SIZE: "52"
       WORKFLOW_POSTGRES_URL: postgres://world:world@127.0.0.1:5432/world

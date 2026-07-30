@@ -36,7 +36,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.sh$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -46,7 +46,7 @@ jobs:
     name: discover-fixtures
     runs-on: ubuntu-latest
     outputs:
-      world_matrix: ${{ steps.discover.outputs.world_matrix }}
+      world_matrix: ${{ steps.discover.outputs.world_matrix_vercel }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -55,7 +55,7 @@ jobs:
 
       - name: Discover eval fixtures
         id: discover
-        run: .github/scripts/discover-e2e-fixtures.sh
+        run: node .github/scripts/discover-e2e-fixtures.mjs
 
   # The Vercel world suite: every fixture deploys and runs once with
   # deterministic mock models (EVE_E2E_MODEL=mock), so this matrix proves the
