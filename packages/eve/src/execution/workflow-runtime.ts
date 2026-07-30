@@ -269,20 +269,20 @@ export async function requestWorkflowTurnCancellation(
     await resumeHook(sessionCancelHookToken(input.sessionId), payload);
     return { status: "accepted" };
   } catch (error) {
-    if (isInactiveCancelTarget(error)) {
-      return { status: "no_active_turn" };
+    const reason = classifyInactiveCancelTarget(error);
+    if (reason !== undefined) {
+      return { reason, status: "no_active_turn" };
     }
     throw error;
   }
 }
 
-function isInactiveCancelTarget(error: unknown): boolean {
-  return (
-    HookNotFoundError.is(error) ||
-    WorkflowRunNotFoundError.is(error) ||
-    RunExpiredError.is(error) ||
-    EntityConflictError.is(error)
-  );
+function classifyInactiveCancelTarget(error: unknown): string | undefined {
+  if (HookNotFoundError.is(error)) return "HookNotFoundError";
+  if (WorkflowRunNotFoundError.is(error)) return "WorkflowRunNotFoundError";
+  if (RunExpiredError.is(error)) return "RunExpiredError";
+  if (EntityConflictError.is(error)) return "EntityConflictError";
+  return undefined;
 }
 
 function isAlreadyTerminalSessionError(error: unknown): boolean {
