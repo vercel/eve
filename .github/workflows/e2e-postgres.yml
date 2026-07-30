@@ -185,9 +185,25 @@ jobs:
             exit 1
           fi
 
-          # Durability proof: the eval traffic above must have produced
-          # Postgres-backed workflow runs, not silently fallen back to the
-          # local world.
+          # Durability proof: when any eval actually executed, its traffic
+          # must have produced Postgres-backed workflow runs, not silently
+          # fallen back to the local world. A fixture can execute nothing
+          # here — all evals tagged `real-model` (no junit written), or
+          # runtime self-skips (junit reports tests == skipped) — and its
+          # leg still proves the fixture builds, boots, and reports healthy
+          # on this world.
+          junit_file="$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
+          executed_evals=0
+          if [ -f "$junit_file" ]; then
+            total="$(grep -o 'tests="[0-9]*"' "$junit_file" | head -1 | tr -dc '0-9')"
+            skipped="$(grep -o 'skipped="[0-9]*"' "$junit_file" | head -1 | tr -dc '0-9')"
+            executed_evals=$(( ${total:-0} - ${skipped:-0} ))
+          fi
+          if [ "$executed_evals" -eq 0 ]; then
+            echo "No evals executed on this world; build/boot/health verified, persistence assertion skipped."
+            exit 0
+          fi
+
           run_count="$(
             docker exec "$POSTGRES_CONTAINER_ID" \
               psql --username=world --dbname=world --tuples-only --no-align \
