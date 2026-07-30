@@ -715,6 +715,7 @@ function slackChannel(
 describe("dispatchChannelRequest tracing", () => {
   let exporter: InMemorySpanExporter;
   let provider: BasicTracerProvider;
+  let priorConfig: ReturnType<typeof getInstrumentationConfig>;
 
   beforeEach(() => {
     exporter = new InMemorySpanExporter();
@@ -722,9 +723,13 @@ describe("dispatchChannelRequest tracing", () => {
     apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
     apiPropagation.setGlobalPropagator(w3cPropagator as never);
     apiTrace.setGlobalTracerProvider(provider);
+    // Request spans are opt-in; enable them for this suite.
+    priorConfig = getInstrumentationConfig();
+    registerInstrumentationConfig({ traceChannelRequests: true }, { agentName: "test" });
   });
 
   afterEach(() => {
+    registerInstrumentationConfig(priorConfig ?? {}, { agentName: "test" });
     apiTrace.disable();
     apiContext.disable();
     apiPropagation.disable();
@@ -961,18 +966,23 @@ describe("dispatchChannelRequest tracing", () => {
 describe("dispatchChannelRequest without an OTel provider", () => {
   let exporter: InMemorySpanExporter;
   let provider: BasicTracerProvider;
+  let priorConfig: ReturnType<typeof getInstrumentationConfig>;
 
   beforeEach(() => {
     // Register an exporter to prove nothing reaches it, but leave the global
-    // tracer provider as the no-op default.
+    // tracer provider as the no-op default. Enable the opt-in flag so this
+    // exercises the no-provider path rather than the disabled-flag bypass.
     exporter = new InMemorySpanExporter();
     provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
     apiTrace.disable();
     apiContext.disable();
     apiPropagation.disable();
+    priorConfig = getInstrumentationConfig();
+    registerInstrumentationConfig({ traceChannelRequests: true }, { agentName: "test" });
   });
 
   afterEach(() => {
+    registerInstrumentationConfig(priorConfig ?? {}, { agentName: "test" });
     apiTrace.disable();
   });
 
@@ -996,21 +1006,20 @@ describe("dispatchChannelRequest without an OTel provider", () => {
   });
 });
 
-describe("dispatchChannelRequest with traceChannelRequests disabled", () => {
+describe("dispatchChannelRequest with request tracing not enabled", () => {
   let exporter: InMemorySpanExporter;
   let provider: BasicTracerProvider;
   let priorConfig: ReturnType<typeof getInstrumentationConfig>;
 
   beforeEach(() => {
-    // A live provider proves the bypass — not the missing provider — is what
-    // suppresses the span.
+    // A live provider proves the opt-in flag — not a missing provider — is what
+    // gates the span.
     exporter = new InMemorySpanExporter();
     provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
     apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
     apiPropagation.setGlobalPropagator(w3cPropagator as never);
     apiTrace.setGlobalTracerProvider(provider);
     priorConfig = getInstrumentationConfig();
-    registerInstrumentationConfig({ traceChannelRequests: false }, { agentName: "test" });
   });
 
   afterEach(() => {
@@ -1021,7 +1030,7 @@ describe("dispatchChannelRequest with traceChannelRequests disabled", () => {
     apiPropagation.disable();
   });
 
-  it("handles the request identically and emits no request span", async () => {
+  async function expectNoSpan(): Promise<void> {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [slackChannel(async () => new Response("ok"))],
@@ -1038,5 +1047,15 @@ describe("dispatchChannelRequest with traceChannelRequests disabled", () => {
     await expect(response.text()).resolves.toBe("ok");
     await provider.forceFlush();
     expect(exporter.getFinishedSpans()).toHaveLength(0);
+  }
+
+  it("emits no request span by default when the flag is unset", async () => {
+    registerInstrumentationConfig({}, { agentName: "test" });
+    await expectNoSpan();
+  });
+
+  it("emits no request span when the flag is explicitly false", async () => {
+    registerInstrumentationConfig({ traceChannelRequests: false }, { agentName: "test" });
+    await expectNoSpan();
   });
 });

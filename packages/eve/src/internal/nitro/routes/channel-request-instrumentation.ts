@@ -57,10 +57,10 @@ export interface TraceChannelRequestInput {
  * recorded a second time here. The span always ends in `finally`, without
  * waiting for `event.waitUntil()` work or streamed response bodies.
  *
- * Authored instrumentation can opt out via
- * `defineInstrumentation({ traceChannelRequests: false })`, in which case the
- * handler runs with no span (`undefined`) and no context extraction — a true
- * bypass, not a non-recording span.
+ * Emitting these spans is opt-in: unless authored instrumentation enables it
+ * via `defineInstrumentation({ traceChannelRequests: true })`, the handler runs
+ * with no span (`undefined`) and no context extraction — a true bypass, not a
+ * non-recording span.
  *
  * This is observability-only: it never changes the response and performs no
  * synchronous span export in the request path, adding only minimal in-process
@@ -70,7 +70,7 @@ export async function traceChannelRequest<T extends Response>(
   input: TraceChannelRequestInput,
   handler: (span: Span | undefined) => Promise<T>,
 ): Promise<T> {
-  if (getInstrumentationConfig()?.traceChannelRequests === false) {
+  if (getInstrumentationConfig()?.traceChannelRequests !== true) {
     return await handler(undefined);
   }
 

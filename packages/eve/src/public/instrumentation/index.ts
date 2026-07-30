@@ -156,9 +156,8 @@ export interface InstrumentationDefinition {
   /**
    * Whether to emit the inbound HTTP `SERVER` span that wraps each channel
    * request (the parent of the turn trace and any `hook.resume`/outgoing
-   * HTTP spans). Defaults to `true` when `instrumentation.ts` is present.
-   * Set `false` to suppress these request spans while keeping the rest of
-   * the trace.
+   * HTTP spans). Defaults to `false`. Set `true` to emit these request spans
+   * alongside the rest of the trace.
    */
   readonly traceChannelRequests?: boolean;
   /**

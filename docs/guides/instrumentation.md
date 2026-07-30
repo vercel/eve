@@ -155,7 +155,7 @@ ai.eve.turn  {eve.session.id}
 
 eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
-Each inbound channel HTTP request is also wrapped in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
+Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
 
 ```text
 POST /eve/v1/session/:sessionId
@@ -164,9 +164,7 @@ POST /eve/v1/session/:sessionId
         └── POST hook_received
 ```
 
-The span stays low-cardinality (route template in `http.route`, method in `http.request.method`, never the concrete URL) and records no session ids, tokens, headers, bodies, or query parameters. It adopts an incoming `traceparent` as its parent when present, so eve requests correlate with upstream traces.
-
-Set `traceChannelRequests: false` on `defineInstrumentation` to suppress these request spans while keeping the turn trace and every other span. It defaults to `true` whenever `instrumentation.ts` is present.
+The span stays low-cardinality (route template in `http.route`, method in `http.request.method`, never the concrete URL) and records no session ids, tokens, headers, bodies, or query parameters. It adopts an incoming `traceparent` as its parent when present, so eve requests correlate with upstream traces. It defaults to `false`; enable it only when you want these request spans.
 
 ## Workflow run tags
 
