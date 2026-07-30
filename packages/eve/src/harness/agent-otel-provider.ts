@@ -393,9 +393,10 @@ export function createAgentOtelInstrumentation(
     if (attempt === undefined) return;
     // Vercel AI Gateway reports per-call cost in providerMetadata.gateway;
     // attributes exist only when it was actually the gateway serving the call.
-    const gateway = readGatewayCost(event.providerMetadata);
-    if (gateway === undefined) return;
-    for (const [key, value] of Object.entries(gateway)) {
+    const costAttributes = readGatewayCost(event.providerMetadata);
+    if (costAttributes === undefined) return;
+    // The vendored OTel Span surface only has singular setAttribute.
+    for (const [key, value] of Object.entries(costAttributes)) {
       attempt.step.span.setAttribute(key, value);
     }
   };
