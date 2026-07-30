@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
 import { interactiveAsker } from "../../ask.js";
-import { createChannelSetupUi } from "./ui.js";
+import { createIntegrationSetupUi } from "./ui.js";
 
-describe("createChannelSetupUi", () => {
+describe("createIntegrationSetupUi", () => {
   it("renders integration-owned next steps through the shared notice", () => {
     const fake = createFakePrompter();
-    const ui = createChannelSetupUi({
+    const ui = createIntegrationSetupUi({
       asker: interactiveAsker(fake.prompter),
       prompter: fake.prompter,
     });

@@ -1,72 +1,46 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import type { Asker } from "#setup/ask.js";
 
-import { interactiveAsker } from "../ask.js";
-import type { AddChannelsDeps } from "./channel-scaffold.js";
-import { channelSetupEnvironment } from "./shared/environment.js";
-import { setupIntegration, createChannelSetupUi } from "./registry.js";
-import { createDefaultSetupState } from "../state.js";
+import { integrationSetupEnvironment } from "./shared/environment.js";
+import { setupIntegration } from "./registry.js";
 import { WizardCancelledError } from "../step.js";
+
+const unusedAsker: Asker = {
+  ask: async <T>() => undefined as T,
+  askMany: async () => [],
+};
 
 function context(prompter = createFakePrompter().prompter) {
   return {
-    environment: channelSetupEnvironment("logged-out", { kind: "unresolved" } as const),
-    state: {
-      ...createDefaultSetupState(),
-      projectPath: { kind: "resolved", inPlace: true, path: "/tmp/project" } as const,
+    appRoot: "/tmp/project",
+    environment: integrationSetupEnvironment("logged-out", { kind: "unresolved" } as const),
+    ui: {
+      asker: unusedAsker,
+      prompter,
+      confirm: async () => false,
+      nextSteps: () => {},
     },
-    ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
   };
 }
 
-describe("channel setup integrations", () => {
-  it("keeps picker cancellation as a structured result", async () => {
+describe("setup integrations", () => {
+  it("keeps Slack credential-picker cancellation as a structured result", async () => {
     const fake = createFakePrompter({
       single: () => {
         throw new WizardCancelledError();
       },
     });
 
-    const result = await setupIntegration("slack").setup(context(fake.prompter));
-
-    expect(result).toMatchObject({ kind: "cancelled" });
+    await expect(setupIntegration("slack").setup(context(fake.prompter))).resolves.toEqual({
+      kind: "cancelled",
+    });
   });
 
-  it("keeps Web setup independent of Slack credential prompts", async () => {
-    const fake = createFakePrompter();
-    const ensureChannel = vi.fn<AddChannelsDeps["ensureChannel"]>(async () => ({
-      kind: "web",
-      action: "skipped",
-      skipReason: "nextjs-project",
-      filesWritten: [],
-      filesSkipped: ["/tmp/project/package.json"],
-      packageJsonUpdated: [],
-    }));
-
-    const result = await setupIntegration("web").setup({
-      ...context(fake.prompter),
-      state: {
-        ...context(fake.prompter).state,
-      },
-      deps: {
-        ensureChannel,
-        deriveSlackConnectorSlug: vi.fn(),
-        provisionSlackbot: vi.fn(),
-        reconcileSlackUid: vi.fn(),
-        detectPackageManager: vi.fn<AddChannelsDeps["detectPackageManager"]>(async () => ({
-          kind: "pnpm",
-          source: "default",
-        })),
-        runPackageManagerInstall: vi.fn(),
-        ensureVercelProject: vi.fn(),
-      },
-    });
-
-    expect(result.kind).toBe("done");
-    expect(ensureChannel).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "web", configureVercelServices: false }),
+  it("rejects an unknown integration", () => {
+    expect(() => setupIntegration("unknown")).toThrow(
+      'Integration setup "unknown" is not available',
     );
-    expect(fake.selectMessages).toEqual([]);
   });
 });

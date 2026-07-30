@@ -147,37 +147,17 @@ export interface SetupState {
   aiGatewayCredentials: ResolvedAiGatewayCredentials;
   chat: ChatPreference | null;
 
-  // Status retained while channel setup retries installs, deployments, or
-  // Connect calls. Advanced by the channel and deploy boxes.
-  /** Channels scaffolded so far in this run. */
-  channels: ChannelKind[];
-  webScaffolded: boolean;
-  slackScaffolded: boolean;
   deploymentDependenciesInstalled: boolean;
   /** The linked Vercel project facts, from the link box or the on-disk `.vercel` link. */
   project: ProjectResolution;
   deploymentPending: boolean;
-  slackbotCreated: boolean;
-  slackbotAttached: boolean;
-  slackConnectorUid: string | undefined;
-  /** Deep link that opens a DM compose with the bot ("chat with your agent"). */
-  slackChatUrl: string | undefined;
-  slackWorkspaceName: string | undefined;
 }
 
 export function createDefaultSetupState(): SetupState {
   return {
-    channels: [],
-    webScaffolded: false,
-    slackScaffolded: false,
     deploymentDependenciesInstalled: false,
     project: { kind: "unresolved" },
     deploymentPending: false,
-    slackbotCreated: false,
-    slackbotAttached: false,
-    slackConnectorUid: undefined,
-    slackChatUrl: undefined,
-    slackWorkspaceName: undefined,
     agentName: "",
     setupMode: "complete",
     modelId: "",
@@ -224,7 +204,6 @@ export function snapshotSetupState(state: SetupState): SetupState {
     aiGatewayCredentials: Object.freeze({ ...state.aiGatewayCredentials }),
     aiGateway: Object.freeze({ ...state.aiGateway }),
     connectionSelection: Object.freeze([...state.connectionSelection]) as ConnectionPlan[],
-    channels: Object.freeze([...state.channels]) as ChannelKind[],
     project: Object.freeze({ ...state.project }) as ProjectResolution,
     projectPath: Object.freeze({ ...state.projectPath }),
     vercelProject: Object.freeze({ ...state.vercelProject }),

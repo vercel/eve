@@ -1,45 +1,27 @@
-import type { AddChannelsDeps } from "./channel-scaffold.js";
-import type { ChannelSetupEnvironment } from "./shared/environment.js";
-import type { ChannelSetupUi } from "./shared/ui.js";
-import type { ChannelKind } from "../scaffold/index.js";
-import type { ProjectResolution } from "../project-resolution.js";
+import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 
-/** Narrow state owned by one channel setup invocation. */
-export interface ChannelSetupState {
-  readonly projectPath:
-    | string
-    | { kind: "unresolved"; inPlace: boolean }
-    | { kind: "resolved"; inPlace: boolean; path: string };
-  readonly project: ProjectResolution;
-  readonly channels: ChannelKind[];
-  readonly webScaffolded: boolean;
-  readonly slackScaffolded: boolean;
-}
+import type { IntegrationSetupEnvironment } from "./shared/environment.js";
+import type { IntegrationSetupUi } from "./shared/ui.js";
 
-/** Shared inputs available to a channel-owned setup implementation. */
-export interface ChannelSetupContext {
-  readonly environment: ChannelSetupEnvironment;
-  readonly state: Readonly<ChannelSetupState>;
-  readonly ui: ChannelSetupUi;
+/** Inputs available to one registry-owned integration setup flow. */
+export interface IntegrationSetupContext {
+  readonly appRoot: string;
+  readonly environment: IntegrationSetupEnvironment;
+  readonly ui: IntegrationSetupUi;
   readonly signal?: AbortSignal;
   readonly force?: boolean;
-  readonly headless?: boolean;
-  readonly presetCreateSlackbot?: boolean;
-  readonly presetPortableCredentials?: boolean;
-  readonly deps?: AddChannelsDeps;
-  /** Registry installation already owns package dependency mutations. */
-  readonly skipDependencyMutation?: boolean;
+  readonly yes?: boolean;
 }
 
-/** Structured outcome from a channel-owned setup implementation. */
-export type ChannelSetupResult =
-  | { readonly kind: "done"; readonly state: ChannelSetupState }
+/** Outcome from one registry-owned integration setup flow. */
+export type IntegrationSetupResult =
+  | { readonly kind: "done"; readonly facts?: readonly RegistrySetupFact[] }
   | { readonly kind: "cancelled" };
 
-/** Setup behavior paired with canonical channel catalog metadata. */
-export interface ChannelSetupIntegration {
-  readonly kind: ChannelKind;
+/** One built-in registry-owned integration setup flow. */
+export interface SetupIntegration {
+  readonly kind: string;
   readonly label: string;
   readonly hint?: string;
-  setup(context: ChannelSetupContext): Promise<ChannelSetupResult>;
+  setup(context: IntegrationSetupContext): Promise<IntegrationSetupResult>;
 }

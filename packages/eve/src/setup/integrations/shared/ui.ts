@@ -2,7 +2,7 @@ import { confirm, SkippedSignal, type Asker } from "../../ask.js";
 import type { Prompter } from "../../prompter.js";
 
 /** UI capabilities available to a channel-owned setup hook. */
-export interface ChannelSetupUi {
+export interface IntegrationSetupUi {
   readonly asker: Asker;
   readonly prompter: Prompter;
   confirm(input: { key: string; message: string; recommended?: boolean }): Promise<boolean>;
@@ -10,7 +10,10 @@ export interface ChannelSetupUi {
 }
 
 /** Adapts the shared setup asker and prompter to the channel hook UI. */
-export function createChannelSetupUi(input: { asker: Asker; prompter: Prompter }): ChannelSetupUi {
+export function createIntegrationSetupUi(input: {
+  asker: Asker;
+  prompter: Prompter;
+}): IntegrationSetupUi {
   return {
     ...input,
     async confirm(question) {

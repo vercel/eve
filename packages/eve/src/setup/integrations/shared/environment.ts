@@ -2,14 +2,16 @@ import type { ProjectResolution } from "../../project-resolution.js";
 import type { VercelAuthStatus } from "../../vercel-project.js";
 
 /** Read-only hosting facts available to channel-owned setup hooks. */
-export interface ChannelSetupEnvironment {
+export interface IntegrationSetupEnvironment {
   vercel:
     | { kind: "available"; project: ProjectResolution }
     | { kind: "unavailable"; reason: Exclude<VercelAuthStatus, "authenticated"> };
 }
 
 /** Describes the result of the read-only Vercel capability probe. */
-export function describeChannelSetupEnvironment(environment: ChannelSetupEnvironment): string {
+export function describeIntegrationSetupEnvironment(
+  environment: IntegrationSetupEnvironment,
+): string {
   if (environment.vercel.kind === "available") {
     switch (environment.vercel.project.kind) {
       case "deployed":
@@ -31,10 +33,10 @@ export function describeChannelSetupEnvironment(environment: ChannelSetupEnviron
 }
 
 /** Builds channel setup facts from the independent Vercel probes. */
-export function channelSetupEnvironment(
+export function integrationSetupEnvironment(
   authStatus: VercelAuthStatus,
   project: ProjectResolution,
-): ChannelSetupEnvironment {
+): IntegrationSetupEnvironment {
   return authStatus === "authenticated"
     ? { vercel: { kind: "available", project } }
     : { vercel: { kind: "unavailable", reason: authStatus } };

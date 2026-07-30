@@ -2,12 +2,13 @@ import { interactiveAsker } from "#setup/ask.js";
 import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 import { detectDeployment, projectResolutionFromDeployment } from "#setup/project-resolution.js";
 import type { Prompter } from "#setup/prompter.js";
-import { createDefaultSetupState } from "#setup/state.js";
 import { getVercelAuthStatus } from "#setup/vercel-project.js";
 
-import type { AddChannelsDeps } from "./channel-scaffold.js";
-import { channelSetupEnvironment, describeChannelSetupEnvironment } from "./shared/environment.js";
-import { createChannelSetupUi } from "./shared/ui.js";
+import {
+  integrationSetupEnvironment,
+  describeIntegrationSetupEnvironment,
+} from "./shared/environment.js";
+import { createIntegrationSetupUi } from "./shared/ui.js";
 import { setupIntegration } from "./registry.js";
 
 /** Inputs shared by every registry-owned integration setup flow. */
@@ -22,7 +23,6 @@ export interface RunIntegrationSetupOptions {
 export interface IntegrationSetupRunnerDeps {
   detectDeployment: typeof detectDeployment;
   getVercelAuthStatus: typeof getVercelAuthStatus;
-  addChannelsDeps?: AddChannelsDeps;
 }
 
 const defaultDeps: IntegrationSetupRunnerDeps = {
@@ -49,23 +49,17 @@ export async function runIntegrationSetup(
     deps.getVercelAuthStatus(options.appRoot, { signal: options.signal }),
   ]);
   const project = projectResolutionFromDeployment(deployment);
-  const environment = channelSetupEnvironment(authStatus, project);
-  options.prompter.log.info(describeChannelSetupEnvironment(environment));
+  const environment = integrationSetupEnvironment(authStatus, project);
+  options.prompter.log.info(describeIntegrationSetupEnvironment(environment));
   const result = await integration.setup({
     environment,
-    state: {
-      ...createDefaultSetupState(),
-      project,
-      projectPath: { kind: "resolved", inPlace: true, path: options.appRoot },
-    },
-    ui: createChannelSetupUi({
+    appRoot: options.appRoot,
+    ui: createIntegrationSetupUi({
       asker: interactiveAsker(options.prompter),
       prompter: options.prompter,
     }),
-    presetCreateSlackbot: options.yes ? true : undefined,
-    skipDependencyMutation: true,
-    deps: deps.addChannelsDeps,
+    yes: options.yes,
     signal: options.signal,
   });
-  return result.kind === "cancelled" ? result : { kind: "done" };
+  return result;
 }
