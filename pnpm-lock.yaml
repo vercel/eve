@@ -217,8 +217,8 @@ importers:
         specifier: 0.2.0
         version: 0.2.0(@opentelemetry/api@1.9.1)(ai@6.0.191(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
       '@blitzreels/eve':
-        specifier: ^0.2.0
-        version: 0.2.0(eve@packages+eve)
+        specifier: ^0.2.1
+        version: 0.2.1(eve@packages+eve)
       '@browserbasehq/eve':
         specifier: ^0.1.0
         version: 0.1.0(@cfworker/json-schema@4.1.1)(eve@packages+eve)(supports-color@10.2.2)
@@ -1710,8 +1710,8 @@ packages:
     resolution: {integrity: sha512-2NOBMoQatxBB164mIkVfx8rsVAuNi2z5PKAqg1696+BstoUZtDodPHQ5SHrhXQKKiyrfCVgCZKO7BdjclhkFAg==}
     engines: {node: '>=20'}
 
-  '@blitzreels/eve@0.2.0':
-    resolution: {integrity: sha512-OiXTnEDpLA1geYQVrHJ1FvPu4ZciJilIAUhwwDoc5uzkbg3Gwlxcs9p38XXBqFapy6iPOnJnbRHx0IjgPntWNA==}
+  '@blitzreels/eve@0.2.1':
+    resolution: {integrity: sha512-mgw/0YpDb+Skc0jyH41+EiUxHwKRD/46OkarfQyC85TmeoQm7h+PXQftjVTIo5i5eImVNFAcQBAxuMq3eRjsXQ==}
     engines: {node: '>=24'}
     peerDependencies:
       eve: '*'
@@ -15752,7 +15752,7 @@ snapshots:
 
   '@blitzreels/contracts@0.2.0': {}
 
-  '@blitzreels/eve@0.2.0(eve@packages+eve)':
+  '@blitzreels/eve@0.2.1(eve@packages+eve)':
     dependencies:
       '@blitzreels/sdk': 0.2.0
       eve: link:packages/eve
