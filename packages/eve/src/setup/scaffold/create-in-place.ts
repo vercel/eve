@@ -3,14 +3,35 @@ const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([
   ".git",
   ".gitkeep",
   ".hg",
-  // Toolchain selectors may need to exist before init so npx runs with the project's Node version.
-  ".mise.toml",
+  // These committed manifests may establish the development environment before init can run.
   ".node-version",
   ".nvmrc",
+  ".protolock",
+  ".prototools",
   ".tool-versions",
-  "mise.toml",
+  "devenv.lock",
+  "devenv.nix",
+  "devenv.yaml",
+  "devbox.json",
+  "devbox.lock",
+  "flake.lock",
+  "flake.nix",
 ]);
 
+function isSharedMiseEntry(entry: string): boolean {
+  const filename = entry.startsWith(".") ? entry.slice(1) : entry;
+  const segments = filename.split(".");
+  const extension = segments.at(-1);
+  const variants = segments.slice(1, -1);
+  return (
+    segments[0] === "mise" &&
+    (extension === "toml" || extension === "lock") &&
+    variants.every((variant) => variant !== "" && variant !== "local")
+  );
+}
+
 export function blockingCreateInPlaceEntries(entries: readonly string[]): string[] {
-  return entries.filter((entry) => !ALLOWED_CREATE_IN_PLACE_ENTRIES.has(entry));
+  return entries.filter(
+    (entry) => !ALLOWED_CREATE_IN_PLACE_ENTRIES.has(entry) && !isSharedMiseEntry(entry),
+  );
 }
