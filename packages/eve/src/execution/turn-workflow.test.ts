@@ -296,6 +296,46 @@ describe("turnWorkflow", () => {
     expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-error")).toEqual([]);
   });
 
+  it("honors cancellation observed while a durable turn step returns", async () => {
+    const sessionState = createSessionState();
+    installInbox([], { cancelPayloads: [{}] });
+    vi.mocked(turnStep).mockImplementationOnce(async (stepInput) => {
+      await vi.waitFor(() => expect(stepInput.abortSignal?.aborted).toBe(true));
+      return {
+        action: "done",
+        output: "must not complete",
+        serializedContext: { state: "done" },
+        sessionState,
+      };
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "start" },
+      sessionState,
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      action: {
+        cancelled: true,
+        kind: "park",
+        serializedContext: { state: "start" },
+        sessionState,
+      },
+      kind: "turn-result",
+    });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({ kind: "done" }),
+      }),
+    );
+  });
+
   it("runs uncancellable when the session cancel token is claimed by another run", async () => {
     const sessionState = createSessionState();
     installInbox([], { cancelConflict: { runId: "wrun_stale_prior_turn" } });

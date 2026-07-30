@@ -106,8 +106,19 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
     while (true) {
       const result = await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal));
+      const pendingActionKeys =
+        result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
+          ? result.pendingRuntimeActionKeys
+          : undefined;
 
-      if (result.action === "cancelled") {
+      // A cancel observed while the step was already returning must still win:
+      // the step body may have missed the abort and produced an ordinary
+      // completion, but the user's cancel was claimed. Pending runtime-action
+      // batches are exempt — their in-line wait below observes the signal.
+      if (
+        result.action === "cancelled" ||
+        (cancellation?.signal.aborted === true && pendingActionKeys === undefined)
+      ) {
         // No `canPark` check here: that gate rejects model-authored waits
         // (`next: null`) in task mode, whereas a cancelled turn parks by
         // design and its parkability was already established when the
@@ -137,11 +148,6 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // A pending runtime-action batch (model-driven `park` or dynamic-workflow
       // interrupt) is resolved in-line so the turn stays alive across the wait;
       // the two arms differ only in their dispatch path.
-      const pendingActionKeys =
-        result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
-          ? result.pendingRuntimeActionKeys
-          : undefined;
-
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
         const dispatch =
