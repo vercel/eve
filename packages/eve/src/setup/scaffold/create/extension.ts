@@ -4,6 +4,7 @@ import { basename, resolve } from "node:path";
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
 import { pathExists, writeTextFile } from "../files.js";
+import { blockingCreateInPlaceEntries } from "../create-in-place.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
@@ -20,7 +21,6 @@ import {
   type EvePackageContract,
 } from "./project.js";
 
-const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep", ".hg"]);
 const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";
 
 interface ExtensionTemplateContext {
@@ -187,7 +187,7 @@ async function assertCanCreateInPlace(
   }
 
   const entries = await readdir(targetRoot);
-  const blocking = entries.filter((entry) => !ALLOWED_CREATE_IN_PLACE_ENTRIES.has(entry));
+  const blocking = blockingCreateInPlaceEntries(entries);
   if (blocking.length > 0 && !overwriteExisting) {
     const visible = blocking.slice(0, 5).join(", ");
     const suffix = blocking.length > 5 ? `, and ${blocking.length - 5} more` : "";
