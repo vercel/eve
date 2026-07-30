@@ -1,41 +1,53 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { photonIMessageChannel } from "#public/channels/photon/photonIMessageChannel.js";
+const { newMention, send, subscribe } = vi.hoisted(() => ({
+  newMention: vi.fn(),
+  send: vi.fn(),
+  subscribe: vi.fn(),
+}));
 
-function routes(channel: unknown): Array<{ method: string; path: string }> {
-  if (!isCompiledChannel(channel)) throw new Error("Expected compiled channel.");
-  return channel.routes.map((route) => ({ method: route.method, path: route.path }));
-}
+vi.mock("#public/channels/chat-sdk/index.js", () => ({
+  chatSdkChannel: () => ({
+    bot: {
+      getAdapter: () => ({ markRead: vi.fn() }),
+      onNewMention: newMention,
+      onSubscribedMessage: vi.fn(),
+    },
+    channel: { routes: [] },
+    send,
+  }),
+  messageToUserContent: (message: Message) => message.text,
+}));
+vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
+  createMemoryState: vi.fn(),
+}));
+vi.mock("#compiled/@photon-ai/chat-adapter-imessage/index.js", () => ({
+  createiMessageAdapter: vi.fn(),
+}));
+vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
+
+import { photonIMessageChannel } from "#public/channels/photon/photonIMessageChannel.js";
+import { Message } from "#compiled/chat/index.js";
 
 describe("photonIMessageChannel", () => {
-  it("creates the default Photon webhook without eagerly resolving credentials", () => {
-    const credentials = vi.fn(async () => ({
-      projectId: "project-id",
-      projectSecret: "project-secret",
-    }));
-
-    const channel = photonIMessageChannel({ credentials });
-
-    expect(credentials).not.toHaveBeenCalled();
-    expect(routes(channel)).toEqual([
-      { method: "GET", path: "/eve/v1/photon" },
-      { method: "POST", path: "/eve/v1/photon" },
-    ]);
-  });
-
-  it("supports a custom webhook route", () => {
-    const channel = photonIMessageChannel({
-      credentials: async () => ({
-        projectId: "project-id",
-        projectSecret: "project-secret",
-      }),
-      route: "/hooks/imessage",
+  it("subscribes to a blank first mention before dropping it", async () => {
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+    const handler = newMention.mock.calls[0]?.[0];
+    if (handler === undefined) throw new Error("Expected an inbound mention handler.");
+    const thread = { id: "thread-id", subscribe };
+    const message = new Message({
+      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      id: "message-id",
+      raw: {},
+      text: "  \n",
+      threadId: thread.id,
     });
 
-    expect(routes(channel)).toEqual([
-      { method: "GET", path: "/hooks/imessage" },
-      { method: "POST", path: "/hooks/imessage" },
-    ]);
+    await handler(thread, message);
+
+    expect(subscribe).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
   });
 });

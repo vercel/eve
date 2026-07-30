@@ -115,10 +115,10 @@ async function dispatchMessage(
 ): Promise<void> {
   const result = await onMessage({ thread }, message);
   if (result === null) return;
+  if (subscribe) await thread.subscribe();
   await markReadBestEffort(bridge.bot.getAdapter("imessage"), thread, message);
   const content = photonInboundContent(message);
   if (content === undefined) return;
-  if (subscribe) await thread.subscribe();
   await bridge.send(
     {
       context: [...(result.context ?? [])],
