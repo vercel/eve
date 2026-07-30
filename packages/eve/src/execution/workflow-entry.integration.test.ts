@@ -328,8 +328,11 @@ describe("workflowEntry integration", () => {
         expect(firstTurn.every((event) => isEventId(event.meta.id))).toBe(true);
         expect(new Set(firstTurn.map((event) => event.meta.id)).size).toBe(firstTurn.length);
 
+        // No stream-order assertion on the ids: they sort in mint order per
+        // process, but a turn's events are appended by separate steps whose
+        // writes can interleave behind minting (see #protocol/event-id.js),
+        // so append order is not contractually sorted.
         const ids = firstTurn.map((event) => event.meta.id);
-        expect(ids).toEqual([...ids].sort());
 
         // Re-reading the durable stream returns the same ids.
         const workflowRuntime = createWorkflowRuntime({
