@@ -521,6 +521,9 @@ importers:
 
   e2e/fixtures/agent-basic-runtime:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -546,6 +549,9 @@ importers:
 
   e2e/fixtures/agent-cancellation:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -571,6 +577,9 @@ importers:
 
   e2e/fixtures/agent-channels:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -599,6 +608,9 @@ importers:
 
   e2e/fixtures/agent-compaction-regressions:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -624,6 +636,9 @@ importers:
 
   e2e/fixtures/agent-model:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -637,6 +652,9 @@ importers:
 
   e2e/fixtures/agent-openapi-swagger:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -665,6 +683,9 @@ importers:
       '@ai-sdk/anthropic':
         specifier: 'catalog:'
         version: 4.0.18(zod@4.4.3)
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -681,6 +702,9 @@ importers:
 
   e2e/fixtures/agent-schedules:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -706,6 +730,9 @@ importers:
 
   e2e/fixtures/agent-session-limits:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -731,6 +758,9 @@ importers:
 
   e2e/fixtures/agent-session-timeout:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -756,6 +786,9 @@ importers:
 
   e2e/fixtures/agent-skills:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -781,6 +814,9 @@ importers:
 
   e2e/fixtures/agent-subagents:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -806,6 +842,9 @@ importers:
 
   e2e/fixtures/agent-subagents-hitl:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -822,6 +861,9 @@ importers:
 
   e2e/fixtures/agent-tools:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@eve-e2e/dynamic-import-dependency':
         specifier: file:./fixtures/dynamic-import-dependency
         version: file:e2e/fixtures/agent-tools/fixtures/dynamic-import-dependency
@@ -850,6 +892,9 @@ importers:
 
   e2e/fixtures/agent-tools-hitl:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -875,6 +920,9 @@ importers:
 
   e2e/fixtures/agent-tools-hitl-openai:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -900,6 +948,9 @@ importers:
 
   e2e/fixtures/agent-tools-sandbox:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -925,6 +976,9 @@ importers:
 
   e2e/fixtures/agent-workflow-stress:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       '@opentelemetry/core':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -950,6 +1004,9 @@ importers:
 
   e2e/fixtures/dist-extensions:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -967,8 +1024,23 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  e2e/fixtures/e2e-config:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.1
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   e2e/fixtures/extensions:
     dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve

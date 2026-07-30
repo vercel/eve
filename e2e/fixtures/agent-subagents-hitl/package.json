@@ -11,6 +11,7 @@
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
+    "@eve-e2e/config": "workspace:*",
     "eve": "workspace:*",
     "zod": "catalog:"
   },

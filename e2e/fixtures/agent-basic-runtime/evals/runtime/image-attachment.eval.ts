@@ -14,6 +14,7 @@ import { defineEval } from "eve/evals";
  * of parsing the flattened placeholder summary.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Session runtime smoke: attachments.",
 
   async test(t) {

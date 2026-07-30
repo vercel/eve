@@ -8,6 +8,7 @@ const TOOL_NAME = "render-stripes";
 // the answer key the tool records on action.result. The pixels reach the
 // model exclusively through `toModelOutput` content parts.
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: toModelOutput content parts deliver an image to the model.",
   async test(t) {
     await t.send(

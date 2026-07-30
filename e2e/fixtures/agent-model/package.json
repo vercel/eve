@@ -11,10 +11,14 @@
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
+    "@eve-e2e/config": "workspace:*",
     "eve": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:"
+  },
+  "e2e": {
+    "modelMatrix": "full"
   }
 }

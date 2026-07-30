@@ -11,6 +11,7 @@
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
+    "@eve-e2e/config": "workspace:*",
     "@eve-e2e/dynamic-import-dependency": "file:./fixtures/dynamic-import-dependency",
     "@opentelemetry/core": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
@@ -21,5 +22,8 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:"
+  },
+  "e2e": {
+    "modelMatrix": "full"
   }
 }

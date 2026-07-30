@@ -2,6 +2,7 @@ import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Cancel a parent turn and cascade cancellation to its local sleeper subagent.",
   timeoutMs: 240_000,
 

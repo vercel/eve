@@ -22,6 +22,7 @@ import {
   type DevelopmentRequestHeaders,
 } from "#cli/dev/url-target.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import type { EvalCliOptions } from "#evals/cli/eval.js";
 import {
   registerRuntimeInvokeCommand,
   type InvokeCliRuntimeDependencies,
@@ -126,19 +127,6 @@ function createDevBootProgressReporter(
       }
     }
   };
-}
-
-interface EvalCliOptions {
-  json?: boolean;
-  junit?: string;
-  list?: boolean;
-  maxConcurrency?: string;
-  skipReport?: boolean;
-  strict?: boolean;
-  tag?: string[];
-  timeout?: string;
-  url?: string;
-  verbose?: boolean;
 }
 
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
@@ -642,6 +630,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     )
     .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
+    .option("--exclude-tag <tag...>", "Skip evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")
     .option("--timeout <ms>", "Per-eval timeout in milliseconds")
