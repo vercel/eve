@@ -6,11 +6,14 @@ import {
 } from "#compiled/@workflow/errors/index.js";
 
 import type { CancelTurnInput, CancelTurnResult } from "#channel/types.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { createLogger, logError } from "#internal/logging.js";
+import { getWorld, reenqueueRun, resumeHook } from "#internal/workflow/runtime.js";
 import {
   sessionCancelHookToken,
   type TurnCancelPayload,
 } from "#execution/turn-cancellation-token.js";
+
+const log = createLogger("execution.turn-cancellation-request");
 
 /** Requests cancellation through a session's stable workflow hook. */
 export async function requestWorkflowTurnCancellation(
@@ -20,7 +23,6 @@ export async function requestWorkflowTurnCancellation(
 
   try {
     await resumeHook(sessionCancelHookToken(input.sessionId), payload);
-    return { status: "accepted" };
   } catch (error) {
     const reason = classifyInactiveCancelTarget(error);
     if (reason !== undefined) {
@@ -28,6 +30,22 @@ export async function requestWorkflowTurnCancellation(
     }
     throw error;
   }
+
+  // The world does not reliably reschedule a suspended run when one of its
+  // hooks is resumed: a parked parent has been observed holding an accepted
+  // cancel for minutes without a single execution. Nudge the scheduler
+  // explicitly. The resume payload above is already durable, so a failed
+  // nudge only re-exposes that wake race — never a lost cancel — and a
+  // redundant one is a harmless replay.
+  try {
+    await reenqueueRun(await getWorld(), input.sessionId);
+  } catch (error) {
+    logError(log, "failed to re-enqueue the cancelled session's run", error, {
+      sessionId: input.sessionId,
+    });
+  }
+
+  return { status: "accepted" };
 }
 
 /**
