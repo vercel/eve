@@ -128,4 +128,40 @@ describe("Photon Connect provisioning", () => {
       expect.objectContaining({ cwd: "/tmp/imessage0", nonInteractive: true }),
     );
   });
+
+  test("rejects empty connector identifiers", () => {
+    expect(
+      parseCreatedPhotonConnector(
+        JSON.stringify({
+          id: "",
+          uid: "photon/imessage0",
+          supportedSubjectTypes: ["app"],
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  test("fails closed when the default trigger destination cannot be removed", async () => {
+    const runVercelCaptureStdout = vi.fn().mockResolvedValue({
+      ok: true as const,
+      stdout: JSON.stringify({
+        id: "scl_photon",
+        uid: "photon/imessage0",
+        supportedSubjectTypes: ["app"],
+      }),
+    });
+    const runVercel = vi.fn(async () => false);
+
+    await expect(
+      provisionPhotonConnector({
+        credentials: { projectId: "project-id", projectSecret: "project-secret" },
+        log: log(),
+        project: { orgId: "team_123", projectId: "prj_123" },
+        projectRoot: "/tmp/imessage0",
+        slug: "imessage0",
+        deps: { runVercel, runVercelCaptureStdout },
+      }),
+    ).rejects.toThrow("default trigger destination could not be removed");
+    expect(runVercel).toHaveBeenCalledOnce();
+  });
 });

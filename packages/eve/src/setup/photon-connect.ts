@@ -1,11 +1,13 @@
 import type { ChannelSetupLog } from "#setup/cli/index.js";
 import { createPromptCommandOutput, withPhase } from "#setup/cli/index.js";
+import { replaceConnectTrigger } from "#setup/connect-provisioning.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import {
   runVercel,
   runVercelCaptureStdout,
   type RunVercelCaptureResult,
 } from "#setup/primitives/run-vercel.js";
+import { z } from "zod";
 
 export const PHOTON_CONNECT_SERVICE = "photon";
 export const PHOTON_CONNECTOR_TYPE = "photon";
@@ -42,24 +44,20 @@ export interface ProvisionPhotonConnectorOptions {
   deps?: ProvisionPhotonConnectorDeps;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const PhotonConnectorRefSchema = z.object({
+  id: z.string().min(1),
+  uid: z.string().min(1),
+  supportedSubjectTypes: z.array(z.string()).refine((types) => types.includes("app")),
+});
 
 /** Parses `vercel connect create -F json` output for a Photon connector. */
 export function parseCreatedPhotonConnector(stdout: string): PhotonConnectorRef | undefined {
-  let value: unknown;
   try {
-    value = JSON.parse(stdout);
+    const parsed = PhotonConnectorRefSchema.safeParse(JSON.parse(stdout));
+    return parsed.success ? { id: parsed.data.id, uid: parsed.data.uid } : undefined;
   } catch {
     return undefined;
   }
-  if (!isRecord(value) || typeof value["id"] !== "string" || typeof value["uid"] !== "string") {
-    return undefined;
-  }
-  const subjects = value["supportedSubjectTypes"];
-  if (!Array.isArray(subjects) || !subjects.includes("app")) return undefined;
-  return { id: value["id"], uid: value["uid"] };
 }
 
 function createData(credentials: PhotonProjectCredentials): string {
@@ -125,54 +123,27 @@ export async function provisionPhotonConnector(
   const connector = requireCreatedConnector(result);
 
   // Creation can auto-attach the cwd's linked project with a pathless default
-  // destination. Detach first so attach installs exactly one routed destination.
-  await deps.runVercel(
-    [
-      "connect",
-      "detach",
-      connector.uid,
-      "--project",
-      options.project.projectId,
-      "--yes",
-      "--scope",
-      options.project.orgId,
-    ],
-    {
-      cwd: options.projectRoot,
-      nonInteractive: true,
+  // destination. Replace it so Connect has exactly one routed destination.
+  const attachment = await withPhase(options.log, "Connecting Photon credentials...", () =>
+    replaceConnectTrigger({
+      connectorUid: connector.uid,
+      projectRoot: options.projectRoot,
+      projectId: options.project.projectId,
+      orgId: options.project.orgId,
+      environment: "production",
+      triggerPath: PHOTON_TRIGGER_PATH,
       onOutput,
       signal: options.signal,
-    },
-  );
-  const attached = await withPhase(options.log, "Connecting Photon credentials...", () =>
-    deps.runVercel(
-      [
-        "connect",
-        "attach",
-        connector.uid,
-        "--project",
-        options.project.projectId,
-        "--environment",
-        "production",
-        "--triggers",
-        "--trigger-path",
-        PHOTON_TRIGGER_PATH,
-        "--yes",
-        "--scope",
-        options.project.orgId,
-      ],
-      {
-        cwd: options.projectRoot,
-        nonInteractive: true,
-        onOutput,
-        signal: options.signal,
-      },
-    ),
+      deps,
+    }),
   );
   options.signal?.throwIfAborted();
-  if (!attached) {
+  if (attachment.state !== "attached") {
+    const command = `vercel connect attach ${connector.uid} --project ${options.project.projectId} --environment production --triggers --trigger-path ${PHOTON_TRIGGER_PATH} --yes --scope ${options.project.orgId}`;
     throw new Error(
-      `Photon connector was created, but its credentials could not be attached. Run \`vercel connect attach ${connector.uid} --environment production --yes\`.`,
+      attachment.state === "detach-failed"
+        ? `Photon connector was created, but its default trigger destination could not be removed. Run \`vercel connect detach ${connector.uid} --project ${options.project.projectId} --yes --scope ${options.project.orgId}\`, then \`${command}\`.`
+        : `Photon connector was created, but its credentials could not be attached. Run \`${command}\`.`,
     );
   }
 
