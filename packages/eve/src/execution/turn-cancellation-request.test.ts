@@ -18,9 +18,11 @@ afterEach(() => {
 });
 
 describe("requestWorkflowTurnCancellation", () => {
-  it("resumes the session cancel hook and nudges the run scheduler", async () => {
+  it("resumes the session cancel hook and nudges the hook's owning run", async () => {
+    // The cancel hook is created by the turn workflow run, not the session's
+    // driver run, so the scheduler nudge must target the hook's runId.
     const world = { kind: "test-world" };
-    vi.mocked(resumeHook).mockResolvedValue({ runId: "session-1" } as never);
+    vi.mocked(resumeHook).mockResolvedValue({ runId: "turn-run-1" } as never);
     vi.mocked(getWorld).mockResolvedValue(world as never);
     vi.mocked(reenqueueRun).mockResolvedValue(undefined as never);
 
@@ -28,6 +30,18 @@ describe("requestWorkflowTurnCancellation", () => {
 
     expect(result).toEqual({ status: "accepted" });
     expect(resumeHook).toHaveBeenCalledWith("session-1:cancel", {});
+    expect(reenqueueRun).toHaveBeenCalledWith(world, "turn-run-1");
+  });
+
+  it("falls back to the session id when the hook carries no run id", async () => {
+    const world = { kind: "test-world" };
+    vi.mocked(resumeHook).mockResolvedValue({} as never);
+    vi.mocked(getWorld).mockResolvedValue(world as never);
+    vi.mocked(reenqueueRun).mockResolvedValue(undefined as never);
+
+    const result = await requestWorkflowTurnCancellation({ sessionId: "session-1" });
+
+    expect(result).toEqual({ status: "accepted" });
     expect(reenqueueRun).toHaveBeenCalledWith(world, "session-1");
   });
 

@@ -21,8 +21,9 @@ export async function requestWorkflowTurnCancellation(
 ): Promise<CancelTurnResult> {
   const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
 
+  let hookRunId: string | undefined;
   try {
-    await resumeHook(sessionCancelHookToken(input.sessionId), payload);
+    hookRunId = readHookRunId(await resumeHook(sessionCancelHookToken(input.sessionId), payload));
   } catch (error) {
     const reason = classifyInactiveCancelTarget(error);
     if (reason !== undefined) {
@@ -32,15 +33,18 @@ export async function requestWorkflowTurnCancellation(
   }
 
   // The world does not reliably reschedule a suspended run when one of its
-  // hooks is resumed: a parked parent has been observed holding an accepted
+  // hooks is resumed: a parked run has been observed holding an accepted
   // cancel for minutes without a single execution. Nudge the scheduler
-  // explicitly. The resume payload above is already durable, so a failed
-  // nudge only re-exposes that wake race — never a lost cancel — and a
-  // redundant one is a harmless replay.
+  // explicitly — targeting the run that owns the hook (the turn workflow
+  // run, not the session's driver run named by `input.sessionId`), since
+  // that is the run suspended racing the cancel payload. The resume above
+  // is already durable, so a failed nudge only re-exposes that wake race —
+  // never a lost cancel — and a redundant one is a harmless replay.
   try {
-    await reenqueueRun(await getWorld(), input.sessionId);
+    await reenqueueRun(await getWorld(), hookRunId ?? input.sessionId);
   } catch (error) {
-    logError(log, "failed to re-enqueue the cancelled session's run", error, {
+    logError(log, "failed to re-enqueue the cancel hook's owning run", error, {
+      hookRunId,
       sessionId: input.sessionId,
     });
   }
@@ -56,6 +60,12 @@ export async function requestWorkflowTurnCancellation(
  */
 export function isRetryableInactiveCancelReason(reason: string | undefined): boolean {
   return reason === "EntityConflictError";
+}
+
+function readHookRunId(hook: unknown): string | undefined {
+  if (typeof hook !== "object" || hook === null || !("runId" in hook)) return undefined;
+  const runId = (hook as { readonly runId?: unknown }).runId;
+  return typeof runId === "string" && runId.length > 0 ? runId : undefined;
 }
 
 function classifyInactiveCancelTarget(error: unknown): string | undefined {
