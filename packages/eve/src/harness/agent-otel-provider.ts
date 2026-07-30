@@ -19,6 +19,7 @@ import type {
   InstrumentationModelCallStartedEvent,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
+  InstrumentationParentLineage,
   InstrumentationTraceContext,
   InstrumentationSessionTransitionEvent,
   InstrumentationToolCallStartedEvent,
@@ -156,6 +157,7 @@ export function createAgentOtelInstrumentation(
           "agent.framework.name": "eve",
           "agent.framework.version": input.frameworkVersion,
           "agent.name": session.agentName,
+          ...parentLineageAttributes(event.parentLineage),
           "agent.root.session.id": event.rootSessionId,
           "agent.session.id": event.sessionId,
           "agent.session.window": session.window,
@@ -507,6 +509,21 @@ export function createAgentOtelInstrumentation(
 
 function turnKey(sessionId: string, turnId: string): string {
   return `${sessionId}:${turnId}`;
+}
+
+function parentLineageAttributes(
+  lineage: InstrumentationParentLineage | undefined,
+): Record<string, string> {
+  if (lineage === undefined) return {};
+  const attributes: Record<string, string> = {
+    "agent.parent.call_id": lineage.callId,
+    "agent.parent.session.id": lineage.sessionId,
+    "agent.parent.turn.id": lineage.turnId,
+  };
+  if (lineage.subagentName !== undefined) {
+    attributes["agent.subagent.name"] = lineage.subagentName;
+  }
+  return attributes;
 }
 
 function adoptedSpanContext(handed: InstrumentationTraceContext): SpanContext {

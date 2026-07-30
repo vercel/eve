@@ -107,6 +107,8 @@ import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-c
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
+import { resolveParentLineage } from "#harness/parent-lineage.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   consumeDeferredStepInput,
   getApprovedTools,
@@ -542,6 +544,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       agentName: config.runtimeIdentity?.agentName,
       handleEvent: baseEmit,
       hooks: config.instrumentation?.hooks,
+      parentLineage: resolveParentLineage(parent, store?.get(ChannelKey)),
       parentTraceContext: store?.get(ParentTraceContextKey),
       rootSessionId: parent?.rootSessionId,
       sessionId: session.sessionId,

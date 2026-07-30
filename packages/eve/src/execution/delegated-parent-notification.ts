@@ -8,7 +8,7 @@
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 

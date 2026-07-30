@@ -37,6 +37,17 @@ export interface InstrumentationTraceContext {
   readonly traceId: string;
 }
 
+/**
+ * Which tool call dispatched a subagent child. The trace structure alone
+ * cannot say: one turn's children all parent to the same window.
+ */
+export interface InstrumentationParentLineage {
+  readonly callId: string;
+  readonly sessionId: string;
+  readonly subagentName?: string;
+  readonly turnId: string;
+}
+
 export interface InstrumentationSessionTransitionEvent {
   readonly type: "session.completed" | "session.failed" | "session.waiting";
   readonly error?: unknown;
@@ -46,6 +57,7 @@ export interface InstrumentationSessionTransitionEvent {
 
 export interface InstrumentationTurnStartedEvent {
   readonly type: "turn.started";
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
   readonly sequence: number;

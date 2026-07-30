@@ -18,6 +18,7 @@ import {
   type InstrumentationAttemptScope,
   type InstrumentationContextRunner,
   type InstrumentationHooks,
+  type InstrumentationParentLineage,
   type InstrumentationTraceContext,
 } from "#harness/instrumentation-lifecycle.js";
 
@@ -142,6 +143,7 @@ async function emitAttempt(input: {
 
 async function publishTurnStarted(input: {
   readonly hooks: InstrumentationHooks;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
   readonly sessionId: string;
@@ -158,6 +160,7 @@ async function publishTurnStarted(input: {
     type: "session.started",
   });
   await input.hooks.publish({
+    parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
     sequence: input.turnSequence,
@@ -441,6 +444,69 @@ describe("createAgentOtelInstrumentation", () => {
     // The child adopts a window rather than opening one, so the trace still
     // holds exactly the root's window span.
     expect(byName(spans, "agent.session")).toHaveLength(1);
+  });
+
+  it("attributes a child turn to the exact call that dispatched it", async () => {
+    const runtime = createRuntime();
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      parentLineage: {
+        callId: "call-7",
+        sessionId: "session-1",
+        subagentName: "researcher",
+        turnId: "turn-1",
+      },
+      rootSessionId: "session-1",
+      sessionId: "child-1",
+      turnId: "child-turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const childTurn = byName(spans, "agent.turn").find(
+      (span) => span.attributes["agent.session.id"] === "child-1",
+    )!;
+    expect(childTurn.attributes["agent.parent.call_id"]).toBe("call-7");
+    expect(childTurn.attributes["agent.parent.session.id"]).toBe("session-1");
+    expect(childTurn.attributes["agent.parent.turn.id"]).toBe("turn-1");
+    expect(childTurn.attributes["agent.subagent.name"]).toBe("researcher");
+  });
+
+  it("omits the subagent name when the dispatch did not carry one", async () => {
+    const runtime = createRuntime();
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      parentLineage: { callId: "call-7", sessionId: "session-1", turnId: "turn-1" },
+      rootSessionId: "session-1",
+      sessionId: "child-1",
+      turnId: "child-turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const childTurn = byName(runtime.exporter.getFinishedSpans(), "agent.turn").find(
+      (span) => span.attributes["agent.session.id"] === "child-1",
+    )!;
+    expect(childTurn.attributes).not.toHaveProperty("agent.subagent.name");
+    expect(childTurn.attributes["agent.parent.call_id"]).toBe("call-7");
+  });
+
+  it("leaves a top-level turn free of parent lineage attributes", async () => {
+    const runtime = createRuntime();
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const turn = byName(runtime.exporter.getFinishedSpans(), "agent.turn")[0]!;
+    expect(turn.attributes).not.toHaveProperty("agent.parent.call_id");
+    expect(turn.attributes).not.toHaveProperty("agent.parent.session.id");
+    expect(turn.attributes).not.toHaveProperty("agent.parent.turn.id");
+    expect(turn.attributes).not.toHaveProperty("agent.subagent.name");
   });
 
   it("opens its own root when a child session is handed no parent window", async () => {

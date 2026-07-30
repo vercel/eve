@@ -1,4 +1,4 @@
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import {
   formatSubagentInput,
   normalizeRequestedOutputSchema,

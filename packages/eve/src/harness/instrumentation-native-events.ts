@@ -1,6 +1,7 @@
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   InstrumentationHooks,
+  InstrumentationParentLineage,
   InstrumentationPointEvent,
   InstrumentationTraceContext,
 } from "#harness/instrumentation-lifecycle.js";
@@ -10,6 +11,7 @@ export interface CreateInstrumentationHandleEventInput {
   readonly agentName?: string;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
   readonly sessionId: string;
@@ -60,6 +62,7 @@ function toLifecycleEvent(
       };
     case "turn.started":
       return {
+        parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
         sequence: event.data.sequence,
