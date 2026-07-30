@@ -57,8 +57,8 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "new",
-    aliases: [],
-    description: "Start a fresh session",
+    aliases: ["clear"],
+    description: "Clear the transcript and start a fresh session",
     takesArgument: false,
     build: () => ({ type: "new" }),
     targets: ["local", "remote"],
@@ -150,8 +150,8 @@ export function isPromptCommandAvailableFor(
 }
 
 /**
- * Recognizes the slash commands the prompt accepts. `/new` clears the
- * session and transcript; `/exit` (and `/quit`) terminate the TUI like
+ * Recognizes the slash commands the prompt accepts. `/new` and `/clear` clear
+ * the session and transcript; `/exit` (and `/quit`) terminate the TUI like
  * Ctrl+C; extension commands are dispatched outside the runner. Anything
  * else — including unknown `/text` — is a normal message.
  */

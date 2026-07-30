@@ -32,18 +32,18 @@ Errors render compactly with docs links highlighted. A code bug escaping your ag
 
 Each command echoes as an invocation line, asks through a bordered panel that takes the input area's place (one question at a time, separate from the chat transcript), and finishes with a one-line `⎿` result. Loading states stay on the ephemeral status line instead of piling into the transcript; model, channel, connection, and the Vercel CLI commands (`/vc:install`, `/vc:login`) use the same green square pulse as the build phase, while `/deploy` keeps a spinner. A connection setup waiting for browser action changes that pulse and the word "browser" to yellow. Setup menus render the selected option with a filled arrow and an inverse label padded by one space on each side. Text prompts use a blinking block cursor over the character at the caret. The selected label is blue normally and yellow for warning rows.
 
-| Command       | Does                                                                                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/model`      | Opens a configure menu that loops until Done (or Esc). See [Configure the model and provider](#configure-the-model-and-provider).                            |
-| `/channels`   | Shows the agent's channel list and adds the one you pick. See [Add a channel](#add-a-channel).                                                               |
-| `/connect`    | Shows the Vercel Connect MCP catalog and configures the server you pick. See [Add a connection](#add-a-connection).                                          |
-| `/deploy`     | Ships the agent to Vercel production, linking the directory first when it is unlinked.                                                                       |
-| `/vc:install` | Installs the Vercel CLI. Available locally and on a remote session.                                                                                          |
-| `/vc:login`   | Logs in to Vercel locally. On a remote session, resolves the deployment's project, refreshes its OIDC token, and confirms any required Trusted Sources rule. |
-| `/loglevel`   | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                             |
-| `/new`        | Starts a fresh session.                                                                                                                                      |
-| `/exit`       | Quits the TUI.                                                                                                                                               |
-| `/help`       | Lists the commands available for the current local or remote session.                                                                                        |
+| Command           | Does                                                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/model`          | Opens a configure menu that loops until Done (or Esc). See [Configure the model and provider](#configure-the-model-and-provider).                            |
+| `/channels`       | Shows the agent's channel list and adds the one you pick. See [Add a channel](#add-a-channel).                                                               |
+| `/connect`        | Shows the Vercel Connect MCP catalog and configures the server you pick. See [Add a connection](#add-a-connection).                                          |
+| `/deploy`         | Ships the agent to Vercel production, linking the directory first when it is unlinked.                                                                       |
+| `/vc:install`     | Installs the Vercel CLI. Available locally and on a remote session.                                                                                          |
+| `/vc:login`       | Logs in to Vercel locally. On a remote session, resolves the deployment's project, refreshes its OIDC token, and confirms any required Trusted Sources rule. |
+| `/loglevel`       | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                             |
+| `/new` (`/clear`) | Clears the transcript and starts a fresh session.                                                                                                            |
+| `/exit`           | Quits the TUI.                                                                                                                                               |
+| `/help`           | Lists the commands available for the current local or remote session.                                                                                        |
 
 `/model`, `/channels`, `/connect`, and `/deploy` manage the local agent or its linked project. They are available only when `eve dev` runs the server locally, not when connected to a remote server with `--url`.
 

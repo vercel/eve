@@ -17,7 +17,7 @@ import { theme } from "./lib/theme.ts";
  * End-to-end proof of the TUI prompt commands.
  *
  *   1. A turn against an unreachable server renders an error region.
- *   2. `/new` clears the transcript and starts a fresh session, the error
+ *   2. `/clear` clears the transcript and starts a fresh session, the error
  *      region disappears and the screen returns to the empty prompt.
  *   3. `/deploy` (in a remote command context) renders the local-only notice
  *      instead of suspending into a setup flow.
@@ -68,13 +68,13 @@ void (async () => {
     // Wait until `readPrompt` is active again so the next keystrokes
     // aren't dropped in the gap between turns.
     await screen.waitForIdlePrompt(5_000);
-    input.type("/new");
+    input.type("/clear");
     input.enter();
     await screen.waitForIdlePrompt(5_000);
     if (screen.snapshot().includes("Error")) {
-      throw new Error(`/new did not clear the transcript:\n${screen.snapshot()}`);
+      throw new Error(`/clear did not clear the transcript:\n${screen.snapshot()}`);
     }
-    console.log(theme.muted("[tui-slash-commands] /new cleared the transcript"));
+    console.log(theme.muted("[tui-slash-commands] /clear cleared the transcript"));
 
     // Remote setup commands return a local-only notice instead of opening a flow.
     input.type("/deploy");

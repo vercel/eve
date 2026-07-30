@@ -9,8 +9,9 @@ import {
 } from "./prompt-commands.js";
 
 describe("parsePromptCommand", () => {
-  it("parses /new", () => {
+  it("parses /new and its /clear alias", () => {
     expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+    expect(parsePromptCommand("/clear")).toEqual({ type: "new" });
   });
 
   it("parses /exit and its /quit alias", () => {

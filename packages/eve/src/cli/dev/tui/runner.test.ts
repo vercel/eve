@@ -623,7 +623,7 @@ describe("EveTUIRunner development session continuity", () => {
     ).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
   });
 
-  it("starts a fresh session only after an explicit /new command", async () => {
+  it("starts a fresh session after /clear", async () => {
     const initialSession = sessionYielding([{ type: "session.waiting" }]);
     const reset = vi
       .spyOn(initialSession, "reset")
@@ -631,7 +631,7 @@ describe("EveTUIRunner development session continuity", () => {
     const newSession = sessionYielding([{ type: "session.waiting" }]);
     const client = stubClient();
     const createSession = vi.spyOn(client, "session").mockReturnValue(newSession);
-    const prompts: Array<string | undefined> = ["first", "/new", "second", undefined];
+    const prompts: Array<string | undefined> = ["first", "/clear", "second", undefined];
     const runner = new EveTUIRunner({
       client,
       name: "Weather Agent",
