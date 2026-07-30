@@ -299,6 +299,25 @@ describe("runInitCommand", () => {
     },
   );
 
+  it("scaffolds the current directory when mise.toml already exists", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-mise-"));
+    const miseConfig = '[tools]\nnode = "24"\n';
+    await writeFile(join(projectPath, "mise.toml"), miseConfig, "utf8");
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, projectPath, ".", {}, deps);
+
+    await expect(readFile(join(projectPath, "mise.toml"), "utf8")).resolves.toBe(miseConfig);
+    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
+    await expect(pathExists(join(projectPath, "package.json"))).resolves.toBe(true);
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectPath,
+      expect.objectContaining({ bypassMinimumReleaseAge: true }),
+    );
+  });
+
   it.each([
     ["npm", "overrides", ["exec", "--", "eve", "dev", "--input", "/model"]],
     ["yarn", "resolutions", ["eve", "dev", "--input", "/model"]],
