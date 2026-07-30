@@ -22,6 +22,7 @@ import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifa
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
+import type { ResolvedChannelDefinition, ResolvedChannelRouteDefinition } from "#runtime/types.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -56,7 +57,7 @@ export async function dispatchChannelRequest(
   const bundle = await resolveNitroChannelRuntimeBundle(config);
 
   const matchedChannel = bundle.channels.find(
-    (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
+    (channel): channel is ResolvedChannelRouteDefinition => matchesChannelRoute(channel, routeKey),
   );
 
   if (matchedChannel === undefined) {
@@ -111,7 +112,7 @@ export async function dispatchChannelWebSocketRequest(
   const bundle = await resolveNitroChannelRuntimeBundle(config);
 
   const matchedChannel = bundle.channels.find(
-    (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
+    (channel): channel is ResolvedChannelRouteDefinition => matchesChannelRoute(channel, routeKey),
   );
 
   if (matchedChannel === undefined || matchedChannel.websocket === undefined) {
@@ -143,6 +144,16 @@ export async function dispatchChannelWebSocketRequest(
       500,
     );
   }
+}
+
+function matchesChannelRoute(
+  channel: ResolvedChannelDefinition,
+  routeKey: string,
+): channel is ResolvedChannelRouteDefinition {
+  return (
+    channel.method !== undefined &&
+    `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey
+  );
 }
 
 async function withDevelopmentVercelOidcContext<T>(

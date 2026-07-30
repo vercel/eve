@@ -262,11 +262,12 @@ export type ReceiveInput<TReceiveTarget = Record<string, unknown>> =
   GenericReceiveInput<TReceiveTarget>;
 
 /**
- * The object passed to {@link defineChannel}. `routes` is required; `state`
- * seeds durable adapter state, `context` builds the per-step `channel` argument
- * for `events` and `deliver`, `events` handle session lifecycle, `receive`
- * accepts cross-channel handoffs, `fetchFile` stages remote file URLs, and
- * `metadata` projects observability data.
+ * The object passed to {@link defineChannel}. `routes` may be empty for a
+ * receive-only channel; `state` seeds durable adapter state, `context` builds
+ * the per-step `channel` argument for `events` and `deliver`, `events` handle
+ * session lifecycle, `receive` accepts schedule and cross-channel handoffs,
+ * `fetchFile` stages remote file URLs, and `metadata` projects observability
+ * data.
  *
  * Generics: `TState` (adapter state), `TCtx` (context factory return type),
  * `TReceiveTarget` (cross-channel target shape), `TMetadata` (instrumentation

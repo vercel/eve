@@ -1,6 +1,9 @@
 import { setChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { HTTP_ADAPTER_KIND } from "#channel/http.js";
-import type { CompiledChannelDefinition } from "#compiler/manifest.js";
+import type {
+  CompiledActiveChannelDefinition,
+  CompiledChannelDefinition,
+} from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import {
   isHttpRouteDefinition,
@@ -30,7 +33,7 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
  * this resolver.
  */
 export async function resolveChannelDefinition(
-  definition: CompiledChannelDefinition,
+  definition: CompiledActiveChannelDefinition,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
 ): Promise<ResolvedChannelDefinition> {
@@ -52,12 +55,6 @@ export async function resolveChannelDefinition(
       sourceId: definition.sourceId,
     });
 
-    const matchedRoute = channelDefinition.routes.find(
-      (route) =>
-        route.method.toUpperCase() === definition.method.toUpperCase() &&
-        route.path === definition.urlPath,
-    );
-
     const channelKind = `channel:${definition.name}`;
     setChannelInstrumentationKind(channelDefinition, channelKind);
 
@@ -66,6 +63,22 @@ export async function resolveChannelDefinition(
       // Repurpose `kind` as the unique path-derived registry/discriminant key.
       (adapter as { kind: string }).kind = channelKind;
     }
+
+    if (definition.kind === "receive-only-channel") {
+      return {
+        name: definition.name,
+        receive: channelDefinition.receive,
+        definition: channelDefinition,
+        adapter,
+        ...sourceRef,
+      };
+    }
+
+    const matchedRoute = channelDefinition.routes.find(
+      (route) =>
+        route.method.toUpperCase() === definition.method.toUpperCase() &&
+        route.path === definition.urlPath,
+    );
 
     const httpRoute = resolveHttpRoute(definition, matchedRoute);
     const websocketRoute = resolveWebSocketRoute(definition, matchedRoute);

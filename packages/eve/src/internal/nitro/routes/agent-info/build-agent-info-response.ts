@@ -113,10 +113,10 @@ export interface AgentInfoSubagentEntry extends AgentInfoSource {
 
 export interface AgentInfoChannelEntry extends AgentInfoSource {
   readonly adapterKind?: string;
-  readonly method: string;
+  readonly method: string | null;
   readonly name: string;
   readonly origin: "authored" | "framework";
-  readonly urlPath: string;
+  readonly urlPath: string | null;
 }
 
 export interface AgentInfoFrameworkChannelEntry extends AgentInfoChannelEntry {
@@ -448,10 +448,10 @@ export function renderChannel(
   return {
     ...toSource(channel),
     adapterKind: channel.adapter?.kind,
-    method: channel.method,
+    method: channel.method ?? null,
     name: channel.name,
     origin: input.origin,
-    urlPath: channel.urlPath,
+    urlPath: channel.urlPath ?? null,
   };
 }
 

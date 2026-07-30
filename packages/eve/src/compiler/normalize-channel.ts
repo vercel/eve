@@ -18,8 +18,10 @@ import {
  *
  * Authored channels are always `CompiledChannel` values (from
  * `defineChannel`). Each route in the channel's `routes` array becomes
- * a separate compiled channel entry. The channel name is derived from
- * the filesystem path; the URL path comes from the route's `path` field.
+ * a separate compiled channel entry. A channel with no routes and a
+ * `receive` hook becomes one receive-only entry. The channel name is
+ * derived from the filesystem path; routed entries take their URL path
+ * from the route's `path` field.
  */
 export async function compileChannelDefinition(
   agentRoot: string,
@@ -48,16 +50,27 @@ export async function compileChannelDefinition(
     `Expected the channel export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
 
-  return definition.routes.map((route) => ({
-    kind: "channel" as const,
+  const commonDefinition = {
     name: channelName,
     logicalPath: source.logicalPath,
-    method: route.method.toUpperCase() as ChannelRouteMethod,
-    urlPath: route.path,
     sourceId: source.sourceId,
     sourceKind: "module" as const,
     exportName: source.exportName,
     adapterKind: extractAdapterKind(definition.adapter),
+  };
+
+  if (definition.routes.length === 0 && definition.receive !== undefined) {
+    return {
+      kind: "receive-only-channel",
+      ...commonDefinition,
+    };
+  }
+
+  return definition.routes.map((route) => ({
+    kind: "channel" as const,
+    ...commonDefinition,
+    method: route.method.toUpperCase() as ChannelRouteMethod,
+    urlPath: route.path,
     cors: definition.cors,
   }));
 }

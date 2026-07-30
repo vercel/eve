@@ -82,9 +82,9 @@ const subagent = entry.extend({
 
 const channel = entry.extend({
   adapterKind: z.string().optional(),
-  method: z.string(),
+  method: z.string().nullable(),
   origin: z.enum(["authored", "framework"]),
-  urlPath: z.string(),
+  urlPath: z.string().nullable(),
 });
 
 const frameworkChannel = channel.extend({

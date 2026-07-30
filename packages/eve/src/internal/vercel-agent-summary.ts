@@ -37,7 +37,7 @@ export const VERCEL_EVE_AGENT_SUMMARY_KIND = "vercel-eve-agent-summary" as const
  * making semantic changes consumers must opt into. Adding optional fields
  * does not require a version bump.
  */
-export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 3;
+export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 4;
 
 /**
  * Output path (relative to the agent's `appRoot`) where eve writes the
@@ -55,7 +55,7 @@ export const VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH = ".eve/agent-summary.json";
 
 /**
  * Display category eve exposes to the dashboard for one channel chip. Built
- * from the channel's reported {@link CompiledChannelDefinition.adapterKind}.
+ * from the channel's reported compiled `adapterKind`.
  */
 export type VercelEveChannelType = "slack" | "http" | "webhook" | "unknown";
 
@@ -142,9 +142,13 @@ export interface VercelEveConnectionEntry {
 
 export interface VercelEveChannelEntry {
   readonly name: string;
-  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "WEBSOCKET";
-  readonly urlPath: string;
+  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "WEBSOCKET" | null;
+  readonly urlPath: string | null;
   readonly type: VercelEveChannelType;
+  /**
+   * True when the channel only accepts schedule and cross-channel handoffs.
+   */
+  readonly receiveOnly?: true;
   /**
    * The raw `ChannelAdapter.kind` reported by the route, when present.
    * Useful when `type` is `"unknown"` and a consumer wants to render a

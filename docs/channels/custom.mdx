@@ -219,6 +219,27 @@ Semantics:
 - Calling `args.receive(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
 - The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
 
+### Receive-only channels
+
+A channel that is only a target for schedules or cross-channel hand-offs does not need an HTTP or WebSocket route. Declare an empty `routes` array and implement `receive`:
+
+```ts
+import { defineChannel } from "eve/channels";
+
+export default defineChannel({
+  routes: [],
+  async receive(input, { send }) {
+    return await send(input.message, {
+      auth: input.auth,
+      continuationToken: input.target.workspaceId,
+      mode: "task",
+    });
+  },
+});
+```
+
+eve keeps the channel in discovery and makes it resolvable by `receive(channel, ...)`, but mounts no network route for it.
+
 ## Channel metadata
 
 A channel can project a subset of its adapter state as metadata, available to instrumentation resolvers, dynamic tool resolvers, and dynamic skill or instruction resolvers. Define a `metadata(state)` function on the channel config:
