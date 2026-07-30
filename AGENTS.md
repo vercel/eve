@@ -31,6 +31,11 @@ the DCO `Signed-off-by` trailer. Use `git commit -s` for every commit, and if a
 commit is missing the trailer, amend it with `git commit --amend -s --no-edit`
 before pushing.
 
+When opening a pull request, use a Conventional Commits-style title for normal
+contribution PRs: `fix(eve): ...`, `feat(eve): ...`, `docs: ...`, or
+`research(eve): ...`. Keep the summary concise, imperative, and lowercase unless
+it names a proper noun.
+
 ## Commands
 
 ```sh
