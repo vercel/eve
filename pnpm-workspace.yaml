@@ -31,6 +31,7 @@ catalog:
   "@ai-sdk/otel": "^1.0.34"
   "@ai-sdk/provider": "^4.0.3"
   "@ai-sdk/provider-utils": "^5.0.12"
+  "@opentelemetry/context-async-hooks": "2.6.1"
   "@opentelemetry/core": "2.6.1"
   "@opentelemetry/sdk-trace-base": "2.6.1"
   "@types/node": "25.9.1"

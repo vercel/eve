@@ -19,6 +19,7 @@ import {
   attachRouteAgent,
 } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
+import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
@@ -53,54 +54,68 @@ export async function dispatchChannelRequest(
   routeKey: string,
   config: NitroArtifactsConfig,
 ): Promise<Response> {
-  const bundle = await resolveNitroChannelRuntimeBundle(config);
+  return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
+    const bundle = await resolveNitroChannelRuntimeBundle(config);
 
-  const matchedChannel = bundle.channels.find(
-    (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
-  );
-
-  if (matchedChannel === undefined) {
-    return Response.json(
-      { error: "No matching channel for this request.", ok: false },
-      { status: 404 },
+    const matchedChannel = bundle.channels.find(
+      (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
     );
-  }
 
-  const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
+    if (matchedChannel === undefined) {
+      return Response.json(
+        { error: "No matching channel for this request.", ok: false },
+        { status: 404 },
+      );
+    }
 
-  let response: Response;
+    // Channel identity is known only after resolution; a 404 span carries
+    // just the route.
+    span.setAttribute("eve.channel.name", matchedChannel.name);
+    if (matchedChannel.adapter?.kind !== undefined) {
+      span.setAttribute("eve.channel.kind", matchedChannel.adapter.kind);
+    }
 
-  try {
-    response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
-      if (matchedChannel.handler) {
-        // Authored CompiledChannel route — build RouteHandlerArgs.
-        return await matchedChannel.handler(event.req, routeArgs.args);
-      }
+    const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
 
-      // Framework-internal fetch-only channel (e.g. the connection
-      // callback route). Build a RouteContext with the agent handle.
-      const ctx: RouteContext = {
-        agent: routeArgs.agent,
-        waitUntil: routeArgs.args.waitUntil,
-        params: routeArgs.args.params,
-        requestIp: routeArgs.args.requestIp,
-      };
+    let response: Response;
 
-      return await matchedChannel.fetch(event.req, ctx);
-    });
-  } catch (error) {
-    // Without this a handler throw is only Nitro's default 5xx, with no eve log.
-    const errorId = logError(log, "channel handler threw", error, {
-      routeKey,
-      channel: matchedChannel.name,
-    });
+    try {
+      response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
+        if (matchedChannel.handler) {
+          // Authored CompiledChannel route — build RouteHandlerArgs.
+          return await matchedChannel.handler(event.req, routeArgs.args);
+        }
+
+        // Framework-internal fetch-only channel (e.g. the connection
+        // callback route). Build a RouteContext with the agent handle.
+        const ctx: RouteContext = {
+          agent: routeArgs.agent,
+          waitUntil: routeArgs.args.waitUntil,
+          params: routeArgs.args.params,
+          requestIp: routeArgs.args.requestIp,
+        };
+
+        return await matchedChannel.fetch(event.req, ctx);
+      });
+    } catch (error) {
+      // Without this a handler throw is only Nitro's default 5xx, with no eve
+      // log. logError records the exception against the active request span,
+      // so traceChannelRequest must not record the returned 500 again.
+      const errorId = logError(log, "channel handler threw", error, {
+        routeKey,
+        channel: matchedChannel.name,
+      });
+      flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
+      return Response.json(
+        { error: "Channel handler failed.", errorId, ok: false },
+        { status: 500 },
+      );
+    }
+
     flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-    return Response.json({ error: "Channel handler failed.", errorId, ok: false }, { status: 500 });
-  }
 
-  flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-
-  return response;
+    return response;
+  });
 }
 
 export async function dispatchChannelWebSocketRequest(

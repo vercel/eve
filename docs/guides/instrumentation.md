@@ -155,6 +155,25 @@ ai.eve.turn  {eve.session.id}
 
 eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
+## Inbound HTTP request spans
+
+Every HTTP request handled by a channel is wrapped in a single OpenTelemetry `SERVER` span — the outer eve channel-request span — so a whole request (bundle resolution, auth and session validation, `onMessage`, `send()`/`resumeHook()`, and response construction) is captured under one span:
+
+```text
+POST /eve/v1/session/:sessionId
+  └── hook.resume
+        ├── GET hooks/by-token
+        ├── workflow.serialize
+        ├── POST hook_received
+        └── POST VQS publish
+```
+
+The span is named for the registered route (`POST /eve/v1/session/:sessionId`), never the concrete URL or session id, so it stays low-cardinality. Following the OTel HTTP semantic convention, the `http.route` attribute holds only the path template (`/eve/v1/session/:sessionId`) while the method lives in `http.request.method`; the full `METHOD path` key is the span name. It also records `http.response.status_code`, `url.scheme`, `server.address`, and — once the matching channel is resolved — `eve.channel.name` and `eve.channel.kind`. It never records session ids, hook tokens, authorization or cookie headers, request or response bodies, or query parameters. Responses with a `>= 500` status, and requests that throw before a response is built, mark the span as an error; a request with no matching channel still produces a span carrying its route and a `404` status.
+
+The span is a trace root only when there is no upstream context. When a request arrives with an incoming `traceparent`, the span intentionally becomes a child of that upstream span and continues its trace; it likewise nests beneath any platform-created active span. Either way, nested channel and Workflow spans (`hook.resume` and the outgoing HTTP calls it makes) become its descendants automatically.
+
+The span starts when eve's Nitro handler begins dispatching and ends once the handler returns and the response is constructed. It therefore does **not** include Vercel Proxy ingress or browser network time, and it does **not** wait for `event.waitUntil()` background work or streamed response bodies — once that work is scheduled it settles outside the span. WebSocket connections are not covered. Tracing is observability-only and performs no synchronous span export in the request path; it adds only minimal in-process overhead and does not otherwise alter request handling.
+
 ## Workflow run tags
 
 Separately from OpenTelemetry, eve tags every workflow run with reserved `$eve.*` attributes. These live on the Vercel Workflow run, queryable in the Workflow dashboard, not on OTel spans, and you do not configure them: they are framework-owned and emitted automatically on every session, turn, and subagent run, whether or not an `instrumentation.ts` file is present. Authored code cannot set or override the `$eve.` namespace.

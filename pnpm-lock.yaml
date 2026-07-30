@@ -27,6 +27,9 @@ catalogs:
     '@ai-sdk/provider-utils':
       specifier: ^5.0.12
       version: 5.0.13
+    '@opentelemetry/context-async-hooks':
+      specifier: 2.6.1
+      version: 2.6.1
     '@opentelemetry/core':
       specifier: 2.6.1
       version: 2.6.1
@@ -1245,6 +1248,9 @@ importers:
       '@nuxt/kit':
         specifier: ^4.0.0
         version: 4.4.6(magicast@0.5.3)
+      '@opentelemetry/context-async-hooks':
+        specifier: 'catalog:'
+        version: 2.6.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/otlp-transformer':
         specifier: 0.214.0
         version: 0.214.0(@opentelemetry/api@1.9.1)
@@ -3693,6 +3699,12 @@ packages:
 
   '@opentelemetry/context-async-hooks@2.10.0':
     resolution: {integrity: sha512-bvyMcgLEkozzSzpEEEo1OMoeQ97bxj6Qs2uN3mPrSdDvObMI1myffD/BPqcLlzZO9//d1SqQA/WPw7Cz2AiqhA==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.0.0 <1.10.0'
+
+  '@opentelemetry/context-async-hooks@2.6.1':
+    resolution: {integrity: sha512-XHzhwRNkBpeP8Fs/qjGrAf9r9PRv67wkJQ/7ZPaBQQ68DYlTBBx5MF9LvPx7mhuXcDessKK2b+DcxqwpgkcivQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
@@ -17754,6 +17766,10 @@ snapshots:
   '@opentelemetry/api@1.9.1': {}
 
   '@opentelemetry/context-async-hooks@2.10.0(@opentelemetry/api@1.9.1)':
+    dependencies:
+      '@opentelemetry/api': 1.9.1
+
+  '@opentelemetry/context-async-hooks@2.6.1(@opentelemetry/api@1.9.1)':
     dependencies:
       '@opentelemetry/api': 1.9.1
 
