@@ -127,10 +127,11 @@ describe("ClientSession", () => {
 
   it("snapshots the session from the start through one pinned durable tail", async () => {
     const requests: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url =
         typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
       requests.push(url);
+      expect(init?.cache).toBe("no-store");
       const events = [
         { type: "turn.started", data: { turnId: "turn_1" } },
         {
