@@ -13,7 +13,7 @@ When no authored `instrumentation.ts` exists, `eve dev` records agent, AI SDK, a
 
 The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits, subject to the [retention policy](#local-trace-retention) below. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
 
-Use `eve trace ls` to list captured traces and `eve trace <trace>` to inspect a session's span tree.
+Use `eve traces ls` to list captured traces and `eve traces <trace>` to inspect a session's span tree.
 
 When a model call is served by Vercel AI Gateway, its `agent.step` span also carries the cost the gateway reported: `gen_ai.usage.cost` (raw inference, USD), `gen_ai.usage.gateway_cost` (with the gateway surcharge), `gen_ai.usage.input_cost` / `gen_ai.usage.output_cost` (the split), and `gen_ai.generation.id` for reconciliation with the gateway dashboard. These attributes only exist for gateway-served calls — other providers emit nothing. Cost per turn is the sum across the turn's step spans.
 
