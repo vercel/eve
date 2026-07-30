@@ -113,6 +113,52 @@ describe("createTurnCancellationControl", () => {
     expect(control!.signal.aborted).toBe(false);
   });
 
+  it("flips the signal in the same microtask that consumes the payload", async () => {
+    // Reproduces a wake replay where a journaled cancel and a completed
+    // turn step resolve in the same drive, payload first. The turn loop
+    // checks `signal.aborted` in the step's continuation — one microtask
+    // after the payload read — so the abort must fire inside the read
+    // continuation, not a `.then` chained behind it.
+    let releasePayload!: (result: IteratorResult<unknown>) => void;
+    const firstRead = new Promise<IteratorResult<unknown>>((resolve) => {
+      releasePayload = resolve;
+    });
+    let delivered = false;
+    createHookMock.mockReturnValue({
+      token: "session-1:cancel",
+      getConflict: vi.fn(async () => null),
+      dispose: vi.fn(),
+      [Symbol.asyncIterator](): AsyncIterator<unknown> {
+        return {
+          next: () => {
+            if (delivered) return new Promise<IteratorResult<unknown>>(() => {});
+            delivered = true;
+            return firstRead;
+          },
+          return: vi.fn(async () => ({ done: true, value: undefined })),
+        };
+      },
+    });
+
+    const control = await createTurnCancellationControl({
+      expectedTurnId: "turn_0",
+      sessionId: "session-1",
+    });
+
+    let releaseStep!: () => void;
+    const step = new Promise<void>((resolve) => {
+      releaseStep = resolve;
+    });
+    const abortedAtStepContinuation = step.then(() => control!.signal.aborted);
+
+    // Journal order: the cancel payload resolves before the step result.
+    releasePayload({ done: false, value: {} });
+    releaseStep();
+
+    await expect(abortedAtStepContinuation).resolves.toBe(true);
+    await expect(control!.requested).resolves.toBe("cancel");
+  });
+
   it("disposes idempotently", async () => {
     const { dispose } = installCancelHook({});
 
