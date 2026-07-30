@@ -8,6 +8,7 @@ import {
   type TextMapGetter,
   trace,
 } from "#compiled/@opentelemetry/api/index.js";
+import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { recordErrorOnSpan } from "#internal/logging.js";
 
 /**
@@ -56,14 +57,23 @@ export interface TraceChannelRequestInput {
  * recorded a second time here. The span always ends in `finally`, without
  * waiting for `event.waitUntil()` work or streamed response bodies.
  *
+ * Authored instrumentation can opt out via
+ * `defineInstrumentation({ traceChannelRequests: false })`, in which case the
+ * handler runs with no span (`undefined`) and no context extraction — a true
+ * bypass, not a non-recording span.
+ *
  * This is observability-only: it never changes the response and performs no
  * synchronous span export in the request path, adding only minimal in-process
  * tracing overhead.
  */
 export async function traceChannelRequest<T extends Response>(
   input: TraceChannelRequestInput,
-  handler: (span: Span) => Promise<T>,
+  handler: (span: Span | undefined) => Promise<T>,
 ): Promise<T> {
+  if (getInstrumentationConfig()?.traceChannelRequests === false) {
+    return await handler(undefined);
+  }
+
   const { request, routeKey } = input;
   const parentContext = propagation.extract(context.active(), request.headers, headersGetter);
   const span = trace

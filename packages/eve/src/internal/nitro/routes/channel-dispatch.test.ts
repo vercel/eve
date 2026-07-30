@@ -17,6 +17,10 @@ import { trace as vendoredTrace } from "#compiled/@opentelemetry/api/index.js";
 
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
+import {
+  getInstrumentationConfig,
+  registerInstrumentationConfig,
+} from "#harness/instrumentation-config.js";
 import type { CancelTurnInput, DeliverInput, RunInput, Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -943,6 +947,51 @@ describe("dispatchChannelRequest without an OTel provider", () => {
   });
 
   it("handles the request identically and records no spans", async () => {
+    const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [slackChannel(async () => new Response("ok"))],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil }),
+      "POST /slack",
+      {} as never,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("ok");
+    await provider.forceFlush();
+    expect(exporter.getFinishedSpans()).toHaveLength(0);
+  });
+});
+
+describe("dispatchChannelRequest with traceChannelRequests disabled", () => {
+  let exporter: InMemorySpanExporter;
+  let provider: BasicTracerProvider;
+  let priorConfig: ReturnType<typeof getInstrumentationConfig>;
+
+  beforeEach(() => {
+    // A live provider proves the bypass — not the missing provider — is what
+    // suppresses the span.
+    exporter = new InMemorySpanExporter();
+    provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
+    apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+    apiPropagation.setGlobalPropagator(w3cPropagator as never);
+    apiTrace.setGlobalTracerProvider(provider);
+    priorConfig = getInstrumentationConfig();
+    registerInstrumentationConfig({ traceChannelRequests: false }, { agentName: "test" });
+  });
+
+  afterEach(() => {
+    // Restore the process-global config so the toggle does not leak.
+    registerInstrumentationConfig(priorConfig ?? {}, { agentName: "test" });
+    apiTrace.disable();
+    apiContext.disable();
+    apiPropagation.disable();
+  });
+
+  it("handles the request identically and emits no request span", async () => {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [slackChannel(async () => new Response("ok"))],

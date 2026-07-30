@@ -166,6 +166,8 @@ POST /eve/v1/session/:sessionId
 
 The span stays low-cardinality (route template in `http.route`, method in `http.request.method`, never the concrete URL) and records no session ids, tokens, headers, bodies, or query parameters. It adopts an incoming `traceparent` as its parent when present, so eve requests correlate with upstream traces.
 
+Set `traceChannelRequests: false` on `defineInstrumentation` to suppress these request spans while keeping the turn trace and every other span. It defaults to `true` whenever `instrumentation.ts` is present.
+
 ## Workflow run tags
 
 Separately from OpenTelemetry, eve tags every workflow run with reserved `$eve.*` attributes. These live on the Vercel Workflow run, queryable in the Workflow dashboard, not on OTel spans, and you do not configure them: they are framework-owned and emitted automatically on every session, turn, and subagent run, whether or not an `instrumentation.ts` file is present. Authored code cannot set or override the `$eve.` namespace.

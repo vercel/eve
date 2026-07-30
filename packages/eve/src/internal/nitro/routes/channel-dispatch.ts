@@ -69,10 +69,11 @@ export async function dispatchChannelRequest(
     }
 
     // Channel identity is known only after resolution; a 404 span carries
-    // just the route.
-    span.setAttribute("eve.channel.name", matchedChannel.name);
+    // just the route. `span` is undefined when instrumentation opted out of
+    // channel-request tracing.
+    span?.setAttribute("eve.channel.name", matchedChannel.name);
     if (matchedChannel.adapter?.kind !== undefined) {
-      span.setAttribute("eve.channel.kind", matchedChannel.adapter.kind);
+      span?.setAttribute("eve.channel.kind", matchedChannel.adapter.kind);
     }
 
     const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
