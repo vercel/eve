@@ -486,8 +486,7 @@ describe("turn cancellation integration", () => {
         expect(fixture.toolAborts()).toBe(1);
 
         // Session.cancel() addresses the same session by id. With the turn
-        // settled and its cancel hook swept, it reports the benign status,
-        // classified by the error that marked the target inactive.
+        // settled and its cancel hook swept, it reports the benign status.
         await waitForHookSweep(sessionCancelHookToken(run.runId));
         const session = createSession(run.runId, rawToken, workflowRuntime);
         await expect(session.cancel()).resolves.toEqual({

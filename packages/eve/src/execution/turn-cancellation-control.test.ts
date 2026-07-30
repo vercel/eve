@@ -114,11 +114,9 @@ describe("createTurnCancellationControl", () => {
   });
 
   it("flips the signal in the same microtask that consumes the payload", async () => {
-    // Reproduces a wake replay where a journaled cancel and a completed
-    // turn step resolve in the same drive, payload first. The turn loop
-    // checks `signal.aborted` in the step's continuation — one microtask
-    // after the payload read — so the abort must fire inside the read
-    // continuation, not a `.then` chained behind it.
+    // A wake replays a journaled cancel and a completed step in one drain,
+    // payload first; the settle check reads `signal.aborted` one microtask
+    // later, so a `.then`-chained abort would lose to it.
     let releasePayload!: (result: IteratorResult<unknown>) => void;
     const firstRead = new Promise<IteratorResult<unknown>>((resolve) => {
       releasePayload = resolve;

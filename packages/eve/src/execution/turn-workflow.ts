@@ -111,10 +111,9 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           ? result.pendingRuntimeActionKeys
           : undefined;
 
-      // A cancel observed while the step was already returning must still win:
-      // the step body may have missed the abort and produced an ordinary
-      // completion, but the user's cancel was claimed. Pending runtime-action
-      // batches are exempt — their in-line wait below observes the signal.
+      // A cancel observed while the step was returning must still win: the
+      // step may have missed the abort and completed normally. Pending
+      // runtime-action batches are exempt — their wait observes the signal.
       if (
         result.action === "cancelled" ||
         (cancellation?.signal.aborted === true && pendingActionKeys === undefined)

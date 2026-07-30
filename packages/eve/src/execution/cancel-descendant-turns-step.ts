@@ -16,11 +16,9 @@ import type {
 } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 
-// Descendants listed in a pending batch should be actively running, so a
-// cancel that cannot be delivered is anomalous: retry with backoff long
-// enough to ride out transient world contention (queue wakes, hook-claim
-// conflicts), then log loudly rather than dropping the cancel silently —
-// an uncancelled child otherwise runs to completion with no trace of why.
+// Retry through transient world contention (queue wakes, hook-claim
+// conflicts), then log loudly: a silently dropped cancel leaves the child
+// running to completion with no trace of why.
 const CANCEL_ATTEMPTS = 8;
 const CANCEL_RETRY_INITIAL_DELAY_MS = 250;
 const CANCEL_RETRY_MAX_DELAY_MS = 1_500;

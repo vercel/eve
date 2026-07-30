@@ -51,12 +51,10 @@ export async function createTurnCancellationControl(input: {
   }
 
   const controller = new AbortController();
-  // The abort fires inside the read continuation itself — not a chained
-  // `.then` — so the signal flips in the same microtask that consumes the
-  // payload. When a wake replays a journaled cancel alongside a completed
-  // step, the turn loop checks `signal.aborted` in the step's continuation;
-  // a chained abort would run one microtask later and lose to that check,
-  // letting an ordinary completion swallow the cancel.
+  // The abort must fire inside the read continuation — not a chained
+  // `.then` — so the signal is already flipped when a same-drain
+  // continuation (the turn loop's settle check) reads it; one microtask
+  // later and an ordinary completion swallows the cancel.
   const requested = consumeMatchingCancel(iterator, input.expectedTurnId, () => {
     controller.abort(new TurnCancelledError());
   }).then(() => "cancel" as const);
@@ -76,9 +74,8 @@ export async function createTurnCancellationControl(input: {
 }
 
 // Mismatched turn guards are consumed as no-ops; each read is durable,
-// so the skip sequence replays deterministically. `onCancel` runs
-// synchronously within the matching read's continuation (see the abort
-// ordering note in `createTurnCancellationControl`).
+// so the skip sequence replays deterministically. `onCancel` fires inside
+// the matching read's continuation (see the abort ordering note above).
 async function consumeMatchingCancel(
   iterator: AsyncIterator<TurnCancelPayload>,
   expectedTurnId: string,

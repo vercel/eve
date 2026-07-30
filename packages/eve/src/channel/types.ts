@@ -31,9 +31,8 @@ export interface CancelTurnResult {
   readonly status: CancelTurnStatus;
   /**
    * For `no_active_turn`: the error class that classified the target as
-   * inactive (e.g. `HookNotFoundError`, `EntityConflictError`). Lets callers
-   * that expected an active turn distinguish "already finished" from a
-   * transiently unreachable cancel hook.
+   * inactive, distinguishing "already finished" (`HookNotFoundError`) from a
+   * transiently unreachable cancel hook (`EntityConflictError`).
    */
   readonly reason?: string;
 }
