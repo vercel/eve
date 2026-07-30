@@ -6,6 +6,7 @@ import { buildJudgeContext } from "#evals/judge.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 import type {
   Assertion,
+  AssertionEvaluation,
   AssertionHandle,
   EveEvalContext,
   EveEvalJudgeConfig,
@@ -107,9 +108,7 @@ async function requireCheck<T>(
   const passed = await collector.recordRequirement({
     name: gated.name,
     threshold: gated.threshold,
-    score: async () => {
-      return { score: await gated.score(value) };
-    },
+    score: () => evaluateAssertion(gated, value),
   });
   if (!passed) throw new EvalRequirementFailed();
   return value;
@@ -124,8 +123,18 @@ function recordCheck(
     name: assertion.name,
     severity: assertion.severity,
     threshold: assertion.threshold,
-    score: async () => ({ score: await assertion.score(value) }),
+    score: () => evaluateAssertion(assertion, value),
   });
+}
+
+async function evaluateAssertion(
+  assertion: Assertion,
+  value: unknown,
+): Promise<AssertionEvaluation> {
+  if (assertion.evaluate !== undefined) {
+    return await assertion.evaluate(value);
+  }
+  return { score: await assertion.score(value) };
 }
 
 function promptText(input: SendTurnInput): string {

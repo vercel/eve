@@ -73,6 +73,12 @@ t.check(
 | `similarity(expected)` | normalized Levenshtein similarity, 1 = identical        | soft    |
 | `satisfies(fn, label)` | custom boolean predicate                                | gate    |
 
+For example, a failed labeled equality check prints:
+
+```text
+✗ equals [status] (0% < 100%): expected {"status":"active"}; received {"status":"disabled"}
+```
+
 Pick the cheapest builder that captures what "correct" means. When exact match is too strict but a judge model is overkill, `similarity` is the middle ground. For nuanced grading, reach for the [judge](./judge).
 
 ## The matcher mini-language
@@ -154,12 +160,13 @@ Every assertion returns a chainable handle. Severity rides on the assertion, so 
 - `.gate(threshold?)` is hard. A miss marks the eval `failed` and `eve eval` exits non-zero.
 - `.soft(threshold?)` is tracked data. A below-threshold miss marks the eval `scored`, fatal only under `--strict`. With no threshold, it is tracked-only and never fails.
 - `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
+- `.label(name)` adds a stable name when an eval records several assertions from the same family.
 
 The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge.*` assertion are soft. Annotate only when you deviate:
 
 ```ts
 t.calledTool("get_weather").soft(); // record the tool call as a metric, don't gate
-t.check(t.reply, similarity("Sunny")).atLeast(0.8); // gate the fuzzy match under --strict
+t.check(t.reply, similarity("Sunny")).label("forecast wording").atLeast(0.8);
 t.check(t.reply, includes("error")).soft(); // track without failing the build
 ```
 

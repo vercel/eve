@@ -37,6 +37,35 @@ describe("eval artifacts", () => {
       skipReason: "dev routes unavailable",
     });
   });
+
+  it("keeps assertion diagnostics in the run summary", async () => {
+    await writeArtifacts("/tmp/eve-evals", judgedSummary());
+
+    const summary = writtenJson("/tmp/eve-evals/summary.json");
+    expect(summary).toMatchObject({
+      evals: [
+        {
+          assertions: [
+            {
+              message: 'prompt: "Name the source."',
+              metadata: {
+                criteria: "cites a source",
+                input: "Name the source.",
+                rationale: "No source was cited.",
+              },
+              name: "judge.autoevals.closedQA",
+              passed: false,
+              score: 0,
+              severity: "soft",
+              threshold: 0.8,
+            },
+          ],
+          id: "quality/source",
+          verdict: "scored",
+        },
+      ],
+    });
+  });
 });
 
 function writtenJson(path: string): Record<string, unknown> {
@@ -70,6 +99,48 @@ function skippedSummary(): EveEvalRunSummary {
     failed: 0,
     scored: 0,
     skipped: 1,
+    errored: 0,
+  };
+}
+
+function judgedSummary(): EveEvalRunSummary {
+  const result: EveEvalResult = {
+    id: "quality/source",
+    assertions: [
+      {
+        name: "judge.autoevals.closedQA",
+        score: 0,
+        severity: "soft",
+        threshold: 0.8,
+        passed: false,
+        message: 'prompt: "Name the source."',
+        metadata: {
+          criteria: "cites a source",
+          input: "Name the source.",
+          rationale: "No source was cited.",
+        },
+      },
+    ],
+    result: {
+      derived: createEmptyDerivedFacts(),
+      events: [],
+      finalMessage: "No source.",
+      output: "No source.",
+      status: "completed",
+    },
+    verdict: "scored",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    completedAt: "2026-01-01T00:00:01.000Z",
+  };
+  return {
+    target: { capabilities: { devRoutes: true }, kind: "local", url: "http://localhost:3000" },
+    results: [result],
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
+    passed: 0,
+    failed: 0,
+    scored: 1,
+    skipped: 0,
     errored: 0,
   };
 }
