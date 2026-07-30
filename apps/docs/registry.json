@@ -125,6 +125,17 @@
       "type": "registry:item",
       "title": "Vercel",
       "description": "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "vercel", "vercel", "vercel"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -139,6 +150,17 @@
       "type": "registry:item",
       "title": "Linear",
       "description": "Issues, projects, cycles, and comments via Linear's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "linear", "mcp.linear.app", "linear"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -153,6 +175,17 @@
       "type": "registry:item",
       "title": "Notion",
       "description": "Search and edit Notion pages and databases over MCP or OpenAPI.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "notion", "mcp.notion.com", "notion"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -167,6 +200,17 @@
       "type": "registry:item",
       "title": "Datadog",
       "description": "Query metrics, monitors, and logs through Datadog's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "datadog", "mcp.datadoghq.com", "datadog"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -181,6 +225,17 @@
       "type": "registry:item",
       "title": "Honeycomb",
       "description": "Explore traces and run queries through Honeycomb's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "honeycomb", "mcp.honeycomb.io", "honeycomb"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -195,6 +250,17 @@
       "type": "registry:item",
       "title": "Airtable",
       "description": "Bases, tables, and records through Airtable's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "airtable", "airtable", "airtable"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -209,6 +275,17 @@
       "type": "registry:item",
       "title": "Bitly",
       "description": "Shorten links, generate QR Codes, and track performance.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "bitly", "bitly", "bitly"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -223,6 +300,17 @@
       "type": "registry:item",
       "title": "Brex",
       "description": "Expenses, cards, and cash through Brex's finance automation.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "brex", "brex", "brex"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -237,6 +325,17 @@
       "type": "registry:item",
       "title": "Candid",
       "description": "Research nonprofits and funders using Candid's data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "candid", "candid", "candid"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -251,6 +350,17 @@
       "type": "registry:item",
       "title": "ClickHouse",
       "description": "Query and explore your ClickHouse Cloud data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "clickhouse", "clickhouse", "clickhouse"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -265,6 +375,17 @@
       "type": "registry:item",
       "title": "Cloudinary",
       "description": "Manage, transform, and deliver your images and videos.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "cloudinary", "cloudinary", "cloudinary"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -279,6 +400,17 @@
       "type": "registry:item",
       "title": "Coda",
       "description": "Create, search, and update docs and tables.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "coda", "coda", "coda"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -293,6 +425,17 @@
       "type": "registry:item",
       "title": "Egnyte",
       "description": "Securely access and analyze Egnyte content.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "egnyte", "egnyte", "egnyte"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -307,6 +450,17 @@
       "type": "registry:item",
       "title": "Embat",
       "description": "Ask Embat about cash, debt, payments, and accounting.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "embat", "embat", "embat"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -321,6 +475,17 @@
       "type": "registry:item",
       "title": "Hugging Face",
       "description": "Access the Hugging Face Hub and thousands of Gradio apps.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "hugging-face", "hugging-face", "hugging-face"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -335,6 +500,17 @@
       "type": "registry:item",
       "title": "Local Falcon",
       "description": "AI visibility and local search intelligence.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "local-falcon", "local-falcon", "local-falcon"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -349,6 +525,17 @@
       "type": "registry:item",
       "title": "Make",
       "description": "Run Make scenarios and manage your Make account.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "make", "make", "make"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -363,6 +550,17 @@
       "type": "registry:item",
       "title": "Manufact",
       "description": "Deploy and monitor MCP servers with Manufact.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "manufact", "manufact", "manufact"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -377,6 +575,17 @@
       "type": "registry:item",
       "title": "Mem0",
       "description": "Persistent memory for AI agents and assistants.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "mem0", "mem0", "mem0"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -391,6 +600,17 @@
       "type": "registry:item",
       "title": "Miro",
       "description": "Access and create content on Miro boards.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "miro", "miro", "miro"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -405,6 +625,17 @@
       "type": "registry:item",
       "title": "Mixpanel",
       "description": "Analyze, query, and manage your Mixpanel data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "mixpanel", "mixpanel", "mixpanel"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -419,6 +650,17 @@
       "type": "registry:item",
       "title": "Netlify",
       "description": "Create, deploy, manage, and secure websites on Netlify.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "netlify", "netlify", "netlify"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -433,6 +675,17 @@
       "type": "registry:item",
       "title": "O'Reilly",
       "description": "Discover O'Reilly's expert learning content.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "oreilly", "oreilly", "oreilly"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -447,6 +700,17 @@
       "type": "registry:item",
       "title": "PlanetScale",
       "description": "Authenticated access to your PlanetScale Postgres and MySQL databases.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "planetscale", "planetscale", "planetscale"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -461,6 +725,17 @@
       "type": "registry:item",
       "title": "PostHog",
       "description": "Query, analyze, and manage your PostHog insights.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "posthog", "posthog", "posthog"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -475,6 +750,17 @@
       "type": "registry:item",
       "title": "Postman",
       "description": "Give API context to your coding agents with Postman.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "postman", "postman", "postman"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -489,6 +775,17 @@
       "type": "registry:item",
       "title": "Razorpay",
       "description": "Razorpay payments, settlements, and dashboard data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "razorpay", "razorpay", "razorpay"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -503,6 +800,17 @@
       "type": "registry:item",
       "title": "Sentry",
       "description": "Search, query, and debug errors intelligently.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "sentry", "sentry", "sentry"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -517,6 +825,17 @@
       "type": "registry:item",
       "title": "Similarweb",
       "description": "Real-time web, mobile app, and market data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "similarweb", "similarweb", "similarweb"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -531,6 +850,17 @@
       "type": "registry:item",
       "title": "Stripe",
       "description": "Payment processing and financial infrastructure tools.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "stripe", "stripe", "stripe"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -545,6 +875,17 @@
       "type": "registry:item",
       "title": "Supabase",
       "description": "Manage databases, authentication, and storage.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "supabase", "supabase", "supabase"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -559,6 +900,17 @@
       "type": "registry:item",
       "title": "Ticket Tailor",
       "description": "Manage tickets, orders, and events with Ticket Tailor.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "ticket-tailor", "ticket-tailor", "ticket-tailor"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -573,6 +925,17 @@
       "type": "registry:item",
       "title": "TickTick",
       "description": "Search, create, and manage your tasks and habits in TickTick.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "ticktick", "ticktick", "ticktick"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -587,6 +950,17 @@
       "type": "registry:item",
       "title": "Todoist",
       "description": "Search, complete, and manage your tasks in Todoist.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "todoist", "todoist", "todoist"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -601,6 +975,17 @@
       "type": "registry:item",
       "title": "Webflow",
       "description": "Manage Webflow CMS, pages, assets, and sites.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "webflow", "webflow", "webflow"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -615,6 +1000,17 @@
       "type": "registry:item",
       "title": "Wix",
       "description": "Manage and build sites and apps on Wix.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "wix", "wix", "wix"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -629,6 +1025,17 @@
       "type": "registry:item",
       "title": "Zapier",
       "description": "Automate workflows across thousands of apps.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "zapier", "zapier", "zapier"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -643,6 +1050,17 @@
       "type": "registry:item",
       "title": "Zomato",
       "description": "Online food ordering and delivery through Zomato.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "zomato", "zomato", "zomato"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {

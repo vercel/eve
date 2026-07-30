@@ -18,6 +18,7 @@ import {
 
 interface SetupProcess extends NodeJS.Process {
   send?: (message: RegistrySetupChildMessage) => boolean;
+  disconnect?: () => void;
 }
 
 function send(process: SetupProcess, message: RegistrySetupChildMessage): void {
@@ -202,6 +203,8 @@ export function createRegistrySetupClient(
     if (terminal) return;
     terminal = true;
     send(childProcess, { type: "result", outcome });
+    childProcess.off("message", onMessage);
+    childProcess.disconnect?.();
   };
   return {
     prompter,

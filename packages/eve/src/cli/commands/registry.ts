@@ -67,7 +67,40 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
 };
 
-const OFFICIAL_REGISTRY = "https://eve.dev/r";
+const DEFAULT_OFFICIAL_REGISTRY_URL = "https://eve.dev/r";
+
+/**
+ * Resolves the official registry URL, honoring the explicit development trust override.
+ *
+ * The override makes its registry eligible to supply setup commands, so it must be
+ * configured in the process environment rather than project configuration.
+ */
+export function resolveOfficialRegistryUrl(
+  configured = process.env.EVE_DEV_OFFICIAL_REGISTRY_URL,
+): string {
+  if (configured === undefined) return DEFAULT_OFFICIAL_REGISTRY_URL;
+
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw new Error("EVE_DEV_OFFICIAL_REGISTRY_URL must be an HTTP(S) URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("EVE_DEV_OFFICIAL_REGISTRY_URL must be an HTTP(S) URL.");
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new Error("EVE_DEV_OFFICIAL_REGISTRY_URL must not include credentials.");
+  }
+  if (url.search !== "" || url.hash !== "") {
+    throw new Error("EVE_DEV_OFFICIAL_REGISTRY_URL must not include a query or fragment.");
+  }
+
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.toString().replace(/\/$/, "");
+}
+
+const OFFICIAL_REGISTRY = resolveOfficialRegistryUrl();
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
 
 function isRegistryAddress(value: string): boolean {
