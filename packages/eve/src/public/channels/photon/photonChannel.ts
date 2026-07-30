@@ -2,7 +2,6 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { vercelOidc } from "#public/channels/auth.js";
 import {
   chatSdkChannel,
-  messageToUserContent,
   type ChatSdkChannel,
   type ChatSdkChannelBridge,
   type ChatSdkChannelEvents,
@@ -15,6 +14,7 @@ import {
   type iMessageCredentialProvider,
   type iMessageWebhookVerifier,
 } from "#compiled/@photon-ai/chat-adapter-imessage/index.js";
+import { photonInboundContent } from "#public/channels/photon/inboundContent.js";
 
 /** Photon project credentials used by {@link photonChannel}. */
 export type PhotonChannelCredentials = iMessageCredentialProvider;
@@ -83,6 +83,7 @@ export function photonChannel(config: PhotonChannelConfig): PhotonChannel {
   });
   const bridge = chatSdkChannel({
     adapters: { imessage },
+    concurrency: "queue",
     events: config.events,
     routes: { imessage: config.route ?? "/eve/v1/photon" },
     state: createMemoryState(),
@@ -115,11 +116,13 @@ async function dispatchMessage(
   const result = await onMessage({ thread }, message);
   if (result === null) return;
   await markReadBestEffort(bridge.bot.getAdapter("imessage"), thread, message);
+  const content = photonInboundContent(message);
+  if (content === undefined) return;
   if (subscribe) await thread.subscribe();
   await bridge.send(
     {
       context: [...(result.context ?? [])],
-      message: messageToUserContent(message),
+      message: content,
     },
     { auth: result.auth, thread },
   );
