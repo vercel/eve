@@ -85,6 +85,14 @@ export async function runEvalCommand(
   }
 
   const evaluations = filterEvalsByTags({ evaluations: included, includeTags: [], excludeTags });
+
+  // List mode reports the post-exclusion set — even when it is empty — so
+  // suite runners can probe "does anything run here?" with `--list --json`.
+  if (options.list === true) {
+    printEvalList(evaluations, options.json === true, logger);
+    return;
+  }
+
   if (evaluations.length === 0) {
     // Every matching eval was excluded. Unlike an include filter with no
     // matches, this is a legitimate "nothing applies to this run" outcome
@@ -103,11 +111,6 @@ export async function runEvalCommand(
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
-    return;
-  }
-
-  if (options.list === true) {
-    printEvalList(evaluations, options.json === true, logger);
     return;
   }
 
