@@ -18,8 +18,9 @@ export default photonIMessageChannel({
 
 The default webhook route is `/eve/v1/photon`. The channel verifies forwarded
 webhooks with same-project Vercel OIDC by default, marks accepted messages as
-read, subscribes the first inbound message thread, and continues the same eve
-session for later messages.
+read, and continues the same eve session for every message in an iMessage
+conversation. A new accepted message cooperatively cancels an active turn and
+steers its replacement turn.
 
 Customize inbound dispatch with `onMessage`. Return `null` to ignore a message:
 

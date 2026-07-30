@@ -83,7 +83,7 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   });
   const bridge = chatSdkChannel({
     adapters: { imessage },
-    concurrency: "queue",
+    concurrency: "concurrent",
     events: config.events,
     routes: { imessage: config.route ?? "/eve/v1/photon" },
     state: createMemoryState(),
@@ -92,11 +92,11 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   });
   const onMessage = config.onMessage ?? defaultOnMessage;
 
-  bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
-    await dispatchMessage(bridge, onMessage, thread, message, true);
+  bridge.bot.onDirectMessage(async (thread: Thread, message: Message) => {
+    await dispatchMessage(bridge, onMessage, thread, message);
   });
-  bridge.bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-    await dispatchMessage(bridge, onMessage, thread, message, false);
+  bridge.bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message) => {
+    await dispatchMessage(bridge, onMessage, thread, message);
   });
 
   return bridge.channel;
@@ -111,11 +111,9 @@ async function dispatchMessage(
   onMessage: NonNullable<PhotonIMessageChannelConfig["onMessage"]>,
   thread: Thread,
   message: Message,
-  subscribe: boolean,
 ): Promise<void> {
   const result = await onMessage({ thread }, message);
   if (result === null) return;
-  if (subscribe) await thread.subscribe();
   await markReadBestEffort(bridge.bot.getAdapter("imessage"), thread, message);
   const content = photonInboundContent(message);
   if (content === undefined) return;
@@ -124,7 +122,7 @@ async function dispatchMessage(
       context: [...(result.context ?? [])],
       message: content,
     },
-    { auth: result.auth, thread },
+    { auth: result.auth, thread, turnPolicy: "experimental-steer" },
   );
 }
 

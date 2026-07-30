@@ -1,17 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { newMention, send, subscribe } = vi.hoisted(() => ({
-  newMention: vi.fn(),
+const { directMessage, newMessage, send } = vi.hoisted(() => ({
+  directMessage: vi.fn(),
+  newMessage: vi.fn(),
   send: vi.fn(),
-  subscribe: vi.fn(),
 }));
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
   chatSdkChannel: () => ({
     bot: {
       getAdapter: () => ({ markRead: vi.fn() }),
-      onNewMention: newMention,
-      onSubscribedMessage: vi.fn(),
+      onDirectMessage: directMessage,
+      onNewMessage: newMessage,
     },
     channel: { routes: [] },
     send,
@@ -30,13 +30,40 @@ import { photonIMessageChannel } from "#public/channels/photon/photonIMessageCha
 import { Message } from "#compiled/chat/index.js";
 
 describe("photonIMessageChannel", () => {
-  it("subscribes to a blank first mention before dropping it", async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("cancels the active Eve turn before steering a direct message into its thread", async () => {
     photonIMessageChannel({
       credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
     });
-    const handler = newMention.mock.calls[0]?.[0];
-    if (handler === undefined) throw new Error("Expected an inbound mention handler.");
-    const thread = { id: "thread-id", subscribe };
+    const handler = directMessage.mock.calls[0]?.[0];
+    if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
+    const thread = { id: "thread-id" };
+    const message = new Message({
+      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      id: "message-id",
+      raw: {},
+      text: "Steer this response",
+      threadId: thread.id,
+    });
+
+    await handler(thread, message);
+
+    expect(send).toHaveBeenCalledWith(
+      { context: [], message: "Steer this response" },
+      { auth: null, thread, turnPolicy: "experimental-steer" },
+    );
+  });
+
+  it("drops blank inbound messages without cancelling or sending", async () => {
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+    const handler = directMessage.mock.calls[0]?.[0];
+    if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
+    const thread = { id: "thread-id" };
     const message = new Message({
       author: { isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
@@ -47,7 +74,32 @@ describe("photonIMessageChannel", () => {
 
     await handler(thread, message);
 
-    expect(subscribe).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("routes group messages without a Chat SDK subscription", async () => {
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+    const [pattern, handler] = newMessage.mock.calls[0] ?? [];
+    if (!(pattern instanceof RegExp) || handler === undefined) {
+      throw new Error("Expected an inbound group-message handler.");
+    }
+    const thread = { id: "group-thread-id" };
+    const message = new Message({
+      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      id: "message-id",
+      raw: {},
+      text: "Hello group",
+      threadId: thread.id,
+    });
+
+    expect(pattern.test(message.text)).toBe(true);
+    await handler(thread, message);
+
+    expect(send).toHaveBeenCalledWith(
+      { context: [], message: "Hello group" },
+      { auth: null, thread, turnPolicy: "experimental-steer" },
+    );
   });
 });
