@@ -311,3 +311,14 @@ export interface SessionState {
   readonly sessionId?: string;
   readonly streamIndex: number;
 }
+
+/**
+ * Finite, cursor-consistent prefix of one durable session stream.
+ */
+export interface SessionSnapshot {
+  /** Events from the start of the session through the durable tail observed when the read opened. */
+  readonly events: readonly MessageStreamEvent[];
+
+  /** Session cursor advanced exactly past {@link events}. */
+  readonly session: SessionState;
+}

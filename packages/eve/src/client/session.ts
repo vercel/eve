@@ -20,6 +20,7 @@ import type {
   ResetResult,
   SendTurnInput,
   SendTurnPayload,
+  SessionSnapshot,
   SessionState,
   StreamOptions,
 } from "#client/types.js";
@@ -62,6 +63,54 @@ export class ClientSession {
    */
   get state(): SessionState {
     return this.#state;
+  }
+
+  /**
+   * Reads a finite, point-in-time prefix of this session's durable event stream.
+   *
+   * The read starts at the beginning of the session and stops at the durable
+   * tail observed when it opens. The returned cursor points exactly after the
+   * returned events, so it can hydrate a UI and resume without a gap.
+   * Reading a snapshot does not advance or reset this handle's state.
+   *
+   * @throws {Error} If the session has no session ID (no message has been sent
+   *   yet).
+   */
+  async snapshot(options?: { readonly signal?: AbortSignal }): Promise<SessionSnapshot> {
+    options?.signal?.throwIfAborted();
+
+    const initialState = this.#state;
+    const sessionId = initialState.sessionId;
+    if (!sessionId) {
+      throw new Error("Session has no session ID. Send a message first.");
+    }
+
+    const events: MessageStreamEvent[] = [];
+
+    for await (const event of this.#readStream({
+      follow: false,
+      sessionId,
+      signal: options?.signal,
+      startIndex: 0,
+    })) {
+      events.push(event);
+    }
+
+    options?.signal?.throwIfAborted();
+
+    const lastEvent = events.at(-1);
+    const continuationToken =
+      lastEvent?.type === "session.waiting"
+        ? lastEvent.data.continuationToken
+        : lastEvent?.type === "session.completed" && this.#context.preserveCompletedSessions
+          ? initialState.continuationToken
+          : undefined;
+    const session: SessionState =
+      continuationToken === undefined
+        ? { sessionId, streamIndex: events.length }
+        : { continuationToken, sessionId, streamIndex: events.length };
+
+    return { events, session };
   }
 
   /**
@@ -249,7 +298,39 @@ export class ClientSession {
       );
     }
 
-    return this.#streamAndAdvance(sessionId, options);
+    const initialState = this.#state;
+    const streamIndex = options?.startIndex ?? initialState.streamIndex;
+    const source = this.#readStream({
+      follow: options?.follow,
+      sessionId,
+      signal: options?.signal,
+      startIndex: streamIndex,
+      streamReconnectPolicy: options?.streamReconnectPolicy,
+    });
+    const advance = (events: readonly MessageStreamEvent[]) => {
+      this.#state = advanceSession({
+        continuationToken: initialState.continuationToken,
+        events,
+        preserveCompletedSessions: this.#context.preserveCompletedSessions,
+        session: { ...initialState, sessionId, streamIndex },
+        sessionId,
+      });
+    };
+
+    return (async function* () {
+      const events: MessageStreamEvent[] = [];
+
+      try {
+        for await (const event of source) {
+          events.push(event);
+          yield event;
+        }
+      } finally {
+        if (streamIndex >= 0) {
+          advance(events);
+        }
+      }
+    })();
   }
 
   // ---------------------------------------------------------------------------
@@ -316,10 +397,8 @@ export class ClientSession {
     const events: MessageStreamEvent[] = [];
 
     try {
-      for await (const event of followStreamIterable({
-        host: this.#context.host,
-        resolveHeaders: () => this.#context.resolveHeaders(input.headers),
-        redirect: this.#context.redirect,
+      for await (const event of this.#readStream({
+        headers: input.headers,
         streamReconnectPolicy: input.streamReconnectPolicy,
         sessionId,
         signal: input.signal,
@@ -343,39 +422,24 @@ export class ClientSession {
     }
   }
 
-  async *#streamAndAdvance(
-    sessionId: string,
-    options?: StreamOptions,
-  ): AsyncGenerator<MessageStreamEvent> {
-    const initialState = this.#state;
-    const streamIndex = options?.startIndex ?? initialState.streamIndex;
-    const events: MessageStreamEvent[] = [];
-
-    try {
-      for await (const event of followStreamIterable({
-        follow: options?.follow,
-        host: this.#context.host,
-        resolveHeaders: () => this.#context.resolveHeaders(),
-        redirect: this.#context.redirect,
-        streamReconnectPolicy: options?.streamReconnectPolicy,
-        sessionId,
-        signal: options?.signal,
-        startIndex: streamIndex,
-      })) {
-        events.push(event);
-        yield event;
-      }
-    } finally {
-      if (streamIndex >= 0) {
-        this.#state = advanceSession({
-          continuationToken: initialState.continuationToken,
-          events,
-          preserveCompletedSessions: this.#context.preserveCompletedSessions,
-          session: { ...initialState, sessionId, streamIndex },
-          sessionId,
-        });
-      }
-    }
+  #readStream(input: {
+    readonly follow?: boolean;
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly sessionId: string;
+    readonly signal?: AbortSignal;
+    readonly startIndex: number;
+    readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
+  }): AsyncIterable<MessageStreamEvent> {
+    return followStreamIterable({
+      follow: input.follow,
+      host: this.#context.host,
+      resolveHeaders: () => this.#context.resolveHeaders(input.headers),
+      redirect: this.#context.redirect,
+      streamReconnectPolicy: input.streamReconnectPolicy,
+      sessionId: input.sessionId,
+      signal: input.signal,
+      startIndex: input.startIndex,
+    });
   }
 }
 
