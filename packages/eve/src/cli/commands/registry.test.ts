@@ -363,7 +363,7 @@ describe("registry commands", () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([
       {
-        name: "channel/photon",
+        name: "channel/photon-imessage",
         type: "registry:item",
         meta: {
           eve: {
@@ -374,7 +374,7 @@ describe("registry commands", () => {
       },
     ]);
 
-    await runAddCommand(logger, "/project", "channel/photon", {});
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {});
 
     expect(logger.errors).toEqual([
       "This registry item requires eve >=0.30.0, but this project is using eve 0.27.8. Upgrade eve and run the command again.",

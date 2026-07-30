@@ -30,6 +30,7 @@ interface Registry {
 
 const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
+  photon: "photon-imessage",
 };
 
 const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
@@ -105,7 +106,7 @@ for (const [index, item] of items.entries()) {
   const registrySlug = expectedSlugs[index];
 
   if (entry.slug === "slack" || entry.slug === "eve" || entry.slug === "photon") {
-    const expectedArgs = ["integration", "setup", registrySlug];
+    const expectedArgs = ["integration", "setup", entry.slug];
     if (
       setup?.command !== "eve" ||
       setup.package !== "eve" ||

@@ -5,7 +5,7 @@ description: Connect an eve agent to iMessage through Photon.
 
 Use `photonIMessageChannel` to receive and reply to iMessages through a Photon project.
 
-Run `eve add channel/photon` to create or use a Photon project and register
+Run `eve add channel/photon-imessage` to create or use a Photon project and register
 your phone number. It then asks whether to configure Vercel Connect or portable
 credentials. With Vercel Connect, eve creates the connector and configures
 Photon’s webhook through Connect. The channel resolves credentials lazily when
@@ -47,7 +47,7 @@ trusted-forwarder verifier.
 ## Other hosts
 
 For a host without Vercel Connect, choose **Use portable credentials** during
-`eve add channel/photon`. eve scaffolds the channel and writes
+`eve add channel/photon-imessage`. eve scaffolds the channel and writes
 `IMESSAGE_PROJECT_ID` and `IMESSAGE_PROJECT_SECRET` to `.env.local`.
 
 After deploying the agent:

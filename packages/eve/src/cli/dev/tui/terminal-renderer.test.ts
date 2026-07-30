@@ -1451,7 +1451,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("hangs a successful command outcome from an elbow into a full-intensity rail", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandResult(
-      "Registry items added: channel/photon.\n" +
+      "Registry items added: channel/photon-imessage.\n" +
         "Text your agent: +15550000000\n" +
         "Photon project: https://app.photon.codes/dashboard/project-id",
       "success",
@@ -1459,7 +1459,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("⎿  ✓ Registry items added: channel/photon.");
+    expect(snapshot).toContain("⎿  ✓ Registry items added: channel/photon-imessage.");
     expect(snapshot).toContain("│ Text your agent: +15550000000");
     expect(snapshot).toContain("└ Photon project: https://app.photon.codes/dashboard/project-id");
     expect(screen.rawOutput()).toContain("\u001b[32m✓\u001b[39m");

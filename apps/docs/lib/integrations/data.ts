@@ -850,7 +850,7 @@ See the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-offic
     install: `Add Photon from eve's registry, then follow the guided project, phone, and deployment setup:
 
 \`\`\`bash
-eve add channel/photon
+eve add channel/photon-imessage
 \`\`\``,
     quickStart: `Create \`agent/channels/photon.ts\`:
 

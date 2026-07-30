@@ -1,6 +1,6 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry-item.json",
-  "name": "channel/photon",
+  "name": "channel/photon-imessage",
   "type": "registry:item",
   "title": "Photon",
   "description": "Connect an eve agent to iMessage through Photon with guided project and phone setup.",
@@ -13,7 +13,7 @@
         "bin": "eve",
         "args": ["integration", "setup", "photon"]
       },
-      "requires": ">=0.27.11"
+      "requires": ">=0.29.0"
     }
   }
 }
