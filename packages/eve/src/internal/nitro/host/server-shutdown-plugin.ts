@@ -8,7 +8,7 @@ let installed = false;
 
 interface ServerShutdownProcess {
   readonly env: Record<string, string | undefined>;
-  exit(code?: number): void;
+  exitCode?: string | number | null;
   once(event: ShutdownSignal, listener: () => void): unknown;
 }
 
@@ -42,8 +42,11 @@ function exitCodeForSignal(signal: ShutdownSignal): number {
 }
 
 /**
- * Routes process signals through Nitro's close lifecycle exactly once and
- * exits only after every registered cleanup has settled.
+ * Routes process signals through Nitro's close lifecycle exactly once.
+ *
+ * srvx owns the HTTP server's graceful drain for these same signals. Setting
+ * `exitCode` instead of calling `process.exit()` lets both independent cleanup
+ * paths settle before Node exits naturally.
  */
 export function installServerShutdownHandlers(input: {
   readonly log: (message: string) => void;
@@ -71,7 +74,7 @@ export function installServerShutdownHandlers(input: {
           input.log(`eve: server shutdown failed: ${toErrorMessage(error)}`);
         })
         .finally(() => {
-          input.process.exit(exitCodeForSignal(signal));
+          input.process.exitCode = exitCodeForSignal(signal);
         });
     });
   }

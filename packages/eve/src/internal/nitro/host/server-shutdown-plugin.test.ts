@@ -9,13 +9,12 @@ type SignalListener = () => void;
 
 function createFakeProcess(env: Record<string, string | undefined> = {}) {
   const listeners = new Map<string, SignalListener>();
-  const exit = vi.fn<(code?: number) => void>();
   return {
     emit(event: string): void {
       listeners.get(event)?.();
     },
     env,
-    exit,
+    exitCode: undefined as number | undefined,
     listeners,
     once(event: "SIGINT" | "SIGTERM", listener: SignalListener): unknown {
       listeners.set(event, listener);
@@ -48,7 +47,7 @@ describe("shouldInstallServerShutdown", () => {
 });
 
 describe("installServerShutdownHandlers", () => {
-  it("awaits Nitro close before exiting for SIGTERM", async () => {
+  it("awaits Nitro close before setting the SIGTERM exit code", async () => {
     const close = Promise.withResolvers<void>();
     const callHook = vi.fn(() => close.promise);
     const fakeProcess = createFakeProcess();
@@ -63,11 +62,11 @@ describe("installServerShutdownHandlers", () => {
     await vi.waitFor(() => {
       expect(callHook).toHaveBeenCalledWith("close");
     });
-    expect(fakeProcess.exit).not.toHaveBeenCalled();
+    expect(fakeProcess.exitCode).toBeUndefined();
 
     close.resolve();
     await vi.waitFor(() => {
-      expect(fakeProcess.exit).toHaveBeenCalledWith(143);
+      expect(fakeProcess.exitCode).toBe(143);
     });
   });
 
@@ -86,13 +85,12 @@ describe("installServerShutdownHandlers", () => {
     close.resolve();
 
     await vi.waitFor(() => {
-      expect(fakeProcess.exit).toHaveBeenCalledTimes(1);
+      expect(fakeProcess.exitCode).toBe(143);
     });
-    expect(fakeProcess.exit).toHaveBeenCalledWith(143);
     expect(callHook).toHaveBeenCalledTimes(1);
   });
 
-  it("logs close failures before exiting", async () => {
+  it("logs close failures before setting the exit code", async () => {
     const log = vi.fn();
     const fakeProcess = createFakeProcess();
 
@@ -110,7 +108,7 @@ describe("installServerShutdownHandlers", () => {
     fakeProcess.emit("SIGINT");
 
     await vi.waitFor(() => {
-      expect(fakeProcess.exit).toHaveBeenCalledWith(130);
+      expect(fakeProcess.exitCode).toBe(130);
     });
     expect(log).toHaveBeenCalledWith(expect.stringContaining("close failed"));
   });

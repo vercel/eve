@@ -112,6 +112,37 @@ async function createWorkflowShutdownProbeAppRoot(): Promise<{
     ].join("\n"),
   );
   await writeFile(join(appRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
+  await mkdir(join(appRoot, "agent", "channels"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(appRoot, "agent", "channels", "shutdown.mjs"),
+    [
+      "export default {",
+      '  __kind: "eve:channel",',
+      '  adapter: { kind: "channel" },',
+      "  routes: [",
+      "    {",
+      '      method: "GET",',
+      '      path: "/shutdown/slow-stream",',
+      "      handler() {",
+      "        const body = new ReadableStream({",
+      "          start(controller) {",
+      '            controller.enqueue(new TextEncoder().encode("start\\n"));',
+      "            setTimeout(() => {",
+      '              controller.enqueue(new TextEncoder().encode("finish\\n"));',
+      "              controller.close();",
+      "            }, 500);",
+      "          },",
+      "        });",
+      "        return new Response(body);",
+      "      },",
+      "    },",
+      "  ],",
+      "};",
+      "",
+    ].join("\n"),
+  );
   await writeFile(
     workflowWorldPath,
     [
@@ -508,6 +539,23 @@ describe("runCli", () => {
       await expect(fetch(new URL(EVE_HEALTH_ROUTE_PATH, firstServer.url))).resolves.toMatchObject({
         status: 200,
       });
+
+      const response = await fetch(new URL("/shutdown/slow-stream", firstServer.url));
+      expect(response.status).toBe(200);
+      expect(response.body).not.toBeNull();
+      if (response.body === null) {
+        throw new Error("Expected the shutdown probe route to return a streaming body.");
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const firstChunk = await reader.read();
+      expect(decoder.decode(firstChunk.value)).toBe("start\n");
+
+      const stopping = firstServer.stop();
+      const secondChunk = await reader.read();
+      expect(decoder.decode(secondChunk.value)).toBe("finish\n");
+      await expect(reader.read()).resolves.toMatchObject({ done: true });
+      await stopping;
     } finally {
       await firstServer.stop();
     }
