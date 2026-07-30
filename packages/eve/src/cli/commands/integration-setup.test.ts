@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import type { AddChannelsDeps } from "#setup/integrations/channel-scaffold.js";
+import type { IntegrationSetupRunnerDeps } from "#setup/integrations/runner.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 
 import { runIntegrationSetupCommand } from "./integration-setup.js";
@@ -57,9 +58,11 @@ describe("runIntegrationSetupCommand", () => {
       {},
       {
         createPrompter: () => fake.prompter,
-        detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
-        getVercelAuthStatus: vi.fn(async () => "cli-missing" as const),
-        addChannelsDeps: deps,
+        runnerDeps: {
+          detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
+          getVercelAuthStatus: vi.fn(async () => "cli-missing" as const),
+          addChannelsDeps: deps,
+        } satisfies IntegrationSetupRunnerDeps,
       },
     );
 

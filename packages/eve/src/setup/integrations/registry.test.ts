@@ -5,7 +5,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { interactiveAsker } from "../ask.js";
 import type { AddChannelsDeps } from "./channel-scaffold.js";
 import { channelSetupEnvironment } from "./shared/environment.js";
-import { channelSetupIntegration, createChannelSetupUi } from "./registry.js";
+import { setupIntegration, createChannelSetupUi } from "./registry.js";
 import { createDefaultSetupState } from "../state.js";
 import { WizardCancelledError } from "../step.js";
 
@@ -28,7 +28,7 @@ describe("channel setup integrations", () => {
       },
     });
 
-    const result = await channelSetupIntegration("slack").setup(context(fake.prompter));
+    const result = await setupIntegration("slack").setup(context(fake.prompter));
 
     expect(result).toMatchObject({ kind: "cancelled" });
   });
@@ -44,7 +44,7 @@ describe("channel setup integrations", () => {
       packageJsonUpdated: [],
     }));
 
-    const result = await channelSetupIntegration("web").setup({
+    const result = await setupIntegration("web").setup({
       ...context(fake.prompter),
       state: {
         ...context(fake.prompter).state,
