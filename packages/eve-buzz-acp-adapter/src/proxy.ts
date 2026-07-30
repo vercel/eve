@@ -5,9 +5,12 @@ import { eveChildEnvironment } from "./environment.js";
 import { readJsonLines } from "./line-reader.js";
 import { fixedModelResult, isFixedModelRequest } from "./model.js";
 import { publishBuzzReply } from "./publisher.js";
+import { publicationKey, reservePublication } from "./publication-state.js";
 import type { BuzzRoute, JsonRpcMessage } from "./types.js";
 
 interface ActiveTurn {
+  cancelled: boolean;
+  publication: AbortController;
   route?: BuzzRoute;
   sessionId?: string;
   text: string;
@@ -21,6 +24,7 @@ export interface ProxyOptions {
   input: Readable;
   modelId?: string;
   output: Writable;
+  publicationStateDirectory: string;
   publishTimeoutMs: number;
   target?: string;
 }
@@ -39,9 +43,20 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
   );
   const requests = new Map<string, string>();
   const turns = new Map<string, ActiveTurn>();
+  let eveInputError: Error | undefined;
+  eve.stdin.on("error", (error) => {
+    eveInputError = error;
+  });
 
   const send = (output: Writable, message: JsonRpcMessage): void => {
     output.write(`${JSON.stringify(message)}\n`);
+  };
+  const sendToEve = (message: JsonRpcMessage): void => {
+    if (eveInputError) throw eveInputError;
+    if (eve.stdin.destroyed || eve.stdin.writableEnded) {
+      throw new Error("eve acp stopped accepting protocol input");
+    }
+    send(eve.stdin, message);
   };
 
   const inputTask = (async () => {
@@ -64,6 +79,8 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
       if (message.method === "session/prompt" && message.id !== undefined) {
         const text = promptText(message.params?.prompt);
         turns.set(keyForId(message.id), {
+          cancelled: false,
+          publication: new AbortController(),
           route: parseBuzzRoute(text),
           sessionId:
             typeof message.params?.sessionId === "string" ? message.params.sessionId : undefined,
@@ -71,9 +88,21 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
         });
         message = addReplySinkInstruction(message);
       }
-      send(eve.stdin, message);
+      if (message.method === "session/cancel") {
+        const sessionId = message.params?.sessionId;
+        if (typeof sessionId === "string") {
+          for (const turn of turns.values()) {
+            if (turn.sessionId === sessionId) {
+              turn.cancelled = true;
+              turn.publication.abort();
+            }
+          }
+        }
+      }
+      sendToEve(message);
     }
-    eve.stdin.end();
+    if (eveInputError) throw eveInputError;
+    if (!eve.stdin.destroyed && !eve.stdin.writableEnded) eve.stdin.end();
   })();
 
   const outputTask = (async () => {
@@ -106,11 +135,10 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
         send(options.output, message);
         continue;
       }
-      turns.delete(requestKey);
-
       const completed = message.error === undefined && message.result?.stopReason === "end_turn";
       const text = turn.text.trim();
-      if (!completed || text.length === 0) {
+      if (!completed || turn.cancelled || text.length === 0) {
+        turns.delete(requestKey);
         send(options.output, message);
         continue;
       }
@@ -119,20 +147,43 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
         if (turn.route === undefined) {
           throw new Error("Buzz prompt did not contain a valid [Context] route");
         }
-        await publishBuzzReply({
-          buzzCli: options.buzzCli,
-          environment: options.environment,
-          route: turn.route,
-          text,
-          timeoutMs: options.publishTimeoutMs,
+        const reservation = await reservePublication({
+          directory: options.publicationStateDirectory,
+          key: publicationKey(turn.route),
+          staleAfterMs: options.publishTimeoutMs * 2,
         });
+        if (reservation === "published") {
+          console.error(
+            `[eve-buzz-acp-adapter] reply already published to ${turn.route.channelId}`,
+          );
+          turns.delete(requestKey);
+          send(options.output, message);
+          continue;
+        }
+        try {
+          await publishBuzzReply({
+            buzzCli: options.buzzCli,
+            environment: options.environment,
+            route: turn.route,
+            signal: turn.publication.signal,
+            text,
+            timeoutMs: options.publishTimeoutMs,
+          });
+          await reservation.commit();
+        } catch (error) {
+          if (turn.publication.signal.aborted) await reservation.commit();
+          else await reservation.release();
+          throw error;
+        }
         console.error(
           `[eve-buzz-acp-adapter] published ${text.length} characters to ${turn.route.channelId}`,
         );
+        turns.delete(requestKey);
         send(options.output, message);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         console.error(`[eve-buzz-acp-adapter] reply publication failed: ${detail}`);
+        turns.delete(requestKey);
         send(options.output, {
           jsonrpc: "2.0",
           id: message.id,

@@ -64,8 +64,8 @@ Before stable release, the connector must:
 - remove Buzz private keys, auth tags, and API tokens from the `eve acp` environment;
 - forward cancellation and preserve ACP errors;
 - bound line size, subprocess output, and publication duration;
-- persist a shared idempotency record before acknowledging publication;
-- coordinate idempotency across Buzz's parallel ACP process pool;
+- persist a shared idempotency record keyed by the channel and supplied reply anchor before acknowledging publication;
+- coordinate idempotency across Buzz's parallel ACP process pool, with a bounded stale-publication lease;
 - reject unsupported interactive elicitation and client-local MCP clearly;
 - avoid logging credentials or full signed events.
 

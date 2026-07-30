@@ -30,9 +30,8 @@ export function parseBuzzRoute(text: string): BuzzRoute | undefined {
   if (channel === null) return undefined;
 
   const replyTo = context.match(new RegExp(`--reply-to\\s+(${EVENT_ID})`, "i"))?.[1];
-  const route: BuzzRoute = { channelId: channel[1] ?? channel[2]! };
-  if (replyTo) route.replyTo = replyTo;
-  return route;
+  if (!replyTo) return undefined;
+  return { channelId: channel[1] ?? channel[2]!, replyTo };
 }
 
 export function addReplySinkInstruction(message: JsonRpcMessage): JsonRpcMessage {

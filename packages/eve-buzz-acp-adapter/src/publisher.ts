@@ -21,7 +21,9 @@ export async function publishBuzzReply(options: {
   route: BuzzRoute;
   text: string;
   timeoutMs: number;
+  signal?: AbortSignal;
 }): Promise<void> {
+  if (options.signal?.aborted) throw new Error("Buzz reply publication cancelled");
   await new Promise<void>((resolve, reject) => {
     const child = spawn(options.buzzCli, publicationArguments(options.route), {
       env: options.environment,
@@ -29,10 +31,15 @@ export async function publishBuzzReply(options: {
     });
     let stderr = "";
     let settled = false;
+    const abort = () => {
+      child.kill("SIGKILL");
+      finish(new Error("Buzz reply publication cancelled"));
+    };
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else resolve();
     };
@@ -40,6 +47,7 @@ export async function publishBuzzReply(options: {
       child.kill("SIGKILL");
       finish(new Error(`buzz CLI timed out after ${options.timeoutMs}ms`));
     }, options.timeoutMs);
+    options.signal?.addEventListener("abort", abort, { once: true });
 
     child.stderr.on("data", (chunk: Buffer) => {
       if (stderr.length < OUTPUT_LIMIT)

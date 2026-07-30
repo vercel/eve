@@ -11,10 +11,8 @@ describe("Buzz prompt projection", () => {
     expect(parseBuzzRoute(text)).toEqual({ channelId, replyTo: eventId });
   });
 
-  it("accepts an unnamed channel and rejects prompts without Context", () => {
-    expect(parseBuzzRoute(`[Context]\nScope: dm\nChannel: ${channelId}`)).toEqual({
-      channelId,
-    });
+  it("rejects a route without Context or an explicit reply anchor", () => {
+    expect(parseBuzzRoute(`[Context]\nScope: dm\nChannel: ${channelId}`)).toBeUndefined();
     expect(parseBuzzRoute(`Channel: ${channelId}`)).toBeUndefined();
   });
 

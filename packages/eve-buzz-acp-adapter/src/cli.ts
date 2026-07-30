@@ -2,6 +2,7 @@
 
 import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPrompter, WizardCancelledError } from "eve/setup";
@@ -93,6 +94,9 @@ async function main(): Promise<void> {
     eveBin: options.eveBin,
     input: process.stdin,
     output: process.stdout,
+    publicationStateDirectory:
+      process.env.BUZZ_PUBLISH_STATE_DIR ??
+      join(homedir(), ".buzz", "eve-buzz-acp-adapter", "publications"),
     publishTimeoutMs: Number(process.env.BUZZ_PUBLISH_TIMEOUT_MS || 20_000),
   };
   if (modelId) proxyOptions.modelId = modelId;
