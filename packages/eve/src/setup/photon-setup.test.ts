@@ -19,7 +19,7 @@ function deps(): PhotonSetupDeps {
   return {
     appendEnv: vi.fn(async () => ({ written: [], skipped: [] })),
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
-    ensureLinkedVercelProject: vi.fn(async () => ({ orgId: "team-id", projectId: "project-id" })),
+    ensureVercelProject: vi.fn(async () => ({ orgId: "team-id", projectId: "project-id" })),
     openUrl: vi.fn(),
     provisionConnector: vi.fn(),
     provisionProject: vi.fn(async () => ({
@@ -62,6 +62,29 @@ describe("Photon setup", () => {
       "/project/agent/channels/photon.ts",
       expect.stringContaining("IMESSAGE_WEBHOOK_SECRET"),
       { force: undefined },
+    );
+  });
+
+  it("uses the agent name in the default Photon project name", async () => {
+    const fake = createFakePrompter({ single: () => "portable" });
+    const effects = deps();
+
+    await PHOTON_CHANNEL_SETUP.setup({
+      environment: photonSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      state: {
+        agentName: "weather-agent",
+        project: { kind: "unresolved" },
+        projectPath: "/project",
+      },
+      ui: createPhotonSetupUi({
+        asker: asker({ "photon-phone-number": "+15551234567" }),
+        prompter: fake.prompter,
+      }),
+      photonDeps: effects,
+    });
+
+    expect(effects.provisionProject).toHaveBeenCalledWith(
+      expect.objectContaining({ projectName: "eve · weather-agent" }),
     );
   });
 

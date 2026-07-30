@@ -1615,9 +1615,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (content.trim().length === 0) return;
     this.#start();
     this.#pushBlock(
-      tone === undefined
-        ? { kind: "result", body: content, live: false }
-        : { kind: "flow", title: tone, body: content, live: false },
+      tone === "success"
+        ? { kind: "result", body: content, live: false, status: "done" }
+        : tone === "error"
+          ? { kind: "flow", title: tone, body: content, live: false }
+          : { kind: "result", body: content, live: false },
     );
     this.#paint();
   }

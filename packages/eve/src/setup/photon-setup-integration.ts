@@ -22,7 +22,12 @@ export interface PhotonSetupContext {
 
 /** Structured outcome from the Photon setup implementation. */
 export type PhotonSetupResult =
-  | { readonly kind: "done"; readonly state: PhotonSetupState }
+  | {
+      readonly kind: "done";
+      readonly state: PhotonSetupState;
+      readonly assignedPhoneNumber?: string;
+      readonly dashboardUrl: string;
+    }
   | { readonly kind: "cancelled" };
 
 /** Guided Photon setup behavior. */

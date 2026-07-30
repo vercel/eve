@@ -71,9 +71,11 @@ function createData(credentials: PhotonProjectCredentials): string {
 
 function requireCreatedConnector(result: RunVercelCaptureResult): PhotonConnectorRef {
   if (!result.ok) {
-    const detail = result.stdout.trim();
+    const detail = [result.stderr, result.stdout]
+      .map((output) => output?.trim())
+      .find((output): output is string => output !== undefined && output.length > 0);
     throw new Error(
-      detail ? `Photon connector creation failed: ${detail}` : "Photon connector creation failed.",
+      detail ? `Photon connector creation failed:\n${detail}` : "Photon connector creation failed.",
     );
   }
   const connector = parseCreatedPhotonConnector(result.stdout);

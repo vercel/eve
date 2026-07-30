@@ -27,6 +27,28 @@ describe("Photon Connect provisioning", () => {
     ).toEqual({ id: "scl_photon", uid: "photon/imessage0" });
   });
 
+  test("includes Vercel stderr when connector creation fails", async () => {
+    await expect(
+      provisionPhotonConnector({
+        credentials: { projectId: "project-id", projectSecret: "project-secret" },
+        log: log(),
+        project: { orgId: "team_123", projectId: "prj_123" },
+        projectRoot: "/tmp/imessage0",
+        slug: "imessage0",
+        deps: {
+          runVercel: vi.fn(),
+          runVercelCaptureStdout: vi.fn(async () => ({
+            ok: false,
+            stdout: "",
+            stderr: 'Error: A connector named "imessage0" already exists.',
+          })),
+        },
+      }),
+    ).rejects.toThrow(
+      'Photon connector creation failed:\nError: A connector named "imessage0" already exists.',
+    );
+  });
+
   test("creates a native connector, detaches, then attaches the routed trigger", async () => {
     const runVercelCaptureStdout = vi.fn().mockResolvedValueOnce({
       ok: true as const,
