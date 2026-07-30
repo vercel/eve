@@ -85,6 +85,8 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     },
     async resolveSession() {
       throw new Error("resolveSession should not be called in this scenario");
+    async cancelSession() {
+      throw new Error("cancelSession should not be called in this scenario");
     },
     async run(input) {
       captured.push({
@@ -179,6 +181,9 @@ describe("cross-channel receive end-to-end", () => {
         {
           receive,
           resolveActiveSession: async () => undefined,
+          cancelSession: async () => {
+            throw new Error("webhook should not cancel sessions directly");
+          },
           send: async () => {
             throw new Error("webhook should delegate to args.receive()");
           },

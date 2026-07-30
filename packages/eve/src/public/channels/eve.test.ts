@@ -11,6 +11,7 @@ import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channe
 import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs, SendFn, SendOptions, SendPayload } from "#channel/routes.js";
 import type { Session as ChannelSession } from "#channel/session.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
@@ -81,6 +82,7 @@ function createEveCreateHandler(input: EveChannelInput) {
         cancel: vi.fn(),
         reset: vi.fn(),
         getSession: vi.fn(),
+        cancelSession: vi.fn(),
         receive: vi.fn() as any,
         params: {},
         waitUntil: () => undefined,
@@ -128,6 +130,7 @@ function createEveContinueHandler(input: EveChannelInput) {
         cancel: vi.fn(),
         reset: vi.fn(),
         getSession: mockGetSession,
+        cancelSession: vi.fn(),
         receive: vi.fn() as any,
         params: { sessionId: "test-session-id" },
         waitUntil: () => undefined,
@@ -208,6 +211,22 @@ function createEveResetHandler(input: EveChannelInput) {
         cancel: vi.fn(),
         reset,
         getSession: vi.fn(),
+function createEveCancelHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const cancelRoute = channel.routes.find(
+    (r) => r.method === "DELETE" && r.path === "/eve/v1/session",
+  );
+  if (!cancelRoute) throw new Error("No cancel DELETE route found");
+
+  const mockCancelSession = vi.fn().mockResolvedValue({ sessionId: "test-session-id" });
+
+  return {
+    cancelSession: mockCancelSession,
+    async fetch(req: Request) {
+      const args: RouteHandlerArgs = {
+        send: vi.fn(),
+        getSession: vi.fn(),
+        cancelSession: mockCancelSession,
         receive: vi.fn() as any,
         params: {},
         waitUntil: () => undefined,
@@ -260,6 +279,7 @@ function createEveStreamHandler(input: EveChannelInput) {
         requestIp: "127.0.0.1",
       };
       return (streamRoute as any).handler(new Request(url), args);
+      return (cancelRoute as any).handler(req, args);
     },
   };
 }
@@ -653,6 +673,83 @@ describe("eveChannel — onMessage", () => {
     expect(payload.context).toBeUndefined();
     const options = handler.send.mock.calls[0]?.[1] as SendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
+  });
+});
+
+describe("eveChannel — cancel session", () => {
+  it("authenticates and cancels a session by continuation token", async () => {
+    const handler = createEveCancelHandler({ auth: () => ACCEPTED_AUTH });
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session", {
+        body: JSON.stringify({
+          continuationToken: "eve:conversation",
+          reason: "operator reset",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "DELETE",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("x-eve-session-id")).toBe("test-session-id");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "test-session-id",
+    });
+    expect(handler.cancelSession).toHaveBeenCalledWith({
+      continuationToken: "eve:conversation",
+      reason: "operator reset",
+    });
+  });
+
+  it("does not cancel when auth rejects", async () => {
+    const handler = createEveCancelHandler({ auth: [] });
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session", {
+        body: JSON.stringify({ continuationToken: "eve:conversation" }),
+        headers: { "content-type": "application/json" },
+        method: "DELETE",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(handler.cancelSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing continuation token", async () => {
+    const handler = createEveCancelHandler({ auth: none() });
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session", {
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json" },
+        method: "DELETE",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.cancelSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("continuationToken"),
+    });
+  });
+
+  it("returns 404 when no active session owns the token", async () => {
+    const handler = createEveCancelHandler({ auth: none() });
+    handler.cancelSession.mockRejectedValueOnce(new RuntimeNoActiveSessionError("eve:missing"));
+
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session", {
+        body: JSON.stringify({ continuationToken: "eve:missing" }),
+        headers: { "content-type": "application/json" },
+        method: "DELETE",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Session not found.",
+      ok: false,
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 import type { H3Event } from "nitro";
 import type { Agent, RouteContext } from "#public/definitions/channel.js";
+import { createCancelSessionFn } from "#channel/cancel-session.js";
 import {
   createCrossChannelReceiveFn,
   toCrossChannelTargets,
@@ -193,6 +194,7 @@ function buildRouteArgs(
   const resolveActiveSession = createResolveActiveSessionFn(bundle.runtime, channelName);
   const cancel = createCancelFn(bundle.runtime, channelName);
   const reset = createResetFn(bundle.runtime, channelName);
+  const cancelSession = createCancelSessionFn(bundle.runtime, channelName);
   const getSession = createGetSessionFn(bundle.runtime);
   const receive = createCrossChannelReceiveFn(
     bundle.runtime,
@@ -218,6 +220,20 @@ function buildRouteArgs(
       },
     ),
     agent,
+  const args = attachAgentInfoRouteResponse(
+    {
+      send,
+      getSession,
+      cancelSession,
+      receive,
+      params,
+      waitUntil,
+      requestIp,
+    },
+    async () => {
+      const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+      return await handleAgentInfoRequest(config);
+    },
   );
 
   return {
@@ -231,6 +247,8 @@ function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agen
   return {
     async cancelTurn(input) {
       return await runtime.cancelTurn(input);
+    async cancelSession(input) {
+      return await runtime.cancelSession(input);
     },
     async deliver(input) {
       const deliverInput: DeliverInput = { ...input, requestId }; // Avoid mutating a frozen caller input.

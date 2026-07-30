@@ -291,6 +291,6 @@ The provider must fail closed for unknown tenants, avoid returning secrets in lo
 4. eve sends the resulting token and headers directly to the remote service.
 5. Neither becomes a model message or tool result.
 
-Also enforce tenant ownership for session create, continue, and stream routes. Route authentication identifies the caller, but your application owns the ACL that decides which session ids that caller may access.
+Also enforce tenant ownership for session create, continue, cancel, and stream routes. Route authentication identifies the caller, but your application owns the ACL that decides which session ids and continuation tokens that caller may access.
 
 No framework-native tenant object is involved. The implementation is the composition of route auth, `ctx.session`, tool execution, and async connection auth/header resolvers.

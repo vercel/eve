@@ -166,6 +166,19 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 `"accepted"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
 Custom channel routes request the same cancellation without knowing the session id: the `cancel` route helper is addressed by the channel-local continuation token, and `Session.cancel()` by session id. See [custom channels](../channels/custom#cancel-a-turn).
+## Cancel a stuck session
+
+If a parked session owns a deterministic conversation identity but the run is no longer progressing, an operator can cancel the run that owns the current continuation token:
+
+```bash
+curl -X DELETE http://127.0.0.1:3000/eve/v1/session \
+  -H 'content-type: application/json' \
+  -d '{"continuationToken":"<token>","reason":"operator reset"}'
+```
+
+The route returns `202` when it cancels the owning run and `404` when no active session owns that token. After cancellation, the next ordinary message with the same conversation identity follows the normal no-active-session path and starts a fresh run.
+
+Use this as an authenticated recovery control, not as ordinary chat flow. If your application serves multiple tenants, check that the caller owns the continuation token before proxying the cancellation request.
 
 ## Reconnect and rewind
 

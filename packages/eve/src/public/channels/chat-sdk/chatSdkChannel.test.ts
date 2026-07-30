@@ -119,6 +119,7 @@ async function firePost(
       method: "POST",
     }),
     {
+      cancelSession: vi.fn() as any,
       getSession: vi.fn() as any,
       resolveActiveSession: async () => undefined,
       cancel: vi.fn(),
@@ -176,6 +177,7 @@ describe("chatSdkChannel", () => {
     const response = await get.handler(
       new Request("https://example.com/eve/v1/test?crc_token=abc123", { method: "GET" }),
       {
+        cancelSession: vi.fn() as any,
         getSession: vi.fn() as any,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),

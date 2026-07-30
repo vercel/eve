@@ -188,6 +188,7 @@ Policy lookup failures should throw or deny, never silently allow. Recheck autho
 An approval durably pauses the session and a later request resumes it. Your HTTP boundary must ensure a caller cannot continue or stream a session owned by another tenant. Persist session ownership in your application and check it before proxying:
 
 - `POST /eve/v1/session/:sessionId`, including `inputResponses`;
+- `DELETE /eve/v1/session`;
 - `GET /eve/v1/session/:sessionId/stream`.
 
 Built-in approval confirms that a human with access to the session approved the call. It is not a four-eyes workflow that proves a different person or role approved it. For that requirement, create an application-owned approval request, notify eligible approvers through a channel, and have policy return allow only after that request records an authorized decision.

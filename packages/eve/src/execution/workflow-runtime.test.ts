@@ -281,6 +281,43 @@ describe("createWorkflowRuntime#resolveSession", () => {
     getHookByTokenMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().resolveSession("test:token")).rejects.toBe(failure);
+describe("createWorkflowRuntime#cancelSession", () => {
+  const NOT_FOUND_TOKEN = "test:no-such-hook";
+
+  function buildRuntime() {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    return createWorkflowRuntime({ compiledArtifactsSource });
+  }
+
+  it("normalizes a missing continuation hook into `RuntimeNoActiveSessionError`", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
+
+    await expect(
+      buildRuntime().cancelSession({
+        continuationToken: NOT_FOUND_TOKEN,
+      }),
+    ).rejects.toSatisfy(isRuntimeNoActiveSessionError);
+  });
+
+  it("cancels the run that owns the continuation hook", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    resumeHookMock.mockResolvedValue({ runId: "driver-run" });
+    getRunMock.mockReturnValue({ cancel });
+
+    await expect(
+      buildRuntime().cancelSession({
+        continuationToken: "test:active-hook",
+        reason: "operator reset",
+      }),
+    ).resolves.toEqual({ sessionId: "driver-run" });
+
+    expect(resumeHookMock).toHaveBeenCalledWith("test:active-hook", {
+      kind: "cancel-session",
+      reason: "operator reset",
+    });
+    expect(getRunMock).toHaveBeenCalledWith("driver-run");
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });
 

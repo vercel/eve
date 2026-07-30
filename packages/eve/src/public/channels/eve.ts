@@ -37,6 +37,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import {
   defineChannel,
+  DELETE,
   POST,
   GET,
   type Channel,
@@ -44,6 +45,7 @@ import {
   type ChannelEvents,
   type ChannelSessionOps,
 } from "#public/definitions/channel.js";
+import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -424,6 +426,37 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             status: 202,
           },
         );
+      DELETE("/eve/v1/session", async (req, { cancelSession }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const body = await parseCancelBody(req);
+        if (body instanceof Response) return body;
+
+        try {
+          const cancelled = await cancelSession({
+            continuationToken: body.continuationToken,
+            reason: body.reason,
+          });
+          return Response.json(
+            {
+              ok: true,
+              sessionId: cancelled.sessionId,
+            },
+            {
+              headers: {
+                "cache-control": "no-store",
+                [EVE_SESSION_ID_HEADER]: cancelled.sessionId,
+              },
+              status: 202,
+            },
+          );
+        } catch (error) {
+          if (isRuntimeNoActiveSessionError(error)) {
+            return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+          }
+          throw error;
+        }
       }),
 
       GET("/eve/v1/session/:sessionId/stream", async (req, { getSession, params }) => {
@@ -628,6 +661,48 @@ interface ParsedContinueBody {
   inputResponses?: readonly InputResponse[];
   context?: readonly string[];
   outputSchema?: JsonObject;
+}
+
+interface ParsedCancelBody {
+  continuationToken: string;
+  reason?: string;
+}
+
+async function parseCancelBody(req: Request): Promise<ParsedCancelBody | Response> {
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
+  }
+
+  if (payload === null || typeof payload !== "object") {
+    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
+  }
+
+  const body = payload as Record<string, unknown>;
+  const continuationToken =
+    typeof body.continuationToken === "string" && body.continuationToken.length > 0
+      ? body.continuationToken
+      : undefined;
+
+  if (continuationToken === undefined) {
+    return Response.json(
+      { error: "Missing or empty 'continuationToken' field.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  if (body.reason !== undefined && typeof body.reason !== "string") {
+    return Response.json(
+      { error: "Expected 'reason' to be a string when present.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  return body.reason === undefined
+    ? { continuationToken }
+    : { continuationToken, reason: body.reason };
 }
 
 function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody | Response {

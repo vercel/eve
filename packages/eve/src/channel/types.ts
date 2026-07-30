@@ -169,6 +169,15 @@ export interface RuntimeActionResultHookPayload {
 }
 
 /**
+ * Framework-owned control payload used to resolve the workflow run that owns a
+ * continuation-token hook before cancelling the session.
+ */
+export interface CancelSessionHookPayload {
+  readonly kind: "cancel-session";
+  readonly reason?: string;
+}
+
+/**
  * Event coordinates attached to a proxied `input.requested` batch.
  *
  * Mirrors the `data` payload of the child's `input.requested` stream event so
@@ -222,6 +231,7 @@ export interface SubagentAuthorizationEventHookPayload {
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
+  | CancelSessionHookPayload
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
@@ -365,6 +375,15 @@ export interface DeliverInput {
   readonly payload: DeliverPayload;
 }
 
+export interface CancelSessionInput {
+  readonly continuationToken: string;
+  readonly reason?: string;
+}
+
+export interface CancelSessionResult {
+  readonly sessionId: string;
+}
+
 /**
  * Terminal outcome of a runtime run.
  *
@@ -421,6 +440,13 @@ export interface Runtime {
    * owns the token.
    */
   resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined>;
+   * Cancels the session that currently owns a continuation token.
+   *
+   * Operators use this to evict a wedged parked session so the next ordinary
+   * delivery can follow the normal no-active-session fallback and create a
+   * fresh run for the same conversation identity.
+   */
+  cancelSession(input: CancelSessionInput): Promise<CancelSessionResult>;
 
   /**
    * Returns a readable stream of lifecycle events for an existing session.
