@@ -567,9 +567,9 @@ describe("provisionSlackbot", () => {
       },
     );
 
-    // Created with --triggers, the slug name, and JSON output for deterministic UID capture.
+    // Created with --triggers, a service-specific name, and JSON output for deterministic UID capture.
     expect(mockedRunVercelCaptureStdout).toHaveBeenCalledWith(
-      ["connect", "create", "slack", "--triggers", "--name", "my-agent", "-F", "json"],
+      ["connect", "create", "slack", "--triggers", "--name", "my-agent-slack", "-F", "json"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", nonInteractive: true }),
     );
     expect(mockedCaptureVercel).toHaveBeenCalledWith(

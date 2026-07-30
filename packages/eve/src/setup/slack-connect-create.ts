@@ -13,6 +13,7 @@ import {
   CONNECT_LOOKUP_TIMEOUT_MS,
   fetchSlackConnectorDetails,
 } from "./slack-connect-lifecycle.js";
+import { connectConnectorName } from "./connect-connector-name.js";
 
 export interface SlackConnectorCreateDeps {
   captureVercel: typeof captureVercel;
@@ -163,7 +164,16 @@ export async function createSlackConnector(input: {
   };
   const createWork = input.phase("Waiting for Slack setup to finish...", () =>
     input.deps.runVercelCaptureStdout(
-      ["connect", "create", "slack", "--triggers", "--name", input.slug, "-F", "json"],
+      [
+        "connect",
+        "create",
+        "slack",
+        "--triggers",
+        "--name",
+        connectConnectorName(input.slug, "slack"),
+        "-F",
+        "json",
+      ],
       {
         cwd: input.projectRoot,
         nonInteractive: true,

@@ -1,4 +1,5 @@
 import {
+  deriveSlackConnectorSlug,
   ensureConnection,
   listAuthoredConnections,
   type ConnectionInput,
@@ -10,6 +11,7 @@ import {
   cleanupCreatedConnectionConnector,
   setupConnectionConnector,
 } from "../connection-connector.js";
+import { connectConnectorName } from "../connect-connector-name.js";
 import { canonicalConnectorNameForEntry } from "../scaffold/connections/catalog.js";
 import {
   isProjectResolved,
@@ -25,6 +27,7 @@ import { CONNECT_REQUIRES_VERCEL } from "./select-connections.js";
 
 /** Injected for tests; defaults to the real scaffold and Connect effects. */
 export interface AddConnectionsDeps {
+  deriveConnectorProjectSlug: (projectRoot: string, projectNameHint?: string) => Promise<string>;
   ensureConnection: typeof ensureConnection;
   listAuthoredConnections: typeof listAuthoredConnections;
   readProjectLink: typeof readProjectLink;
@@ -68,6 +71,7 @@ export function addConnections(
   options: AddConnectionsOptions,
 ): SetupBox<SetupState, null, ProjectResolution> {
   const deps = options.deps ?? {
+    deriveConnectorProjectSlug: deriveSlackConnectorSlug,
     ensureConnection,
     listAuthoredConnections,
     readProjectLink,
@@ -93,6 +97,14 @@ export function addConnections(
       const noVercel = !hasVercelProject(state);
       const project = state.project;
       const authored = new Set(await deps.listAuthoredConnections(projectRoot));
+      let connectorProjectSlug: string | undefined;
+      const getConnectorProjectSlug = async (): Promise<string> => {
+        connectorProjectSlug ??= await deps.deriveConnectorProjectSlug(
+          projectRoot,
+          state.agentName,
+        );
+        return connectorProjectSlug;
+      };
 
       for (const plan of state.connectionSelection) {
         if (authored.has(plan.slug)) {
@@ -115,11 +127,17 @@ export function addConnections(
             if (canonicalConnectorName === undefined) {
               throw new Error(`Connection ${plan.slug} has no canonical connector name.`);
             }
+            const connectorName = connectConnectorName(
+              await getConnectorProjectSlug(),
+              plan.provision.service,
+              plan.slug,
+            );
             const connector = await deps.setupConnectionConnector({
               log,
               prompter: options.prompter,
               projectRoot,
               slug: plan.slug,
+              connectorName,
               service: plan.provision.service,
               canonicalConnectorName,
               project: await resolveConnectionProject({
@@ -134,11 +152,17 @@ export function addConnections(
             if (connector.kind === "created") createdConnectorId = connector.connectorId;
             break;
           }
-          case "command-hint":
+          case "command-hint": {
+            const connectorName = connectConnectorName(
+              await getConnectorProjectSlug(),
+              plan.provision.service,
+              plan.slug,
+            );
             log.info(
-              `Run \`vercel connect create ${plan.provision.service} --name ${plan.slug}\`, then set the connector UID in agent/connections/${plan.slug}.ts.`,
+              `Run \`vercel connect create ${plan.provision.service} --name ${connectorName}\`, then set the connector UID in agent/connections/${plan.slug}.ts.`,
             );
             break;
+          }
           case "connect-manual":
             log.warning(
               `Could not determine a Connect service for ${plan.slug}. Create the connector manually and set its UID in agent/connections/${plan.slug}.ts.`,

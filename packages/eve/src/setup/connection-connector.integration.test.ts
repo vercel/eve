@@ -64,6 +64,7 @@ describe("setupConnectionConnector", () => {
       prompter,
       projectRoot,
       slug: "linear",
+      connectorName: "my-agent-linear-mcp",
       service: SERVICE,
       canonicalConnectorName: CANONICAL_NAME,
       project: { projectId: "prj_1", orgId: "org_1" },
@@ -208,7 +209,17 @@ describe("setupConnectionConnector", () => {
       "Could not attach linear/linear-2",
     );
     expect(create).toHaveBeenCalledWith(
-      ["connect", "create", SERVICE, "--name", "linear-2", "-F", "json", "--scope", "org_1"],
+      [
+        "connect",
+        "create",
+        SERVICE,
+        "--name",
+        "my-agent-linear-mcp",
+        "-F",
+        "json",
+        "--scope",
+        "org_1",
+      ],
       expect.any(Object),
     );
     expect(run).toHaveBeenLastCalledWith(

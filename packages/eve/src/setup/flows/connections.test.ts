@@ -34,6 +34,7 @@ function scriptConnectionList(queue: Array<PrompterValue | "cancel">) {
 
 function addConnectionDeps(): AddConnectionsDeps {
   return {
+    deriveConnectorProjectSlug: vi.fn(async () => "agent"),
     ensureConnection: vi.fn<AddConnectionsDeps["ensureConnection"]>(async (options) => ({
       slug: options.slug ?? options.entry.slug,
       protocol: options.protocol,

@@ -51,6 +51,9 @@ function makeBoxes(
 
 function createDeps() {
   return {
+    deriveConnectorProjectSlug: vi.fn<AddConnectionsDeps["deriveConnectorProjectSlug"]>(
+      async () => "my-agent",
+    ),
     ensureConnection: vi.fn<AddConnectionsDeps["ensureConnection"]>(async (options) => ({
       slug: options.slug ?? options.entry.slug,
       protocol: options.protocol,
@@ -129,7 +132,7 @@ describe("selectConnections + addConnections boxes", () => {
     // since `vercel connect create` opens a browser.
     expect(deps.setupConnectionConnector).not.toHaveBeenCalled();
     expect(prompter.log.info).toHaveBeenCalledWith(
-      "Run `vercel connect create mcp.linear.app --name linear`, then set the connector UID in agent/connections/linear.ts.",
+      "Run `vercel connect create mcp.linear.app --name my-agent-linear-mcp`, then set the connector UID in agent/connections/linear.ts.",
     );
   });
 
@@ -146,6 +149,7 @@ describe("selectConnections + addConnections boxes", () => {
     expect(deps.setupConnectionConnector).toHaveBeenCalledWith(
       expect.objectContaining({
         slug: "linear",
+        connectorName: "my-agent-linear-mcp",
         service: "mcp.linear.app",
         projectRoot: "/tmp/project",
       }),

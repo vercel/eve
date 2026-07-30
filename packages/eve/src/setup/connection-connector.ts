@@ -10,6 +10,7 @@ export interface SetupConnectionConnectorOptions {
   prompter: Prompter;
   projectRoot: string;
   slug: string;
+  connectorName: string;
   service: string;
   canonicalConnectorName: string;
   project: VercelProjectReference;
@@ -266,7 +267,7 @@ async function resolveFallbackConnector(
     const name = (
       await options.prompter.text({
         message: "New connector name",
-        defaultValue: nextConnectorName(options.slug, names),
+        defaultValue: nextConnectorName(options.connectorName, names),
         validate: (value) => {
           const normalized = value.trim().toLowerCase();
           if (normalized.length === 0) return "A name is required.";
