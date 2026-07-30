@@ -813,6 +813,7 @@ export async function createProductionApplicationNitro(
   const nitroPlugins = createApplicationNitroPlugins(preparedHost);
   nitroPlugins.push(
     resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
+    resolvePackageSourceFilePath("src/internal/nitro/host/server-shutdown-plugin.ts"),
   );
 
   await prepareEveVersionedCacheDirectory(options.buildDir);
