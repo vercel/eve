@@ -1,5 +1,6 @@
 import type { H3Event } from "nitro";
 import type { Agent, RouteContext } from "#public/definitions/channel.js";
+import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import {
   createCrossChannelReceiveFn,
   toCrossChannelTargets,
@@ -70,10 +71,15 @@ export async function dispatchChannelRequest(
 
     // Channel identity is known only after resolution; a 404 span carries
     // just the route. `span` is undefined when instrumentation opted out of
-    // channel-request tracing.
+    // channel-request tracing. Prefer the stamped instrumentation kind
+    // (`channel:<name>`) over the raw adapter kind — behaviorless authored
+    // channels keep adapter kind `"http"`, so the adapter alone would report
+    // `"http"` where the rest of the trace reports `channel:<name>`.
     span?.setAttribute("eve.channel.name", matchedChannel.name);
-    if (matchedChannel.adapter?.kind !== undefined) {
-      span?.setAttribute("eve.channel.kind", matchedChannel.adapter.kind);
+    const channelKind =
+      getChannelInstrumentationKind(matchedChannel.definition) ?? matchedChannel.adapter?.kind;
+    if (channelKind !== undefined) {
+      span?.setAttribute("eve.channel.kind", channelKind);
     }
 
     const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);

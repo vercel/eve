@@ -15,7 +15,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { trace as vendoredTrace } from "#compiled/@opentelemetry/api/index.js";
 
-import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
+import {
+  CHANNEL_SENTINEL,
+  type CompiledChannel,
+  setChannelInstrumentationKind,
+} from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import {
   getInstrumentationConfig,
@@ -771,6 +775,32 @@ describe("dispatchChannelRequest tracing", () => {
       "url.scheme": "https",
     });
     expect(span!.status.code).toBe(0 /* SpanStatusCode.UNSET */);
+  });
+
+  it("stamps the instrumentation kind for a behaviorless authored channel, not the http adapter kind", async () => {
+    // Behaviorless authored channels keep adapter kind "http"; the stamped
+    // instrumentation kind carries the real channel:<name>.
+    const definition: CompiledChannel = {
+      __kind: CHANNEL_SENTINEL,
+      routes: [],
+      adapter: { kind: "http" },
+    };
+    setChannelInstrumentationKind(definition, "channel:support");
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        slackChannel(async () => new Response("ok"), {
+          adapter: { kind: "http" },
+          definition,
+        }),
+      ],
+      runtime,
+    });
+
+    await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
+
+    const [span] = await finishedSpans();
+    expect(span!.attributes["eve.channel.kind"]).toBe("channel:support");
   });
 
   it("makes a span created inside the handler a child of the request span", async () => {
