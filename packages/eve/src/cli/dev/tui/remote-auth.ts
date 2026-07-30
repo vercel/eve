@@ -101,8 +101,8 @@ async function selectVercelDeploymentScope(
 
 /**
  * Authenticates a remote by resolving its deployment URL to the owning Vercel
- * project, updating Trusted Sources when needed and keeping the resolved
- * credential in this TUI session.
+ * project, updating Trusted Sources when approved, and returning a renewable
+ * credential for the calling interactive session.
  */
 export async function runRemoteAuthFlow(input: {
   readonly workspaceRoot: string;

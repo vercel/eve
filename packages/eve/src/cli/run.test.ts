@@ -537,6 +537,39 @@ describe("eve acp", () => {
     expect(output).toEqual([]);
   });
 
+  it("resolves verified Vercel credentials for a remote ACP agent", async () => {
+    const runAcpServer = vi.fn(async () => {});
+    const resolveVerifiedRemoteDevelopmentClient = vi.fn(async () => ({
+      options: {
+        auth: { vercelOidc: { token: "oidc-token" } } as const,
+        headers: { "x-vercel-protection-bypass": "bypass" },
+        host: "https://agent.example.com/",
+      },
+      lastOidcTokenFailure: () => undefined,
+    }));
+
+    await runCli(
+      ["acp", "https://agent.example.com", "--scope", "vercel-internal-playground"],
+      { error: () => {}, log: () => {} },
+      { resolveVerifiedRemoteDevelopmentClient, runAcpServer },
+    );
+
+    expect(resolveVerifiedRemoteDevelopmentClient).toHaveBeenCalledWith({
+      headers: undefined,
+      serverUrl: "https://agent.example.com/",
+      signal: expect.any(AbortSignal),
+      vercelScope: "vercel-internal-playground",
+      workspaceRoot: expect.any(String),
+    });
+    expect(runAcpServer).toHaveBeenCalledWith({
+      auth: { vercelOidc: { token: "oidc-token" } },
+      eveVersion: expect.any(String),
+      headers: { "x-vercel-protection-bypass": "bypass" },
+      serverUrl: "https://agent.example.com/",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it("connects ACP to a remote agent without starting a local server", async () => {
     const startHost = vi.fn();
     const runAcpServer = vi.fn(async () => {});

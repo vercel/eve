@@ -15,6 +15,8 @@ Without a URL, the client starts one process from the eve application root. It s
 eve acp https://agent.example.com
 ```
 
+For a recognized Vercel deployment, eve verifies the exact origin and resolves a short-lived project-scoped OIDC token from the local Vercel session. If login or a Trusted Sources change is required, run `eve dev <url>` and complete `/vc:login` before launching ACP. `VERCEL_AUTOMATION_BYPASS_SECRET` remains available for deployments configured with a Protection Bypass for Automation token.
+
 ## Configure Zed
 
 Open the eve application root as the Zed workspace. In **Agent Settings → External Agents**, add a custom agent:

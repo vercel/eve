@@ -16,7 +16,7 @@ import {
   type ToolCall,
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
-import type { SendTurnInput, SessionState } from "#client/types.js";
+import type { ClientOptions, SendTurnInput, SessionState } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -55,7 +55,8 @@ interface AcpSession {
 /** Configuration for translating one ACP client connection to an eve server. */
 export interface EveAcpAdapterOptions {
   readonly eveVersion: string;
-  readonly headers?: Readonly<Record<string, string>>;
+  readonly auth?: ClientOptions["auth"];
+  readonly headers?: ClientOptions["headers"];
   readonly serverUrl: string;
   /** Local workspace root to enforce; omit when connecting to a remote deployment. */
   readonly workspaceRoot?: string;
@@ -83,6 +84,7 @@ export class EveAcpAdapter {
     this.#client =
       options.client ??
       new Client({
+        auth: options.auth,
         headers: options.headers,
         host: options.serverUrl,
         preserveCompletedSessions: true,

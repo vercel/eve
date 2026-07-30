@@ -2,12 +2,14 @@ import { Readable, Writable } from "node:stream";
 
 import { agent, methods, ndJsonStream } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { EveAcpAdapter } from "#acp/adapter.js";
+import type { ClientOptions } from "#client/types.js";
 import { limitAcpLineBytes } from "#acp/line-limit.js";
 
 /** Configuration for one ACP stdio connection backed by an eve server. */
 export interface RunAcpServerOptions {
+  readonly auth?: ClientOptions["auth"];
   readonly eveVersion: string;
-  readonly headers?: Readonly<Record<string, string>>;
+  readonly headers?: ClientOptions["headers"];
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
   /** Local workspace root to enforce; omit when connecting to a remote deployment. */

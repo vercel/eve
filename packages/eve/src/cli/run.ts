@@ -9,7 +9,11 @@ import { registerIntegrationCommands } from "#cli/commands/register-integration-
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
-import { registerAcpCommand, type RunAcpServer } from "#cli/acp/command.js";
+import {
+  registerAcpCommand,
+  type ResolveVerifiedRemoteDevelopmentClient,
+  type RunAcpServer,
+} from "#cli/acp/command.js";
 import {
   FORCED_EXIT_BACKSTOP_MS,
   installShutdownSignal,
@@ -55,6 +59,7 @@ interface CliRuntimeDependencies {
     readonly serverUrl: string;
   }): Promise<boolean>;
   buildHost: BuildHost;
+  resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;
   runAcpServer: RunAcpServer;
   printApplicationInfo(
     logger: CliLogger,
@@ -351,6 +356,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     appRoot,
     eveVersion: packageVersion,
     program,
+    resolveVerifiedRemoteDevelopmentClient: runtime.resolveVerifiedRemoteDevelopmentClient,
     runAcpServer: runtime.runAcpServer,
     startHost: runtime.startHost,
   });

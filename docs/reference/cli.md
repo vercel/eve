@@ -185,7 +185,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
 
-`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. See [Use eve through ACP](../guides/acp) for client configuration and capability limits.
+`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Use eve through ACP](../guides/acp) for client configuration and capability limits.
 
 A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, then opens `/model`. Other input stays editable in the prompt.
 

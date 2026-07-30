@@ -7,20 +7,26 @@ import {
 } from "#cli/dev/url-target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js";
+import type { ClientOptions } from "#client/types.js";
 import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
 export type RunAcpServer = (input: {
+  readonly auth?: ClientOptions["auth"];
   readonly eveVersion: string;
-  readonly headers?: DevelopmentRequestHeaders;
+  readonly headers?: ClientOptions["headers"];
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
   readonly workspaceRoot?: string;
 }) => Promise<void>;
 
+export type ResolveVerifiedRemoteDevelopmentClient =
+  typeof import("#setup/verified-remote-client.js").resolveVerifiedRemoteDevelopmentClient;
+
 export interface RegisterAcpCommandOptions {
   readonly appRoot: string;
   readonly eveVersion: string;
   readonly program: Command;
+  readonly resolveVerifiedRemoteDevelopmentClient?: ResolveVerifiedRemoteDevelopmentClient;
   readonly runAcpServer?: RunAcpServer;
   readonly startHost?: (appRoot: string, options?: DevelopmentServerOptions) => DevelopmentServer;
 }
@@ -32,6 +38,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
     .description("Serve an eve agent through stable ACP v1 over stdio.")
     .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
+    .option("--scope <team>", "Vercel team that owns the URL target")
     .option(
       "-H, --header <header>",
       'Request header for a URL target, in "Name: value" form (repeatable)',
@@ -52,6 +59,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
             headers: target.headers,
             serverUrl: target.serverUrl,
             signal: lifecycle.signal,
+            vercelScope: commandOptions.scope ?? process.env.EVE_VERCEL_SCOPE,
           });
         } finally {
           lifecycle.dispose();
@@ -98,15 +106,42 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
 
 interface AcpCliOptions {
   readonly header?: DevelopmentRequestHeaders;
+  readonly scope?: string;
   readonly url?: string;
 }
 
 async function runAcp(
   options: RegisterAcpCommandOptions,
-  input: Omit<Parameters<RunAcpServer>[0], "eveVersion">,
+  input: Omit<Parameters<RunAcpServer>[0], "eveVersion"> & { readonly vercelScope?: string },
 ): Promise<void> {
   const run = options.runAcpServer ?? (await import("#acp/server.js")).runAcpServer;
-  await run({ eveVersion: options.eveVersion, ...input });
+  const { vercelScope, ...serverInput } = input;
+  const staticHeaders = typeof serverInput.headers === "function" ? undefined : serverInput.headers;
+  const ownsAuthorization = Object.keys(staticHeaders ?? {}).some(
+    (name) => name.toLowerCase() === "authorization",
+  );
+  if (serverInput.workspaceRoot !== undefined || ownsAuthorization) {
+    await run({ eveVersion: options.eveVersion, ...serverInput });
+    return;
+  }
+
+  const resolveVerifiedRemoteDevelopmentClient =
+    options.resolveVerifiedRemoteDevelopmentClient ??
+    (await import("#setup/verified-remote-client.js")).resolveVerifiedRemoteDevelopmentClient;
+  const { options: clientOptions } = await resolveVerifiedRemoteDevelopmentClient({
+    headers: staticHeaders,
+    serverUrl: serverInput.serverUrl,
+    signal: serverInput.signal,
+    vercelScope,
+    workspaceRoot: options.appRoot,
+  });
+  await run({
+    auth: clientOptions.auth,
+    eveVersion: options.eveVersion,
+    headers: clientOptions.headers,
+    serverUrl: serverInput.serverUrl,
+    signal: serverInput.signal,
+  });
 }
 
 async function loadStartHost(): Promise<NonNullable<RegisterAcpCommandOptions["startHost"]>> {
