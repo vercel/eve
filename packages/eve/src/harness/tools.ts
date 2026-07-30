@@ -6,7 +6,7 @@ import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { ApprovalStatus } from "#public/definitions/approval.js";
+import { resolveApprovalPolicy, type ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -243,7 +243,7 @@ function buildApprovalFn(
 
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
 
-    const status = await definition.approval({
+    const status = await resolveApprovalPolicy(definition.approval)({
       ...buildCallbackContext(),
       approvedTools: input.approvedTools ?? new Set(),
       callId,

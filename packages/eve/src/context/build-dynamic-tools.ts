@@ -8,7 +8,12 @@ import {
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
-import type { ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
+import type {
+  ApprovalContext,
+  ApprovalResponseDecision,
+  ApprovalResponseContext,
+  ApprovalStatus,
+} from "#public/definitions/approval.js";
 import { toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 
 const log = createLogger("dynamic-tools");
@@ -66,21 +71,43 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
 function buildReplayedApproval(
   metadata: DurableDynamicToolMetadata,
 ): HarnessToolDefinition["approval"] | undefined {
-  if (metadata.approvalStepFnName === undefined) {
+  if (metadata.approvalRequestStepFnName === undefined) {
     return undefined;
   }
 
-  const approvalStepFn = lookupStepFunction(metadata.approvalStepFnName);
+  const approvalStepFn = lookupStepFunction(metadata.approvalRequestStepFnName);
   if (approvalStepFn === null) {
     log.warn(
-      `Dynamic tool "${metadata.name}" references approval function "${metadata.approvalStepFnName}" ` +
+      `Dynamic tool "${metadata.name}" references approval function "${metadata.approvalRequestStepFnName}" ` +
         "which is not registered — requiring approval by default.",
     );
     return () => "user-approval";
   }
 
-  return async (approvalCtx: ApprovalContext) =>
+  const policy = async (approvalCtx: ApprovalContext) =>
     (await approvalStepFn(metadata.closureVars ?? {}, approvalCtx)) as ApprovalStatus;
+  if (metadata.approvalResponseStepFnName === undefined) return policy;
+
+  const responseStepFn = lookupStepFunction(metadata.approvalResponseStepFnName);
+  if (responseStepFn === null) {
+    log.warn(
+      `Dynamic tool "${metadata.name}" references response authorizer ` +
+        `"${metadata.approvalResponseStepFnName}" which is not registered — rejecting responses.`,
+    );
+    return {
+      request: policy,
+      response: async () => ({
+        safeReason: "Approval response authorization is temporarily unavailable.",
+        status: "rejected" as const,
+      }),
+    };
+  }
+
+  return {
+    request: policy,
+    response: async (responseCtx: ApprovalResponseContext) =>
+      (await responseStepFn(metadata.closureVars ?? {}, responseCtx)) as ApprovalResponseDecision,
+  };
 }
 
 /**

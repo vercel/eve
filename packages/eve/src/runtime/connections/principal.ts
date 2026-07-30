@@ -83,11 +83,20 @@ export function resolveConnectionPrincipal(
   authorization: AuthorizationDefinition,
   ctx: AlsContext | undefined = contextStorage.getStore(),
 ): ConnectionPrincipal {
+  return resolveConnectionPrincipalFromAuth(connectionName, authorization, ctx?.get(AuthKey), ctx);
+}
+
+/** Resolves a connection principal from an explicitly bound session identity. */
+export function resolveConnectionPrincipalFromAuth(
+  connectionName: string,
+  authorization: AuthorizationDefinition,
+  current: SessionAuthContext | null | undefined,
+  ctx?: AlsContext,
+): ConnectionPrincipal {
   if (authorization.principalType === "app") {
     return { type: "app" };
   }
 
-  const current = ctx?.get(AuthKey);
   if (current === null || current === undefined || current.principalType !== "user") {
     throw new ConnectionAuthorizationFailedError(connectionName, {
       message: buildUserPrincipalRequiredMessage(connectionName, authorization, ctx, current),

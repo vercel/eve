@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { buildApprovalResponseAuth, createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -70,6 +70,47 @@ function authoredTool(input: {
     sourceKind: "module",
   };
 }
+
+describe("approval response authorization", () => {
+  it("resolves user tokens for the explicitly bound responder instead of ambient auth", async () => {
+    let resolvedPrincipal: ConnectionPrincipal | undefined;
+    const provider: AuthorizationDefinition = {
+      principalType: "user",
+      async getToken({ principal }): Promise<TokenResult> {
+        resolvedPrincipal = principal;
+        return { token: "bound-responder-token" };
+      },
+    };
+    const runtime = createTestRuntime({ tools: [] });
+
+    await runtime.runAsSession(undefined, async () => {
+      loadContext().set(AuthKey, {
+        attributes: {},
+        authenticator: "test-idp",
+        principalId: "ambient-U2",
+        principalType: "user",
+      });
+      return await buildApprovalResponseAuth({
+        responder: {
+          attributes: { role: ["approver"] },
+          authenticator: "test-idp",
+          issuer: "test-idp",
+          principalId: "bound-U1",
+          principalType: "user",
+          subject: "bound-subject-U1",
+        },
+        scope: "candidate-1",
+      }).getToken(provider);
+    });
+
+    expect(resolvedPrincipal).toMatchObject({
+      attributes: { role: ["approver"] },
+      id: "bound-U1",
+      issuer: "test-idp",
+      type: "user",
+    });
+  });
+});
 
 describe("tool-hosted authorization", () => {
   it("resolves and caches the bearer through ctx.getToken(provider)", async () => {
