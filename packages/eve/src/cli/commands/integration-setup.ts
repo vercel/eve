@@ -1,17 +1,3 @@
-<<<<<<< HEAD
-=======
-import { basename } from "node:path";
-
-import { interactiveAsker } from "#setup/ask.js";
-import type { AddChannelsDeps } from "#setup/integrations/channel-scaffold.js";
-import {
-  channelSetupEnvironment,
-  describeChannelSetupEnvironment,
-} from "#setup/integrations/shared/environment.js";
-import { channelSetupIntegration, createChannelSetupUi } from "#setup/integrations/registry.js";
-import { setupPhoton } from "#setup/photon-setup.js";
-import { detectDeployment, projectResolutionFromDeployment } from "#setup/project-resolution.js";
->>>>>>> 23729a51 (fix(eve): stabilize Photon setup)
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
 import {
@@ -30,13 +16,7 @@ export interface IntegrationSetupOptions {
 
 export interface IntegrationSetupDependencies {
   createPrompter?: () => Prompter;
-<<<<<<< HEAD
   runnerDeps?: IntegrationSetupRunnerDeps;
-=======
-  detectDeployment: typeof detectDeployment;
-  getVercelAuthStatus: typeof getVercelAuthStatus;
-  addChannelsDeps?: AddChannelsDeps;
->>>>>>> 855f34ab (fix(eve): resolve Photon setup restack conflict)
 }
 
 const defaultIntegrationSetupDependencies: IntegrationSetupDependencies = {};
@@ -58,7 +38,6 @@ export async function runIntegrationSetupCommand(
   const client = createRegistrySetupClient({ signal: options.signal });
   try {
     const prompter = client?.prompter ?? dependencies.createPrompter?.() ?? createPrompter();
-<<<<<<< HEAD
     const result = await runIntegrationSetup(
       kind,
       {
@@ -66,60 +45,6 @@ export async function runIntegrationSetupCommand(
         prompter,
         signal: client?.signal ?? options.signal,
         yes: options.yes,
-=======
-    const signal = client?.signal ?? options.signal;
-    const [deployment, authStatus] = await Promise.all([
-      dependencies.detectDeployment(appRoot, { signal }),
-      dependencies.getVercelAuthStatus(appRoot, { signal }),
-    ]);
-    const project = projectResolutionFromDeployment(deployment);
-
-    if (kind === "photon") {
-      prompter.intro("Set up Photon");
-      prompter.log.message("Checking Vercel setup...");
-      const environment = channelSetupEnvironment(authStatus, project);
-      prompter.log.info(describeChannelSetupEnvironment(environment));
-      const result = await setupPhoton({
-        agentName: basename(appRoot),
-        projectPath: appRoot,
-        environment,
-        ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
-        signal,
-      });
-      if (result.kind === "cancelled") {
-        client?.cancel();
-        if (process.env.EVE_SETUP === "1") process.exitCode = 130;
-        return;
-      }
-      prompter.outro("Integration set up.");
-      client?.complete([
-        ...(result.assignedPhoneNumber === undefined
-          ? []
-          : [
-              {
-                label: "Text your agent",
-                value: result.assignedPhoneNumber,
-                kind: "phone" as const,
-              },
-            ]),
-        { label: "Photon project", value: result.dashboardUrl, kind: "url" },
-      ]);
-      return;
-    }
-
-    const channelKind: ChannelKind = kind;
-    const integration = channelSetupIntegration(channelKind);
-    prompter.intro(`Set up ${integration.label}`);
-    prompter.log.message("Checking Vercel setup...");
-    const environment = channelSetupEnvironment(authStatus, project);
-    prompter.log.info(describeChannelSetupEnvironment(environment));
-    const result = await integration.setup({
-      environment,
-      state: {
-        ...createDefaultSetupState(),
-        project,
-        projectPath: { kind: "resolved", inPlace: true, path: appRoot },
->>>>>>> 23729a51 (fix(eve): stabilize Photon setup)
       },
       dependencies.runnerDeps,
     );
