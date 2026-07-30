@@ -606,8 +606,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     });
 
   const traces = program
-    .command("trace [trace]")
-    .usage("[options] [trace]\n       eve trace ls [options]")
+    .command("traces [trace]")
+    .usage("[options] [trace]\n       eve traces ls [options]")
     .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
     .action(async (reference: string | undefined) => {
       const { runTraceShowCommand } = await import("#cli/commands/trace.js");
