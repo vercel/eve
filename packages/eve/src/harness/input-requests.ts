@@ -1,14 +1,11 @@
 import type { ModelMessage } from "ai";
 
-import type {
-  RuntimeToolCallActionRequest,
-  RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
+import { getApprovalAuditState } from "#harness/approval-candidates.js";
+import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import { classifyInputRequest, isApprovalRequest } from "#harness/input-request-class.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
-import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 import {
   isSessionLimitContinuationRequest,
   resolveSessionLimitContinuation,
@@ -42,6 +39,7 @@ interface PendingInputBatchEvent {
  */
 interface PendingInputBatch {
   readonly event?: PendingInputBatchEvent;
+  readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly requests: readonly InputRequest[];
   readonly responseMessages: readonly ModelMessage[];
 }
@@ -57,9 +55,9 @@ export interface RejectedActionBatch {
 
 type ApprovalTerminalStatus = "approved" | "denied" | "ignored" | "invalid";
 
-/**
- * Returns true when the step input carries user-facing turn input.
- */
+export type NormalizedPendingInput = StepInput & { readonly messageConsumed?: boolean };
+
+/** Returns true when the step input carries user-facing turn input. */
 export function hasStepInput(input?: StepInput): boolean {
   if (input === undefined) {
     return false;
@@ -67,10 +65,6 @@ export function hasStepInput(input?: StepInput): boolean {
 
   return input.message !== undefined || (input.inputResponses?.length ?? 0) > 0;
 }
-
-// ---------------------------------------------------------------------------
-// Deferred step input
-// ---------------------------------------------------------------------------
 
 /**
  * Merges any queued follow-up input into the current step input and clears it
@@ -136,9 +130,12 @@ export function resolvePendingInput(input: {
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }): ResolvePendingInputResult {
-  const { stepInput } = input;
   let session = input.session;
   const baseHistory = [...(input.history ?? session.history)];
+  const stepInput = normalizePendingInputResponses({
+    state: session.state,
+    stepInput: input.stepInput,
+  });
 
   const pendingBatch = getPendingInputBatch(session.state);
 
@@ -148,20 +145,23 @@ export function resolvePendingInput(input: {
   }
 
   // Pending batch exists -- only resolve if we have actual responses.
-  const resolvedStepInput = resolveTextMessageInput(pendingBatch, stepInput);
-  const responses = resolvedStepInput?.inputResponses ?? [];
+  const responses = mergeSettledApprovalResponses({
+    pendingBatch,
+    responses: stepInput?.inputResponses ?? [],
+    session,
+  });
   const resolvesApprovalBatch = pendingBatch.requests.some((request) => isApprovalRequest(request));
 
-  if (responses.length === 0 && resolvedStepInput?.message === undefined) {
+  if (responses.length === 0 && stepInput?.message === undefined) {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
   if (hasUnansweredRequiredRequest({ pendingBatch, responses })) {
-    session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
+    session = queueDeferredStepInput(session, compactStepInput(stepInput));
     return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
   }
 
-  if (responses.length === 0 && resolvedStepInput?.message !== undefined) {
+  if (responses.length === 0 && stepInput?.message !== undefined) {
     // A follow-up message arrived and every pending request is dismissable
     // (a required one would have deferred above): mark the unanswered
     // requests ignored so the model can continue with the message.
@@ -175,7 +175,7 @@ export function resolvePendingInput(input: {
     session = clearPendingInputBatch(session);
 
     return {
-      consumedMessage: resolvedStepInput?.messageConsumed,
+      consumedMessage: stepInput?.messageConsumed,
       outcome: "resolved",
       messages,
       rejectedActions,
@@ -215,18 +215,18 @@ export function resolvePendingInput(input: {
       context?: StepInput["context"];
       message?: StepInput["message"];
     } = {};
-    if ((resolvedStepInput?.context?.length ?? 0) > 0) {
-      deferredInput.context = resolvedStepInput?.context;
+    if ((stepInput?.context?.length ?? 0) > 0) {
+      deferredInput.context = stepInput?.context;
     }
-    if (resolvedStepInput?.message !== undefined) {
-      deferredInput.message = resolvedStepInput.message;
+    if (stepInput?.message !== undefined) {
+      deferredInput.message = stepInput.message;
     }
 
     if (deferredInput.context !== undefined || deferredInput.message !== undefined) {
       session = queueDeferredStepInput(session, deferredInput);
 
       return {
-        consumedMessage: resolvedStepInput?.messageConsumed,
+        consumedMessage: stepInput?.messageConsumed,
         deferredContext: deferredInput.context === undefined ? undefined : true,
         deferredMessage: deferredInput.message === undefined ? undefined : true,
         limitContinuation,
@@ -239,7 +239,7 @@ export function resolvePendingInput(input: {
   }
 
   return {
-    consumedMessage: resolvedStepInput?.messageConsumed,
+    consumedMessage: stepInput?.messageConsumed,
     limitContinuation,
     outcome: "resolved",
     messages,
@@ -248,10 +248,30 @@ export function resolvePendingInput(input: {
   };
 }
 
-function resolveTextMessageInput(
-  pendingBatch: PendingInputBatch,
-  stepInput: StepInput | undefined,
-): (StepInput & { readonly messageConsumed?: boolean }) | undefined {
+function mergeSettledApprovalResponses(input: {
+  readonly pendingBatch: PendingInputBatch;
+  readonly responses: readonly InputResponse[];
+  readonly session: HarnessSession;
+}): readonly InputResponse[] {
+  const responses = new Map(input.responses.map((response) => [response.requestId, response]));
+  const requestIds = new Set(input.pendingBatch.requests.map((request) => request.requestId));
+  for (const settlement of getApprovalAuditState(input.session.state).settlements) {
+    if (!requestIds.has(settlement.requestId)) continue;
+    responses.set(settlement.requestId, {
+      optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
+      requestId: settlement.requestId,
+    });
+  }
+  return [...responses.values()];
+}
+
+export function normalizePendingInputResponses(input: {
+  readonly state: SessionStateMap | undefined;
+  readonly stepInput: StepInput | undefined;
+}): NormalizedPendingInput | undefined {
+  const pendingBatch = getPendingInputBatch(input.state);
+  const stepInput = input.stepInput;
+  if (pendingBatch === undefined) return stepInput;
   if (typeof stepInput?.message !== "string" || (stepInput.inputResponses?.length ?? 0) > 0) {
     return stepInput;
   }
@@ -372,7 +392,15 @@ export function getPendingInputRequestIds(state: SessionStateMap | undefined): R
   return new Set(getPendingInputBatch(state)?.requests.map((request) => request.requestId));
 }
 
-function getPendingInputBatch(state: SessionStateMap | undefined): PendingInputBatch | undefined {
+export function getResponseAuthRequiredRequestIds(
+  state: SessionStateMap | undefined,
+): ReadonlySet<string> {
+  return new Set(getPendingInputBatch(state)?.responseAuthRequiredRequestIds ?? []);
+}
+
+export function getPendingInputBatch(
+  state: SessionStateMap | undefined,
+): PendingInputBatch | undefined {
   const value = state?.[PENDING_INPUT_BATCH_KEY];
 
   if (typeof value !== "object" || value === null) {
@@ -393,6 +421,7 @@ function getPendingInputBatch(state: SessionStateMap | undefined): PendingInputB
  */
 export function setPendingInputBatch(input: {
   readonly event?: PendingInputBatchEvent;
+  readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly requests: readonly InputRequest[];
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
@@ -400,6 +429,7 @@ export function setPendingInputBatch(input: {
   const state = { ...input.session.state };
   state[PENDING_INPUT_BATCH_KEY] = {
     event: input.event,
+    responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
     requests: [...input.requests],
     responseMessages: [...input.responseMessages],
   } satisfies PendingInputBatch;
@@ -418,15 +448,11 @@ function clearPendingInputBatch(session: HarnessSession): HarnessSession {
   return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
 }
 
-// ---------------------------------------------------------------------------
-// Deferred step input state
-// ---------------------------------------------------------------------------
-
 function getDeferredStepInput(session: HarnessSession): StepInput | undefined {
   return session.state?.[DEFERRED_STEP_INPUT_KEY] as StepInput | undefined;
 }
 
-function queueDeferredStepInput(session: HarnessSession, input: StepInput): HarnessSession {
+export function queueDeferredStepInput(session: HarnessSession, input: StepInput): HarnessSession {
   const existing = getDeferredStepInput(session);
   const deferredInput = existing === undefined ? input : coalesceTurnInputs(existing, input);
   const state = { ...session.state };
@@ -666,29 +692,4 @@ function buildToolResponsePartsForRequest(
       type: "tool-result",
     },
   ];
-}
-
-// ---------------------------------------------------------------------------
-// Tool call helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Creates a runtime tool-call action shape from an AI SDK tool call.
- */
-export function createRuntimeToolCallActionFromToolCall(input: {
-  readonly toolCall: {
-    readonly input: unknown;
-    readonly toolCallId: string;
-    readonly toolName: string;
-  };
-}): RuntimeToolCallActionRequest {
-  return {
-    callId: input.toolCall.toolCallId,
-    input: resolveToolCallInputObject(input.toolCall.input, {
-      callId: input.toolCall.toolCallId,
-      toolName: input.toolCall.toolName,
-    }),
-    kind: "tool-call",
-    toolName: input.toolCall.toolName,
-  };
 }
