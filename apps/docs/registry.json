@@ -1211,7 +1211,7 @@
     {
       "name": "channel/photon-imessage",
       "type": "registry:item",
-      "title": "Photon",
+      "title": "Photon iMessage",
       "description": "Connect an eve agent to iMessage through Photon with guided project and phone setup.",
       "dependencies": ["@vercel/connect@0.5.0"],
       "meta": {

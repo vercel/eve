@@ -33,6 +33,11 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   photon: "photon-imessage",
 };
 
+const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
+  eve: "web",
+  photon: "photon",
+};
+
 const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-gchat": "@chat-adapter/gchat",
   "chat-sdk-whatsapp": "@chat-adapter/whatsapp",
@@ -106,7 +111,11 @@ for (const [index, item] of items.entries()) {
   const registrySlug = expectedSlugs[index];
 
   if (entry.slug === "slack" || entry.slug === "eve" || entry.slug === "photon") {
-    const expectedArgs = ["integration", "setup", registrySlug];
+    const expectedArgs = [
+      "integration",
+      "setup",
+      setupKindsByCatalogSlug[entry.slug] ?? registrySlug,
+    ];
     if (
       setup?.command !== "eve" ||
       setup.package !== "eve" ||
@@ -114,7 +123,7 @@ for (const [index, item] of items.entries()) {
       JSON.stringify(setup.args) !== JSON.stringify(expectedArgs)
     ) {
       throw new Error(
-        `Registry item "${item.name}" must delegate setup to eve integration setup ${registrySlug}.`,
+        `Registry item "${item.name}" must delegate setup to eve integration setup ${expectedArgs[2]}.`,
       );
     }
     continue;

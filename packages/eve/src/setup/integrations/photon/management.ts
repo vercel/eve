@@ -1,5 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { z } from "#compiled/zod/index.js";
+
 const PHOTON_DASHBOARD_HOST = "https://app.photon.codes";
 const PHOTON_SPECTRUM_HOST = "https://spectrum.photon.codes";
 const PHOTON_DEVICE_CLIENT_ID = "photon-cli";
@@ -16,6 +18,43 @@ export function validatePhotonPhoneNumber(value: string): string | null {
   }
   return null;
 }
+
+const DeviceAuthorizationSchema = z.object({
+  device_code: z.string().min(1),
+  user_code: z.string().min(1),
+  verification_uri_complete: z.string().url().optional(),
+  verification_uri: z.string().url().optional(),
+  expires_in: z.number().positive().optional(),
+  interval: z.number().positive().optional(),
+});
+
+const DeviceTokenSchema = z.object({
+  access_token: z.string().min(1).optional(),
+  accessToken: z.string().min(1).optional(),
+});
+
+const ProjectSchema = z.object({ id: z.string().min(1) });
+const ProjectSecretSchema = z.object({ projectSecret: z.string().min(1) });
+const ErrorResponseSchema = z.object({
+  error: z.unknown().optional(),
+  message: z.unknown().optional(),
+});
+const PhoneRegistrationSchema = z.object({
+  assignedPhoneNumber: z.string().optional(),
+  phoneNumber: z.string().optional(),
+  data: z
+    .object({
+      assignedPhoneNumber: z.string().optional(),
+      phoneNumber: z.string().optional(),
+      user: z
+        .object({ assignedPhoneNumber: z.string().optional(), phoneNumber: z.string().optional() })
+        .optional(),
+    })
+    .optional(),
+  user: z
+    .object({ assignedPhoneNumber: z.string().optional(), phoneNumber: z.string().optional() })
+    .optional(),
+});
 
 interface DeviceCodeResponse {
   deviceCode: string;
@@ -63,21 +102,23 @@ const defaultDeps: PhotonManagementDeps = {
   delay: (ms, signal) => sleep(ms, undefined, { signal }),
 };
 
-function record(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Photon returned an invalid response.");
-  }
-  return value as Record<string, unknown>;
+function errorDetail(body: unknown, fallback: string): string {
+  const parsed = ErrorResponseSchema.safeParse(body);
+  return String(parsed.success ? (parsed.data.error ?? parsed.data.message ?? fallback) : fallback);
 }
 
-async function json(response: Response, action: string): Promise<Record<string, unknown>> {
-  const body: unknown = await response.json().catch(() => ({}));
+function parsePhotonResponse<T>(schema: z.ZodType<T>, body: unknown, message: string): T {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new Error(message);
+  return parsed.data;
+}
+
+async function json(response: Response, action: string): Promise<unknown> {
+  const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
-    const value = record(body);
-    const detail = value["error"] ?? value["message"] ?? response.statusText;
-    throw new Error(`Photon ${action} failed: ${String(detail)}`);
+    throw new Error(`Photon ${action} failed: ${errorDetail(body, response.statusText)}`);
   }
-  return record(body);
+  return body;
 }
 
 function bearer(token: string): Record<string, string> {
@@ -97,23 +138,21 @@ async function requestDeviceCode(deps: PhotonManagementDeps): Promise<DeviceCode
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ client_id: PHOTON_DEVICE_CLIENT_ID, scope: "openid profile email" }),
   });
-  const body = await json(response, "device login");
-  const deviceCode = body["device_code"];
-  const userCode = body["user_code"];
-  const verificationUrl = body["verification_uri_complete"] ?? body["verification_uri"];
-  if (
-    typeof deviceCode !== "string" ||
-    typeof userCode !== "string" ||
-    typeof verificationUrl !== "string"
-  ) {
+  const body = parsePhotonResponse(
+    DeviceAuthorizationSchema,
+    await json(response, "device login"),
+    "Photon returned an invalid device authorization response.",
+  );
+  const verificationUrl = body.verification_uri_complete ?? body.verification_uri;
+  if (verificationUrl === undefined) {
     throw new Error("Photon returned an invalid device authorization response.");
   }
   return {
-    deviceCode,
-    userCode,
+    deviceCode: body.device_code,
+    userCode: body.user_code,
     verificationUrl,
-    expiresIn: typeof body["expires_in"] === "number" ? body["expires_in"] : 1800,
-    interval: typeof body["interval"] === "number" ? body["interval"] : 5,
+    expiresIn: body.expires_in ?? 1800,
+    interval: body.interval ?? 5,
   };
 }
 
@@ -136,19 +175,25 @@ async function pollForToken(
       }),
       signal,
     });
-    const body = record(await response.json().catch(() => ({})));
+    const body: unknown = await response.json().catch(() => undefined);
     if (response.ok) {
-      const token = body["access_token"] ?? body["accessToken"];
-      if (typeof token === "string" && token.length > 0) return token;
+      const token = parsePhotonResponse(
+        DeviceTokenSchema,
+        body,
+        "Photon approved device login without returning an access token.",
+      );
+      if (token.access_token !== undefined) return token.access_token;
+      if (token.accessToken !== undefined) return token.accessToken;
       throw new Error("Photon approved device login without returning an access token.");
     }
-    const error = body["error"] ?? body["message"];
-    if (error === "authorization_pending") continue;
-    if (error === "slow_down" || response.status === 429) {
+    const error = ErrorResponseSchema.safeParse(body);
+    const statusCode = error.success ? (error.data.error ?? error.data.message) : undefined;
+    if (statusCode === "authorization_pending") continue;
+    if (statusCode === "slow_down" || response.status === 429) {
       intervalMs += response.status === 429 ? 10_000 : 5_000;
       continue;
     }
-    throw new Error(`Photon device login failed: ${String(error ?? response.statusText)}`);
+    throw new Error(`Photon device login failed: ${String(statusCode ?? response.statusText)}`);
   }
   throw new Error("Photon device login timed out.");
 }
@@ -169,9 +214,11 @@ async function createProject(
       observability: false,
     }),
   });
-  const body = await json(response, "project creation");
-  if (typeof body["id"] !== "string") throw new Error("Photon did not return a project ID.");
-  return body["id"];
+  return parsePhotonResponse(
+    ProjectSchema,
+    await json(response, "project creation"),
+    "Photon did not return a project ID.",
+  ).id;
 }
 
 async function regenerateSecret(
@@ -183,11 +230,11 @@ async function regenerateSecret(
     `${PHOTON_DASHBOARD_HOST}/api/projects/${encodeURIComponent(projectId)}/regenerate-secret`,
     { method: "POST", headers: bearer(token), body: "{}" },
   );
-  const body = await json(response, "project credential provisioning");
-  if (typeof body["projectSecret"] !== "string") {
-    throw new Error("Photon did not return the new project secret.");
-  }
-  return body["projectSecret"];
+  return parsePhotonResponse(
+    ProjectSecretSchema,
+    await json(response, "project credential provisioning"),
+    "Photon did not return the new project secret.",
+  ).projectSecret;
 }
 
 async function registerUser(
@@ -204,11 +251,21 @@ async function registerUser(
       body: JSON.stringify({ type: "shared", phoneNumber }),
     },
   );
-  const body = await json(response, "phone registration");
-  const data = record(body["data"] ?? body);
-  const user = record(data["user"] ?? data);
-  const assignedPhoneNumber = user["assignedPhoneNumber"] ?? user["phoneNumber"];
-  return typeof assignedPhoneNumber === "string" ? assignedPhoneNumber : undefined;
+  const body = parsePhotonResponse(
+    PhoneRegistrationSchema,
+    await json(response, "phone registration"),
+    "Photon returned an invalid phone registration response.",
+  );
+  return (
+    body.data?.user?.assignedPhoneNumber ??
+    body.data?.user?.phoneNumber ??
+    body.data?.assignedPhoneNumber ??
+    body.data?.phoneNumber ??
+    body.user?.assignedPhoneNumber ??
+    body.user?.phoneNumber ??
+    body.assignedPhoneNumber ??
+    body.phoneNumber
+  );
 }
 
 async function deleteProject(

@@ -1,21 +1,18 @@
 import { basename } from "node:path";
 
-import { setupPhoton } from "#setup/integrations/photon/setup-flow.js";
+import { setupPhoton } from "./setup-flow.js";
 
-import type { ChannelSetupIntegration } from "../types.js";
+import type { SetupIntegration } from "../types.js";
 
 /** Photon project provisioning and iMessage channel scaffolding. */
-export const PHOTON_SETUP: ChannelSetupIntegration = {
+export const PHOTON_SETUP: SetupIntegration = {
   kind: "photon",
   label: "Photon",
   hint: "Messages through Photon",
   async setup(context) {
-    if (context.state.projectPath.kind !== "resolved") {
-      throw new Error("Project path has not been resolved.");
-    }
     const result = await setupPhoton({
-      agentName: basename(context.state.projectPath.path),
-      projectPath: context.state.projectPath.path,
+      agentName: basename(context.appRoot),
+      projectPath: context.appRoot,
       environment: context.environment,
       ui: context.ui,
       signal: context.signal,
@@ -24,7 +21,6 @@ export const PHOTON_SETUP: ChannelSetupIntegration = {
     if (result.kind === "cancelled") return result;
     return {
       kind: "done",
-      state: context.state,
       facts: [
         ...(result.assignedPhoneNumber === undefined
           ? []

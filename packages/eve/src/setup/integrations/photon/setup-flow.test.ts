@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
 import type { Asker, Question } from "../../ask.js";
-import { channelSetupEnvironment } from "../shared/environment.js";
-import { createChannelSetupUi } from "../shared/ui.js";
+import { integrationSetupEnvironment } from "../shared/environment.js";
+import { createIntegrationSetupUi } from "../shared/ui.js";
 import { setupPhoton, type PhotonSetupDeps } from "./setup-flow.js";
 
 function asker(answers: Record<string, string>): Asker {
@@ -40,8 +40,8 @@ describe("Photon setup", () => {
       setupPhoton({
         agentName: "agent",
         projectPath: "/project",
-        environment: channelSetupEnvironment("cli-missing", { kind: "unresolved" }),
-        ui: createChannelSetupUi({
+        environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+        ui: createIntegrationSetupUi({
           asker: asker({ "photon-phone-number": "+15551234567" }),
           prompter: fake.prompter,
         }),
@@ -68,8 +68,8 @@ describe("Photon setup", () => {
     await setupPhoton({
       agentName: "weather-agent",
       projectPath: "/project",
-      environment: channelSetupEnvironment("cli-missing", { kind: "unresolved" }),
-      ui: createChannelSetupUi({
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      ui: createIntegrationSetupUi({
         asker: asker({ "photon-phone-number": "+15551234567" }),
         prompter: fake.prompter,
       }),
@@ -88,8 +88,8 @@ describe("Photon setup", () => {
       setupPhoton({
         agentName: "agent",
         projectPath: "/project",
-        environment: channelSetupEnvironment("cli-missing", { kind: "unresolved" }),
-        ui: createChannelSetupUi({ asker: asker({}), prompter: fake.prompter }),
+        environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+        ui: createIntegrationSetupUi({ asker: asker({}), prompter: fake.prompter }),
         deps: deps(),
       }),
     ).rejects.toThrow("vercel login");
