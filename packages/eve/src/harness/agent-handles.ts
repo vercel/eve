@@ -7,16 +7,13 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 export const AGENT_HANDLES_STATE_KEY = "eve.agent.handles";
 
 /** Delivery category for a delegated agent handle. */
-export type AgentHandleKind = "agent/local" | "agent/remote" | "agent/runtime";
+export type AgentHandleKind = AgentHandle["kind"];
 
-/** Durable delivery coordinates for one delegated agent. */
-export interface AgentHandle {
+/** Fields shared by every delegated agent handle. */
+interface AgentHandleBase {
   /** Model-visible identifier derived from the tool name and session id. */
   readonly id: string;
-  readonly kind: AgentHandleKind;
   readonly relationship: "child" | "parent";
-  /** Deliver target base URL. Empty for the same deployment; never model-visible. */
-  readonly url: string;
   /** Subagent tool name. */
   readonly name: string;
   /** Agent-graph node used to re-resolve remote headers. */
@@ -26,37 +23,65 @@ export interface AgentHandle {
   readonly continuationToken: string;
   /** Short task description captured from the latest delegation tool call. */
   readonly description?: string;
-  /**
-   * Callback base URL stub captured when the remote child was dispatched.
-   * Continuation binds the current parent token to this stub; only present
-   * for `agent/remote` handles. Never model-visible.
-   */
-  readonly callbackBaseUrl?: string;
   /** Latest one-line output snippet, truncated to 120 characters. */
   readonly lastStatus?: string;
   /** ISO timestamp for the latest handle update. */
   readonly updatedAt: string;
 }
 
+/** Handle to a delegated agent running in the same deployment. */
+export interface LocalAgentHandle extends AgentHandleBase {
+  readonly kind: "agent/local";
+}
+
+/** Handle to a runtime-defined agent running in the same deployment. */
+export interface RuntimeAgentHandle extends AgentHandleBase {
+  readonly kind: "agent/runtime";
+}
+
+/** Handle to a delegated agent running on another deployment. */
+export interface RemoteAgentHandle extends AgentHandleBase {
+  readonly kind: "agent/remote";
+  /** Deliver target base URL; never model-visible. */
+  readonly url: string;
+  /**
+   * Callback base URL stub captured when the remote child was dispatched.
+   * Continuation binds the current parent token to this stub. Never
+   * model-visible.
+   */
+  readonly callbackBaseUrl: string;
+}
+
+/** Durable delivery coordinates for one delegated agent. */
+export type AgentHandle = LocalAgentHandle | RuntimeAgentHandle | RemoteAgentHandle;
+
 /** Session-state collection of delegated agent handles. */
 export interface AgentHandleStore {
   readonly handles: readonly AgentHandle[];
 }
 
-const agentHandleSchema: z.ZodType<AgentHandle> = z.object({
-  callbackBaseUrl: z.string().optional(),
+const agentHandleBaseShape = {
   continuationToken: z.string(),
   description: z.string().optional(),
   id: z.string(),
-  kind: z.enum(["agent/local", "agent/remote", "agent/runtime"]),
   lastStatus: z.string().optional(),
   name: z.string(),
   nodeId: z.string(),
   relationship: z.enum(["child", "parent"]),
   sessionId: z.string(),
   updatedAt: z.string(),
-  url: z.string(),
-});
+};
+
+const agentHandleSchema: z.ZodType<AgentHandle> = z.discriminatedUnion("kind", [
+  z.object({ ...agentHandleBaseShape, kind: z.literal("agent/local") }),
+  z.object({ ...agentHandleBaseShape, kind: z.literal("agent/runtime") }),
+  z.object({
+    ...agentHandleBaseShape,
+    callbackBaseUrl: z.string(),
+    kind: z.literal("agent/remote"),
+    url: z.string(),
+  }),
+]);
 
 const agentHandleStoreSchema: z.ZodType<AgentHandleStore> = z.object({
   handles: z.array(agentHandleSchema),
@@ -76,12 +101,27 @@ export function deriveAgentId(name: string, sessionId: string): string {
   return `ag_${name}:${sessionId.slice(-12)}`;
 }
 
-/** Reads and validates the agent handle store from session state. */
+/**
+ * Reads and validates the agent handle store from session state.
+ *
+ * Returns `undefined` only when no store has been written. A present but
+ * invalid store throws: treating corruption as absence would let the next
+ * upsert silently replace every delegated child's delivery coordinates.
+ */
 export function getAgentHandleStore(
   state: SessionStateMap | undefined,
 ): AgentHandleStore | undefined {
-  const parsed = agentHandleStoreSchema.safeParse(state?.[AGENT_HANDLES_STATE_KEY]);
-  return parsed.success ? parsed.data : undefined;
+  const raw = state?.[AGENT_HANDLES_STATE_KEY];
+  if (raw === undefined) {
+    return undefined;
+  }
+  const parsed = agentHandleStoreSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(
+      `Corrupt agent handle store under session state key "${AGENT_HANDLES_STATE_KEY}": ${parsed.error.message}`,
+    );
+  }
+  return parsed.data;
 }
 
 /** Returns a session with the handle inserted or replaced by identifier. */

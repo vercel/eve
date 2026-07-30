@@ -7,7 +7,8 @@ import {
   removeAgentHandle,
   renderAgentsSnippet,
   upsertAgentHandle,
-  type AgentHandle,
+  type LocalAgentHandle,
+  type RemoteAgentHandle,
 } from "#harness/agent-handles.js";
 import { AGENTS_SNIPPET_LABEL } from "#harness/compaction-prompt.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -27,7 +28,7 @@ function createSession(state?: HarnessSession["state"]): HarnessSession {
   };
 }
 
-function createHandle(overrides: Partial<AgentHandle> = {}): AgentHandle {
+function createHandle(overrides: Partial<LocalAgentHandle> = {}): LocalAgentHandle {
   return {
     continuationToken: "continuation_handle",
     id: "ag_research:abcdefghijkl",
@@ -37,7 +38,6 @@ function createHandle(overrides: Partial<AgentHandle> = {}): AgentHandle {
     relationship: "child",
     sessionId: "session_abcdefghijkl",
     updatedAt: "2026-07-28T12:00:00.000Z",
-    url: "",
     ...overrides,
   };
 }
@@ -49,15 +49,21 @@ describe("deriveAgentId", () => {
 });
 
 describe("getAgentHandleStore", () => {
-  it("returns undefined for missing or malformed state", () => {
+  it("returns undefined only when no store has been written", () => {
     expect(getAgentHandleStore(undefined)).toBeUndefined();
+    expect(getAgentHandleStore({})).toBeUndefined();
+  });
 
+  it("throws on a present but malformed store instead of treating it as absent", () => {
     for (const malformed of [
       null,
       { handles: "not-an-array" },
       { handles: [{ id: "incomplete" }] },
+      { handles: [{ ...createHandle(), kind: "agent/remote" }] },
     ]) {
-      expect(getAgentHandleStore({ [AGENT_HANDLES_STATE_KEY]: malformed })).toBeUndefined();
+      expect(() => getAgentHandleStore({ [AGENT_HANDLES_STATE_KEY]: malformed })).toThrow(
+        AGENT_HANDLES_STATE_KEY,
+      );
     }
   });
 });
@@ -66,7 +72,7 @@ describe("upsertAgentHandle", () => {
   it("replaces an existing handle by id without mutating the prior session", () => {
     const originalHandle = createHandle({ lastStatus: "working" });
     const inserted = upsertAgentHandle(createSession(), originalHandle);
-    const replacement = createHandle({ lastStatus: "done", url: "https://next.invalid" });
+    const replacement = createHandle({ description: "next task", lastStatus: "done" });
 
     const replaced = upsertAgentHandle(inserted, replacement);
 
@@ -86,25 +92,30 @@ describe("removeAgentHandle", () => {
 describe("renderAgentsSnippet", () => {
   it("starts with the synthetic label and omits private delivery coordinates", () => {
     const url = "https://URL_SENTINEL.invalid";
+    const callbackBaseUrl = "https://CALLBACK_SENTINEL.invalid";
     const continuationToken = "CONTINUATION_TOKEN_SENTINEL";
     const sessionId = "SESSION_ID_SENTINEL_123456789";
-    const snippet = renderAgentsSnippet({
-      handles: [
-        createHandle({
-          continuationToken,
-          id: "ag_research:visible-id",
-          lastStatus: "waiting for input",
-          sessionId,
-          url,
-        }),
-      ],
-    });
+    const remoteHandle: RemoteAgentHandle = {
+      callbackBaseUrl,
+      continuationToken,
+      id: "ag_research:visible-id",
+      kind: "agent/remote",
+      lastStatus: "waiting for input",
+      name: "research",
+      nodeId: "node_research",
+      relationship: "child",
+      sessionId,
+      updatedAt: "2026-07-28T12:00:00.000Z",
+      url,
+    };
+    const snippet = renderAgentsSnippet({ handles: [remoteHandle] });
 
     expect(snippet.startsWith(`${AGENTS_SNIPPET_LABEL}\n<agents>`)).toBe(true);
     expect(snippet).toContain(
       '<agent id="ag_research:visible-id" name="research">waiting for input</agent>',
     );
     expect(snippet).not.toContain(url);
+    expect(snippet).not.toContain(callbackBaseUrl);
     expect(snippet).not.toContain(continuationToken);
     expect(snippet).not.toContain(sessionId);
   });
