@@ -12,6 +12,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
+  InstrumentationAttemptMetadataEvent,
   InstrumentationAttemptScope,
   InstrumentationAttemptStartedEvent,
   InstrumentationAttemptTerminalEvent,
@@ -387,11 +388,24 @@ export function createAgentOtelInstrumentation(
     return state;
   };
 
+  const onAttemptMetadata = (event: InstrumentationAttemptMetadataEvent): void => {
+    const attempt = steps.get(event.scope);
+    if (attempt === undefined) return;
+    // Vercel AI Gateway reports per-call cost in providerMetadata.gateway;
+    // attributes exist only when it was actually the gateway serving the call.
+    const gateway = readGatewayCost(event.providerMetadata);
+    if (gateway === undefined) return;
+    for (const [key, value] of Object.entries(gateway)) {
+      attempt.step.span.setAttribute(key, value);
+    }
+  };
+
   return {
     hook: {
       events: {
         "attempt.completed": onAttemptTerminal,
         "attempt.failed": onAttemptTerminal,
+        "attempt.metadata": onAttemptMetadata,
         "attempt.started": onAttemptStarted,
         "model.call": { after: afterModelCall, before: beforeModelCall },
         "session.completed": onSessionTransition,
@@ -448,12 +462,49 @@ function contextFromSpanContext(spanContext: SpanContext): Context {
   return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext));
 }
 
+/**
+ * Extracts cost data from a step result's provider metadata. Only Vercel AI
+ * Gateway reports it (`providerMetadata.gateway`): raw inference cost, the
+ * gateway's surcharged total, the input/output split, and the generation id
+ * for dashboard reconciliation. Values arrive as USD strings; anything
+ * missing or non-numeric is skipped, so non-gateway providers get nothing.
+ */
+function readGatewayCost(
+  providerMetadata: Readonly<Record<string, unknown>>,
+): Record<string, string | number> | undefined {
+  const gateway = providerMetadata.gateway;
+  if (!isRecord(gateway)) return undefined;
+  const attributes: Record<string, string | number> = {};
+  const cost = readUsd(gateway.cost);
+  if (cost !== undefined) attributes["gen_ai.usage.cost"] = cost;
+  const gatewayCost = readUsd(gateway.gatewayCost);
+  if (gatewayCost !== undefined) attributes["gen_ai.usage.gateway_cost"] = gatewayCost;
+  const inputCost = readUsd(gateway.inputInferenceCost);
+  if (inputCost !== undefined) attributes["gen_ai.usage.input_cost"] = inputCost;
+  const outputCost = readUsd(gateway.outputInferenceCost);
+  if (outputCost !== undefined) attributes["gen_ai.usage.output_cost"] = outputCost;
+  if (typeof gateway.generationId === "string" && gateway.generationId.length > 0) {
+    attributes["gen_ai.generation.id"] = gateway.generationId;
+  }
+  return Object.keys(attributes).length === 0 ? undefined : attributes;
+}
+
+function readUsd(value: unknown): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function isSpanState(value: unknown): value is SpanState {
   return typeof value === "object" && value !== null && "context" in value && "span" in value;
 }
 
 function isToolSpanState(value: unknown): value is ToolSpanState {
   return isSpanState(value) && "toolSpan" in value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function modelSpanName(operationName: string): string {

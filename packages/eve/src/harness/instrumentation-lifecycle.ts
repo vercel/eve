@@ -58,6 +58,17 @@ export interface InstrumentationAttemptTerminalEvent {
   readonly scope: InstrumentationAttemptScope;
 }
 
+/**
+ * Provider metadata for one completed step, as reported by the AI SDK
+ * (`StepResult.providerMetadata`). Carries Vercel AI Gateway cost data when
+ * the request went through the gateway; absent for other providers.
+ */
+export interface InstrumentationAttemptMetadataEvent {
+  readonly type: "attempt.metadata";
+  readonly scope: InstrumentationAttemptScope;
+  readonly providerMetadata: Readonly<Record<string, unknown>>;
+}
+
 export interface InstrumentationModelCallStartedEvent {
   readonly type: "model.call.started";
   readonly id: string;
@@ -129,6 +140,9 @@ export interface InstrumentationProviderDefinition {
     readonly "attempt.failed"?: (
       event: InstrumentationAttemptTerminalEvent,
     ) => void | PromiseLike<void>;
+    readonly "attempt.metadata"?: (
+      event: InstrumentationAttemptMetadataEvent,
+    ) => void | PromiseLike<void>;
     readonly "session.completed"?: (
       event: InstrumentationSessionTransitionEvent,
     ) => void | PromiseLike<void>;
@@ -171,6 +185,7 @@ export type InstrumentationRelatedEventName = keyof InstrumentationRelatedEventM
 
 export type InstrumentationPointEvent =
   | InstrumentationAttemptStartedEvent
+  | InstrumentationAttemptMetadataEvent
   | InstrumentationAttemptTerminalEvent
   | InstrumentationSessionStartedEvent
   | InstrumentationSessionTransitionEvent

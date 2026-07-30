@@ -44,6 +44,7 @@ async function emitAttempt(input: {
   readonly attemptIndex?: number;
   readonly hooks: InstrumentationHooks;
   readonly runInContext: InstrumentationContextRunner;
+  readonly providerMetadata?: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
   readonly toolError?: Error;
   readonly turnAlreadyStarted?: boolean;
@@ -111,6 +112,14 @@ async function emitAttempt(input: {
           : { error: input.toolError, type: "tool-error" },
     },
   ]);
+
+  if (input.providerMetadata !== undefined) {
+    await input.hooks.publish({
+      providerMetadata: input.providerMetadata,
+      scope,
+      type: "attempt.metadata",
+    });
+  }
 
   await input.hooks.publish({ scope, type: "attempt.completed" });
   await input.hooks.publish({
@@ -201,6 +210,55 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.root.session.id": "session-1",
     });
     expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("private");
+  });
+
+  it("writes gateway cost attributes on the step span when the gateway reports them", async () => {
+    const runtime = createRuntime();
+    await emitAttempt({
+      hooks: runtime.hooks,
+      providerMetadata: {
+        gateway: {
+          cost: "0.000082",
+          gatewayCost: "0.000182",
+          generationId: "gen_01KYR80F7ZV4RM3PJ635KMXB5V",
+          inputInferenceCost: "0.000042",
+          outputInferenceCost: "0.00004",
+        },
+      },
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const step = byName(runtime.exporter.getFinishedSpans(), "agent.step")[0]!;
+    expect(step.attributes).toMatchObject({
+      "gen_ai.generation.id": "gen_01KYR80F7ZV4RM3PJ635KMXB5V",
+      "gen_ai.usage.cost": 0.000082,
+      "gen_ai.usage.gateway_cost": 0.000182,
+      "gen_ai.usage.input_cost": 0.000042,
+      "gen_ai.usage.output_cost": 0.00004,
+    });
+  });
+
+  it("emits no cost attributes when the provider is not the gateway", async () => {
+    const runtime = createRuntime();
+    await emitAttempt({
+      hooks: runtime.hooks,
+      providerMetadata: { anthropic: { cacheCreationInputTokens: 0 } },
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const step = byName(runtime.exporter.getFinishedSpans(), "agent.step")[0]!;
+    const keys = Object.keys(step.attributes);
+    for (const key of keys) {
+      expect(key).not.toContain("cost");
+    }
   });
 
   it("reuses one trace id across turns", async () => {
