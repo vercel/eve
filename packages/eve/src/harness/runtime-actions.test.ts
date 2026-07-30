@@ -159,7 +159,17 @@ describe("resolveToolCallInputObject", () => {
     expect(() => resolveToolCallInputObject('"query"', context)).toThrow(
       /web_search.*call-1.*Expected a JSON-serializable object/su,
     );
-    expect(() => resolveToolCallInputObject("not json", context)).toThrow(/web_search.*call-1/su);
+
+    try {
+      resolveToolCallInputObject("not json", context);
+      expect.unreachable("malformed JSON should throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        cause: expect.objectContaining({ name: "SyntaxError" }),
+      });
+      expect((error as Error).message).toMatch(/web_search.*call-1/su);
+      expect((error as Error).message).not.toContain("Expected a JSON-serializable object.");
+    }
   });
 
   it("rejects non-object JSON values", () => {
