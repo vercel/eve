@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
 import type { Asker, Question } from "./ask.js";
-import { channelSetupEnvironment } from "./integrations/channels/environment.js";
-import { createChannelSetupUi } from "./integrations/channels/ui.js";
+import { channelSetupEnvironment } from "./integrations/shared/environment.js";
+import { createChannelSetupUi } from "./integrations/shared/ui.js";
 import { setupPhoton, type PhotonSetupDeps } from "./photon-setup.js";
 
 function asker(answers: Record<string, string>): Asker {

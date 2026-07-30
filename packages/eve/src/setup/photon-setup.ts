@@ -13,8 +13,8 @@ import { openUrl } from "./primitives/open-url.js";
 import { deriveSlackConnectorSlug } from "./scaffold/index.js";
 import { writeTextFile } from "./scaffold/files.js";
 import { WizardCancelledError } from "./step.js";
-import type { ChannelSetupEnvironment } from "./integrations/channels/environment.js";
-import type { ChannelSetupUi } from "./integrations/channels/ui.js";
+import type { ChannelSetupEnvironment } from "./integrations/shared/environment.js";
+import type { ChannelSetupUi } from "./integrations/shared/ui.js";
 import { ensureVercelProject } from "./flows/ensure-vercel-project.js";
 
 /** Inputs for Photon project provisioning and channel scaffolding. */

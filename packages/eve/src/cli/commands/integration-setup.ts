@@ -7,23 +7,9 @@ import type { AddChannelsDeps } from "#setup/integrations/channel-scaffold.js";
 import {
   channelSetupEnvironment,
   describeChannelSetupEnvironment,
-<<<<<<< HEAD
 } from "#setup/integrations/shared/environment.js";
 import { channelSetupIntegration, createChannelSetupUi } from "#setup/integrations/registry.js";
-import type { PhotonSetupDeps } from "#setup/photon-setup.js";
-import {
-  describePhotonSetupEnvironment,
-  photonSetupEnvironment,
-} from "#setup/photon-setup-environment.js";
-import { createPhotonSetupUi, photonSetupIntegration } from "#setup/photon-setup-integrations.js";
-=======
-} from "#setup/integrations/channels/environment.js";
-import {
-  channelSetupIntegration,
-  createChannelSetupUi,
-} from "#setup/integrations/channels/index.js";
-import { setupPhoton, type PhotonSetupDeps } from "#setup/photon-setup.js";
->>>>>>> b21842f3 (refactor(eve): simplify Photon setup flow)
+import { setupPhoton } from "#setup/photon-setup.js";
 import { detectDeployment, projectResolutionFromDeployment } from "#setup/project-resolution.js";
 >>>>>>> 23729a51 (fix(eve): stabilize Photon setup)
 import { createPrompter, type Prompter } from "#setup/prompter.js";
@@ -44,7 +30,13 @@ export interface IntegrationSetupOptions {
 
 export interface IntegrationSetupDependencies {
   createPrompter?: () => Prompter;
+<<<<<<< HEAD
   runnerDeps?: IntegrationSetupRunnerDeps;
+=======
+  detectDeployment: typeof detectDeployment;
+  getVercelAuthStatus: typeof getVercelAuthStatus;
+  addChannelsDeps?: AddChannelsDeps;
+>>>>>>> 855f34ab (fix(eve): resolve Photon setup restack conflict)
 }
 
 const defaultIntegrationSetupDependencies: IntegrationSetupDependencies = {};
@@ -92,7 +84,6 @@ export async function runIntegrationSetupCommand(
         projectPath: appRoot,
         environment,
         ui: createChannelSetupUi({ asker: interactiveAsker(prompter), prompter }),
-        deps: dependencies.photonDeps,
         signal,
       });
       if (result.kind === "cancelled") {
