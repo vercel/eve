@@ -19,6 +19,7 @@ import {
   truncatePlainText,
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
+import { gfmToSlackMrkdwn } from "#public/channels/slack/mrkdwn.js";
 import type { InputRequest } from "#runtime/input/types.js";
 
 /**
@@ -145,7 +146,7 @@ export function isHitlAction(actionId: string): boolean {
  */
 export function renderInputRequestBlocks(request: InputRequest): unknown[] {
   const prompt = {
-    text: { text: truncateSectionText(request.prompt), type: "mrkdwn" },
+    text: { text: truncateSectionText(gfmToSlackMrkdwn(request.prompt)), type: "mrkdwn" },
     type: "section",
   };
   const details = renderInputRequestDetailBlocks(request);
@@ -232,7 +233,12 @@ export function buildFreeformModalView(input: {
 }): Record<string, unknown> {
   const title = input.prompt ? truncateModalTitle(input.prompt) : "Your answer";
   const promptBlocks = input.prompt
-    ? [{ type: "section", text: { type: "mrkdwn", text: truncateSectionText(input.prompt) } }]
+    ? [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: truncateSectionText(gfmToSlackMrkdwn(input.prompt)) },
+        },
+      ]
     : [];
   return {
     type: "modal",

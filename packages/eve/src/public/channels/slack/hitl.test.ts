@@ -280,6 +280,23 @@ describe("renderInputRequestBlocks", () => {
     expect(button.style).toBe("primary");
   });
 
+  it("converts model markdown in the prompt to Slack mrkdwn", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({ prompt: "Rename **config.yaml**? See [docs](https://x.dev)" }),
+    );
+
+    const prompt = blocks[0] as { text: { text: string; type: string } };
+    expect(prompt.text.type).toBe("mrkdwn");
+    expect(prompt.text.text).toBe("Rename *config.yaml*? See <https://x.dev|docs>");
+  });
+
+  it("leaves code spans in the prompt untouched", () => {
+    const blocks = renderInputRequestBlocks(makeRequest({ prompt: "Run `**not bold**` first?" }));
+
+    const prompt = blocks[0] as { text: { text: string } };
+    expect(prompt.text.text).toBe("Run `**not bold**` first?");
+  });
+
   it("uses option buttons when allowFreeform is set alongside options", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({
@@ -417,6 +434,25 @@ describe("buildFreeformModalView", () => {
       | undefined;
     expect(inputBlock?.block_id).toBe(HITL_FREEFORM_MODAL_BLOCK_ID);
     expect(inputBlock?.element?.action_id).toBe(HITL_FREEFORM_MODAL_ACTION_ID);
+  });
+
+  it("converts model markdown in the modal prompt section to Slack mrkdwn", () => {
+    const view = buildFreeformModalView({
+      metadata: {
+        continuationToken: "slack:C01:1.0",
+        channelId: "C01",
+        threadTs: "1.0",
+        messageTs: "1.1",
+        requestId: "call_abc",
+      },
+      prompt: "Rename **config.yaml**?",
+    });
+
+    const blocks = view.blocks as Array<Record<string, unknown>>;
+    const section = blocks.find((b) => b.type === "section") as
+      | { text?: { text?: string } }
+      | undefined;
+    expect(section?.text?.text).toBe("Rename *config.yaml*?");
   });
 
   it("truncates a long modal prompt to fit the section-text limit", () => {
