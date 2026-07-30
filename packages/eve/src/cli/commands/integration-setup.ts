@@ -97,6 +97,7 @@ export async function runIntegrationSetupCommand(
       });
       if (result.kind === "cancelled") {
         client?.cancel();
+        if (process.env.EVE_SETUP === "1") process.exitCode = 130;
         return;
       }
       prompter.outro("Integration set up.");

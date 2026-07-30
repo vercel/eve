@@ -106,7 +106,7 @@ for (const [index, item] of items.entries()) {
   const registrySlug = expectedSlugs[index];
 
   if (entry.slug === "slack" || entry.slug === "eve" || entry.slug === "photon") {
-    const expectedArgs = ["integration", "setup", entry.slug];
+    const expectedArgs = ["integration", "setup", registrySlug];
     if (
       setup?.command !== "eve" ||
       setup.package !== "eve" ||
