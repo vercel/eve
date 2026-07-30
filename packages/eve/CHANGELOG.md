@@ -1,5 +1,24 @@
 # eve
 
+## 0.29.0
+
+### Minor Changes
+
+- 2b09840: Remove the `/channels` dev TUI command, `eve channels add`, and the unused programmatic onboarding API. Channel integrations install through `eve add`, run isolated integration setup without deploying, and leave deployment as an explicit `eve deploy` step.
+- 38cdff8: Renames the `eve trace` CLI command to `eve traces` so it matches the `/traces` TUI command and the plural `eve logs` command. `eve traces ls` and `eve traces <trace>` work as before; the old singular form is removed.
+
+### Patch Changes
+
+- 6dd3006: Cancelling a parent turn now delivers descendant cancellations more reliably: the cancel request retries with exponential backoff (~8s budget instead of 3s), `no_active_turn` results carry the error class that marked the target inactive, and every previously silent drop path (missing pending batch, missing child session ids, exhausted retries) now logs a warning so an uncancelled child no longer runs to completion without a trace.
+- 255027e: Add an opt-in durable `sleep` tool from `eve/tools/sleep`. Agents can export `sleep()` from `agent/tools/sleep.ts` to let the model pause a turn before checking progress or status again without holding an application runtime open.
+- 01ed80d: `eve eval` gains a repeatable `--exclude-tag <tag...>` flag that skips evals carrying a tag. Exclusion applies after `--tag` inclusion, and a run where exclusion removes every matching eval now exits successfully with nothing executed. `--list` reports the post-filter selection — `--list --json` prints `[]` when exclusion removes everything — so suite runners can probe whether anything would run.
+- f09a399: Allow `eve init .` to scaffold in directories that already contain common, source-controlled toolchain and development-environment manifests. Existing mise configs and lockfiles, Node version selectors, proto, Devbox, Nix flake, and devenv configuration are preserved.
+- 2b09840: Remove the `/connect` dev TUI command. Add connections through `eve add` or `/add`; official Connect-backed connection items now configure and patch their Vercel connector during registry setup.
+- 0179111: Report concise, actionable diagnostics for failed value and LLM judge assertions, including actual and expected values, schema issues, evaluated prompts, and judge rationale. Add assertion labels, preserve structured evidence in artifacts, and prevent duplicate Braintrust score names from overwriting each other.
+- 2b09840: Add a `/add` dev TUI command with categorized registry browsing, manifest inspection, and integration installation without leaving the interactive session. Fresh `eve init` sessions open this next-steps hub after model setup.
+- 6dd3006: A turn cancellation observed while a durable turn step is returning now settles the turn as cancelled instead of losing the race to an ordinary completion. Previously the step could miss the abort signal and finish `done`, leaving the session in a completed state after the user had already cancelled. The cancel signal also now aborts in the same microtask that consumes the cancel payload, so a cancel replayed alongside a completed step can no longer lose the settle check by one task-queue hop.
+- 6dd3006: Upgrade the vendored Workflow DevKit to `@workflow/core@5.0.0-beta.38`. This picks up the upstream fix for runs going dormant after an accepted hook resume (vercel/workflow#3183): a session cancelled while parked on subagents could previously hold the accepted cancel indefinitely — its turn only settling as cancelled when unrelated traffic happened to wake the run. beta.38 also restored runtime world selection in core's `createWorld()`, which statically imports both first-party worlds; eve stubs those imports at vendor time so hosted Vercel bundles keep excluding local-world infrastructure.
+
 ## 0.28.0
 
 ### Minor Changes
