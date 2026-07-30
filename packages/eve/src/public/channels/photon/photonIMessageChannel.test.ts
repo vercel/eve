@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { photonChannel } from "#public/channels/photon/photonChannel.js";
+import { photonIMessageChannel } from "#public/channels/photon/photonIMessageChannel.js";
 
 function routes(channel: unknown): Array<{ method: string; path: string }> {
   if (!isCompiledChannel(channel)) throw new Error("Expected compiled channel.");
   return channel.routes.map((route) => ({ method: route.method, path: route.path }));
 }
 
-describe("photonChannel", () => {
+describe("photonIMessageChannel", () => {
   it("creates the default Photon webhook without eagerly resolving credentials", () => {
     const credentials = vi.fn(async () => ({
       projectId: "project-id",
       projectSecret: "project-secret",
     }));
 
-    const channel = photonChannel({ credentials });
+    const channel = photonIMessageChannel({ credentials });
 
     expect(credentials).not.toHaveBeenCalled();
     expect(routes(channel)).toEqual([
@@ -25,7 +25,7 @@ describe("photonChannel", () => {
   });
 
   it("supports a custom webhook route", () => {
-    const channel = photonChannel({
+    const channel = photonIMessageChannel({
       credentials: async () => ({
         projectId: "project-id",
         projectSecret: "project-secret",

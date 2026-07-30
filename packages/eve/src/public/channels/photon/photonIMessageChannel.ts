@@ -16,16 +16,16 @@ import {
 } from "#compiled/@photon-ai/chat-adapter-imessage/index.js";
 import { photonInboundContent } from "#public/channels/photon/inboundContent.js";
 
-/** Photon project credentials used by {@link photonChannel}. */
-export type PhotonChannelCredentials = iMessageCredentialProvider;
+/** Photon project credentials used by {@link photonIMessageChannel}. */
+export type PhotonIMessageChannelCredentials = iMessageCredentialProvider;
 
-/** Context passed to {@link PhotonChannelConfig.onMessage}. */
+/** Context passed to {@link PhotonIMessageChannelConfig.onMessage}. */
 export interface PhotonInboundMessageContext {
   /** Low-level Chat SDK thread for iMessage-specific operations. */
   readonly thread: Thread;
 }
 
-/** Result of {@link PhotonChannelConfig.onMessage}. Return `null` to drop the message. */
+/** Result of {@link PhotonIMessageChannelConfig.onMessage}. Return `null` to drop the message. */
 export type PhotonInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
@@ -34,10 +34,10 @@ export type PhotonInboundResult = {
 /** Sync or async {@link PhotonInboundResult}. */
 export type PhotonInboundResultOrPromise = PhotonInboundResult | Promise<PhotonInboundResult>;
 
-/** Configuration for {@link photonChannel}. */
-export interface PhotonChannelConfig {
+/** Configuration for {@link photonIMessageChannel}. */
+export interface PhotonIMessageChannelConfig {
   /** Lazy Photon project credentials, such as `connectPhotonCredentials(...)`. */
-  readonly credentials: PhotonChannelCredentials;
+  readonly credentials: PhotonIMessageChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
   readonly events?: ChatSdkChannelEvents<{ imessage: iMessageAdapter }>;
   /** Inbound message policy. Defaults to dispatching every message with no user auth. */
@@ -56,7 +56,7 @@ export interface PhotonChannelConfig {
 }
 
 /** First-class eve channel backed by Photon iMessage. */
-export interface PhotonChannel extends ChatSdkChannel {}
+export interface PhotonIMessageChannel extends ChatSdkChannel {}
 
 /**
  * Creates an eve channel for Photon-powered iMessage.
@@ -64,14 +64,14 @@ export interface PhotonChannel extends ChatSdkChannel {}
  * @example
  * ```ts
  * import { connectPhotonCredentials } from "@vercel/connect/eve";
- * import { photonChannel } from "eve/channels/photon";
+ * import { photonIMessageChannel } from "eve/channels/photon";
  *
- * export default photonChannel({
- *   credentials: connectPhotonCredentials(process.env.PHOTON_CONNECTOR_ID!),
+ * export default photonIMessageChannel({
+ *   credentials: connectPhotonCredentials("photon/my-agent"),
  * });
  * ```
  */
-export function photonChannel(config: PhotonChannelConfig): PhotonChannel {
+export function photonIMessageChannel(config: PhotonIMessageChannelConfig): PhotonIMessageChannel {
   const webhookSecret = config.webhookSecret ?? process.env.IMESSAGE_WEBHOOK_SECRET;
   const imessage = createiMessageAdapter({
     credentials: config.credentials,
@@ -108,7 +108,7 @@ async function defaultOnMessage(): Promise<PhotonInboundResult> {
 
 async function dispatchMessage(
   bridge: ChatSdkChannelBridge<{ imessage: iMessageAdapter }>,
-  onMessage: NonNullable<PhotonChannelConfig["onMessage"]>,
+  onMessage: NonNullable<PhotonIMessageChannelConfig["onMessage"]>,
   thread: Thread,
   message: Message,
   subscribe: boolean,

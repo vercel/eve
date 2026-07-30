@@ -3,16 +3,16 @@ title: Photon
 description: Connect an eve agent to iMessage through Photon.
 ---
 
-Use `photonChannel` to receive and reply to iMessages through a Photon project.
+Use `photonIMessageChannel` to receive and reply to iMessages through a Photon project.
 With Vercel Connect, the channel resolves credentials lazily when the adapter
 first initializes:
 
 ```ts title="agent/channels/photon.ts"
 import { connectPhotonCredentials } from "@vercel/connect/eve";
-import { photonChannel } from "eve/channels/photon";
+import { photonIMessageChannel } from "eve/channels/photon";
 
-export default photonChannel({
-  credentials: connectPhotonCredentials(process.env.PHOTON_CONNECTOR_ID!),
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
 });
 ```
 
@@ -24,8 +24,8 @@ session for later messages.
 Customize inbound dispatch with `onMessage`. Return `null` to ignore a message:
 
 ```ts
-export default photonChannel({
-  credentials: connectPhotonCredentials(process.env.PHOTON_CONNECTOR_ID!),
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
   onMessage(_ctx, message) {
     if (message.author.isBot) return null;
     return {

@@ -1,9 +1,9 @@
 export {
-  photonChannel,
-  type PhotonChannel,
-  type PhotonChannelConfig,
-  type PhotonChannelCredentials,
+  photonIMessageChannel,
+  type PhotonIMessageChannel,
+  type PhotonIMessageChannelConfig,
+  type PhotonIMessageChannelCredentials,
   type PhotonInboundMessageContext,
   type PhotonInboundResult,
   type PhotonInboundResultOrPromise,
-} from "#public/channels/photon/photonChannel.js";
+} from "#public/channels/photon/photonIMessageChannel.js";
