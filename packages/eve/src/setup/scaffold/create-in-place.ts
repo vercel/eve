@@ -3,7 +3,11 @@ const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([
   ".git",
   ".gitkeep",
   ".hg",
-  // mise.toml may need to exist before init so npx runs with the project's Node version.
+  // Toolchain selectors may need to exist before init so npx runs with the project's Node version.
+  ".mise.toml",
+  ".node-version",
+  ".nvmrc",
+  ".tool-versions",
   "mise.toml",
 ]);
 
