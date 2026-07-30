@@ -93,6 +93,7 @@ const defaultDeps: SlackSetupDeps = {
 async function chooseCredentials(
   context: IntegrationSetupContext,
 ): Promise<"vercel-connect" | "environment" | "cancelled"> {
+  if (context.yes) return "vercel-connect";
   try {
     return (await context.ui.prompter.select<"vercel" | "portable">({
       message: "How would you like to configure Slack?",
@@ -124,11 +125,14 @@ async function provisionSlack(
       const selected = await context.ui.prompter.select<string>({
         message: "Which Slack app would you like to use?",
         options: [
-          ...connectors.map((connector) => ({
-            value: connector.uid,
-            label: `Use ${connector.uid}`,
-            ...(connector.uid === preferred?.uid ? { hint: "Matches this agent" } : {}),
-          })),
+          ...connectors.map((connector) => {
+            const option: { value: string; label: string; hint?: string } = {
+              value: connector.uid,
+              label: `Use ${connector.uid}`,
+            };
+            if (connector.uid === preferred?.uid) option.hint = "Matches this agent";
+            return option;
+          }),
           { value: "create", label: "Create a new Slack app" },
         ],
         initialValue: preferred?.uid,
@@ -137,11 +141,11 @@ async function provisionSlack(
         ? "create"
         : connectors.find((connector) => connector.uid === selected)!;
     },
-    ...(context.signal === undefined ? {} : { signal: context.signal }),
-    ...(context.ui.prompter.awaitChoice === undefined
-      ? {}
-      : { awaitChoice: context.ui.prompter.awaitChoice }),
   };
+  if (context.signal !== undefined) provisionOptions.signal = context.signal;
+  if (context.ui.prompter.awaitChoice !== undefined) {
+    provisionOptions.awaitChoice = context.ui.prompter.awaitChoice;
+  }
   const result = await deps.provisionSlackbot(
     context.ui.prompter.log,
     context.appRoot,
