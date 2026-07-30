@@ -3,10 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
 import type { Asker, Question } from "./ask.js";
-import { photonSetupEnvironment } from "./photon-setup-environment.js";
-import type { PhotonSetupDeps } from "./photon-setup.js";
-import { PHOTON_CHANNEL_SETUP } from "./photon-setup.js";
-import { createPhotonSetupUi } from "./photon-setup-ui.js";
+import { channelSetupEnvironment } from "./integrations/channels/environment.js";
+import { createChannelSetupUi } from "./integrations/channels/ui.js";
+import { setupPhoton, type PhotonSetupDeps } from "./photon-setup.js";
 
 function asker(answers: Record<string, string>): Asker {
   return {
@@ -38,18 +37,15 @@ describe("Photon setup", () => {
     const effects = deps();
 
     await expect(
-      PHOTON_CHANNEL_SETUP.setup({
-        environment: photonSetupEnvironment("cli-missing", { kind: "unresolved" }),
-        state: {
-          agentName: "agent",
-          project: { kind: "unresolved" },
-          projectPath: "/project",
-        },
-        ui: createPhotonSetupUi({
+      setupPhoton({
+        agentName: "agent",
+        projectPath: "/project",
+        environment: channelSetupEnvironment("cli-missing", { kind: "unresolved" }),
+        ui: createChannelSetupUi({
           asker: asker({ "photon-phone-number": "+15551234567" }),
           prompter: fake.prompter,
         }),
-        photonDeps: effects,
+        deps: effects,
       }),
     ).resolves.toMatchObject({ kind: "done" });
 
@@ -69,18 +65,15 @@ describe("Photon setup", () => {
     const fake = createFakePrompter({ single: () => "portable" });
     const effects = deps();
 
-    await PHOTON_CHANNEL_SETUP.setup({
-      environment: photonSetupEnvironment("cli-missing", { kind: "unresolved" }),
-      state: {
-        agentName: "weather-agent",
-        project: { kind: "unresolved" },
-        projectPath: "/project",
-      },
-      ui: createPhotonSetupUi({
+    await setupPhoton({
+      agentName: "weather-agent",
+      projectPath: "/project",
+      environment: channelSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      ui: createChannelSetupUi({
         asker: asker({ "photon-phone-number": "+15551234567" }),
         prompter: fake.prompter,
       }),
-      photonDeps: effects,
+      deps: effects,
     });
 
     expect(effects.provisionProject).toHaveBeenCalledWith(
@@ -92,15 +85,12 @@ describe("Photon setup", () => {
     const fake = createFakePrompter({ single: () => "vercel" });
 
     await expect(
-      PHOTON_CHANNEL_SETUP.setup({
-        environment: photonSetupEnvironment("cli-missing", { kind: "unresolved" }),
-        state: {
-          agentName: "agent",
-          project: { kind: "unresolved" },
-          projectPath: "/project",
-        },
-        ui: createPhotonSetupUi({ asker: asker({}), prompter: fake.prompter }),
-        photonDeps: deps(),
+      setupPhoton({
+        agentName: "agent",
+        projectPath: "/project",
+        environment: channelSetupEnvironment("cli-missing", { kind: "unresolved" }),
+        ui: createChannelSetupUi({ asker: asker({}), prompter: fake.prompter }),
+        deps: deps(),
       }),
     ).rejects.toThrow("vercel login");
   });

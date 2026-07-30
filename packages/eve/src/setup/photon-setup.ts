@@ -2,7 +2,6 @@ import { join } from "node:path";
 
 import { text } from "./ask.js";
 import { appendEnv } from "./append-env.js";
-import type { PhotonSetupIntegration } from "./photon-setup-integration.js";
 import { provisionPhotonConnector } from "./photon-connect.js";
 import {
   provisionPhotonProject,
@@ -14,7 +13,25 @@ import { openUrl } from "./primitives/open-url.js";
 import { deriveSlackConnectorSlug } from "./scaffold/index.js";
 import { writeTextFile } from "./scaffold/files.js";
 import { WizardCancelledError } from "./step.js";
+import type { ChannelSetupEnvironment } from "./integrations/channels/environment.js";
+import type { ChannelSetupUi } from "./integrations/channels/ui.js";
 import { ensureVercelProject } from "./flows/ensure-vercel-project.js";
+
+/** Inputs for Photon project provisioning and channel scaffolding. */
+export interface PhotonSetupOptions {
+  agentName: string;
+  projectPath: string;
+  environment: ChannelSetupEnvironment;
+  ui: ChannelSetupUi;
+  signal?: AbortSignal;
+  force?: boolean;
+  deps?: PhotonSetupDeps;
+}
+
+/** Outcome of Photon project provisioning and channel scaffolding. */
+export type PhotonSetupResult =
+  | { kind: "done"; assignedPhoneNumber?: string; dashboardUrl: string }
+  | { kind: "cancelled" };
 
 interface PhotonSetupPlan {
   credentials: "vercel-connect" | "environment";
@@ -70,10 +87,10 @@ export default photonIMessageChannel({
 }
 
 async function choosePhotonProject(
-  context: Parameters<PhotonSetupIntegration["setup"]>[0],
+  options: PhotonSetupOptions,
 ): Promise<Pick<PhotonSetupPlan, "photonProject" | "photonProjectName">> {
-  const defaultName = `eve · ${context.state.agentName || "agent"}`;
-  const options = [
+  const defaultName = `eve · ${options.agentName || "agent"}`;
+  const projectOptions = [
     {
       value: "create" as const,
       label: "Create a new Photon project",
@@ -85,10 +102,10 @@ async function choosePhotonProject(
       hint: "Enter its project credentials",
     },
   ];
-  const editable = context.ui.prompter.selectEditable
-    ? await context.ui.prompter.selectEditable<"create" | "existing">({
+  const editable = options.ui.prompter.selectEditable
+    ? await options.ui.prompter.selectEditable<"create" | "existing">({
         message: "Photon project",
-        options,
+        options: projectOptions,
         initialValue: "create",
         editable: {
           value: "create",
@@ -101,16 +118,16 @@ async function choosePhotonProject(
     : undefined;
   const source =
     editable?.value ??
-    (await context.ui.prompter.select<"create" | "existing">({
+    (await options.ui.prompter.select<"create" | "existing">({
       message: "Photon project",
-      options,
+      options: projectOptions,
       initialValue: "create",
     }));
   if (source === "existing") {
-    const projectId = await context.ui.asker.ask(
+    const projectId = await options.ui.asker.ask(
       text({ key: "photon-project-id", message: "Photon project ID", required: true }),
     );
-    const projectSecret = await context.ui.asker.ask(
+    const projectSecret = await options.ui.asker.ask(
       text({
         key: "photon-project-secret",
         message: "Photon project secret",
@@ -128,17 +145,17 @@ async function choosePhotonProject(
 }
 
 async function chooseSetupPlan(
-  context: Parameters<PhotonSetupIntegration["setup"]>[0],
+  options: PhotonSetupOptions,
 ): Promise<PhotonSetupPlan | "cancelled"> {
   try {
-    const destination = await context.ui.prompter.select<"vercel" | "portable">({
+    const destination = await options.ui.prompter.select<"vercel" | "portable">({
       message: "How would you like to configure Photon?",
       options: [
         {
           value: "vercel",
           label: "Set up Vercel Connect",
           hint:
-            context.environment.vercel.kind === "available"
+            options.environment.vercel.kind === "available"
               ? "Link this project and configure Photon automatically"
               : "Log in to Vercel and link this project",
         },
@@ -148,14 +165,14 @@ async function chooseSetupPlan(
           hint: "Configure the Photon webhook manually after deployment",
         },
       ],
-      initialValue: context.environment.vercel.kind === "available" ? "vercel" : "portable",
+      initialValue: options.environment.vercel.kind === "available" ? "vercel" : "portable",
     });
-    if (destination === "vercel" && context.environment.vercel.kind === "unavailable") {
+    if (destination === "vercel" && options.environment.vercel.kind === "unavailable") {
       throw new Error(
         "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Photon setup.",
       );
     }
-    const photon = await choosePhotonProject(context);
+    const photon = await choosePhotonProject(options);
     return { credentials: destination === "vercel" ? "vercel-connect" : "environment", ...photon };
   } catch (error) {
     if (error instanceof WizardCancelledError) return "cancelled";
@@ -164,7 +181,7 @@ async function chooseSetupPlan(
 }
 
 async function resolvePhotonProject(
-  context: Parameters<PhotonSetupIntegration["setup"]>[0],
+  options: PhotonSetupOptions,
   plan: PhotonSetupPlan,
   phoneNumber: string,
   deps: PhotonSetupDeps,
@@ -172,18 +189,18 @@ async function resolvePhotonProject(
   if (plan.photonProject !== "create") {
     return deps.useProject({ ...plan.photonProject, phoneNumber });
   }
-  const spinner = context.ui.prompter.log.spinner?.("Waiting for Photon approval…", {
+  const spinner = options.ui.prompter.log.spinner?.("Waiting for Photon approval…", {
     kind: "external-action",
     emphasis: "browser",
   });
   try {
     return await deps.provisionProject({
-      projectName: plan.photonProjectName ?? `eve · ${context.state.agentName || "agent"}`,
+      projectName: plan.photonProjectName ?? `eve · ${options.agentName || "agent"}`,
       phoneNumber,
-      signal: context.signal,
+      signal: options.signal,
       onAuthorization(authorization) {
-        context.ui.prompter.log.message(`Authorize Photon: ${authorization.verificationUrl}`);
-        context.ui.prompter.log.message(`Photon code: ${authorization.userCode}`);
+        options.ui.prompter.log.message(`Authorize Photon: ${authorization.verificationUrl}`);
+        options.ui.prompter.log.message(`Photon code: ${authorization.userCode}`);
         deps.openUrl(authorization.verificationUrl);
       },
     });
@@ -192,12 +209,12 @@ async function resolvePhotonProject(
   }
 }
 
-async function setupPhoton(
-  context: Parameters<PhotonSetupIntegration["setup"]>[0],
+async function scaffoldPhoton(
+  options: PhotonSetupOptions,
   plan: PhotonSetupPlan,
   deps: PhotonSetupDeps,
 ): Promise<{ assignedPhoneNumber?: string; dashboardUrl: string }> {
-  const phoneNumber = await context.ui.asker.ask(
+  const phoneNumber = await options.ui.asker.ask(
     text({
       key: "photon-phone-number",
       message: "Your iMessage phone number",
@@ -206,47 +223,47 @@ async function setupPhoton(
       validate: validatePhotonPhoneNumber,
     }),
   );
-  const projectRoot = context.state.projectPath;
-  const managedProject = await resolvePhotonProject(context, plan, phoneNumber, deps);
+  const projectRoot = options.projectPath;
+  const managedProject = await resolvePhotonProject(options, plan, phoneNumber, deps);
   try {
     const channelPath = join(projectRoot, "agent/channels/photon.ts");
     if (plan.credentials === "vercel-connect") {
-      const slug = await deps.deriveConnectorSlug(projectRoot, context.state.agentName);
+      const slug = await deps.deriveConnectorSlug(projectRoot, options.agentName);
       const project = await deps.ensureVercelProject({
         appRoot: projectRoot,
-        prompter: context.ui.prompter,
-        signal: context.signal,
+        prompter: options.ui.prompter,
+        signal: options.signal,
       });
       const connector = await deps.provisionConnector({
         credentials: managedProject,
-        log: context.ui.prompter.log,
+        log: options.ui.prompter.log,
         project,
         projectRoot,
         slug,
-        signal: context.signal,
+        signal: options.signal,
       });
       await deps.writeTextFile(channelPath, connectTemplate(connector.uid), {
-        force: context.force,
+        force: options.force,
       });
     } else {
       await deps.appendEnv(join(projectRoot, ".env.local"), {
         IMESSAGE_PROJECT_ID: managedProject.projectId,
         IMESSAGE_PROJECT_SECRET: managedProject.projectSecret,
       });
-      await deps.writeTextFile(channelPath, PORTABLE_TEMPLATE, { force: context.force });
-      context.ui.nextSteps([
+      await deps.writeTextFile(channelPath, PORTABLE_TEMPLATE, { force: options.force });
+      options.ui.nextSteps([
         "Deploy the agent, then create a Photon webhook pointing to https://<your-host>/eve/v1/photon.",
         "Copy the webhook signing secret into IMESSAGE_WEBHOOK_SECRET, alongside IMESSAGE_PROJECT_ID and IMESSAGE_PROJECT_SECRET, in your host's encrypted environment variables.",
       ]);
     }
-    context.ui.prompter.log.success("Scaffolded channel: photon");
+    options.ui.prompter.log.success("Scaffolded channel: photon");
     if (managedProject.assignedPhoneNumber !== undefined) {
-      context.ui.prompter.note(managedProject.assignedPhoneNumber, "Text your agent", {
+      options.ui.prompter.note(managedProject.assignedPhoneNumber, "Text your agent", {
         tone: "success",
       });
     }
     const dashboardUrl = `https://app.photon.codes/dashboard/${managedProject.projectId}`;
-    context.ui.prompter.note(dashboardUrl, "Photon project", { tone: "success" });
+    options.ui.prompter.note(dashboardUrl, "Photon project", { tone: "success" });
     return managedProject.assignedPhoneNumber === undefined
       ? { dashboardUrl }
       : { assignedPhoneNumber: managedProject.assignedPhoneNumber, dashboardUrl };
@@ -256,24 +273,14 @@ async function setupPhoton(
   }
 }
 
-/** Photon-managed project provisioning and channel scaffolding. */
-export const PHOTON_CHANNEL_SETUP: PhotonSetupIntegration = {
-  kind: "photon",
-  label: "Photon",
-  hint: "Messages through Photon",
-  async setup(context) {
-    try {
-      const plan = await chooseSetupPlan(context);
-      if (plan === "cancelled") return { kind: "cancelled" };
-      const result = await setupPhoton(context, plan, context.photonDeps ?? defaultDeps);
-      return {
-        kind: "done",
-        state: context.state,
-        ...result,
-      };
-    } catch (error) {
-      if (error instanceof WizardCancelledError) return { kind: "cancelled" };
-      throw error;
-    }
-  },
-};
+/** Provisions a Photon project and scaffolds its iMessage channel. */
+export async function setupPhoton(options: PhotonSetupOptions): Promise<PhotonSetupResult> {
+  try {
+    const plan = await chooseSetupPlan(options);
+    if (plan === "cancelled") return { kind: "cancelled" };
+    return { kind: "done", ...(await scaffoldPhoton(options, plan, options.deps ?? defaultDeps)) };
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return { kind: "cancelled" };
+    throw error;
+  }
+}
