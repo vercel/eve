@@ -1418,6 +1418,16 @@ importers:
         specifier: 5.0.0
         version: 5.0.0(zod@4.4.3)
 
+  packages/eve-buzz-acp-adapter:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../eve
+    devDependencies:
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.10(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
+
   packages/eve-catalog:
     devDependencies:
       vitest:

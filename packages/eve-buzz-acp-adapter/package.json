@@ -1,0 +1,46 @@
+{
+  "name": "eve-buzz-acp-adapter",
+  "version": "0.0.0",
+  "description": "Buzz ACP compatibility adapter for eve agents.",
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "buzz",
+    "eve"
+  ],
+  "homepage": "https://github.com/vercel/eve#readme",
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel/eve.git",
+    "directory": "packages/eve-buzz-acp-adapter"
+  },
+  "bin": {
+    "eve-buzz-acp-adapter": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": true,
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "test": "pnpm run test:unit",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "eve": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
