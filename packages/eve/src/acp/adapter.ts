@@ -259,15 +259,7 @@ export class EveAcpAdapter {
   async close(): Promise<void> {
     const sessions = [...this.#sessions.values()];
     this.#sessions.clear();
-    const results = await Promise.allSettled(
-      sessions.map((session) => this.#retireSession(session)),
-    );
-    const errors = results.flatMap((result) =>
-      result.status === "rejected" ? [result.reason] : [],
-    );
-    if (errors.length > 0) {
-      throw new AggregateError(errors, "Could not close every eve session");
-    }
+    await Promise.allSettled(sessions.map((session) => this.#retireSession(session)));
   }
 
   async #retireSession(session: AcpSession): Promise<void> {

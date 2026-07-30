@@ -576,4 +576,13 @@ describe("EveAcpAdapter", () => {
     await adapter.close();
     expect(session.reset).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps whole-connection cleanup best-effort when reset fails", async () => {
+    const { adapter, session } = adapterWith();
+    await createSession(adapter);
+    session.reset.mockRejectedValueOnce(new Error("server already stopped"));
+
+    await expect(adapter.close()).resolves.toBeUndefined();
+    expect(session.reset).toHaveBeenCalledOnce();
+  });
 });
