@@ -32,6 +32,7 @@ export {
   linearContinuationToken,
   messageFromLinearAgentSessionEvent,
   parseLinearWebhookEvent,
+  stripLinearOtherThreads,
   type LinearAgentActivityRef,
   type LinearAgentSessionAction,
   type LinearAgentSessionEvent,
@@ -40,6 +41,7 @@ export {
   type LinearDelivery,
   type LinearInboundEvent,
   type LinearIssueRef,
+  type LinearMessageOptions,
   type LinearUser,
 } from "#public/channels/linear/inbound.js";
 export {

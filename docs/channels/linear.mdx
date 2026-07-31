@@ -72,7 +72,7 @@ Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC ove
 
 ### Dispatch
 
-The default hook dispatches `created` and `prompted` Agent Session events. eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`.
+The default hook dispatches `created` and `prompted` Agent Session events. eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`. On multi-agent issues, Linear's `promptContext` includes every agent's conversation threads; see [Excluding other agents' threads](#excluding-other-agents-threads) to keep them out of the model-visible turn.
 
 ### Delivery
 
@@ -100,7 +100,7 @@ Event handlers receive `channel.linear`, which exposes `createActivity`, `listAc
 
 ## Custom hooks
 
-Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent.
+Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent. Alongside `auth` you can return `context` (extra user-role strings), `message` (replaces the computed turn message), and `previousComments` (replaces the webhook's previous comments; `[]` drops them).
 
 ```ts
 import { defaultLinearAuth, linearChannel } from "eve/channels/linear";
@@ -128,6 +128,42 @@ export default linearChannel({
   },
 });
 ```
+
+### Excluding other agents' threads
+
+When several agents work on one Linear issue, each `AgentSessionEvent` ships a `promptContext` containing not just the thread where your agent was mentioned but every `<other-thread>` block on the issue — including other agents' full conversations. Left in place, that leaks other sessions' instructions and state into your agent's model-visible turn and widens its prompt-injection surface. Opt out with the channel flag:
+
+```ts
+import { linearChannel } from "eve/channels/linear";
+
+export default linearChannel({
+  excludeOtherThreads: true,
+});
+```
+
+The flag strips `<other-thread>` blocks from the default turn message, failing closed: if the markup is malformed or has drifted, the message falls back to the session summary or issue title rather than leaking partial thread content. It does not touch `previousComments` — those are prior comments from your agent's own thread. To drop them too, or to apply custom filtering, override the dispatched turn from `onAgentSession`; compose `defaultOnAgentSession` so unknown webhook actions still acknowledge without dispatching:
+
+```ts
+import {
+  defaultOnAgentSession,
+  linearChannel,
+  messageFromLinearAgentSessionEvent,
+} from "eve/channels/linear";
+
+export default linearChannel({
+  onAgentSession(ctx, event) {
+    const base = defaultOnAgentSession(ctx, event);
+    if (base === null) return null;
+    return {
+      ...base,
+      message: messageFromLinearAgentSessionEvent(event, { excludeOtherThreads: true }),
+      previousComments: [],
+    };
+  },
+});
+```
+
+An explicit `message` override always wins over the flag. Parsed `previousComments` are body strings only; to filter selectively (for example, keep human comments but drop other bots'), read the raw webhook payload from `event.raw`.
 
 Override event delivery when you want more specific Agent Activities.
 
