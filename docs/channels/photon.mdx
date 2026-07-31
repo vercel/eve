@@ -1,0 +1,78 @@
+---
+title: Photon
+description: Connect an eve agent to iMessage through Photon.
+---
+
+Use `photonIMessageChannel` to receive and reply to iMessages through a Photon project.
+
+Run `eve add channel/photon-imessage` to create or use a Photon project and register
+your phone number. It then asks whether to configure Vercel Connect or portable
+credentials. With Vercel Connect, eve creates the connector and configures
+Photon’s webhook through Connect. The channel resolves credentials lazily when
+the adapter first initializes:
+
+```ts title="agent/channels/photon.ts"
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+});
+```
+
+The default webhook route is `/eve/v1/photon`. The channel verifies forwarded
+webhooks with same-project Vercel OIDC by default, marks accepted messages as
+read, and continues the same eve session for every message in an iMessage
+conversation. A new accepted message cooperatively cancels an active turn and
+steers its replacement turn.
+
+Customize inbound dispatch with `onMessage`. Return `null` to ignore a message:
+
+```ts
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+  onMessage(_ctx, message) {
+    if (message.author.isBot) return null;
+    return {
+      auth: null,
+      context: [`The sender is ${message.author.fullName}.`],
+    };
+  },
+});
+```
+
+Set `route` to override the webhook path or `webhookVerifier` to use a different
+trusted-forwarder verifier.
+
+## Other hosts
+
+For a host without Vercel Connect, choose **Use portable credentials** during
+`eve add channel/photon-imessage`. eve scaffolds the channel and writes
+`IMESSAGE_PROJECT_ID` and `IMESSAGE_PROJECT_SECRET` to `.env.local`.
+
+After deploying the agent:
+
+1. Create a Photon webhook for your public `https://…/eve/v1/photon` URL.
+2. Copy its signing secret into `IMESSAGE_WEBHOOK_SECRET`.
+3. Set `IMESSAGE_PROJECT_ID`, `IMESSAGE_PROJECT_SECRET`, and
+   `IMESSAGE_WEBHOOK_SECRET` in the host’s encrypted environment variables.
+
+To configure the channel by hand, use lazy environment-backed credentials:
+
+```ts title="agent/channels/photon.ts"
+import { photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  async credentials() {
+    const projectId = process.env.IMESSAGE_PROJECT_ID;
+    const projectSecret = process.env.IMESSAGE_PROJECT_SECRET;
+    if (!projectId || !projectSecret) throw new Error("Photon project credentials are required.");
+    return { projectId, projectSecret };
+  },
+  webhookSecret: process.env.IMESSAGE_WEBHOOK_SECRET,
+});
+```
+
+For direct Photon webhooks, pass `webhookSecret` or set
+`IMESSAGE_WEBHOOK_SECRET`; the signing secret takes precedence over the default
+OIDC verifier.

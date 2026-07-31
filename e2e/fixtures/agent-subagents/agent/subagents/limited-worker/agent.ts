@@ -1,3 +1,4 @@
+import { e2eSubagentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 
 export default defineAgent({
@@ -6,6 +7,6 @@ export default defineAgent({
   limits: {
     maxInputTokensPerSession: 1,
   },
-  model: process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol",
+  ...e2eSubagentConfig(),
   reasoning: "high",
 });

@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
-import { openUrl } from "#setup/primitives/open-url.js";
-import { WizardCancelledError } from "#setup/step.js";
 
 import {
   runTuiSetupCommand,
@@ -12,10 +10,6 @@ import {
   type TuiSetupCommandRenderer,
   type TuiSetupFlows,
 } from "./setup-commands.js";
-
-// runDeployAndChat opens the chat URL in a browser; stub the opener so the unit
-// test never spawns a real OS process.
-vi.mock("#setup/primitives/open-url.js", () => ({ openUrl: vi.fn() }));
 
 const APP_ROOT = "/tmp/weather-agent";
 
@@ -36,14 +30,15 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
     setStatus: vi.fn(),
     renderLine: vi.fn(),
     renderOutput: vi.fn(),
-    waitForInterrupt: () => ({
+    withInheritedStdio: (task) => task(),
+    waitForInterrupt: vi.fn(() => ({
       promise: new Promise<void>((resolve) => {
         fire = resolve;
       }),
       dispose: () => {
         disposed = true;
       },
-    }),
+    })),
     fireInterrupt: () => fire(),
     interruptDisposed: () => disposed,
   };
@@ -59,13 +54,9 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
       kind: "done",
       modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
     })),
-    runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
+    runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
       kind: "done",
-      addedChannels: [],
-    })),
-    runConnectionsFlow: vi.fn<TuiSetupFlows["runConnectionsFlow"]>(async () => ({
-      kind: "done",
-      addedConnections: [],
+      addedItems: [],
     })),
     runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => ({
       kind: "deployed",
@@ -76,7 +67,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
 }
 
 function run(input: {
-  command: "vc:install" | "vc:login" | "model" | "channels" | "connect" | "deploy";
+  command: "vc:install" | "vc:login" | "model" | "add" | "deploy";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
@@ -100,6 +91,18 @@ function run(input: {
 }
 
 describe("runTuiSetupCommand", () => {
+  it("keeps registry setup interruptible through the parent drawer", async () => {
+    const renderer = fakePanelRenderer();
+    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
+      kind: "done",
+      addedItems: [],
+    }));
+
+    await run({ command: "add", flows: fakeFlows({ runRegistryFlow }), renderer });
+
+    expect(renderer.waitForInterrupt).toHaveBeenCalledWith();
+  });
+
   it("uses the build pulse for every setup command except deploy", () => {
     expect(
       Object.fromEntries(
@@ -109,8 +112,7 @@ describe("runTuiSetupCommand", () => {
       "vc:install": "pulse",
       "vc:login": "pulse",
       model: "pulse",
-      channels: "pulse",
-      connect: "pulse",
+      add: "pulse",
       deploy: "spinner",
     });
   });
@@ -324,187 +326,28 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("reports the added channels with the deploy hint", async () => {
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "done",
-        addedChannels: ["slack"],
-      })),
-    });
-
-    const notice = await run({ command: "channels", flows });
-
-    expect(notice).toEqual({
-      message: "Channels added: slack — run /deploy to ship them.",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "channels-added" },
-    });
-    expect(flows.runChannelsFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ appRoot: APP_ROOT }),
-    );
-  });
-
-  it("deploys, then opens and surfaces the Slack message deep link on deploy-and-chat", async () => {
-    vi.mocked(openUrl).mockClear();
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "deploy-and-chat",
-        addedChannels: ["slack"],
-        chat: { chatUrl: "https://slack.com/app_redirect?app=A0&team=T0", workspaceName: "Acme" },
-      })),
-    });
-
-    const notice = await run({ command: "channels", flows });
-
-    // The app_redirect link is upgraded to the Messages tab (a DM compose) and
-    // opened in the browser — nothing else opens one at this step.
-    const expectedUrl = "https://slack.com/app_redirect?app=A0&team=T0&tab=messages";
-    expect(vi.mocked(openUrl)).toHaveBeenCalledWith(expectedUrl);
-    expect(notice).toEqual({
-      message:
-        "Deployed: https://my-agent.vercel.app\n" + `Chat with your agent in Slack: ${expectedUrl}`,
-      preserveFlowDiagnostics: true,
-      effect: { kind: "deployed" },
-    });
-    expect(flows.runDeployFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ interactive: true }),
-    );
-  });
-
-  it("reports the deploy outcome plainly when no Slack workspace URL is known", async () => {
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "deploy-and-chat",
-        addedChannels: ["slack"],
-        chat: {},
-      })),
-    });
-
-    const notice = await run({ command: "channels", flows });
-
-    expect(notice).toEqual({
-      message: "Deployed: https://my-agent.vercel.app\nMessage your agent in Slack to see it live.",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "deployed" },
-    });
-  });
-
-  it("keeps the added channels pending when deploy-and-chat is cancelled", async () => {
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "deploy-and-chat",
-        addedChannels: ["slack"],
-        chat: {},
-      })),
-      runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => ({ kind: "cancelled" })),
-    });
-
-    await expect(run({ command: "channels", flows })).resolves.toEqual({
-      message: "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "channels-added" },
-    });
-  });
-
-  it("keeps the added channels pending when deploy-and-chat needs a link", async () => {
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "deploy-and-chat",
-        addedChannels: ["slack"],
-        chat: {},
-      })),
-      runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => ({ kind: "needs-link" })),
-    });
-
-    await expect(run({ command: "channels", flows })).resolves.toEqual({
-      message:
-        "Channels added, but this directory is not linked to Vercel. Run /model, then /deploy.",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "channels-added" },
-    });
-  });
-
-  it("keeps the added channels pending when deploy-and-chat fails", async () => {
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "deploy-and-chat",
-        addedChannels: ["slack"],
-        chat: {},
-      })),
-      runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
-        throw new Error("build failed");
-      }),
-    });
-
-    await expect(run({ command: "channels", flows })).resolves.toEqual({
-      message: "Channels added, but /deploy failed: build failed",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "channels-added" },
-    });
-  });
-
-  it("reports an empty channels pick", async () => {
-    const notice = await run({ command: "channels", flows: fakeFlows() });
-
-    expect(notice).toEqual({
-      message: "No channels added.",
-      preserveFlowDiagnostics: true,
-    });
-  });
-
   it.each([
     [
-      "configured",
-      { kind: "done", addedConnections: ["linear", "notion"] },
-      "Connections added: linear, notion.",
-      { kind: "connection-added" },
+      "added",
+      { kind: "done", addedItems: ["extension/browser"] },
+      "Registry items added: extension/browser.",
     ],
-    [
-      "empty",
-      { kind: "done", addedConnections: [] },
-      "No connections added.",
-      { kind: "model-access-changed" },
-    ],
-    ["cancelled", { kind: "cancelled" }, "/connect dismissed.", { kind: "model-access-changed" }],
-    [
-      "partially failed",
-      { kind: "failed", addedConnections: ["linear"], message: "install failed" },
-      "Connection files changed, but /connect failed: install failed",
-      { kind: "connection-added" },
-    ],
-    [
-      "failed before a connection file was written",
-      { kind: "failed", addedConnections: [], message: "connector setup failed" },
-      "/connect failed: connector setup failed",
-      { kind: "model-access-changed" },
-    ],
-  ] as const)("reports %s connection flows", async (_case, result, message, effect) => {
-    const runConnectionsFlow = vi.fn(async () => result);
-    await expect(
-      run({ command: "connect", flows: fakeFlows({ runConnectionsFlow }) }),
-    ).resolves.toEqual({
+    ["empty", { kind: "done", addedItems: [] }, "No registry items added."],
+    ["cancelled", { kind: "cancelled" }, "/add dismissed."],
+  ] as const)("reports a %s registry flow", async (_case, result, message) => {
+    const runRegistryFlow = vi.fn(async () => result);
+    const outcome = await run({ command: "add", flows: fakeFlows({ runRegistryFlow }) });
+    const expected: {
+      message: string;
+      tone?: "success";
+      preserveFlowDiagnostics: boolean;
+    } = {
       message,
       preserveFlowDiagnostics: true,
-      effect,
-    });
-    expect(runConnectionsFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
-  });
-
-  it("keeps deploy pending when channel files landed before a sub-flow failure", async () => {
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "failed",
-        addedChannels: ["slack"],
-        message: "Slack connector UID update is required before deployment.",
-      })),
-    });
-
-    await expect(run({ command: "channels", flows })).resolves.toEqual({
-      message:
-        "Channel files changed, but /channels failed: Slack connector UID update is required before deployment.",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "channels-added" },
-    });
+    };
+    if (result.kind === "done" && result.addedItems.length > 0) expected.tone = "success";
+    expect(outcome).toEqual(expected);
+    expect(runRegistryFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
   });
 
   it("reports the production URL after a deploy", async () => {
@@ -517,102 +360,6 @@ describe("runTuiSetupCommand", () => {
     expect(flows.runDeployFlow).toHaveBeenCalledWith(
       expect.objectContaining({ interactive: true }),
     );
-  });
-
-  it("folds flow errors and cancellations into the notice", async () => {
-    const failing = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => {
-        throw new Error("vercel CLI not found");
-      }),
-    });
-    await expect(run({ command: "channels", flows: failing })).resolves.toEqual({
-      message: "/channels failed: vercel CLI not found",
-      preserveFlowDiagnostics: true,
-    });
-
-    const cancelling = fakeFlows({
-      runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
-        throw new WizardCancelledError();
-      }),
-    });
-    await expect(run({ command: "deploy", flows: cancelling })).resolves.toEqual({
-      message: "/deploy dismissed.",
-      preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("clears the flow status even when the flow throws mid-wait", async () => {
-    const renderer = fakePanelRenderer();
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => {
-        renderer.setStatus("Checking the current Vercel link...");
-        throw new Error("network down");
-      }),
-    });
-
-    await expect(run({ command: "channels", flows, renderer })).resolves.toEqual({
-      message: "/channels failed: network down",
-      preserveFlowDiagnostics: true,
-    });
-    expect(renderer.setStatus).toHaveBeenLastCalledWith(undefined);
-  });
-
-  it("retains command ownership until an interrupted flow finishes unwinding", async () => {
-    const renderer = fakePanelRenderer();
-    let releaseFlow: () => void = () => {};
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(
-        () =>
-          new Promise((resolve) => {
-            releaseFlow = () => resolve({ kind: "cancelled" });
-          }),
-      ),
-    });
-
-    const result = run({ command: "channels", flows, renderer });
-    let settled = false;
-    void result.finally(() => {
-      settled = true;
-    });
-    renderer.fireInterrupt();
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(settled).toBe(false);
-
-    releaseFlow();
-    await expect(result).resolves.toEqual({
-      message: "/channels interrupted.",
-      preserveFlowDiagnostics: true,
-    });
-    expect(renderer.interruptDisposed()).toBe(true);
-    expect(renderer.setStatus).toHaveBeenLastCalledWith(undefined);
-  });
-
-  it("keeps channels pending when deploy-and-chat is interrupted", async () => {
-    const renderer = fakePanelRenderer();
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "deploy-and-chat",
-        addedChannels: ["slack"],
-        chat: {},
-      })),
-      runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(
-        ({ signal }) =>
-          new Promise((resolve) => {
-            signal?.addEventListener("abort", () => resolve({ kind: "cancelled" }), { once: true });
-          }),
-      ),
-    });
-
-    const result = run({ command: "channels", flows, renderer });
-    await vi.waitFor(() => expect(flows.runDeployFlow).toHaveBeenCalled());
-    renderer.fireInterrupt();
-
-    await expect(result).resolves.toEqual({
-      message: "/channels interrupted.",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "channels-added" },
-    });
   });
 
   it("preserves model access refreshes when provider setup is interrupted", async () => {
@@ -652,43 +399,6 @@ describe("runTuiSetupCommand", () => {
       preserveFlowDiagnostics: true,
       effect: { kind: "model-access-changed" },
     });
-  });
-
-  it("keeps cleanup diagnostics while muting abandoned progress after an interrupt", async () => {
-    const renderer = fakePanelRenderer();
-    let releaseFlow: () => void = () => {};
-    let flowSignal: AbortSignal | undefined;
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async ({ prompter, signal }) => {
-        flowSignal = signal;
-        await new Promise<void>((resolve) => {
-          releaseFlow = resolve;
-        });
-        // The abandoned flow resumes after the subprocess finally settles.
-        // Narrative progress and prompts stay muted, but cleanup diagnostics
-        // must survive so the closed panel can persist them.
-        prompter.log.info("late line");
-        prompter.log.warning("cleanup could not be verified");
-        await prompter.select({ message: "late question", options: [{ value: "a", label: "A" }] });
-        return { kind: "done", addedChannels: [] };
-      }),
-    });
-
-    // The real TUI prompter, so the muted renderer is actually exercised.
-    const result = runTuiSetupCommand({ command: "channels", appRoot: APP_ROOT, renderer, flows });
-    renderer.fireInterrupt();
-    await vi.waitFor(() => expect(flowSignal?.aborted).toBe(true));
-
-    vi.mocked(renderer.renderLine).mockClear();
-    vi.mocked(renderer.readSelect).mockClear();
-    releaseFlow();
-    await expect(result).resolves.toMatchObject({
-      message: "/channels interrupted.",
-    });
-
-    expect(renderer.renderLine).toHaveBeenCalledOnce();
-    expect(renderer.renderLine).toHaveBeenCalledWith("cleanup could not be verified", "warning");
-    expect(renderer.readSelect).not.toHaveBeenCalled();
   });
 
   it("reports a completed login and refreshes the link identity", async () => {
@@ -820,47 +530,6 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "vc:install", flows })).resolves.toEqual({
       message: "The Vercel CLI is already installed.",
       preserveFlowDiagnostics: false,
-    });
-  });
-
-  it("routes a /channels provisioning login error to /vc:login (not the raw message)", async () => {
-    // Provisioning throws before any channel lands, so the flow re-throws and
-    // the command catch routes it — the same path /deploy uses.
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-login",
-          command: "vercel login",
-          reason: "not logged in",
-        });
-      }),
-    });
-    await expect(run({ command: "channels", flows })).resolves.toEqual({
-      message: "You're not logged in to Vercel — run /vc:login, then retry /channels.",
-      preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("routes a deploy-and-chat login action to /vc:login while keeping channels added", async () => {
-    const flows = fakeFlows({
-      runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
-        kind: "deploy-and-chat",
-        addedChannels: ["slack"],
-        chat: {},
-      })),
-      runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-login",
-          command: "vercel login",
-          reason: "not logged in",
-        });
-      }),
-    });
-    await expect(run({ command: "channels", flows })).resolves.toEqual({
-      message:
-        "Channels added. You're not logged in to Vercel — run /vc:login, then retry /deploy.",
-      preserveFlowDiagnostics: true,
-      effect: { kind: "channels-added" },
     });
   });
 });

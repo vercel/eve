@@ -15,6 +15,7 @@ const TOOL_NAME = "guarded-slow-echo";
  * without a `tool_result` and the provider rejects every later turn.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "HITL regression (#460): approved slow tool result survives replay.",
   async test(t) {
     const parked = await t.send(

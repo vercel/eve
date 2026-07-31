@@ -102,9 +102,9 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       vi.fn(async () => Response.json({ revision: "snapshot-a" })),
     );
     const order: string[] = [];
-    const handle = vi.fn(async () => {
-      order.push("model");
-      return { message: "/model dismissed." };
+    const handle = vi.fn(async (command: { name: string }) => {
+      order.push(command.name);
+      return { message: `/${command.name} dismissed.` };
     });
     const readPrompt = vi.fn(async () => {
       order.push("prompt");
@@ -129,11 +129,17 @@ describe("BOOT_DETECTIONS against a real directory", () => {
 
     await runner.run();
 
-    expect(handle).toHaveBeenCalledExactlyOnceWith(
+    expect(handle).toHaveBeenNthCalledWith(
+      1,
       { type: "extension", name: "model", argument: "" },
       { renderer, title: "eve", initialModelStep: "provider" },
     );
+    expect(handle).toHaveBeenNthCalledWith(
+      2,
+      { type: "extension", name: "add", argument: "" },
+      { renderer, title: "eve" },
+    );
     expect(readPrompt).toHaveBeenCalledOnce();
-    expect(order).toEqual(["model", "prompt"]);
+    expect(order).toEqual(["model", "add", "prompt"]);
   });
 });

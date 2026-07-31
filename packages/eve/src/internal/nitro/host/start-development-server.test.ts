@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => {
     close: vi.fn(async () => undefined),
     flush: vi.fn(async () => undefined),
     rebuild: vi.fn(async () => undefined),
+    resume: vi.fn(async () => undefined),
+    suspend: vi.fn(async () => undefined),
   };
   const mocksWorldInstance = {
     close: vi.fn(async () => undefined),

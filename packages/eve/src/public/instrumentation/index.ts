@@ -154,6 +154,13 @@ export interface InstrumentationDefinition {
    */
   readonly recordOutputs?: boolean;
   /**
+   * Whether to emit the inbound HTTP `SERVER` span that wraps each channel
+   * request (the parent of the turn trace and any `hook.resume`/outgoing
+   * HTTP spans). Defaults to `false`. Set `true` to emit these request spans
+   * alongside the rest of the trace.
+   */
+  readonly traceChannelRequests?: boolean;
+  /**
    * Setup callback invoked at server startup with the resolved agent name.
    * Use it to call `registerOTel` or other OTel provider setup;
    * `context.agentName` comes from `defineAgent`.

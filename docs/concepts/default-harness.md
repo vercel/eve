@@ -103,6 +103,18 @@ export default experimental_workflow({ maxSubagents: 100 });
 
 With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most the configured `maxSubagents` calls (default 100). See [Dynamic workflows](../guides/dynamic-workflows).
 
+## The opt-in `sleep` tool
+
+The framework also ships a durable `sleep` tool, but does not add it to agents by default. Enable it with `agent/tools/sleep.ts`:
+
+```ts
+import { sleep } from "eve/tools/sleep";
+
+export default sleep();
+```
+
+The model calls it with `{ seconds }` when it is useful to wait before checking progress or status again. The pause sleeps the durable turn workflow, so it does not hold an application runtime open, and the same turn continues automatically when the duration elapses. If one model response makes concurrent `sleep` calls, eve waits for the longest requested duration.
+
 ## What to read next
 
 - [Tools](../tools): define your own tools, gate them on approval, and shape their output with `toModelOutput`

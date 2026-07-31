@@ -19,7 +19,12 @@ export default defineConfig({
     environment: "node",
     exclude: ["**/node_modules/**", "test/vercel/**"],
     globalSetup: ["./test/setup/pack-scenario-tarball.ts"],
-    include: ["**/dev-server.scenario.test.ts"],
+    include: [
+      "test/scenarios/dev-server-apps.scenario.test.ts",
+      "test/scenarios/dev-server-connections.scenario.test.ts",
+      "test/scenarios/dev-server-rebuild.scenario.test.ts",
+      "test/scenarios/dev-server-workflow-generations.scenario.test.ts",
+    ],
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],
     testTimeout: 360_000,
   },

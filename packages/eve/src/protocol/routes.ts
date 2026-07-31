@@ -76,6 +76,12 @@ export const EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/dev/run
  */
 export const EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/rebuild`;
 
+/** Dev-only route that pauses authored-source rebuilding while a setup subprocess owns the terminal. */
+export const EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/suspend`;
+
+/** Dev-only route that resumes authored-source rebuilding after setup subprocess completion. */
+export const EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/resume`;
+
 /**
  * Builds the dev-only schedule dispatch URL for one named authored
  * schedule. The path encodes the schedule id so reserved characters in
