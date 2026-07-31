@@ -11,7 +11,7 @@ import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#client/types.js";
 
 export type { PrepareSend };
@@ -41,7 +41,7 @@ export interface UseEveAgentReturn<TData> {
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: ComputedRef<Error | undefined>;
   /** Raw server events from this session (authoritative stream). */
-  readonly events: ComputedRef<readonly HandleMessageStreamEvent[]>;
+  readonly events: ComputedRef<readonly MessageStreamEvent[]>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
   /** Send a turn with full structured input (message, attachments, input responses). */
@@ -88,8 +88,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default ""
    */
   readonly host?: string;
-  /** Prior stream events to rehydrate the projected state from on mount. */
-  readonly initialEvents?: readonly HandleMessageStreamEvent[];
+  /** Ordered prefix of the session stream used to rehydrate projected state. */
+  readonly initialEvents?: readonly MessageStreamEvent[];
   /** Prior session cursor to resume from on mount. */
   readonly initialSession?: SessionState;
   /**

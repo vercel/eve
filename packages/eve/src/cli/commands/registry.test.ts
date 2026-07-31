@@ -1,16 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import {
+  browseRegistryCatalog,
   runAddCommand,
   runRegistryAddCommand,
   runRegistryListCommand,
   runRegistrySearchCommand,
+  resolveOfficialRegistryUrl,
   runRegistryViewCommand,
   type RegistryCommandLogger,
 } from "./registry.js";
 
 const {
   addRegistryItems,
+  applyPackageManagerWorkspaceConfiguration,
   getRegistryItems,
   isEveProject,
   readFile,
@@ -19,6 +23,7 @@ const {
   writeFile,
 } = vi.hoisted(() => ({
   addRegistryItems: vi.fn(),
+  applyPackageManagerWorkspaceConfiguration: vi.fn(),
   getRegistryItems: vi.fn(),
   isEveProject: vi.fn(),
   readFile: vi.fn(),
@@ -34,6 +39,7 @@ vi.mock("#compiled/shadcn-registry/index.js", () => ({
 }));
 
 vi.mock("#setup/scaffold/index.js", () => ({ isEveProject }));
+vi.mock("#setup/scaffold/workspace-root.js", () => ({ applyPackageManagerWorkspaceConfiguration }));
 vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
 vi.mock("node:fs/promises", () => ({ readFile, writeFile }));
 
@@ -50,7 +56,12 @@ function createLogger(): RegistryCommandLogger & { errors: string[]; logs: strin
 
 describe("registry commands", () => {
   beforeEach(() => {
+    delete process.env.EVE_DEV_OFFICIAL_REGISTRY_URL;
     vi.clearAllMocks();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }))),
+    );
     isEveProject.mockResolvedValue(true);
     readFile.mockResolvedValue(
       JSON.stringify({
@@ -61,7 +72,23 @@ describe("registry commands", () => {
   });
 
   afterEach(() => {
+    delete process.env.EVE_DEV_OFFICIAL_REGISTRY_URL;
     process.exitCode = undefined;
+    vi.unstubAllGlobals();
+  });
+
+  it("normalizes the explicit development official-registry override", () => {
+    expect(resolveOfficialRegistryUrl("http://localhost:4173/r/")).toBe("http://localhost:4173/r");
+  });
+
+  it.each([
+    ["invalid URL", "not a URL"],
+    ["unsupported protocol", "file:///tmp/registry"],
+    ["credentials", "https://user:password@example.com/r"],
+    ["query", "https://example.com/r?token=secret"],
+    ["fragment", "https://example.com/r#preview"],
+  ])("rejects a development official-registry override with %s", (_reason, value) => {
+    expect(() => resolveOfficialRegistryUrl(value)).toThrow(/EVE_DEV_OFFICIAL_REGISTRY_URL/);
   });
 
   it("installs official items through the registry SDK", async () => {
@@ -83,6 +110,7 @@ describe("registry commands", () => {
       },
       cwd: "/project",
       overwrite: true,
+      silent: undefined,
     });
     expect(logger.errors).toEqual([]);
   });
@@ -91,14 +119,14 @@ describe("registry commands", () => {
     "installs the official %s item before running its declared setup",
     async (kind) => {
       const logger = createLogger();
-      const runSetupCommand = vi.fn(async () => {});
+      const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
       getRegistryItems.mockResolvedValue([
         {
           name: `channel/${kind}`,
           type: "registry:item",
           meta: {
             eve: {
-              setup: { command: "eve", args: ["integration", "setup", kind] },
+              setup: { package: "eve", bin: "eve", args: ["integration", "setup", kind] },
             },
           },
         },
@@ -108,7 +136,7 @@ describe("registry commands", () => {
         logger,
         "/project",
         `channel/${kind}`,
-        { overwrite: true },
+        { overwrite: true, yes: true },
         {
           loadSetupCommandRunner: async () => runSetupCommand,
         },
@@ -118,16 +146,176 @@ describe("registry commands", () => {
       expect(addRegistryItems.mock.invocationCallOrder[0]).toBeLessThan(
         runSetupCommand.mock.invocationCallOrder[0]!,
       );
-      expect(runSetupCommand).toHaveBeenCalledWith("/project", {
-        command: "eve",
-        args: ["integration", "setup", kind],
-      });
+      expect(runSetupCommand).toHaveBeenCalledWith(
+        "/project",
+        {
+          package: "eve",
+          bin: "eve",
+          args: ["integration", "setup", kind, "--yes"],
+        },
+        `channel/${kind}`,
+        expect.objectContaining({ prompter: expect.any(Object) }),
+      );
     },
   );
 
+  it("skips setup in non-interactive use and prints the resume command", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      {},
+      {
+        isInteractive: () => false,
+        loadSetupCommandRunner: async () => runSetup,
+      },
+    );
+
+    expect(runSetup).not.toHaveBeenCalled();
+    expect(logger.logs).toEqual([
+      "Setup skipped. Run `eve add channel/slack --skip-install` when you're ready.",
+    ]);
+  });
+
+  it("asks before setup and prints the resume command when declined", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const fake = createFakePrompter({ single: () => "no" });
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      {},
+      {
+        createPrompter: () => fake.prompter,
+        isInteractive: () => true,
+        loadSetupCommandRunner: async () => runSetup,
+      },
+    );
+
+    expect(fake.selectMessages).toEqual(["Set up channel/slack now?"]);
+    expect(runSetup).not.toHaveBeenCalled();
+    expect(logger.logs).toEqual([
+      "Setup skipped. Run `eve add channel/slack --skip-install` when you're ready.",
+    ]);
+  });
+
+  it("prints the resume command when the setup CLI cancels", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => ({ kind: "cancelled" as const }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      { yes: true },
+      {
+        loadSetupCommandRunner: async () => runSetup,
+      },
+    );
+
+    expect(logger.logs).toEqual([
+      "Setup cancelled. Run `eve add channel/slack --skip-install` when you're ready.",
+    ]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("runs setup directly without installing the item", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      { skipInstall: true, yes: true },
+      {
+        loadSetupCommandRunner: async () => runSetup,
+      },
+    );
+
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(runSetup).toHaveBeenCalledWith(
+      "/project",
+      { package: "@acme/slack", bin: "eve-slack", args: ["setup", "--yes"] },
+      "channel/slack",
+      expect.objectContaining({ prompter: expect.any(Object) }),
+    );
+  });
+
+  it("rejects --overwrite with --skip-install", async () => {
+    const logger = createLogger();
+
+    await runAddCommand(logger, "/project", "channel/slack", {
+      skipInstall: true,
+      overwrite: true,
+    });
+
+    expect(logger.errors).toEqual(["--overwrite cannot be used with --skip-install."]);
+    expect(getRegistryItems).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
+  });
+
+  it("rejects --skip-setup with --skip-install", async () => {
+    const logger = createLogger();
+
+    await runAddCommand(logger, "/project", "channel/slack", {
+      skipInstall: true,
+      skipSetup: true,
+    });
+
+    expect(logger.errors).toEqual(["--skip-install cannot be used with --skip-setup."]);
+    expect(getRegistryItems).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
+  });
+
+  it("rejects setup for third-party items", async () => {
+    const logger = createLogger();
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "@acme/slack",
+      { skipInstall: true },
+      {
+        loadSetupCommandRunner: vi.fn(),
+      },
+    );
+
+    expect(logger.errors).toEqual([
+      "Setup flows are currently supported only for official eve registry items.",
+    ]);
+    expect(getRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
   it("does not infer setup from the item address", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => {});
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     getRegistryItems.mockResolvedValue([{ name: "channel/web", type: "registry:item" }]);
 
     await runAddCommand(
@@ -146,14 +334,14 @@ describe("registry commands", () => {
 
   it("does not execute setup metadata from a URL item", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => {});
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     getRegistryItems.mockResolvedValue([
       {
         name: "channel/web",
         type: "registry:item",
         meta: {
           eve: {
-            setup: { command: "eve", args: ["integration", "setup", "web"] },
+            setup: { package: "eve", bin: "eve", args: ["integration", "setup", "web"] },
           },
         },
       },
@@ -171,9 +359,10 @@ describe("registry commands", () => {
 
     expect(runSetupCommand).not.toHaveBeenCalled();
     expect(addRegistryItems).toHaveBeenCalledOnce();
+    expect(applyPackageManagerWorkspaceConfiguration).not.toHaveBeenCalled();
   });
 
-  it("rejects invalid official setup metadata before installation", async () => {
+  it("accepts any declared package binary from trusted official metadata", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([
       {
@@ -181,35 +370,34 @@ describe("registry commands", () => {
         type: "registry:item",
         meta: {
           eve: {
-            setup: { command: "sh", args: ["-c", "echo nope"] },
+            setup: { package: "shell-package", bin: "sh", args: ["-c", "echo nope"] },
           },
         },
       },
     ]);
 
-    await runAddCommand(logger, "/project", "channel/unknown", {});
+    await runAddCommand(logger, "/project", "channel/unknown", { skipSetup: true });
 
-    expect(logger.errors).toHaveLength(1);
-    expect(addRegistryItems).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    expect(logger.errors).toEqual([]);
+    expect(addRegistryItems).toHaveBeenCalledOnce();
   });
 
   it("rejects an item that requires a newer eve before installation", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([
       {
-        name: "channel/photon",
+        name: "channel/photon-imessage",
         type: "registry:item",
         meta: {
           eve: {
             requires: ">=0.30.0",
-            setup: { command: "eve", args: ["integration", "setup", "web"] },
+            setup: { package: "eve", bin: "eve", args: ["integration", "setup", "web"] },
           },
         },
       },
     ]);
 
-    await runAddCommand(logger, "/project", "channel/photon", {});
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {});
 
     expect(logger.errors).toEqual([
       "This registry item requires eve >=0.30.0, but this project is using eve 0.27.8. Upgrade eve and run the command again.",
@@ -239,6 +427,25 @@ describe("registry commands", () => {
       "utf8",
     );
     expect(logger.logs).toContain("Added @other to package.json.");
+  });
+
+  it("uses the Photon iMessage title for the official provider", async () => {
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "https://eve.dev/r/registry.json",
+          name: "channel/photon-imessage",
+          addCommandArgument: "https://eve.dev/r/channel/photon-imessage.json",
+        },
+      ],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    });
+
+    await expect(browseRegistryCatalog("/project")).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({ name: "channel/photon-imessage", title: "Photon iMessage" }),
+      ],
+    });
   });
 
   it("lists the official registry without configured namespaces", async () => {

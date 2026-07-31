@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { InputResponse } from "#runtime/input/types.js";
 
 /**
@@ -55,7 +55,7 @@ export type EveAgentReducerEvent =
   | ClientInputRespondedEvent
   | ClientMessageFailedEvent
   | ClientMessageSubmittedEvent
-  | HandleMessageStreamEvent;
+  | MessageStreamEvent;
 
 /**
  * Projects eve stream events into accumulated consumer data.

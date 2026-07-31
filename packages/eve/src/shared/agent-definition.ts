@@ -150,6 +150,18 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
+   * Maximum lifetime of one durable session, in milliseconds.
+   *
+   * The deadline starts when the session is created and survives process
+   * restarts and redeployments. If it elapses during an active turn, eve lets
+   * that turn settle before completing the session normally.
+   *
+   * `false` disables the timeout.
+   *
+   * @default 2_592_000_000 (30 days)
+   */
+  readonly sessionTimeoutMs?: number | false;
+  /**
    * Maximum provider-reported input tokens accumulated by one durable session.
    *
    * eve checks this before starting each model call. The model call that crosses

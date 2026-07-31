@@ -63,6 +63,7 @@ function createPendingApprovalSession(): HarnessSession {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Yes" },
           { id: "deny", label: "No" },

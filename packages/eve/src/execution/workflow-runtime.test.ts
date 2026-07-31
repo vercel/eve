@@ -6,6 +6,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
+  sessionTimeoutWorkflowReference,
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
@@ -58,6 +59,11 @@ describe("workflowEntryReference", () => {
     expect(turnWorkflowReference.workflowId).toBe(`workflow//${packageInfo.name}//turnWorkflow`);
     expect(turnWorkflowReference.workflowId).not.toContain("/src/execution/");
     expect(turnWorkflowReference.workflowId).not.toContain("@");
+    expect(sessionTimeoutWorkflowReference.workflowId).toBe(
+      `workflow//${packageInfo.name}//sessionTimeoutWorkflow`,
+    );
+    expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("/src/execution/");
+    expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("@");
   });
 });
 
@@ -163,19 +169,23 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {});
   });
 
-  it("maps missing and terminal targets to 'no_active_turn'", async () => {
+  it("maps missing and terminal targets to 'no_active_turn' with a classified reason", async () => {
     const { EntityConflictError, HookNotFoundError, RunExpiredError, WorkflowRunNotFoundError } =
       await import("#compiled/@workflow/errors/index.js");
     const errors = [
-      new HookNotFoundError("session-1:cancel"),
-      new WorkflowRunNotFoundError("turn-run"),
-      new RunExpiredError("turn already completed"),
-      new EntityConflictError("turn completed during cancellation"),
+      { error: new HookNotFoundError("session-1:cancel"), reason: "HookNotFoundError" },
+      { error: new WorkflowRunNotFoundError("turn-run"), reason: "WorkflowRunNotFoundError" },
+      { error: new RunExpiredError("turn already completed"), reason: "RunExpiredError" },
+      {
+        error: new EntityConflictError("turn completed during cancellation"),
+        reason: "EntityConflictError",
+      },
     ];
 
-    for (const error of errors) {
+    for (const { error, reason } of errors) {
       resumeHookMock.mockRejectedValueOnce(error);
       await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).resolves.toEqual({
+        reason,
         status: "no_active_turn",
       });
     }
@@ -281,9 +291,17 @@ describe("createWorkflowRuntime#run", () => {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
 
-  function mockBundleAndRun(compiledArtifactsSource: RuntimeCompiledArtifactsSource): void {
+  function mockBundleAndRun(
+    compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+    sessionTimeoutMs?: number | false,
+  ): void {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource,
+      resolvedAgent: {
+        config: {
+          limits: sessionTimeoutMs === undefined ? undefined : { sessionTimeoutMs },
+        },
+      },
     } as never);
     getRunMock.mockReturnValue({
       getReadable: () =>
@@ -351,6 +369,25 @@ describe("createWorkflowRuntime#run", () => {
     expect(startOptions.attributes["$eve.title"]).toBe("ship it");
   });
 
+  it("passes the configured session timeout to the durable workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 86_400_000);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: null,
+      input: { message: "hello" },
+      mode: "conversation",
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput).toMatchObject({
+      input: { message: "hello" },
+      sessionTimeoutMs: 86_400_000,
+    });
+  });
+
   it("serializes the channel request id into workflow context", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
@@ -393,6 +430,7 @@ describe("createWorkflowRuntime#run", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource,
       nodeId: "researcher",
+      resolvedAgent: { config: {} },
     } as never);
     startMock.mockResolvedValue({ runId: "subagent-run" });
 
@@ -500,6 +538,7 @@ describe("createWorkflowRuntime#run", () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource,
+      resolvedAgent: { config: {} },
     } as never);
     const bytes = new TextEncoder().encode('{"type":"test.event"}\n');
     const getReadable = vi.fn(

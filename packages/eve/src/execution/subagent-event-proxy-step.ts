@@ -19,19 +19,17 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession } from "#execution/session.js";
 import { emitProxiedInputRequest } from "#execution/subagent-hitl-proxy.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import type { ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import { encodeMessageStreamEvent, timestampHandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
-type ProxyInputRequestEntries = readonly (readonly [
-  requestId: string,
-  childContinuationToken: string,
-])[];
+type ProxyInputRequestEntries = readonly (readonly [requestId: string, route: ProxyInputRequest])[];
 
 interface ProxySubagentEventResult {
   readonly serializedContext: Record<string, unknown>;
@@ -81,9 +79,11 @@ export async function emitProxiedSubagentEvent(input: {
   let proxyEntries: ProxyInputRequestEntries | undefined;
   let scopedSession: HarnessSession;
   try {
-    const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
+    // A re-emitted child event is a distinct event on the parent stream, so it
+    // gets its own id rather than the child's.
+    const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
       const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-      await writer.write(encodeMessageStreamEvent(timestampHandleMessageStreamEvent(transformed)));
+      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {

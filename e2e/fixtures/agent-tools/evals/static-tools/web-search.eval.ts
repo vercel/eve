@@ -1,9 +1,9 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
 
-function providerRequestsPrecedeResults(events: readonly HandleMessageStreamEvent[]): boolean {
+function providerRequestsPrecedeResults(events: readonly MessageStreamEvent[]): boolean {
   const requestIndexByCallId = new Map<string, number>();
   const resultIndexByCallId = new Map<string, number>();
   let requestCount = 0;
@@ -41,6 +41,7 @@ function providerRequestsPrecedeResults(events: readonly HandleMessageStreamEven
 }
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Provider tools smoke: gateway web search answers a current-events question.",
   async test(t) {
     const turn = await t.send(

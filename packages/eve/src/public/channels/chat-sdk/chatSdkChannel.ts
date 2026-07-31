@@ -2,7 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type {
   ActionEvent,
@@ -30,6 +30,7 @@ import {
   type Channel,
   type ChannelEvents,
   type ChannelSessionOps,
+  type CancelFn,
   type RouteHandlerArgs,
   type SendFn,
   type SendOptions,
@@ -44,10 +45,11 @@ const MAX_TYPING_STATUS = 80;
 
 type ChatSdkAdapters = Record<string, Adapter>;
 type ChatSdkSendInput = Parameters<SendFn<ChatSdkChannelState>>[0];
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 interface ActiveWebhookContext {
+  readonly cancel: CancelFn;
   readonly send: SendFn<ChatSdkChannelState>;
 }
 
@@ -134,6 +136,13 @@ export interface ChatSdkSendOptions {
   readonly mode?: SendOptions<ChatSdkChannelState>["mode"];
   readonly thread: SerializedThread | Thread | string;
   readonly title?: string;
+  /**
+   * Controls how this input interacts with an active eve turn on the same
+   * thread. Defaults to `"queue"`. `"experimental-steer"` requests
+   * cancellation of the active turn before sending this input as its
+   * replacement.
+   */
+  readonly turnPolicy?: "queue" | "experimental-steer";
   /**
    * Required when `thread` is a string that does not include the Chat SDK
    * adapter prefix. Prefer passing the `Thread` object from the Chat SDK handler
@@ -295,7 +304,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       ): Promise<Response> => {
         const webhook = bot.webhooks[adapterName];
         const ctx = new ContextContainer();
-        ctx.setVirtualContext(ActiveWebhookKey, { send: args.send });
+        ctx.setVirtualContext(ActiveWebhookKey, { cancel: args.cancel, send: args.send });
         return contextStorage.run(ctx, () =>
           webhook(request, {
             ...config.webhook,
@@ -559,7 +568,14 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   if (options.title) {
     sendOptions.title = options.title;
   }
+  if (options.turnPolicy === "experimental-steer" && hasMessageInput(input)) {
+    await active.cancel({ continuationToken: thread.id });
+  }
   return active.send(input, sendOptions);
+}
+
+function hasMessageInput(input: ChatSdkSendInput): boolean {
+  return typeof input === "string" || Array.isArray(input) || input.message !== undefined;
 }
 
 function initialState(): ChatSdkChannelState {

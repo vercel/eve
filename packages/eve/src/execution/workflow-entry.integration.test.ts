@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
+import { createSendFn } from "#channel/send.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
@@ -15,7 +16,8 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import { isEventId } from "#protocol/event-id.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { AuthorizationDefinition, TokenResult } from "#runtime/connections/types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
@@ -291,6 +293,124 @@ describe("workflowEntry integration", () => {
       } finally {
         stream.dispose();
         await run.cancel();
+      }
+    });
+  });
+
+  it("stamps every stream event with an id that survives a rewind", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-event-ids" } });
+    const continuationToken = "http:workflow-entry-event-ids";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "identify these events" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+
+      const stream = captureTurnEvents(run);
+      let firstTurn: readonly MessageStreamEvent[];
+      try {
+        firstTurn = await stream.nextTurn();
+      } finally {
+        stream.dispose();
+      }
+
+      try {
+        expect(firstTurn.length).toBeGreaterThan(1);
+        // No two events share an id, including appends that share
+        // `(turnId, sequence, stepIndex)`.
+        expect(firstTurn.every((event) => isEventId(event.meta.id))).toBe(true);
+        expect(new Set(firstTurn.map((event) => event.meta.id)).size).toBe(firstTurn.length);
+
+        // No stream-order assertion on the ids: they sort in mint order per
+        // process, but a turn's events are appended by separate steps whose
+        // writes can interleave behind minting (see #protocol/event-id.js),
+        // so append order is not contractually sorted.
+        const ids = firstTurn.map((event) => event.meta.id);
+
+        // Re-reading the durable stream returns the same ids.
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        const replayed = await workflowRuntime.getEventStream(run.runId, { startIndex: 0 });
+        const replayedIds: string[] = [];
+        const reader = replayed.getReader();
+        try {
+          while (replayedIds.length < firstTurn.length) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            replayedIds.push(value.meta.id);
+          }
+        } finally {
+          await reader.cancel();
+        }
+
+        expect(replayedIds).toEqual(ids);
+      } finally {
+        await run.cancel();
+      }
+    });
+  });
+
+  it("completes an expired conversation and lets its channel start a fresh session", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
+    const continuationToken = "http:workflow-entry-timeout";
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+          sessionTimeoutMs: 25,
+        },
+      ]);
+      const stream = captureEvents(run);
+      let replacementSessionId: string | undefined;
+
+      try {
+        const events = await stream.nextUntil(
+          "session completion",
+          (event) => event.type === "session.completed",
+        );
+
+        expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+        expect(events.at(-1)?.type).toBe("session.completed");
+        expect(isEventId(events.at(-1)?.meta.id ?? "")).toBe(true);
+        expect(filterEventsByType(events, "session.failed")).toHaveLength(0);
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+
+        const send = createSendFn(workflowRuntime, { kind: "http" }, "http");
+        const replacement = await send("start fresh", {
+          auth: null,
+          continuationToken: "workflow-entry-timeout",
+        });
+        replacementSessionId = replacement.id;
+
+        expect(replacement.id).not.toBe(run.runId);
+        await waitForHook(
+          { runId: replacement.id },
+          {
+            token: continuationToken,
+          },
+        );
+      } finally {
+        stream.dispose();
+        if (replacementSessionId !== undefined) {
+          await workflowRuntime.terminateSession({ sessionId: replacementSessionId });
+        }
       }
     });
   });
@@ -586,8 +706,8 @@ interface CapturedEventStream {
   dispose(): void;
   nextUntil(
     label: string,
-    predicate: (event: HandleMessageStreamEvent) => boolean,
-  ): Promise<HandleMessageStreamEvent[]>;
+    predicate: (event: MessageStreamEvent) => boolean,
+  ): Promise<MessageStreamEvent[]>;
 }
 
 function captureEvents(run: Parameters<typeof captureTurnEvents>[0]): CapturedEventStream {
@@ -618,9 +738,9 @@ async function readUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   decoder: InstanceType<typeof TextDecoder>,
   initialBuffer: string,
-  predicate: (event: HandleMessageStreamEvent) => boolean,
-): Promise<{ buffer: string; events: HandleMessageStreamEvent[] }> {
-  const events: HandleMessageStreamEvent[] = [];
+  predicate: (event: MessageStreamEvent) => boolean,
+): Promise<{ buffer: string; events: MessageStreamEvent[] }> {
+  const events: MessageStreamEvent[] = [];
   let buffer = initialBuffer;
 
   while (true) {
@@ -644,7 +764,7 @@ async function readUntil(
         continue;
       }
 
-      const event = JSON.parse(line) as HandleMessageStreamEvent;
+      const event = JSON.parse(line) as MessageStreamEvent;
       events.push(event);
 
       if (predicate(event)) {

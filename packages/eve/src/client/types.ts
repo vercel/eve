@@ -1,7 +1,7 @@
 import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -269,7 +269,7 @@ export interface MessageResult<TOutput = unknown> {
   /**
    * All events received during this turn.
    */
-  readonly events: HandleMessageStreamEvent[];
+  readonly events: MessageStreamEvent[];
 
   /**
    * HITL input requests emitted during this turn.

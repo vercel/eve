@@ -5,7 +5,6 @@ import {
   type AuthorizationCompletedStreamEvent,
   type ConnectionAuthorizationOutcome,
   type AuthorizationRequiredStreamEvent,
-  type HandleMessageStreamEvent,
   type InputOption,
   type InputRequest,
   type InputRequestedStreamEvent,
@@ -14,6 +13,7 @@ import {
   type ReasoningAppendedStreamEvent,
   type SessionFailedStreamEvent,
   type StepCompletedStreamEvent,
+  type MessageStreamEvent,
   type SubagentCalledStreamEvent,
   type SubagentCompletedStreamEvent,
   Client,
@@ -21,6 +21,7 @@ import {
 } from "#client/index.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
+import { createEventDeduper } from "#protocol/event-dedupe.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
@@ -46,7 +47,7 @@ import {
 } from "./errors.js";
 
 import { pickAgentHeaderTip } from "./agent-header.js";
-import { probeAgentInfo } from "./agent-info-probe.js";
+import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import { parseLogDisplayMode } from "./log-display-mode.js";
 import {
   formatPromptCommandHelp,
@@ -75,6 +76,7 @@ import {
   type SetupIssue,
 } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
+import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
 import type {
   AssistantResponseStatsMode,
@@ -255,8 +257,13 @@ export type AgentTUIRenderer = {
   clearSetupWarning?(): void;
   /** Commits the startup `/vc:login` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
-  renderCommandResult?(text: string): void;
+  renderCommandResult?(text: string, tone?: "success" | "error"): void;
   readonly setupFlow?: SetupFlowRenderer;
+  /**
+   * The renderer's full-screen local trace viewer, opened by `/traces`.
+   * The returned promise resolves when the user closes the viewer.
+   */
+  readonly traceViewer?: TraceViewerRenderer;
   readPrompt?(options?: AgentTUISessionOptions): Promise<string | undefined>;
   /**
    * Consumes the next prompt produced by mid-turn input: the Esc-popped
@@ -329,10 +336,8 @@ export type AgentTUIRenderer = {
   flushDelayedDevBuildErrors?(): void;
   /**
    * Sets the workspace-scoped Vercel segment of the persistent bottom
-   * status line: linked project identity and the session's pending-deploy
-   * flag. Pushed by the runner at startup (async probe) and after
-   * /vercel, /channels, /deploy outcomes. Renderers without a status
-   * line ignore it.
+   * status line. Pushed by the runner at startup and after Vercel-related
+   * setup outcomes. Renderers without a status line ignore it.
    */
   setVercelStatus?(status: VercelStatusSnapshot): void;
   /** Sets the remote deployment badge and its current connection/authentication state. */
@@ -363,6 +368,7 @@ export interface PromptCommandHandlerContext {
    */
   readonly keepSetupFlowOpen?: true;
   readonly remoteConnection?: RemoteConnectionController;
+  readonly withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly disabledConnectionReasons?: Readonly<Record<string, string>>;
 }
 
@@ -370,8 +376,10 @@ export interface PromptCommandHandlerContext {
 export interface PromptCommandOutcome {
   /** Outcome line rendered under the echoed command; absent renders nothing. */
   message?: string;
+  /** Promotes an outcome to a top-level status. */
+  tone?: "success" | "error";
   /** Post-command work after setup settles. */
-  effect?: VercelStatusEffect | { kind: "connection-added" } | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | { kind: "model-access-changed" };
 }
 
 export interface PromptCommandHandler {
@@ -422,6 +430,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
+  /** Gives setup subprocesses exclusive terminal and development-host ownership. */
+  withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Remote target and mutable OIDC token source, when connected through `--url`. */
   remote?: {
     readonly target: RemoteDevelopmentTarget;
@@ -471,6 +481,7 @@ export class EveTUIRunner {
   readonly #initialInput?: string;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
+  readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
@@ -558,6 +569,7 @@ export class EveTUIRunner {
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
     this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
+    this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
     this.#subagents = options.subagents ?? "full";
@@ -802,6 +814,16 @@ export class EveTUIRunner {
         // own log filter, so it works without a prompt-command handler.
         if (command?.type === "loglevel") {
           this.#renderCommandOutcome(this.#applyLogLevelCommand(command.argument));
+          pendingInputResponses = undefined;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+          continue;
+        }
+
+        // /traces is renderer-local too: the viewer reads the local spool
+        // from disk and owns the screen until the user closes it.
+        if (command?.type === "traces") {
+          await this.#openTraceViewer(command.argument);
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1184,7 +1206,7 @@ export class EveTUIRunner {
   }
 
   #createTUIStreamResult(
-    events: AsyncIterable<HandleMessageStreamEvent>,
+    events: AsyncIterable<MessageStreamEvent>,
     abort: () => void,
   ): AgentTUIStreamResult {
     const turnState = createTurnState();
@@ -1297,10 +1319,10 @@ export class EveTUIRunner {
     });
   }
 
-  #renderCommandOutcome(text: string | undefined): void {
+  #renderCommandOutcome(text: string | undefined, tone?: "success" | "error"): void {
     if (text === undefined) return;
     if (this.#renderer.renderCommandResult !== undefined) {
-      this.#renderer.renderCommandResult(text);
+      this.#renderer.renderCommandResult(text, tone);
       return;
     }
     this.#renderer.renderNotice?.(text);
@@ -1319,6 +1341,7 @@ export class EveTUIRunner {
       title: input.title,
       initialModelStep: input.initialModelStep,
       remoteConnection: this.#remoteConnection,
+      withExclusiveTerminal: this.#withExclusiveTerminal,
     };
     const disabledConnectionReasons = this.#mcpConnectionStatus?.current();
     const context: PromptCommandHandlerContext =
@@ -1344,13 +1367,6 @@ export class EveTUIRunner {
   }
 
   async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
-    if (effect?.kind === "connection-added") {
-      this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
-      this.#authHintStale = true;
-      await this.#refreshConnectionRuntime();
-      await this.#refreshModelAccess();
-      return;
-    }
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
       this.#authHintStale = true;
@@ -1362,15 +1378,6 @@ export class EveTUIRunner {
     this.#vercelStatus?.applyEffect(effect);
     this.#authHintStale = true;
     void this.#refreshSetupAttention(this.#agentInfo);
-  }
-
-  async #refreshConnectionRuntime(): Promise<void> {
-    const runtimeArtifacts = this.#runtimeArtifacts;
-    if (runtimeArtifacts === undefined) return;
-
-    await runtimeArtifacts.refreshAfterSourceChange({
-      onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
-    });
   }
 
   async #executeExtensionCommand(
@@ -1388,7 +1395,7 @@ export class EveTUIRunner {
       title,
     });
     this.#renderStartupCommandInvocation(command, input.trigger);
-    this.#renderCommandOutcome(outcome?.message);
+    this.#renderCommandOutcome(outcome?.message, outcome?.tone);
     await this.#applyCommandEffect(outcome?.effect);
     this.#refreshHeaderFromRemoteConnection();
   }
@@ -1398,7 +1405,8 @@ export class EveTUIRunner {
    * model access depends on the Vercel CLI and a Vercel session, so resolve
    * only those missing prerequisites before entering the model picker. A probe
    * failure still opens `/model`: its own-key and external-provider paths do
-   * not require Vercel.
+   * not require Vercel. After model setup, open the categorized registry hub so
+   * a new user has concrete next steps before reaching the chat prompt.
    */
   async #runInitialModelOnboarding(title: string): Promise<void> {
     const appRoot = this.#appRoot;
@@ -1443,6 +1451,9 @@ export class EveTUIRunner {
       trigger: "startup",
       initialModelStep: "provider",
     });
+    await this.#executeExtensionCommand({ type: "extension", name: "add", argument: "" }, title, {
+      trigger: "startup",
+    });
   }
 
   #refreshHeaderFromRemoteConnection(): void {
@@ -1455,6 +1466,28 @@ export class EveTUIRunner {
       name: this.#name,
       serverUrl: this.#serverUrl,
     });
+  }
+
+  /**
+   * Opens the renderer's trace viewer on the local spool. The viewer owns the
+   * screen until the user closes it; sessions without the capability (or
+   * without a local app root) get a one-line notice instead.
+   */
+  async #openTraceViewer(argument: string): Promise<void> {
+    if (this.#appRoot === undefined || this.#renderer.traceViewer === undefined) {
+      this.#renderCommandOutcome("/traces is only available in local dev sessions.");
+      return;
+    }
+    try {
+      await this.#renderer.traceViewer.open({
+        appRoot: this.#appRoot,
+        sessionId: this.#session.state.sessionId,
+        reference: argument === "" ? undefined : argument,
+      });
+    } catch (error) {
+      if (isInterruptedError(error)) return;
+      throw error;
+    }
   }
 
   /**
@@ -1632,7 +1665,7 @@ function formatAgentUpdateNotice(
 }
 
 type EveStreamTranslatorInput = {
-  events: AsyncIterable<HandleMessageStreamEvent>;
+  events: AsyncIterable<MessageStreamEvent>;
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
@@ -1671,11 +1704,13 @@ async function* eveEventsToTUIStream(
   } = input;
   const textParts = new Map<string, StreamPartState>();
   const reasoningParts = new Map<string, StreamPartState>();
+  // Dropping re-delivered events here means every case below is a new emission.
+  const seenEvents = createEventDeduper();
   // Counts `step.started` events. The harness reuses `stepIndex` across the
   // model calls of one turn (e.g. the post-subagent call restarts at the same
-  // index), so a part key alone cannot distinguish "new message under a
-  // reused key" from "replayed events of the finished message". A fresh
-  // `step.started` since the part completed is the discriminator.
+  // index), so a part key alone cannot distinguish a new message under a
+  // reused key from a re-emission. A fresh `step.started` since the part
+  // completed is the discriminator.
   let stepEpoch = 0;
   const knownToolCalls = new Set<string>();
   const seenInputRequestIds = new Set<string>();
@@ -1688,6 +1723,10 @@ async function* eveEventsToTUIStream(
   let latestStepUsage: StepCompletedStreamEvent["data"]["usage"] | undefined;
 
   for await (const event of events) {
+    if (!seenEvents.admit(event)) {
+      continue;
+    }
+
     if (visibleTurnCompleted && isPostTurnVisibleEvent(event)) {
       continue;
     }
@@ -1726,10 +1765,7 @@ async function* eveEventsToTUIStream(
         const next = appended.data.messageSoFar;
 
         if (state.completed) {
-          // Replays of the finished message re-stream prefixes of it — drop.
-          if (state.text.startsWith(next)) break;
-          // Divergent text without an intervening `step.started` is a retry
-          // of the same model call — drop it rather than mixing attempts.
+          // No intervening `step.started`: a retry of the same model call.
           if (stepEpoch <= state.completedEpoch) break;
           // A fresh model call reusing this part key (the harness restarts
           // `stepIndex` after a park/resume, e.g. post-subagent): open a new
@@ -1755,7 +1791,7 @@ async function* eveEventsToTUIStream(
         const message = event.data.message;
 
         if (state.completed) {
-          if (message === null || message === state.text) break;
+          if (message === null) break;
           if (stepEpoch <= state.completedEpoch) break;
           // Channels that skip per-delta events: a new full message under a
           // reused key after a fresh model call.
@@ -1802,7 +1838,6 @@ async function* eveEventsToTUIStream(
         const next = appended.data.reasoningSoFar;
 
         if (state.completed) {
-          if (state.text.startsWith(next)) break;
           if (stepEpoch <= state.completedEpoch) break;
           state.generation += 1;
           state.text = "";
@@ -1825,7 +1860,7 @@ async function* eveEventsToTUIStream(
         const next = event.data.reasoning;
 
         if (state.completed) {
-          if (next.length === 0 || next === state.text || state.text.startsWith(next)) break;
+          if (next.length === 0) break;
           if (stepEpoch <= state.completedEpoch) break;
           state.generation += 1;
           state.text = next;
@@ -1876,7 +1911,11 @@ async function* eveEventsToTUIStream(
         for (const request of requests) {
           const toolCallId = request.action.callId;
 
-          if (!knownToolCalls.has(toolCallId)) {
+          // The session-limit continuation is harness-authored — no model
+          // tool call exists behind it, so fabricating a transcript entry
+          // would render a phantom call. Its question rendering already
+          // carries the prompt copy.
+          if (request.kind !== "session-limit" && !knownToolCalls.has(toolCallId)) {
             knownToolCalls.add(toolCallId);
             yield {
               type: "tool-call",
@@ -1890,7 +1929,7 @@ async function* eveEventsToTUIStream(
           seenInputRequestIds.add(request.requestId);
           pendingInputRequests.set(request.requestId, request);
 
-          if (isQuestionRequest(request)) {
+          if (request.kind !== "tool-approval") {
             upsertPendingQuestion(turnState, request);
             continue;
           }
@@ -1996,8 +2035,8 @@ async function* eveEventsToTUIStream(
         break;
 
       case "subagent.called": {
-        // Run creation (idempotent for SSE-resume re-entries) lives in the
-        // pump's begin().
+        // Re-delivery within this translator was filtered above; run creation
+        // and re-entry from a later translator live in the pump's begin().
         onSubagentCalled?.(event as SubagentCalledStreamEvent);
         break;
       }
@@ -2144,7 +2183,7 @@ function* closeOpenParts(
   }
 }
 
-function isPostTurnVisibleEvent(event: HandleMessageStreamEvent): boolean {
+function isPostTurnVisibleEvent(event: MessageStreamEvent): boolean {
   switch (event.type) {
     case "actions.requested":
     case "authorization.completed":
@@ -2207,12 +2246,6 @@ function toFailureEvent(
   const detail = formatFailureDetail(event);
   if (detail !== undefined) failure.detail = detail;
   return failure;
-}
-
-function isQuestionRequest(request: InputRequest): boolean {
-  if (request.display === "select" || request.display === "text") return true;
-  if (request.display === "confirmation") return false;
-  return request.options !== undefined && request.options.length > 0;
 }
 
 function toAgentTUIInputQuestion(request: InputRequest): AgentTUIInputQuestion {

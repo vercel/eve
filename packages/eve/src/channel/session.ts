@@ -1,5 +1,5 @@
 import type { ContextAccessor } from "#context/key.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult, Runtime } from "#channel/types.js";
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
@@ -27,9 +27,7 @@ export interface Session {
    * Opens the durable event stream. Negative start indexes read relative to
    * the current tail (`-1` starts at the latest event).
    */
-  getEventStream(options?: {
-    startIndex?: number;
-  }): Promise<ReadableStream<HandleMessageStreamEvent>>;
+  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
   /**
    * Resolves the durable tail of the event stream: the zero-based index of
    * the last recorded event, or `-1` before the first.

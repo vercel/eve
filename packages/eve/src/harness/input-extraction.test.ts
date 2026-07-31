@@ -34,6 +34,7 @@ describe("extractQuestionInputRequests", () => {
           toolName: "ask_question",
         },
         display: "select",
+        kind: "question",
         options: [{ id: "yes", label: "Yes" }],
         prompt: "Continue?",
         requestId: "call-1",
@@ -117,6 +118,7 @@ describe("extractToolApprovalInputRequests", () => {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Yes" },
           { id: "deny", label: "No" },
@@ -154,6 +156,7 @@ describe("extractToolApprovalInputRequests", () => {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Yes" },
           { id: "deny", label: "No" },

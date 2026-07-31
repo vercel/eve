@@ -226,10 +226,10 @@ const agent = useEveAgent({ reducer: toolCounter });
 The browser conversation lives durably on the server. Persist both the rendered event log and the `session` cursor to pick it back up after a reload:
 
 ```tsx
-import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+import type { SessionState, MessageStreamEvent } from "eve/client";
 
 type SavedEveChat = {
-  events?: readonly HandleMessageStreamEvent[];
+  events?: readonly MessageStreamEvent[];
   session?: SessionState;
 };
 
@@ -254,6 +254,8 @@ const agent = useEveAgent({
 ```
 
 Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field. The session cursor lets eve continue the durable conversation; the event log lets your UI render historical messages without replaying the whole stream. A database-backed chat app should usually persist stream events as they arrive with `onEvent` and then save a final snapshot in `onFinish`.
+
+`initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. Every event carries a stable [`meta.id`](/docs/concepts/sessions-runs-and-streaming#the-event-envelope), and the store drops any event whose id it has already applied — so a saved log that overlaps the replayed prefix renders once, and `onEvent` only fires for events your UI has not seen.
 
 For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, and `optimistic` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
 

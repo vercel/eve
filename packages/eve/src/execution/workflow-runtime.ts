@@ -38,7 +38,7 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -46,6 +46,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import {
   sessionCancelHookToken,
@@ -54,6 +55,7 @@ import {
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
+const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
@@ -72,6 +74,7 @@ export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
 export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
+  SESSION_TIMEOUT_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -103,6 +106,11 @@ export const turnWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TURN_WORKFLOW_NAME}`,
 };
 
+/** Stable workflow reference for session deadline timers. */
+export const sessionTimeoutWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_TIMEOUT_WORKFLOW_NAME}`,
+};
+
 /**
  * Creates a workflow-backed runtime whose long-lived driver owns the
  * event stream and dispatches each turn as a child workflow run.
@@ -120,6 +128,17 @@ export function createWorkflowRuntime(config: {
       const ctx = buildRunContext({ bundle, run: input });
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
+      const sessionTimeoutMs = bundle.resolvedAgent.config.limits?.sessionTimeoutMs;
+      const workflowInput: {
+        -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
+      } = {
+        input: input.input,
+        limits: input.limits,
+        serializedContext,
+      };
+      if (sessionTimeoutMs !== undefined) {
+        workflowInput.sessionTimeoutMs = sessionTimeoutMs;
+      }
       const attributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
@@ -137,20 +156,10 @@ export function createWorkflowRuntime(config: {
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
-        run = await startWorkflowPreferLatest(
-          workflowEntryReference,
-          [
-            {
-              input: input.input,
-              limits: input.limits,
-              serializedContext,
-            },
-          ],
-          {
-            allowReservedAttributes: true,
-            attributes: normalizeEveAttributes(attributes),
-          },
-        );
+        run = await startWorkflowPreferLatest(workflowEntryReference, [workflowInput], {
+          allowReservedAttributes: true,
+          attributes: normalizeEveAttributes(attributes),
+        });
       } catch (error) {
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
@@ -158,11 +167,9 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
-      let events: ReadableStream<HandleMessageStreamEvent> | undefined;
+      let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= parseNdjsonStream<HandleMessageStreamEvent>(() =>
-          getRun(run.runId).getReadable(),
-        );
+        events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
         return events;
       };
 
@@ -219,8 +226,8 @@ export function createWorkflowRuntime(config: {
     async getEventStream(
       sessionId: string,
       options?: GetEventStreamOptions,
-    ): Promise<ReadableStream<HandleMessageStreamEvent>> {
-      return parseNdjsonStream<HandleMessageStreamEvent>(() =>
+    ): Promise<ReadableStream<MessageStreamEvent>> {
+      return parseNdjsonStream<MessageStreamEvent>(() =>
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
     },
@@ -262,20 +269,20 @@ export async function requestWorkflowTurnCancellation(
     await resumeHook(sessionCancelHookToken(input.sessionId), payload);
     return { status: "accepted" };
   } catch (error) {
-    if (isInactiveCancelTarget(error)) {
-      return { status: "no_active_turn" };
+    const reason = classifyInactiveCancelTarget(error);
+    if (reason !== undefined) {
+      return { reason, status: "no_active_turn" };
     }
     throw error;
   }
 }
 
-function isInactiveCancelTarget(error: unknown): boolean {
-  return (
-    HookNotFoundError.is(error) ||
-    WorkflowRunNotFoundError.is(error) ||
-    RunExpiredError.is(error) ||
-    EntityConflictError.is(error)
-  );
+function classifyInactiveCancelTarget(error: unknown): string | undefined {
+  if (HookNotFoundError.is(error)) return "HookNotFoundError";
+  if (WorkflowRunNotFoundError.is(error)) return "WorkflowRunNotFoundError";
+  if (RunExpiredError.is(error)) return "RunExpiredError";
+  if (EntityConflictError.is(error)) return "EntityConflictError";
+  return undefined;
 }
 
 function isAlreadyTerminalSessionError(error: unknown): boolean {

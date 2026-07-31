@@ -1,10 +1,23 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { InputRequestKind } from "#runtime/input/types.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
-/** `requestId → childContinuationToken` map stored on the parent session. */
-type ProxyInputRequestMap = Readonly<Record<string, string>>;
+const PROXY_INPUT_REQUEST_KINDS = {
+  question: true,
+  "session-limit": true,
+  "tool-approval": true,
+} satisfies Readonly<Record<InputRequestKind, true>>;
+
+/** Routing and control metadata for one descendant-owned input request. */
+export interface ProxyInputRequest {
+  readonly childContinuationToken: string;
+  readonly kind: InputRequestKind;
+}
+
+/** `requestId → route` map stored on the parent session. */
+type ProxyInputRequestMap = Readonly<Record<string, ProxyInputRequest>>;
 
 /**
  * Returns the proxy-routing map as a fresh `Map`. Never returns a live
@@ -12,7 +25,7 @@ type ProxyInputRequestMap = Readonly<Record<string, string>>;
  */
 export function getProxyInputRequests(
   state: SessionStateMap | undefined,
-): ReadonlyMap<string, string> {
+): ReadonlyMap<string, ProxyInputRequest> {
   return new Map(Object.entries(readMap(state)));
 }
 
@@ -33,20 +46,20 @@ export function hasProxyInputRequests(state: SessionStateMap | undefined): boole
  * batch — the parent never keeps stale request metadata.
  */
 export function upsertProxyInputRequests(input: {
-  readonly entries: readonly (readonly [requestId: string, childContinuationToken: string])[];
+  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly forChildContinuationToken: string;
   readonly session: HarnessSession;
 }): HarnessSession {
-  const next: Record<string, string> = {};
+  const next: Record<string, ProxyInputRequest> = {};
 
-  for (const [requestId, childToken] of Object.entries(readMap(input.session.state))) {
-    if (childToken !== input.forChildContinuationToken) {
-      next[requestId] = childToken;
+  for (const [requestId, route] of Object.entries(readMap(input.session.state))) {
+    if (route.childContinuationToken !== input.forChildContinuationToken) {
+      next[requestId] = route;
     }
   }
 
-  for (const [requestId, childToken] of input.entries) {
-    next[requestId] = childToken;
+  for (const [requestId, route] of input.entries) {
+    next[requestId] = route;
   }
 
   return writeMap(input.session, next);
@@ -61,15 +74,15 @@ export function clearProxyInputRequestsForChild(
   childContinuationToken: string,
 ): HarnessSession {
   const current = readMap(session.state);
-  const next: Record<string, string> = {};
+  const next: Record<string, ProxyInputRequest> = {};
   let changed = false;
 
-  for (const [requestId, childToken] of Object.entries(current)) {
-    if (childToken === childContinuationToken) {
+  for (const [requestId, route] of Object.entries(current)) {
+    if (route.childContinuationToken === childContinuationToken) {
       changed = true;
       continue;
     }
-    next[requestId] = childToken;
+    next[requestId] = route;
   }
 
   if (!changed) {
@@ -92,13 +105,20 @@ export function clearAllProxyInputRequests(session: HarnessSession): HarnessSess
 
 /**
  * Projects a {@link SubagentInputRequestHookPayload} into the
- * `(requestId, childContinuationToken)` tuples the session stores.
+ * `(requestId, route)` tuples the session stores.
  */
 export function toProxyInputRequestEntries(
   payload: SubagentInputRequestHookPayload,
-): readonly (readonly [requestId: string, childContinuationToken: string])[] {
+): readonly (readonly [requestId: string, route: ProxyInputRequest])[] {
   return payload.event.requests.map(
-    (request) => [request.requestId, payload.childContinuationToken] as const,
+    (request) =>
+      [
+        request.requestId,
+        {
+          childContinuationToken: payload.childContinuationToken,
+          kind: request.kind,
+        },
+      ] as const,
   );
 }
 
@@ -109,16 +129,20 @@ function readMap(state: SessionStateMap | undefined): ProxyInputRequestMap {
     return {};
   }
 
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "string") {
-      result[key] = value;
+  const result: Record<string, ProxyInputRequest> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const request = parseProxyInputRequest(value);
+    if (request !== undefined) {
+      result[key] = request;
     }
   }
   return result;
 }
 
-function writeMap(session: HarnessSession, entries: Record<string, string>): HarnessSession {
+function writeMap(
+  session: HarnessSession,
+  entries: Record<string, ProxyInputRequest>,
+): HarnessSession {
   const state = { ...session.state };
 
   if (Object.keys(entries).length === 0) {
@@ -131,4 +155,24 @@ function writeMap(session: HarnessSession, entries: Record<string, string>): Har
 
   state[PROXY_INPUT_REQUESTS_KEY] = entries;
   return { ...session, state };
+}
+
+function parseProxyInputRequest(value: unknown): ProxyInputRequest | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  if (!("childContinuationToken" in value) || !("kind" in value)) {
+    return undefined;
+  }
+  if (typeof value.childContinuationToken !== "string" || !isInputRequestKind(value.kind)) {
+    return undefined;
+  }
+  return {
+    childContinuationToken: value.childContinuationToken,
+    kind: value.kind,
+  };
+}
+
+function isInputRequestKind(value: unknown): value is InputRequestKind {
+  return typeof value === "string" && Object.hasOwn(PROXY_INPUT_REQUEST_KINDS, value);
 }

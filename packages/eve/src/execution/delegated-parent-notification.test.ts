@@ -5,7 +5,8 @@ import { serializeContext } from "#context/serialize.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
-import { SUBAGENT_ADAPTER, SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 

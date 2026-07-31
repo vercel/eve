@@ -557,7 +557,7 @@ describe("emitStreamContent action requests", () => {
       EMISSION_STATE,
       streamOf([
         {
-          input: "not an object",
+          input: '"not an object"',
           toolCallId: "call-bad",
           toolName: "web_search",
           type: "tool-call",
@@ -600,8 +600,6 @@ describe("emitStreamContent action requests", () => {
 
   it("turns malformed provider-executed tool call input into a failed tool result", async () => {
     const emit = createEmitStub();
-    const message =
-      'Failed to parse tool-call arguments for "web_search" (call-bad): Expected a JSON-serializable object.';
 
     const result = await emitStreamContent(
       emit,
@@ -625,6 +623,13 @@ describe("emitStreamContent action requests", () => {
     );
 
     const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const actionResult = events.find((event) => event.type === "action.result");
+    if (actionResult?.data.error === undefined) {
+      throw new Error("Expected a failed action.result event.");
+    }
+    const { message } = actionResult.data.error;
+    expect(message).toMatch(/Failed to parse tool-call arguments for "web_search" \(call-bad\):/u);
+    expect(message).not.toContain("Expected a JSON-serializable object.");
     expect(events).toEqual([
       expect.objectContaining({
         data: expect.objectContaining({
@@ -642,8 +647,14 @@ describe("emitStreamContent action requests", () => {
       }),
     ]);
     expect([...result.invalidInputToolCallIds]).toEqual(["call-bad"]);
-    // Provider results live in the assistant response; no local tool message.
-    expect(result.trailingInlineToolResultParts).toEqual([]);
+    expect(result.trailingInlineToolResultParts).toEqual([
+      {
+        output: { type: "error-text", value: message },
+        toolCallId: "call-bad",
+        toolName: "web_search",
+        type: "tool-result",
+      },
+    ]);
   });
 });
 

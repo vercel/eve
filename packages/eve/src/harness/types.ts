@@ -2,7 +2,7 @@ import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
-import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -196,7 +196,7 @@ export type HarnessToolMap = ReadonlyMap<string, HarnessToolDefinition>;
  * events without knowing about writables or handlers.
  */
 export type HarnessEmitFn = (
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
@@ -209,7 +209,7 @@ export type HarnessEmitFn = (
  * and dynamic tool dispatch in one call.
  */
 export type HandleEventFn = (
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
@@ -263,7 +263,7 @@ export interface ToolLoopHarnessConfig {
   readonly onCompaction?: () => readonly ModelMessage[];
   readonly dispatchDynamicModelEvent?: (input: {
     readonly ctx: AlsContext;
-    readonly event: HandleMessageStreamEvent;
+    readonly event: UnstampedMessageStreamEvent;
     readonly fallback: RuntimeModelReference;
     readonly messages: readonly ModelMessage[];
   }) => Promise<void>;

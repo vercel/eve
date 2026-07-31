@@ -17,10 +17,18 @@ export function registerRegistryCommands(input: {
     .command("add <item>")
     .description("Install a registry item; relative paths use the official eve registry.")
     .option("-o, --overwrite", "Overwrite existing files.")
-    .action(async (item: string, options: { overwrite?: boolean }) => {
-      const { runAddCommand } = await import("./registry.js");
-      await runAddCommand(logger, appRoot, item, options);
-    });
+    .option("--skip-install", "Run the item's setup flow without installing it.")
+    .option("--skip-setup", "Skip the item's setup flow.")
+    .option("-y, --yes", "Run setup and accept its recommended defaults.")
+    .action(
+      async (
+        item: string,
+        options: { skipInstall?: boolean; overwrite?: boolean; skipSetup?: boolean; yes?: boolean },
+      ) => {
+        const { runAddCommand } = await import("./registry.js");
+        await runAddCommand(logger, appRoot, item, options);
+      },
+    );
 
   const registry = program
     .command("registry")

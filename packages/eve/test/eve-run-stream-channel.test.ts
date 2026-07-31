@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { HandleMessageStreamEvent } from "../src/protocol/message.js";
+import type { MessageStreamEvent } from "../src/protocol/message.js";
+import { stampTestEvents } from "../src/internal/testing/events.js";
 import type { RouteHandlerArgs, GetSessionFn } from "../src/channel/routes.js";
 import type { Session } from "../src/channel/session.js";
 import { EVE_MESSAGE_STREAM_ROUTE_PATTERN } from "../src/protocol/routes.js";
@@ -30,18 +31,20 @@ function createGetHandler() {
 describe("eveChannel GET stream", () => {
   it("forwards the startIndex query parameter into getSession/getEventStream", async () => {
     const getRoute = createGetHandler();
-    const events = createEvents([
-      {
-        type: "message.completed",
-        data: {
-          finishReason: "stop",
-          message: "second turn reply",
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "turn-1",
+    const events = createEvents(
+      stampTestEvents([
+        {
+          type: "message.completed",
+          data: {
+            finishReason: "stop",
+            message: "second turn reply",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn-1",
+          },
         },
-      },
-    ]);
+      ]),
+    );
     const getSession = createMockGetSession(events);
 
     const response = await (getRoute as any).handler(
@@ -116,7 +119,7 @@ describe("eveChannel GET stream", () => {
 
   it("re-serializes the parsed event stream as NDJSON bytes", async () => {
     const getRoute = createGetHandler();
-    const events: HandleMessageStreamEvent[] = [
+    const events = stampTestEvents([
       {
         type: "message.completed",
         data: {
@@ -131,7 +134,7 @@ describe("eveChannel GET stream", () => {
         type: "session.waiting",
         data: { continuationToken: "eve:test", wait: "next-user-message" },
       },
-    ];
+    ]);
     const getSession = createMockGetSession(createEvents(events));
 
     const response = await (getRoute as any).handler(
@@ -153,10 +156,8 @@ describe("eveChannel GET stream", () => {
   });
 });
 
-function createEvents(
-  events: readonly HandleMessageStreamEvent[],
-): ReadableStream<HandleMessageStreamEvent> {
-  return new ReadableStream<HandleMessageStreamEvent>({
+function createEvents(events: readonly MessageStreamEvent[]): ReadableStream<MessageStreamEvent> {
+  return new ReadableStream<MessageStreamEvent>({
     start(controller) {
       for (const event of events) {
         controller.enqueue(event);
@@ -166,7 +167,7 @@ function createEvents(
   });
 }
 
-function createMockGetSession(events: ReadableStream<HandleMessageStreamEvent>) {
+function createMockGetSession(events: ReadableStream<MessageStreamEvent>) {
   return vi.fn<GetSessionFn>().mockReturnValue({
     id: "session_xyz",
     continuationToken: "",

@@ -43,6 +43,27 @@ const IntegrationsPage = async ({ searchParams }: PageProps<"/[lang]/integration
         </p>
       </section>
       <Gallery filter={filter} integrations={integrations} />
+      <section className="mt-12 rounded-lg border border-dashed px-6 py-10 text-center">
+        <h2 className="font-medium text-gray-1000 text-xl tracking-tight">
+          Don&apos;t see your integration?
+        </h2>
+        <p className="mt-2 text-gray-800 text-sm">
+          <a
+            className="font-medium text-gray-1000 underline underline-offset-4"
+            href="/docs/install-integrations#contribute-an-official-integration"
+          >
+            Contribute to the official registry
+          </a>{" "}
+          or{" "}
+          <a
+            className="font-medium text-gray-1000 underline underline-offset-4"
+            href="/docs/install-integrations#host-your-own-registry"
+          >
+            host a third-party registry
+          </a>
+          .
+        </p>
+      </section>
     </main>
   );
 };

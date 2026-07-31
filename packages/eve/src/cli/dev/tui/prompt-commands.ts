@@ -1,10 +1,4 @@
-export type PromptCommandExtensionName =
-  | "model"
-  | "channels"
-  | "connect"
-  | "deploy"
-  | "vc:install"
-  | "vc:login";
+export type PromptCommandExtensionName = "model" | "add" | "deploy" | "vc:install" | "vc:login";
 
 type PromptCommandTarget = "local" | "remote";
 
@@ -14,6 +8,7 @@ export type PromptCommand =
   | { type: "exit" }
   | { type: "help" }
   | { type: "loglevel"; argument: string }
+  | { type: "traces"; argument: string }
   | { type: "extension"; name: PromptCommandExtensionName; argument: string };
 
 /**
@@ -98,19 +93,20 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
-    name: "channels",
+    name: "traces",
     aliases: [],
-    description: "Add chat channels to the agent",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "channels", argument: "" }),
+    description: "Open the local trace viewer",
+    argumentHint: "[trace]",
+    takesArgument: true,
+    build: (argument) => ({ type: "traces", argument }),
     targets: ["local"],
   },
   {
-    name: "connect",
+    name: "add",
     aliases: [],
-    description: "Add an MCP server through Vercel Connect",
+    description: "Browse and add registry integrations",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "connect", argument: "" }),
+    build: () => ({ type: "extension", name: "add", argument: "" }),
     targets: ["local"],
   },
   {

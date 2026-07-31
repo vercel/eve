@@ -50,6 +50,8 @@ export interface RunVercelOptions {
   extraEnv?: Readonly<Record<string, string>>;
   /** Pass `--non-interactive` and close stdin so automation cannot stop on a prompt. */
   nonInteractive?: boolean;
+  /** UTF-8 data written to stdin, used to keep connector secrets out of argv. */
+  stdin?: string;
   /** Streams command output to a parent-owned renderer instead of writing outside it. */
   onOutput?: ProcessOutputHandler;
   /** Aborts the Vercel CLI subprocess when its parent setup flow is interrupted. */
@@ -158,13 +160,173 @@ export function resolveVercelInvocation(
     : { command: localBinary, commandArgs: args };
 }
 
+function stdinMode(options: RunVercelOptions): "inherit" | "ignore" | "pipe" {
+  if (options.stdin !== undefined) return "pipe";
+  return options.nonInteractive ? "ignore" : "inherit";
+}
+
+function writeStdin(
+  child: ChildProcess,
+  input: string | undefined,
+  onError: (error: NodeJS.ErrnoException) => void,
+): void {
+  if (input === undefined || child.stdin === null) return;
+  child.stdin.once("error", onError);
+  child.stdin.end(input, "utf8");
+}
+
 function stdioForRun(
   options: RunVercelOptions,
-): ["inherit" | "ignore", "pipe", "pipe"] | "inherit" {
-  if (options.onOutput) {
-    return [options.nonInteractive ? "ignore" : "inherit", "pipe", "pipe"];
+): ["inherit" | "ignore" | "pipe", "pipe", "pipe"] | "inherit" {
+  if (options.onOutput || options.stdin !== undefined) {
+    return [stdinMode(options), "pipe", "pipe"];
   }
   return options.nonInteractive ? ["ignore", "pipe", "pipe"] : "inherit";
+}
+
+type StdioChannel = "inherit" | "ignore" | "pipe";
+
+/** stdio layout for a Vercel CLI child: fully inherited, or per channel. */
+type VercelStdio = "inherit" | [StdioChannel, StdioChannel, StdioChannel];
+
+/** Why a run failed, carried so a caller can act on the cause. */
+interface VercelRunFailure {
+  code?: number | null;
+  errno?: string;
+  message: string;
+}
+
+/** Terminal state of one Vercel CLI run, before it is shaped for the caller. */
+type VercelRunOutcome =
+  | { ok: true; stdout: string; stderr: string }
+  | ({ ok: false; stdout: string; stderr: string } & VercelRunFailure);
+
+/** How a public entry point drives the shared run and shapes its result. */
+interface VercelRunSpec<T> {
+  stdio: VercelStdio;
+  /**
+   * Retain stdout and stderr for the caller. When false, stdout is streamed to
+   * the renderer instead and neither stream is kept in memory.
+   */
+  capture: boolean;
+  /** Write diagnostics to `process.stderr` when no renderer is attached. */
+  reportWithoutRenderer: boolean;
+  result(outcome: VercelRunOutcome): T;
+}
+
+/**
+ * Runs the Vercel CLI with the Connect feature flag enabled and settles exactly
+ * once, whatever ends the run: a clean exit, a non-zero exit, a spawn error, a
+ * failed stdin write, the `timeoutMs` deadline, or cancellation. Every public
+ * entry point shares this lifecycle and differs only in its stdio layout and
+ * result shape.
+ *
+ * A settled run flushes buffered output before its diagnostic so a partial
+ * trailing line cannot appear after the failure it preceded. Cancellation and a
+ * signal-driven exit stay silent: the timeout that killed the child has already
+ * reported, and a user-driven abort is not a fault to narrate.
+ */
+function runVercelProcess<T>(
+  args: string[],
+  options: RunVercelOptions,
+  spec: VercelRunSpec<T>,
+): Promise<T> {
+  if (options.signal?.aborted === true) {
+    return Promise.resolve(
+      spec.result({
+        ok: false,
+        stdout: "",
+        stderr: "",
+        errno: "ABORT_ERR",
+        message: abortMessage(args),
+      }),
+    );
+  }
+  return new Promise<T>((resolvePromise) => {
+    const cwd = existingDir(options.cwd);
+    const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
+    const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
+    const child = spawn(invocation.command, invocation.commandArgs, {
+      cwd,
+      stdio: spec.stdio,
+      env: buildSpawnEnv(options.extraEnv ?? {}),
+      shell: invocation.shell,
+      signal: options.signal,
+    });
+    const disarmAbort = armProcessAbort(child, options.signal);
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    child.stdout?.on("data", (chunk: Buffer) => {
+      if (spec.capture) stdoutChunks.push(chunk.toString("utf8"));
+      else outputBuffer?.write("stdout", chunk);
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      if (spec.capture) stderrChunks.push(chunk.toString("utf8"));
+      outputBuffer?.write("stderr", chunk);
+    });
+
+    let settled = false;
+    function settle(outcome: VercelRunOutcome, report: boolean): void {
+      if (settled) return;
+      settled = true;
+      outputBuffer?.flush();
+      if (report && !outcome.ok) {
+        if (options.onOutput !== undefined) {
+          options.onOutput({ stream: "stderr", text: outcome.message });
+        } else if (spec.reportWithoutRenderer) {
+          process.stderr.write(`\n${outcome.message}\n`);
+        }
+      }
+      resolvePromise(spec.result(outcome));
+    }
+    function captured(): { stdout: string; stderr: string } {
+      return { stdout: stdoutChunks.join(""), stderr: stderrChunks.join("") };
+    }
+    function fail(failure: VercelRunFailure, report = true): void {
+      settle({ ok: false, ...captured(), ...failure }, report);
+    }
+
+    const disarmDeadline = armDeadline(child, options.timeoutMs, () => {
+      fail({ code: null, message: timeoutMessage(args, options.timeoutMs ?? 0) });
+    });
+    writeStdin(child, options.stdin, (error) => {
+      fail({
+        errno: error.code,
+        message: `vercel ${args.join(" ")} stdin failed: ${error.message}`,
+      });
+    });
+
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      if (isAbortError(error, options.signal)) return;
+      disarmAbort();
+      disarmDeadline();
+      fail({
+        errno: error.code,
+        message:
+          error.code === "ENOENT"
+            ? VERCEL_NOT_FOUND_MESSAGE
+            : `vercel ${args.join(" ")} failed: ${error.message}`,
+      });
+    });
+    child.on("close", (code) => {
+      disarmAbort();
+      disarmDeadline();
+      if (options.signal?.aborted === true) {
+        fail({ code, errno: "ABORT_ERR", message: abortMessage(args) }, false);
+        return;
+      }
+      if (code === 0) {
+        settle({ ok: true, ...captured() }, false);
+        return;
+      }
+      fail(
+        code === null
+          ? { code, message: abortMessage(args) }
+          : { code, message: `vercel ${args.join(" ")} exited with code ${code}.` },
+        code !== null,
+      );
+    });
+  });
 }
 
 /**
@@ -174,72 +336,11 @@ function stdioForRun(
  * so an interactive parent can keep terminal rendering coherent.
  */
 export async function runVercel(args: string[], options: RunVercelOptions): Promise<boolean> {
-  if (options.signal?.aborted === true) return false;
-  return new Promise<boolean>((resolvePromise) => {
-    const cwd = existingDir(options.cwd);
-    const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
-    const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    const child = spawn(invocation.command, invocation.commandArgs, {
-      cwd,
-      stdio: stdioForRun(options),
-      env: buildSpawnEnv(options.extraEnv ?? {}),
-      shell: invocation.shell,
-      signal: options.signal,
-    });
-    const disarmAbort = armProcessAbort(child, options.signal);
-    child.stdout?.on("data", (chunk: Buffer) => outputBuffer?.write("stdout", chunk));
-    child.stderr?.on("data", (chunk: Buffer) => outputBuffer?.write("stderr", chunk));
-
-    let settled = false;
-    function settle(success: boolean): void {
-      if (settled) return;
-      settled = true;
-      outputBuffer?.flush();
-      resolvePromise(success);
-    }
-    function reportFailure(message: string): void {
-      if (options.onOutput) {
-        options.onOutput({ stream: "stderr", text: message });
-      } else {
-        process.stderr.write(`\n${message}\n`);
-      }
-    }
-
-    const disarmDeadline = armDeadline(child, options.timeoutMs, () => {
-      reportFailure(timeoutMessage(args, options.timeoutMs ?? 0));
-      settle(false);
-    });
-
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      if (isAbortError(error, options.signal)) {
-        return;
-      } else if (error.code === "ENOENT") {
-        disarmAbort();
-        disarmDeadline();
-        reportFailure(VERCEL_NOT_FOUND_MESSAGE);
-        settle(false);
-      } else {
-        disarmAbort();
-        disarmDeadline();
-        reportFailure(`vercel ${args.join(" ")} failed: ${error.message}`);
-        settle(false);
-      }
-    });
-    child.on("close", (code) => {
-      disarmAbort();
-      disarmDeadline();
-      if (options.signal?.aborted === true) {
-        settle(false);
-        return;
-      }
-      // After a timeout has settled the run, the eventual kill-driven exit
-      // must not inject a second, stale diagnostic into the renderer.
-      if (!settled && code !== 0 && code !== null) {
-        outputBuffer?.flush();
-        reportFailure(`vercel ${args.join(" ")} exited with code ${code}.`);
-      }
-      settle(code === 0);
-    });
+  return runVercelProcess(args, options, {
+    stdio: stdioForRun(options),
+    capture: false,
+    reportWithoutRenderer: true,
+    result: (outcome) => outcome.ok,
   });
 }
 
@@ -247,6 +348,7 @@ export async function runVercel(args: string[], options: RunVercelOptions): Prom
 export interface RunVercelCaptureResult {
   ok: boolean;
   stdout: string;
+  stderr?: string;
 }
 
 /**
@@ -262,74 +364,12 @@ export async function runVercelCaptureStdout(
   args: string[],
   options: RunVercelOptions,
 ): Promise<RunVercelCaptureResult> {
-  if (options.signal?.aborted === true) return { ok: false, stdout: "" };
-  return new Promise<RunVercelCaptureResult>((resolvePromise) => {
-    const cwd = existingDir(options.cwd);
-    const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
-    const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    const child = spawn(invocation.command, invocation.commandArgs, {
-      cwd,
-      stdio: [
-        options.nonInteractive ? "ignore" : "inherit",
-        "pipe",
-        options.onOutput ? "pipe" : "inherit",
-      ],
-      env: buildSpawnEnv(options.extraEnv ?? {}),
-      shell: invocation.shell,
-      signal: options.signal,
-    });
-    const disarmAbort = armProcessAbort(child, options.signal);
-    const chunks: string[] = [];
-    child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk.toString("utf8")));
-    child.stderr?.on("data", (chunk: Buffer) => outputBuffer?.write("stderr", chunk));
-
-    let settled = false;
-    function settle(ok: boolean): void {
-      if (settled) return;
-      settled = true;
-      outputBuffer?.flush();
-      resolvePromise({ ok, stdout: chunks.join("") });
-    }
-    function reportFailure(message: string): void {
-      if (options.onOutput) {
-        options.onOutput({ stream: "stderr", text: message });
-      } else {
-        process.stderr.write(`\n${message}\n`);
-      }
-    }
-
-    const disarmDeadline = armDeadline(child, options.timeoutMs, () => {
-      reportFailure(timeoutMessage(args, options.timeoutMs ?? 0));
-      settle(false);
-    });
-
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      if (isAbortError(error, options.signal)) {
-        return;
-      }
-      disarmAbort();
-      disarmDeadline();
-      reportFailure(
-        error.code === "ENOENT"
-          ? VERCEL_NOT_FOUND_MESSAGE
-          : `vercel ${args.join(" ")} failed: ${error.message}`,
-      );
-      settle(false);
-    });
-    child.on("close", (code) => {
-      disarmAbort();
-      disarmDeadline();
-      if (options.signal?.aborted === true) {
-        settle(false);
-        return;
-      }
-      // After a timeout has settled the run, the eventual kill-driven exit
-      // must not inject a second, stale diagnostic into the renderer.
-      if (!settled && code !== 0 && code !== null) {
-        reportFailure(`vercel ${args.join(" ")} exited with code ${code}.`);
-      }
-      settle(code === 0);
-    });
+  return runVercelProcess(args, options, {
+    stdio: [stdinMode(options), "pipe", options.onOutput ? "pipe" : "inherit"],
+    capture: true,
+    reportWithoutRenderer: true,
+    result: ({ ok, stdout, stderr }) =>
+      stderr.length === 0 ? { ok, stdout } : { ok, stdout, stderr },
   });
 }
 
@@ -364,106 +404,29 @@ export type VercelCaptureResult =
  * live `onOutput` renderer attached; when `onOutput` is supplied, stderr is
  * streamed to it and the failure summary is appended after a non-zero exit.
  */
+/** Shapes a failed run as the diagnostic {@link captureVercel} callers act on. */
+function toCaptureFailure(outcome: Extract<VercelRunOutcome, { ok: false }>): VercelCaptureFailure {
+  const failure: VercelCaptureFailure = {
+    stdout: outcome.stdout,
+    stderr: outcome.stderr,
+    message: outcome.message,
+  };
+  if (outcome.code !== undefined) failure.code = outcome.code;
+  if (outcome.errno !== undefined) failure.errno = outcome.errno;
+  return failure;
+}
+
 export async function captureVercel(
   args: string[],
   options: RunVercelOptions,
 ): Promise<VercelCaptureResult> {
-  if (options.signal?.aborted === true) {
-    return {
-      ok: false,
-      failure: {
-        errno: "ABORT_ERR",
-        stdout: "",
-        stderr: "",
-        message: abortMessage(args),
-      },
-    };
-  }
-  return new Promise<VercelCaptureResult>((resolvePromise) => {
-    const cwd = existingDir(options.cwd);
-    const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
-    const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    const child = spawn(invocation.command, invocation.commandArgs, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: buildSpawnEnv(options.extraEnv ?? {}),
-      shell: invocation.shell,
-      signal: options.signal,
-    });
-    const disarmAbort = armProcessAbort(child, options.signal);
-    const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
-    child.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk.toString("utf8")));
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderrChunks.push(chunk.toString("utf8"));
-      outputBuffer?.write("stderr", chunk);
-    });
-
-    let settled = false;
-    function fail(failure: VercelCaptureFailure, report = true): void {
-      if (settled) return;
-      settled = true;
-      outputBuffer?.flush();
-      if (report) options.onOutput?.({ stream: "stderr", text: failure.message });
-      resolvePromise({ ok: false, failure });
-    }
-    function succeed(): void {
-      if (settled) return;
-      settled = true;
-      outputBuffer?.flush();
-      resolvePromise({ ok: true, stdout: stdoutChunks.join("") });
-    }
-
-    const disarmDeadline = armDeadline(child, options.timeoutMs, () => {
-      fail({
-        code: null,
-        stdout: stdoutChunks.join(""),
-        stderr: stderrChunks.join(""),
-        message: timeoutMessage(args, options.timeoutMs ?? 0),
-      });
-    });
-
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      if (isAbortError(error, options.signal)) {
-        return;
-      }
-      disarmAbort();
-      disarmDeadline();
-      fail({
-        errno: error.code,
-        stdout: stdoutChunks.join(""),
-        stderr: stderrChunks.join(""),
-        message:
-          error.code === "ENOENT"
-            ? VERCEL_NOT_FOUND_MESSAGE
-            : `vercel ${args.join(" ")} failed: ${error.message}`,
-      });
-    });
-    child.on("close", (code) => {
-      disarmAbort();
-      disarmDeadline();
-      if (options.signal?.aborted === true) {
-        fail(
-          {
-            errno: "ABORT_ERR",
-            stdout: stdoutChunks.join(""),
-            stderr: stderrChunks.join(""),
-            message: abortMessage(args),
-          },
-          false,
-        );
-        return;
-      }
-      if (code !== 0 && code !== null) {
-        fail({
-          code,
-          stdout: stdoutChunks.join(""),
-          stderr: stderrChunks.join(""),
-          message: `vercel ${args.join(" ")} exited with code ${code}.`,
-        });
-        return;
-      }
-      succeed();
-    });
+  return runVercelProcess(args, options, {
+    stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    capture: true,
+    reportWithoutRenderer: false,
+    result: (outcome) =>
+      outcome.ok
+        ? { ok: true, stdout: outcome.stdout }
+        : { ok: false, failure: toCaptureFailure(outcome) },
   });
 }

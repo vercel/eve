@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { expectScheduleRun, SCHEDULE_ADAPTER_KIND, ScheduleDispatcher } from "#channel/schedule.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer } from "#context/container.js";
@@ -71,7 +71,7 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
 
       const handle: RunHandle = {
         continuationToken: "scenario-token",
-        events: new ReadableStream<HandleMessageStreamEvent>(),
+        events: new ReadableStream<MessageStreamEvent>(),
         sessionId: "scenario-session",
       };
       return handle;
@@ -80,7 +80,7 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
       throw new Error("deliver should not be called in this scenario");
     },
     async getEventStream() {
-      return new ReadableStream<HandleMessageStreamEvent>();
+      return new ReadableStream<MessageStreamEvent>();
     },
     async getStreamTailIndex() {
       return -1;

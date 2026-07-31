@@ -27,6 +27,7 @@ function makeRequest(overrides: Partial<InputRequest>): InputRequest {
     prompt: "Pick one",
     requestId: "call_abc123",
     ...overrides,
+    kind: overrides.kind ?? "question",
   };
 }
 
@@ -136,6 +137,7 @@ describe("renderInputRequestBlocks", () => {
         },
       },
       display: "confirmation",
+      kind: "tool-approval",
       prompt: "Approve tool call: mongodb-mutate",
       requestId: "approval_1",
       options: [
@@ -190,6 +192,7 @@ describe("renderInputRequestBlocks", () => {
           input: { value: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500) },
         },
         display: "confirmation",
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Yes" },
           { id: "deny", label: "No" },
@@ -374,6 +377,7 @@ describe("formatInputRequestFallbackText", () => {
           },
         },
         display: "confirmation",
+        kind: "tool-approval",
         prompt: "Approve tool call: mongodb-mutate",
         options: [
           { id: "approve", label: "Yes" },

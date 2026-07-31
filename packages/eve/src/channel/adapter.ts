@@ -1,7 +1,7 @@
 import type { ContextAccessor } from "#context/key.js";
 import type { StepInput } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type { FetchFileResult, FetchFileFunction } from "#shared/channel-definition.js";
@@ -61,15 +61,15 @@ type StateOf<TCtx> = TCtx extends ChannelAdapterContext<infer S> ? S : Record<st
  * Extracts the `data` field type from a stream event by its `type` discriminant.
  * Events that carry no `data` field (e.g. `session.completed`) resolve to `undefined`.
  */
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * A single outbound event handler. Receives the event's `data` (not the full
  * envelope) and the adapter context. Void return — side effects only.
  */
 type EventHandler<
-  T extends HandleMessageStreamEvent["type"],
+  T extends UnstampedMessageStreamEvent["type"],
   TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext,
 > = (data: EventData<T>, ctx: TCtx) => void | Promise<void>;
 
@@ -80,7 +80,7 @@ type EventHandler<
  */
 export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext> =
   {
-    [K in HandleMessageStreamEvent["type"]]?: EventHandler<K, TCtx>;
+    [K in UnstampedMessageStreamEvent["type"]]?: EventHandler<K, TCtx>;
   };
 
 // ---------------------------------------------------------------------------
@@ -232,9 +232,9 @@ export function getAdapterKind(adapter: ChannelAdapter): string {
  */
 export async function callAdapterEventHandler(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: ChannelAdapterContext,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   const handler = adapter[event.type] as
     | ((data: unknown, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;

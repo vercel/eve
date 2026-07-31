@@ -1,6 +1,6 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
-import { createActionResultEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
+import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { getRuntimeActionRequestKey, getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -268,7 +268,7 @@ export async function resolvePendingRuntimeActions(input: {
             subagentName: result.subagentName,
           },
           type: "subagent.completed",
-        } satisfies Extract<HandleMessageStreamEvent, { type: "subagent.completed" }>);
+        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
       }
 
       await input.emit(
@@ -452,13 +452,7 @@ export function resolveToolCallInputObject(
 }
 
 function parseJsonStringInput(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    // Not JSON at all — return the raw string so parseJsonObject rejects it
-    // with the canonical "Expected a JSON-serializable object." detail.
-    return value;
-  }
+  return JSON.parse(value);
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {

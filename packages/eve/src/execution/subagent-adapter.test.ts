@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { buildSessionHandle } from "#channel/session.js";
-import { type SubagentAdapterState } from "#execution/subagent-adapter.js";
+import { type SubagentAdapterState } from "#execution/subagent-adapter-state.js";
 import { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -53,6 +53,7 @@ function sampleRequest(): InputRequest {
       kind: "tool-call",
       toolName: "create_issue",
     },
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve" },
       { id: "deny", label: "Deny" },

@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
@@ -9,7 +9,7 @@ const EXPECTED_WINNERS =
   "2023 Denver Nuggets; 2022 Golden State Warriors; 2021 Milwaukee Bucks; " +
   "2020 Los Angeles Lakers; 2019 Toronto Raptors.";
 
-function completedToolResultCount(events: readonly HandleMessageStreamEvent[], toolName: string) {
+function completedToolResultCount(events: readonly MessageStreamEvent[], toolName: string) {
   const callIds = new Set<string>();
   for (const event of events) {
     if (
@@ -25,6 +25,7 @@ function completedToolResultCount(events: readonly HandleMessageStreamEvent[], t
 }
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Provider tools smoke: eight parallel gateway web searches complete successfully.",
   async test(t) {
     const turn = await t.send(

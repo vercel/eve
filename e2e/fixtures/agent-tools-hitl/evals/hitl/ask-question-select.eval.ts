@@ -6,6 +6,7 @@ import { defineEval } from "eve/evals";
  * here is deterministic.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "HITL smoke: ask-question select parks and resumes with the chosen option.",
   async test(t) {
     await t.send(

@@ -5,7 +5,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callTwilioApi,
   sendTwilioMessage,
@@ -52,8 +52,8 @@ import {
 
 const log = createLogger("twilio.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Twilio context passed to the inbound text, voice, and voice-transcription hooks. */
 export interface TwilioContext {
@@ -144,7 +144,7 @@ export type TwilioVoiceResultOrPromise =
   | undefined
   | Promise<TwilioVoiceResult | null | undefined>;
 
-type TwilioEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type TwilioEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: TwilioEventContext,
   ctx: SessionContext,

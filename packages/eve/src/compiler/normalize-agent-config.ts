@@ -129,6 +129,7 @@ export async function compileAgentConfig(
     compiledConfig.limits = {
       maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
+      sessionTimeoutMs: definition.limits.sessionTimeoutMs,
     };
   }
 

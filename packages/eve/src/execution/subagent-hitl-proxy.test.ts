@@ -22,10 +22,10 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
 describe("routeDeliverPayload", () => {
   it("routes responses to matching descendants and keeps unknown ones on forSelf", () => {
     const session = upsertProxyInputRequests({
-      entries: [["req-a", "child-a"]],
+      entries: [["req-a", { childContinuationToken: "child-a", kind: "tool-approval" }]],
       forChildContinuationToken: "child-a",
       session: upsertProxyInputRequests({
-        entries: [["req-b", "child-b"]],
+        entries: [["req-b", { childContinuationToken: "child-b", kind: "tool-approval" }]],
         forChildContinuationToken: "child-b",
         session: createSession(),
       }),
@@ -69,7 +69,7 @@ describe("routeDeliverPayload", () => {
 
   it("returns forSelf as undefined when every response routes to a descendant", () => {
     const session = upsertProxyInputRequests({
-      entries: [["req-a", "child-a"]],
+      entries: [["req-a", { childContinuationToken: "child-a", kind: "tool-approval" }]],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
@@ -83,5 +83,28 @@ describe("routeDeliverPayload", () => {
 
     expect(routed.forChildren).toHaveLength(1);
     expect(routed.forSelf).toBeUndefined();
+  });
+
+  it("asks the parent to cancel after routing Stop to a descendant session-limit request", () => {
+    const session = upsertProxyInputRequests({
+      entries: [["req-limit", { childContinuationToken: "child-a", kind: "session-limit" }]],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [{ optionId: "stop", requestId: "req-limit" }],
+      },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toEqual([
+      {
+        childContinuationToken: "child-a",
+        payload: { inputResponses: [{ optionId: "stop", requestId: "req-limit" }] },
+      },
+    ]);
+    expect(routed.parentAction).toEqual({ kind: "cancel-turn" });
   });
 });

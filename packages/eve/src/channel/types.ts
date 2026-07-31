@@ -1,6 +1,6 @@
 import type { UserContent } from "ai";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
@@ -29,6 +29,12 @@ export interface CancelTurnInput {
 /** Result of requesting turn cancellation. Both statuses are successful. */
 export interface CancelTurnResult {
   readonly status: CancelTurnStatus;
+  /**
+   * For `no_active_turn`: the error class that classified the target as
+   * inactive, distinguishing "already finished" (`HookNotFoundError`) from a
+   * transiently unreachable cancel hook (`EntityConflictError`).
+   */
+  readonly reason?: string;
 }
 
 /** Identifies a session to transition permanently to a terminal state. */
@@ -78,6 +84,17 @@ export interface SessionParent {
   readonly turn: SessionTurn;
 }
 
+/**
+ * Serializable W3C span context identifying a parent's open trace window.
+ * Structural rather than an OTel `SpanContext` so the channel surface stays
+ * free of tracing dependencies.
+ */
+export interface SessionTraceContext {
+  readonly spanId: string;
+  readonly traceFlags: number;
+  readonly traceId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -104,7 +121,7 @@ export interface SessionAuthContext {
  * Backed by `getWritable()` in the workflow runtime. Not part of the adapter
  * interface: the runtime always writes events itself.
  */
-export type EventEmitFn = (event: HandleMessageStreamEvent) => Promise<void>;
+export type EventEmitFn = (event: UnstampedMessageStreamEvent) => Promise<void>;
 
 // ---------------------------------------------------------------------------
 // Deliver payload
@@ -149,6 +166,11 @@ export interface DeliverHookPayload {
   readonly payloads: readonly DeliverPayload[];
 }
 
+/** Internal deadline signal sent through the session's delivery hook. */
+export interface SessionTimeoutHookPayload {
+  readonly kind: "session-timeout";
+}
+
 /**
  * Runtime-action results resumed back into a parked parent workflow.
  */
@@ -189,7 +211,7 @@ export interface SubagentInputRequestHookPayload {
 
 /** Authorization lifecycle event forwarded from a delegated child. */
 export type SubagentAuthorizationEvent = Extract<
-  HandleMessageStreamEvent,
+  UnstampedMessageStreamEvent,
   { type: "authorization.required" | "authorization.completed" }
 >;
 
@@ -213,6 +235,7 @@ export interface SubagentAuthorizationEventHookPayload {
 export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
+  | SessionTimeoutHookPayload
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
@@ -325,6 +348,11 @@ export interface RunInput {
   readonly mode: RunMode;
   readonly parent?: SessionParent;
   /**
+   * Dispatching parent's open trace window. Handed down rather than looked up
+   * because trace state is scoped to one session's context.
+   */
+  readonly parentTraceContext?: SessionTraceContext;
+  /**
    * Runtime-supplied session limits. Delegated local subagents use this to
    * carry the parent's remaining quota and delegation caps with the same limit
    * fields authors configure on agents; `false` means no inherited token cap
@@ -371,7 +399,7 @@ export type RunResult =
  */
 export interface RunHandle {
   readonly continuationToken: string;
-  readonly events: ReadableStream<HandleMessageStreamEvent>;
+  readonly events: ReadableStream<MessageStreamEvent>;
   /**
    * Runtime-owned identifier for this session. Stream and inspection APIs
    * key on it: workflow-backed runs expose the workflow run id.
@@ -425,7 +453,7 @@ export interface Runtime {
   getEventStream(
     sessionId: string,
     options?: GetEventStreamOptions,
-  ): Promise<ReadableStream<HandleMessageStreamEvent>>;
+  ): Promise<ReadableStream<MessageStreamEvent>>;
 
   /**
    * Resolves the durable tail of a session's event stream: the zero-based

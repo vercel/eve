@@ -61,6 +61,17 @@ export function createAiSdkHookBridge(
       const completed = toModelCallCompleted(state, id, event);
       await hooks.after("model.call", completed);
     },
+    async onStepEnd(event) {
+      // Step results carry provider metadata (e.g. Vercel AI Gateway cost)
+      // that the per-call telemetry events don't. Publish it for providers
+      // that know what to do with it; skip when there is none.
+      if (event.providerMetadata === undefined) return;
+      await hooks.publish({
+        providerMetadata: event.providerMetadata,
+        scope: state.scope,
+        type: "attempt.metadata",
+      });
+    },
     async onToolExecutionStart(event) {
       const id = createToolCallIdentity(state, event.toolCall.toolCallId);
       state.toolIds.set(event.toolCall.toolCallId, id);

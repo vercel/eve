@@ -42,7 +42,7 @@ describe("initAgentInstructions", () => {
     const instructions = initAgentInstructions();
 
     // Channels: Slack credentials are provisioned by Connect, not hand-managed.
-    expect(instructions).toContain("eve channels add slack");
+    expect(instructions).toContain("eve add channel/slack");
     // Connections: per-user auth wires through Connect's eve helper.
     expect(instructions).toContain("agent/connections/");
     expect(instructions).toContain("@vercel/connect/eve");

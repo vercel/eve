@@ -6,7 +6,7 @@ import type { HarnessEmissionState } from "#harness/emission.js";
 import { createWorkflowLifecycle } from "#harness/workflow-lifecycle.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { defineState } from "#public/definitions/state.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 const emissionState: HarnessEmissionState = {
   sequence: 2,
@@ -49,7 +49,7 @@ function nestedCall(replayed = false) {
 
 describe("createWorkflowLifecycle", () => {
   it("emits nested subagent calls and results as action events", async () => {
-    const events: HandleMessageStreamEvent[] = [];
+    const events: UnstampedMessageStreamEvent[] = [];
     const lifecycle = createWorkflowLifecycle({
       emit: async (event) => {
         events.push(event);
@@ -96,7 +96,7 @@ describe("createWorkflowLifecycle", () => {
   });
 
   it("projects rejected child results through the shared result contract", async () => {
-    const events: HandleMessageStreamEvent[] = [];
+    const events: UnstampedMessageStreamEvent[] = [];
     const lifecycle = createWorkflowLifecycle({
       emit: async (event) => {
         events.push(event);
@@ -123,7 +123,7 @@ describe("createWorkflowLifecycle", () => {
   });
 
   it("skips replayed calls during continuation", async () => {
-    const events: HandleMessageStreamEvent[] = [];
+    const events: UnstampedMessageStreamEvent[] = [];
     const lifecycle = createWorkflowLifecycle({
       emit: async (event) => {
         events.push(event);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { defaultMessageReducer } from "#client/message-reducer.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 import {
   createActionResultEvent,
   createActionsRequestedEvent,
@@ -14,7 +15,20 @@ import {
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+
+function reduceServerEvents(
+  reducer: ReturnType<typeof defaultMessageReducer>,
+  data: ReturnType<ReturnType<typeof defaultMessageReducer>["initial"]>,
+  events: readonly UnstampedMessageStreamEvent[],
+) {
+  let next = data;
+  for (const event of stampTestEvents(events)) {
+    next = reducer.reduce(next, event);
+  }
+  return next;
+}
 
 describe("defaultMessageReducer", () => {
   it("projects messages, reasoning, and actions into UIMessage-compatible parts", () => {
@@ -29,17 +43,13 @@ describe("defaultMessageReducer", () => {
       },
       type: "client.message.submitted",
     });
-    data = reducer.reduce(
-      data,
+    data = reduceServerEvents(reducer, data, [
       createReasoningCompletedEvent({
         reasoning: "Need the weather tool.",
         sequence: 1,
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createActionsRequestedEvent({
         actions: [
           {
@@ -53,9 +63,6 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createActionResultEvent({
         result: {
           callId: "call_1",
@@ -67,7 +74,7 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -116,8 +123,7 @@ describe("defaultMessageReducer", () => {
 
   it("projects an action result without a preceding action request", () => {
     const reducer = defaultMessageReducer();
-    const data = reducer.reduce(
-      reducer.initial(),
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createActionResultEvent({
         result: {
           callId: "call_1",
@@ -129,7 +135,7 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -163,8 +169,7 @@ describe("defaultMessageReducer", () => {
 
   it("projects denied tool output distinctly from generic failures", () => {
     const reducer = defaultMessageReducer();
-    const data = reducer.reduce(
-      reducer.initial(),
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createActionResultEvent({
         result: {
           callId: "call_1",
@@ -179,7 +184,7 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -219,15 +224,14 @@ describe("defaultMessageReducer", () => {
     const reducer = defaultMessageReducer();
     let data = reducer.initial();
 
-    data = reducer.reduce(
-      data,
+    data = reduceServerEvents(reducer, data, [
       createResultCompletedEvent({
         result: { title: "Done" },
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -245,8 +249,7 @@ describe("defaultMessageReducer", () => {
 
   it("projects authorization prompts into assistant message parts", () => {
     const reducer = defaultMessageReducer();
-    const data = reducer.reduce(
-      reducer.initial(),
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createAuthorizationRequiredEvent({
         authorization: {
           expiresAt: "2026-06-26T12:00:00.000Z",
@@ -261,7 +264,7 @@ describe("defaultMessageReducer", () => {
         turnId: "turn_1",
         webhookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/hook",
       }),
-    );
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -295,8 +298,7 @@ describe("defaultMessageReducer", () => {
 
   it("updates the pending authorization part when authorization completes", () => {
     const reducer = defaultMessageReducer();
-    let data = reducer.reduce(
-      reducer.initial(),
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createAuthorizationRequiredEvent({
         authorization: {
           displayName: "Notion",
@@ -310,10 +312,6 @@ describe("defaultMessageReducer", () => {
         turnId: "turn_1",
         webhookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/hook",
       }),
-    );
-
-    data = reducer.reduce(
-      data,
       createAuthorizationCompletedEvent({
         authorization: {
           displayName: "Notion",
@@ -325,7 +323,7 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-    );
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -359,8 +357,7 @@ describe("defaultMessageReducer", () => {
 
   it("projects input requests onto tool approval parts", () => {
     const reducer = defaultMessageReducer();
-    const data = reducer.reduce(
-      reducer.initial(),
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createInputRequestedEvent({
         requests: [
           {
@@ -371,6 +368,7 @@ describe("defaultMessageReducer", () => {
               toolName: "bash",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
               { id: "deny", label: "No", style: "danger" },
@@ -383,7 +381,7 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -407,6 +405,7 @@ describe("defaultMessageReducer", () => {
                 inputRequest: {
                   allowFreeform: undefined,
                   display: "confirmation",
+                  kind: "tool-approval",
                   options: [
                     { id: "approve", label: "Yes", style: "primary" },
                     { id: "deny", label: "No", style: "danger" },
@@ -429,8 +428,7 @@ describe("defaultMessageReducer", () => {
 
   it("marks input requests as responded when the client submits a response", () => {
     const reducer = defaultMessageReducer();
-    let data = reducer.reduce(
-      reducer.initial(),
+    let data = reduceServerEvents(reducer, reducer.initial(), [
       createInputRequestedEvent({
         requests: [
           {
@@ -441,6 +439,7 @@ describe("defaultMessageReducer", () => {
               toolName: "bash",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
               { id: "deny", label: "No", style: "danger" },
@@ -453,7 +452,7 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     data = reducer.reduce(data, {
       data: {
@@ -485,6 +484,7 @@ describe("defaultMessageReducer", () => {
                 inputRequest: {
                   allowFreeform: undefined,
                   display: "confirmation",
+                  kind: "tool-approval",
                   options: [
                     { id: "approve", label: "Yes", style: "primary" },
                     { id: "deny", label: "No", style: "danger" },
@@ -508,8 +508,7 @@ describe("defaultMessageReducer", () => {
 
   it("merges resumed approval results back into the requested tool part", () => {
     const reducer = defaultMessageReducer();
-    let data = reducer.reduce(
-      reducer.initial(),
+    let data = reduceServerEvents(reducer, reducer.initial(), [
       createInputRequestedEvent({
         requests: [
           {
@@ -520,6 +519,7 @@ describe("defaultMessageReducer", () => {
               toolName: "bash",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
               { id: "deny", label: "No", style: "danger" },
@@ -532,7 +532,7 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_0",
       }),
-    );
+    ]);
 
     data = reducer.reduce(data, {
       data: {
@@ -541,16 +541,12 @@ describe("defaultMessageReducer", () => {
       },
       type: "client.input.responded",
     });
-    data = reducer.reduce(
-      data,
+    data = reduceServerEvents(reducer, data, [
       createStepStartedEvent({
         sequence: 1,
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createActionResultEvent({
         result: {
           callId: "call_1",
@@ -562,7 +558,7 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     const toolParts = data.messages.flatMap((message) =>
       message.parts.filter((part) => part.type === "dynamic-tool"),
@@ -602,26 +598,20 @@ describe("defaultMessageReducer", () => {
 
   it("keeps text from separate steps as separate parts", () => {
     const reducer = defaultMessageReducer();
-    let data = reducer.initial();
-
-    data = reducer.reduce(
-      data,
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageCompletedEvent({
         message: "First step.",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createMessageCompletedEvent({
         message: "Second step.",
         sequence: 1,
         stepIndex: 1,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -657,10 +647,7 @@ describe("defaultMessageReducer", () => {
     // text parts by stepIndex alone drops the first run and reorders the second
     // ahead of the tool call.
     const reducer = defaultMessageReducer();
-    let data = reducer.initial();
-
-    data = reducer.reduce(
-      data,
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageAppendedEvent({
         messageDelta: "Checking Vienna",
         messageSoFar: "Checking Vienna",
@@ -668,9 +655,6 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_0",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createMessageCompletedEvent({
         finishReason: "tool-calls",
         message: "Checking Vienna first.",
@@ -678,9 +662,6 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_0",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createActionsRequestedEvent({
         actions: [
           {
@@ -694,9 +675,6 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_0",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createMessageAppendedEvent({
         messageDelta: "Now Berlin",
         messageSoFar: "Now Berlin",
@@ -704,16 +682,13 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_0",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createMessageCompletedEvent({
         message: "Now checking Berlin.",
         sequence: 4,
         stepIndex: 0,
         turnId: "turn_0",
       }),
-    );
+    ]);
 
     const assistant = data.messages.find((message) => message.id === "turn_0:assistant");
     expect(
@@ -725,8 +700,7 @@ describe("defaultMessageReducer", () => {
 
   it("finalizes partial streamed message and reasoning when the turn is cancelled", () => {
     const reducer = defaultMessageReducer();
-    let data = reducer.reduce(
-      reducer.initial(),
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createReasoningAppendedEvent({
         reasoningDelta: "Thinking",
         reasoningSoFar: "Thinking",
@@ -734,9 +708,6 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createMessageAppendedEvent({
         messageDelta: "Partial",
         messageSoFar: "Partial",
@@ -744,8 +715,8 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
-    data = reducer.reduce(data, createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }));
+      createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
+    ]);
 
     expect(data.messages).toEqual([
       {
@@ -776,17 +747,13 @@ describe("defaultMessageReducer", () => {
 
   it("removes streamed text for a null message completion", () => {
     const reducer = defaultMessageReducer();
-    let data = reducer.reduce(
-      reducer.initial(),
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageCompletedEvent({
         message: "Earlier step.",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createMessageAppendedEvent({
         messageDelta: "<eve-empty-delivery/>",
         messageSoFar: "<eve-empty-delivery/>",
@@ -794,16 +761,13 @@ describe("defaultMessageReducer", () => {
         stepIndex: 1,
         turnId: "turn_1",
       }),
-    );
-    data = reducer.reduce(
-      data,
       createMessageCompletedEvent({
         message: null,
         sequence: 1,
         stepIndex: 1,
         turnId: "turn_1",
       }),
-    );
+    ]);
 
     expect(data.messages[0]?.parts).toEqual([
       { type: "step-start" },
@@ -819,24 +783,26 @@ describe("defaultMessageReducer", () => {
 
   it("projects structured file parts from message.received onto the user message", () => {
     const reducer = defaultMessageReducer();
-    const data = reducer.reduce(reducer.initial(), {
-      data: {
-        message: "describe this\n[file: report.pdf (application/pdf)]",
-        parts: [
-          { text: "describe this", type: "text" },
-          {
-            filename: "report.pdf",
-            mediaType: "application/pdf",
-            size: 4,
-            type: "file",
-            url: "https://files.example.com/report.pdf",
-          },
-        ],
-        sequence: 1,
-        turnId: "turn_1",
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      {
+        data: {
+          message: "describe this\n[file: report.pdf (application/pdf)]",
+          parts: [
+            { text: "describe this", type: "text" },
+            {
+              filename: "report.pdf",
+              mediaType: "application/pdf",
+              size: 4,
+              type: "file",
+              url: "https://files.example.com/report.pdf",
+            },
+          ],
+          sequence: 1,
+          turnId: "turn_1",
+        },
+        type: "message.received",
       },
-      type: "message.received",
-    });
+    ]);
 
     const userMessage = data.messages.find((message) => message.role === "user");
     expect(userMessage?.parts).toEqual([
@@ -853,10 +819,12 @@ describe("defaultMessageReducer", () => {
 
   it("falls back to a single text part when message.received omits parts", () => {
     const reducer = defaultMessageReducer();
-    const data = reducer.reduce(reducer.initial(), {
-      data: { message: "hello there", sequence: 1, turnId: "turn_1" },
-      type: "message.received",
-    });
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      {
+        data: { message: "hello there", sequence: 1, turnId: "turn_1" },
+        type: "message.received",
+      },
+    ]);
 
     const userMessage = data.messages.find((message) => message.role === "user");
     expect(userMessage?.parts).toEqual([{ state: "done", text: "hello there", type: "text" }]);

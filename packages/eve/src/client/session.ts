@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema } from "#protocol/reset-session.js";
@@ -236,7 +236,7 @@ export class ClientSession {
    * @throws {Error} If the session has no session ID (no message has been sent
    *   yet), or if `follow: false` is combined with a negative `startIndex`.
    */
-  stream(options?: StreamOptions): AsyncIterable<HandleMessageStreamEvent> {
+  stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
     const sessionId = this.#state.sessionId;
 
     if (!sessionId) {
@@ -312,8 +312,8 @@ export class ClientSession {
     continuationToken: string | undefined,
     initialState: SessionState,
     input: SendTurnPayload,
-  ): AsyncGenerator<HandleMessageStreamEvent> {
-    const events: HandleMessageStreamEvent[] = [];
+  ): AsyncGenerator<MessageStreamEvent> {
+    const events: MessageStreamEvent[] = [];
 
     try {
       for await (const event of followStreamIterable({
@@ -346,10 +346,10 @@ export class ClientSession {
   async *#streamAndAdvance(
     sessionId: string,
     options?: StreamOptions,
-  ): AsyncGenerator<HandleMessageStreamEvent> {
+  ): AsyncGenerator<MessageStreamEvent> {
     const initialState = this.#state;
     const streamIndex = options?.startIndex ?? initialState.streamIndex;
-    const events: HandleMessageStreamEvent[] = [];
+    const events: MessageStreamEvent[] = [];
 
     try {
       for await (const event of followStreamIterable({

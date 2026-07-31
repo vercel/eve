@@ -67,12 +67,14 @@ function extractQuestionRequests(input: {
       action: InputRequest["action"];
       allowFreeform?: InputRequest["allowFreeform"];
       display?: InputRequest["display"];
+      kind: InputRequest["kind"];
       options?: InputRequest["options"];
       prompt: InputRequest["prompt"];
       requestId: InputRequest["requestId"];
     } = {
       action,
       display: "text",
+      kind: "question",
       prompt: String(toolInput.prompt),
       requestId: action.callId,
     };
@@ -156,6 +158,7 @@ function extractApprovalRequests(input: {
       action: createRuntimeToolCallActionFromToolCall({ toolCall }),
       allowFreeform: false,
       display: "confirmation",
+      kind: "tool-approval",
       options: [
         { id: "approve", label: "Yes" },
         { id: "deny", label: "No" },

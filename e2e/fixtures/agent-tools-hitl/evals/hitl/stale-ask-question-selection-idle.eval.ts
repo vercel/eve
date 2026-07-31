@@ -7,6 +7,7 @@ import { defineEval } from "eve/evals";
  * the request.
  */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "HITL smoke: a stale ask-question selection becomes a new user turn when nothing is pending.",
   async test(t) {

@@ -107,7 +107,7 @@ function renderEndpoint(
 
 /**
  * Builds a leading local `:port` or remote badge followed by the model (with
- * its reasoning level and Fast mode marker), endpoint, and deploy status
+ * its reasoning level and Fast mode marker), and endpoint
  * segments. Both badges are the final narrow-width fallback. Remote sessions
  * omit endpoint state. Returns undefined when every segment is empty.
  */
@@ -118,7 +118,6 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   const logLevel = input.logLevel === undefined ? undefined : c.cyan(`logs: ${input.logLevel}`);
   const serverPort = renderServerPort(input);
   const model = renderModel(input);
-  const pending = input.vercel?.pendingDeploy ? c.yellow("/deploy pending") : undefined;
   const remote = input.remote === undefined ? undefined : formatRemoteStatus(input.remote, theme);
   const endpoint = renderEndpoint(input);
   const leading = remote?.full ?? serverPort;
@@ -145,9 +144,9 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   // leads every variant and gets the final stand-alone fallback. Without one,
   // the logs hint retains its previous priority.
   const variants = [
-    compose(leading, [logLevel, modelSegment, endpointSegment, pending]),
-    compose(leading, [logLevel, model, pending]),
-    compose(leading, [logLevel, pending]),
+    compose(leading, [logLevel, modelSegment, endpointSegment]),
+    compose(leading, [logLevel, model]),
+    compose(leading, [logLevel]),
     compose(leading, [logLevel]),
     compose(badge, [logLevel]),
     compose(badge, []),

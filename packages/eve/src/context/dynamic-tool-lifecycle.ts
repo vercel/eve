@@ -3,7 +3,7 @@ import type { ModelMessage } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalContext } from "#public/definitions/approval.js";
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
-import type { HandleMessageStreamEvent, SessionStartedStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, SessionStartedStreamEvent } from "#protocol/message.js";
 import {
   ALLOWED_DYNAMIC_TOOL_EVENTS,
   isBrandedToolEntry,
@@ -205,7 +205,7 @@ interface ResolveResult {
 async function resolveToolsFromEvent(
   ctx: ContextContainer,
   resolvers: readonly ResolvedDynamicToolResolver[],
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   messages: readonly ModelMessage[],
 ): Promise<ResolveResult> {
   const outcomes = await Promise.allSettled(
@@ -332,7 +332,7 @@ async function resolveToolsFromEvent(
 export async function dispatchDynamicToolEvent(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
-  readonly event: HandleMessageStreamEvent;
+  readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;

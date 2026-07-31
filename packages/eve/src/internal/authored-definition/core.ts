@@ -162,7 +162,7 @@ function normalizeAgentModelDefinition(
   } as NormalizedAgentDefinition["model"];
 }
 
-/** `false` means "explicitly uncapped" for session token limits. */
+/** `false` explicitly disables one numeric runtime limit. */
 function expectPositiveIntegerOrFalse(value: unknown, message: string): number | false {
   if (value === false) {
     return false;
@@ -176,9 +176,19 @@ function normalizeAgentLimitsDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["limits"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["maxInputTokensPerSession", "maxOutputTokensPerSession"], message);
+  expectOnlyKnownKeys(
+    record,
+    ["maxInputTokensPerSession", "maxOutputTokensPerSession", "sessionTimeoutMs"],
+    message,
+  );
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
 
+  if (record.sessionTimeoutMs !== undefined) {
+    normalizedDefinition.sessionTimeoutMs = expectPositiveIntegerOrFalse(
+      record.sessionTimeoutMs,
+      message,
+    );
+  }
   if (record.maxInputTokensPerSession !== undefined) {
     normalizedDefinition.maxInputTokensPerSession = expectPositiveIntegerOrFalse(
       record.maxInputTokensPerSession,

@@ -60,13 +60,17 @@ for await (const event of response) {
 
 ## Handle event types
 
-Import event types from `eve/client` when you want exhaustiveness or helpers:
+Import event types from `eve/client` when you want exhaustiveness or helpers. Events read from a stream are `MessageStreamEvent`: the same union, with the `meta` envelope guaranteed present.
+
+`HandleMessageStreamEvent` remains available as a deprecated alias, so existing type imports continue to compile.
 
 ```ts
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { isCurrentTurnBoundaryEvent } from "eve/client";
 
-function handleEvent(event: HandleMessageStreamEvent) {
+function handleEvent(event: MessageStreamEvent) {
+  console.log(event.meta.id, event.meta.at);
+
   if (isCurrentTurnBoundaryEvent(event)) {
     console.log("turn settled:", event.type);
   }
@@ -104,6 +108,8 @@ If you support refresh while an authorization prompt is pending, keep the sessio
 ## Reconnection
 
 HTTP connections can end before a run does. The client reconnects from the number of events already consumed, so long turns continue without replaying events. It stops at a turn boundary, when aborted, or when the stream can no longer make progress.
+
+If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [the event envelope](../../concepts/sessions-runs-and-streaming#the-event-envelope).
 
 Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
 

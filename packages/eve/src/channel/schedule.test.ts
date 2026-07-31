@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   SCHEDULE_ADAPTER,
   SCHEDULE_ADAPTER_KIND,
@@ -17,7 +17,7 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 function createMockRunHandle(): RunHandle {
   return {
     continuationToken: "slack:C0123ABC:",
-    events: new ReadableStream<HandleMessageStreamEvent>(),
+    events: new ReadableStream<MessageStreamEvent>(),
     sessionId: "mock-session-id",
   };
 }
@@ -28,7 +28,7 @@ function createMockRuntime(): Runtime {
     deliver: vi.fn().mockRejectedValue(new RuntimeNoActiveSessionError("schedule:token")),
     resolveSession: vi.fn(),
     run: vi.fn().mockResolvedValue(createMockRunHandle()),
-    getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
+    getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     terminateSession: vi.fn(),
   };

@@ -1,0 +1,26 @@
+{
+  "name": "agent-session-timeout",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "eve build && tsc",
+    "test:e2e": "eve eval --strict"
+  },
+  "dependencies": {
+    "@eve-e2e/config": "workspace:*",
+    "@opentelemetry/core": "catalog:",
+    "@opentelemetry/sdk-trace-base": "catalog:",
+    "@vercel/otel": "catalog:",
+    "@workflow/world-postgres": "catalog:",
+    "ai": "catalog:",
+    "eve": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

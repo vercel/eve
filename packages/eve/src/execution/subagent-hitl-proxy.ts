@@ -8,10 +8,12 @@ import {
   getProxyInputRequests,
   toProxyInputRequestEntries,
 } from "#harness/proxy-input-requests.js";
+import type { ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { InputResponse } from "#runtime/input/types.js";
+import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
 
 // ---------------------------------------------------------------------------
 // Upward proxy emission
@@ -28,7 +30,7 @@ export async function emitProxiedInputRequest(input: {
   readonly mode: RunMode;
   readonly session: HarnessSession;
 }): Promise<{
-  readonly entries: readonly (readonly [requestId: string, childContinuationToken: string])[];
+  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly session: HarnessSession;
 }> {
   await input.emit(
@@ -74,6 +76,7 @@ export interface RoutedDeliverPayload {
     readonly payload: { readonly inputResponses: readonly InputResponse[] };
   }[];
   readonly forSelf: DeliverPayload | undefined;
+  readonly parentAction: { readonly kind: "cancel-turn" } | undefined;
 }
 
 /** Splits a deliver payload into parent-local and proxied-child buckets. */
@@ -86,19 +89,24 @@ export function routeDeliverPayload(input: {
 
   const responsesByChild = new Map<string, InputResponse[]>();
   const unroutedResponses: InputResponse[] = [];
+  let parentAction: RoutedDeliverPayload["parentAction"];
 
   for (const response of inputResponses) {
-    const childContinuationToken = entries.get(response.requestId);
+    const route = entries.get(response.requestId);
 
-    if (childContinuationToken === undefined) {
+    if (route === undefined) {
       unroutedResponses.push(response);
       continue;
     }
 
-    const existing = responsesByChild.get(childContinuationToken);
+    if (route.kind === "session-limit" && response.optionId === SESSION_LIMIT_STOP_OPTION_ID) {
+      parentAction = { kind: "cancel-turn" };
+    }
+
+    const existing = responsesByChild.get(route.childContinuationToken);
 
     if (existing === undefined) {
-      responsesByChild.set(childContinuationToken, [response]);
+      responsesByChild.set(route.childContinuationToken, [response]);
     } else {
       existing.push(response);
     }
@@ -130,5 +138,5 @@ export function routeDeliverPayload(input: {
 
   const forSelf = Object.keys(remainder).length > 0 ? (remainder as DeliverPayload) : undefined;
 
-  return { forChildren, forSelf };
+  return { forChildren, forSelf, parentAction };
 }

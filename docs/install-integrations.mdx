@@ -18,6 +18,8 @@ eve add instrumentation/braintrust
 
 Extensions may create a mount under `agent/extensions/`. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation providers write `agent/instrumentation.ts`; because an agent has one instrumentation file, compose multiple exporters there by hand. Configure generated files and required environment variables before running your agent.
 
+When an official item has an interactive setup flow, eve asks whether to run it after installation. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later.
+
 ## Find an integration
 
 Browse the [Integrations directory](/integrations) to see the official integrations available from the eve registry.
@@ -44,7 +46,7 @@ eve registry view extension/agent-browser
 
 ## Add a third-party source
 
-Give a registry a namespace and an integration URL template:
+Use the integration URL template provided by the registry publisher and give the source a namespace:
 
 ```bash
 eve registry add @acme=https://registry.acme.com/r/{name}.json
@@ -69,6 +71,79 @@ Install a known integration URL directly when you do not need a namespace:
 
 ```bash
 eve add https://registry.acme.com/r/analytics.json
+```
+
+## Contribute an official integration
+
+Community contributions to the official registry are welcome. Open an issue and get maintainer agreement before submitting a pull request, then follow the [registry contribution guide](https://github.com/vercel/eve/blob/main/CONTRIBUTING.md#adding-an-integration-to-the-registry) for the required source files, metadata, validation, and extension requirements.
+
+## Host your own registry
+
+Hosting your own registry is the publishing side of the [third-party source workflow](#add-a-third-party-source). Once it is deployed, other eve projects can give it a namespace and pull integrations from it.
+
+An eve registry is a standard [shadcn registry](https://ui.shadcn.com/docs/registry), so it can be hosted by any service that serves JSON over HTTP. It needs two kinds of endpoint:
+
+- A catalog such as `https://registry.acme.com/r/registry.json` for `eve registry list` and `eve registry search`
+- One JSON document per integration, such as `https://registry.acme.com/r/analytics.json`, for `eve registry view` and `eve add`
+
+Start with a source file for the integration and a `registry.json` that describes where to install it:
+
+```text
+registry.json
+registry/
+└── analytics.ts
+```
+
+```json title="registry.json"
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "acme",
+  "homepage": "https://registry.acme.com",
+  "items": [
+    {
+      "name": "analytics",
+      "type": "registry:item",
+      "title": "Acme Analytics",
+      "description": "Add Acme analytics tools to an eve agent.",
+      "dependencies": ["@acme/eve-analytics"],
+      "envVars": {
+        "ACME_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/analytics.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/analytics.ts"
+        }
+      ]
+    }
+  ]
+}
+```
+
+`files[].path` is relative to `registry.json`. `files[].target` is relative to the root of the eve project that installs the item. Use `registry:item` with explicit `registry:file` targets for eve integrations so installation does not depend on a UI framework or shadcn project aliases.
+
+Validate the source registry, then build its static JSON:
+
+```bash
+pnpm dlx shadcn@latest registry validate
+pnpm dlx shadcn@latest build
+```
+
+By default, the build writes the catalog to `public/r/registry.json` and each item to `public/r/<name>.json`. Deploy the `public` directory to a static host, or use the shadcn registry APIs to serve the same payloads from dynamic routes.
+
+Before sharing the registry, test its deployed catalog and item endpoints from an eve project:
+
+```bash
+eve registry list --registry https://registry.acme.com/r/registry.json
+eve registry view https://registry.acme.com/r/analytics.json
+```
+
+Share the item URL template with consumers. From another eve project, they can add the hosted registry as a third-party source and pull the integration through its namespace:
+
+```bash
+eve registry add @acme=https://registry.acme.com/r/{name}.json
+eve add @acme/analytics
 ```
 
 ## Configure generated files

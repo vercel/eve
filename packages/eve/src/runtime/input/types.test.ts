@@ -18,6 +18,7 @@ describe("inputRequestSchema", () => {
       },
       allowFreeform: false,
       display: "confirmation",
+      kind: "tool-approval",
       options: [
         { id: "approve", label: "Approve", style: "primary" },
         { id: "deny", label: "Deny", style: "danger" },
@@ -42,6 +43,7 @@ describe("inputRequestSchema", () => {
         toolName: "ask_question",
       },
       display: "select",
+      kind: "question",
       options: [{ id: "yes", label: "Yes" }],
       prompt: "Continue?",
       requestId: "call-2",
@@ -61,6 +63,7 @@ describe("inputRequestSchema", () => {
       },
       allowFreeform: true,
       display: "text",
+      kind: "question",
       prompt: "What is your name?",
       requestId: "call-3",
     };
@@ -77,6 +80,7 @@ describe("inputRequestSchema", () => {
         kind: "tool-call",
         toolName: "ask_question",
       },
+      kind: "question",
       prompt: "Are you sure?",
       requestId: "req-4",
     };
@@ -85,7 +89,7 @@ describe("inputRequestSchema", () => {
     expect(isInputRequest(value)).toBe(true);
   });
 
-  it("rejects unknown fields", () => {
+  it("requires a recognized request kind", () => {
     const value = {
       action: {
         callId: "call-5",
@@ -95,6 +99,23 @@ describe("inputRequestSchema", () => {
       },
       prompt: "Hello?",
       requestId: "req-5",
+    };
+
+    expect(isInputRequest(value)).toBe(false);
+    expect(isInputRequest({ ...value, kind: "unknown" })).toBe(false);
+  });
+
+  it("rejects unknown fields", () => {
+    const value = {
+      action: {
+        callId: "call-6",
+        input: {},
+        kind: "tool-call",
+        toolName: "ask_question",
+      },
+      kind: "question",
+      prompt: "Hello?",
+      requestId: "req-6",
       unknown: true,
     };
 
