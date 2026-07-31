@@ -298,39 +298,7 @@ export class ClientSession {
       );
     }
 
-    const initialState = this.#state;
-    const streamIndex = options?.startIndex ?? initialState.streamIndex;
-    const source = this.#readStream({
-      follow: options?.follow,
-      sessionId,
-      signal: options?.signal,
-      startIndex: streamIndex,
-      streamReconnectPolicy: options?.streamReconnectPolicy,
-    });
-    const advance = (events: readonly MessageStreamEvent[]) => {
-      this.#state = advanceSession({
-        continuationToken: initialState.continuationToken,
-        events,
-        preserveCompletedSessions: this.#context.preserveCompletedSessions,
-        session: { ...initialState, sessionId, streamIndex },
-        sessionId,
-      });
-    };
-
-    return (async function* () {
-      const events: MessageStreamEvent[] = [];
-
-      try {
-        for await (const event of source) {
-          events.push(event);
-          yield event;
-        }
-      } finally {
-        if (streamIndex >= 0) {
-          advance(events);
-        }
-      }
-    })();
+    return this.#streamAndAdvance(sessionId, options);
   }
 
   // ---------------------------------------------------------------------------
@@ -419,6 +387,38 @@ export class ClientSession {
         sessionId,
         session: initialState,
       });
+    }
+  }
+
+  async *#streamAndAdvance(
+    sessionId: string,
+    options?: StreamOptions,
+  ): AsyncGenerator<MessageStreamEvent> {
+    const initialState = this.#state;
+    const streamIndex = options?.startIndex ?? initialState.streamIndex;
+    const events: MessageStreamEvent[] = [];
+
+    try {
+      for await (const event of this.#readStream({
+        follow: options?.follow,
+        sessionId,
+        signal: options?.signal,
+        startIndex: streamIndex,
+        streamReconnectPolicy: options?.streamReconnectPolicy,
+      })) {
+        events.push(event);
+        yield event;
+      }
+    } finally {
+      if (streamIndex >= 0) {
+        this.#state = advanceSession({
+          continuationToken: initialState.continuationToken,
+          events,
+          preserveCompletedSessions: this.#context.preserveCompletedSessions,
+          session: { ...initialState, sessionId, streamIndex },
+          sessionId,
+        });
+      }
     }
   }
 
