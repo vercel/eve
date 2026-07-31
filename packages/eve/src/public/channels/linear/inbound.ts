@@ -141,14 +141,27 @@ export function parseLinearWebhookEvent(input: {
   };
 }
 
+/** Options for {@link messageFromLinearAgentSessionEvent}. */
+export interface LinearMessageOptions {
+  /** Strip other agents' `<other-thread>` blocks from `promptContext` (fail closed). */
+  readonly excludeOtherThreads?: boolean;
+}
+
 /** Builds the user-facing message for a Linear Agent Session event. */
-export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEvent): UserContent {
+export function messageFromLinearAgentSessionEvent(
+  event: LinearAgentSessionEvent,
+  options: LinearMessageOptions = {},
+): UserContent {
   if (event.action === "prompted") {
     const body = event.agentActivity?.body;
     if (body !== undefined && body.trim().length > 0) return body;
   }
 
-  const prompt = event.promptContext?.trim();
+  const rawPrompt =
+    options.excludeOtherThreads === true && event.promptContext !== undefined
+      ? stripLinearOtherThreads(event.promptContext)
+      : event.promptContext;
+  const prompt = rawPrompt?.trim();
   if (prompt !== undefined && prompt.length > 0) return prompt;
 
   const summary = event.agentSession.summary?.trim();

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { stripLinearOtherThreads } from "#public/channels/linear/inbound.js";
+import {
+  messageFromLinearAgentSessionEvent,
+  stripLinearOtherThreads,
+  type LinearAgentSessionEvent,
+} from "#public/channels/linear/inbound.js";
 
 const PRIMARY_THREAD = [
   '<primary-directive-thread comment-id="comment-primary">',
@@ -64,5 +68,86 @@ describe("stripLinearOtherThreads", () => {
   it("preserves blank-line formatting inside the primary thread", () => {
     const result = stripLinearOtherThreads(`${OTHER_THREAD_A}\n\n${PRIMARY_THREAD}`);
     expect(result).toContain("@eve please triage this issue.\n\nSteps so far:");
+  });
+});
+
+function makeSessionEvent(overrides: {
+  action?: string;
+  activityBody?: string;
+  promptContext?: string;
+  summary?: string | null;
+  issueTitle?: string;
+}): LinearAgentSessionEvent {
+  return {
+    action: overrides.action ?? "created",
+    agentActivity:
+      overrides.activityBody === undefined
+        ? undefined
+        : {
+            body: overrides.activityBody,
+            content: { body: overrides.activityBody },
+            id: "activity_1",
+          },
+    agentSession: {
+      id: "agent_session_1",
+      issue:
+        overrides.issueTitle === undefined
+          ? null
+          : { id: "issue_1", identifier: "EVE-123", title: overrides.issueTitle },
+      summary: overrides.summary ?? null,
+    },
+    delivery: { event: undefined, id: undefined },
+    kind: "agent_session",
+    previousComments: [],
+    promptContext: overrides.promptContext,
+    raw: {},
+  };
+}
+
+describe("messageFromLinearAgentSessionEvent with excludeOtherThreads", () => {
+  it("strips other-thread blocks from promptContext", () => {
+    const event = makeSessionEvent({
+      promptContext: `${PRIMARY_THREAD}\n\n${OTHER_THREAD_A}`,
+    });
+    expect(messageFromLinearAgentSessionEvent(event, { excludeOtherThreads: true })).toBe(
+      PRIMARY_THREAD,
+    );
+  });
+
+  it("keeps promptContext verbatim without the option", () => {
+    const input = `${PRIMARY_THREAD}\n\n${OTHER_THREAD_A}`;
+    const event = makeSessionEvent({ promptContext: input });
+    expect(messageFromLinearAgentSessionEvent(event)).toBe(input);
+  });
+
+  it("falls through to the session summary when promptContext is entirely other threads", () => {
+    const event = makeSessionEvent({
+      promptContext: OTHER_THREAD_A,
+      summary: "Triage the login bug.",
+    });
+    expect(messageFromLinearAgentSessionEvent(event, { excludeOtherThreads: true })).toBe(
+      "Triage the login bug.",
+    );
+  });
+
+  it("falls through to the issue title when stripping fails closed and no summary exists", () => {
+    const event = makeSessionEvent({
+      promptContext: `${PRIMARY_THREAD}\n\n<other-thread comment-id="broken">\nleak`,
+      issueTitle: "Fix login flow",
+    });
+    expect(messageFromLinearAgentSessionEvent(event, { excludeOtherThreads: true })).toBe(
+      "EVE-123: Fix login flow",
+    );
+  });
+
+  it("leaves the prompted activity-body path unaffected", () => {
+    const event = makeSessionEvent({
+      action: "prompted",
+      activityBody: "yes, approve",
+      promptContext: `${PRIMARY_THREAD}\n\n${OTHER_THREAD_A}`,
+    });
+    expect(messageFromLinearAgentSessionEvent(event, { excludeOtherThreads: true })).toBe(
+      "yes, approve",
+    );
   });
 });
