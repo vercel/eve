@@ -50,11 +50,6 @@ import type {
   DevelopmentServerOptions,
   ProductionServerHandle,
 } from "#internal/nitro/host/types.js";
-import type {
-  AssistantResponseStatsMode,
-  LogDisplayMode,
-  TerminalPartDisplayMode,
-} from "#cli/dev/tui/types.js";
 
 export { resolveDevUiMode, resolveTuiDisplayOptions };
 
