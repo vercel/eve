@@ -28,7 +28,7 @@ import {
 } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
-import { AuthKey, ParentSessionKey } from "#context/keys.js";
+import { AuthKey, ParentSessionKey, ParentTraceContextKey } from "#context/keys.js";
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
 import { getActiveDynamicModelSelection } from "#context/dynamic-model-lifecycle.js";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";

@@ -8,7 +8,7 @@
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 
 /**
  * Builds the success-shaped {@link RuntimeSubagentResultActionResult}.

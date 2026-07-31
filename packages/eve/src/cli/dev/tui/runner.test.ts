@@ -869,6 +869,61 @@ describe("EveTUIRunner delayed dev build errors", () => {
   });
 });
 
+describe("EveTUIRunner /traces", () => {
+  it("opens the renderer's trace viewer with the app root and optional reference", async () => {
+    const prompts: Array<string | undefined> = ["/traces abc123", "/traces", undefined];
+    const open = vi.fn(async () => {});
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async () => {}),
+      traceViewer: { open },
+    };
+
+    const runner = new EveTUIRunner({
+      session: sessionYielding([{ type: "session.waiting" }]),
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+    });
+
+    await runner.run();
+
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenNthCalledWith(1, {
+      appRoot: "/tmp/weather-agent",
+      sessionId: undefined,
+      reference: "abc123",
+    });
+    expect(open).toHaveBeenNthCalledWith(2, {
+      appRoot: "/tmp/weather-agent",
+      sessionId: undefined,
+      reference: undefined,
+    });
+  });
+
+  it("renders a local-only notice when the session has no trace viewer", async () => {
+    const prompts: Array<string | undefined> = ["/traces", undefined];
+    const notices: string[] = [];
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderNotice: vi.fn((text: string) => {
+        notices.push(text);
+      }),
+      renderStream: vi.fn(async () => {}),
+    };
+
+    const runner = new EveTUIRunner({
+      session: sessionYielding([{ type: "session.waiting" }]),
+      renderer,
+      name: "Weather Agent",
+    });
+
+    await runner.run();
+
+    expect(notices.some((text) => text.includes("/traces is only available"))).toBe(true);
+  });
+});
+
 describe("EveTUIRunner initial input", () => {
   it("seeds only the first prompt's editable buffer with --input text", async () => {
     const seenOptions: Array<AgentTUISessionOptions | undefined> = [];

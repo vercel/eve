@@ -10,6 +10,7 @@ import {
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
+  ParentTraceContextKey,
   SessionCallbackKey,
   SubagentDepthKey,
 } from "#context/keys.js";
@@ -56,6 +57,10 @@ export function buildRunContext(input: {
 
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
+  }
+
+  if (run.parentTraceContext !== undefined) {
+    ctx.set(ParentTraceContextKey, run.parentTraceContext);
   }
 
   if (run.subagentDepth !== undefined) {

@@ -6,7 +6,7 @@ import { trace } from "@opentelemetry/api";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { installLocalInstrumentationRuntime } from "#harness/local-instrumentation-runtime.js";
+import { installLocalInstrumentationRuntime } from "#tracing/local-instrumentation-runtime.js";
 
 let appRoot: string | undefined;
 

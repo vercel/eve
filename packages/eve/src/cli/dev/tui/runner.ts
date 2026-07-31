@@ -76,6 +76,7 @@ import {
   type SetupIssue,
 } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
+import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
 import type {
   AssistantResponseStatsMode,
@@ -258,6 +259,11 @@ export type AgentTUIRenderer = {
   renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string, tone?: "success" | "error"): void;
   readonly setupFlow?: SetupFlowRenderer;
+  /**
+   * The renderer's full-screen local trace viewer, opened by `/traces`.
+   * The returned promise resolves when the user closes the viewer.
+   */
+  readonly traceViewer?: TraceViewerRenderer;
   readPrompt?(options?: AgentTUISessionOptions): Promise<string | undefined>;
   /**
    * Consumes the next prompt produced by mid-turn input: the Esc-popped
@@ -808,6 +814,16 @@ export class EveTUIRunner {
         // own log filter, so it works without a prompt-command handler.
         if (command?.type === "loglevel") {
           this.#renderCommandOutcome(this.#applyLogLevelCommand(command.argument));
+          pendingInputResponses = undefined;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+          continue;
+        }
+
+        // /traces is renderer-local too: the viewer reads the local spool
+        // from disk and owns the screen until the user closes it.
+        if (command?.type === "traces") {
+          await this.#openTraceViewer(command.argument);
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1450,6 +1466,28 @@ export class EveTUIRunner {
       name: this.#name,
       serverUrl: this.#serverUrl,
     });
+  }
+
+  /**
+   * Opens the renderer's trace viewer on the local spool. The viewer owns the
+   * screen until the user closes it; sessions without the capability (or
+   * without a local app root) get a one-line notice instead.
+   */
+  async #openTraceViewer(argument: string): Promise<void> {
+    if (this.#appRoot === undefined || this.#renderer.traceViewer === undefined) {
+      this.#renderCommandOutcome("/traces is only available in local dev sessions.");
+      return;
+    }
+    try {
+      await this.#renderer.traceViewer.open({
+        appRoot: this.#appRoot,
+        sessionId: this.#session.state.sessionId,
+        reference: argument === "" ? undefined : argument,
+      });
+    } catch (error) {
+      if (isInterruptedError(error)) return;
+      throw error;
+    }
   }
 
   /**

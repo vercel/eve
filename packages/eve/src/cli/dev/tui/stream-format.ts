@@ -25,6 +25,15 @@ export type TerminalKey =
   | { type: "end" }
   | { type: "tab" }
   | { type: "escape" }
+  | {
+      type: "mouse";
+      action: "press" | "release";
+      /** SGR button code (0 = left). */
+      button: number;
+      /** 1-based terminal cell coordinates. */
+      x: number;
+      y: number;
+    }
   | { type: "ctrl-a" }
   | { type: "ctrl-e" }
   | { type: "ctrl-d" }
@@ -162,8 +171,24 @@ export function nextKey(buffer: string): KeyToken {
   return { key: parseKey(Buffer.from(buffer.slice(0, end))), consumed: end };
 }
 
+// SGR mouse reporting (1006): `ESC [ < Cb ; Cx ; Cy M` press, lowercase
+// `m` release. Only decoded while mouse reporting is enabled (the trace
+// viewer's alt screen).
+const SGR_MOUSE = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`, "u");
+
 export function parseKey(chunk: Buffer): TerminalKey {
   const value = chunk.toString("utf8");
+
+  const mouse = SGR_MOUSE.exec(value);
+  if (mouse !== null) {
+    return {
+      type: "mouse",
+      action: mouse[4] === "M" ? "press" : "release",
+      button: Number(mouse[1]),
+      x: Number(mouse[2]),
+      y: Number(mouse[3]),
+    };
+  }
 
   switch (value) {
     case "\u0001":
