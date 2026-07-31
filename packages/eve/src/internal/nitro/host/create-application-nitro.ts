@@ -37,7 +37,7 @@ import type {
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
-import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { collectCompiledExtensionMounts, type CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
  * Bare `workflow/*` specifiers that appear in pre-built workflow bundles.
@@ -635,7 +635,7 @@ function createApplicationNitroBundlerConfiguration(
     ).push(packageName);
   }
   const extensionScopePlugin = createExtensionScopePlugin(
-    (preparedHost.compileResult.manifest.extensionMounts ?? []).map((mount) => ({
+    collectCompiledExtensionMounts(preparedHost.compileResult.manifest).map((mount) => ({
       sourceRoot: mount.sourceRoot,
       packageNamespace: mount.packageNamespace,
     })),

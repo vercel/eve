@@ -258,6 +258,30 @@ When `eve dev` starts a consuming agent, it builds mounted, source-backed extens
 
 Production `eve build` expects the extension distribution to exist already. Keep `eve extension build` in the extension package's `build` and `prepare` scripts, as the scaffold does, and run workspace builds in dependency order so extensions build before their consuming agents.
 
+#### Share an extension with subagents
+
+Extension mounts belong to an agent node. To give the root agent and several declared subagents the same capabilities, mount the same package in each agent directory:
+
+```text
+agent/
+├── extensions/shared.ts
+└── subagents/
+    ├── researcher/
+    │   ├── agent.ts
+    │   └── extensions/shared.ts
+    └── reviewer/
+        ├── agent.ts
+        └── extensions/shared.ts
+```
+
+Each `shared.ts` contains the same mount:
+
+```ts
+export { default } from "@acme/shared-capabilities";
+```
+
+The extension's tools, connections, skills, instructions, and hooks remain defined once in the workspace package. Each agent node receives the complete extension surface under its local `shared__` namespace. Mounts are opt-in, so omit the file from any subagent that should not have those capabilities.
+
 ### Override a contribution
 
 Use a directory mount to replace or remove an extension contribution. Put the mount declaration in `extension.ts` and add overrides beside it:

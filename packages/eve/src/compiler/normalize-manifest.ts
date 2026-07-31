@@ -48,23 +48,8 @@ export async function compileAgentManifest(
     subagents: manifest.subagents,
   });
 
-  const extensionMounts: CompiledExtensionMount[] = manifest.resolvedExtensions.map((mount) => {
-    const mountRef = manifest.extensions.find(
-      (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
-    );
-    return {
-      namespace: mount.namespace,
-      packageName: mount.packageName,
-      packageNamespace: packageStateNamespace(mount.packageName),
-      sourceRoot: mount.sourceRoot,
-      mountSourceId: mountRef?.sourceId ?? `extensions/${mount.namespace}`,
-      mountLogicalPath: mountRef?.logicalPath ?? `extensions/${mount.namespace}`,
-    };
-  });
-
   return createCompiledAgentManifest({
     ...compiledNode,
-    extensionMounts,
     remoteAgents: subagentGraph.remoteAgents,
     subagentEdges: subagentGraph.edges,
     subagents: subagentGraph.nodes,
@@ -250,6 +235,7 @@ async function compileAgentNodeManifest(
     workflowTool,
     dynamicSkills,
     dynamicTools,
+    extensionMounts: compileExtensionMounts(manifest),
     hooks,
     sandbox:
       manifest.sandbox === null
@@ -268,6 +254,22 @@ async function compileAgentNodeManifest(
     skills,
     instructions: composedInstructions,
     tools,
+  });
+}
+
+function compileExtensionMounts(manifest: AgentSourceManifest): CompiledExtensionMount[] {
+  return manifest.resolvedExtensions.map((mount) => {
+    const mountRef = manifest.extensions.find(
+      (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
+    );
+    return {
+      namespace: mount.namespace,
+      packageName: mount.packageName,
+      packageNamespace: packageStateNamespace(mount.packageName),
+      sourceRoot: mount.sourceRoot,
+      mountSourceId: mountRef?.sourceId ?? `extensions/${mount.namespace}`,
+      mountLogicalPath: mountRef?.logicalPath ?? `extensions/${mount.namespace}`,
+    };
   });
 }
 

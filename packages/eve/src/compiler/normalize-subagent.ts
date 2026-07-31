@@ -330,6 +330,7 @@ function assertRemoteAgentDefinitionHasNoLocalPackageEntries(source: LocalSubage
   const manifest = source.manifest;
   const extraEntries = [
     manifest.connections.length > 0 ? "connections/" : undefined,
+    manifest.extensions.length > 0 ? "extensions/" : undefined,
     manifest.hooks.length > 0 ? "hooks/" : undefined,
     manifest.instructions.length > 0 ? "instructions" : undefined,
     manifest.lib.length > 0 ? "lib/" : undefined,

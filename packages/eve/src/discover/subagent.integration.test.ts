@@ -11,7 +11,72 @@ import {
   discoverSubagents,
 } from "#discover/discover-subagent.js";
 
+const discoverExtensionSourceTree = async (
+  input: Parameters<typeof discoverAgent>[0],
+): ReturnType<typeof discoverAgent> => await discoverAgent({ ...input, role: "extension" });
+const extensionCompatibilityManifest = JSON.stringify({
+  kind: "eve-extension",
+  formatVersion: 1,
+  builtWithEve: "0.0.0-test",
+  requires: { extension: 1, tool: 1 },
+});
+
 describe("discoverSubagents (memory)", () => {
+  it("discovers extension mounts owned by multiple local subagents", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/shared/package.json": JSON.stringify({
+          name: "@acme/shared",
+          eve: { extension: { dist: "extension" } },
+        }),
+        "node_modules/@acme/shared/extension/_manifest.json": extensionCompatibilityManifest,
+        "node_modules/@acme/shared/extension/tools/search.ts":
+          'throw new Error("extension modules should not execute during discovery");\n',
+      },
+      agentFiles: {
+        "instructions.md": "Route requests.",
+        "subagents/researcher/agent.ts":
+          'throw new Error("subagent modules should not execute during discovery");\n',
+        "subagents/researcher/extensions/shared.ts": 'export { default } from "@acme/shared";\n',
+        "subagents/reviewer/agent.ts":
+          'throw new Error("subagent modules should not execute during discovery");\n',
+        "subagents/reviewer/extensions/shared.ts": 'export { default } from "@acme/shared";\n',
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.subagents).toHaveLength(2);
+    for (const subagent of result.manifest.subagents) {
+      expect(subagent.manifest.extensions).toEqual([
+        {
+          logicalPath: "extensions/shared.ts",
+          sourceId: "extensions/shared.ts",
+          sourceKind: "module",
+        },
+      ]);
+      expect(subagent.manifest.resolvedExtensions).toHaveLength(1);
+      expect(subagent.manifest.resolvedExtensions[0]).toMatchObject({
+        namespace: "shared",
+        packageName: "@acme/shared",
+        manifest: {
+          tools: [
+            {
+              logicalPath: "tools/search.ts",
+              sourceId: "tools/search.ts",
+              sourceKind: "module",
+            },
+          ],
+        },
+      });
+    }
+  });
+
   it("discovers recursive local subagent packages through the agent manifest", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
@@ -185,6 +250,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      discoverExtensionSourceTree,
       source: project.source,
     });
 
@@ -216,6 +282,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      discoverExtensionSourceTree,
       source: project.source,
     });
 
@@ -247,6 +314,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      discoverExtensionSourceTree,
       source: project.source,
     });
 
@@ -277,6 +345,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      discoverExtensionSourceTree,
       source: project.source,
     });
 
@@ -308,6 +377,7 @@ describe("discoverSubagents (memory)", () => {
     const result = await discoverSubagents({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
+      discoverExtensionSourceTree,
       source: project.source,
     });
 

@@ -1,11 +1,11 @@
 import { realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
-import {
-  discoverExtensionMountDeclarations,
-  type ExtensionMountDescriptor,
-} from "#discover/discover-agent.js";
 import { locateExtensionMountPackage } from "#discover/extensions.js";
+import {
+  discoverExtensionMountDeclarationsRecursively,
+  type ExtensionMountDescriptor,
+} from "#discover/extension-mount-declarations.js";
 import { createDiskProjectSource } from "#discover/project-source.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
@@ -40,18 +40,18 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
   const appRoot = resolve(input.appRoot);
   const project = await resolveDiscoveryProject(appRoot);
   const source = createDiskProjectSource();
-  const discovered = await discoverExtensionMountDeclarations({
+  const discovered = await discoverExtensionMountDeclarationsRecursively({
     agentRoot: project.agentRoot,
     source,
   });
   const workspaceSourceRoot = await toCanonicalPath(resolveDevelopmentSourceRoot(appRoot));
   const extensionsByPackageRoot = new Map<string, DevelopmentWorkspaceExtension>();
 
-  for (const mount of discovered.mounts) {
+  for (const discoveredMount of discovered.mounts) {
     const extension = await resolveWorkspaceExtension({
       appRoot,
-      agentRoot: project.agentRoot,
-      mount,
+      agentRoot: discoveredMount.agentRoot,
+      mount: discoveredMount.mount,
       source,
       workspaceSourceRoot,
     });

@@ -53,6 +53,7 @@ Minimum files:
 agent/subagents/researcher/
 ├── agent.ts            # required (must export a description)
 ├── instructions.md     # or instructions.ts, optional
+├── extensions/         # optional, mounted capability packages
 ├── tools/              # optional, its own tools
 ├── skills/             # optional, its own skills
 ├── sandbox/            # optional, its own sandbox + workspace seed
@@ -63,11 +64,12 @@ agent/subagents/researcher/
 
 ## The isolation boundary
 
-A declared subagent inherits nothing from the root's authored slots. Discovery treats its directory as its own agent root, so it has only the instructions, tools, connections, skills, sandbox, hooks, and nested subagents authored under `agent/subagents/<id>/`. An absent slot falls back to the framework default, not to the root's version.
+A declared subagent inherits nothing from the root's authored slots. Discovery treats its directory as its own agent root, so it has only the instructions, extensions, tools, connections, skills, sandbox, hooks, and nested subagents authored under `agent/subagents/<id>/`. An absent slot falls back to the framework default, not to the root's version.
 
 | Slot         | Root built-in `agent` tool    | Declared subagent                      |
 | ------------ | ----------------------------- | -------------------------------------- |
 | Instructions | Inherited (copy of the agent) | Own `instructions.{md,ts}`, optional   |
+| Extensions   | Inherited (copy of the agent) | Own `extensions/` mounts               |
 | Tools        | Inherited except root-only    | Own `tools/`                           |
 | Connections  | Inherited                     | Own `connections/`                     |
 | Skills       | Inherited                     | Own `skills/`                          |
@@ -77,7 +79,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 | Channels     | Root-only                     | Root-only                              |
 | Schedules    | Root-only                     | Root-only                              |
 
-For a declared subagent this means duplicating anything the child needs. When two subagents need the same procedure, copy the markdown under each `skills/` directory, or share typed helpers via `lib/`. The sandbox does not inherit from the parent; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
+For a declared subagent this means explicitly adding anything the child needs. Mount the same [extension](./extensions) in several subagents when they should share a capability package without duplicating its definitions. For smaller implementation helpers, use `lib/`. The sandbox does not inherit from the parent; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
 
 The root built-in `agent` tool is the exception. Its children share the root's sandbox and tools because they are copies of the same agent working on the same files.
 

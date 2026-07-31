@@ -62,6 +62,7 @@ export type AgentRootEntryKind =
 export type LocalSubagentEntryKind =
   | "agent-config-module"
   | "connections-directory"
+  | "extensions-directory"
   | "hooks-directory"
   | "ignored-directory"
   | "instructions-directory"
@@ -243,6 +244,10 @@ export function classifyLocalSubagentEntry(
 
     if (name === "connections") {
       return "connections-directory";
+    }
+
+    if (name === "extensions") {
+      return "extensions-directory";
     }
 
     if (name === "hooks") {

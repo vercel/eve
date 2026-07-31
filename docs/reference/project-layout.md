@@ -30,6 +30,7 @@ my-agent/
 │   ├── instrumentation.ts
 │   ├── channels/
 │   ├── connections/
+│   ├── extensions/
 │   ├── hooks/
 │   ├── skills/
 │   ├── lib/
@@ -53,6 +54,7 @@ The Subagents column states whether a local subagent (`subagents/<id>/`) can aut
 | `instrumentation.ts`                                    | Telemetry config                            | No        | OTel exporter and AI SDK span settings, auto-discovered and run before agent code. Root-only.                                                                                                                         |
 | `channels/`                                             | HTTP / messaging entrypoints                | No        | Root-only.                                                                                                                                                                                                            |
 | `connections/`                                          | External service connections (MCP, OpenAPI) | Yes       | One connection per file; name derived from filename.                                                                                                                                                                  |
+| `extensions/`                                           | Mounted reusable capability packages        | Yes       | One mount per file or directory; the mount path supplies the contribution namespace. See [Extensions](../extensions).                                                                                                 |
 | `hooks/`                                                | Lifecycle and stream-event subscribers      | Yes       | Module-backed only. Recursive directories supported.                                                                                                                                                                  |
 | `skills/`                                               | On-demand procedures and capability packs   | Yes       | Flat markdown, module-backed skills, or packaged skills. Seeded into `$HOME/.agents/skills/...`, with `/workspace/skills/...` as a fallback if `$HOME` is unavailable.                                                |
 | `lib/`                                                  | Shared authored helper code                 | Yes       | Import-only; not mounted into the workspace.                                                                                                                                                                          |
@@ -81,6 +83,7 @@ agent/subagents/researcher/
 ├── agent.ts
 ├── instructions.md
 ├── connections/
+├── extensions/
 ├── hooks/
 ├── skills/
 ├── lib/
@@ -93,7 +96,7 @@ Rules:
 
 - `agent.ts` is required, and must declare a `description`. The parent reads it on the lowered subagent tool to decide when to delegate.
 - `instructions.md` / `instructions.ts` is optional (unlike the root agent, where it is required).
-- `connections/`, `hooks/`, `skills/`, `lib/`, `sandbox/`, and `tools/` are all supported, discovered from the subagent's own directory.
+- `connections/`, `extensions/`, `hooks/`, `skills/`, `lib/`, `sandbox/`, and `tools/` are all supported, discovered from the subagent's own directory.
 - `channels/` and `schedules/` are not supported inside local subagents.
 - Nested subagents are supported.
 

@@ -1,10 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type {
-  CompiledAgentManifest,
-  CompiledAgentNodeManifest,
-  CompiledExtensionMount,
-} from "#compiler/manifest.js";
+import type { CompiledAgentManifest, CompiledAgentNodeManifest } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 
@@ -253,18 +249,13 @@ export function collectModuleRefsForManifest(
     });
   }
 
-  // Extension mount modules (root manifest only). Their top-level factory call
-  // binds config, so they must be evaluated at module-map load.
-  const extensionMounts = (manifest as { extensionMounts?: readonly CompiledExtensionMount[] })
-    .extensionMounts;
-  if (extensionMounts !== undefined) {
-    for (const mount of extensionMounts) {
-      moduleSourceRefs.set(mount.mountSourceId, {
-        sourceKind: "module",
-        logicalPath: mount.mountLogicalPath,
-        sourceId: mount.mountSourceId,
-      });
-    }
+  // Mount modules bind extension config when the owning node's module map loads.
+  for (const mount of manifest.extensionMounts) {
+    moduleSourceRefs.set(mount.mountSourceId, {
+      sourceKind: "module",
+      logicalPath: mount.mountLogicalPath,
+      sourceId: mount.mountSourceId,
+    });
   }
 
   // Authored system modules execute once at build time. The compiled markdown

@@ -1125,6 +1125,39 @@ describe("discoverAgent (memory)", () => {
     expect(nested?.message).toContain("extensions/inner");
   });
 
+  it("rejects an extension subagent that mounts another extension", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: { source: "source", dist: "extension" } },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": EXTENSION_COMPATIBILITY_MANIFEST,
+        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/subagents/specialist/agent.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/subagents/specialist/extensions/inner.ts":
+          'export { default } from "@acme/inner";\n',
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    const nested = result.diagnostics.find(
+      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
+    );
+    expect(nested).toBeDefined();
+    expect(nested?.message).toContain("extensions/inner");
+  });
+
   it("allows an agent-root tool whose name does not use a mounted namespace prefix", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {

@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { discoverExtensionMountDeclarations } from "#discover/discover-agent.js";
 import { locateExtensionMountPackage } from "#discover/extensions.js";
+import { discoverExtensionMountDeclarations } from "#discover/extension-mount-declarations.js";
 import { createDiskProjectSource } from "#discover/project-source.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
 import {
@@ -156,6 +156,28 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
     });
 
     expect(mocks.buildExtensionPackage).toHaveBeenCalledTimes(2);
+  });
+
+  it("builds a workspace extension mounted only by a nested local subagent", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    await rm(join(appRoot, "agent", "extensions", "alpha.ts"));
+    await writeText(
+      join(appRoot, "agent", "subagents", "researcher", "agent.ts"),
+      "export default {};\n",
+    );
+    await writeText(
+      join(appRoot, "agent", "subagents", "researcher", "extensions", "alpha.ts"),
+      'export { default } from "../../../../packages/alpha";\n',
+    );
+
+    const extensions = await prepareDevelopmentWorkspaceExtensions({ appRoot });
+
+    expect(extensions).toHaveLength(1);
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledWith(
+      join(appRoot, "packages", "alpha"),
+      expect.objectContaining({ packageName: "@acme/alpha" }),
+    );
   });
 });
 

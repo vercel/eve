@@ -28,6 +28,10 @@ import {
   type SubagentSourceRef,
 } from "#discover/manifest.js";
 import {
+  type DiscoverExtensionSourceTree,
+  discoverMountedExtensions,
+} from "#discover/mounted-extensions.js";
+import {
   createDiskProjectSource,
   type ProjectSource,
   type ProjectSourceEntry,
@@ -50,6 +54,8 @@ export const DISCOVER_SUBAGENTS_DIRECTORY_INVALID = "discover/subagents-director
 interface DiscoverSubagentsInput {
   agentRoot: string;
   appRoot: string;
+  discoverExtensionSourceTree: DiscoverExtensionSourceTree;
+  resolveExtensionMounts?: boolean;
   /**
    * Optional {@link ProjectSource} used for all filesystem reads. Defaults
    * to a disk-backed source so disk callers keep their current behaviour.
@@ -134,6 +140,8 @@ export async function discoverSubagents(
 
     const localSubagentResult = await discoverLocalSubagentPackage({
       appRoot: input.appRoot,
+      discoverExtensionSourceTree: input.discoverExtensionSourceTree,
+      resolveExtensionMounts: input.resolveExtensionMounts,
       source,
       subagentId: entry.name,
       subagentLogicalPath: join(subagentsLogicalPath, entry.name),
@@ -178,6 +186,8 @@ function discoverSingleFileSubagent(input: {
 
 async function discoverLocalSubagentPackage(input: {
   appRoot: string;
+  discoverExtensionSourceTree: DiscoverExtensionSourceTree;
+  resolveExtensionMounts?: boolean;
   source: ProjectSource;
   subagentId: string;
   subagentLogicalPath: string;
@@ -273,9 +283,26 @@ async function discoverLocalSubagentPackage(input: {
   });
   diagnostics.push(...skillsResult.diagnostics);
 
+  const mountedExtensions = await discoverMountedExtensions({
+    agentRoot: input.subagentRoot,
+    appRoot: input.appRoot,
+    contributionSources: [
+      ...toolsResult.sources,
+      ...connectionsResult.connections,
+      ...skillsResult.skills,
+    ],
+    discoverExtensionSourceTree: input.discoverExtensionSourceTree,
+    resolveMounts: input.resolveExtensionMounts ?? true,
+    rootEntries,
+    source: input.source,
+  });
+  diagnostics.push(...mountedExtensions.diagnostics);
+
   const subagentsResult = await discoverSubagents({
     agentRoot: input.subagentRoot,
     appRoot: input.appRoot,
+    discoverExtensionSourceTree: input.discoverExtensionSourceTree,
+    resolveExtensionMounts: input.resolveExtensionMounts,
     source: input.source,
   });
   diagnostics.push(...subagentsResult.diagnostics);
@@ -285,12 +312,14 @@ async function discoverLocalSubagentPackage(input: {
     appRoot: input.appRoot,
     connections: connectionsResult.connections,
     diagnostics,
+    extensions: mountedExtensions.extensions,
     hooks: hooksResult.sources,
     lib: libResult.lib,
     instructions: instructionsResult.instructions,
     sandbox: sandboxResult.sandbox,
     sandboxWorkspaces:
       sandboxResult.sandboxWorkspace === null ? [] : [sandboxResult.sandboxWorkspace],
+    resolvedExtensions: mountedExtensions.resolvedExtensions,
     skills: skillsResult.skills,
     tools: toolsResult.sources,
     subagents: subagentsResult.subagents,

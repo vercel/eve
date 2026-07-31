@@ -633,6 +633,38 @@ const compiledHookDefinitionSchema: z.ZodType<CompiledHookDefinition> = z
   })
   .strict();
 
+/** One mounted extension recorded on its owning compiled agent node. */
+export interface CompiledExtensionMount {
+  /** Mount-derived namespace that prefixes the extension's tool/skill names. */
+  readonly namespace: string;
+  readonly packageName: string;
+  /**
+   * Package-derived namespace that scopes the extension's durable state keys and
+   * config binding. Distinct from {@link namespace}: state stays keyed to the
+   * package so a consumer renaming the mount file cannot orphan persisted state.
+   */
+  readonly packageNamespace: string;
+  /**
+   * Absolute path to the extension's source root on disk. The extension-scope
+   * bundler plugin treats any module under this root as extension-owned and
+   * rewrites its `eve/context`/`eve/extension` imports to bake in the namespace.
+   */
+  readonly sourceRoot: string;
+  readonly mountSourceId: string;
+  readonly mountLogicalPath: string;
+}
+
+const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
+  .object({
+    namespace: z.string(),
+    packageName: z.string(),
+    packageNamespace: z.string(),
+    sourceRoot: z.string(),
+    mountSourceId: z.string(),
+    mountLogicalPath: z.string(),
+  })
+  .strict();
+
 /**
  * Zod schema for one non-recursive compiled authored agent payload.
  */
@@ -649,6 +681,7 @@ const compiledAgentNodeManifestSchema = z
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
+    extensionMounts: z.array(compiledExtensionMountSchema).default([]),
     hooks: z.array(compiledHookDefinitionSchema),
     sandbox: compiledSandboxDefinitionSchema.nullable(),
     sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
@@ -680,42 +713,6 @@ const compiledSubagentEdgeSchema: z.ZodType<CompiledSubagentEdge> = z
   .object({
     childNodeId: z.string(),
     parentNodeId: z.string(),
-  })
-  .strict();
-
-/**
- * One mounted extension recorded on the root compiled manifest. The runtime
- * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
- * call binds the extension's config before any tool runs.
- */
-export interface CompiledExtensionMount {
-  /** Mount-derived namespace that prefixes the extension's tool/skill names. */
-  readonly namespace: string;
-  readonly packageName: string;
-  /**
-   * Package-derived namespace that scopes the extension's durable state keys and
-   * config binding. Distinct from {@link namespace}: state stays keyed to the
-   * package so a consumer renaming the mount file cannot orphan persisted state.
-   */
-  readonly packageNamespace: string;
-  /**
-   * Absolute path to the extension's source root on disk. The extension-scope
-   * bundler plugin treats any module under this root as extension-owned and
-   * rewrites its `eve/context`/`eve/extension` imports to bake in the namespace.
-   */
-  readonly sourceRoot: string;
-  readonly mountSourceId: string;
-  readonly mountLogicalPath: string;
-}
-
-const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
-  .object({
-    namespace: z.string(),
-    packageName: z.string(),
-    packageNamespace: z.string(),
-    sourceRoot: z.string(),
-    mountSourceId: z.string(),
-    mountLogicalPath: z.string(),
   })
   .strict();
 
@@ -767,6 +764,7 @@ export function createCompiledAgentNodeManifest(input: {
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
+  readonly extensionMounts?: readonly CompiledExtensionMount[];
   readonly hooks?: readonly CompiledHookDefinition[];
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
   readonly sandbox?: CompiledSandboxDefinition | null;
@@ -848,6 +846,7 @@ export function createCompiledAgentNodeManifest(input: {
     dynamicInstructions: [...(input.dynamicInstructions ?? [])],
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
+    extensionMounts: [...(input.extensionMounts ?? [])],
     hooks: [...(input.hooks ?? [])],
     remoteAgents: [...(input.remoteAgents ?? [])],
     sandbox: input.sandbox ?? null,
@@ -940,6 +939,16 @@ export function createCompiledAgentManifest(input: {
     subagents: [...(input.subagents ?? [])],
     version: COMPILED_AGENT_MANIFEST_VERSION,
   };
+}
+
+/** Collects extension mounts from the root and every flattened subagent node. */
+export function collectCompiledExtensionMounts(
+  manifest: CompiledAgentManifest,
+): CompiledExtensionMount[] {
+  return [
+    ...manifest.extensionMounts,
+    ...manifest.subagents.flatMap((subagent) => subagent.agent.extensionMounts),
+  ];
 }
 
 function cloneCompiledRuntimeModelReference(

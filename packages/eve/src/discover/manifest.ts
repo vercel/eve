@@ -195,8 +195,8 @@ export interface AgentSourceManifest {
   extensions: ExtensionSourceRef[];
   /**
    * Mounted extensions resolved to their packages and discovered source trees.
-   * Populated only for the agent root; extension trees do not mount further
-   * extensions (transitive mounting is a non-goal).
+   * Populated for the root agent and declared local subagents; extension trees
+   * do not mount further extensions (transitive mounting is a non-goal).
    */
   resolvedExtensions: ResolvedExtensionMount[];
   hooks: ModuleSourceRef[];
