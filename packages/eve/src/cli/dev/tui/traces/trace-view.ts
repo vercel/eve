@@ -64,19 +64,7 @@ export function renderTraceViewer(
   const panelWidth = state.panelOpen ? panelWidthFor(width) : 0;
   const timelineWidth = Math.max(20, width - (panelWidth === 0 ? 0 : panelWidth + 1));
 
-  const selected = selectedTraceViewerSpan(state);
-  // A panel that doesn't fit (very narrow terminal) isn't modeled as open —
-  // otherwise key handling would scroll content nobody can see. The drawer
-  // gets one row of top padding and one column of side padding.
-  const detailLines =
-    state.panelOpen && panelWidth > 0 && selected !== undefined
-      ? [
-          "",
-          ...renderSpanDetail(selected, Math.max(16, panelWidth - 3), theme, {
-            excludeKeys: CONVERSATION_CONTENT_KEYS,
-          }).map((line) => ` ${line}`),
-        ]
-      : [];
+  const detailLines = panelDetailLines(state, panelWidth, theme);
   const panelViewportRows = bodyRows;
 
   const rows: string[] = [];
@@ -95,7 +83,15 @@ export function renderTraceViewer(
       }
       // No divider: the base canvas separates the cards and drawer by itself.
       const separator = " ";
-      const panelLine = detailLines[state.panelScroll + index] ?? "";
+      let panelLine = detailLines[state.panelScroll + index] ?? "";
+      if (state.textSelection !== undefined && state.textSelection.region === "panel") {
+        panelLine = highlightSelection(
+          panelLine,
+          state.panelScroll + index,
+          state.textSelection,
+          panelWidth,
+        );
+      }
       rows.push(joinPanels(left, timelineWidth, separator, panelLine, width));
     }
   }
@@ -256,7 +252,9 @@ function renderConversation(
   // cards taller than the viewport can be scrolled through to the end.
   const allLines = conversationLines(state, width, theme);
   const visible = allLines.slice(state.scrollRow, state.scrollRow + bodyRows);
-  if (state.textSelection === undefined) return visible;
+  if (state.textSelection === undefined || state.textSelection.region !== "conversation") {
+    return visible;
+  }
   return visible.map((line, index) =>
     highlightSelection(line, state.scrollRow + index, state.textSelection!, width),
   );
@@ -280,9 +278,25 @@ function conversationLines(state: TraceViewerState, width: number, theme: Theme)
 }
 
 /**
- * Plain text covered by a drag selection, extracted from the same rendered
- * lines the user saw: partial first/last lines honor the columns, middle
- * lines contribute in full, and each line loses its trailing card padding.
+ * The drawer's display lines for the selected span: one row of top padding
+ * and one column of side padding around the span detail. A panel that
+ * doesn't fit (very narrow terminal) isn't modeled as open — otherwise key
+ * handling would scroll content nobody can see.
+ */
+function panelDetailLines(state: TraceViewerState, panelWidth: number, theme: Theme): string[] {
+  const selected = selectedTraceViewerSpan(state);
+  if (!state.panelOpen || panelWidth <= 0 || selected === undefined) return [];
+  return [
+    "",
+    ...renderSpanDetail(selected, Math.max(16, panelWidth - 3), theme, {
+      excludeKeys: CONVERSATION_CONTENT_KEYS,
+    }).map((line) => ` ${line}`),
+  ];
+}
+
+/**
+ * Plain text covered by a drag selection over the conversation, extracted
+ * from the same rendered lines the user saw.
  */
 export function conversationSelectionText(
   state: TraceViewerState,
@@ -290,8 +304,32 @@ export function conversationSelectionText(
   theme: Theme,
   selection: TextSelectionRange,
 ): string {
+  return selectionText(conversationLines(state, width, theme), selection);
+}
+
+/**
+ * Plain text covered by a drag selection over the details drawer, extracted
+ * from the same detail lines the frame painted. `totalWidth` is the full
+ * terminal width — the drawer's width derives from it exactly as rendering
+ * does, so columns map to the same cells the user selected.
+ */
+export function panelSelectionText(
+  state: TraceViewerState,
+  totalWidth: number,
+  theme: Theme,
+  selection: TextSelectionRange,
+): string {
+  const panelWidth = state.panelOpen ? panelWidthFor(totalWidth) : 0;
+  return selectionText(panelDetailLines(state, panelWidth, theme), selection);
+}
+
+/**
+ * Slices the selected cells out of rendered lines: partial first/last lines
+ * honor the columns, middle lines contribute in full, and each line loses
+ * its trailing padding.
+ */
+function selectionText(lines: readonly string[], selection: TextSelectionRange): string {
   const { start, end } = orderedTextSelection(selection);
-  const lines = conversationLines(state, width, theme);
   const parts: string[] = [];
   for (let line = Math.max(0, start.line); line <= end.line && line < lines.length; line += 1) {
     const text = stripAnsi(lines[line]!);

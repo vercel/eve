@@ -10,7 +10,7 @@ import type { Theme } from "../theme.js";
 import type { TraceStore, TraceStoreEntry } from "./trace-store.js";
 import { createTraceStore } from "./trace-store.js";
 import { conversationItemLineCount } from "./trace-conversation.js";
-import { conversationSelectionText, renderTraceViewer } from "./trace-view.js";
+import { conversationSelectionText, panelSelectionText, renderTraceViewer } from "./trace-view.js";
 import type { TextSelectionRange, TraceViewerState } from "./trace-viewer-state.js";
 import {
   applyLoadedTrace,
@@ -160,12 +160,20 @@ export class TraceViewerSession {
 
   /** Extracts the dragged text, hands it to the clipboard, and confirms with a toast. */
   #copySelection(selection: TextSelectionRange): void {
-    const text = conversationSelectionText(
-      this.#state,
-      this.#metrics.contentWidth,
-      this.#options.theme,
-      selection,
-    );
+    const text =
+      selection.region === "panel"
+        ? panelSelectionText(
+            this.#state,
+            this.#options.dimensions().width,
+            this.#options.theme,
+            selection,
+          )
+        : conversationSelectionText(
+            this.#state,
+            this.#metrics.contentWidth,
+            this.#options.theme,
+            selection,
+          );
     if (text.trim().length === 0) return;
     this.#options.copyText?.(text);
     this.#toast = "Copied to clipboard";

@@ -119,6 +119,16 @@ describe("TraceViewerSession drag copy", () => {
     expect(copied).toHaveLength(1);
     expect(copied[0]).toContain("copy me please");
     expect(frames[frames.length - 1]!.join("\n")).toContain("Copied to clipboard");
+
+    // A drag over the open drawer copies drawer text: at width 80 the
+    // drawer starts right of the conversation's 46 columns, and detail
+    // line 1 carries the selected span's name.
+    session.handleKey({ type: "enter" });
+    session.handleKey({ type: "mouse", action: "press", button: 0, x: 49, y: 3 });
+    session.handleKey({ type: "mouse", action: "press", button: 32, x: 75, y: 3 });
+    session.handleKey({ type: "mouse", action: "release", button: 0, x: 75, y: 3 });
+    expect(copied).toHaveLength(2);
+    expect(copied[1]).toContain("agent.turn");
     session.dispose();
   });
 });

@@ -38,11 +38,15 @@ export interface TraceViewerState {
   readonly panelScroll: number;
   /** One-line status for edge cases (trace pruned, tracing disabled, …). */
   readonly notice?: string;
-  /** Mouse drag selection over the conversation, in absolute line/column cells. */
+  /** Mouse drag selection over the conversation or drawer, in line/column cells. */
   readonly textSelection?: TextSelectionRange;
 }
 
-/** One end of a text selection: conversation line index + 0-based column. */
+/**
+ * One end of a text selection: line index + 0-based column, both relative
+ * to the selection's region — absolute conversation lines for the cards,
+ * absolute detail lines (and panel-content columns) for the drawer.
+ */
 export interface TextSelectionPoint {
   readonly line: number;
   readonly column: number;
@@ -54,6 +58,8 @@ export interface TextSelectionRange {
   readonly head: TextSelectionPoint;
   /** The pointer moved off the anchor cell — release copies instead of clicking. */
   readonly dragging: boolean;
+  /** Where the drag started; the selection stays in that region. */
+  readonly region: "conversation" | "panel";
 }
 
 /** Selection endpoints ordered top-to-bottom for rendering and extraction. */
@@ -239,21 +245,33 @@ export function reduceTraceViewerKey(
         const delta = key.button === 64 ? -3 : 3;
         return { state: scrollConversation(base, delta, environment) };
       }
-      const point = conversationCellAt(base, environment, key.x, key.y);
-      // Left press anchors a possible drag selection; the click action (and
-      // any copy) waits for release so dragging never toggles cards.
+      // Left press anchors a possible drag selection in whichever region the
+      // pointer sits over — the cards or the open drawer; the click action
+      // (and any copy) waits for release so dragging never toggles cards.
       if (key.action === "press" && key.button === 0) {
-        if (point === undefined) return { state: { ...base, textSelection: undefined } };
+        const anchored = selectionCellAt(base, environment, key.x, key.y);
+        if (anchored === undefined) return { state: { ...base, textSelection: undefined } };
         return {
           state: {
             ...base,
-            textSelection: { anchor: point, head: point, dragging: false },
+            textSelection: {
+              anchor: anchored.point,
+              head: anchored.point,
+              dragging: false,
+              region: anchored.region,
+            },
           },
         };
       }
-      // Motion with the left button held (SGR button 32) extends the selection.
+      // Motion with the left button held (SGR button 32) extends the
+      // selection within the region the drag started in.
       if (key.action === "press" && key.button === 32) {
-        if (base.textSelection === undefined || point === undefined) return { state: base };
+        if (base.textSelection === undefined) return { state: base };
+        const point =
+          base.textSelection.region === "panel"
+            ? panelCellAt(base, environment, key.x, key.y)
+            : conversationCellAt(base, environment, key.x, key.y);
+        if (point === undefined) return { state: base };
         const dragging =
           base.textSelection.dragging ||
           point.line !== base.textSelection.anchor.line ||
@@ -439,6 +457,43 @@ function conversationCellAt(
   const line = state.scrollRow + bodyIndex;
   if (line >= totalLines) return undefined;
   return { column, line };
+}
+
+/**
+ * Maps 1-based terminal coordinates to a detail-drawer cell: absolute
+ * detail-line index (drawer scroll applied) and a column relative to the
+ * drawer's content (the area right of the conversation and its separator).
+ */
+function panelCellAt(
+  state: TraceViewerState,
+  environment: TraceViewerKeyEnvironment,
+  x: number,
+  y: number,
+): TextSelectionPoint | undefined {
+  if (!state.panelOpen || environment.panelTotalRows === 0) return undefined;
+  const bodyIndex = y - 2; // one header row, 1-based coordinates
+  if (bodyIndex < 0 || bodyIndex >= environment.panelViewportRows) return undefined;
+  const column = x - 1 - (environment.contentWidth + 1);
+  if (column < 0) return undefined;
+  const line = state.panelScroll + bodyIndex;
+  if (line >= environment.panelTotalRows) return undefined;
+  return { column, line };
+}
+
+/** Resolves a press to the region under the pointer: cards first, then drawer. */
+function selectionCellAt(
+  state: TraceViewerState,
+  environment: TraceViewerKeyEnvironment,
+  x: number,
+  y: number,
+):
+  | { readonly point: TextSelectionPoint; readonly region: TextSelectionRange["region"] }
+  | undefined {
+  const conversation = conversationCellAt(state, environment, x, y);
+  if (conversation !== undefined) return { point: conversation, region: "conversation" };
+  const panel = panelCellAt(state, environment, x, y);
+  if (panel !== undefined) return { point: panel, region: "panel" };
+  return undefined;
 }
 
 /** Maps a click's body row to a card index, walking card heights + separators. */

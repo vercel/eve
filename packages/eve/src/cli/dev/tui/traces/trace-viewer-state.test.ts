@@ -212,6 +212,54 @@ describe("reduceTraceViewerKey", () => {
     expect(state.expandedItems.has(assistantIndex)).toBe(false);
   });
 
+  it("selects and copies from the details drawer when the drag starts there", () => {
+    let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    const env = { ...ENV, conversationLineCounts: state.conversationItems.map(() => 6) };
+    state = reduceTraceViewerKey(state, key("enter"), env).state;
+    expect(state.panelOpen).toBe(true);
+    // Press right of the cards (contentWidth 80 + separator): drawer cell
+    // columns are relative to the drawer's content area.
+    state = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "press", button: 0, x: 85, y: 3 },
+      env,
+    ).state;
+    expect(state.textSelection).toEqual({
+      anchor: { line: 1, column: 3 },
+      head: { line: 1, column: 3 },
+      dragging: false,
+      region: "panel",
+    });
+    state = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "press", button: 32, x: 90, y: 5 },
+      env,
+    ).state;
+    const result = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "release", button: 0, x: 90, y: 5 },
+      env,
+    );
+    expect(result.copySelection).toEqual({
+      anchor: { line: 1, column: 3 },
+      head: { line: 3, column: 8 },
+      dragging: true,
+      region: "panel",
+    });
+    expect(result.state.textSelection).toBeUndefined();
+  });
+
+  it("does not anchor a selection right of the cards when the drawer is closed", () => {
+    let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    const env = { ...ENV, conversationLineCounts: state.conversationItems.map(() => 6) };
+    state = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "press", button: 0, x: 85, y: 3 },
+      env,
+    ).state;
+    expect(state.textSelection).toBeUndefined();
+  });
+
   it("copies a drag selection on release instead of clicking", () => {
     let state = applyLoadedTrace(createTraceViewerState(), conversationTrace({ longReply: true }));
     const env = {
@@ -228,6 +276,7 @@ describe("reduceTraceViewerKey", () => {
       anchor: { line: 1, column: 4 },
       head: { line: 1, column: 4 },
       dragging: false,
+      region: "conversation",
     });
 
     // Motion with the left button held (SGR button 32) extends the selection.
@@ -240,6 +289,7 @@ describe("reduceTraceViewerKey", () => {
       anchor: { line: 1, column: 4 },
       head: { line: 3, column: 19 },
       dragging: true,
+      region: "conversation",
     });
 
     const result = reduceTraceViewerKey(
@@ -251,6 +301,7 @@ describe("reduceTraceViewerKey", () => {
       anchor: { line: 1, column: 4 },
       head: { line: 3, column: 19 },
       dragging: true,
+      region: "conversation",
     });
     expect(result.state.textSelection).toBeUndefined();
     // The drag did not toggle any card.
