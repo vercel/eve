@@ -1,3 +1,4 @@
+import { isInboxResultFromRunningHandle } from "#harness/handles/query.js";
 import {
   createHook,
   getWorkflowMetadata,
@@ -27,10 +28,7 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import {
-  isInboxResultFromRunningHandle,
-  resolveRuntimeActionResultsForKeys,
-} from "#harness/runtime-actions.js";
+import { resolveRuntimeActionResultsForKeys } from "#harness/runtime-actions.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";

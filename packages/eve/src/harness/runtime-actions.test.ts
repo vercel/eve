@@ -1,9 +1,11 @@
+import {
+  isInboxResultFromRunningHandle,
+  isResultBoundToRunningHandle,
+} from "#harness/handles/query.js";
 import { describe, expect, it } from "vitest";
 
 import {
   getPendingRuntimeActionBatch,
-  isInboxResultFromRunningHandle,
-  isResultBoundToRunningHandle,
   resolvePendingRuntimeActions,
   resolveToolCallInputObject,
   setPendingRuntimeActionBatch,
