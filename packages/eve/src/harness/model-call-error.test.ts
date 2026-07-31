@@ -6,6 +6,7 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
+  isStreamAssemblerDesyncError,
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call-error.js";
@@ -153,6 +154,29 @@ describe("normalizeModelStreamError", () => {
  * rendering (details payload, OTel span exceptions) is covered in
  * `src/internal/logging.test.ts`.
  */
+describe("isStreamAssemblerDesyncError", () => {
+  it("matches the AI SDK stream assembler desync message", () => {
+    expect(isStreamAssemblerDesyncError(new Error("text part 8bfaeea5cfe5bd29 not found"))).toBe(
+      true,
+    );
+  });
+
+  it("matches when nested in a cause chain", () => {
+    const wrapped = new Error("model stream failed", {
+      cause: new Error("text part 1a2b3c4d not found"),
+    });
+    expect(isStreamAssemblerDesyncError(wrapped)).toBe(true);
+  });
+
+  it("rejects other errors and non-matching shapes", () => {
+    expect(isStreamAssemblerDesyncError(new Error("text part not found"))).toBe(false);
+    expect(isStreamAssemblerDesyncError(new Error("tool result part abc not found"))).toBe(false);
+    expect(isStreamAssemblerDesyncError(new Error("overloaded"))).toBe(false);
+    expect(isStreamAssemblerDesyncError("text part deadbeef not found")).toBe(false);
+    expect(isStreamAssemblerDesyncError(undefined)).toBe(false);
+  });
+});
+
 describe("classifyModelCallError", () => {
   it("returns recoverable for an empty model response, never retry", () => {
     // "retry" would re-run executeModelCall against step hooks whose
@@ -168,6 +192,30 @@ describe("classifyModelCallError", () => {
       isRetryable: true,
     });
     expect(classifyModelCallError(wrapped)).toBe("terminal");
+  });
+
+  it("returns terminal for a stream-assembler desync, even when marked retryable", () => {
+    // A deterministic malformed stream frame cannot be fixed by replaying
+    // the turn, so it must never drop into the recoverable durable-replay
+    // path (https://github.com/vercel/eve/issues/1227).
+    const err = Object.assign(new Error("text part 8bfaeea5cfe5bd29 not found"), {
+      isRetryable: true,
+    });
+    expect(classifyModelCallError(err)).toBe("terminal");
+
+    const wrapped = new Error("model stream failed", {
+      cause: new Error("text part 1a2b3c4d not found"),
+    });
+    expect(classifyModelCallError(wrapped)).toBe("terminal");
+  });
+
+  it("returns terminal for a bare stream-assembler desync, not the recoverable catch-all", () => {
+    // The production failure arrives as a plain Error with no gateway
+    // signals, no status code, and no retryable flag; without the dedicated
+    // branch it fell through to the catch-all `recoverable` classification
+    // that parked the session for a full-turn durable replay.
+    const bare = new Error("text part 8bfaeea5cfe5bd29 not found");
+    expect(classifyModelCallError(bare)).toBe("terminal");
   });
 
   it("returns retry when the AI SDK marks the error as retryable", () => {

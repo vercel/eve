@@ -256,10 +256,48 @@ export function isNoOutputGeneratedError(error: unknown): boolean {
 }
 
 /**
+ * Anchored matcher for the AI SDK stream assembler's desync failure
+ * (`text part <id> not found`), raised from `consumeStreamContent` when
+ * an interleaved provider stream (observed with `deepseek/deepseek-v4-flash`
+ * reasoning parts via the AI Gateway) references a part the assembler no
+ * longer tracks. Matched on message prefix rather than a stable error name —
+ * the SDK throws a plain `Error` here, and the part id is a per-stream hex
+ * token, so the check anchors on the fixed `text part ... not found` shape.
+ */
+const STREAM_ASSEMBLER_DESYNC_REGEX = /^text part [0-9a-z]+ not found$/i;
+
+/**
+ * True when the error (or any error in its cause chain) is the AI SDK
+ * stream assembler's desync failure: a content part references an id the
+ * assembler never opened or already closed. Replaying the turn cannot fix a
+ * malformed stream — the provider emits the same broken frame sequence — so
+ * the runtime must not park the session for a durable full-turn replay.
+ */
+export function isStreamAssemblerDesyncError(error: unknown): boolean {
+  for (const candidate of walkCauseChain(error)) {
+    const message = readErrorMessage(candidate);
+    if (message !== "" && STREAM_ASSEMBLER_DESYNC_REGEX.test(message.trim())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Classifies a model-call failure into the runtime's recovery policy.
  */
 export function classifyModelCallError(error: unknown): "retry" | "recoverable" | "terminal" {
   if (isTurnCancellation(error)) {
+    return "terminal";
+  }
+
+  // The stream-assembler desync is a deterministic malformed-frame failure
+  // from the provider's stream. Classifying it as recoverable parked the
+  // session for a durable replay that re-ran the entire tool loop from the
+  // start (15-70 min loops, tens of millions of replayed cache-read tokens
+  // per incident in production). There is no partial model state to recover
+  // and no transient condition to wait out, so fail the step instead.
+  if (isStreamAssemblerDesyncError(error)) {
     return "terminal";
   }
 
