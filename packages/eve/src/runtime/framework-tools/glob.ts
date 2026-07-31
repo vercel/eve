@@ -25,7 +25,7 @@ export const GLOB_INPUT_SCHEMA = z.strictObject({
     .string()
     .describe(
       "The directory to search in. Defaults to /workspace. " +
-        "Must be an absolute path. Omit to use the default.",
+        "Must be an absolute path or begin with $HOME/. Omit to use the default.",
     )
     .optional(),
   pattern: z

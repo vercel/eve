@@ -10,6 +10,8 @@ import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
 import { ReadFileStateKey } from "../src/runtime/framework-tools/file-state.js";
 
+const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -39,7 +41,10 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
         resolvePath(path: string) {
           return path;
         },
-        async run(_options: { command: string }) {
+        async run({ command }: { command: string }) {
+          if (command === HOME_PROBE_COMMAND) {
+            return { exitCode: 0, stderr: "", stdout: "/home/agent\n" };
+          }
           return { exitCode: 0, stderr: "", stdout: "" };
         },
         async spawn() {
@@ -230,6 +235,18 @@ describe("executeReadFileOnSandbox", () => {
         executeReadFileOnSandbox(sandbox, { filePath: "foo.ts" }),
       ),
     ).rejects.toThrow("filePath must be an absolute path");
+  });
+
+  it("reads skill files through the model-facing $HOME path", async () => {
+    const filePath = "/home/agent/.agents/skills/research/references/catalog.md";
+    const result = (await runInContext({ [filePath]: "catalog\n" }, (sandbox) =>
+      executeReadFileOnSandbox(sandbox, {
+        filePath: "$HOME/.agents/skills/research/references/catalog.md",
+      }),
+    )) as ReadFileResult;
+
+    expect(result.content).toBe("1: catalog");
+    expect(result.path).toBe(filePath);
   });
 
   // ---------------------------------------------------------------------------
