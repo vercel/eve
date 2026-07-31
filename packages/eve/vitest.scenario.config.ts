@@ -7,9 +7,15 @@ import { defineConfig } from "vitest/config";
  * listeners, real compile/bundle pipelines, or real workflow on-disk state.
  * Scenario tests take seconds to run and frequently mutate
  * `process.cwd`/`process.env`, so each file runs in its own forked worker
- * process. Some scenarios also rebuild the workspace package, which clears
- * its shared `dist/` directory; files therefore run serially. Tests within a
- * single file still run sequentially.
+ * process, and files run in parallel across workers.
+ *
+ * Parallel-safety invariants every scenario file must uphold:
+ * - never rebuild or clean the shared workspace outputs (`dist/`,
+ *   `.generated/`) at test time — the suite requires a prebuilt workspace,
+ *   and `globalSetup` packs the eve tarball once (scripts disabled) before
+ *   any worker forks, so every worker reads shared, immutable state;
+ * - bind listeners to port 0 and write only under per-test temp roots
+ *   (`useScenarioApp`, `useTemporaryAppRoots`).
  *
  * Nothing in this tier is expected to be hermetic. Keep the set small —
  * anything that can be expressed through the in-memory `AppHarness` belongs
@@ -31,9 +37,12 @@ export default defineConfig({
   test: {
     environment: "node",
     exclude: ["**/node_modules/**", "test/vercel/**"],
-    fileParallelism: false,
     globalSetup: ["./test/setup/pack-scenario-tarball.ts"],
     include: ["src/**/*.scenario.test.ts", "test/scenarios/**/*.scenario.test.ts"],
+    // Subprocess-heavy files (dev servers, real builds, installs) fan out
+    // beyond their own worker; a fixed cap keeps timing-sensitive
+    // assertions stable on large hosts and matches CI's 4 vCPUs.
+    maxWorkers: 4,
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],
     testTimeout: 120_000,
   },

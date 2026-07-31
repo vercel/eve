@@ -71,7 +71,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   let error: string | undefined;
   let skipReason: string | undefined;
   try {
-    await evaluation.test(context);
+    await runUntilAborted(evaluation.test(context), signal);
   } catch (err) {
     if (err instanceof EvalSkipped) {
       skipReason = err.reason;
@@ -158,4 +158,22 @@ function sum<T>(entries: readonly T[], read: (entry: T) => number): number {
 
 function neverAbortSignal(): AbortSignal {
   return new AbortController().signal;
+}
+
+async function runUntilAborted(task: void | Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+
+  try {
+    await Promise.race([task, aborted]);
+  } finally {
+    if (onAbort !== undefined) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
 }

@@ -107,7 +107,7 @@ export async function addAgentToProject(
     "aiPackageVersion",
     options.aiPackageVersion ?? DEFAULT_AI_PACKAGE_VERSION,
   );
-  // Channels and connections scaffolded later (`eve channels add slack`,
+  // Channels and connections scaffolded later (`eve add channel/slack`,
   // possibly while `eve dev` is running) import `@vercel/connect`; shipping
   // it from init means adding them never introduces a missing dependency.
   const connectVersion = resolveVersionToken(

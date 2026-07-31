@@ -42,6 +42,7 @@ function setupFlowRenderer() {
     setStatus: vi.fn(),
     renderLine: vi.fn(),
     renderOutput: vi.fn(),
+    withInheritedStdio: (task) => task(),
     waitForInterrupt: () => ({
       promise: new Promise<void>(() => {}),
       dispose: vi.fn(),

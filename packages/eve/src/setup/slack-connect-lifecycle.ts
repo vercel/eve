@@ -2,6 +2,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#setup/scaffold/index.js";
+import {
+  CONNECT_MUTATION_TIMEOUT_MS,
+  replaceConnectTrigger,
+  type ConnectTriggerAttachmentResult,
+} from "#setup/connect-provisioning.js";
 import { createPromptCommandOutput, type ChannelSetupLog } from "#setup/cli/index.js";
 import { captureVercel, runVercel } from "#setup/primitives/run-vercel.js";
 import { z } from "zod";
@@ -17,7 +22,6 @@ import {
 } from "./slack-connect.js";
 
 export const CONNECT_LOOKUP_TIMEOUT_MS = 60_000;
-export const CONNECT_MUTATION_TIMEOUT_MS = 2 * 60_000;
 
 const VercelProjectLinkSchema = z.object({
   projectId: z.string().min(1),
@@ -135,10 +139,7 @@ export async function findSlackConnector(
  * while an old trigger destination may still exist. A `detach-failed` connector
  * is left in a known-stale state the caller surfaces with manual recovery steps.
  */
-export type SlackConnectorAttachmentResult =
-  | { state: "attached" }
-  | { state: "detach-failed" }
-  | { state: "attach-failed" };
+export type SlackConnectorAttachmentResult = ConnectTriggerAttachmentResult;
 
 /**
  * Replaces the connector's default trigger destination with the eve route:
@@ -153,33 +154,14 @@ export async function attachSlackConnector(
   onOutput: CommandOutput,
   signal?: AbortSignal,
 ): Promise<SlackConnectorAttachmentResult> {
-  const detached = await deps.runVercel(["connect", "detach", ref.uid, "--yes"], {
-    cwd: projectRoot,
+  return replaceConnectTrigger({
+    connectorUid: ref.uid,
+    projectRoot,
+    triggerPath: SLACK_CHANNEL_DEFAULT_ROUTE,
     onOutput,
-    nonInteractive: true,
-    timeoutMs: CONNECT_MUTATION_TIMEOUT_MS,
     signal,
+    deps,
   });
-  if (!detached) return { state: "detach-failed" };
-  const attached = await deps.runVercel(
-    [
-      "connect",
-      "attach",
-      ref.uid,
-      "--triggers",
-      "--trigger-path",
-      SLACK_CHANNEL_DEFAULT_ROUTE,
-      "--yes",
-    ],
-    {
-      cwd: projectRoot,
-      onOutput,
-      nonInteractive: true,
-      timeoutMs: CONNECT_MUTATION_TIMEOUT_MS,
-      signal,
-    },
-  );
-  return attached ? { state: "attached" } : { state: "attach-failed" };
 }
 
 export type SlackWorkspaceLookup =

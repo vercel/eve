@@ -51,12 +51,13 @@ export async function createTurnCancellationControl(input: {
   }
 
   const controller = new AbortController();
-  // The durable abort fires in the read's continuation so its call site
-  // is reached deterministically on every replay.
-  const requested = consumeMatchingCancel(iterator, input.expectedTurnId).then(() => {
+  // The abort must fire inside the read continuation — not a chained
+  // `.then` — so the signal is already flipped when a same-drain
+  // continuation (the turn loop's settle check) reads it; one microtask
+  // later and an ordinary completion swallows the cancel.
+  const requested = consumeMatchingCancel(iterator, input.expectedTurnId, () => {
     controller.abort(new TurnCancelledError());
-    return "cancel" as const;
-  });
+  }).then(() => "cancel" as const);
 
   let disposed = false;
   return {
@@ -73,15 +74,20 @@ export async function createTurnCancellationControl(input: {
 }
 
 // Mismatched turn guards are consumed as no-ops; each read is durable,
-// so the skip sequence replays deterministically.
+// so the skip sequence replays deterministically. `onCancel` fires inside
+// the matching read's continuation (see the abort ordering note above).
 async function consumeMatchingCancel(
   iterator: AsyncIterator<TurnCancelPayload>,
   expectedTurnId: string,
+  onCancel: () => void,
 ): Promise<void> {
   while (true) {
     const next = await iterator.next();
     if (next.done) return await new Promise<never>(() => {});
-    if (matchesActiveTurn(next.value, expectedTurnId)) return;
+    if (matchesActiveTurn(next.value, expectedTurnId)) {
+      onCancel();
+      return;
+    }
   }
 }
 

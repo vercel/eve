@@ -10,6 +10,7 @@ const HOUSE_RULES_OVERRIDE_TOKEN = "house-rules-dynamic-ok-M5T8";
  * authored one.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Skills smoke: a dynamic skill overrides a same-named authored skill.",
   async test(t) {
     await t.send("Please use the house rules skill and follow its instructions exactly.");

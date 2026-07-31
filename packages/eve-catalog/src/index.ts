@@ -81,12 +81,6 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  * The canonical set of eve integrations. Order is display order. Each entry
  * carries only shared identity; the scaffolder and docs overlay their own
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
- *
- * `surfaces.scaffoldable` reflects what eve's interactive setup flow can
- * provision and scaffold today: Slack and Web Chat for channels, plus its
- * curated connections. Registry installation is independent of this flag.
- * The remaining channels are runtime modules configured by hand, so they
- * appear in the gallery but not the setup picker.
  */
 export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
@@ -223,10 +217,10 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
-    slug: "chat-sdk-photon",
+    slug: "photon",
     name: "Photon",
     kind: "channel",
-    tagline: "Cloud, self-hosted, and local iMessage messaging through Photon.",
+    tagline: "iMessage through Photon, with guided project and phone setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {

@@ -243,7 +243,7 @@ describe("eve eval environment loading", () => {
     expect(xml).toContain('<testsuite name="eve evals" tests="2" failures="1" skipped="0"');
     expect(xml).toContain('name="alpha"');
     expect(xml).toContain('name="beta"');
-    expect(xml).toContain('<failure message="check: nope">');
+    expect(xml).toContain('<failure message="check (0% &lt; 100%): nope">');
     expect(exit).toHaveBeenCalledWith(1);
   });
 });

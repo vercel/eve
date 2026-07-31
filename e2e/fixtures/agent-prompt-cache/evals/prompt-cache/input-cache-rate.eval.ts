@@ -22,6 +22,7 @@ import { satisfies } from "eve/evals/expect";
  * trace-level accounting.
  */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "Anthropic-direct prompt caching: input-cache rate stays above 99% across a multi-step tool session.",
   async test(t) {

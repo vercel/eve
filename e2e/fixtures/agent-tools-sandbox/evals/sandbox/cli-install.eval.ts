@@ -7,6 +7,7 @@ import { SANDBOX_CLI_NAME, SANDBOX_CLI_TOKEN } from "./shared";
 // tooling is both on the PATH and executable in later sessions, and that the
 // base image's Python runtime ran the bootstrap-authored script.
 export default defineEval({
+  tags: ["real-model"],
   description: "Sandbox: a custom CLI installed in `bootstrap` is on the PATH for later sessions.",
   async test(t) {
     await t.send(

@@ -2867,7 +2867,7 @@ describe("createToolLoopHarness", () => {
   });
 
   it("feeds non-object tool call input back to the model as a failed tool result", async () => {
-    const invalidInput = "not an object";
+    const invalidInput = '"not an object"';
     const errorMessage =
       'Failed to parse tool-call arguments for "add" (call-bad): Expected a JSON-serializable object.';
     setupMockAgent({
@@ -3582,6 +3582,128 @@ describe("createToolLoopHarness", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("feeds malformed provider web search input back to the model", async () => {
+    const invalidInput = '{"query": 2025 NBA Finals champion}';
+    setupMockAgent({
+      content: [
+        {
+          input: invalidInput,
+          providerExecuted: true,
+          toolCallId: "search-malformed",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+      ],
+      finishReason: "tool-calls",
+      fullStreamParts: [
+        {
+          input: invalidInput,
+          providerExecuted: true,
+          toolCallId: "search-malformed",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: invalidInput,
+                providerExecuted: true,
+                toolCallId: "search-malformed",
+                toolName: "web_search",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: invalidInput,
+          providerExecuted: true,
+          toolCallId: "search-malformed",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        tools: new Map(),
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "anthropic/claude-opus-5" },
+        system: "You are a test assistant.",
+        tools: [{ description: "Search the web", inputSchema: null, name: "web_search" }],
+      },
+    });
+    const firstStep = await runStep(session, {
+      message: "Who won the 2025 NBA Finals?",
+    });
+
+    expect(firstStep.next).toBe(runStep);
+    expect(events.filter((event) => event.type === "action.result")).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: expect.objectContaining({
+            message: expect.stringMatching(
+              /Failed to parse tool-call arguments for "web_search" \(search-malformed\):/u,
+            ),
+          }),
+          status: "failed",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    const failedToolMessage = firstStep.session.history.at(-1);
+    expect(failedToolMessage).toMatchObject({
+      content: [
+        {
+          output: {
+            type: "error-text",
+            value: expect.stringMatching(
+              /Failed to parse tool-call arguments for "web_search" \(search-malformed\):/u,
+            ),
+          },
+          toolCallId: "search-malformed",
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    });
+    expect(JSON.stringify(failedToolMessage)).not.toContain("Expected a JSON-serializable object.");
+
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [{ content: "I'll fix the search arguments.", role: "assistant" }],
+      },
+      text: "I'll fix the search arguments.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    await runStep(firstStep.session);
+
+    const secondInstance = vi.mocked(ToolLoopAgent).mock.results[1]?.value as
+      | { stream: ReturnType<typeof vi.fn> }
+      | undefined;
+    const secondCall = secondInstance?.stream.mock.calls[0]?.[0] as
+      | { messages: ModelMessage[] }
+      | undefined;
+    expect(secondCall?.messages).toEqual(firstStep.session.history);
   });
 
   it("does not start a model call when the turn signal is already aborted", async () => {
