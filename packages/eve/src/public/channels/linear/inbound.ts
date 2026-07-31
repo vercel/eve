@@ -186,6 +186,15 @@ export function messageFromLinearAgentSessionEvent(
  * true })`, which layers this onto the full message fallback chain.
  */
 export function stripLinearOtherThreads(text: string): string {
+  const opens = countOccurrences(text, "<other-thread");
+  const closes = countOccurrences(text, "</other-thread");
+  if (opens !== closes) {
+    log.warn(
+      "linear promptContext still contains other-thread tags after stripping; withholding it",
+    );
+    return "";
+  }
+
   const stripped = text.replace(OTHER_THREAD_BLOCK_PATTERN, "");
   if (RESIDUAL_OTHER_THREAD_PATTERN.test(stripped)) {
     log.warn(
@@ -194,6 +203,18 @@ export function stripLinearOtherThreads(text: string): string {
     return "";
   }
   return stripped.trim();
+}
+
+function countOccurrences(text: string, needle: string): number {
+  let count = 0;
+  for (
+    let index = text.indexOf(needle);
+    index !== -1;
+    index = text.indexOf(needle, index + needle.length)
+  ) {
+    count += 1;
+  }
+  return count;
 }
 
 /** Formats Linear issue/session context as an eve context block. */

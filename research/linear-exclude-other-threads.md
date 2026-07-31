@@ -1,6 +1,6 @@
 ---
 issue: https://github.com/vercel/eve/issues/1226
-status: proposed
+status: implemented
 last_updated: "2026-07-31"
 ---
 
@@ -83,7 +83,7 @@ linearChannel({
   `promptContext` falls through to the existing fallbacks
   (session summary → issue title → static string). The `prompted`
   activity-body path is unaffected.
-- `stripLinearOtherThreads(text: string): string` — new pure helper in
+- `stripLinearOtherThreads(text: string): string` — new helper in
   `inbound.ts`, exported from the channel index. Plumbing for the above;
   `messageFromLinearAgentSessionEvent` with options is the intended entry
   point.

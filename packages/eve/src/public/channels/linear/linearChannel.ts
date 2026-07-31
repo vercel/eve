@@ -158,8 +158,8 @@ export interface LinearChannelEvents {
  * Result of an inbound Linear hook. Return `null` to acknowledge without
  * dispatching; return `{ auth }` to dispatch. Optional `context` strings are
  * added as `role: "user"` messages before the dispatched turn. `message`
- * replaces the computed turn message and `previousComments` replaces the
- * webhook's previous comments; both take precedence over channel config.
+ * replaces the computed turn message (taking precedence over channel config) and `previousComments` replaces the
+ * webhook's previous comments.
  */
 export type LinearInboundResult = {
   readonly auth: SessionAuthContext | null;
