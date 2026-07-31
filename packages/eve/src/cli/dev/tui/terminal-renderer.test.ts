@@ -839,6 +839,26 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("parks the hardware cursor on the prompt caret so IME composition renders inline", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("漢字");
+    input.left(); // caret on 字
+
+    // Terminals draw IME pre-edit text at the hardware cursor position, so
+    // each paint must park the (hidden) cursor on the caret cell: the prompt
+    // row, past the two gutter cells and the wide 漢 (2 cells).
+    const lines = screen.snapshot().split("\n");
+    const promptLine = lines.findIndex((line) => line.includes("❯ 漢字"));
+    expect(promptLine).toBeGreaterThanOrEqual(0);
+    expect(screen.cursorPosition()).toEqual({ line: promptLine, column: 4 });
+
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
   it("recovers from an unterminated bracketed paste instead of wedging input", async () => {
     vi.useFakeTimers();
     try {

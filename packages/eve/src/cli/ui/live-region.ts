@@ -36,6 +36,20 @@ export interface LiveRegionOutput {
   write(chunk: string): boolean;
 }
 
+/**
+ * Hardware-cursor park position within the live region, 0-based. Terminals
+ * anchor the IME composition (pre-edit) overlay to the cursor *position*
+ * regardless of its visibility, so parking the hidden cursor under the drawn
+ * block caret makes uncommitted IME text render inline in the focused input
+ * instead of at the frame's tail.
+ */
+export interface LiveCursor {
+  /** Row within the live region (0 = first live row). */
+  readonly row: number;
+  /** Terminal column of the caret cell. */
+  readonly column: number;
+}
+
 export interface LiveRegionOptions {
   /** Wrap each paint in synchronized-update markers to avoid flicker. */
   synchronized?: boolean;
@@ -46,6 +60,8 @@ export class LiveRegion {
   readonly #synchronized: boolean;
   /** Rows the live region currently occupies on screen. */
   #liveRowCount = 0;
+  /** Live-region row the hardware cursor was left on by the last write. */
+  #cursorRow = 0;
 
   constructor(output: LiveRegionOutput, options?: LiveRegionOptions) {
     this.#write = output.write.bind(output);
@@ -74,17 +90,19 @@ export class LiveRegion {
   /**
    * Repaints the live region in place from `liveRows`. Each row must already
    * be styled and fit within the terminal width (one row == one screen line).
+   * When `cursor` is given, the (hidden) hardware cursor parks on that cell so
+   * the terminal renders IME composition text at the focused input's caret.
    */
-  update(liveRows: readonly string[]): void {
-    this.#paint([], liveRows);
+  update(liveRows: readonly string[], cursor?: LiveCursor): void {
+    this.#paint([], liveRows, cursor);
   }
 
   /**
    * Commits `committedRows` to scrollback above the live region, then repaints
    * `liveRows`. Committed rows are permanent and scroll with the terminal.
    */
-  flush(committedRows: readonly string[], liveRows: readonly string[]): void {
-    this.#paint(committedRows, liveRows);
+  flush(committedRows: readonly string[], liveRows: readonly string[], cursor?: LiveCursor): void {
+    this.#paint(committedRows, liveRows, cursor);
   }
 
   /**
@@ -99,12 +117,14 @@ export class LiveRegion {
     }
     this.#write(`${this.#moveToTop()}${CLEAR_TO_END}`);
     this.#liveRowCount = 0;
+    this.#cursorRow = 0;
   }
 
   /** Clears the visible transcript and, where supported, terminal scrollback. */
   clearAll(): void {
     this.#write(`${CLEAR_SCROLLBACK}${CLEAR_SCREEN}${CURSOR_HOME}`);
     this.#liveRowCount = 0;
+    this.#cursorRow = 0;
   }
 
   /**
@@ -114,29 +134,51 @@ export class LiveRegion {
    */
   reset(): void {
     this.#liveRowCount = 0;
+    this.#cursorRow = 0;
   }
 
-  #paint(committedRows: readonly string[], liveRows: readonly string[]): void {
+  #paint(committedRows: readonly string[], liveRows: readonly string[], cursor?: LiveCursor): void {
     const body =
       this.#moveToTop() +
       CLEAR_TO_END +
       committedRows.map((row) => `${row}\n`).join("") +
       liveRows.join("\n");
 
-    this.#write(this.#synchronized ? `${SYNC_START}${body}${SYNC_END}` : body);
     this.#liveRowCount = liveRows.length;
+    this.#cursorRow = Math.max(0, liveRows.length - 1);
+    const park = cursor === undefined ? "" : this.#parkCursor(cursor);
+
+    this.#write(this.#synchronized ? `${SYNC_START}${body}${park}${SYNC_END}` : `${body}${park}`);
   }
 
   /**
-   * Cursor sequence that returns to column 0 of the first live row. The cursor
-   * sits at the end of the last live row after a paint, so move up
-   * `liveRowCount - 1` lines. CPL (`F`) treats a 0 parameter as 1, so a single
-   * (or empty) live region uses a bare carriage return instead.
+   * Cursor sequence that moves from the end of the freshly painted last live
+   * row to the caret cell, so the terminal's IME overlay anchors to the
+   * focused input. The cursor itself stays hidden — the renderer draws its
+   * own caret; only the position matters here.
+   */
+  #parkCursor(cursor: LiveCursor): string {
+    if (this.#liveRowCount === 0) return "";
+    const row = Math.min(Math.max(0, cursor.row), this.#liveRowCount - 1);
+    const column = Math.max(0, cursor.column);
+    this.#cursorRow = row;
+    // CPL (`F`) treats a 0 parameter as 1, so staying on the last row uses a
+    // bare carriage return; CUF (`C`) likewise only fires for column > 0.
+    const vertical =
+      this.#liveRowCount - 1 - row > 0 ? `${ESC}[${this.#liveRowCount - 1 - row}F` : "\r";
+    return column > 0 ? `${vertical}${ESC}[${column}C` : vertical;
+  }
+
+  /**
+   * Cursor sequence that returns to column 0 of the first live row from
+   * wherever the last paint left the hardware cursor (the end of the last
+   * live row, or a parked caret cell). CPL (`F`) treats a 0 parameter as 1,
+   * so a cursor already on the first row uses a bare carriage return.
    */
   #moveToTop(): string {
-    if (this.#liveRowCount <= 1) {
+    if (this.#cursorRow <= 0) {
       return "\r";
     }
-    return `${ESC}[${this.#liveRowCount - 1}F`;
+    return `${ESC}[${this.#cursorRow}F`;
   }
 }

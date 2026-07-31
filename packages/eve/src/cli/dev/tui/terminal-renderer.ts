@@ -111,12 +111,13 @@ import {
   visibleLine,
   type LineState,
 } from "./line-editor.js";
-import { LiveRegion } from "#cli/ui/live-region.js";
+import { LiveRegion, type LiveCursor } from "#cli/ui/live-region.js";
 import { buildStatusLine } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
 import {
   clipVisible,
+  inputTextWidth,
   renderInputText,
   renderInputWithBlockCursor,
   stripAnsi,
@@ -405,6 +406,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #remoteConnection?: RemoteConnectionSnapshot;
   #inputText = "";
   #inputCursor = 0;
+  /**
+   * Caret cell of the focused footer input, relative to the footer's first
+   * row; set by {@link #footerRows} on each paint. The paint parks the hidden
+   * hardware cursor there so the terminal renders IME composition (pre-edit)
+   * text inline in the input instead of at the frame's tail.
+   */
+  #footerCaret?: { row: number; column: number };
   readonly #promptHistory = new PromptHistory();
   #inputActive = false;
   /**
@@ -3564,11 +3572,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
       ),
       ...footer,
     ];
+    const cursor = this.#liveCursor(liveRows.length, footer.length);
     if (committed.length > 0) {
-      this.#live.flush(committed, liveRows);
+      this.#live.flush(committed, liveRows, cursor);
     } else {
-      this.#live.update(liveRows);
+      this.#live.update(liveRows, cursor);
     }
+  }
+
+  /** Translates the footer-relative caret cell into live-region coordinates. */
+  #liveCursor(liveRowCount: number, footerRowCount: number): LiveCursor | undefined {
+    const caret = this.#footerCaret;
+    if (caret === undefined) return undefined;
+    return { row: liveRowCount - footerRowCount + caret.row, column: caret.column };
   }
 
   #replayTranscript(): void {
@@ -3591,6 +3607,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#live.flush(
       [...this.#renderAgentHeaderRows(), ...this.#committedTranscriptRows],
       liveRows,
+      this.#liveCursor(liveRows.length, footer.length),
     );
   }
 
@@ -3713,6 +3730,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #footerRows(width: number): string[] {
+    // Recomputed per paint: only footers that render a focused text input
+    // (the prompt and its streaming draft) park the hardware cursor.
+    this.#footerCaret = undefined;
     const c = this.#theme.colors;
     const rows: string[] = [""];
 
@@ -3848,7 +3868,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
           ? ""
           : promptPlaceholder(Date.now() - this.#promptPlaceholderStartedAtMs);
       }
-      rows.push(...promptInputRows(promptRows));
+      const prompt = promptInputRows(promptRows);
+      this.#footerCaret = {
+        row: rows.length + prompt.caret.row,
+        column: prompt.caret.column,
+      };
+      rows.push(...prompt.rows);
       rows.push(...statusRows);
       return rows;
     }
@@ -3968,7 +3993,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       inert: options.inert,
     };
     if (options.inert && this.#streamDraft.text.length === 0) prompt.placeholder = "";
-    rows.push(...promptInputRows(prompt));
+    const rendered = promptInputRows(prompt);
+    this.#footerCaret = {
+      row: rows.length + rendered.caret.row,
+      column: rendered.caret.column,
+    };
+    rows.push(...rendered.rows);
   }
 
   /** Appends the persistent bottom status line below the prompt when it has content. */
@@ -4385,6 +4415,13 @@ interface PromptInputRowsInput {
   inert?: boolean;
 }
 
+/** The rendered prompt rows plus the caret cell within them, for IME cursor parking. */
+interface PromptInputRender {
+  readonly rows: string[];
+  /** Caret cell: `row` indexes {@link rows}; `column` is the terminal column. */
+  readonly caret: { readonly row: number; readonly column: number };
+}
+
 /**
  * Renders the prompt buffer as terminal rows, followed by a blank row that keeps
  * the persistent status visually separate. The buffer can carry newlines from
@@ -4402,24 +4439,32 @@ function promptInputRows({
   maxRows,
   placeholder,
   inert,
-}: PromptInputRowsInput): string[] {
+}: PromptInputRowsInput): PromptInputRender {
   const c = theme.colors;
+  // The caret cell sits after the two gutter cells (mark + space) plus the
+  // visible text before it — the same cells `renderInputWithBlockCursor`
+  // paints, measured with the same tab expansion.
+  const caretColumn = (before: string) => 2 + inputTextWidth(before);
 
   if (text.length === 0 && placeholder !== undefined) {
     // The empty state trades the active `❯` for a quiet `›` and lets the
     // caret rest on the placeholder's first character, like the setup
     // panel's text fields.
+    const window = visibleLine(
+      { text: placeholder, cursor: 0 },
+      Math.max(1, width - 3),
+      theme.glyph.ellipsis,
+    );
     const body = renderInputWithBlockCursor({
-      ...visibleLine(
-        { text: placeholder, cursor: 0 },
-        Math.max(1, width - 3),
-        theme.glyph.ellipsis,
-      ),
+      ...window,
       visible: caretVisible,
       inverse: c.inverse,
       render: (segment) => c.dim(renderInputText(segment)),
     });
-    return [clip(`${c.dim(theme.glyph.promptIdle)} ${body}`, width), ""];
+    return {
+      rows: [clip(`${c.dim(theme.glyph.promptIdle)} ${body}`, width), ""],
+      caret: { row: 0, column: caretColumn(window.before) },
+    };
   }
 
   const style = (segment: string): string => {
@@ -4442,6 +4487,7 @@ function promptInputRows({
   // markers (`│`, `▲`).
   const budget = Math.max(1, width - 3);
   const out: string[] = [];
+  let caret = { row: 0, column: 2 };
   for (let r = top; r < top + visibleCount; r += 1) {
     const row = layout.rows[r]!;
     let gutter = r === 0 ? promptGlyph : " ";
@@ -4466,6 +4512,7 @@ function promptInputRows({
         inverse: c.inverse,
         render: style,
       });
+      caret = { row: out.length, column: caretColumn(before) };
       // The argument hint trails the caret only on a single-line command draft.
       if (ghost.length > 0 && layout.rows.length === 1) body += ghost;
     } else {
@@ -4474,7 +4521,7 @@ function promptInputRows({
     out.push(clip(`${gutter} ${body}`, width));
   }
   out.push("");
-  return out;
+  return { rows: out, caret };
 }
 
 /** Kind + title of the previously rendered block, for gap / run decisions. */

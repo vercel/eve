@@ -121,6 +121,11 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     return this.#lines.join("\n");
   }
 
+  /** The emulated cursor cell after the last write, 0-based. */
+  cursorPosition() {
+    return { line: this.#cursorLine, column: this.#cursorColumn };
+  }
+
   rawOutput() {
     return this.#rawOutput;
   }
