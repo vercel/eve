@@ -10,7 +10,7 @@ describe("Discord setup API", () => {
   it("resolves application metadata from a bot token", async () => {
     const fetchImpl = vi.fn(async () =>
       Response.json({ id: "app-1", name: "Agent", verify_key: "public-key" }),
-    ) as unknown as typeof fetch;
+    ) as typeof fetch;
 
     await expect(resolveDiscordApplication("bot-token", fetchImpl)).resolves.toEqual({
       id: "app-1",
@@ -20,9 +20,7 @@ describe("Discord setup API", () => {
   });
 
   it("registers the default message command shape", async () => {
-    const fetchImpl = vi.fn(async () =>
-      Response.json({ id: "command-1" }),
-    ) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => Response.json({ id: "command-1" })) as typeof fetch;
 
     await registerDiscordCommand(
       "app-1",
@@ -53,7 +51,7 @@ describe("Discord setup API", () => {
   });
 
   it("sets the Connect interaction callback URL", async () => {
-    const fetchImpl = vi.fn(async () => Response.json({ id: "app-1" })) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => Response.json({ id: "app-1" })) as typeof fetch;
 
     await configureDiscordInteractionsEndpoint("bot-token", "scl_discord", fetchImpl);
 

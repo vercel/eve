@@ -64,6 +64,39 @@ describe("Discord setup", () => {
     );
   });
 
+  it("prefills the command name and description", async () => {
+    const questions: Question<unknown>[] = [];
+    const effects = deps();
+    await setupDiscord(
+      {
+        appRoot: "/project",
+        environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
+        ui: createIntegrationSetupUi({
+          asker: {
+            ask: async <T>(question: Question<T>) => {
+              questions.push(question as Question<unknown>);
+              if (question.key === "discord-bot-token") return "bot-token" as T;
+              return question.detected as T;
+            },
+            askMany: async () => [],
+          },
+          prompter: createFakePrompter().prompter,
+        }),
+      },
+      effects,
+    );
+
+    expect(questions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "discord-command-name", detected: "ask" }),
+        expect.objectContaining({
+          key: "discord-command-description",
+          detected: "Ask the eve agent",
+        }),
+      ]),
+    );
+  });
+
   it("requires an authenticated Vercel CLI", async () => {
     const fake = createFakePrompter();
     await expect(

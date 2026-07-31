@@ -369,6 +369,7 @@ function textPrompt(
     validate: opts.validate ? (value) => opts.validate?.(value ?? "") : undefined,
     placeholder: opts.placeholder,
     defaultValue: opts.defaultValue,
+    initialValue: opts.defaultValue,
     render() {
       const head = header(this.state, opts.message, resolvedCount);
       const placeholderRendered = opts.placeholder
