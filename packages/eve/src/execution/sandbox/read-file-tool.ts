@@ -5,7 +5,7 @@ import {
   normalizeModelPath,
   setReadFileStamp,
 } from "#runtime/framework-tools/file-state.js";
-import { validateAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -58,8 +58,8 @@ export async function executeReadFileOnSandbox(
 ): Promise<ReadFileResult> {
   const { filePath, offset, limit } = args;
 
-  validateAbsoluteFilePath(filePath);
-  const normalizedPath = normalizeModelPath(filePath);
+  const resolvedPath = await resolveAbsoluteFilePath(sandbox, filePath);
+  const normalizedPath = normalizeModelPath(resolvedPath);
 
   // ── Validate offset / limit ─────────────────────────────────────────
   const effectiveOffset = offset ?? DEFAULT_OFFSET;
@@ -70,7 +70,7 @@ export async function executeReadFileOnSandbox(
   }
 
   // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = await sandbox.readTextFile({ path: filePath });
+  const rawContent = await sandbox.readTextFile({ path: resolvedPath });
 
   if (rawContent === null) {
     throw new Error(

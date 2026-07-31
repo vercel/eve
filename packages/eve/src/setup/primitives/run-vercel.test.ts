@@ -363,6 +363,26 @@ describe("captureVercel", () => {
     expectSpawnedVercel(["whoami"], { stdio: ["ignore", "pipe", "pipe"] });
   });
 
+  test("treats a signal-killed exit as a failure rather than an empty success", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+
+    // Ctrl-C reaches the whole process group: the CLI dies without a status
+    // code, so its stdout is truncated and cannot be parsed as a result.
+    const result = captureVercel(["connect", "list", "-F", "json"], { cwd: "/tmp/eve-agent" });
+    child.emit("close", null);
+
+    await expect(result).resolves.toEqual({
+      ok: false,
+      failure: {
+        code: null,
+        stdout: "",
+        stderr: "",
+        message: "vercel connect list -F json was aborted.",
+      },
+    });
+  });
+
   test("reports a missing CLI as a spawn error", async () => {
     const child = createChildProcess();
     mockSpawnReturn(child);

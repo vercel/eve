@@ -208,26 +208,27 @@ function addDevelopmentControlHandler(input: {
     if (url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH && request.method === "GET") {
       return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
     }
+    const isSuspendRequest =
+      url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH && request.method === "POST";
+    const isResumeRequest =
+      url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH && request.method === "POST";
+    const isRebuildRequest =
+      url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH &&
+      (request.method === "GET" || request.method === "POST");
+    if (!isSuspendRequest && !isResumeRequest && !isRebuildRequest) {
+      return undefined;
+    }
     const watcher = input.getWatcher();
     if (watcher === undefined) {
       return Response.json({ error: "The development server is still starting." }, { status: 503 });
     }
-    if (
-      url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH &&
-      request.method === "POST"
-    ) {
+    if (isSuspendRequest) {
       await watcher.suspend();
       return Response.json({ suspended: true });
     }
-    if (url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH && request.method === "POST") {
+    if (isResumeRequest) {
       await watcher.resume({ silent: url.searchParams.get("silent") === "1" });
       return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
-    }
-    if (
-      url.pathname !== EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH ||
-      (request.method !== "GET" && request.method !== "POST")
-    ) {
-      return undefined;
     }
     if (url.searchParams.get("force") === "1") {
       await watcher.rebuild();

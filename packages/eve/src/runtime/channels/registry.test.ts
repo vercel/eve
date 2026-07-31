@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { HTTP_ADAPTER, HTTP_ADAPTER_KIND } from "#channel/http.js";
 import { SCHEDULE_ADAPTER, SCHEDULE_ADAPTER_KIND } from "#channel/schedule.js";
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 import { RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";

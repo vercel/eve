@@ -84,6 +84,17 @@ export interface SessionParent {
   readonly turn: SessionTurn;
 }
 
+/**
+ * Serializable W3C span context identifying a parent's open trace window.
+ * Structural rather than an OTel `SpanContext` so the channel surface stays
+ * free of tracing dependencies.
+ */
+export interface SessionTraceContext {
+  readonly spanId: string;
+  readonly traceFlags: number;
+  readonly traceId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -336,6 +347,11 @@ export interface RunInput {
   };
   readonly mode: RunMode;
   readonly parent?: SessionParent;
+  /**
+   * Dispatching parent's open trace window. Handed down rather than looked up
+   * because trace state is scoped to one session's context.
+   */
+  readonly parentTraceContext?: SessionTraceContext;
   /**
    * Runtime-supplied session limits. Delegated local subagents use this to
    * carry the parent's remaining quota and delegation caps with the same limit
