@@ -22,6 +22,34 @@ const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
 const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supported/i;
 
 /**
+ * Anchored regex for OpenAI-compatible endpoints that reject the
+ * `web_search_call.action.sources` include instead of naming a tool
+ * type (e.g. Bedrock Mantle's "Invalid value:
+ * 'web_search_call.action.sources'. Supported values are:
+ * 'reasoning.encrypted_content'."). The AI SDK adds that include only
+ * when the OpenAI web-search provider tool is in the request, so this
+ * rejection can only be caused by the injected web-search tool. The
+ * `invalid value` prefix keeps the match anchored to the rejected
+ * value — the same token also shows up in supported-value enumerations
+ * for other rejected includes and in request snapshots echoed into
+ * truncated error bodies, and neither of those means web search is
+ * unsupported.
+ */
+const UNSUPPORTED_WEB_SEARCH_INCLUDE_REGEX =
+  /invalid value:\s*['"](web_search_call\.action\.sources)['"]/i;
+
+/**
+ * Every rejection shape the recovery path can map back to a framework
+ * tool: the gateway's "tool type 'X' is not supported" phrasing and the
+ * OpenAI-compatible include rejection. Group 1 of each regex is the
+ * upstream token handed to `resolveFrameworkToolFromUpstreamType`.
+ */
+const UPSTREAM_TOOL_REJECTION_REGEXES: readonly RegExp[] = [
+  UNSUPPORTED_TOOL_TYPE_REGEX,
+  UNSUPPORTED_WEB_SEARCH_INCLUDE_REGEX,
+];
+
+/**
  * The most informative human-readable rejection a model-call error
  * carries, extracted from the upstream response. Not a semantic-error
  * classification: the message is arbitrary provider prose, so it carries
@@ -93,17 +121,19 @@ function isTransientHttpStatus(status: number | undefined): boolean {
 }
 
 /**
- * Returns the distinct upstream tool types referenced by any
- * "tool type 'X' is not supported" rejection in an AI Gateway error's
- * provider attempt list.
+ * Returns the distinct upstream tokens referenced by any provider-tool
+ * rejection the recovery path knows how to act on: the AI Gateway's
+ * "tool type 'X' is not supported" provider-attempt phrasing, and the
+ * OpenAI-compatible "Invalid value: 'web_search_call.action.sources'"
+ * include rejection.
  *
  * Walks the cause chain to find the gateway error and inspects both the
  * structured `data` field and the raw `responseBody` JSON. Returns an
- * empty array for errors that are not of this shape.
+ * empty array for errors that are not of these shapes.
  *
  * Used by the harness recovery path to identify which framework tools
  * to drop before retrying the failing step. Detection is by string
- * match on the upstream tool type — see
+ * match on the upstream token — see
  * {@link resolveFrameworkToolFromUpstreamType} for the mapping back to
  * framework tool names.
  */
@@ -122,10 +152,7 @@ export function extractUnsupportedProviderToolTypes(error: unknown): readonly st
         // includes a large request snapshot. Fall back to a raw string
         // scan so we still surface the tool name when the regex match
         // lies before the truncation boundary.
-        const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(responseBody);
-        if (match?.[1] !== undefined) {
-          found.add(match[1]);
-        }
+        collectUpstreamToolRejections(responseBody, found);
       }
     }
   }
@@ -133,14 +160,20 @@ export function extractUnsupportedProviderToolTypes(error: unknown): readonly st
   return [...found];
 }
 
+function collectUpstreamToolRejections(value: string, out: Set<string>): void {
+  for (const regex of UPSTREAM_TOOL_REJECTION_REGEXES) {
+    const match = regex.exec(value);
+    if (match?.[1] !== undefined) {
+      out.add(match[1]);
+    }
+  }
+}
+
 function collectUnsupportedToolTypesFromValue(value: unknown, out: Set<string>): void {
   if (value === null || value === undefined) return;
 
   if (typeof value === "string") {
-    const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(value);
-    if (match?.[1] !== undefined) {
-      out.add(match[1]);
-    }
+    collectUpstreamToolRejections(value, out);
     return;
   }
 

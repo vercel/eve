@@ -200,6 +200,12 @@ describe("resolveFrameworkToolFromUpstreamType", () => {
     expect(resolveFrameworkToolFromUpstreamType("web_search_20250305")).toBe("web_search");
   });
 
+  it("maps the OpenAI web-search sources include back to web_search", () => {
+    expect(resolveFrameworkToolFromUpstreamType("web_search_call.action.sources")).toBe(
+      "web_search",
+    );
+  });
+
   it("returns null for unknown upstream tool types", () => {
     expect(resolveFrameworkToolFromUpstreamType("computer_20251022")).toBeNull();
     expect(resolveFrameworkToolFromUpstreamType("some.future.tool")).toBeNull();

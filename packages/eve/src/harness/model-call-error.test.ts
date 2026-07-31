@@ -509,6 +509,81 @@ describe("extractUnsupportedProviderToolTypes", () => {
     expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
   });
 
+  it("returns the OpenAI web-search include value from an OpenAI-compatible endpoint rejection", () => {
+    // Bedrock Mantle (and other OpenAI-compatible endpoints without native
+    // web search) reject the `web_search_call.action.sources` include the
+    // AI SDK adds for the injected OpenAI web-search tool. The rejection
+    // names the include value, not a tool type.
+    const data = {
+      error: {
+        message:
+          "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+        type: "invalid_request_error",
+        param: "include",
+        code: "invalid_value",
+      },
+    };
+    const error = directApiCallError({
+      data,
+      responseBody: JSON.stringify(data),
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_call.action.sources"]);
+  });
+
+  it("returns the include value when only the responseBody carries it", () => {
+    const responseBody = JSON.stringify({
+      error: {
+        message:
+          "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+        type: "invalid_request_error",
+      },
+    });
+    const error = directApiCallError({ responseBody, statusCode: 400 });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_call.action.sources"]);
+  });
+
+  it("recovers the include value from a truncated responseBody via raw string scan", () => {
+    const fullBody = JSON.stringify({
+      error: {
+        message:
+          "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+        type: "invalid_request_error",
+      },
+      request: { input: "large snapshot ".repeat(50) },
+    });
+    const responseBody = `${fullBody.slice(0, fullBody.indexOf("Supported values") + 20)}...<truncated>`;
+    const error = directApiCallError({ responseBody, statusCode: 400 });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_call.action.sources"]);
+  });
+
+  it("ignores the include value when it appears only as a supported value or request echo", () => {
+    // An endpoint that supports web-search sources but rejects a different
+    // include enumerates it after "Supported values are:"; a truncated body
+    // can also echo the request's include array. Neither is a web_search
+    // rejection, so recovery must not drop the tool.
+    const enumeration = directApiCallError({
+      data: {
+        error: {
+          message:
+            "Invalid value: 'code_interpreter_call.outputs'. Supported values are: 'web_search_call.action.sources', 'reasoning.encrypted_content'.",
+          type: "invalid_request_error",
+        },
+      },
+      statusCode: 400,
+    });
+    expect(extractUnsupportedProviderToolTypes(enumeration)).toEqual([]);
+
+    const requestEcho = directApiCallError({
+      responseBody: `{"error":{"message":"Internal error"},"request":{"include":["web_search_call.action.sources"],"input":"...<truncated>`,
+      statusCode: 400,
+    });
+    expect(extractUnsupportedProviderToolTypes(requestEcho)).toEqual([]);
+  });
+
   it("returns empty for the ambiguous internal server error case (no tool rejection)", () => {
     const innerBody = {
       error: { message: "Bad Request", type: "internal_server_error" },

@@ -33,6 +33,11 @@ const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
   // Anthropic backends reject this type because they only host the
   // older Claude Messages surface.
   web_search_20250305: WEB_SEARCH_TOOL_DEFINITION.name,
+  // The Responses API include the AI SDK adds whenever the OpenAI
+  // web-search tool is present. OpenAI-compatible endpoints without
+  // native web search (e.g. Bedrock Mantle) reject the request by
+  // quoting this include value instead of naming a tool type.
+  "web_search_call.action.sources": WEB_SEARCH_TOOL_DEFINITION.name,
 };
 
 /**
