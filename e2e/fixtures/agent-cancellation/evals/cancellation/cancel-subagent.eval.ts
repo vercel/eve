@@ -2,11 +2,16 @@ import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Cancel a parent turn and cascade cancellation to its local sleeper subagent.",
   timeoutMs: 240_000,
 
   async test(t) {
-    const parent = await t.start("Delegate a cancellation wait to the sleeper subagent.");
+    // Explicit directive phrasing keeps the delegation deterministic so a
+    // scripted mock responder can drive this eval in the world suites.
+    const parent = await t.start(
+      "Use the sleeper subagent exactly once with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.'",
+    );
     const called = await parent.waitForEvent("subagent.called", {
       data: { name: "sleeper" },
     });

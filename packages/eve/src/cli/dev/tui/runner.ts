@@ -256,7 +256,7 @@ export type AgentTUIRenderer = {
   clearSetupWarning?(): void;
   /** Commits the startup `/vc:login` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
-  renderCommandResult?(text: string): void;
+  renderCommandResult?(text: string, tone?: "success" | "error"): void;
   readonly setupFlow?: SetupFlowRenderer;
   readPrompt?(options?: AgentTUISessionOptions): Promise<string | undefined>;
   /**
@@ -330,10 +330,8 @@ export type AgentTUIRenderer = {
   flushDelayedDevBuildErrors?(): void;
   /**
    * Sets the workspace-scoped Vercel segment of the persistent bottom
-   * status line: linked project identity and the session's pending-deploy
-   * flag. Pushed by the runner at startup (async probe) and after
-   * /vercel, /channels, /deploy outcomes. Renderers without a status
-   * line ignore it.
+   * status line. Pushed by the runner at startup and after Vercel-related
+   * setup outcomes. Renderers without a status line ignore it.
    */
   setVercelStatus?(status: VercelStatusSnapshot): void;
   /** Sets the remote deployment badge and its current connection/authentication state. */
@@ -364,6 +362,7 @@ export interface PromptCommandHandlerContext {
    */
   readonly keepSetupFlowOpen?: true;
   readonly remoteConnection?: RemoteConnectionController;
+  readonly withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly disabledConnectionReasons?: Readonly<Record<string, string>>;
 }
 
@@ -371,8 +370,10 @@ export interface PromptCommandHandlerContext {
 export interface PromptCommandOutcome {
   /** Outcome line rendered under the echoed command; absent renders nothing. */
   message?: string;
+  /** Promotes an outcome to a top-level status. */
+  tone?: "success" | "error";
   /** Post-command work after setup settles. */
-  effect?: VercelStatusEffect | { kind: "connection-added" } | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | { kind: "model-access-changed" };
 }
 
 export interface PromptCommandHandler {
@@ -423,6 +424,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
+  /** Gives setup subprocesses exclusive terminal and development-host ownership. */
+  withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Remote target and mutable OIDC token source, when connected through `--url`. */
   remote?: {
     readonly target: RemoteDevelopmentTarget;
@@ -472,6 +475,7 @@ export class EveTUIRunner {
   readonly #initialInput?: string;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
+  readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
@@ -559,6 +563,7 @@ export class EveTUIRunner {
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
     this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
+    this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
     this.#subagents = options.subagents ?? "full";
@@ -1298,10 +1303,10 @@ export class EveTUIRunner {
     });
   }
 
-  #renderCommandOutcome(text: string | undefined): void {
+  #renderCommandOutcome(text: string | undefined, tone?: "success" | "error"): void {
     if (text === undefined) return;
     if (this.#renderer.renderCommandResult !== undefined) {
-      this.#renderer.renderCommandResult(text);
+      this.#renderer.renderCommandResult(text, tone);
       return;
     }
     this.#renderer.renderNotice?.(text);
@@ -1320,6 +1325,7 @@ export class EveTUIRunner {
       title: input.title,
       initialModelStep: input.initialModelStep,
       remoteConnection: this.#remoteConnection,
+      withExclusiveTerminal: this.#withExclusiveTerminal,
     };
     const disabledConnectionReasons = this.#mcpConnectionStatus?.current();
     const context: PromptCommandHandlerContext =
@@ -1345,13 +1351,6 @@ export class EveTUIRunner {
   }
 
   async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
-    if (effect?.kind === "connection-added") {
-      this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
-      this.#authHintStale = true;
-      await this.#refreshConnectionRuntime();
-      await this.#refreshModelAccess();
-      return;
-    }
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
       this.#authHintStale = true;
@@ -1363,15 +1362,6 @@ export class EveTUIRunner {
     this.#vercelStatus?.applyEffect(effect);
     this.#authHintStale = true;
     void this.#refreshSetupAttention(this.#agentInfo);
-  }
-
-  async #refreshConnectionRuntime(): Promise<void> {
-    const runtimeArtifacts = this.#runtimeArtifacts;
-    if (runtimeArtifacts === undefined) return;
-
-    await runtimeArtifacts.refreshAfterSourceChange({
-      onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
-    });
   }
 
   async #executeExtensionCommand(
@@ -1389,7 +1379,7 @@ export class EveTUIRunner {
       title,
     });
     this.#renderStartupCommandInvocation(command, input.trigger);
-    this.#renderCommandOutcome(outcome?.message);
+    this.#renderCommandOutcome(outcome?.message, outcome?.tone);
     await this.#applyCommandEffect(outcome?.effect);
     this.#refreshHeaderFromRemoteConnection();
   }
@@ -1399,7 +1389,8 @@ export class EveTUIRunner {
    * model access depends on the Vercel CLI and a Vercel session, so resolve
    * only those missing prerequisites before entering the model picker. A probe
    * failure still opens `/model`: its own-key and external-provider paths do
-   * not require Vercel.
+   * not require Vercel. After model setup, open the categorized registry hub so
+   * a new user has concrete next steps before reaching the chat prompt.
    */
   async #runInitialModelOnboarding(title: string): Promise<void> {
     const appRoot = this.#appRoot;
@@ -1443,6 +1434,9 @@ export class EveTUIRunner {
     await this.#executeExtensionCommand({ type: "extension", name: "model", argument: "" }, title, {
       trigger: "startup",
       initialModelStep: "provider",
+    });
+    await this.#executeExtensionCommand({ type: "extension", name: "add", argument: "" }, title, {
+      trigger: "startup",
     });
   }
 

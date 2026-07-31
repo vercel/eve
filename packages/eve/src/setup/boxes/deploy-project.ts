@@ -36,7 +36,7 @@ export interface DeployProjectOptions {
   skip?: boolean;
   /**
    * Run even without a planned or detected project, linking interactively from
-   * inside `perform` (the `eve channels add` composition; onboarding always has
+   * inside `perform` (the `eve add channel/slack` composition; onboarding always has
    * a plan or skips deploy with the channels).
    */
   ensureLinkedProject?: "interactive-vercel-link";
@@ -75,14 +75,14 @@ export interface DeployProjectPayload {
  * The project was linked up front by the link box, so `perform` reuses
  * `state.project` and never triggers a second interactive `vercel link` (the
  * #1020 deadlock). When no resolution exists (no link box ran, e.g. the
- * `eve channels add` composition), it falls back to the interactive bare
+ * `eve add channel/slack` composition), it falls back to the interactive bare
  * `vercel link`, or throws {@link HumanActionRequiredError} headlessly.
  *
  * Once the project is linked, {@link syncHostFrameworkPreset} runs before the
  * deploy so a project that gained a host framework (e.g. a web channel) builds
  * the host app instead of the stale `eve` agent preset. It is a no-op for a
  * plain agent (no host framework on disk) or an already-correct preset, so
- * every deploy surface — `eve channels add`, the dev TUI `/deploy`, onboarding —
+ * every deploy surface — `eve add channel/slack`, the dev TUI `/deploy`, onboarding —
  * gets the reconcile without composing a separate box.
  */
 export function deployProject(
@@ -143,7 +143,7 @@ export function deployProject(
 
       // The directory is now linked, so align the project's Framework Preset with
       // the host framework on disk before deploying — deploy is deliberately the
-      // only place this server-side setting is touched, so a local `/channels` add
+      // only place this server-side setting is touched, so a local integration add
       // never mutates deployed settings unless the user is actively deploying.
       // Best-effort and a no-op for a plain agent or an already-correct preset.
       await deps.syncHostFrameworkPreset(

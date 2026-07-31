@@ -7,6 +7,7 @@ import { GUARDED_ECHO_TOKEN } from "./shared";
  * resolves the pending approval the same way as structured inputResponses.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "HITL smoke: text approve resolves a pending tool approval.",
   async test(t) {
     const parked = await t.send('Call the guarded-echo tool with note "text-approve".');

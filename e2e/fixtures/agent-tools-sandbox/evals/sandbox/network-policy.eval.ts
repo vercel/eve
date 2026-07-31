@@ -21,6 +21,7 @@ function isBlocked(value: unknown): boolean {
 // then attempts egress. Asserting the probe came back blocked proves
 // `setNetworkPolicy("deny-all")` actually severs egress on the active backend.
 export default defineEval({
+  tags: ["real-model"],
   description: "Sandbox: setNetworkPolicy('deny-all') blocks sandbox egress mid-turn.",
   async test(t) {
     await t.send(

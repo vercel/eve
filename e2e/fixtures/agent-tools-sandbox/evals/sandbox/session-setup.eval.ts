@@ -13,6 +13,7 @@ import {
 // A single `cat` of both files proving both tokens appear shows session-scoped
 // setup and workspace seeding both landed on top of the shared template.
 export default defineEval({
+  tags: ["real-model"],
   description: "Sandbox: onSession marker and seeded workspace file are both present per session.",
   async test(t) {
     await t.send(

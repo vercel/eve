@@ -11,6 +11,7 @@ import {
   runSelectComponent,
   type ChannelSetupAwaitChoice,
   type PromptState,
+  type SetupSpinnerIntent,
 } from "#setup/cli/index.js";
 import { createRailLog, type RailSpinner } from "#setup/cli/index.js";
 import pc from "picocolors";
@@ -89,9 +90,19 @@ export interface SelectNotice {
   text: string;
 }
 
+/** One labeled fact rendered between a select question's description and options. */
+export interface SelectMetadata {
+  label: string;
+  value: string;
+}
+
 /** Options common to every {@link Prompter.select} call. */
 export interface SelectCommonOptions<T extends PrompterValue> {
   message: string;
+  /** Inert context rendered beneath the question heading and above its options. */
+  description?: string;
+  /** Labeled facts rendered beneath the description and above the options. */
+  metadata?: readonly SelectMetadata[];
   options: SelectOption<T>[];
   /**
    * Add a type-ahead filter line. The filter is a case-insensitive substring
@@ -112,7 +123,7 @@ export interface SelectCommonOptions<T extends PrompterValue> {
    * each hint on its own line below the label with a blank line between options —
    * for small action menus whose hints carry current values. "inline" keeps hints
    * on the label row, suppresses numeric shortcuts, and separates the trailing
-   * completion action (e.g. the `/channels` task list).
+   * completion action (e.g. the `/add` task list).
    */
   hintLayout?: "stacked" | "inline";
   /** Outcome lines from earlier laps of a looping menu. */
@@ -239,6 +250,12 @@ export interface Prompter {
   /** Prints a final green ● end-cap with the message. */
   outro(message: string): void;
 
+  /** Temporarily hands terminal ownership to a command that inherits stdio. */
+  withInheritedStdio?<T>(task: () => Promise<T>): Promise<T>;
+
+  /** Gives a setup subprocess exclusive terminal and development-host ownership. */
+  withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
+
   log: {
     message(text: string): void;
     info(text: string): void;
@@ -252,7 +269,7 @@ export interface Prompter {
      * returning a handle whose `stop()` clears it. Present on the real prompter;
      * optional so lightweight test fakes can omit it.
      */
-    spinner?(message: string): RailSpinner;
+    spinner?(message: string, intent?: SetupSpinnerIntent): RailSpinner;
   };
 }
 
@@ -447,6 +464,12 @@ export function createPrompter(): Prompter {
     ): Promise<T | T[]> {
       log.settle();
       printNotices(opts.notices);
+      if (opts.description !== undefined) {
+        process.stdout.write(formatRailLine(pc.dim(opts.description), pc, process.stdout));
+      }
+      for (const { label, value } of opts.metadata ?? []) {
+        process.stdout.write(formatRailLine(`${pc.dim(`${label}:`)} ${value}`, pc, process.stdout));
+      }
       const result = guardCancel(
         await runSelectComponent<T>({
           message: opts.message,

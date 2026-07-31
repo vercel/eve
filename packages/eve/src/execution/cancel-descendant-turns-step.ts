@@ -16,8 +16,12 @@ import type {
 } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 
-const CANCEL_ATTEMPTS = 12;
-const CANCEL_RETRY_DELAY_MS = 250;
+// Retry through transient world contention (queue wakes, hook-claim
+// conflicts), then log loudly: a silently dropped cancel leaves the child
+// running to completion with no trace of why.
+const CANCEL_ATTEMPTS = 8;
+const CANCEL_RETRY_INITIAL_DELAY_MS = 250;
+const CANCEL_RETRY_MAX_DELAY_MS = 1_500;
 const log = createLogger("execution.cancel-descendant-turns");
 
 /** Cancels every successfully adopted child in the current pending batch. */
@@ -38,9 +42,20 @@ export async function cancelDescendantTurnsStep(input: {
     return;
   }
 
-  if (batch === undefined) return;
+  if (batch === undefined) {
+    log.warn("no pending batch found while cancelling descendants; nothing to cancel", {
+      sessionId: input.sessionState.sessionId,
+    });
+    return;
+  }
   const childSessionIds = batch.childSessionIds;
-  if (childSessionIds === undefined) return;
+  if (childSessionIds === undefined) {
+    log.warn("pending batch carries no child session ids; descendants cannot be cancelled", {
+      actionCount: batch.actions.length,
+      sessionId: input.sessionState.sessionId,
+    });
+    return;
+  }
 
   let remoteRegistry: Promise<RuntimeSubagentRegistry["subagentsByNodeId"]> | undefined;
   const getRemoteRegistry = () =>
@@ -75,10 +90,19 @@ async function cancelLocalDescendant(input: {
   readonly childSessionId: string;
 }): Promise<void> {
   try {
-    await requestCancellationWithRetry({
+    const final = await requestCancellationWithRetry({
       request: () => requestWorkflowTurnCancellation({ sessionId: input.childSessionId }),
       shouldRetryError: () => false,
     });
+    if (final.status !== "accepted") {
+      log.warn("descendant cancel was never accepted; the child may run to completion", {
+        callId: input.action.callId,
+        childSessionId: input.childSessionId,
+        finalStatus: final.status,
+        reason: final.reason,
+        subagentName: input.action.subagentName,
+      });
+    }
   } catch (error) {
     logError(log, "failed to cancel local descendant turn", error, {
       callId: input.action.callId,
@@ -101,10 +125,19 @@ async function cancelRemoteDescendant(input: {
       registry,
     });
 
-    await requestCancellationWithRetry({
+    const final = await requestCancellationWithRetry({
       request: () => cancelRemoteAgentTurn({ remote, sessionId: input.childSessionId }),
       shouldRetryError: isRetryableRemoteAgentCancelError,
     });
+    if (final.status !== "accepted") {
+      log.warn("remote descendant cancel was never accepted; the child may run to completion", {
+        callId: input.action.callId,
+        childSessionId: input.childSessionId,
+        finalStatus: final.status,
+        reason: final.reason,
+        remoteAgentName: input.action.remoteAgentName,
+      });
+    }
   } catch (error) {
     logError(log, "failed to cancel remote descendant turn", error, {
       callId: input.action.callId,
@@ -117,15 +150,21 @@ async function cancelRemoteDescendant(input: {
 async function requestCancellationWithRetry(input: {
   readonly request: () => Promise<CancelTurnResult>;
   readonly shouldRetryError: (error: unknown) => boolean;
-}): Promise<void> {
+}): Promise<CancelTurnResult> {
+  let delayMs = CANCEL_RETRY_INITIAL_DELAY_MS;
+  let lastResult: CancelTurnResult = { status: "no_active_turn" };
+
   for (let attempt = 1; attempt <= CANCEL_ATTEMPTS; attempt += 1) {
     try {
-      const result = await input.request();
-      if (result.status === "accepted" || attempt === CANCEL_ATTEMPTS) return;
+      lastResult = await input.request();
+      if (lastResult.status === "accepted" || attempt === CANCEL_ATTEMPTS) return lastResult;
     } catch (error) {
       if (!input.shouldRetryError(error) || attempt === CANCEL_ATTEMPTS) throw error;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, CANCEL_RETRY_DELAY_MS));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    delayMs = Math.min(delayMs * 2, CANCEL_RETRY_MAX_DELAY_MS);
   }
+
+  return lastResult;
 }

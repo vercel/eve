@@ -14,6 +14,7 @@ export interface AddRegistryItemsOptions {
   cwd?: string;
   config?: RegistryConfig;
   overwrite?: boolean;
+  silent?: boolean;
 }
 
 export interface RegistrySearchItem {

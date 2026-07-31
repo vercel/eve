@@ -65,6 +65,7 @@ function readExecutionCompletedAt(output: unknown): number | undefined {
 // consumed. The tool waits before completing, so post-execution batch emission
 // still cannot satisfy this relation.
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: a local action request streams while execution is pending.",
   async test(t) {
     const turn = await t.send(

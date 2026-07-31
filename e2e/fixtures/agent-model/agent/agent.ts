@@ -1,6 +1,7 @@
+import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
 import { defineAgent, defineDynamic, type DynamicResolveContext } from "eve";
 
-const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol";
+const model = e2eModel();
 
 /**
  * Dynamic-model e2e fixture. Resolves at `turn.started` (not the usual
@@ -8,6 +9,9 @@ const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol";
  * and resolver-failure degradation.
  */
 export default defineAgent({
+  // Harness config wires the workflow world; the dynamic definition below
+  // overrides the harness model.
+  ...e2eAgentConfig(),
   model: defineDynamic({
     fallback: model,
     events: {

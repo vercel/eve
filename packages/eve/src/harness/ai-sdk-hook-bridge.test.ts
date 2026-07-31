@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHooks,
+  type InstrumentationAttemptMetadataEvent,
   type InstrumentationAttemptScope,
   type InstrumentationProviderDefinition,
 } from "#harness/instrumentation-lifecycle.js";
@@ -117,6 +118,33 @@ describe("createAiSdkHookBridge", () => {
     expect(await bridge.executeLanguageModelCall!({ callId: "missing", execute })).toBe("result");
     expect(execute).toHaveBeenCalledOnce();
     expect(adapterCalls).toBe(0);
+  });
+
+  it("publishes step provider metadata as attempt.metadata, skipping steps without any", async () => {
+    const events: InstrumentationAttemptMetadataEvent[] = [];
+    const hooks = createInstrumentationHooks([
+      {
+        events: {
+          "attempt.metadata": (event) => {
+            events.push(event);
+          },
+        },
+      },
+    ]);
+    const bridge = createAiSdkHookBridge(scope, hooks);
+
+    await Reflect.apply(bridge.onStepEnd!, bridge, [
+      { providerMetadata: { gateway: { cost: "0.000082" } } },
+    ]);
+    await Reflect.apply(bridge.onStepEnd!, bridge, [{ providerMetadata: undefined }]);
+
+    expect(events).toEqual([
+      {
+        providerMetadata: { gateway: { cost: "0.000082" } },
+        scope,
+        type: "attempt.metadata",
+      },
+    ]);
   });
 
   it("isolates a failing provider from the remaining providers", async () => {

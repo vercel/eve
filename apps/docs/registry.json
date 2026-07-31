@@ -1209,22 +1209,22 @@
       ]
     },
     {
-      "name": "channel/chat-sdk-photon",
+      "name": "channel/photon-imessage",
       "type": "registry:item",
-      "title": "Photon",
-      "description": "Cloud, self-hosted, and local iMessage messaging through Photon.",
-      "dependencies": ["chat", "@photon-ai/chat-adapter-imessage", "@chat-adapter/state-memory"],
-      "envVars": {
-        "IMESSAGE_PROJECT_ID": "",
-        "IMESSAGE_PROJECT_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/chat-sdk-photon.ts",
-          "type": "registry:file",
-          "target": "agent/channels/imessage.ts"
+      "title": "Photon iMessage",
+      "description": "Connect an eve agent to iMessage through Photon with guided project and phone setup.",
+      "dependencies": ["@vercel/connect@0.5.0"],
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "photon"]
+          },
+          "requires": ">=0.29.0"
         }
-      ]
+      }
     },
     {
       "name": "channel/chat-sdk-dial",

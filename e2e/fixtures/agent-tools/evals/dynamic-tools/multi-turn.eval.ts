@@ -5,6 +5,7 @@ import { DYNAMIC_ECHO_TOKEN, ECHO_TOOL } from "./shared";
 // The dynamic tool must survive serialization/deserialization (lazy
 // replay of the resolver): both turns call it and see the token.
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic tools smoke: the dynamic tool survives serialization across turns.",
   async test(t) {
     const first = await t.send(
