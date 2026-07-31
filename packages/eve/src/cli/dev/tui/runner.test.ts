@@ -232,6 +232,7 @@ function idleSetupFlow(): SetupFlowRenderer {
     setStatus: vi.fn(),
     renderLine: vi.fn(),
     renderOutput: vi.fn(),
+    withInheritedStdio: (task) => task(),
     waitForInterrupt: () => ({
       promise: new Promise<void>(() => {}),
       dispose: vi.fn(),
@@ -1674,9 +1675,8 @@ describe("parsePromptCommand", () => {
     ["/new", { type: "new" }],
     ["/exit", { type: "exit" }],
     ["/quit", { type: "exit" }],
-    ["/channels", { type: "extension", name: "channels", argument: "" }],
     ["/deploy", { type: "extension", name: "deploy", argument: "" }],
-    ["  /channels  ", { type: "extension", name: "channels", argument: "" }],
+    ["  /channels  ", null],
     ["/vercel", null],
     ["/links", null],
     ["deploy", null],
@@ -1700,30 +1700,6 @@ describe("EveTUIRunner setup commands", () => {
     };
     return { renderer, notices };
   }
-
-  it("answers /channels with a local-only notice when no appRoot is configured", async () => {
-    const session = sessionYielding([]);
-    const { renderer, notices } = recordingRenderer(["/channels", undefined]);
-
-    const runner = new EveTUIRunner({
-      session,
-      renderer,
-      name: "Weather Agent",
-      availablePromptCommands: promptCommandsFor("remote"),
-      promptCommandHandler: createPromptCommandHandler({
-        target: {
-          kind: "remote",
-          workspaceRoot: "/tmp/weather-agent",
-          serverUrl: "https://example.com/",
-        },
-      }),
-    });
-    await runner.run();
-
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toContain("--url");
-    expect(session.send).not.toHaveBeenCalled();
-  });
 
   it("answers /deploy with an unsupported notice when the renderer cannot suspend", async () => {
     const session = sessionYielding([]);
@@ -2229,13 +2205,13 @@ describe("EveTUIRunner Vercel status line", () => {
     });
     await runner.run();
 
-    expect(pushes).toEqual([{ identity, pendingDeploy: false }]);
+    expect(pushes).toEqual([{ identity }]);
     expect(detectIdentity).toHaveBeenCalledWith("/tmp/weather-agent", {
       signal: expect.any(AbortSignal),
     });
   });
 
-  it("applies command effects: channels mark pending, deploy clears and re-probes", async () => {
+  it("applies deploy effects and re-probes", async () => {
     const pushes: VercelStatusSnapshot[] = [];
     const settled = createDeferred<void>();
     let probes = 0;
@@ -2245,7 +2221,7 @@ describe("EveTUIRunner Vercel status line", () => {
       probes += 1;
       return probes === 1 ? new Promise<never>(() => {}) : Promise.resolve(identity);
     });
-    const prompts: Array<string | undefined> = ["/channels", "/deploy"];
+    const prompts: Array<string | undefined> = ["/deploy"];
     const renderer = fakeRenderer({
       renderNotice: vi.fn(),
       readPrompt: vi.fn(async () => {
@@ -2256,14 +2232,10 @@ describe("EveTUIRunner Vercel status line", () => {
       }),
       setVercelStatus: (snapshot) => {
         pushes.push(snapshot);
-        if (pushes.length >= 3) settled.resolve();
+        if (pushes.length >= 2) settled.resolve();
       },
     });
     const outcomes: Record<string, PromptCommandOutcome> = {
-      channels: {
-        message: "Channels added: slack — run /deploy to ship them.",
-        effect: { kind: "channels-added" },
-      },
       deploy: { message: "Deployed.", effect: { kind: "deployed" } },
     };
 
@@ -2277,18 +2249,14 @@ describe("EveTUIRunner Vercel status line", () => {
     });
     await runner.run();
 
-    expect(pushes).toEqual([
-      { pendingDeploy: true },
-      { pendingDeploy: false },
-      { identity, pendingDeploy: false },
-    ]);
+    expect(pushes).toEqual([{}, { identity }]);
     expect(detectIdentity).toHaveBeenCalledTimes(2);
   });
 
   it("refreshes agent info only after a model-access change", async () => {
     const client = stubClient();
     const info = vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
-    const prompts: Array<string | undefined> = ["/channels", "/model", undefined];
+    const prompts: Array<string | undefined> = ["/deploy", "/model", undefined];
     const infoCallsAtPrompt: number[] = [];
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async () => {
@@ -2296,9 +2264,9 @@ describe("EveTUIRunner Vercel status line", () => {
         return prompts.shift();
       }),
     });
-    const channelsOutcome: PromptCommandOutcome = {
-      message: "Channels added.",
-      effect: { kind: "channels-added" },
+    const deployOutcome: PromptCommandOutcome = {
+      message: "Deployed.",
+      effect: { kind: "deployed" },
     };
     const modelOutcome: PromptCommandOutcome = {
       message: "Connected to AI Gateway.",
@@ -2315,7 +2283,7 @@ describe("EveTUIRunner Vercel status line", () => {
       bootDetections: [],
       detectProjectIdentity: vi.fn(async () => undefined),
       promptCommandHandler: {
-        handle: async (command) => (command.name === "model" ? modelOutcome : channelsOutcome),
+        handle: async (command) => (command.name === "model" ? modelOutcome : deployOutcome),
       },
     });
 
@@ -2323,98 +2291,6 @@ describe("EveTUIRunner Vercel status line", () => {
 
     expect(infoCallsAtPrompt).toEqual([1, 1, 2]);
     expect(info).toHaveBeenCalledTimes(2);
-  });
-
-  it("forces a runtime rebuild after /connect adds a connection", async () => {
-    const client = stubClient();
-    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
-    const requests: URL[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
-        const url = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input : input.url,
-        );
-        requests.push(url);
-        return Response.json({ revision: url.searchParams.get("force") === "1" ? "next" : "base" });
-      }),
-    );
-    const prompts: Array<string | undefined> = ["/connect", undefined];
-    const renderer = fakeRenderer({ readPrompt: vi.fn(async () => prompts.shift()) });
-    const connectOutcome = {
-      message: "Connections added: linear.",
-      effect: { kind: "connection-added" },
-    } satisfies PromptCommandOutcome;
-
-    const runner = new EveTUIRunner({
-      session: stubSession(),
-      client,
-      renderer,
-      serverUrl: "http://localhost:3000",
-      name: "Weather Agent",
-      promptCommandHandler: { handle: async () => connectOutcome },
-    });
-    await runner.run();
-
-    expect(
-      requests.some(
-        (url) =>
-          url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
-          url.searchParams.get("force") === "1",
-      ),
-    ).toBe(true);
-  });
-
-  it("forces a runtime rebuild through the /connect command path", async () => {
-    const client = stubClient();
-    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
-    const requests: URL[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
-        const url = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input : input.url,
-        );
-        requests.push(url);
-        return Response.json({ revision: url.searchParams.get("force") === "1" ? "next" : "base" });
-      }),
-    );
-    const runConnectionsFlow = vi.fn(async () => ({
-      kind: "done" as const,
-      addedConnections: ["linear"],
-    }));
-    const prompts: Array<string | undefined> = ["/connect", undefined];
-    const renderer = fakeRenderer({
-      readPrompt: vi.fn(async () => prompts.shift()),
-      setupFlow: idleSetupFlow(),
-    });
-
-    const runner = new EveTUIRunner({
-      session: stubSession(),
-      client,
-      renderer,
-      serverUrl: "http://localhost:3000",
-      name: "Weather Agent",
-      appRoot: "/tmp/weather-agent",
-      promptCommandHandler: createPromptCommandHandler({
-        target: {
-          kind: "local",
-          serverUrl: "http://localhost:3000",
-          workspaceRoot: "/tmp/weather-agent",
-        },
-        flows: { runConnectionsFlow },
-      }),
-    });
-    await runner.run();
-
-    expect(runConnectionsFlow).toHaveBeenCalledTimes(1);
-    expect(
-      requests.some(
-        (url) =>
-          url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
-          url.searchParams.get("force") === "1",
-      ),
-    ).toBe(true);
   });
 
   it("never pushes Vercel status for a remote --url session", async () => {
@@ -2564,10 +2440,13 @@ describe("EveTUIRunner boot setup detection", () => {
       detectProjectIdentity: vi.fn(async () => undefined),
       getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       promptCommandHandler: {
-        handle: async () => ({
-          message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
-          effect: { kind: "model-access-changed" },
-        }),
+        handle: async (command) =>
+          command.name === "model"
+            ? {
+                message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+                effect: { kind: "model-access-changed" },
+              }
+            : { message: "/add dismissed." },
       },
     });
 
@@ -2627,7 +2506,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
     await runner.run();
 
-    expect(order).toEqual(["vc:install", "vc:login", "model", "prompt"]);
+    expect(order).toEqual(["vc:install", "vc:login", "model", "add", "prompt"]);
     expect(handle).toHaveBeenNthCalledWith(
       1,
       { type: "extension", name: "vc:install", argument: "" },
@@ -2641,6 +2520,10 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(handle).toHaveBeenCalledWith(
       { type: "extension", name: "model", argument: "" },
       { renderer, title: "Weather Agent", initialModelStep: "provider" },
+    );
+    expect(handle).toHaveBeenCalledWith(
+      { type: "extension", name: "add", argument: "" },
+      { renderer, title: "Weather Agent" },
     );
   });
 
@@ -2844,7 +2727,7 @@ describe("EveTUIRunner command outcome rendering", () => {
 
     expect(results).toHaveLength(1);
     expect(results[0]).toContain("/model");
-    expect(results[0]).toContain("/channels");
+    expect(results[0]).not.toContain("/channels");
     expect(session.send).not.toHaveBeenCalled();
   });
 

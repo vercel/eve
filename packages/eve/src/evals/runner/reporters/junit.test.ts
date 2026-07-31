@@ -26,7 +26,8 @@ describe("JUnit", () => {
     const [, xml] = fsMocks.writeFile.mock.calls[0]!;
     expect(xml).toContain('<testsuite name="suite &amp; one" tests="2" failures="1" skipped="0"');
     expect(xml).toContain('<testcase classname="eve.eval" name="runtime/passes"');
-    expect(xml).toContain('<failure message="contains: expected hello">');
+    expect(xml).toContain('<failure message="contains (0% &lt; 100%): expected hello">');
+    expect(xml).not.toContain("Successful assertion details");
   });
 
   it("defaults the suite name", async () => {
@@ -93,7 +94,16 @@ function makeSummary(): EveEvalRunSummary {
 function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
   return {
     id: "eval-1",
-    assertions: [{ name: "check", score: 1, severity: "gate", passed: true }],
+    assertions: [
+      {
+        message: "Successful assertion details",
+        metadata: { rationale: "Successful rationale details" },
+        name: "check",
+        score: 1,
+        severity: "gate",
+        passed: true,
+      },
+    ],
     result: {
       derived: createEmptyDerivedFacts(),
       events: [],
