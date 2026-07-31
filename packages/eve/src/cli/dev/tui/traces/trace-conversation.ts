@@ -8,18 +8,15 @@
  */
 
 import { formatElapsed } from "#cli/format-elapsed.js";
-import {
-  clipVisible,
-  stripTerminalControls,
-  visibleLength,
-  wrapVisibleLine,
-} from "#cli/ui/terminal-text.js";
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
-import { compareLocalTraceSpans } from "#harness/local-trace-reader.js";
+import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import { compareLocalTraceSpans } from "#tracing/local-trace-reader.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
-import { prettyJson, splitEmbeddedNewlines } from "./trace-content.js";
+import { formatPayloadContent, wrapPlainText } from "./trace-content.js";
+import type { TraceViewerSurfaces } from "./trace-surfaces.js";
+import { SURFACE_CLOSE } from "./trace-surfaces.js";
 
 export interface ConversationItem {
   readonly kind: "system" | "user" | "assistant" | "tool";
@@ -219,10 +216,14 @@ function turnSubagent(turn: LocalTraceSpan): ConversationSubagent | undefined {
 }
 
 /**
- * Renders one conversation card, width-clipped: message kinds (system, user,
- * assistant) as rounded text bubbles, tool calls as bordered boxes. Collapsed
- * cards cap their payloads; expanded ones render them in full. The system
- * bubble is title-only until expanded.
+ * Renders one conversation card, width-clipped: a title row (bold kind plus
+ * dim metadata, metrics right-aligned) over body rows. With `surfaces`
+ * (derived from the terminal's background via the OSC 11 probe) the card
+ * draws as two elevated bands; without them it falls back to a gutter rail —
+ * the same vocabulary the dev transcript uses. Both layouts occupy identical
+ * rows and columns, so scroll/click math and drag-copy column mapping never
+ * depend on whether the probe was answered. Collapsed cards cap their
+ * payloads; expanded ones render them in full.
  */
 export function renderConversationItem(
   item: ConversationItem,
@@ -230,20 +231,28 @@ export function renderConversationItem(
   theme: Theme,
   selected: boolean,
   expanded: boolean,
+  surfaces?: TraceViewerSurfaces,
 ): string[] {
   const { colors, glyph } = theme;
   const inner = Math.max(8, width - 8);
   const expandable = conversationItemExpandable(item, width);
+  // Surfaces are only derived for color themes, but guard anyway so a
+  // no-color render can never emit their raw SGR sequences.
+  const active = theme.color ? surfaces : undefined;
+  // Titles read as primary text: the theme's bright white on an unknown
+  // background, or the surface-matched primary (white on dark, black on
+  // light) once the terminal has answered the background probe.
+  const primary = active?.primaryText ?? colors.white;
 
   let leftTitle: string;
   let rightTitle: string;
   const body: string[] = [];
   if (item.kind === "tool") {
-    const name = colors.bold(colors.white(item.name ?? "tool"));
+    const name = colors.bold(primary(item.name ?? "tool"));
     leftTitle = `${foldMarker(expanded, expandable, theme)}${name}`;
     rightTitle = item.durationMs > 0 ? colors.dim(formatElapsed(item.durationMs)) : "";
-    const argsLines = item.args === undefined ? [] : payloadJsonLines(item.args, inner);
-    const resultLines = item.result === undefined ? [] : payloadJsonLines(item.result, inner);
+    const argsLines = item.args === undefined ? [] : formatPayloadContent(item.args, inner);
+    const resultLines = item.result === undefined ? [] : formatPayloadContent(item.result, inner);
     const cappedArgs = expanded ? argsLines : capLines(argsLines, inner);
     const cappedResult = expanded ? resultLines : capLines(resultLines, inner);
     if (cappedArgs.length > 0) {
@@ -253,23 +262,23 @@ export function renderConversationItem(
       body.push("", colors.dim("Output:"), "", ...cappedResult);
     }
   } else if (item.kind === "system") {
-    leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(colors.white("system"))}`;
+    leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(primary("system"))}`;
     rightTitle = colors.dim(`~${formatCompactTokenCount(estimateTokens(item.text ?? ""))} tokens`);
-    const uncapped = wrapText(item.text ?? "", inner);
+    const uncapped = wrapPlainText(item.text ?? "", inner);
     body.push(...(expanded ? uncapped : capLines(uncapped, inner)));
   } else if (item.kind === "assistant") {
-    leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(colors.white("assistant"))}${
+    leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(primary("assistant"))}${
       item.model !== undefined ? colors.dim(` · ${stripTerminalControls(item.model)}`) : ""
     }`;
     rightTitle = assistantMetrics(item, glyph, colors);
     const reasoningUncapped =
       item.reasoning === undefined || item.reasoning.trim().length === 0
         ? []
-        : payloadLines(item.reasoning, inner);
+        : wrapPlainText(item.reasoning, inner);
     const textUncapped =
       item.text === undefined || item.text.trim().length === 0
         ? []
-        : payloadLines(item.text, inner);
+        : wrapPlainText(item.text, inner);
     const reasoningLines = (expanded ? reasoningUncapped : capLines(reasoningUncapped, inner)).map(
       (line) => colors.dim(line),
     );
@@ -296,12 +305,12 @@ export function renderConversationItem(
     // A subagent's "user" message is the synthesized delegated prompt, not
     // something the user typed — label it as the task it is.
     const label = item.kind === "user" && item.subagent !== undefined ? "task" : item.kind;
-    leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(colors.white(label))}`;
+    leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(primary(label))}`;
     rightTitle = "";
     const textUncapped =
       item.text === undefined || item.text.trim().length === 0
         ? []
-        : payloadLines(item.text, inner);
+        : wrapPlainText(item.text, inner);
     body.push(...(expanded ? textUncapped : capLines(textUncapped, inner)));
   }
   // Delegated work is called out on every card of the subagent's turn so it
@@ -310,6 +319,9 @@ export function renderConversationItem(
     const label = item.subagent.name === undefined ? "subagent" : `subagent:${item.subagent.name}`;
     leftTitle += colors.dim(` · ${label}`);
   }
+  // Failures carry the transcript's error vocabulary: a red mark beside the
+  // title, echoed by a red rail down the card's left edge.
+  if (item.error) leftTitle += ` ${colors.red(glyph.error)}`;
   // A truncated card advertises its affordance: ellipsis on its own line,
   // a gap, then the click hint (which flips once open).
   if (!expanded && expandable) {
@@ -320,51 +332,70 @@ export function renderConversationItem(
 
   // The header is a band with vertical padding on both sides of the title,
   // so the card's identity dominates its content; the body gets a padding
-  // row at both ends. Failures paint the whole card red instead of an icon.
-  const headerSurface = item.error ? CARD_ERROR_SURFACE_HEADER : CARD_SURFACE_HEADER;
-  const bodySurface = item.error ? CARD_ERROR_SURFACE_BODY : CARD_SURFACE_BODY;
+  // row at both ends.
+  const headerSurface =
+    active === undefined ? undefined : item.error ? active.errorHeader : active.header;
+  const bodySurface =
+    active === undefined ? undefined : item.error ? active.errorBody : active.body;
+  const rail = railCell(theme, selected, item.error, active);
   return [
-    cardRow("", width, theme, selected, headerSurface),
-    cardSplitRow(leftTitle, rightTitle, width, theme, selected, headerSurface),
-    cardRow("", width, theme, selected, headerSurface),
-    cardRow("", width, theme, selected, bodySurface),
-    ...body.map((line) => cardRow(line, width, theme, selected, bodySurface)),
-    cardRow("", width, theme, selected, bodySurface),
+    cardRow("", width, theme, rail, headerSurface),
+    cardSplitRow(leftTitle, rightTitle, width, theme, rail, headerSurface),
+    cardRow("", width, theme, rail, headerSurface),
+    cardRow("", width, theme, rail, bodySurface),
+    ...body.map((line) => cardRow(line, width, theme, rail, bodySurface)),
+    cardRow("", width, theme, rail, bodySurface),
   ];
 }
 
 /**
- * Cards are two-band blocks on the viewer's true-black canvas: a header
- * band in near-black over body rows in dark gray so the content reads as
- * the dominant surface, with one cell of margin
- * on each side (the right margin matching the selection bar's column for
- * symmetry) and two cells of padding inside. The vocabulary is the Vercel
- * aesthetic — monochrome surfaces with color reserved for status — and
- * truecolor is exempt from tinted-theme palette remapping. The selected
- * card carries a cyan half-block bar down its left edge.
+ * One card row. With a `surface` the row draws as a padded band on that
+ * background — one cell of margin either side of the band, the selection bar
+ * in the left margin — and the theme's own colors style the content. Without
+ * one, a gutter rail groups the card's rows: dim normally, red when the card
+ * failed, a bright half-block bar when selected. Both forms pad to the same
+ * visible width (`inner = width - 8`), so the two layouts are cell-for-cell
+ * interchangeable and nothing assumes a dark terminal palette.
  */
-const CARD_SURFACE_HEADER = "\x1b[48;2;22;22;22m";
-const CARD_SURFACE_BODY = "\x1b[48;2;36;36;36m";
-const CARD_ERROR_SURFACE_HEADER = "\x1b[48;2;69;32;37m";
-const CARD_ERROR_SURFACE_BODY = "\x1b[48;2;58;26;31m";
-const CARD_SURFACE_CLOSE = "\x1b[49m";
-const RESET_ALL = "\x1b[0m";
-
 function cardRow(
   line: string,
   width: number,
   theme: Theme,
-  selected: boolean,
-  surface: string,
+  rail: string,
+  surface?: string,
 ): string {
-  const bar = selected ? theme.colors.white("▌") : " ";
   const clipped = clipVisible(line, Math.max(1, width - 8));
   const pad = " ".repeat(Math.max(0, width - 8 - visibleLength(clipped)));
-  if (!theme.color) return ` ${bar}  ${clipped}${pad}    `;
-  // The second surface open re-establishes the background past any embedded
-  // style reset in the clipped content, so the padding is covered too. The
-  // cells outside the surface show the viewer's base canvas as margins.
-  return ` ${bar}${surface}  ${clipped}${RESET_ALL}${surface}${pad}  ${CARD_SURFACE_CLOSE}  `;
+  if (surface === undefined || !theme.color) return ` ${rail}  ${clipped}${pad}    `;
+  // A style reset embedded in the content — `clipVisible` appends one when
+  // it truncates styled text, e.g. a title clipped by the details drawer —
+  // would drop the band's background for the rest of the row (the metrics
+  // after a clipped title would sit on the terminal's default background).
+  // Re-open the surface after every embedded reset, and once more before
+  // the padding to close any style the content left open.
+  const covered = clipped.replaceAll("\x1b[0m", `\x1b[0m${surface}`);
+  return ` ${rail}${surface}  ${covered}\x1b[0m${surface}${pad}  ${SURFACE_CLOSE}  `;
+}
+
+/**
+ * The card's left-edge cell — constant for every row of one card: selection
+ * bar (surface-matched primary so it stays visible on light backgrounds),
+ * error rail, dim rail, or plain margin when a band already groups the card.
+ */
+function railCell(
+  theme: Theme,
+  selected: boolean,
+  error: boolean,
+  surfaces: TraceViewerSurfaces | undefined,
+): string {
+  const { colors, glyph } = theme;
+  if (selected) {
+    const bar = theme.unicode ? "▌" : glyph.rule;
+    return surfaces === undefined ? colors.white(bar) : surfaces.primaryText(bar);
+  }
+  // Surfaced cards need no rail — the band groups them (error bands are red).
+  if (surfaces !== undefined) return " ";
+  return error ? colors.red(glyph.rule) : colors.dim(glyph.rule);
 }
 
 /**
@@ -377,16 +408,16 @@ function cardSplitRow(
   right: string,
   width: number,
   theme: Theme,
-  selected: boolean,
-  surface: string,
+  rail: string,
+  surface?: string,
 ): string {
-  if (visibleLength(right) === 0) return cardRow(left, width, theme, selected, surface);
+  if (visibleLength(right) === 0) return cardRow(left, width, theme, rail, surface);
   const inner = Math.max(1, width - 8);
   const rightVis = visibleLength(right);
   const leftMax = Math.max(1, inner - rightVis - 2);
   const leftClipped = clipVisible(left, leftMax);
   const gap = " ".repeat(Math.max(2, inner - visibleLength(leftClipped) - rightVis));
-  return cardRow(`${leftClipped}${gap}${right}`, width, theme, selected, surface);
+  return cardRow(`${leftClipped}${gap}${right}`, width, theme, rail, surface);
 }
 
 /** Right-aligned metrics for an assistant card: duration, tokens, cost. */
@@ -433,27 +464,6 @@ function foldMarker(expanded: boolean, expandable: boolean, theme: Theme): strin
   return expandable ? `${theme.colors.dim("▸")} ` : "";
 }
 
-function wrapText(text: string, width: number): string[] {
-  return splitEmbeddedNewlines([stripTerminalControls(text)]).flatMap((line) =>
-    wrapVisibleLine(line, width),
-  );
-}
-
-function payloadLines(text: string, width: number): string[] {
-  return wrapText(text, width);
-}
-
-/** Tool payloads pretty-print when they're JSON; text stays text. */
-function payloadJsonLines(text: string, width: number): string[] {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed === "object" && parsed !== null) return prettyJson(parsed, width);
-  } catch {
-    // Not JSON — fall through to plain text.
-  }
-  return payloadLines(text, width);
-}
-
 /** Caps payload lines — the standalone `…` + click hint marks the cut. */
 function capLines(lines: readonly string[], width: number): string[] {
   if (lines.length <= CARD_PAYLOAD_LINES) return [...lines];
@@ -477,27 +487,29 @@ export function conversationItemLineCount(
 export function conversationItemExpandable(item: ConversationItem, width: number): boolean {
   const inner = Math.max(8, width - 8);
   if (item.kind === "tool") {
-    const args = item.args === undefined ? 0 : payloadJsonLines(item.args, inner - 2).length;
-    const result = item.result === undefined ? 0 : payloadJsonLines(item.result, inner - 2).length;
+    const args = item.args === undefined ? 0 : formatPayloadContent(item.args, inner - 2).length;
+    const result =
+      item.result === undefined ? 0 : formatPayloadContent(item.result, inner - 2).length;
     return args > CARD_PAYLOAD_LINES || result > CARD_PAYLOAD_LINES;
   }
-  if (item.kind === "system") return wrapText(item.text ?? "", inner).length > CARD_PAYLOAD_LINES;
+  if (item.kind === "system")
+    return wrapPlainText(item.text ?? "", inner).length > CARD_PAYLOAD_LINES;
   if (item.kind === "user") {
     const text =
       item.text === undefined || item.text.trim().length === 0
         ? 0
-        : payloadLines(item.text, inner).length;
+        : wrapPlainText(item.text, inner).length;
     return text > CARD_PAYLOAD_LINES;
   }
   // assistant
   const reasoning =
     item.reasoning === undefined || item.reasoning.trim().length === 0
       ? 0
-      : payloadLines(item.reasoning, inner).length;
+      : wrapPlainText(item.reasoning, inner).length;
   const text =
     item.text === undefined || item.text.trim().length === 0
       ? 0
-      : payloadLines(item.text, inner).length;
+      : wrapPlainText(item.text, inner).length;
   return reasoning > CARD_PAYLOAD_LINES || text > CARD_PAYLOAD_LINES;
 }
 

@@ -180,6 +180,30 @@ Because a tail-relative cursor cannot be bounded, `follow: false` throws when co
 
 `stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
 
+## Snapshot a session
+
+Use `snapshot()` when you need the complete event prefix and its matching cursor
+as one value, such as when hydrating a server-rendered chat:
+
+```ts
+const session = client.session({ sessionId, streamIndex: 0 });
+const snapshot = await session.snapshot();
+
+// snapshot.events contains event indexes 0 through snapshot.session.streamIndex - 1.
+```
+
+The read pins the durable tail when it opens, just like
+`stream({ follow: false })`. Events written afterward are not included, and
+`snapshot.session.streamIndex` is the exact index from which a live consumer can
+continue. `snapshot()` always reads from index `0`; use a bounded stream directly
+when you only need the unread suffix from an existing cursor.
+
+Unlike `stream()`, `snapshot()` does not advance or reset the originating
+`ClientSession`. Its returned session includes a continuation token only when
+the captured prefix ends in `session.waiting`, or when completed sessions are
+explicitly preserved by the client. Active and terminal snapshots remain
+inspectable at their returned stream cursor but cannot accept another turn.
+
 ## Abort a request
 
 Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops the server-side turn — it keeps running and remains attachable by index. To stop the turn itself, POST the session's [cancel route](../../channels/eve#routes) and watch the stream settle with `turn.cancelled` followed by `session.waiting`.

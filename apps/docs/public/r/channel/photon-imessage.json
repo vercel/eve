@@ -3,20 +3,14 @@
   "name": "channel/photon-imessage",
   "title": "Photon iMessage",
   "description": "Connect an eve agent to iMessage through Photon with guided project and phone setup.",
-  "dependencies": [
-    "@vercel/connect@0.5.0"
-  ],
+  "dependencies": ["@vercel/connect@0.5.0"],
   "meta": {
     "eve": {
       "setup": {
         "command": "eve",
         "package": "eve",
         "bin": "eve",
-        "args": [
-          "integration",
-          "setup",
-          "photon"
-        ]
+        "args": ["integration", "setup", "photon"]
       },
       "requires": ">=0.29.0"
     }

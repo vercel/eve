@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { listLocalTraces } from "#harness/local-trace-reader.js";
+import { listLocalTraces } from "#tracing/local-trace-reader.js";
 
 import { resolveLocalTraces, runTraceListCommand, runTraceShowCommand } from "./trace.js";
 

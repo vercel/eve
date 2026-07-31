@@ -2,12 +2,12 @@ import { basename } from "node:path";
 
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { createCliTheme, renderCliSection, sanitizeForTerminal } from "#cli/ui/output.js";
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 import {
   compareLocalTraceSpans,
   describeLocalTraceSpan,
   listLocalTraces,
-} from "#harness/local-trace-reader.js";
+} from "#tracing/local-trace-reader.js";
 
 const TRACE_DISPLAY_DIRECTORY = ".eve/traces/v1";
 
@@ -15,8 +15,6 @@ interface CliTraceLogger {
   error(message: string): void;
   log(message: string): void;
 }
-
-export type { LocalTrace, LocalTraceSpan };
 
 interface SpanExtent {
   readonly endTimeNs: bigint;

@@ -9,6 +9,10 @@ package docs are unavailable, use https://eve.dev/docs as a fallback. Read
 such as `connections`, `channels/slack`, or `guides/auth-and-route-protection`
 for the Vercel Connect flow.
 
+Before implementing an integration yourself, use `eve registry search <query>` or
+`eve registry list` to discover available integrations. Inspect one with
+`eve registry view <item>`, then install it with `eve add <item>`.
+
 - Put the purpose in `agent/instructions.md` (the always-on system prompt),
   replacing the scaffold's placeholder with what the user said the agent should
   do.

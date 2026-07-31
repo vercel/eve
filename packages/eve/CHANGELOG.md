@@ -1,5 +1,46 @@
 # eve
 
+## 0.29.4
+
+### Patch Changes
+
+- e90a8c2: Launch local or deployed eve applications as stable ACP v1 agents with `eve acp [url]`, including streamed messages, tool activity, human input, cancellation, concurrent sessions, and verified Vercel authentication.
+- cec672d: Add guided Discord setup through `eve add channel/discord`, including Vercel Connect provisioning, trigger attachment, interactions endpoint configuration, slash-command registration, and channel scaffolding.
+- ed328e7: Render registry item titles with their exact registry-provided casing by loading manifests for each page of catalog results.
+- c875a67: Update the generated `AGENTS.md` to direct coding agents to the eve registry for discovering and installing integrations.
+- 5153b13: Add JSON output to `eve registry list` and `eve registry search` for scripts that inspect registry catalogs.
+- 155d46a: Connection registry items now configure their Vercel Connect connector during `eve add`, and registry setup commands close their IPC channel after reporting an outcome so `/add` returns instead of remaining stuck.
+- 6f3daca: Add `ClientSession.snapshot()` for reading a finite, cursor-consistent session event prefix that can hydrate server-rendered applications.
+- 67bfc76: Resolve sandbox skill roots and seed-file paths through the same `$HOME` resolver the file tools use, so the skills location is spelled once instead of twice.
+- a5acde8: Ensure exiting the dev TUI shuts down its owned server and any surviving workflow processes before the CLI exits. Persisted workflow messages now reach the ready worker during restart instead of being rejected while the file watcher starts.
+- 731464f: Give the local trace spool's on-disk layout a single owner: the shared trace reader now exposes the listing and segment-read primitives that `eve traces` and the `/traces` viewer both use, and payload formatting is shared between the detail panel and the conversation view.
+- f7ba3b3: Derive the `/traces` conversation viewer's line geometry from one prefix-sum helper so scroll, click, and wheel math cannot disagree, and reset the view through a single factory when the viewed trace changes.
+- 3f4bb9c: The `/traces` viewer now follows your terminal's colors instead of forcing a hardcoded black/grey truecolor palette. It probes the terminal's default background (OSC 11) and derives its card surfaces from your own theme — subtly elevated bands on dark and light backgrounds alike, with red bands for failures, and card titles that invert to black on light backgrounds so they stay legible. Terminals that don't answer the probe get a clean gutter-rail rendering drawn entirely with the shared TUI theme.
+- f5d0533: Derive the dev TUI's slash-command suggestion window from the command registry instead of a hand-maintained constant, and collapse the duplicated cursor step in the terminal line-wrap loop.
+
+## 0.29.3
+
+### Patch Changes
+
+- 22bfa02: Add guided Photon setup through `eve add channel/photon-imessage`, including project creation, phone registration, Vercel Connect or portable credentials, and channel scaffolding.
+- 0c0de19: Add an opt-in experimental steering policy to Chat SDK sends that cancels an active turn before delivering its replacement message.
+- b00a79d: Add `photonIMessageChannel`, a first-class Photon iMessage channel with lazy credentials, Vercel OIDC webhook verification, and automatic eve session routing.
+- 495e93b: Resolve leading `$HOME` paths in the built-in `read_file`, `write_file`, `glob`, and `grep` tools so agents can directly access packaged skill references advertised in their prompt.
+- bf01952: Local trace spans now capture model and tool payloads: the system prompt, prompt messages, and response text/reasoning/tool calls on model spans, and call arguments/results on tool spans, each capped at 32 KB with provider transport metadata stripped. Set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.
+- 680db59: Provider-executed tool calls (like a gateway's `web_search`) now show up in local traces: their calls and results are captured on the model span and the `/traces` viewer renders them as tool cards, with oversized outputs truncated to stay valid JSON.
+- 7ab6d8a: Terminal text wrapping in the dev TUI is now linear-time, so views rendering large single-line payloads (long tool results, big JSON) no longer stall on every repaint.
+- 52cee9c: Consolidate the three Vercel CLI subprocess runners onto one shared lifecycle. A `vercel` lookup killed by a signal (for example Ctrl-C during setup) now reports a cancellation failure instead of resolving as a success with truncated output.
+- 7703448: The local trace spool reader behind `eve traces` moved into a shared internal module; command behavior is unchanged.
+- 2d87acb: Subagent turn spans now record the dispatch that created them —
+  `agent.parent.session.id`, `agent.parent.turn.id`, `agent.parent.call_id`, and
+  `agent.subagent.name` — so a parent turn that fans out to several children can
+  be attributed to the exact tool call behind each one.
+- 3c846bc: The `/traces` viewer supports drag-to-select: dragging with the mouse highlights text and releasing copies it to the clipboard (OSC 52 with tmux passthrough, plus the platform clipboard command) with a confirmation toast. Clicks now act on release so drags never toggle cards, and Esc cancels an in-flight selection.
+- 3645c6e: The `/traces` viewer frame breathes: padding rows around the title and above the footer hints, the copy toast floats top-right as a small surface with a left edge bar, and the scroll wheel scrolls the attributes drawer when the pointer is over it.
+- 8858403: The local tracing subsystem (spool writer/reader, retention, the zero-config local OTel runtime, and agent span capture) moved from `src/harness` into its own `src/tracing` module; no behavior change.
+- 9adb455: Adds a `/traces` command to the dev TUI: a full-screen live viewer over the local trace spool that re-tells each trace as a chat-style conversation — system prompt, user and assistant messages, and tool calls render as expandable cards (arrow keys or mouse click to expand/collapse), with a right-side metadata drawer. Subagent turns are badged with their dispatch lineage (`subagent:<name>`), and the viewer opens on the trace containing the current session — including windowed sessions and subagent children recorded into a parent's trace. Expanded cards scroll line-by-line so content taller than the viewport is fully readable. Model spans with errors, token usage, or tool calls (but no text) now appear as cards instead of disappearing. Terminal escape sequences in trace payloads are stripped at render time. Tool-call arguments and results are captured without stripping domain-level `providerOptions`/`providerMetadata` keys. A single prompt message over 32 KiB is truncated at the text level so the serialized JSON stays parseable. Local spans capture system prompt, prompt messages, responses, reasoning, and tool arguments/results (`EVE_TRACES_CONTENT=off` to disable); long conversations truncate oldest messages first with an omission marker.
+- 275271d: Subagent runs now record into the trace of the session that dispatched them instead of a disconnected trace of their own, and `eve traces` resolves either session id to it. Local traces also open a real `agent.session` root span rather than a synthesized parent, so an authored OTel sampler's root rule decides whether a session is sampled, and a session long enough to outgrow one trace rolls into numbered windows that `eve traces <session-id>` lists oldest first. Rows whose lifetime outlives the worker that opened them — `agent.session` and `agent.turn` — now show the extent of their descendants instead of `0ms`.
+
 ## 0.29.2
 
 ### Patch Changes

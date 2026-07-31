@@ -46,18 +46,20 @@ export function registerRegistryCommands(input: {
     .command("list")
     .description("List items from all registries or one source.")
     .option("-r, --registry <source>", "List items from one registry.")
-    .action(async (options: { registry?: string }) => {
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean; registry?: string }) => {
       const { runRegistryListCommand } = await import("./registry.js");
-      await runRegistryListCommand(logger, appRoot, options.registry);
+      await runRegistryListCommand(logger, appRoot, options.registry, options);
     });
 
   registry
     .command("search <query>")
     .description("Search all registries or one source.")
     .option("-r, --registry <source>", "Search one registry.")
-    .action(async (query: string, options: { registry?: string }) => {
+    .option("--json", "Output as JSON")
+    .action(async (query: string, options: { json?: boolean; registry?: string }) => {
       const { runRegistrySearchCommand } = await import("./registry.js");
-      await runRegistrySearchCommand(logger, appRoot, query, options.registry);
+      await runRegistrySearchCommand(logger, appRoot, query, options.registry, options);
     });
 
   registry

@@ -63,6 +63,8 @@ export interface DevelopmentServerOptions {
   readonly existing?: "attach-if-unconfigured" | "reject";
   readonly host?: string;
   readonly onBootProgress?: DevBootProgressReporter;
+  /** Parent stream that receives a supervised development child's stdout. */
+  readonly output?: "stderr" | "stdout";
   readonly port?: number;
 }
 

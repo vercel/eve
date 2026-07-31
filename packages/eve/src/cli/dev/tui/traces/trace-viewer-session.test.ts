@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 
 import { createTheme } from "../theme.js";
 import type { TraceStore } from "./trace-store.js";
@@ -112,7 +112,7 @@ describe("TraceViewerSession drag copy", () => {
       const last = frames[frames.length - 1]?.join("\n") ?? "";
       if (!last.includes("copy me please")) throw new Error("no conversation frame yet");
     });
-    // Drag across the user card's text row (two header rows, then the
+    // Drag across the user card's text row (three header rows, then the
     // card's band, title, band, and padding rows): press, motion, release.
     session.handleKey({ type: "mouse", action: "press", button: 0, x: 1, y: 8 });
     session.handleKey({ type: "mouse", action: "press", button: 32, x: 40, y: 8 });
@@ -130,6 +130,90 @@ describe("TraceViewerSession drag copy", () => {
     session.handleKey({ type: "mouse", action: "release", button: 0, x: 75, y: 5 });
     expect(copied).toHaveLength(2);
     expect(copied[1]).toContain("agent.turn");
+    session.dispose();
+  });
+});
+
+describe("TraceViewerSession background surfaces", () => {
+  it("derives card bands from the OSC 11 background reply and repaints", async () => {
+    const turn = span("a".repeat(16), "session-mine");
+    const model: LocalTraceSpan = {
+      ...span("b".repeat(16), "session-mine"),
+      name: "ai.streamText.doStream",
+      parentSpanId: turn.spanId,
+      attributes: {
+        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+        "ai.response.text": "reply",
+      },
+    };
+    const store = stubStore([
+      {
+        endTimeNs: 1_000_000n,
+        sessionId: "session-mine",
+        sessionIds: ["session-mine"],
+        spans: [turn, model],
+        startTimeNs: 1_000_000n,
+        traceId: "c".repeat(32),
+      },
+    ]);
+    const frames: string[][] = [];
+    const session = new TraceViewerSession({
+      appRoot: "/nowhere",
+      dimensions: () => ({ width: 80, height: 24 }),
+      paint: (rows) => frames.push([...rows]),
+      store,
+      theme: createTheme({ color: true, unicode: true }),
+    });
+    session.start();
+    await vi.waitFor(() => {
+      const last = frames[frames.length - 1]?.join("\n") ?? "";
+      if (!last.includes("reply")) throw new Error("no conversation frame yet");
+    });
+    // Before the terminal answers the probe: rail rendering, no truecolor.
+    expect(frames[frames.length - 1]!.join("\n")).not.toContain("\x1b[48;2;");
+    session.setTerminalBackground({ r: 0, g: 0, b: 0 });
+    const surfaced = frames[frames.length - 1]!.join("\n");
+    expect(surfaced).toContain("\x1b[48;2;22;22;22m");
+    expect(surfaced).toContain("\x1b[48;2;36;36;36m");
+    session.dispose();
+  });
+
+  it("paints surfaces from the first conversation frame with a cached background", async () => {
+    const turn = span("a".repeat(16), "session-mine");
+    const model: LocalTraceSpan = {
+      ...span("b".repeat(16), "session-mine"),
+      name: "ai.streamText.doStream",
+      parentSpanId: turn.spanId,
+      attributes: {
+        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+        "ai.response.text": "reply",
+      },
+    };
+    const store = stubStore([
+      {
+        endTimeNs: 1_000_000n,
+        sessionId: "session-mine",
+        sessionIds: ["session-mine"],
+        spans: [turn, model],
+        startTimeNs: 1_000_000n,
+        traceId: "c".repeat(32),
+      },
+    ]);
+    const frames: string[][] = [];
+    const session = new TraceViewerSession({
+      appRoot: "/nowhere",
+      dimensions: () => ({ width: 80, height: 24 }),
+      paint: (rows) => frames.push([...rows]),
+      store,
+      terminalBackground: { r: 0, g: 0, b: 0 },
+      theme: createTheme({ color: true, unicode: true }),
+    });
+    session.start();
+    await vi.waitFor(() => {
+      const last = frames[frames.length - 1]?.join("\n") ?? "";
+      if (!last.includes("reply")) throw new Error("no conversation frame yet");
+    });
+    expect(frames[frames.length - 1]!.join("\n")).toContain("\x1b[48;2;22;22;22m");
     session.dispose();
   });
 });

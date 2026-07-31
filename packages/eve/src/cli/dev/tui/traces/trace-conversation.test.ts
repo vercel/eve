@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 
 import { createTheme } from "../theme.js";
 import { buildConversationItems, renderConversationItem } from "./trace-conversation.js";
+import { deriveTraceViewerSurfaces } from "./trace-surfaces.js";
 
 const THEME = createTheme({ color: false, unicode: true });
 const BASE = 1_700_000_000_000_000_000n;
@@ -264,17 +265,19 @@ describe("buildConversationItems", () => {
 });
 
 describe("renderConversationItem", () => {
-  it("renders the user message as a borderless card", () => {
+  it("renders the user message as a railed card", () => {
     const user = buildConversationItems(trace(weatherTurn())).find((item) => item.kind === "user")!;
     const lines = renderConversationItem(user, 60, THEME, false, false).map(stripAnsi);
-    // Padded header band, one body padding row, content, one padding row.
-    expect(lines[0]).toMatch(/^ +$/);
-    expect(lines[1]).toMatch(/^ {4}user + {4}$/);
-    expect(lines[2]).toMatch(/^ +$/);
-    expect(lines[3]).toMatch(/^ +$/);
-    expect(lines[4]).toMatch(/^ {4}weather in sf\? + {4}$/);
-    expect(lines[5]).toMatch(/^ +$/);
+    // Padded header band around the title, one body padding row, content,
+    // one padding row — every row padded to the full card width.
+    expect(lines[0]!.trimEnd()).toBe(" │");
+    expect(lines[1]!.trimEnd()).toBe(" │  user");
+    expect(lines[2]!.trimEnd()).toBe(" │");
+    expect(lines[3]!.trimEnd()).toBe(" │");
+    expect(lines[4]!.trimEnd()).toBe(" │  weather in sf?");
+    expect(lines[5]!.trimEnd()).toBe(" │");
     expect(lines).toHaveLength(6);
+    for (const line of lines) expect(visibleLength(line)).toBe(60);
   });
 
   it("renders the assistant title with model on the left and metrics right-aligned", () => {
@@ -346,7 +349,7 @@ describe("renderConversationItem", () => {
     const tool = items.find((item) => item.kind === "tool")!;
     const lines = renderConversationItem(tool, 60, THEME, false, false).map(stripAnsi);
     expect(lines[1]).toContain("get_weather");
-    // Duration is right-aligned at the end of the header row.
+    // Duration is right-aligned at the end of the title row.
     expect(lines[1]!.trimEnd()).toMatch(/300ms$/);
     expect(lines.some((line) => line.includes("Input:"))).toBe(true);
     expect(lines.some((line) => line.includes('"city": "sf"'))).toBe(true);
@@ -399,11 +402,12 @@ describe("renderConversationItem", () => {
     const headerIndex = lines.findIndex((line) => line.includes("Thought:"));
     const reasoningIndex = lines.findIndex((line) => line.includes("let me think about this"));
     const answerIndex = lines.findIndex((line) => line.includes("here is my answer"));
-    // Thought: header, a blank line, the reasoning, a blank line, the reply.
+    // Thought: header, a blank railed line, the reasoning, a blank railed
+    // line, the reply.
     expect(headerIndex).toBeGreaterThan(-1);
-    expect(lines[headerIndex + 1]!.trim()).toBe("");
+    expect(lines[headerIndex + 1]!.trim()).toBe("│");
     expect(reasoningIndex).toBe(headerIndex + 2);
-    expect(lines[reasoningIndex + 1]!.trim()).toBe("");
+    expect(lines[reasoningIndex + 1]!.trim()).toBe("│");
     expect(answerIndex).toBe(reasoningIndex + 2);
   });
 
@@ -422,32 +426,108 @@ describe("renderConversationItem", () => {
     const tool = items.find((item) => item.kind === "tool")!;
     const long = { ...tool, result: "x".repeat(500) };
     const collapsed = renderConversationItem(long, 60, THEME, false, false).map(stripAnsi);
-    expect(collapsed.some((line) => line.trim() === "…")).toBe(true);
+    expect(collapsed.some((line) => line.trim() === "│  …")).toBe(true);
     expect(collapsed.some((line) => line.includes("Click to expand"))).toBe(true);
     const expanded = renderConversationItem(long, 60, THEME, false, true).map(stripAnsi);
     expect(expanded.length).toBeGreaterThan(collapsed.length);
     expect(expanded.some((line) => line.includes("Click to collapse"))).toBe(true);
   });
 
-  it("marks the selected card with a bright bar and a solid surface", () => {
+  it("marks the selected card with a bright bar and rails the rest", () => {
     const assistant = buildConversationItems(trace(weatherTurn())).find(
       (item) => item.kind === "assistant",
     )!;
     const themed = createTheme({ color: true, unicode: true });
     const lines = renderConversationItem(assistant, 80, themed, true, false);
     for (const line of lines) {
-      // Cyan half-block bar on the left edge, no inverse.
+      // Bright half-block bar on the left edge, no inverse, no truecolor
+      // surface — the terminal's own background shows through.
       expect(line).toContain("\x1b[97m▌\x1b[39m");
       expect(line).not.toContain("\x1b[7m");
+      expect(line).not.toContain("\x1b[48;2;");
     }
-    // Header band rows in near-black, body rows in dark gray.
-    for (const line of lines.slice(0, 3)) expect(line).toContain("\x1b[48;2;22;22;22m");
-    for (const line of lines.slice(3)) expect(line).toContain("\x1b[48;2;36;36;36m");
     // The assistant title is bold white.
     expect(lines[1]).toContain("\x1b[97m");
     const unselected = renderConversationItem(assistant, 80, themed, false, false);
     expect(unselected[0]).not.toContain("▌");
-    expect(unselected[0]).toContain("\x1b[48;2;22;22;22m");
+    // Unselected cards carry a dim gutter rail instead.
+    expect(unselected[0]).toContain("\x1b[2m│\x1b[22m");
+  });
+
+  it("paints error cards with a red rail and a red error mark", () => {
+    const items = buildConversationItems(trace(weatherTurn()));
+    const tool = items.find((item) => item.kind === "tool")!;
+    const failed = { ...tool, error: true };
+    const themed = createTheme({ color: true, unicode: true });
+    const lines = renderConversationItem(failed, 60, themed, false, false);
+    for (const line of lines) expect(line).toContain("\x1b[31m│\x1b[39m");
+    expect(lines[1]).toContain("\x1b[31m⨯\x1b[39m");
+  });
+
+  it("draws elevated bands when surfaces are provided, on identical geometry", () => {
+    const items = buildConversationItems(trace(weatherTurn()));
+    const assistant = items.find((item) => item.kind === "assistant")!;
+    const themed = createTheme({ color: true, unicode: true });
+    // A black background reproduces the viewer's original dark palette.
+    const surfaces = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 0 });
+    const banded = renderConversationItem(assistant, 60, themed, false, false, surfaces);
+    // Header band rows in near-black, body rows in dark gray.
+    for (const line of banded.slice(0, 3)) expect(line).toContain("\x1b[48;2;22;22;22m");
+    for (const line of banded.slice(3)) expect(line).toContain("\x1b[48;2;36;36;36m");
+    // The band groups the card — no gutter rail.
+    expect(stripAnsi(banded[1]!)).not.toContain("│");
+    // Surfaced and railed layouts occupy the same rows and cells, so scroll,
+    // click, and drag-copy math never depend on the OSC 11 probe's outcome.
+    const railed = renderConversationItem(assistant, 60, themed, false, false);
+    expect(banded.length).toBe(railed.length);
+    for (const [index, line] of banded.entries()) {
+      expect(visibleLength(line)).toBe(visibleLength(railed[index]!));
+    }
+    // The selection bar still marks the selected card in its left margin.
+    const selected = renderConversationItem(assistant, 60, themed, true, false, surfaces);
+    expect(selected[0]).toContain("\x1b[38;2;255;255;255m▌\x1b[39m");
+    // Errors swap in the red bands.
+    const failed = { ...items.find((item) => item.kind === "tool")!, error: true };
+    const errorLines = renderConversationItem(failed, 60, themed, false, false, surfaces);
+    expect(errorLines[0]).toContain("\x1b[48;2;69;32;37m");
+    expect(errorLines[3]).toContain("\x1b[48;2;58;26;31m");
+  });
+
+  it("keeps the band behind the metrics when a styled title clips mid-row", () => {
+    const assistant = buildConversationItems(trace(weatherTurn())).find(
+      (item) => item.kind === "assistant",
+    )!;
+    const themed = createTheme({ color: true, unicode: true });
+    const surfaces = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 0 });
+    // Narrow enough (like a card beside the open drawer) that the styled
+    // title clips, which embeds a full SGR reset mid-row. The band must
+    // re-open after it, or the gap and right-aligned metrics render on the
+    // terminal's default background.
+    const title = renderConversationItem(assistant, 46, themed, false, false, surfaces)[1]!;
+    expect(stripAnsi(title)).toContain("↓50");
+    const afterResets = title.split("\x1b[0m").slice(1);
+    expect(afterResets.length).toBeGreaterThan(1);
+    for (const segment of afterResets) {
+      expect(segment.startsWith("\x1b[48;2;22;22;22m")).toBe(true);
+    }
+  });
+
+  it("inverts primary text on light backgrounds so titles stay legible", () => {
+    const assistant = buildConversationItems(trace(weatherTurn())).find(
+      (item) => item.kind === "assistant",
+    )!;
+    const themed = createTheme({ color: true, unicode: true });
+    const light = deriveTraceViewerSurfaces({ r: 255, g: 255, b: 255 });
+    const lines = renderConversationItem(assistant, 80, themed, true, false, light);
+    // The title renders in black, not the theme's fixed bright white.
+    expect(lines[1]).toContain("\x1b[38;2;0;0;0massistant\x1b[39m");
+    expect(lines[1]).not.toContain("\x1b[97m");
+    // The selection bar follows the same primary so it shows on the white canvas.
+    for (const line of lines) expect(line).toContain("\x1b[38;2;0;0;0m▌\x1b[39m");
+    // Dark backgrounds keep the bright-white primary.
+    const dark = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 0 });
+    const darkLines = renderConversationItem(assistant, 80, themed, true, false, dark);
+    expect(darkLines[1]).toContain("\x1b[38;2;255;255;255massistant\x1b[39m");
   });
 
   it("never emits rows wider than the given width", () => {

@@ -40,13 +40,26 @@ export function formatAttributeContent(
     const transcript = messageTranscript(value, theme, width);
     if (transcript !== undefined) return transcript;
   }
-  const parsed = parseJson(value);
+  return formatPayloadContent(value, width);
+}
+
+/**
+ * Wraps text to `width`, splitting on embedded newlines so a multi-line payload
+ * keeps its shape, and stripping control bytes the frame must not carry.
+ */
+export function wrapPlainText(text: string, width: number): string[] {
+  return splitEmbeddedNewlines([stripTerminalControls(text)]).flatMap((line) =>
+    wrapVisibleLine(line, width),
+  );
+}
+
+/** Formats a payload: JSON structure pretty-prints, anything else stays text. */
+export function formatPayloadContent(text: string, width: number): string[] {
+  const parsed = parseJson(text);
   if (parsed !== undefined && (Array.isArray(parsed) || isRecord(parsed))) {
     return prettyJson(parsed, width);
   }
-  return splitEmbeddedNewlines([stripTerminalControls(value)]).flatMap((line) =>
-    wrapVisibleLine(line, width),
-  );
+  return wrapPlainText(text, width);
 }
 
 function messageTranscript(raw: string, theme: Theme, width: number): string[] | undefined {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 
 import type { TraceStoreEntry } from "./trace-store.js";
 import type { TerminalKey } from "../stream-format.js";

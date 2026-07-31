@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 
 import { createTheme } from "../theme.js";
+import { deriveTraceViewerSurfaces } from "./trace-surfaces.js";
 import {
   conversationSelectionText,
   panelSelectionText,
@@ -144,7 +145,7 @@ describe("renderTraceViewer", () => {
 
   it("extracts the dragged text from the rendered conversation", () => {
     const state = viewerState(conversationSpans());
-    // The system card's title row is line 1 ("  ▸ system" once rendered).
+    // The system card's title row is line 1 (" │  system" once rendered).
     const selection = {
       anchor: { line: 1, column: 0 },
       head: { line: 1, column: 40 },
@@ -221,7 +222,8 @@ describe("renderTraceViewer", () => {
     );
     const body = frame.rows.map(stripAnsi).join("\n");
     expect(body).toContain("explode");
-    expect(frame.rows.some((row) => row.includes("\x1b[48;2;69;32;37m"))).toBe(true);
+    // The failed card carries a red error mark beside its title.
+    expect(frame.rows.some((row) => row.includes("\x1b[31m⨯"))).toBe(true);
   });
 
   it("opens the details drawer on the right with the selected card's attributes", () => {
@@ -317,18 +319,70 @@ describe("renderTraceViewer", () => {
     expect(frame.panelTotalRows).toBe(0);
   });
 
-  it("paints every frame row on the viewer's base canvas at full width", () => {
+  it("renders on the terminal's own background — no truecolor surfaces", () => {
     const frame = render(viewerState(conversationSpans()), 100, 30);
     for (const row of frame.rows) {
-      expect(row).toContain("\x1b[48;2;0;0;0m");
-      expect(visibleLength(row)).toBe(100);
+      expect(row).not.toContain("\x1b[48;2;");
+      expect(visibleLength(row)).toBeLessThanOrEqual(100);
     }
     const plain = renderTraceViewer(viewerState(conversationSpans()), {
       width: 100,
       height: 30,
       theme: NO_COLOR_THEME,
     });
-    for (const row of plain.rows) expect(row).not.toContain("\x1b[48;2;");
+    for (const row of plain.rows) expect(row).not.toContain("\x1b[");
+  });
+
+  it("paints card bands and a surfaced toast when the background is known", () => {
+    const surfaces = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 0 });
+    const frame = renderTraceViewer(viewerState(conversationSpans()), {
+      width: 100,
+      height: 30,
+      theme: THEME,
+      surfaces,
+      toast: "Copied to clipboard",
+    });
+    expect(frame.rows.some((row) => row.includes("\x1b[48;2;22;22;22m"))).toBe(true);
+    expect(frame.rows.some((row) => row.includes("\x1b[48;2;36;36;36m"))).toBe(true);
+    // The toast sits on the body band, message row between its padding rows.
+    expect(frame.rows[3]).toContain("\x1b[48;2;36;36;36m");
+    expect(stripAnsi(frame.rows[3]!)).toContain("▌  Copied to clipboard");
+    // Rows never exceed the terminal width even with the bands painted.
+    for (const row of frame.rows) expect(visibleLength(row)).toBeLessThanOrEqual(100);
+    // On a light background the toast's primary text inverts to black.
+    const lightFrame = renderTraceViewer(viewerState(conversationSpans()), {
+      width: 100,
+      height: 30,
+      theme: THEME,
+      surfaces: deriveTraceViewerSurfaces({ r: 255, g: 255, b: 255 }),
+      toast: "Copied to clipboard",
+    });
+    expect(lightFrame.rows[3]).toContain("\x1b[38;2;0;0;0m  Copied to clipboard  \x1b[39m");
+    expect(lightFrame.rows[3]).not.toContain("\x1b[97m");
+  });
+
+  it("anchors the chrome — header, footer controls, drawer — to the probed background", () => {
+    const light = deriveTraceViewerSurfaces({ r: 255, g: 255, b: 255 });
+    const frame = renderTraceViewer(
+      viewerState(conversationSpans(), { panelOpen: true, selectedRow: 2 }),
+      { width: 100, height: 30, theme: THEME, surfaces: light },
+    );
+    // Header: primary title, muted metadata segments.
+    expect(frame.rows[1]).toContain("\x1b[1m\x1b[38;2;0;0;0m▲ traces\x1b[39m\x1b[22m");
+    expect(frame.rows[1]).toContain("\x1b[38;2;115;115;115m");
+    // Footer control hints render as black-anchored muted text.
+    const footer = frame.rows[frame.rows.length - 2]!;
+    expect(footer).toContain("\x1b[38;2;115;115;115m");
+    expect(footer).toContain("q close");
+    // Drawer: primary span name and muted fact labels.
+    expect(
+      frame.rows.some((row) => row.includes("\x1b[38;2;0;0;0mai.streamText.doStream\x1b[39m")),
+    ).toBe(true);
+    expect(frame.rows.some((row) => row.includes("\x1b[38;2;115;115;115mstatus"))).toBe(true);
+    // Without surfaces the chrome keeps the theme's plain emphasis.
+    const plain = render(viewerState(conversationSpans(), { panelOpen: true, selectedRow: 2 }));
+    expect(plain.rows[1]).toContain("\x1b[1m▲ traces\x1b[22m");
+    expect(plain.rows.join("\n")).not.toContain("\x1b[38;2;");
   });
 });
 

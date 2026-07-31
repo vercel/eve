@@ -53,6 +53,7 @@ export type {
   ResolvedStreamReconnectPolicy,
   SendTurnInput,
   SendTurnPayload,
+  SessionSnapshot,
   SessionState,
   StreamOptions,
   StreamReconnectPolicy,

@@ -45,6 +45,15 @@ export type TerminalKey =
   | { type: "ctrl-l" }
   | { type: "ctrl-r" }
   | { type: "ctrl-c" }
+  | {
+      /**
+       * An OSC sequence from the terminal (`ESC ] … BEL`/`ST`) — a reply to a
+       * query such as the OSC 11 background-color probe, never a keypress.
+       * `value` is the payload between the opener and the terminator.
+       */
+      type: "osc";
+      value: string;
+    }
   | { type: "ignore" };
 
 /** One decoded key plus the UTF-16 code units it consumed from the input buffer. */
@@ -96,6 +105,15 @@ export function isIncompletePaste(buffer: string): boolean {
 /** Drops a leading bracketed-paste start marker, leaving the buffered payload. */
 export function stripPasteStart(buffer: string): string {
   return buffer.startsWith(PASTE_START) ? buffer.slice(PASTE_START.length) : buffer;
+}
+
+/**
+ * True when `buffer` opens an OSC sequence whose terminator hasn't arrived.
+ * {@link nextKey} reports such a buffer as `incomplete` indefinitely, so the
+ * caller needs this to recover if the terminator never comes.
+ */
+export function isIncompleteOsc(buffer: string): boolean {
+  return buffer.startsWith("\x1b]") && !buffer.includes("\x07", 2) && !buffer.includes("\x1b\\", 2);
 }
 
 /** Removes C0 control characters and DEL from text intended for the prompt. */
@@ -150,6 +168,19 @@ export function nextKey(buffer: string): KeyToken {
         }
       }
       return { consumed: 0, incomplete: true };
+    }
+    if (second === "]") {
+      // OSC (`ESC ] … BEL` or `ESC ] … ESC \`): a terminal's reply to a query
+      // (e.g. the OSC 11 background-color probe). Tokenized whole so a reply
+      // never garbles the key stream; the payload excludes the terminator.
+      const bel = buffer.indexOf("\x07", 2);
+      const st = buffer.indexOf("\x1b\\", 2);
+      if (bel === -1 && st === -1) return { consumed: 0, incomplete: true };
+      const end = bel === -1 ? st : st === -1 ? bel : Math.min(bel, st);
+      return {
+        key: { type: "osc", value: buffer.slice(2, end) },
+        consumed: end + (end === bel ? 1 : 2),
+      };
     }
     // `ESC` + another byte (e.g. Alt+key): surface the Escape and re-tokenize.
     return { key: { type: "escape" }, consumed: 1 };
