@@ -32,12 +32,6 @@ export type AgentInfoState =
       readonly updatedAt: number;
     };
 
-export interface ChatSessionCursor {
-  readonly continuationToken?: string;
-  readonly sessionId?: string;
-  readonly streamIndex: number;
-}
-
 export interface TranscriptMessageReceivedEvent {
   readonly data: {
     readonly message: string;
@@ -175,15 +169,4 @@ export interface TraceTurn {
   readonly subagentCount: number;
   readonly turnId: string;
   readonly userMessage?: string;
-}
-
-/**
- * One restored thread in the local web UI, expressed directly in reconstructed
- * transcript turns so chat and debugger can render from the same source.
- */
-export interface ThreadState {
-  readonly continuationToken?: string;
-  readonly sessionId: string;
-  readonly streamIndex: number;
-  readonly turns: readonly TraceTurn[];
 }
