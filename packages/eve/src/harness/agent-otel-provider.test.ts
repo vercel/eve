@@ -79,13 +79,28 @@ async function emitAttempt(input: {
   ]);
   await Reflect.apply(bridge.onStepStart!, bridge, [{ callId: "call-1", stepNumber: 0 }]);
   await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
-    { callId: "call-1", messages: [], modelId: "claude-test", provider: "anthropic" },
+    {
+      callId: "call-1",
+      instructions: "You are a weather assistant (system prompt).",
+      messages: [
+        {
+          content: "real user text",
+          providerOptions: { anthropic: { signature: "sig-blob" } },
+          role: "user",
+        },
+      ],
+      modelId: "claude-test",
+      provider: "anthropic",
+    },
   ]);
   await bridge.executeLanguageModelCall!({ callId: "call-1", execute: async () => undefined });
   await Reflect.apply(bridge.onLanguageModelCallEnd!, bridge, [
     {
       callId: "call-1",
-      content: [],
+      content: [
+        { type: "reasoning", text: "thinking about weather" },
+        { type: "text", text: "Checking the weather." },
+      ],
       finishReason: "tool-calls",
       performance: { responseTimeMs: 10 },
       responseId: "response-1",
@@ -231,7 +246,134 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.framework.name": "eve",
       "agent.root.session.id": "session-1",
     });
+  });
+
+  it("captures model and tool inputs/outputs on the operation spans", async () => {
+    const runtime = createRuntime();
+    await emitAttempt({
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const model = byName(spans, "ai.streamText.doStream")[0]!;
+    const tool = byName(spans, "ai.toolCall")[0]!;
+    // Provider transport noise (signatures et al.) is stripped at capture time.
+    expect(model.attributes["ai.prompt.messages"]).toBe(
+      '[{"content":"real user text","role":"user"}]',
+    );
+    expect(model.attributes["ai.prompt.system"]).toBe(
+      "You are a weather assistant (system prompt).",
+    );
+    expect(model.attributes["ai.response.finish_reason"]).toBe("tool-calls");
+    expect(model.attributes["ai.response.reasoning"]).toBe("thinking about weather");
+    expect(model.attributes["ai.response.text"]).toBe("Checking the weather.");
+    expect(tool.attributes["gen_ai.tool.call.arguments"]).toBe('{"secret":"value"}');
+    expect(tool.attributes["gen_ai.tool.call.result"]).toBe('{"temperature":72}');
+    // Structural spans stay structural: content lives only on the operation spans.
+    const structural = byName(spans, "agent.action")[0]!;
+    expect(JSON.stringify(structural.attributes)).not.toContain("secret");
+    expect(JSON.stringify(structural.attributes)).not.toContain("temperature");
+  });
+
+  it("truncates long conversations from the front, keeping valid JSON and recent messages", async () => {
+    const runtime = createRuntime();
+    const manyMessages = Array.from({ length: 200 }, (_, index) => ({
+      content: `message ${index} ${"x".repeat(200)}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+    }));
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn-1:0:0",
+      attemptIndex: 0,
+      functionId: "weather",
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    await runtime.hooks.publish({
+      agentName: "weather",
+      channelKind: "http",
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      type: "session.started",
+    });
+    await runtime.hooks.publish({
+      rootSessionId: "session-1",
+      sequence: 0,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "turn.started",
+    });
+    const bridge = createAiSdkHookBridge(scope, runtime.hooks, runtime.runInContext);
+    Reflect.apply(bridge.onStart!, bridge, [
+      {
+        callId: "call-1",
+        messages: manyMessages,
+        modelId: "claude-test",
+        operationId: "ai.streamText",
+        provider: "anthropic",
+      },
+    ]);
+    await Reflect.apply(bridge.onStepStart!, bridge, [{ callId: "call-1", stepNumber: 0 }]);
+    await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
+      { callId: "call-1", messages: manyMessages, modelId: "claude-test", provider: "anthropic" },
+    ]);
+    await bridge.executeLanguageModelCall!({ callId: "call-1", execute: async () => undefined });
+    await Reflect.apply(bridge.onLanguageModelCallEnd!, bridge, [
+      {
+        callId: "call-1",
+        content: [],
+        finishReason: "stop",
+        performance: { responseTimeMs: 10 },
+        responseId: "response-1",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+    ]);
+    await runtime.provider.forceFlush();
+
+    const model = byName(runtime.exporter.getFinishedSpans(), "ai.streamText.doStream")[0]!;
+    const raw = model.attributes["ai.prompt.messages"];
+    expect(typeof raw).toBe("string");
+    expect((raw as string).length).toBeLessThanOrEqual(32 * 1024);
+    const parsed = JSON.parse(raw as string) as Array<Record<string, unknown>>;
+    const marker = parsed[0]!["eve.truncated"] as { omittedMessages: number };
+    expect(marker.omittedMessages).toBeGreaterThan(0);
+    expect(marker.omittedMessages).toBeLessThan(200);
+    expect(JSON.stringify(parsed)).toContain("message 199");
+    expect(JSON.stringify(parsed)).not.toContain("message 0 ");
+  });
+
+  it("captures nothing when content capture is off", async () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    const agentOtel = createAgentOtelInstrumentation({
+      captureContent: false,
+      frameworkVersion: "test",
+      stateStore: new InMemoryAgentTraceStateStore(),
+      tracer: provider.getTracer("eve.agent"),
+    });
+    const hooks = createInstrumentationHooks([agentOtel.hook]);
+    await emitAttempt({
+      hooks,
+      runInContext: agentOtel.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await provider.forceFlush();
+
+    const spans = exporter.getFinishedSpans();
+    expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("secret");
+    expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("temperature");
     expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("private");
+    expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("real user text");
+    expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("system prompt");
   });
 
   it("writes gateway cost attributes on the step span when the gateway reports them", async () => {

@@ -13,7 +13,7 @@ When no authored `instrumentation.ts` exists, `eve dev` records agent, AI SDK, a
 
 The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits, subject to the [retention policy](#local-trace-retention) below. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
 
-Use `eve traces ls` to list captured traces and `eve traces <trace>` to inspect a session's span tree.
+Use `eve traces ls` to list captured traces and `eve traces <trace>` to inspect a session's span tree. Model and tool-call spans also carry the inputs and outputs (system prompt, prompt messages, and response text for models; call arguments and results for tools, each capped at 32 KB) — set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.
 
 When a model call is served by Vercel AI Gateway, its `agent.step` span also carries the cost the gateway reported: `gen_ai.usage.cost` (raw inference, USD), `gen_ai.usage.gateway_cost` (with the gateway surcharge), `gen_ai.usage.input_cost` / `gen_ai.usage.output_cost` (the split), and `gen_ai.generation.id` for reconciliation with the gateway dashboard. These attributes only exist for gateway-served calls — other providers emit nothing. Cost per turn is the sum across the turn's step spans.
 
@@ -34,12 +34,13 @@ Whatever survives is then evicted oldest-first while the store exceeds `EVE_TRAC
 
 Open sessions are tracked per dev worker, so a session waiting across a restart, or a trace a draining worker is still writing, is not covered by the first rule. The five-minute write-recency rule is what protects those, and it applies even when you set `EVE_TRACES_MAX_AGE_MS=0`.
 
-| Variable                     | Default              | Effect                                        |
-| ---------------------------- | -------------------- | --------------------------------------------- |
-| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping |
-| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted        |
-| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store               |
-| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size  |
+| Variable                     | Default              | Effect                                                                                      |
+| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
+| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping                                               |
+| `EVE_TRACES_CONTENT`         | on                   | `off` stops capturing model prompt/response and tool input/output attributes on local spans |
+| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted                                                      |
+| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store                                                             |
+| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size                                                |
 
 Set these in `.env.local`, which `eve dev` loads automatically. Each bound accepts `off` to disable it individually — note that `EVE_TRACES_RETAIN_COUNT=off` removes the keep-newest guarantee rather than retaining everything.
 
