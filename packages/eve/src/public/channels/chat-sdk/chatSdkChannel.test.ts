@@ -13,7 +13,7 @@ import {
   messageToUserContent,
   type ChatSdkChannelState,
 } from "#public/channels/chat-sdk/index.js";
-import type { RouteHandlerArgs, SendFn } from "#public/definitions/channel.js";
+import type { CancelFn, RouteHandlerArgs, SendFn } from "#public/definitions/channel.js";
 import type {
   Adapter,
   AdapterPostableMessage,
@@ -88,6 +88,7 @@ async function firePost(
   path: string,
   body: Record<string, unknown>,
 ): Promise<{
+  cancel: ReturnType<typeof vi.fn<CancelFn>>;
   response: Response;
   send: ReturnType<typeof vi.fn<SendFn<ChatSdkChannelState>>>;
   waitUntil: ReturnType<typeof vi.fn>;
@@ -110,6 +111,7 @@ async function firePost(
       return -1;
     },
   });
+  const cancel = vi.fn<CancelFn>().mockResolvedValue({ status: "accepted" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(
@@ -121,7 +123,7 @@ async function firePost(
     {
       getSession: vi.fn() as any,
       resolveActiveSession: async () => undefined,
-      cancel: vi.fn(),
+      cancel,
       reset: vi.fn(),
       params: {},
       receive: vi.fn() as any,
@@ -138,7 +140,7 @@ async function firePost(
     await Promise.allSettled(pending);
   }
 
-  return { response, send, waitUntil };
+  return { cancel, response, send, waitUntil };
 }
 
 describe("chatSdkChannel", () => {
@@ -205,11 +207,12 @@ describe("chatSdkChannel", () => {
       await bridge.send(message.text, { auth: AUTH, thread, title: "mention" });
     });
 
-    const { response, send } = await firePost(bridge.channel, "/eve/v1/test", {
+    const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
       text: "@bot hello",
     });
 
     expect(response.status).toBe(200);
+    expect(cancel).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0]).toBe("@bot hello");
     expect(send.mock.calls[0]?.[1]).toMatchObject({
@@ -225,6 +228,68 @@ describe("chatSdkChannel", () => {
       },
       title: "mention",
     });
+  });
+
+  it("cancels the active turn before an experimental steering send", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      concurrency: "concurrent",
+      state: memoryState(),
+      userName: "bot",
+    });
+
+    bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
+      await bridge.send(message.text, {
+        auth: AUTH,
+        thread,
+        turnPolicy: "experimental-steer",
+      });
+    });
+
+    const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
+      text: "@bot correction",
+    });
+
+    expect(response.status).toBe(200);
+    expect(cancel).toHaveBeenCalledWith({ continuationToken: THREAD_ID });
+    expect(send).toHaveBeenCalledWith("@bot correction", {
+      auth: AUTH,
+      continuationToken: THREAD_ID,
+      state: {
+        thread: expect.objectContaining({
+          adapterName: "test",
+          id: THREAD_ID,
+        }),
+      },
+    });
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
+  });
+
+  it("does not cancel for an experimental steering response without a message", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      concurrency: "concurrent",
+      state: memoryState(),
+      userName: "bot",
+    });
+
+    bridge.bot.onNewMention(async (thread: Thread) => {
+      await bridge.send(
+        { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
+        { thread, turnPolicy: "experimental-steer" },
+      );
+    });
+
+    const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
+      text: "@bot approve",
+    });
+
+    expect(response.status).toBe(200);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(
+      { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
+      expect.objectContaining({ continuationToken: THREAD_ID }),
+    );
   });
 
   it("fails loudly when bridge.send is called outside a Chat SDK webhook", async () => {

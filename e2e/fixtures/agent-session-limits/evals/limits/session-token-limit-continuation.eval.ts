@@ -10,6 +10,7 @@ import { equals } from "eve/evals/expect";
  * a user decision, not an error and not a session end.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Session token limit parks on a continuation prompt; approve resumes, stop cancels.",
   async test(t) {
     // The 1-token budget lets this first call finish (limits are checked

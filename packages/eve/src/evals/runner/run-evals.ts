@@ -185,17 +185,19 @@ function buildReporterBindings(
   return bindings;
 }
 
-/**
- * Fills an eval's judge model from the run config when the eval does not set
- * its own. The judge model only ever drives `t.judge.*` assertions.
- */
+/** Fills per-eval defaults from the run config without replacing authored values. */
 function applyConfigDefaults(evaluation: EveEval, config: EveEvalConfig): EveEval {
-  if (evaluation.judge !== undefined || config.judge === undefined) {
+  const judge = evaluation.judge ?? config.judge;
+  const timeoutMs = evaluation.timeoutMs ?? config.timeoutMs;
+
+  if (judge === evaluation.judge && timeoutMs === evaluation.timeoutMs) {
     return evaluation;
   }
+
   return {
     ...evaluation,
-    judge: config.judge,
+    judge,
+    timeoutMs,
   };
 }
 

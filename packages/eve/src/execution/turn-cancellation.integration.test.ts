@@ -489,7 +489,10 @@ describe("turn cancellation integration", () => {
         // settled and its cancel hook swept, it reports the benign status.
         await waitForHookSweep(sessionCancelHookToken(run.runId));
         const session = createSession(run.runId, rawToken, workflowRuntime);
-        await expect(session.cancel()).resolves.toEqual({ status: "no_active_turn" });
+        await expect(session.cancel()).resolves.toEqual({
+          reason: "HookNotFoundError",
+          status: "no_active_turn",
+        });
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {

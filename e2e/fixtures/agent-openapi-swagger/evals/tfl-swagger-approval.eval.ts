@@ -4,6 +4,7 @@ const SEARCH_TOOL = "connection_search";
 const TFL_APPROVAL_JOURNEY_MODES_TOOL = "tfl-approval__Journey_Meta";
 
 export default defineEval({
+  tags: ["real-model"],
   description:
     "OpenAPI connection HITL: an approval-gated TfL Swagger operation parks before execution.",
 

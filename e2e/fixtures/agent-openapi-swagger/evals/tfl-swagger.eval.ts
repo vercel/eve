@@ -4,6 +4,7 @@ const SEARCH_TOOL = "connection_search";
 const TFL_JOURNEY_MODES_TOOL = "tfl__Journey_Meta";
 
 export default defineEval({
+  tags: ["real-model"],
   description:
     "OpenAPI connection smoke: TfL's Swagger 2.0 document exposes and calls Journey_Meta.",
 

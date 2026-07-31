@@ -101,6 +101,7 @@ async function postChannel(
  * before the matching action request and result.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Channel event smoke: pre-tool narration is visible when an action is requested.",
   async test(t) {
     const token = `channel-narration-${randomBytes(4).toString("hex")}`;

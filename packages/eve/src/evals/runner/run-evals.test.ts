@@ -382,6 +382,56 @@ describe("runEvals", () => {
     expect(peak).toBe(2);
   });
 
+  it("applies config timeouts while preserving eval and CLI overrides", async () => {
+    mockArtifacts();
+    mockedRunnerDependencies.executeTask.mockResolvedValue(createTaskResult("done"));
+
+    await run({
+      evaluations: [createEval("uses-config"), createEval("uses-eval", { timeoutMs: 2_000 })],
+      config: {
+        _tag: "EveEvalConfig",
+        timeoutMs: 1_000,
+      },
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [],
+      maxConcurrency: 1,
+    });
+
+    expect(mockedRunnerDependencies.executeTask.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        evaluation: expect.objectContaining({ id: "uses-config", timeoutMs: 1_000 }),
+        timeoutMs: 1_000,
+      }),
+    );
+    expect(mockedRunnerDependencies.executeTask.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        evaluation: expect.objectContaining({ id: "uses-eval", timeoutMs: 2_000 }),
+        timeoutMs: 2_000,
+      }),
+    );
+
+    mockedRunnerDependencies.executeTask.mockClear();
+
+    await run({
+      evaluations: [createEval("uses-cli", { timeoutMs: 2_000 })],
+      config: {
+        _tag: "EveEvalConfig",
+        timeoutMs: 1_000,
+      },
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [],
+      timeoutMs: 500,
+    });
+
+    expect(mockedRunnerDependencies.executeTask).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 500 }),
+    );
+  });
+
   it("drives config reporters across every eval and dedupes eval references", async () => {
     mockArtifacts();
     mockedRunnerDependencies.executeTask.mockResolvedValue(createTaskResult("done"));

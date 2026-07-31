@@ -37,6 +37,8 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly initialInput?: string;
   /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */
   readonly onBootProgress?: DevBootProgressReporter;
+  /** Gives setup subprocesses exclusive terminal and development-host ownership. */
+  withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly lifecycle?: CommandLifecycle;
 }
 
@@ -82,7 +84,15 @@ function prepareDevelopmentTarget(target: DevelopmentTuiTarget): PreparedDevelop
  * the inline error region rather than crashing the command.
  */
 export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void> {
-  const { target, headers, initialInput, onBootProgress, lifecycle, ...display } = input;
+  const {
+    target,
+    headers,
+    initialInput,
+    onBootProgress,
+    lifecycle,
+    withExclusiveTerminal,
+    ...display
+  } = input;
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
   const headerOptions = headers === undefined ? {} : { headers };
@@ -122,6 +132,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   if (initialInput !== undefined) options.initialInput = initialInput;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
   if (lifecycle !== undefined) options.lifecycle = lifecycle;
+  if (withExclusiveTerminal !== undefined) options.withExclusiveTerminal = withExclusiveTerminal;
 
   const diagnostics =
     prepared.kind === "local"

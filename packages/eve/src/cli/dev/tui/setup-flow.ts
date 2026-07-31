@@ -2,7 +2,7 @@ import type { ChannelSetupChoice, ChannelSetupChoiceOptions } from "#setup/cli/i
 import type { SearchActionOption } from "#setup/cli/select-state.js";
 import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { SelectMetadata, SelectNotice } from "#setup/prompter.js";
 
 import type { SetupPanelOption } from "./setup-panel.js";
 
@@ -18,6 +18,8 @@ export type SetupFlowStatus = string | { kind: "external-action"; text: string; 
 
 interface SetupSelectRequestBase {
   message: string;
+  description?: string;
+  metadata?: readonly SelectMetadata[];
   options: readonly SetupPanelOption[];
   notices?: readonly SelectNotice[];
 }
@@ -102,15 +104,23 @@ export interface SetupFlowRenderer {
   setStatus(status: SetupFlowStatus | undefined): void;
   renderLine(text: string, tone: "info" | "success" | "warning" | "error"): void;
   renderOutput(text: string): void;
+  /** Temporarily restores the terminal while a child process inherits stdio. */
+  withInheritedStdio<T>(task: () => Promise<T>): Promise<T>;
+  /** Gives a setup subprocess exclusive terminal and development-host ownership. */
+  withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
   /**
    * Arms a key trap for the flow's working state — the status indicator between
    * questions, where no prompt is consuming keys. Ctrl-C or Esc resolves the
    * promise so the command can abandon an in-flight flow (e.g. a parked
    * `vercel connect create` browser OAuth). Open questions own their keys; the
-   * trap covers only the gaps. `dispose` releases the trap; the promise then
-   * never resolves.
+   * trap covers only the gaps. `interruptible: false` still consumes and
+   * discards input but does not cancel non-abortable work. `dispose` releases
+   * the trap; the promise then never resolves.
    */
-  waitForInterrupt(): { promise: Promise<void>; dispose(): void };
+  waitForInterrupt(options?: { interruptible?: boolean }): {
+    promise: Promise<void>;
+    dispose(): void;
+  };
 }
 
 export type SetupFlowPrompterRenderer = Pick<
@@ -123,4 +133,6 @@ export type SetupFlowPrompterRenderer = Pick<
   | "setStatus"
   | "renderLine"
   | "renderOutput"
+  | "withInheritedStdio"
+  | "withExclusiveTerminal"
 >;

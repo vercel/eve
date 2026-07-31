@@ -14,7 +14,7 @@ import {
 const TRACE_ONE = "1".repeat(32);
 const TRACE_TWO = "2".repeat(32);
 
-describe("eve trace", () => {
+describe("eve traces", () => {
   const roots: string[] = [];
 
   afterEach(async () => {

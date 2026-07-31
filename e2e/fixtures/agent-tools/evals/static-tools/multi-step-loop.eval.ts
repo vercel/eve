@@ -6,6 +6,7 @@ const MULTI_STEP_FINAL_VALUE = "phoenix-rising-9F2X";
 // lookup-step-b in order, and the final value flows back into the
 // user-visible reply.
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: deterministic two-step tool loop.",
   async test(t) {
     await t.send(

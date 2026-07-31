@@ -3,6 +3,7 @@ import {
   getRegistryItems,
   searchRegistries,
   type RegistryConfig,
+  type RegistrySearchItem,
 } from "#compiled/shadcn-registry/index.js";
 import semver from "#compiled/semver/index.js";
 import { z } from "#compiled/zod/index.js";
@@ -25,9 +26,14 @@ export interface AddCommandOptions {
   overwrite?: boolean;
   skipSetup?: boolean;
   yes?: boolean;
+  /** Suppresses the registry SDK's terminal-native progress output. */
+  silent?: boolean;
 }
 
-type SetupCommandOptions = Pick<AddCommandOptions, "yes">;
+type SetupCommandOptions = Pick<AddCommandOptions, "yes"> & {
+  prompter?: Prompter;
+  signal?: AbortSignal;
+};
 
 export interface RegistrySetupDependencies {
   loadSetupCommandRunner(): Promise<typeof runRegistrySetupCommand>;
@@ -38,6 +44,23 @@ export interface AddCommandDependencies extends RegistrySetupDependencies {
   isInteractive?: () => boolean;
 }
 
+/** One discoverable item from an eve-compatible registry catalog. */
+export interface RegistryCatalogItem {
+  address: string;
+  name: string;
+  title?: string;
+  type?: string;
+  description?: string;
+  source: string;
+}
+
+/** Catalog items plus non-fatal failures from the registry sources queried. */
+export interface RegistryCatalogResult {
+  items: RegistryCatalogItem[];
+  total: number;
+  errors: Array<{ message: string; registry: string }>;
+}
+
 const defaultAddCommandDependencies: AddCommandDependencies = {
   createPrompter,
   isInteractive: () => process.stdin.isTTY === true && process.stdout.isTTY === true,
@@ -45,8 +68,11 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
 };
 
-const OFFICIAL_REGISTRY = "https://eve.dev/r";
+const OFFICIAL_REGISTRY = process.env.EVE_DEV_OFFICIAL_REGISTRY_URL ?? "https://eve.dev/r";
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
+
+// shadcn's registry search response omits titles. Keep this one exception until it includes them.
+const OFFICIAL_CATALOG_TITLES = new Map([["channel/photon-imessage", "Photon iMessage"]]);
 
 function isRegistryAddress(value: string): boolean {
   return value.startsWith("@") || /^https?:\/\//.test(value);
@@ -176,20 +202,54 @@ function printSearchResults(
   }
 }
 
+async function searchRegistryCatalog(
+  appRoot: string,
+  options: { query?: string; source?: string },
+) {
+  validateRegistrySource(options.source);
+  const config = await readRegistryConfig(appRoot);
+  const sources = options.source
+    ? [options.source]
+    : [OFFICIAL_CATALOG, ...configuredRegistrySources(config)];
+  const result = await searchRegistries(sources, {
+    config,
+    continueOnError: sources.length > 1,
+    query: options.query,
+  });
+  return { result, sources };
+}
+
+/** Browses all configured catalogs, or one namespace or URL source. */
+export async function browseRegistryCatalog(
+  appRoot: string,
+  options: { query?: string; source?: string } = {},
+): Promise<RegistryCatalogResult> {
+  const { result } = await searchRegistryCatalog(appRoot, options);
+  return {
+    items: result.items.map((item: RegistrySearchItem) => {
+      const catalogItem: RegistryCatalogItem = {
+        address: item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument,
+        name: item.name,
+        source: item.registry === OFFICIAL_CATALOG ? "Vercel" : item.registry,
+      };
+      const title = OFFICIAL_CATALOG_TITLES.get(item.name);
+      if (title !== undefined && item.registry === OFFICIAL_CATALOG) catalogItem.title = title;
+      if (item.type !== undefined) catalogItem.type = item.type;
+      if (item.description !== undefined) catalogItem.description = item.description;
+      return catalogItem;
+    }),
+    total: result.pagination.total,
+    errors: result.errors ?? [],
+  };
+}
+
 async function browseRegistryItems(
   logger: RegistryCommandLogger,
   appRoot: string,
   query: string | undefined,
   source: string | undefined,
 ): Promise<void> {
-  validateRegistrySource(source);
-  const config = await readRegistryConfig(appRoot);
-  const sources = source ? [source] : [OFFICIAL_CATALOG, ...configuredRegistrySources(config)];
-  const result = await searchRegistries(sources, {
-    config,
-    continueOnError: sources.length > 1,
-    query,
-  });
+  const { result, sources } = await searchRegistryCatalog(appRoot, { query, source });
   const errors = result.errors ?? [];
   if (errors.length < sources.length) {
     printSearchResults(logger, result, { query, sources });
@@ -198,6 +258,13 @@ async function browseRegistryItems(
     logger.error(`${error.registry}: ${error.message}`);
   }
   if (errors.length > 0) process.exitCode = 1;
+}
+
+/** Resolves one official, configured, or URL-addressed item manifest. */
+export async function getRegistryItemManifest(appRoot: string, item: string): Promise<unknown> {
+  const config = await readRegistryConfig(appRoot);
+  const items = await getRegistryItems([itemAddress(item)], { config });
+  return items.length === 1 ? items[0] : items;
 }
 
 async function runDeclaredSetup(
@@ -211,15 +278,43 @@ async function runDeclaredSetup(
   if (setup === undefined) return;
   const runSetupCommand = await dependencies.loadSetupCommandRunner();
   try {
+    const prompter = options.prompter ?? createPrompter();
     const result = await runSetupCommand(
       appRoot,
       { ...setup, args: [...setup.args, ...(options.yes ? ["--yes"] : [])] },
       item,
+      { prompter, signal: options.signal },
     );
-    if (result === "cancelled") logger.log(setupReminder(item, "cancelled"));
+    if (result.kind === "cancelled") {
+      logger.log(setupReminder(item, "cancelled"));
+    } else {
+      for (const line of result.output) logger.log(line);
+    }
   } catch (error) {
     throw new Error(`${errorMessage(error)} Try again with \`${setupResumeCommand(item)}\`.`);
   }
+}
+
+/** Installs an official, configured, or URL-addressed registry item. */
+export async function installRegistryItem(
+  appRoot: string,
+  item: string,
+  options: AddCommandOptions & { prompter?: Prompter; signal?: AbortSignal } = {},
+  dependencies: AddCommandDependencies = defaultAddCommandDependencies,
+): Promise<readonly string[]> {
+  let failure: string | undefined;
+  const output: string[] = [];
+  const logger: RegistryCommandLogger = {
+    error: (message) => {
+      failure = message;
+    },
+    log: (message) => output.push(message),
+  };
+  const previousExitCode = process.exitCode;
+  await runAddCommand(logger, appRoot, item, { ...options, yes: true }, dependencies);
+  process.exitCode = previousExitCode;
+  if (failure !== undefined) throw new Error(failure);
+  return output;
 }
 
 /** Installs an official, configured, or URL-addressed registry item. */
@@ -227,7 +322,7 @@ export async function runAddCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
   item: string,
-  options: AddCommandOptions,
+  options: AddCommandOptions & { prompter?: Prompter; signal?: AbortSignal },
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
 ): Promise<void> {
   await runRegistryAction(logger, appRoot, async () => {
@@ -260,7 +355,12 @@ export async function runAddCommand(
       return;
     }
 
-    await addRegistryItems([address], { config, cwd: appRoot, overwrite: options.overwrite });
+    await addRegistryItems([address], {
+      config,
+      cwd: appRoot,
+      overwrite: options.overwrite,
+      silent: options.silent,
+    });
     if (eveMetadata?.setup === undefined) return;
 
     const isInteractive =
