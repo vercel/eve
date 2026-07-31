@@ -9,6 +9,7 @@ import {
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { collectModuleRefsForManifest } from "#compiler/module-map.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
 import { experimental_workflow } from "#public/definitions/tool.js";
 import { webSearch } from "#public/tools/web-search.js";
@@ -80,6 +81,71 @@ describe("compileAgentManifest", () => {
     await expect(compileAgentManifest(manifest)).rejects.toThrow(
       'Remove "experimental.workflow" from "research"',
     );
+  });
+
+  it("retains extension mounts on the subagent that owns them", async () => {
+    const extensionManifest = createAgentSourceManifest({
+      agentId: "research-extension",
+      agentRoot: "/packages/research/dist/extension",
+      appRoot: "/packages/research",
+    });
+    const mountRef = createModuleSourceRef({ logicalPath: "extensions/research.ts" });
+    const subagentManifest = createAgentSourceManifest({
+      agentId: "researcher",
+      agentRoot: "/app/agent/subagents/researcher",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({ logicalPath: "agent.ts" }),
+      extensions: [mountRef],
+      resolvedExtensions: [
+        {
+          namespace: "research",
+          specifier: "@acme/research",
+          packageName: "@acme/research",
+          packageRoot: "/packages/research",
+          sourceRoot: "/packages/research/dist/extension",
+          manifest: extensionManifest,
+        },
+      ],
+    });
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      subagents: [
+        createLocalSubagentSourceRef({
+          entryPath: "subagents/researcher/agent.ts",
+          logicalPath: "subagents/researcher",
+          manifest: subagentManifest,
+          rootPath: "/app/agent/subagents/researcher",
+          subagentId: "researcher",
+        }),
+      ],
+    });
+    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
+      input.agentId === "researcher"
+        ? createConfig({ name: input.agentId, description: "Research the request." })
+        : createConfig({ name: input.agentId }),
+    );
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      description: "Research the request.",
+      model: "openai/gpt-5.5",
+    });
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.extensionMounts).toEqual([]);
+    expect(compiled.subagents[0]?.agent.extensionMounts).toEqual([
+      expect.objectContaining({
+        namespace: "research",
+        mountLogicalPath: "extensions/research.ts",
+        packageName: "@acme/research",
+      }),
+    ]);
+    expect(collectModuleRefsForManifest(compiled.subagents[0]!.agent)).toContainEqual({
+      sourceKind: "module",
+      logicalPath: "extensions/research.ts",
+      sourceId: "extensions/research.ts",
+    });
   });
 
   it("compiles experimental Workflow tool configuration", async () => {

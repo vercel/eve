@@ -103,10 +103,19 @@ agent/subagents/researcher/
 ├── agent.ts            # required
 ├── instructions.md     # or instructions.ts, optional
 ├── tools/              # optional, its own tools
+├── extensions/         # optional, mounted only into this subagent
 ├── skills/             # optional, its own skills
 ├── sandbox/            # optional, its own sandbox + workspace seed
 └── subagents/          # optional, nested subagents
 ```
+
+Extensions mounted under `subagents/<id>/extensions/` contribute only to that subagent. They use the same file and directory mount forms, namespacing, configuration, and overrides as root-agent extensions:
+
+```ts title="agent/subagents/researcher/extensions/search.ts"
+export { default } from "@acme/research-search";
+```
+
+The root agent does not receive the extension's tools, skills, instructions, connections, or hooks.
 
 `schedules/` is not supported inside a declared subagent. Schedules are root-only.
 
@@ -122,6 +131,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 | Skills       | Inherited                     | Own `skills/`                          |
 | Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
 | Hooks        | Inherited                     | Own `hooks/`                           |
+| Extensions   | Inherited contributions       | Own `extensions/`                      |
 | State        | Fresh                         | Fresh                                  |
 | Channels     | Root-only                     | Root-only                              |
 | Schedules    | Root-only                     | Root-only                              |
