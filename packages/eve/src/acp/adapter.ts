@@ -28,7 +28,6 @@ const ERROR_CODE_UNSUPPORTED = -32_003;
 
 interface ActivePrompt {
   cancelRequested: boolean;
-  protocolCancelled: boolean;
   readonly outboundController: AbortController;
   readonly settled: Promise<void>;
   readonly resolveSettled: () => void;
@@ -154,18 +153,15 @@ export class EveAcpAdapter {
     }
 
     const message = promptContent(params);
-    session.tools.clear();
     const settled = Promise.withResolvers<void>();
     const active: ActivePrompt = {
       cancelRequested: false,
-      protocolCancelled: false,
       outboundController: new AbortController(),
       settled: settled.promise,
       resolveSettled: settled.resolve,
     };
     session.active = active;
     const onProtocolCancel = () => {
-      active.protocolCancelled = true;
       void this.#cancelActive(session).catch(() => undefined);
     };
     if (signal.aborted) {
@@ -174,14 +170,20 @@ export class EveAcpAdapter {
       signal.addEventListener("abort", onProtocolCancel, { once: true });
     }
 
+    // A protocol cancel — this request's own signal — is an error for the
+    // caller, while a client-side cancel (declining an input request) is a
+    // normal stop reason. Both can arrive at any await in the loop below.
+    const clientCancelled = (): boolean => {
+      if (signal.aborted) throw RequestError.requestCancelled({ sessionId: params.sessionId });
+      return active.cancelRequested;
+    };
+
     try {
-      if (active.protocolCancelled) {
-        throw RequestError.requestCancelled({ sessionId: params.sessionId });
-      }
+      if (clientCancelled()) return { stopReason: "cancelled" };
       let input: SendTurnInput = { message };
       for (;;) {
         const response = await session.client.send(input);
-        if (active.cancelRequested || active.protocolCancelled) {
+        if (active.cancelRequested || signal.aborted) {
           await this.#cancelActive(session);
         }
 
@@ -207,10 +209,7 @@ export class EveAcpAdapter {
           await this.#projectEvent(params.sessionId, session, event, client);
         }
 
-        if (active.protocolCancelled) {
-          throw RequestError.requestCancelled({ sessionId: params.sessionId });
-        }
-        if (cancelled || active.cancelRequested) return { stopReason: "cancelled" };
+        if (clientCancelled() || cancelled) return { stopReason: "cancelled" };
         if (failure !== undefined) throw eveFailure(failure);
         if (unsupportedEvent !== undefined) throw unsupportedEvent;
         if (inputRequests.length === 0) return { stopReason: "end_turn" };
@@ -223,16 +222,10 @@ export class EveAcpAdapter {
             ),
           );
         } catch (error) {
-          if (active.protocolCancelled) {
-            throw RequestError.requestCancelled({ sessionId: params.sessionId });
-          }
-          if (active.cancelRequested) return { stopReason: "cancelled" };
+          if (clientCancelled()) return { stopReason: "cancelled" };
           throw error;
         }
-        if (active.protocolCancelled) {
-          throw RequestError.requestCancelled({ sessionId: params.sessionId });
-        }
-        if (active.cancelRequested) return { stopReason: "cancelled" };
+        if (clientCancelled()) return { stopReason: "cancelled" };
         input = { inputResponses };
       }
     } catch (error) {
@@ -380,8 +373,7 @@ export class EveAcpAdapter {
         { cancellationSignal },
       );
       if (response.outcome.outcome === "cancelled") {
-        this.#cancelClientInput(session);
-        return { requestId: request.requestId };
+        return this.#declineInput(session, request);
       }
       if (response.outcome.optionId === approveId) {
         return { requestId: request.requestId, optionId: "approve" };
@@ -417,8 +409,7 @@ export class EveAcpAdapter {
       { cancellationSignal },
     );
     if (response.action !== "accept") {
-      this.#cancelClientInput(session);
-      return { requestId: request.requestId };
+      return this.#declineInput(session, request);
     }
     const content = response.content as Record<string, unknown> | null | undefined;
     const answer = content?.[ANSWER_FIELD];
@@ -435,6 +426,16 @@ export class EveAcpAdapter {
       return { requestId: request.requestId, optionId: answer };
     }
     return { requestId: request.requestId, text: answer };
+  }
+
+  /**
+   * The client dismissed a request instead of answering it. eve receives an
+   * empty response so the turn can wind down, and the prompt settles as
+   * cancelled rather than as a failure.
+   */
+  #declineInput(session: AcpSession, request: InputRequest): InputResponse {
+    this.#cancelClientInput(session);
+    return { requestId: request.requestId };
   }
 
   #cancelClientInput(session: AcpSession): void {
