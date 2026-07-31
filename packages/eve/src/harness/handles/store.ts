@@ -2,8 +2,10 @@ import { z } from "#compiled/zod/index.js";
 
 import type { SessionStateMap } from "#harness/types.js";
 
-/** Session-state key for delegated agent handles. */
-export const AGENT_HANDLES_STATE_KEY = "eve.agent.handles";
+import { AGENT_HANDLES_STATE_KEY } from "./state-key.js";
+
+export { AGENT_HANDLES_STATE_KEY };
+
 const MAX_STATUS_LENGTH = 120;
 
 /**

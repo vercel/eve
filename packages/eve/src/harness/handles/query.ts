@@ -1,9 +1,27 @@
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
-import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
+import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/state-key.js";
+import type { AgentHandle } from "#harness/handles/store.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 /** A handle with one outstanding operation and a confirmed child address. */
 export type RunningAgentHandle = Extract<AgentHandle, { phase: "running" }>;
+
+/**
+ * Schema-free read of the agent handles from session state.
+ *
+ * Trust boundary: every write to this key goes through transitions.ts, which
+ * validates against the strict zod store schema before persisting. This
+ * driver-side query trusts that invariant instead of re-validating, so the
+ * workflow driver bundle stays free of the compiled zod runtime.
+ */
+function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHandle[] {
+  const raw = state?.[AGENT_HANDLES_STATE_KEY];
+  if (raw === undefined) {
+    return [];
+  }
+  const handles = (raw as { handles?: unknown }).handles;
+  return Array.isArray(handles) ? (handles as readonly AgentHandle[]) : [];
+}
 
 /**
  * Finds the running agent handle a child-produced result must settle: the
@@ -14,7 +32,7 @@ export function findRunningAgentHandle(
   state: SessionStateMap | undefined,
   input: { readonly callId: string; readonly sessionId: string },
 ): RunningAgentHandle | undefined {
-  const handles = getAgentHandleStore(state)?.handles ?? [];
+  const handles = readAgentHandles(state);
   return handles.find(
     (handle): handle is RunningAgentHandle =>
       handle.phase === "running" &&
