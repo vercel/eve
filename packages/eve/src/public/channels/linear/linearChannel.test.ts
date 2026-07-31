@@ -13,6 +13,24 @@ import type { InputRequest } from "#runtime/input/types.js";
 
 const SECRET = "linear-secret";
 
+const PRIMARY_THREAD = [
+  '<primary-directive-thread comment-id="comment-primary">',
+  '<comment author="Ada Lovelace" created-at="2026-07-30T12:00:00.000Z">',
+  "@eve please triage this issue.",
+  "</comment>",
+  "</primary-directive-thread>",
+].join("\n");
+
+const OTHER_THREAD = [
+  '<other-thread comment-id="comment-other">',
+  '<comment author="Rival Agent" created-at="2026-07-30T11:00:00.000Z">',
+  "Deploying the fix now.",
+  "</comment>",
+  "</other-thread>",
+].join("\n");
+
+const MIXED_PROMPT_CONTEXT = `${PRIMARY_THREAD}\n\n${OTHER_THREAD}`;
+
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
   return channel as CompiledChannel<T>;
@@ -267,6 +285,155 @@ describe("linearChannel inbound Agent Session events", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ignored: true, ok: true });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("excludeOtherThreads strips other-thread blocks from the default message", async () => {
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      excludeOtherThreads: true,
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(sessionPayload({ promptContext: MIXED_PROMPT_CONTEXT })),
+    );
+
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.message).toBe(PRIMARY_THREAD);
+  });
+
+  it("keeps the full promptContext by default", async () => {
+    const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
+    const { send } = await firePost(
+      channel,
+      signedRequest(sessionPayload({ promptContext: MIXED_PROMPT_CONTEXT })),
+    );
+
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.message).toBe(MIXED_PROMPT_CONTEXT);
+  });
+
+  it("hook message override wins over the config flag", async () => {
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      excludeOtherThreads: true,
+      onAgentSession: () => ({ auth: null, message: "custom message" }),
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(sessionPayload({ promptContext: MIXED_PROMPT_CONTEXT })),
+    );
+
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.message).toBe("custom message");
+  });
+
+  it("treats empty and whitespace-only message overrides as no override", async () => {
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      onAgentSession: () => ({ auth: null, message: "  \n " }),
+    });
+    const { send } = await firePost(channel, signedRequest(sessionPayload()));
+
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.message).toBe("Please handle this issue.");
+  });
+
+  it("treats an empty-array message override as no override", async () => {
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      onAgentSession: () => ({ auth: null, message: [] }),
+    });
+    const { send } = await firePost(channel, signedRequest(sessionPayload()));
+
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.message).toBe("Please handle this issue.");
+  });
+
+  it("string message overrides still attach Linear upload images", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "image/webp" },
+      }),
+    );
+    const channel = linearChannel({
+      api: { fetch: fetchMock },
+      credentials: { accessToken: "linear-token", webhookSecret: SECRET },
+      onAgentSession: () => ({
+        auth: null,
+        message: "See ![shot](https://uploads.linear.app/acme/image.webp).",
+      }),
+    });
+    const { send } = await firePost(channel, signedRequest(sessionPayload()));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.message[1]).toMatchObject({ mediaType: "image/webp", type: "file" });
+  });
+
+  it("prompted events with a message override still dispatch for HITL resolution", async () => {
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      onAgentSession: () => ({ auth: null, message: "filtered reply" }),
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        sessionPayload({
+          action: "prompted",
+          agentActivity: {
+            content: { body: "raw reply", type: "prompt" },
+            id: "activity_prompt",
+            user: { id: "user_1" },
+            userId: "user_1",
+          },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.inputResponses).toBeUndefined();
+    expect(payload.message).toBe("filtered reply");
+  });
+
+  it("spreads previousComments into context by default", async () => {
+    const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
+    const { send } = await firePost(
+      channel,
+      signedRequest(sessionPayload({ previousComments: ["first comment", "second comment"] })),
+    );
+
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.context.slice(1, 3)).toEqual(["first comment", "second comment"]);
+  });
+
+  it("previousComments: [] drops the event comments", async () => {
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      onAgentSession: () => ({ auth: null, previousComments: [] }),
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(sessionPayload({ previousComments: ["first comment"] })),
+    );
+
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.context).toHaveLength(1);
+    expect(payload.context[0]).toContain("<linear_context>");
+  });
+
+  it("a non-empty previousComments override replaces the event comments", async () => {
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      onAgentSession: () => ({ auth: null, previousComments: ["kept comment"] }),
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(sessionPayload({ previousComments: ["dropped comment"] })),
+    );
+
+    const [payload] = send.mock.calls[0]!;
+    expect(payload.context).toEqual([expect.stringContaining("<linear_context>"), "kept comment"]);
   });
 });
 

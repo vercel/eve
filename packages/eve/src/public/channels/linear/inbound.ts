@@ -1,7 +1,13 @@
 import type { UserContent } from "ai";
 
+import { createLogger } from "#internal/logging.js";
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+
+const log = createLogger("linear.inbound");
+
+const OTHER_THREAD_BLOCK_PATTERN = /<other-thread\b[^>]*>[\s\S]*?<\/other-thread>(?:\r?\n)*/gu;
+const RESIDUAL_OTHER_THREAD_PATTERN = /<\/?other-thread/iu;
 
 /** Linear Agent Session webhook actions supported by the channel. */
 export type LinearAgentSessionAction = "created" | "prompted" | (string & {});
@@ -135,14 +141,27 @@ export function parseLinearWebhookEvent(input: {
   };
 }
 
+/** Options for {@link messageFromLinearAgentSessionEvent}. */
+export interface LinearMessageOptions {
+  /** Strip other agents' `<other-thread>` blocks from `promptContext` (fail closed). */
+  readonly excludeOtherThreads?: boolean;
+}
+
 /** Builds the user-facing message for a Linear Agent Session event. */
-export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEvent): UserContent {
+export function messageFromLinearAgentSessionEvent(
+  event: LinearAgentSessionEvent,
+  options: LinearMessageOptions = {},
+): UserContent {
   if (event.action === "prompted") {
     const body = event.agentActivity?.body;
     if (body !== undefined && body.trim().length > 0) return body;
   }
 
-  const prompt = event.promptContext?.trim();
+  const rawPrompt =
+    options.excludeOtherThreads === true && event.promptContext !== undefined
+      ? stripLinearOtherThreads(event.promptContext)
+      : event.promptContext;
+  const prompt = rawPrompt?.trim();
   if (prompt !== undefined && prompt.length > 0) return prompt;
 
   const summary = event.agentSession.summary?.trim();
@@ -155,6 +174,47 @@ export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEven
   }
 
   return "Linear agent session started.";
+}
+
+/**
+ * Removes `<other-thread …>` blocks (other agents' conversations) from a
+ * Linear `promptContext` string. Fails closed: if any `other-thread` tag
+ * survives removal — format drift, or a comment embedding a literal
+ * closing tag that truncated a match — returns `""` so callers fall back
+ * to safe message sources instead of leaking partial thread content.
+ * Prefer `messageFromLinearAgentSessionEvent(event, { excludeOtherThreads:
+ * true })`, which layers this onto the full message fallback chain.
+ */
+export function stripLinearOtherThreads(text: string): string {
+  const opens = countOccurrences(text, "<other-thread");
+  const closes = countOccurrences(text, "</other-thread");
+  if (opens !== closes) {
+    log.warn(
+      "linear promptContext still contains other-thread tags after stripping; withholding it",
+    );
+    return "";
+  }
+
+  const stripped = text.replace(OTHER_THREAD_BLOCK_PATTERN, "");
+  if (RESIDUAL_OTHER_THREAD_PATTERN.test(stripped)) {
+    log.warn(
+      "linear promptContext still contains other-thread tags after stripping; withholding it",
+    );
+    return "";
+  }
+  return stripped.trim();
+}
+
+function countOccurrences(text: string, needle: string): number {
+  let count = 0;
+  for (
+    let index = text.indexOf(needle);
+    index !== -1;
+    index = text.indexOf(needle, index + needle.length)
+  ) {
+    count += 1;
+  }
+  return count;
 }
 
 /** Formats Linear issue/session context as an eve context block. */
