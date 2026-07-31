@@ -175,7 +175,7 @@ class BraintrustReporter implements EvalReporter {
     this.#experiment.log({
       id: result.id,
       input: evaluation?.description ?? "",
-      output: result.result.output,
+      output: result.result.output ?? "",
       error: result.error ?? undefined,
       scores,
       metadata,

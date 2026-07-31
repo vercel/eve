@@ -199,4 +199,32 @@ describe("Braintrust", () => {
       }),
     );
   });
+
+  it("logs evals that produce no agent output", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    braintrustMocks.log.mockImplementationOnce((event: { output?: unknown }) => {
+      if (event.output === null || event.output === undefined) {
+        throw new Error("output must be specified");
+      }
+    });
+
+    const result = makeEvalResult();
+    const resultWithoutOutput: EveEvalResult = {
+      ...result,
+      result: {
+        ...result.result,
+        output: null,
+        finalMessage: null,
+      },
+    };
+
+    expect(() => reporter.onEvalComplete(resultWithoutOutput)).not.toThrow();
+    expect(braintrustMocks.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output: "",
+      }),
+    );
+  });
 });
