@@ -7,7 +7,7 @@
  * viewer without losing the user's selection.
  */
 
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 
 import type { ConversationItem } from "#cli/dev/tui/traces/trace-conversation.js";
 import {

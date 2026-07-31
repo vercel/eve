@@ -11,7 +11,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { resolveLocalTraceSchemaDirectory } from "#harness/local-trace-span-processor.js";
+import { resolveLocalTraceSchemaDirectory } from "#tracing/local-trace-span-processor.js";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const SPAN_FILE_PATTERN = /^([0-9a-f]{16})\.otlp\.json$/u;

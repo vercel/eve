@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   resolveLocalTraceSchemaDirectory,
   resolveLocalTraceSegmentsDirectory,
-} from "#harness/local-trace-span-processor.js";
+} from "#tracing/local-trace-span-processor.js";
 import { createLogger, formatError } from "#internal/logging.js";
 
 const log = createLogger("harness.local-trace-retention");

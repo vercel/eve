@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentTraceSpanProcessor } from "#harness/agent-trace-span-processor.js";
+import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
 
 describe("AgentTraceSpanProcessor", () => {
   it("routes an agent trace and releases it at session terminal", () => {

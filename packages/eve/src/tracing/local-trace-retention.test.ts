@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveLocalTraceRetentionSettings } from "#harness/local-trace-retention.js";
+import { resolveLocalTraceRetentionSettings } from "#tracing/local-trace-retention.js";
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
 const FIVE_HUNDRED_TWELVE_MIB = 512 * 1024 * 1024;

@@ -15,8 +15,8 @@ import {
   visibleLength,
   wrapVisibleLine,
 } from "#cli/ui/terminal-text.js";
-import type { LocalTraceSpan } from "#harness/local-trace-reader.js";
-import { describeLocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import { describeLocalTraceSpan } from "#tracing/local-trace-reader.js";
 
 import type { Theme } from "../theme.js";
 import { formatAttributeContent } from "./trace-content.js";

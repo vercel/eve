@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONTENT_ATTRIBUTE_LIMIT,
   toolResultsContentAttribute,
-} from "#harness/agent-otel-content.js";
+} from "#tracing/agent-otel-content.js";
 
 describe("toolResultsContentAttribute", () => {
   it("returns the full payload when it fits", () => {

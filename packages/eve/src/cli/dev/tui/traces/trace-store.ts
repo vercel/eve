@@ -10,12 +10,12 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
-import { assembleLocalTrace, parseLocalTraceSegment } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import { assembleLocalTrace, parseLocalTraceSegment } from "#tracing/local-trace-reader.js";
 import {
   resolveLocalTraceSchemaDirectory,
   resolveLocalTraceSegmentsDirectory,
-} from "#harness/local-trace-span-processor.js";
+} from "#tracing/local-trace-span-processor.js";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;

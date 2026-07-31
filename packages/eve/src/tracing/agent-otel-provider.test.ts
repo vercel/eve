@@ -12,7 +12,7 @@ import {
   createAgentOtelInstrumentation,
   InMemoryAgentTraceStateStore,
   SESSION_WINDOW_TURN_LIMIT,
-} from "#harness/agent-otel-provider.js";
+} from "#tracing/agent-otel-provider.js";
 import {
   createInstrumentationHooks,
   type InstrumentationAttemptScope,

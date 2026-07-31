@@ -6,7 +6,7 @@ import {
   ContextAgentTraceStateStore,
   preserveSerializedAgentTraceState,
   readSessionTraceContext,
-} from "#harness/agent-trace-context-store.js";
+} from "#tracing/agent-trace-context-store.js";
 
 describe("ContextAgentTraceStateStore", () => {
   it("restores serializable session and turn context", async () => {
