@@ -16,8 +16,6 @@ interface CliTraceLogger {
   log(message: string): void;
 }
 
-export type { LocalTrace, LocalTraceSpan };
-
 interface SpanExtent {
   readonly endTimeNs: bigint;
   readonly startTimeNs: bigint;

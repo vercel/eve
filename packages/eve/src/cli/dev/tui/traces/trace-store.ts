@@ -7,19 +7,14 @@
  * of parsing spans, keeping a 1s poll cheap even with a large spool.
  */
 
-import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
-
 import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
-import { assembleLocalTrace, parseLocalTraceSegment } from "#harness/local-trace-reader.js";
 import {
-  resolveLocalTraceSchemaDirectory,
-  resolveLocalTraceSegmentsDirectory,
-} from "#harness/local-trace-span-processor.js";
-
-const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
-const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;
-const MAX_SEGMENT_BYTES = 8 * 1024 * 1024;
+  assembleLocalTrace,
+  listLocalTraceIds,
+  listLocalTraceSegments,
+  readLocalTraceActivityMs,
+  readLocalTraceSegment,
+} from "#harness/local-trace-reader.js";
 
 export interface TraceStoreEntry {
   readonly traceId: string;
@@ -39,7 +34,6 @@ export interface TraceStore {
 }
 
 export function createTraceStore(options: { readonly appRoot: string }): TraceStore {
-  const schemaRoot = resolveLocalTraceSchemaDirectory(options.appRoot);
   const caches = new Map<
     string,
     { seen: Set<string>; spans: Map<string, LocalTraceSpan>; assembled?: LocalTrace }
@@ -47,24 +41,10 @@ export function createTraceStore(options: { readonly appRoot: string }): TraceSt
 
   return {
     async list() {
-      let entries;
-      try {
-        entries = await readdir(schemaRoot, { withFileTypes: true });
-      } catch (error) {
-        if (isMissing(error)) return [];
-        throw error;
-      }
       const traces: TraceStoreEntry[] = [];
-      for (const entry of entries) {
-        if (!entry.isDirectory() || !TRACE_ID_PATTERN.test(entry.name)) continue;
-        try {
-          const segments = await stat(
-            resolveLocalTraceSegmentsDirectory(options.appRoot, entry.name),
-          );
-          traces.push({ traceId: entry.name, lastActivityMs: segments.mtimeMs });
-        } catch (error) {
-          if (!isMissing(error)) throw error;
-        }
+      for (const traceId of await listLocalTraceIds(options.appRoot)) {
+        const lastActivityMs = await readLocalTraceActivityMs(options.appRoot, traceId);
+        if (lastActivityMs !== undefined) traces.push({ traceId, lastActivityMs });
       }
       return traces.sort((left, right) =>
         right.lastActivityMs === left.lastActivityMs
@@ -74,16 +54,10 @@ export function createTraceStore(options: { readonly appRoot: string }): TraceSt
     },
 
     async read(traceId) {
-      const segmentsRoot = resolveLocalTraceSegmentsDirectory(options.appRoot, traceId);
-      let entries;
-      try {
-        entries = await readdir(segmentsRoot, { withFileTypes: true });
-      } catch (error) {
-        if (isMissing(error)) {
-          caches.delete(traceId);
-          return undefined;
-        }
-        throw error;
+      const fileNames = await listLocalTraceSegments(options.appRoot, traceId);
+      if (fileNames === undefined) {
+        caches.delete(traceId);
+        return undefined;
       }
 
       let cache = caches.get(traceId);
@@ -92,19 +66,10 @@ export function createTraceStore(options: { readonly appRoot: string }): TraceSt
         caches.set(traceId, cache);
       }
       let changed = false;
-      for (const entry of entries) {
-        if (!entry.isFile() || !SPAN_FILE_PATTERN.test(entry.name)) continue;
-        if (cache.seen.has(entry.name)) continue;
-        cache.seen.add(entry.name);
-        let content: string;
-        try {
-          const path = join(segmentsRoot, entry.name);
-          if ((await stat(path)).size > MAX_SEGMENT_BYTES) continue;
-          content = await readFile(path, "utf8");
-        } catch {
-          continue;
-        }
-        for (const span of parseLocalTraceSegment(content, traceId)) {
+      for (const fileName of fileNames) {
+        if (cache.seen.has(fileName)) continue;
+        cache.seen.add(fileName);
+        for (const span of await readLocalTraceSegment(options.appRoot, traceId, fileName)) {
           if (!cache.spans.has(span.spanId)) {
             cache.spans.set(span.spanId, span);
             changed = true;
@@ -118,8 +83,4 @@ export function createTraceStore(options: { readonly appRoot: string }): TraceSt
       return cache.assembled;
     },
   };
-}
-
-function isMissing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException).code === "ENOENT";
 }

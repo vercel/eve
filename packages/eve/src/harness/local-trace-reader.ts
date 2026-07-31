@@ -11,10 +11,13 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { resolveLocalTraceSchemaDirectory } from "#harness/local-trace-span-processor.js";
+import {
+  resolveLocalTraceSchemaDirectory,
+  resolveLocalTraceSegmentsDirectory,
+} from "#harness/local-trace-span-processor.js";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
-const SPAN_FILE_PATTERN = /^([0-9a-f]{16})\.otlp\.json$/u;
+const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;
 const MAX_SEGMENT_BYTES = 8 * 1024 * 1024;
 const MAX_UINT64 = 18_446_744_073_709_551_615n;
 
@@ -49,21 +52,89 @@ export interface LocalTrace {
   readonly window?: number;
 }
 
-/** Reads valid local traces, newest first, while ignoring malformed segments. */
-export async function listLocalTraces(appRoot: string): Promise<LocalTrace[]> {
-  const root = resolveLocalTraceSchemaDirectory(appRoot);
+/**
+ * Trace ids held by the spool, unordered. Empty when nothing has been written
+ * yet; any other read fault propagates.
+ */
+export async function listLocalTraceIds(appRoot: string): Promise<string[]> {
   let entries;
   try {
-    entries = await readdir(root, { withFileTypes: true });
+    entries = await readdir(resolveLocalTraceSchemaDirectory(appRoot), { withFileTypes: true });
   } catch (error) {
     if (isMissing(error)) return [];
     throw error;
   }
+  return entries
+    .filter((entry) => entry.isDirectory() && TRACE_ID_PATTERN.test(entry.name))
+    .map((entry) => entry.name);
+}
 
+/**
+ * Instant one trace last received a span, or `undefined` once retention has
+ * pruned it. Reads the segments directory's mtime, so it stays cheap enough to
+ * poll a large spool without parsing any span.
+ */
+export async function readLocalTraceActivityMs(
+  appRoot: string,
+  traceId: string,
+): Promise<number | undefined> {
+  try {
+    return (await stat(resolveLocalTraceSegmentsDirectory(appRoot, traceId))).mtimeMs;
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Segment file names of one trace in read order, or `undefined` when the trace
+ * is gone. Segments are immutable and named for their span, so the order is
+ * stable across reads and a caller can treat names it has seen as parsed.
+ */
+export async function listLocalTraceSegments(
+  appRoot: string,
+  traceId: string,
+): Promise<string[] | undefined> {
+  let entries;
+  try {
+    entries = await readdir(resolveLocalTraceSegmentsDirectory(appRoot, traceId), {
+      withFileTypes: true,
+    });
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
+  return entries
+    .filter((entry) => entry.isFile() && SPAN_FILE_PATTERN.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+/**
+ * Spans held by one segment file. An oversized, unreadable, or malformed
+ * segment yields none, so a partial write never breaks a view.
+ */
+export async function readLocalTraceSegment(
+  appRoot: string,
+  traceId: string,
+  fileName: string,
+): Promise<LocalTraceSpan[]> {
+  const path = join(resolveLocalTraceSegmentsDirectory(appRoot, traceId), fileName);
+  let content: string;
+  try {
+    if ((await stat(path)).size > MAX_SEGMENT_BYTES) return [];
+    content = await readFile(path, "utf8");
+  } catch {
+    return [];
+  }
+  return parseLocalTraceSegment(content, traceId);
+}
+
+/** Reads valid local traces, newest first, while ignoring malformed segments. */
+export async function listLocalTraces(appRoot: string): Promise<LocalTrace[]> {
   const traces: LocalTrace[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !TRACE_ID_PATTERN.test(entry.name)) continue;
-    const trace = await readLocalTrace(root, entry.name).catch(() => undefined);
+  for (const traceId of await listLocalTraceIds(appRoot)) {
+    const trace = await readLocalTrace(appRoot, traceId).catch(() => undefined);
     if (trace !== undefined) traces.push(trace);
   }
   return traces.sort((left, right) =>
@@ -76,33 +147,15 @@ export async function listLocalTraces(appRoot: string): Promise<LocalTrace[]> {
 }
 
 /**
- * Reads one trace from its segments directory, or `undefined` when the trace
- * has no valid spans. Spans come back ordered by start time.
+ * Reads one whole trace, or `undefined` when it holds no valid spans. Spans
+ * come back ordered by start time.
  */
-export async function readLocalTrace(
-  root: string,
-  traceId: string,
-): Promise<LocalTrace | undefined> {
-  const segmentsRoot = join(root, traceId, "segments");
-  let entries;
-  try {
-    entries = await readdir(segmentsRoot, { withFileTypes: true });
-  } catch (error) {
-    if (isMissing(error)) return undefined;
-    throw error;
-  }
+async function readLocalTrace(appRoot: string, traceId: string): Promise<LocalTrace | undefined> {
+  const fileNames = await listLocalTraceSegments(appRoot, traceId);
+  if (fileNames === undefined) return undefined;
   const spans = new Map<string, LocalTraceSpan>();
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (!entry.isFile() || !SPAN_FILE_PATTERN.test(entry.name)) continue;
-    let content: string;
-    try {
-      const path = join(segmentsRoot, entry.name);
-      if ((await stat(path)).size > MAX_SEGMENT_BYTES) continue;
-      content = await readFile(path, "utf8");
-    } catch {
-      continue;
-    }
-    for (const span of parseLocalTraceSegment(content, traceId)) {
+  for (const fileName of fileNames) {
+    for (const span of await readLocalTraceSegment(appRoot, traceId, fileName)) {
       if (!spans.has(span.spanId)) spans.set(span.spanId, span);
     }
   }

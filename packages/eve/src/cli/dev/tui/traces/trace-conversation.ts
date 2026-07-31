@@ -8,18 +8,13 @@
  */
 
 import { formatElapsed } from "#cli/format-elapsed.js";
-import {
-  clipVisible,
-  stripTerminalControls,
-  visibleLength,
-  wrapVisibleLine,
-} from "#cli/ui/terminal-text.js";
+import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
 import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
 import { compareLocalTraceSpans } from "#harness/local-trace-reader.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
-import { prettyJson, splitEmbeddedNewlines } from "./trace-content.js";
+import { formatPayloadContent, wrapPlainText } from "./trace-content.js";
 
 export interface ConversationItem {
   readonly kind: "system" | "user" | "assistant" | "tool";
@@ -242,8 +237,8 @@ export function renderConversationItem(
     const name = colors.bold(colors.white(item.name ?? "tool"));
     leftTitle = `${foldMarker(expanded, expandable, theme)}${name}`;
     rightTitle = item.durationMs > 0 ? colors.dim(formatElapsed(item.durationMs)) : "";
-    const argsLines = item.args === undefined ? [] : payloadJsonLines(item.args, inner);
-    const resultLines = item.result === undefined ? [] : payloadJsonLines(item.result, inner);
+    const argsLines = item.args === undefined ? [] : formatPayloadContent(item.args, inner);
+    const resultLines = item.result === undefined ? [] : formatPayloadContent(item.result, inner);
     const cappedArgs = expanded ? argsLines : capLines(argsLines, inner);
     const cappedResult = expanded ? resultLines : capLines(resultLines, inner);
     if (cappedArgs.length > 0) {
@@ -255,7 +250,7 @@ export function renderConversationItem(
   } else if (item.kind === "system") {
     leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(colors.white("system"))}`;
     rightTitle = colors.dim(`~${formatCompactTokenCount(estimateTokens(item.text ?? ""))} tokens`);
-    const uncapped = wrapText(item.text ?? "", inner);
+    const uncapped = wrapPlainText(item.text ?? "", inner);
     body.push(...(expanded ? uncapped : capLines(uncapped, inner)));
   } else if (item.kind === "assistant") {
     leftTitle = `${foldMarker(expanded, expandable, theme)}${colors.bold(colors.white("assistant"))}${
@@ -265,11 +260,11 @@ export function renderConversationItem(
     const reasoningUncapped =
       item.reasoning === undefined || item.reasoning.trim().length === 0
         ? []
-        : payloadLines(item.reasoning, inner);
+        : wrapPlainText(item.reasoning, inner);
     const textUncapped =
       item.text === undefined || item.text.trim().length === 0
         ? []
-        : payloadLines(item.text, inner);
+        : wrapPlainText(item.text, inner);
     const reasoningLines = (expanded ? reasoningUncapped : capLines(reasoningUncapped, inner)).map(
       (line) => colors.dim(line),
     );
@@ -301,7 +296,7 @@ export function renderConversationItem(
     const textUncapped =
       item.text === undefined || item.text.trim().length === 0
         ? []
-        : payloadLines(item.text, inner);
+        : wrapPlainText(item.text, inner);
     body.push(...(expanded ? textUncapped : capLines(textUncapped, inner)));
   }
   // Delegated work is called out on every card of the subagent's turn so it
@@ -433,27 +428,6 @@ function foldMarker(expanded: boolean, expandable: boolean, theme: Theme): strin
   return expandable ? `${theme.colors.dim("▸")} ` : "";
 }
 
-function wrapText(text: string, width: number): string[] {
-  return splitEmbeddedNewlines([stripTerminalControls(text)]).flatMap((line) =>
-    wrapVisibleLine(line, width),
-  );
-}
-
-function payloadLines(text: string, width: number): string[] {
-  return wrapText(text, width);
-}
-
-/** Tool payloads pretty-print when they're JSON; text stays text. */
-function payloadJsonLines(text: string, width: number): string[] {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed === "object" && parsed !== null) return prettyJson(parsed, width);
-  } catch {
-    // Not JSON — fall through to plain text.
-  }
-  return payloadLines(text, width);
-}
-
 /** Caps payload lines — the standalone `…` + click hint marks the cut. */
 function capLines(lines: readonly string[], width: number): string[] {
   if (lines.length <= CARD_PAYLOAD_LINES) return [...lines];
@@ -477,27 +451,29 @@ export function conversationItemLineCount(
 export function conversationItemExpandable(item: ConversationItem, width: number): boolean {
   const inner = Math.max(8, width - 8);
   if (item.kind === "tool") {
-    const args = item.args === undefined ? 0 : payloadJsonLines(item.args, inner - 2).length;
-    const result = item.result === undefined ? 0 : payloadJsonLines(item.result, inner - 2).length;
+    const args = item.args === undefined ? 0 : formatPayloadContent(item.args, inner - 2).length;
+    const result =
+      item.result === undefined ? 0 : formatPayloadContent(item.result, inner - 2).length;
     return args > CARD_PAYLOAD_LINES || result > CARD_PAYLOAD_LINES;
   }
-  if (item.kind === "system") return wrapText(item.text ?? "", inner).length > CARD_PAYLOAD_LINES;
+  if (item.kind === "system")
+    return wrapPlainText(item.text ?? "", inner).length > CARD_PAYLOAD_LINES;
   if (item.kind === "user") {
     const text =
       item.text === undefined || item.text.trim().length === 0
         ? 0
-        : payloadLines(item.text, inner).length;
+        : wrapPlainText(item.text, inner).length;
     return text > CARD_PAYLOAD_LINES;
   }
   // assistant
   const reasoning =
     item.reasoning === undefined || item.reasoning.trim().length === 0
       ? 0
-      : payloadLines(item.reasoning, inner).length;
+      : wrapPlainText(item.reasoning, inner).length;
   const text =
     item.text === undefined || item.text.trim().length === 0
       ? 0
-      : payloadLines(item.text, inner).length;
+      : wrapPlainText(item.text, inner).length;
   return reasoning > CARD_PAYLOAD_LINES || text > CARD_PAYLOAD_LINES;
 }
 
