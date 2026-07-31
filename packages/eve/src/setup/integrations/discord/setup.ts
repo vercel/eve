@@ -72,14 +72,16 @@ export async function setupDiscord(
       "Create a Discord application or open an existing one, then go to Bot → Reset Token and copy the new bot token:\n\nCreate: https://discord.com/developers/applications?new_application=true\nExisting applications: https://discord.com/developers/applications",
       "Discord application",
     );
-    const botToken = await context.ui.asker.ask(
-      text({
-        key: "discord-bot-token",
-        message: "Discord bot token",
-        required: true,
-        sensitive: true,
-      }),
-    );
+    const botToken = (
+      await context.ui.asker.ask(
+        text({
+          key: "discord-bot-token",
+          message: "Discord bot token",
+          required: true,
+          sensitive: true,
+        }),
+      )
+    ).trim();
     const commandName = await context.ui.asker.ask(
       text({
         key: "discord-command-name",
@@ -103,7 +105,7 @@ export async function setupDiscord(
               : null,
       }),
     );
-    const application = await deps.resolveApplication(botToken.trim());
+    const application = await deps.resolveApplication(botToken);
     const project = await deps.ensureVercelProject({
       appRoot: context.appRoot,
       prompter: context.ui.prompter,

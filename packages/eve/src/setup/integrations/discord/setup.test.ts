@@ -41,7 +41,7 @@ describe("Discord setup", () => {
           environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
           ui: createIntegrationSetupUi({
             asker: asker({
-              "discord-bot-token": "bot-token",
+              "discord-bot-token": "  bot-token  ",
               "discord-command-name": "ask",
               "discord-command-description": "Ask the eve agent",
             }),
@@ -52,6 +52,10 @@ describe("Discord setup", () => {
       ),
     ).resolves.toMatchObject({ kind: "done" });
 
+    expect(effects.resolveApplication).toHaveBeenCalledWith("bot-token");
+    expect(effects.provisionConnector).toHaveBeenCalledWith(
+      expect.objectContaining({ botToken: "bot-token" }),
+    );
     expect(effects.registerCommand).toHaveBeenCalledWith("app-1", "bot-token", {
       name: "ask",
       description: "Ask the eve agent",
