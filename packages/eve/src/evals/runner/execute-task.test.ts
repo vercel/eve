@@ -26,6 +26,23 @@ function createTestEval(test: (t: EveEvalContext) => unknown, id = "test-eval"):
 }
 
 describe("executeTask", () => {
+  it("settles when an eval ignores its timeout signal", async () => {
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(
+        async () =>
+          await new Promise<void>(() => {
+            // Deliberately never settles.
+          }),
+        "timeout",
+      ),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+  });
+
   it("exposes a sleep helper with a one-second default", async () => {
     vi.useFakeTimers();
     let settled = false;

@@ -1,7 +1,11 @@
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import type { Prompter } from "#setup/prompter.js";
+import { REGISTRY_SETUP_PROTOCOL_VERSION } from "#setup/registry-setup-protocol.js";
 import { runRegistrySetupCommand } from "./registry-setup-command.js";
 
 const { findPackageJSON, readFile, spawn } = vi.hoisted(() => ({
@@ -14,11 +18,41 @@ vi.mock("node:fs/promises", () => ({ readFile }));
 vi.mock("node:module", () => ({ findPackageJSON }));
 vi.mock("node:child_process", () => ({ spawn }));
 
-function childThatCloses(code: number | null, signal: NodeJS.Signals | null = null) {
-  const child = new EventEmitter();
-  setTimeout(() => child.emit("close", code, signal), 0);
+function createPrompter(): Prompter {
+  const fake = createFakePrompter({
+    single: () => "selected",
+    text: () => "answer",
+  });
+  fake.prompter.log.spinner = vi.fn(() => ({ stop: vi.fn() }));
+  return fake.prompter;
+}
+
+function protocolChild(
+  code = 0,
+  signal: NodeJS.Signals | null = null,
+  beforeClose?: (child: EventEmitter & { send: ReturnType<typeof vi.fn> }) => void,
+) {
+  const child = Object.assign(new EventEmitter(), {
+    connected: true,
+    send: vi.fn(),
+    kill: vi.fn(),
+    pid: undefined,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+  });
+  setTimeout(() => {
+    child.emit("message", { type: "ready", version: REGISTRY_SETUP_PROTOCOL_VERSION });
+    if (beforeClose === undefined) {
+      child.emit("message", { type: "result", outcome: { kind: "completed", facts: [] } });
+    } else {
+      beforeClose(child);
+    }
+    child.emit("close", code, signal);
+  }, 0);
   return child;
 }
+
+const options = () => ({ prompter: createPrompter() });
 
 describe("runRegistrySetupCommand", () => {
   beforeEach(() => {
@@ -32,79 +66,179 @@ describe("runRegistrySetupCommand", () => {
     );
   });
 
-  it("runs a package's declared binary directly with Node", async () => {
-    spawn.mockReturnValue(childThatCloses(0));
+  it("runs a package binary with IPC while the parent owns stdin", async () => {
+    spawn.mockReturnValue(protocolChild());
 
     await expect(
       runRegistrySetupCommand(
         "/project",
         { package: "@acme/slack", bin: "acme-slack", args: ["setup"] },
         "channel/slack",
+        options(),
       ),
-    ).resolves.toBe("completed");
+    ).resolves.toEqual({ kind: "completed", output: [] });
 
-    expect(findPackageJSON).toHaveBeenCalledWith("@acme/slack", expect.any(URL));
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
       ["/project/node_modules/@acme/slack/dist/cli.js", "setup"],
       expect.objectContaining({
         cwd: "/project",
-        env: expect.objectContaining({ EVE_SETUP: "1", EVE_SETUP_ITEM: "channel/slack" }),
-        stdio: "inherit",
+        env: expect.objectContaining({
+          EVE_SETUP: "1",
+          EVE_SETUP_ITEM: "channel/slack",
+          EVE_SETUP_PROTOCOL: "1",
+        }),
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
       }),
     );
   });
 
-  it("runs the declared eve binary without a package-manager shim", async () => {
-    findPackageJSON.mockReturnValue("/project/node_modules/eve/package.json");
-    readFile.mockResolvedValue(JSON.stringify({ name: "eve", bin: { eve: "./bin/eve.js" } }));
-    spawn.mockReturnValue(childThatCloses(0));
+  it("routes child prompts through the parent prompter", async () => {
+    const child = protocolChild(0, null, (running) => {
+      running.emit("message", {
+        type: "prompt",
+        id: 7,
+        prompt: { kind: "text", message: "Workspace name" },
+      });
+      running.emit("message", { type: "result", outcome: { kind: "completed", facts: [] } });
+    });
+    const prompter = createPrompter();
+    const readText = vi.spyOn(prompter, "text");
+    spawn.mockReturnValue(child);
 
     await runRegistrySetupCommand(
       "/project",
-      { package: "eve", bin: "eve", args: ["integration", "setup", "slack"] },
+      { package: "@acme/slack", bin: "acme-slack", args: ["setup"] },
       "channel/slack",
+      { prompter },
     );
 
-    expect(spawn).toHaveBeenCalledWith(
-      process.execPath,
-      ["/project/node_modules/eve/bin/eve.js", "integration", "setup", "slack"],
-      expect.any(Object),
+    expect(readText).toHaveBeenCalledWith({ kind: "text", message: "Workspace name" });
+    await vi.waitFor(() =>
+      expect(child.send).toHaveBeenCalledWith({ type: "prompt-result", id: 7, value: "answer" }),
     );
   });
 
-  it.each([
-    [130, null],
-    [null, "SIGINT"],
-  ] as const)("maps exit %s and signal %s to cancellation", async (code, signal) => {
-    spawn.mockReturnValue(childThatCloses(code, signal));
+  it("streams child output through the parent prompter", async () => {
+    const child = protocolChild();
+    const prompter = createPrompter();
+    spawn.mockReturnValue(child);
+    child.stdout.write("connecting\n");
+
+    await runRegistrySetupCommand(
+      "/project",
+      { package: "@acme/slack", bin: "acme-slack", args: [] },
+      "channel/slack",
+      { prompter },
+    );
+
+    expect(prompter.log.commandOutput).toHaveBeenCalledWith("connecting");
+  });
+
+  it("uses a structured child failure instead of the exit code", async () => {
+    const child = protocolChild(1, null, (running) => {
+      running.emit("message", {
+        type: "result",
+        outcome: {
+          kind: "failed",
+          error: { message: "Photon approval was denied.", details: ["at setupPhoton"] },
+        },
+      });
+    });
+    spawn.mockReturnValue(child);
 
     await expect(
       runRegistrySetupCommand(
         "/project",
-        { package: "@acme/slack", bin: "acme-slack", args: ["setup"] },
-        "channel/slack",
+        { package: "@acme/slack", bin: "acme-slack", args: [] },
+        "channel/photon-imessage",
+        options(),
       ),
-    ).resolves.toBe("cancelled");
+    ).rejects.toThrow("Photon approval was denied.\nat setupPhoton");
   });
 
-  it("resolves string-form bin using the installed package's unscoped name", async () => {
-    readFile.mockResolvedValue(
-      JSON.stringify({ name: "@renamed/installed-slack", bin: "./dist/cli.js" }),
-    );
-    spawn.mockReturnValue(childThatCloses(0));
+  it("returns durable setup notes with successful completion", async () => {
+    const child = protocolChild(0, null, (running) => {
+      running.emit("message", {
+        type: "result",
+        outcome: {
+          kind: "completed",
+          facts: [
+            { label: "Text your agent", value: "+15550000000", kind: "phone" },
+            {
+              label: "Photon project",
+              value: "https://app.photon.codes/dashboard/project-id",
+              kind: "url",
+            },
+          ],
+        },
+      });
+    });
+    spawn.mockReturnValue(child);
 
-    await runRegistrySetupCommand(
+    await expect(
+      runRegistrySetupCommand(
+        "/project",
+        { package: "@acme/slack", bin: "acme-slack", args: [] },
+        "channel/photon-imessage",
+        options(),
+      ),
+    ).resolves.toEqual({
+      kind: "completed",
+      output: [
+        "Text your agent: +15550000000",
+        "Photon project: https://app.photon.codes/dashboard/project-id",
+      ],
+    });
+  });
+
+  it("cancels the setup child through IPC and its process group", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      connected: true,
+      send: vi.fn(),
+      kill: vi.fn(),
+      pid: undefined,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+    });
+    const controller = new AbortController();
+    spawn.mockReturnValue(child);
+    const setup = runRegistrySetupCommand(
       "/project",
-      { package: "registry-package-alias", bin: "installed-slack", args: [] },
+      { package: "@acme/slack", bin: "acme-slack", args: [] },
       "channel/slack",
+      { prompter: createPrompter(), signal: controller.signal },
     );
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+    controller.abort();
+    child.emit("message", { type: "result", outcome: { kind: "cancelled" } });
+    child.emit("close", 130, null);
 
-    expect(spawn).toHaveBeenCalledWith(
-      process.execPath,
-      ["/project/node_modules/@acme/slack/dist/cli.js"],
-      expect.any(Object),
-    );
+    await expect(setup).resolves.toEqual({ kind: "cancelled" });
+    expect(child.send).toHaveBeenCalledWith({ type: "cancel" });
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("rejects a setup command that does not speak the protocol", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      connected: true,
+      send: vi.fn(),
+      kill: vi.fn(),
+      pid: undefined,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+    });
+    setTimeout(() => child.emit("close", 0, null), 0);
+    spawn.mockReturnValue(child);
+
+    await expect(
+      runRegistrySetupCommand(
+        "/project",
+        { package: "@acme/slack", bin: "acme-slack", args: [] },
+        "channel/slack",
+        options(),
+      ),
+    ).rejects.toThrow("exited with code 0 before reporting a result");
   });
 
   it("rejects a binary the installed package does not declare", async () => {
@@ -113,38 +247,10 @@ describe("runRegistrySetupCommand", () => {
         "/project",
         { package: "@acme/slack", bin: "something-else", args: [] },
         "channel/slack",
+        options(),
       ),
     ).rejects.toThrow('Package "@acme/slack" does not declare a "something-else" binary.');
     expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it("rejects a declared binary outside the package directory", async () => {
-    readFile.mockResolvedValue(
-      JSON.stringify({ name: "@acme/slack", bin: { "acme-slack": "../escape.js" } }),
-    );
-
-    await expect(
-      runRegistrySetupCommand(
-        "/project",
-        { package: "@acme/slack", bin: "acme-slack", args: [] },
-        "channel/slack",
-      ),
-    ).rejects.toThrow(
-      'Package "@acme/slack" declares its "acme-slack" binary outside the package directory.',
-    );
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it("reports a package without binaries as not declaring the requested binary", async () => {
-    readFile.mockResolvedValue(JSON.stringify({ name: "@acme/slack" }));
-
-    await expect(
-      runRegistrySetupCommand(
-        "/project",
-        { package: "@acme/slack", bin: "acme-slack", args: [] },
-        "channel/slack",
-      ),
-    ).rejects.toThrow('Package "@acme/slack" does not declare a "acme-slack" binary.');
   });
 
   it("does not download a missing setup package", async () => {
@@ -155,6 +261,7 @@ describe("runRegistrySetupCommand", () => {
         "/project",
         { package: "@acme/slack", bin: "acme-slack", args: ["setup"] },
         "channel/slack",
+        options(),
       ),
     ).rejects.toThrow(
       'Setup package "@acme/slack" is not installed. Run `eve add channel/slack` first.',

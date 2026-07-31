@@ -1,0 +1,8 @@
+{
+  "$comment": "Registry for the e2e CI matrices. `models` drives the model suite (e2e-local): the first entry is the default every fixture runs on; fixtures with `\"e2e\": { \"modelMatrix\": \"full\" }` in package.json run on all of them. The short model name is the stable Actions check identifier, so updating a model version does not rename required checks. `worlds` drives the world suites: each entry backs one `world_matrix_<name>` output consumed by the matching `e2e-<name>.yml`, and `package` (when set) is exported to the job as EVE_E2E_WORKFLOW_WORLD. See e2e/README.md.",
+  "models": [
+    { "name": "openai-sol", "id": "openai/gpt-5.6-sol" },
+    { "name": "anthropic-opus", "id": "anthropic/claude-opus-5" }
+  ],
+  "worlds": [{ "name": "vercel" }, { "name": "postgres", "package": "@workflow/world-postgres" }]
+}

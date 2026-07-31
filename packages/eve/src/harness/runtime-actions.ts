@@ -452,13 +452,7 @@ export function resolveToolCallInputObject(
 }
 
 function parseJsonStringInput(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    // Not JSON at all — return the raw string so parseJsonObject rejects it
-    // with the canonical "Expected a JSON-serializable object." detail.
-    return value;
-  }
+  return JSON.parse(value);
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {

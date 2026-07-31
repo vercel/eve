@@ -9,6 +9,8 @@ export const FORCED_EXIT_BACKSTOP_MS = 900;
 export interface CommandLifecycle {
   readonly signal: AbortSignal;
   readonly stopped: Promise<NodeJS.Signals | undefined>;
+  /** Temporarily gives SIGINT and SIGTERM to an inherited-stdio subprocess. */
+  withTerminalLease?<T>(task: () => Promise<T>): Promise<T>;
   requestStop(): void;
   dispose(): void;
 }
@@ -24,6 +26,7 @@ export function installShutdownSignal(
   const stopped = Promise.withResolvers<NodeJS.Signals | undefined>();
   let stopRequested = false;
   let signalCount = 0;
+  let terminalLeaseDepth = 0;
   let backstop: NodeJS.Timeout | undefined;
   const stop = (signal?: NodeJS.Signals) => {
     if (stopRequested) return;
@@ -39,6 +42,7 @@ export function installShutdownSignal(
     }
   };
   const handleSignal = (signal: NodeJS.Signals) => {
+    if (terminalLeaseDepth > 0) return;
     signalCount += 1;
     if (signalCount > 1) process.exit(signal === "SIGINT" ? 130 : 143);
     stop(signal);
@@ -50,6 +54,14 @@ export function installShutdownSignal(
   return {
     signal: controller.signal,
     stopped: stopped.promise,
+    async withTerminalLease<T>(task: () => Promise<T>): Promise<T> {
+      terminalLeaseDepth += 1;
+      try {
+        return await task();
+      } finally {
+        terminalLeaseDepth -= 1;
+      }
+    },
     requestStop: () => stop(),
     dispose() {
       if (backstop !== undefined) clearTimeout(backstop);

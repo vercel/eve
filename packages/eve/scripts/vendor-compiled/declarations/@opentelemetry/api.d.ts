@@ -20,7 +20,11 @@ export interface Span {
 export interface Tracer {
   startSpan(
     name: string,
-    options?: { attributes?: Attributes | undefined; root?: boolean | undefined },
+    options?: {
+      attributes?: Attributes | undefined;
+      kind?: SpanKind | undefined;
+      root?: boolean | undefined;
+    },
     context?: Context,
   ): Span;
 }
@@ -38,6 +42,20 @@ export declare enum SpanStatusCode {
 export declare const context: {
   active(): Context;
   with<T>(context: Context, fn: () => T): T;
+};
+
+/**
+ * Reads carrier values during context extraction. `Carrier` is the
+ * transport-specific container (e.g. a `Headers` instance for inbound
+ * HTTP requests).
+ */
+export interface TextMapGetter<Carrier = unknown> {
+  get(carrier: Carrier, key: string): string | string[] | undefined;
+  keys(carrier: Carrier): string[];
+}
+
+export declare const propagation: {
+  extract<Carrier>(context: Context, carrier: Carrier, getter: TextMapGetter<Carrier>): Context;
 };
 
 export declare const trace: {

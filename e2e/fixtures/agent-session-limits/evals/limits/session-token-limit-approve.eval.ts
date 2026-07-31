@@ -6,6 +6,7 @@ import { equals, satisfies } from "eve/evals/expect";
  * behind an active model turn.
  */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "Messages sent during an active turn produce one limit prompt, and approve resets the budget.",
   timeoutMs: 90_000,

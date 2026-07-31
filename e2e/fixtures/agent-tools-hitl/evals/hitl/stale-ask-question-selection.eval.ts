@@ -7,6 +7,7 @@ import { defineEval } from "eve/evals";
  * old selection is still relevant.
  */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "HITL smoke: a stale ask-question selection becomes a new user turn while another question is pending.",
   async test(t) {
