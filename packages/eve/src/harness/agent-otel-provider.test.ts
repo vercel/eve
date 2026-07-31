@@ -100,6 +100,21 @@ async function emitAttempt(input: {
       content: [
         { type: "reasoning", text: "thinking about weather" },
         { type: "text", text: "Checking the weather." },
+        {
+          input: { query: "weather today" },
+          providerExecuted: true,
+          toolCallId: "search-1",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          input: { query: "weather today" },
+          output: { results: ["sunny"] },
+          providerExecuted: true,
+          toolCallId: "search-1",
+          toolName: "web_search",
+          type: "tool-result",
+        },
       ],
       finishReason: "tool-calls",
       performance: { responseTimeMs: 10 },
@@ -272,6 +287,14 @@ describe("createAgentOtelInstrumentation", () => {
     expect(model.attributes["ai.response.finish_reason"]).toBe("tool-calls");
     expect(model.attributes["ai.response.reasoning"]).toBe("thinking about weather");
     expect(model.attributes["ai.response.text"]).toBe("Checking the weather.");
+    // Provider-executed tools never reach the tool loop; their calls and
+    // results are captured off the model response content.
+    expect(model.attributes["ai.response.tool_calls"]).toBe(
+      '[{"input":{"query":"weather today"},"toolName":"web_search"}]',
+    );
+    expect(model.attributes["ai.response.tool_results"]).toBe(
+      '[{"input":{"query":"weather today"},"output":{"results":["sunny"]},"toolName":"web_search"}]',
+    );
     expect(tool.attributes["gen_ai.tool.call.arguments"]).toBe('{"secret":"value"}');
     expect(tool.attributes["gen_ai.tool.call.result"]).toBe('{"temperature":72}');
     // Structural spans stay structural: content lives only on the operation spans.

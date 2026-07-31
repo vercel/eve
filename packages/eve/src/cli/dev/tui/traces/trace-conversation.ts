@@ -162,6 +162,27 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
           },
           order: span.startTimeNs,
         });
+        // Provider-executed tools (e.g. web_search) run inside the model
+        // call and never get an ai.toolCall span; their results only exist
+        // on the model span. Emit a card per result right after the
+        // assistant card (same order, stable sort keeps emission order).
+        for (const result of parseProviderToolResults(
+          stringAttribute(span, "ai.response.tool_results"),
+        )) {
+          entries.push({
+            item: {
+              kind: "tool",
+              args: result.args,
+              durationMs: 0,
+              error: result.error,
+              name: stripTerminalControls(result.name),
+              result: result.result,
+              span,
+              subagent,
+            },
+            order: span.startTimeNs,
+          });
+        }
       } else if (span.name === "ai.toolCall") {
         entries.push({
           item: {
@@ -547,6 +568,39 @@ function parseToolCallNames(raw: string | undefined): readonly string[] | undefi
       .map((entry) => entry.toolName);
   } catch {
     return undefined;
+  }
+}
+
+interface ProviderToolResult {
+  readonly args: string | undefined;
+  readonly error: boolean;
+  readonly name: string;
+  readonly result: string | undefined;
+}
+
+/** Parses the `ai.response.tool_results` JSON array of provider-executed tool outcomes. */
+function parseProviderToolResults(raw: string | undefined): readonly ProviderToolResult[] {
+  if (raw === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isRecord).map((entry) => {
+      const failed = "error" in entry;
+      const outcome = failed ? entry.error : entry.output;
+      return {
+        args: entry.input === undefined ? undefined : JSON.stringify(entry.input),
+        error: failed,
+        name: typeof entry.toolName === "string" ? entry.toolName : "tool",
+        result:
+          typeof outcome === "string"
+            ? outcome
+            : outcome === undefined
+              ? undefined
+              : JSON.stringify(outcome),
+      };
+    });
+  } catch {
+    return [];
   }
 }
 

@@ -359,6 +359,20 @@ export function createAgentOtelInstrumentation(
           const json = contentAttribute(toolCalls, false);
           if (json !== undefined) state.span.setAttribute("ai.response.tool_calls", json);
         }
+        // Provider-executed tools (e.g. web_search) run inside the model call,
+        // never reach eve's tool loop, and so never get an ai.toolCall span.
+        // Their results only exist as content parts on the model response.
+        const toolResults = event.source.content
+          .filter((part) => part.type === "tool-result" || part.type === "tool-error")
+          .map((part) =>
+            part.type === "tool-result"
+              ? { input: part.input, output: part.output, toolName: part.toolName }
+              : { error: errorText(part.error), input: part.input, toolName: part.toolName },
+          );
+        if (toolResults.length > 0) {
+          const json = contentAttribute(toolResults, false);
+          if (json !== undefined) state.span.setAttribute("ai.response.tool_results", json);
+        }
       }
     }
     state.span.end();
@@ -670,6 +684,10 @@ function setUsage(
   if (details?.cacheWriteTokens !== undefined) {
     span.setAttribute("gen_ai.usage.cache_creation.input_tokens", details.cacheWriteTokens);
   }
+}
+
+function errorText(error: unknown): unknown {
+  return error instanceof Error ? error.message : error;
 }
 
 function recordError(span: Span, error: unknown): void {

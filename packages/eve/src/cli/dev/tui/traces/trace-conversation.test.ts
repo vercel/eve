@@ -83,6 +83,41 @@ describe("buildConversationItems", () => {
     expect(items[2]?.result).toBe('{"temperatureF":72}');
   });
 
+  it("renders provider-executed tool results as tool cards after the assistant", () => {
+    // Provider-executed tools (e.g. web_search) never get an ai.toolCall
+    // span; their outcomes live on the model span's tool_results attribute.
+    const spans = weatherTurn().map((s) =>
+      s.name === "ai.streamText.doStream"
+        ? {
+            ...s,
+            attributes: {
+              ...s.attributes,
+              "ai.response.tool_results": JSON.stringify([
+                {
+                  input: { query: "weather sf" },
+                  output: { results: ["sunny"] },
+                  toolName: "web_search",
+                },
+                { error: "quota exceeded", input: { query: "again" }, toolName: "web_search" },
+              ]),
+            },
+          }
+        : s,
+    );
+    const items = buildConversationItems(trace(spans));
+    expect(items.map((item) => item.kind)).toEqual(["user", "assistant", "tool", "tool", "tool"]);
+    const search = items[2]!;
+    expect(search.name).toBe("web_search");
+    expect(search.args).toBe('{"query":"weather sf"}');
+    expect(search.result).toBe('{"results":["sunny"]}');
+    expect(search.error).toBe(false);
+    expect(search.durationMs).toBe(0);
+    const failed = items[3]!;
+    expect(failed.error).toBe(true);
+    expect(failed.result).toBe("quota exceeded");
+    expect(items[4]?.name).toBe("get_weather");
+  });
+
   it("finds turns parented to a session window span", () => {
     // Post-windowing capture: turns are children of the `agent.session` root,
     // so turn discovery must go by name, not root position.

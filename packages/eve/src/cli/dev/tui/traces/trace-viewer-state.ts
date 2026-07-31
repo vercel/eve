@@ -165,9 +165,13 @@ export function applyLoadedTrace(
   if (selectedSpanId === undefined) {
     selectedRow = state.selectedRow;
   } else {
-    selectedRow = conversationItems.findIndex(
-      (item) => item.span.spanId === selectedSpanId && item.kind === selectedItemKind,
-    );
+    // Several cards can share one span (a model span also carries its
+    // provider-executed tool cards), so match by occurrence, not first hit.
+    const matches = (item: ConversationItem): boolean =>
+      item.span.spanId === selectedSpanId && item.kind === selectedItemKind;
+    const occurrence = state.conversationItems.slice(0, state.selectedRow).filter(matches).length;
+    const indices = conversationItems.flatMap((item, index) => (matches(item) ? [index] : []));
+    selectedRow = indices[Math.min(occurrence, indices.length - 1)] ?? -1;
   }
   if (selectedRow === -1) {
     selectedRow = Math.min(state.selectedRow, conversationItems.length - 1);
