@@ -784,6 +784,7 @@ export class EveTUIRunner {
         const command = parsePromptCommand(prompt);
 
         if (command?.type === "exit") {
+          this.#lifecycle?.requestStop();
           return;
         }
 

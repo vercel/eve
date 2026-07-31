@@ -2066,6 +2066,8 @@ describe("EveTUIRunner renderer teardown", () => {
 
   it("shuts the renderer down once when /exit ends the run loop", async () => {
     const shutdown = vi.fn();
+    const controller = new AbortController();
+    const requestStop = vi.fn(() => controller.abort());
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async () => "/exit"),
       shutdown,
@@ -2074,11 +2076,18 @@ describe("EveTUIRunner renderer teardown", () => {
       session: sessionYielding([]),
       renderer,
       name: "Weather Agent",
+      lifecycle: {
+        signal: controller.signal,
+        stopped: new Promise<NodeJS.Signals | undefined>(() => {}),
+        requestStop,
+        dispose: () => {},
+      },
     });
 
     await runner.run();
 
     expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(requestStop).toHaveBeenCalledOnce();
   });
 
   it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {
