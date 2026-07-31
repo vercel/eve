@@ -136,8 +136,10 @@ function withViewerBase(row: string, width: number, theme: Theme): string {
 const CONVERSATION_CONTENT_KEYS: ReadonlySet<string> = new Set([
   "ai.prompt.messages",
   "ai.prompt.system",
+  "ai.response.reasoning",
   "ai.response.text",
   "ai.response.tool_calls",
+  "ai.response.tool_results",
   "gen_ai.tool.call.arguments",
   "gen_ai.tool.call.result",
 ]);
