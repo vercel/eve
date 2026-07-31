@@ -100,9 +100,12 @@ async function selectVercelDeploymentScope(
 }
 
 /**
- * Authenticates a remote by resolving its deployment URL to the owning Vercel
- * project, updating Trusted Sources when approved, and returning a renewable
- * credential for the calling interactive session.
+ * Authenticates an interactive client for a remote Vercel deployment.
+ *
+ * Resolves the deployment's owning project, optionally configures Trusted
+ * Sources after user approval, and returns a renewable project-scoped OIDC
+ * credential. Callers must pass a TTY-backed {@link Prompter}; cancelled and
+ * failed flows are returned as results rather than thrown.
  */
 export async function runRemoteAuthFlow(input: {
   readonly workspaceRoot: string;
