@@ -172,7 +172,7 @@ describe("reduceTraceViewerKey", () => {
     expect(state.expandedItems.has(assistantIndex)).toBe(false);
   });
 
-  it("expands and collapses cards on mouse clicks", () => {
+  it("expands and collapses cards on mouse clicks (press + release in place)", () => {
     let state = applyLoadedTrace(createTraceViewerState(), conversationTrace({ longReply: true }));
     const env = {
       ...ENV,
@@ -183,29 +183,92 @@ describe("reduceTraceViewerKey", () => {
     // assistantIndex*7. Click one row into it (y=2 is first body row, so
     // bodyRow = clickY-2 maps to absolute line scrollRow+bodyRow).
     const clickY = 2 + assistantIndex * 7 + 1;
+    const click = (): void => {
+      state = reduceTraceViewerKey(
+        state,
+        { type: "mouse", action: "press", button: 0, x: 10, y: clickY },
+        env,
+      ).state;
+      state = reduceTraceViewerKey(
+        state,
+        { type: "mouse", action: "release", button: 0, x: 10, y: clickY },
+        env,
+      ).state;
+    };
 
-    state = reduceTraceViewerKey(
-      state,
-      { type: "mouse", action: "press", button: 0, x: 10, y: clickY },
-      env,
-    ).state;
+    click();
     expect(state.selectedRow).toBe(assistantIndex);
     expect(state.expandedItems.has(assistantIndex)).toBe(true);
 
+    click();
+    expect(state.expandedItems.has(assistantIndex)).toBe(false);
+
+    // A press alone (a drag may follow) is not a click.
     state = reduceTraceViewerKey(
       state,
       { type: "mouse", action: "press", button: 0, x: 10, y: clickY },
       env,
     ).state;
     expect(state.expandedItems.has(assistantIndex)).toBe(false);
+  });
 
-    // A release is not a click.
+  it("copies a drag selection on release instead of clicking", () => {
+    let state = applyLoadedTrace(createTraceViewerState(), conversationTrace({ longReply: true }));
+    const env = {
+      ...ENV,
+      conversationLineCounts: state.conversationItems.map(() => 6),
+    };
+
     state = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "release", button: 0, x: 10, y: clickY },
+      { type: "mouse", action: "press", button: 0, x: 5, y: 3 },
       env,
     ).state;
-    expect(state.expandedItems.has(assistantIndex)).toBe(false);
+    expect(state.textSelection).toEqual({
+      anchor: { line: 1, column: 4 },
+      head: { line: 1, column: 4 },
+      dragging: false,
+    });
+
+    // Motion with the left button held (SGR button 32) extends the selection.
+    state = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "press", button: 32, x: 20, y: 5 },
+      env,
+    ).state;
+    expect(state.textSelection).toEqual({
+      anchor: { line: 1, column: 4 },
+      head: { line: 3, column: 19 },
+      dragging: true,
+    });
+
+    const result = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "release", button: 0, x: 20, y: 5 },
+      env,
+    );
+    expect(result.copySelection).toEqual({
+      anchor: { line: 1, column: 4 },
+      head: { line: 3, column: 19 },
+      dragging: true,
+    });
+    expect(result.state.textSelection).toBeUndefined();
+    // The drag did not toggle any card.
+    expect(result.state.expandedItems.size).toBe(0);
+  });
+
+  it("escape clears an in-flight selection without closing the viewer", () => {
+    let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    const env = { ...ENV, conversationLineCounts: state.conversationItems.map(() => 6) };
+    state = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "press", button: 0, x: 5, y: 3 },
+      env,
+    ).state;
+    expect(state.textSelection).toBeDefined();
+    const result = reduceTraceViewerKey(state, key("escape"), env);
+    expect(result.effect).toBeUndefined();
+    expect(result.state.textSelection).toBeUndefined();
   });
 
   it("scrolls the viewport on mouse wheel events", () => {

@@ -14,8 +14,10 @@
 const ESC = "\x1b";
 const ALT_SCREEN_ON = `${ESC}[?1049h`;
 const ALT_SCREEN_OFF = `${ESC}[?1049l`;
-const MOUSE_ON = `${ESC}[?1000h${ESC}[?1006h`;
-const MOUSE_OFF = `${ESC}[?1006l${ESC}[?1000l`;
+// 1002 (button-event tracking) reports motion while a button is held, which
+// drag-to-select needs; 1006 upgrades coordinates to the SGR encoding.
+const MOUSE_ON = `${ESC}[?1002h${ESC}[?1006h`;
+const MOUSE_OFF = `${ESC}[?1006l${ESC}[?1002l`;
 const HIDE_CURSOR = `${ESC}[?25l`;
 const SHOW_CURSOR = `${ESC}[?25h`;
 const CLEAR_TO_END = `${ESC}[0J`;
@@ -63,6 +65,15 @@ export class AltScreen {
     const visible = rows.slice(0, Math.max(0, height));
     const body = visible.map((row, index) => `${ESC}[${index + 1}H${row}`).join("");
     this.#write(`${SYNC_START}${CURSOR_HOME}${CLEAR_TO_END}${body}${SYNC_END}`);
+  }
+
+  /**
+   * Writes an out-of-band sequence (e.g. an OSC 52 clipboard write) through
+   * the same captured write the paints use, bypassing foreign-output capture.
+   */
+  writeRaw(chunk: string): void {
+    if (!this.#active) return;
+    this.#write(chunk);
   }
 
   /** Restores the main screen, cursor, and mouse reporting. */

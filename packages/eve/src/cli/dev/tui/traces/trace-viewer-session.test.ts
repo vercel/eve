@@ -75,6 +75,54 @@ async function openViewer(store: TraceStore, sessionId?: string) {
   return frames[frames.length - 1]!.join("\n");
 }
 
+describe("TraceViewerSession drag copy", () => {
+  it("copies the dragged text and shows a toast", async () => {
+    const turn = span("a".repeat(16), "session-mine");
+    const model: LocalTraceSpan = {
+      ...span("b".repeat(16), "session-mine"),
+      name: "ai.streamText.doStream",
+      parentSpanId: turn.spanId,
+      attributes: {
+        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "copy me please" }]),
+        "ai.response.text": "reply",
+      },
+    };
+    const store = stubStore([
+      {
+        endTimeNs: 1_000_000n,
+        sessionId: "session-mine",
+        sessionIds: ["session-mine"],
+        spans: [turn, model],
+        startTimeNs: 1_000_000n,
+        traceId: "c".repeat(32),
+      },
+    ]);
+    const frames: string[][] = [];
+    const copied: string[] = [];
+    const session = new TraceViewerSession({
+      appRoot: "/nowhere",
+      copyText: (text) => copied.push(text),
+      dimensions: () => ({ width: 80, height: 24 }),
+      paint: (rows) => frames.push([...rows]),
+      store,
+      theme: THEME,
+    });
+    session.start();
+    await vi.waitFor(() => {
+      const last = frames[frames.length - 1]?.join("\n") ?? "";
+      if (!last.includes("copy me please")) throw new Error("no conversation frame yet");
+    });
+    // Drag across the user card's text row: press, motion, release.
+    session.handleKey({ type: "mouse", action: "press", button: 0, x: 1, y: 6 });
+    session.handleKey({ type: "mouse", action: "press", button: 32, x: 40, y: 6 });
+    session.handleKey({ type: "mouse", action: "release", button: 0, x: 40, y: 6 });
+    expect(copied).toHaveLength(1);
+    expect(copied[0]).toContain("copy me please");
+    expect(frames[frames.length - 1]!.join("\n")).toContain("Copied to clipboard");
+    session.dispose();
+  });
+});
+
 describe("TraceViewerSession session preference", () => {
   it("opens on the trace containing the current session, not the newest", async () => {
     // Trace ids are provider-generated, so the session's trace is found by

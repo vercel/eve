@@ -10,8 +10,8 @@ import type { Theme } from "../theme.js";
 import type { TraceStore, TraceStoreEntry } from "./trace-store.js";
 import { createTraceStore } from "./trace-store.js";
 import { conversationItemLineCount } from "./trace-conversation.js";
-import { renderTraceViewer } from "./trace-view.js";
-import type { TraceViewerState } from "./trace-viewer-state.js";
+import { conversationSelectionText, renderTraceViewer } from "./trace-view.js";
+import type { TextSelectionRange, TraceViewerState } from "./trace-viewer-state.js";
 import {
   applyLoadedTrace,
   applyTraceList,
@@ -22,6 +22,8 @@ import {
 const POLL_INTERVAL_MS = 1_000;
 /** A trace whose last span landed this recently renders its window up to "now". */
 const LIVE_WINDOW_MS = 3_000;
+/** How long the copy confirmation stays in the header. */
+const TOAST_MS = 2_000;
 
 export interface TraceViewerOpenOptions {
   readonly appRoot: string;
@@ -42,6 +44,8 @@ export interface TraceViewerSessionOptions extends TraceViewerOpenOptions {
   readonly dimensions: () => { readonly width: number; readonly height: number };
   readonly tracingDisabled?: boolean;
   readonly store?: TraceStore;
+  /** Receives drag-selected text (wired to the clipboard by the renderer). */
+  readonly copyText?: (text: string) => void;
 }
 
 export class TraceViewerSession {
@@ -59,6 +63,8 @@ export class TraceViewerSession {
    */
   #preferSessionId?: string;
   #pollTimer?: ReturnType<typeof setInterval>;
+  #toast?: string;
+  #toastTimer?: ReturnType<typeof setTimeout>;
   #disposed = false;
   #refreshing = false;
   #refreshAgain = false;
@@ -101,9 +107,10 @@ export class TraceViewerSession {
       this.#preferSessionId = undefined;
     }
     const hadTrace = this.#state.trace !== undefined;
-    const { state, effect } = reduceTraceViewerKey(this.#state, key, this.#metrics);
+    const { state, effect, copySelection } = reduceTraceViewerKey(this.#state, key, this.#metrics);
     this.#state = state;
     if (effect === "close") return "close";
+    if (copySelection !== undefined) this.#copySelection(copySelection);
     this.repaint();
     // A trace switch cleared the timeline — fetch the newly selected trace
     // immediately instead of leaving a Loading frame up for a full poll.
@@ -120,6 +127,7 @@ export class TraceViewerSession {
       theme: this.#options.theme,
       tracingDisabled: this.#options.tracingDisabled,
       activeWindowEndNs: this.#activeWindowEndNs(),
+      toast: this.#toast,
     });
     this.#metrics = {
       timelineViewportRows: frame.timelineViewportRows,
@@ -144,6 +152,30 @@ export class TraceViewerSession {
       clearInterval(this.#pollTimer);
       this.#pollTimer = undefined;
     }
+    if (this.#toastTimer !== undefined) {
+      clearTimeout(this.#toastTimer);
+      this.#toastTimer = undefined;
+    }
+  }
+
+  /** Extracts the dragged text, hands it to the clipboard, and confirms with a toast. */
+  #copySelection(selection: TextSelectionRange): void {
+    const text = conversationSelectionText(
+      this.#state,
+      this.#metrics.contentWidth,
+      this.#options.theme,
+      selection,
+    );
+    if (text.trim().length === 0) return;
+    this.#options.copyText?.(text);
+    this.#toast = "Copied to clipboard";
+    if (this.#toastTimer !== undefined) clearTimeout(this.#toastTimer);
+    this.#toastTimer = setTimeout(() => {
+      this.#toastTimer = undefined;
+      this.#toast = undefined;
+      this.repaint();
+    }, TOAST_MS);
+    this.#toastTimer.unref?.();
   }
 
   async #refresh(): Promise<void> {

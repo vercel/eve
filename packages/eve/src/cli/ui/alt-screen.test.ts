@@ -21,12 +21,12 @@ describe("AltScreen", () => {
     const screen = new AltScreen(output);
     screen.enter();
     screen.enter();
-    expect(writes.join("")).toBe("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h");
+    expect(writes.join("")).toBe("\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h");
     expect(screen.active).toBe(true);
     screen.exit();
     screen.exit();
     expect(writes.join("")).toBe(
-      "\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l",
+      "\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h\x1b[?1006l\x1b[?1002l\x1b[?25h\x1b[?1049l",
     );
     expect(screen.active).toBe(false);
   });

@@ -113,6 +113,7 @@ import {
 } from "./line-editor.js";
 import { LiveRegion } from "#cli/ui/live-region.js";
 import { AltScreen } from "#cli/ui/alt-screen.js";
+import { copyTextToClipboard } from "./clipboard.js";
 import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import { TraceViewerSession } from "./traces/trace-viewer-session.js";
 import { buildStatusLine } from "./status-line.js";
@@ -2669,6 +2670,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       dimensions: () => ({ width: this.#width(), height: this.#height() }),
       paint: (rows) => this.#altScreen.paint(rows, this.#height()),
       tracingDisabled: process.env.EVE_TRACES === "off",
+      copyText: (text) => copyTextToClipboard(text, (chunk) => this.#altScreen.writeRaw(chunk)),
     });
     this.#traceView = session;
     this.#altScreen.enter();
