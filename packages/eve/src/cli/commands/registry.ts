@@ -68,11 +68,42 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
 };
 
-const OFFICIAL_REGISTRY = process.env.EVE_DEV_OFFICIAL_REGISTRY_URL ?? "https://eve.dev/r";
-const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
+const DEFAULT_OFFICIAL_REGISTRY_URL = "https://eve.dev/r";
 
-// shadcn's registry search response omits titles. Keep this one exception until it includes them.
-const OFFICIAL_CATALOG_TITLES = new Map([["channel/photon-imessage", "Photon iMessage"]]);
+/**
+ * Resolves the official registry URL, honoring the explicit development trust override.
+ *
+ * The override makes its registry eligible to supply setup commands, so it must be
+ * configured in the process environment rather than project configuration.
+ */
+export function resolveOfficialRegistryUrl(
+  configured = process.env.EVE_DEV_OFFICIAL_REGISTRY_URL,
+): string {
+  if (configured === undefined) return DEFAULT_OFFICIAL_REGISTRY_URL;
+
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw new Error("EVE_DEV_OFFICIAL_REGISTRY_URL must be an HTTP(S) URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("EVE_DEV_OFFICIAL_REGISTRY_URL must be an HTTP(S) URL.");
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new Error("EVE_DEV_OFFICIAL_REGISTRY_URL must not include credentials.");
+  }
+  if (url.search !== "" || url.hash !== "") {
+    throw new Error("EVE_DEV_OFFICIAL_REGISTRY_URL must not include a query or fragment.");
+  }
+
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.toString().replace(/\/$/, "");
+}
+
+const OFFICIAL_REGISTRY = resolveOfficialRegistryUrl();
+const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
+const CATALOG_PAGE_SIZE = 100;
 
 function isRegistryAddress(value: string): boolean {
   return value.startsWith("@") || /^https?:\/\//.test(value);
@@ -214,9 +245,17 @@ async function searchRegistryCatalog(
   const result = await searchRegistries(sources, {
     config,
     continueOnError: sources.length > 1,
+    limit: CATALOG_PAGE_SIZE,
     query: options.query,
   });
-  return { result, sources };
+  return { config, result, sources };
+}
+
+function registryManifestTitle(manifest: unknown): string | undefined {
+  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest))
+    return undefined;
+  const title = (manifest as { title?: unknown }).title;
+  return typeof title === "string" ? title : undefined;
 }
 
 /** Browses all configured catalogs, or one namespace or URL source. */
@@ -224,16 +263,22 @@ export async function browseRegistryCatalog(
   appRoot: string,
   options: { query?: string; source?: string } = {},
 ): Promise<RegistryCatalogResult> {
-  const { result } = await searchRegistryCatalog(appRoot, options);
+  const { config, result } = await searchRegistryCatalog(appRoot, options);
+  const manifests = await Promise.all(
+    result.items.map(async (item) => {
+      const [manifest] = await getRegistryItems([item.addCommandArgument], { config });
+      return manifest;
+    }),
+  );
   return {
-    items: result.items.map((item: RegistrySearchItem) => {
+    items: result.items.map((item: RegistrySearchItem, index) => {
       const catalogItem: RegistryCatalogItem = {
         address: item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument,
         name: item.name,
         source: item.registry === OFFICIAL_CATALOG ? "Vercel" : item.registry,
       };
-      const title = OFFICIAL_CATALOG_TITLES.get(item.name);
-      if (title !== undefined && item.registry === OFFICIAL_CATALOG) catalogItem.title = title;
+      const title = registryManifestTitle(manifests[index]);
+      if (title !== undefined) catalogItem.title = title;
       if (item.type !== undefined) catalogItem.type = item.type;
       if (item.description !== undefined) catalogItem.description = item.description;
       return catalogItem;

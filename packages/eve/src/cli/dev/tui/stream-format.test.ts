@@ -181,8 +181,25 @@ describe("parseKey", () => {
   });
 
   it("decodes ctrl-n and ctrl-p for emacs-style navigation", () => {
-    expect(parseKey(Buffer.from("\u000e"))).toEqual({ type: "ctrl-n" });
-    expect(parseKey(Buffer.from("\u0010"))).toEqual({ type: "ctrl-p" });
+    expect(parseKey(Buffer.from(""))).toEqual({ type: "ctrl-n" });
+    expect(parseKey(Buffer.from(""))).toEqual({ type: "ctrl-p" });
+  });
+
+  it("decodes SGR mouse press and release with cell coordinates", () => {
+    expect(parseKey(Buffer.from("\x1b[<0;35;12M"))).toEqual({
+      type: "mouse",
+      action: "press",
+      button: 0,
+      x: 35,
+      y: 12,
+    });
+    expect(parseKey(Buffer.from("\x1b[<0;35;12m"))).toEqual({
+      type: "mouse",
+      action: "release",
+      button: 0,
+      x: 35,
+      y: 12,
+    });
   });
 });
 

@@ -16,10 +16,10 @@
  *   rule 13 — No spread-ternary object composition
  *             (`...(c ? {} : { k: v })`). (Rationale: hard to read, easy
  *             to mistype; declare the object then assign optional keys.)
- *   rule 15 — No `@workflow/*` imports inside `src/channel/**` or
- *             `src/harness/**`. Channels and harnesses must stay
- *             workflow-agnostic — only runtime/execution code touches
- *             workflow primitives.
+ *   rule 15 — No `@workflow/*` imports inside `src/channel/**`,
+ *             `src/harness/**`, or `src/tracing/**`. Channels, harnesses,
+ *             and tracing must stay workflow-agnostic — only
+ *             runtime/execution code touches workflow primitives.
  *   rule 19 — No `new AsyncLocalStorage()` outside the two allowlisted
  *             files. All ambient runtime state flows through a single
  *             `EveContext`.
@@ -240,7 +240,9 @@ const WORKFLOW_IMPORT_RE = /from ["']@workflow\b/;
  */
 function isChannelOrHarness(posix) {
   return (
-    posix.startsWith("packages/eve/src/channel/") || posix.startsWith("packages/eve/src/harness/")
+    posix.startsWith("packages/eve/src/channel/") ||
+    posix.startsWith("packages/eve/src/harness/") ||
+    posix.startsWith("packages/eve/src/tracing/")
   );
 }
 
@@ -257,7 +259,7 @@ function checkRule15(posix, lines, violations) {
         rule: 15,
         file: posix,
         line: idx + 1,
-        message: `imports from "@workflow/*". Channel and harness code must stay workflow-agnostic. Move the workflow primitive call into src/runtime/ or src/execution/ and have the channel/harness call a thin runtime helper instead.`,
+        message: `imports from "@workflow/*". Channel, harness, and tracing code must stay workflow-agnostic. Move the workflow primitive call into src/runtime/ or src/execution/ and have the caller use a thin runtime helper instead.`,
       });
     }
   });

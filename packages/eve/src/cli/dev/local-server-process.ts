@@ -104,7 +104,9 @@ export function createDevelopmentServer(
       },
     );
     child = spawned;
-    spawned.stdout?.on("data", (chunk: Buffer) => process.stdout.write(chunk));
+    spawned.stdout?.on("data", (chunk: Buffer) =>
+      (options.output === "stderr" ? process.stderr : process.stdout).write(chunk),
+    );
     spawned.stderr?.on("data", (chunk: Buffer) => process.stderr.write(chunk));
 
     return new Promise<DevelopmentServerHandle>((resolve, reject) => {

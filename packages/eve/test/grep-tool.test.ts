@@ -24,6 +24,7 @@ interface FakeAccessOptions {
 }
 
 const PROBE_COMMAND = "command -v rg >/dev/null 2>&1";
+const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
 function createFakeAccess(
   commandHandler: (command: string) => { exitCode: number; stderr: string; stdout: string },
@@ -55,6 +56,9 @@ function createFakeAccess(
           return options.pathResolver ? options.pathResolver(path) : path;
         },
         async run({ command }: { command: string }) {
+          if (command === HOME_PROBE_COMMAND) {
+            return { exitCode: 0, stderr: "", stdout: "/home/agent\n" };
+          }
           if (command === PROBE_COMMAND) {
             return { exitCode: probeExitCode, stderr: "", stdout: "" };
           }
@@ -135,6 +139,28 @@ describe("executeGrepOnSandbox", () => {
         (sandbox) => executeGrepOnSandbox(sandbox, { pattern: "foo", path: "src" }),
       ),
     ).rejects.toThrow("filePath must be an absolute path");
+  });
+
+  it("expands a leading $HOME before searching", async () => {
+    let capturedCommand = "";
+    const result = (await runInContext(
+      (cmd) => {
+        capturedCommand = cmd;
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: "/home/agent/.agents/skills/research/SKILL.md:1:Research\n",
+        };
+      },
+      (sandbox) =>
+        executeGrepOnSandbox(sandbox, {
+          path: "$HOME/.agents/skills/research",
+          pattern: "Research",
+        }),
+    )) as GrepResult;
+
+    expect(capturedCommand).toContain("'/home/agent/.agents/skills/research'");
+    expect(result.path).toBe("/home/agent/.agents/skills/research");
   });
 
   // ---------------------------------------------------------------------------

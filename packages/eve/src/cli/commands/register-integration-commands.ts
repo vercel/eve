@@ -25,6 +25,7 @@ export function registerIntegrationCommands(input: {
 
   integration
     .command("connect <slug> <service> [canonical-name]")
+    .option("-y, --yes")
     .action(async (slug: string, service: string, canonicalName: string | undefined) => {
       const { runIntegrationConnectCommand } = await import("./integration-connect.js");
       await runIntegrationConnectCommand(logger, appRoot, slug, service, canonicalName);
