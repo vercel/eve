@@ -18,6 +18,21 @@ describe("formatAttributeContent", () => {
     expect(format("agent.usage.input_tokens", 1234)).toEqual(["1234"]);
   });
 
+  it("sanitizes non-string attribute values instead of String()ing them", () => {
+    // OTLP array attributes can carry strings with raw escape sequences.
+    // Assert on the unstripped output — stripAnsi would mask an injection.
+    const raw = formatAttributeContent(
+      "agent.session.ids",
+      ["safe", "evil\x1b[2J\x1b]0;owned\x07text"],
+      THEME,
+      WIDTH,
+    ).join("\n");
+    expect(raw).not.toContain("\x1b");
+    expect(raw).not.toContain("\x07");
+    expect(raw).toContain("evil");
+    expect(format("agent.flag", true)).toEqual(["true"]);
+  });
+
   it("pretty-prints JSON payloads", () => {
     expect(format("gen_ai.tool.call.arguments", '{"city":"SF","unit":"f"}')).toEqual([
       "{",

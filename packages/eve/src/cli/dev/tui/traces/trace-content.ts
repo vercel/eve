@@ -29,7 +29,13 @@ export function formatAttributeContent(
   theme: Theme,
   width: number,
 ): string[] {
-  if (typeof value !== "string") return [String(value)];
+  // Non-string OTLP values include arrays whose elements can carry raw
+  // escape sequences; JSON-encode them (which escapes control characters)
+  // rather than String() them into the frame.
+  if (typeof value !== "string") {
+    if (Array.isArray(value)) return prettyJson(value, width);
+    return [stripTerminalControls(shortJson(value))];
+  }
   if (key === "ai.prompt.messages") {
     const transcript = messageTranscript(value, theme, width);
     if (transcript !== undefined) return transcript;
