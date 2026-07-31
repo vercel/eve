@@ -47,6 +47,27 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("   ▷ Create a new project");
   });
 
+  it("renders multiline diagnostics as separate terminal rows", () => {
+    const rows = renderFlowPanel(
+      {
+        title: "Add to your agent",
+        lines: [
+          {
+            text: "Linear connector creation failed:\nError: connector already exists.",
+            tone: "error",
+          },
+        ],
+        content: { kind: "idle", indicator: { glyph: "▪", color: "green" } },
+      },
+      theme,
+      60,
+    );
+
+    expect(rows).toContain("   ⨯ Linear connector creation failed:");
+    expect(rows).toContain("     Error: connector already exists.");
+    expect(rows.every((row) => !row.includes("\n"))).toBe(true);
+  });
+
   it("keeps only the freshest progress lines in view", () => {
     const lines = Array.from({ length: 10 }, (_, index) => ({
       text: `step ${index}`,

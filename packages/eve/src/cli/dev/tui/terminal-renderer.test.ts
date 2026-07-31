@@ -3880,26 +3880,6 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.shutdown();
   });
 
-  it("does not leak panel frames when a setup error includes command output", () => {
-    const { screen, renderer } = makeRenderer();
-
-    renderer.setupFlow.begin("Add to your agent", "pulse");
-    renderer.setupFlow.renderLine(
-      "Linear connector creation failed:\nError: connector already exists.",
-      "error",
-    );
-    renderer.setupFlow.setStatus("Cleaning up…");
-
-    const titles = screen
-      .snapshot()
-      .split("\n")
-      .filter((line) => line.includes("Add to your agent"));
-    expect(titles).toHaveLength(1);
-    expect(screen.snapshot()).toContain("Linear connector creation failed:");
-    renderer.setupFlow.end();
-    renderer.shutdown();
-  });
-
   it("discards input without interrupting a non-interruptible flow", async () => {
     const { input, renderer } = makeRenderer();
     renderer.setupFlow.begin("Add to your agent", "pulse");
