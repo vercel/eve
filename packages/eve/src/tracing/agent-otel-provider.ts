@@ -15,7 +15,7 @@ import {
   systemPromptAttribute,
   textContentAttribute,
   toolResultsContentAttribute,
-} from "#harness/agent-otel-content.js";
+} from "#tracing/agent-otel-content.js";
 import type {
   InstrumentationAttemptMetadataEvent,
   InstrumentationAttemptScope,

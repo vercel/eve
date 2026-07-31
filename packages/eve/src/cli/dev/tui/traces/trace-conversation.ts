@@ -9,8 +9,8 @@
 
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
-import { compareLocalTraceSpans } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import { compareLocalTraceSpans } from "#tracing/local-trace-reader.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";

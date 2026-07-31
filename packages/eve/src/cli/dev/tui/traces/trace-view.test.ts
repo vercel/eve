@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { stripAnsi, visibleLength } from "#cli/ui/terminal-text.js";
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 
 import { createTheme } from "../theme.js";
 import {

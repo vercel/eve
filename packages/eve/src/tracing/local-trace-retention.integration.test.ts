@@ -3,11 +3,11 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { pruneLocalTraceStore } from "#harness/local-trace-retention.js";
+import { pruneLocalTraceStore } from "#tracing/local-trace-retention.js";
 import {
   resolveLocalTraceSchemaDirectory,
   resolveLocalTraceSegmentsDirectory,
-} from "#harness/local-trace-span-processor.js";
+} from "#tracing/local-trace-span-processor.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();

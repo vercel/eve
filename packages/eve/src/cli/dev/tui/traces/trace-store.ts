@@ -7,14 +7,14 @@
  * of parsing spans, keeping a 1s poll cheap even with a large spool.
  */
 
-import type { LocalTrace, LocalTraceSpan } from "#harness/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 import {
   assembleLocalTrace,
   listLocalTraceIds,
   listLocalTraceSegments,
   readLocalTraceActivityMs,
   readLocalTraceSegment,
-} from "#harness/local-trace-reader.js";
+} from "#tracing/local-trace-reader.js";
 
 export interface TraceStoreEntry {
   readonly traceId: string;

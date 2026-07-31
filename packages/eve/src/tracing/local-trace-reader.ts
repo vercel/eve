@@ -14,7 +14,7 @@ import { join } from "node:path";
 import {
   resolveLocalTraceSchemaDirectory,
   resolveLocalTraceSegmentsDirectory,
-} from "#harness/local-trace-span-processor.js";
+} from "#tracing/local-trace-span-processor.js";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;

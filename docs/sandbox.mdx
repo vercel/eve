@@ -20,7 +20,7 @@ The model already has shell and file access through the default tools:
 | `glob`                     | find files by pattern               |
 | `grep`                     | search file contents                |
 
-All of them run with `/workspace` as the working directory. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
+All of them run with `/workspace` as the working directory. The model-facing file tools accept both absolute paths and paths beginning with `$HOME/`; eve resolves the latter inside the sandbox before reading, writing, or searching. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
 
 ```ts title="agent/tools/run_analysis.ts"
 import { defineTool } from "eve/tools";
