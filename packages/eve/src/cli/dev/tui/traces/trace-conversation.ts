@@ -584,19 +584,17 @@ function parseProviderToolResults(raw: string | undefined): readonly ProviderToo
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
+    // Capture-side truncation may collapse input/output to capped text, so
+    // both structured values and pre-flattened strings appear here.
+    const asText = (value: unknown): string | undefined =>
+      typeof value === "string" ? value : value === undefined ? undefined : JSON.stringify(value);
     return parsed.filter(isRecord).map((entry) => {
       const failed = "error" in entry;
-      const outcome = failed ? entry.error : entry.output;
       return {
-        args: entry.input === undefined ? undefined : JSON.stringify(entry.input),
+        args: asText(entry.input),
         error: failed,
         name: typeof entry.toolName === "string" ? entry.toolName : "tool",
-        result:
-          typeof outcome === "string"
-            ? outcome
-            : outcome === undefined
-              ? undefined
-              : JSON.stringify(outcome),
+        result: asText(failed ? entry.error : entry.output),
       };
     });
   } catch {

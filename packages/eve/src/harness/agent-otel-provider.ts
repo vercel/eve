@@ -14,6 +14,7 @@ import {
   messagesContentAttribute,
   systemPromptAttribute,
   textContentAttribute,
+  toolResultsContentAttribute,
 } from "#harness/agent-otel-content.js";
 import type {
   InstrumentationAttemptMetadataEvent,
@@ -370,7 +371,7 @@ export function createAgentOtelInstrumentation(
               : { error: errorText(part.error), input: part.input, toolName: part.toolName },
           );
         if (toolResults.length > 0) {
-          const json = contentAttribute(toolResults, false);
+          const json = toolResultsContentAttribute(toolResults);
           if (json !== undefined) state.span.setAttribute("ai.response.tool_results", json);
         }
       }

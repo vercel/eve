@@ -53,6 +53,36 @@ export function messagesContentAttribute(messages: unknown): string | undefined 
   return truncateSingleMessage(stripped);
 }
 
+/**
+ * Serializes provider-executed tool results, keeping the attribute valid
+ * JSON under the cap: when the full payload is too big, each entry's input
+ * and output collapse to capped text at progressively smaller budgets
+ * instead of cutting the JSON mid-string.
+ */
+export function toolResultsContentAttribute(
+  results: readonly Record<string, unknown>[],
+): string | undefined {
+  if (results.length === 0) return undefined;
+  const full = stringifyContent(results);
+  if (full !== undefined && full.length <= CONTENT_ATTRIBUTE_LIMIT) return full;
+  for (let cap = CONTENT_ATTRIBUTE_LIMIT; cap >= 0; cap = cap >= 256 ? Math.floor(cap / 2) : -1) {
+    const json = stringifyContent(results.map((entry) => cappedToolResult(entry, cap)));
+    if (json !== undefined && json.length <= CONTENT_ATTRIBUTE_LIMIT) return json;
+  }
+  return undefined;
+}
+
+function cappedToolResult(entry: Record<string, unknown>, cap: number): Record<string, unknown> {
+  const out: Record<string, unknown> = { toolName: entry.toolName };
+  for (const key of ["input", "output", "error"]) {
+    if (!(key in entry)) continue;
+    const value = entry[key];
+    const text = typeof value === "string" ? value : (stringifyContent(value) ?? "");
+    out[key] = text.length <= cap ? text : `${text.slice(0, cap)}… [truncated]`;
+  }
+  return out;
+}
+
 /** Normalizes the AI SDK's `instructions` prompt to plain text for `ai.prompt.system`. */
 export function systemPromptAttribute(instructions: unknown): string | undefined {
   if (typeof instructions === "string") return textContentAttribute(instructions);
