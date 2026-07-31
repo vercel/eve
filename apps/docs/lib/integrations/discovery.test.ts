@@ -29,7 +29,7 @@ describe("integration discovery", () => {
     const markdown = integrationMarkdown(slack!);
     expect(markdown).toContain("## Install");
     expect(markdown).toContain("## Quick start");
-    expect(markdown).toContain("eve channels add slack");
+    expect(markdown).toContain("eve add channel/slack");
   });
 
   it("renders the Browserbase extension setup", () => {

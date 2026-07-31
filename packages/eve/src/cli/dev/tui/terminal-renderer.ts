@@ -112,6 +112,10 @@ import {
   type LineState,
 } from "./line-editor.js";
 import { LiveRegion } from "#cli/ui/live-region.js";
+import { AltScreen } from "#cli/ui/alt-screen.js";
+import { copyTextToClipboard } from "./clipboard.js";
+import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
+import { TraceViewerSession } from "./traces/trace-viewer-session.js";
 import { buildStatusLine } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
@@ -344,6 +348,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #input: TerminalInput;
   readonly #output: TerminalOutput;
   readonly #live: LiveRegion;
+  readonly #altScreen: AltScreen;
   readonly #theme: Theme;
   readonly #tools: TerminalPartDisplayMode;
   readonly #reasoning: TerminalPartDisplayMode;
@@ -547,6 +552,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #flowInterrupt?: () => void;
   /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
   #flowIdleConsumer?: (key: TerminalKey) => void;
+  /** The open `/traces` viewer session, if the alt-screen viewer is active. */
+  #traceView?: TraceViewerSession;
   readonly setupFlow: SetupFlowRenderer = {
     begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
@@ -565,6 +572,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     waitForInterrupt: (options) => this.#waitForFlowInterrupt(options),
   };
 
+  /** The `/traces` full-screen viewer; resolves when the user closes it. */
+  readonly traceViewer: TraceViewerRenderer = {
+    open: (options) => this.#openTraceViewer(options),
+  };
+
   constructor(options?: TerminalRendererOptions) {
     this.#input = options?.input ?? process.stdin;
     this.#output = options?.output ?? process.stdout;
@@ -573,6 +585,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // every frame the live region paints would be intercepted as foreign log
     // output and re-trigger a paint — unbounded recursion.
     this.#live = new LiveRegion(this.#output);
+    this.#altScreen = new AltScreen(this.#output);
     this.#theme = createTheme({
       color: options?.color ?? true,
       unicode: options?.unicode ?? detectUnicode(),
@@ -1615,9 +1628,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (content.trim().length === 0) return;
     this.#start();
     this.#pushBlock(
-      tone === undefined
-        ? { kind: "result", body: content, live: false }
-        : { kind: "flow", title: tone, body: content, live: false },
+      tone === "success"
+        ? { kind: "result", body: content, live: false, status: "done" }
+        : tone === "error"
+          ? { kind: "flow", title: tone, body: content, live: false }
+          : { kind: "result", body: content, live: false },
     );
     this.#paint();
   }
@@ -2639,6 +2654,58 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   // ---------------------------------------------------------------------------
+  // Trace viewer (alt-screen)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Opens the `/traces` viewer on the alternate screen and owns the keyboard
+   * until the user closes it. The transcript's live region stays untouched
+   * underneath — the terminal restores it on exit, so closing just repaints.
+   */
+  async #openTraceViewer(options: TraceViewerOpenOptions): Promise<void> {
+    if (this.#traceView !== undefined || !this.#isInteractive) return;
+    const session = new TraceViewerSession({
+      ...options,
+      theme: this.#theme,
+      dimensions: () => ({ width: this.#width(), height: this.#height() }),
+      paint: (rows) => this.#altScreen.paint(rows, this.#height()),
+      tracingDisabled: process.env.EVE_TRACES === "off",
+      copyText: (text) => copyTextToClipboard(text, (chunk) => this.#altScreen.writeRaw(chunk)),
+    });
+    this.#traceView = session;
+    this.#altScreen.enter();
+    await new Promise<void>((resolve) => {
+      this.#traceViewClose = resolve;
+      this.#consumeKey = (key) => {
+        if (session.handleKey(key) === "close") this.#closeTraceViewer();
+      };
+      this.#attachInput();
+      session.start();
+    });
+  }
+
+  #closeTraceViewer(): void {
+    const session = this.#traceView;
+    if (session === undefined) return;
+    this.#traceView = undefined;
+    session.dispose();
+    this.#detachInput();
+    this.#altScreen.exit();
+    // exit() shows the cursor; hide it before the repaint so it doesn't
+    // blink over the transcript while the live region re-anchors.
+    this.#live.hideCursor();
+    // The main screen comes back exactly as it was (the engine's live-region
+    // row count still matches it), so a normal paint re-anchors cleanly.
+    this.#paint();
+    this.#live.showCursor();
+    const resolve = this.#traceViewClose;
+    this.#traceViewClose = undefined;
+    resolve?.();
+  }
+
+  #traceViewClose?: () => void;
+
+  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
@@ -2679,6 +2746,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   readonly #onProcessExit = () => {
     if (!this.#isInteractive) return;
+    this.#altScreen.exit();
     if (this.#input.isTTY) {
       this.#live.emitBracketedPaste(false);
       this.#input.setRawMode?.(false);
@@ -2687,6 +2755,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   };
 
   #stop() {
+    // An open trace viewer must leave the alt screen before teardown, and its
+    // awaited `open()` resolves so the runner loop can observe the shutdown.
+    this.#closeTraceViewer();
     // A reader still awaiting keys can never settle once input detaches;
     // rejecting a promise that already settled is a no-op.
     const rejectReader = this.#rejectActiveReader;
@@ -3500,6 +3571,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #paintNow() {
     if (!this.#isInteractive) return;
+
+    // The alt-screen viewer owns the screen while open; resize and stray
+    // paint triggers repaint its frame instead of the transcript.
+    if (this.#traceView !== undefined) {
+      this.#traceView.repaint();
+      return;
+    }
 
     const width = this.#width();
     const footer = this.#footerRows(width);

@@ -1,126 +1,80 @@
 ---
 issue: TBD
-status: proposed
-last_updated: "2026-07-24"
+status: in-progress
+last_updated: "2026-07-30"
 ---
 
 # Provider-neutral local observability
 
 ## Summary
 
-eve should produce useful local traces without depending on Workflow tracing, changing production
-instrumentation, or coupling observability providers directly to the AI SDK.
-
-The first consumer is zero-config tracing in `eve dev`, but the lifecycle contract must support
-OTel, Vercel, Braintrust, and custom providers.
-
-## Desired flow
+eve produces local traces without depending on Workflow tracing, changing production
+instrumentation, or coupling observability providers to the AI SDK. The first consumer is
+zero-config tracing in `eve dev`; the lifecycle contract must also support OTel, Vercel,
+Braintrust, and custom providers.
 
 ```text
-eve lifecycle boundaries -------------------+
-                                             +--> eve lifecycle hooks
-AI SDK callbacks -> per-attempt bridge -------+            |
-                                                          +--> local OTel provider
-AI SDK execute() -> eve-owned context runner              +--> Vercel provider
-                                                          +--> Braintrust provider
-                                                          +--> custom providers
+eve lifecycle boundaries ------------------+
+                                            +--> eve lifecycle hooks --> providers
+AI SDK callbacks -> per-attempt bridge -----+       (local OTel, Vercel, Braintrust, custom)
+AI SDK execute() -> eve-owned context runner
 ```
-
-The AI SDK bridge is an adapter, not an instrumentation provider. It translates AI SDK callbacks
-into immutable, eve-owned lifecycle events.
-
-Providers never receive raw AI SDK event types or execution functions.
 
 ## Lifecycle contract
 
-The bridge receives stable attempt scope and typed lifecycle hooks:
-
 ```ts
 createAiSdkHookBridge(scope, hooks, runInContext): Telemetry;
-```
 
-```ts
-interface LifecycleHooks {
-  publish(event: LifecycleEvent): Promise<void>;
-
-  before(name: "model.call", event: ModelCallStartedEvent): Promise<void>;
-  after(name: "model.call", event: ModelCallTerminalEvent): Promise<void>;
-
-  before(name: "tool.call", event: ToolCallStartedEvent): Promise<void>;
-  after(name: "tool.call", event: ToolCallTerminalEvent): Promise<void>;
+interface InstrumentationHooks {
+  publish(event: InstrumentationPointEvent): Promise<void>;
+  before(name: "model.call" | "tool.call", event: StartEvent): Promise<void>;
+  after(name: "model.call" | "tool.call", event: TerminalEvent): Promise<void>;
 }
 ```
 
-Lifecycle events use eve-owned identities and payloads. AI SDK `callId` values are bridge
-correlation details, not provider run identities.
+The bridge is an adapter, not a provider. It maps AI SDK callbacks into eve-owned lifecycle
+events, assigns stable attempt/model-call/tool-call identities, terminalizes open operations on
+error and abort, and invokes the trusted `runInContext` while calling execution exactly once. AI
+SDK `callId` values are bridge correlation details, not provider run identities.
 
-Related `before` state is retained per provider and operation, then supplied only to that
-provider's `after`. Attempt state is scoped by object identity and WeakMap-backed so abandoned
-attempts do not leak state.
+The bridge does not create spans, export records, apply capture policy, or publish durable
+eve-native events. Session, turn, compaction, suspension, and canonical step-terminal events are
+published by the harness.
 
-## Bridge responsibilities
+Attempt state is WeakMap-keyed by scope identity so abandoned attempts do not leak. `before` state
+is retained per provider and operation and supplied only to that provider's `after`.
 
-The bridge:
+## Providers
 
-- snapshots AI SDK callbacks;
-- maps them into eve-owned lifecycle events;
-- assigns stable attempt, model-call, and tool-call identities;
-- publishes starts and terminals through typed hooks;
-- terminalizes open operations on errors and aborts;
-- invokes trusted `runInContext` with a typed model or tool operation while calling execution
-  exactly once.
+A provider is a hook definition: handlers for the eve-owned events it cares about. An OTel provider
+may return spans from `before` and close them in `after`; Braintrust may retain row handles; Vercel
+may enqueue records.
 
-The bridge does not create spans, export records, apply provider capture policy, or publish durable
-eve-native events.
+Each provider owns an independent trace graph, rooted from its own serializable session state — not
+from ambient Workflow context or another provider's active context.
 
-Session, turn, compaction, suspension, and canonical step-terminal events are published directly
-by the eve harness.
-
-## Provider responsibilities
-
-Providers are ordinary lifecycle hook definitions. Each provider subscribes by defining handlers
-only for the eve-owned events it cares about; the lifecycle dispatcher invokes those handlers when
-the corresponding boundaries occur.
-
-An OTel provider may return spans from `before` and close them in `after`. Braintrust may retain
-native row handles. Vercel may enqueue normalized records.
-
-Each provider owns an independent trace graph. It creates or restores its root from provider-owned,
-serializable session state and derives later parentage from that state. Providers do not use ambient
-Workflow context, or another provider's active context, as their trace parent.
-
-Providers never receive an execution function. A built-in integration that needs ambient context
-may register a trusted internal `runInContext` alongside its event definition; it is passed directly
-to the bridge and is not part of the provider or hook contract.
+Providers never receive an execution function. A built-in integration needing ambient context may
+register a trusted internal `runInContext` alongside its event definition; that is not part of the
+provider contract.
 
 ## Local tracing
 
-`eve dev` registers a private local OTel provider that consumes the same lifecycle events as other
-providers.
+In `eve dev` eve registers the process tracer provider (`registerOTel`) with a private span
+processor consuming the same lifecycle events as any other provider, so nested AI SDK and user
+spans share agent context. It creates one trace per session window, explicitly roots that window
+rather than inheriting the ambient Workflow span, drops spans from the `workflow` instrumentation
+scope, and persists OTLP/JSON segments under `.eve/traces/v1`.
 
-The local provider:
+Those immutable segments are the canonical local store. A future index or dashboard is a
+rebuildable consumer of the spool, not a second source of trace identity.
 
-- is registered privately by eve while using the process OTel runtime so nested user spans share
-  agent context;
-- creates one trace per eve session, independently from Workflow context;
-- explicitly roots session context instead of inheriting the ambient Workflow span;
-- never captures Workflow spans;
-- persists traces as OTLP/JSON for later inspection.
-
-Immutable OTLP/JSON segments are the canonical local store. A future DuckDB or dashboard index is a
-rebuildable consumer of that spool, not a second source of trace identity or Workflow continuation
-state.
-
-Authored instrumentation and local capture may observe the same attempt concurrently without
-executing the model or tool more than once.
+Authored instrumentation and local capture may observe the same attempt without executing the model
+or tool more than once.
 
 ## Agent OTel semantics
 
-The local OTel provider emits an agent-first structural convention. GenAI spans may remain nested
-implementation detail, but they do not define the agent run.
-
 ```text
-session trace                              {agent.session.id}
+agent.session                              {agent.session.id, agent.session.window}
   +-- agent.turn                           {agent.turn.id, agent.turn.sequence}
       +-- agent.step                       {agent.step.index, agent.step.attempt}
           +-- model-provider spans
@@ -128,89 +82,136 @@ session trace                              {agent.session.id}
               +-- tool-provider spans
 ```
 
-The session is the trace, not a long-lived span. All turns share its trace id. Session lifecycle
-events attach to the turn that causes the transition; a transition without a turn may use a
-zero-duration marker span.
+GenAI spans stay nested implementation detail; they do not define the agent run. An `agent.step`
+covers one model call and the actions it requests through their resolution. `agent.action.kind` is
+an open discriminator — `tool` today, with `skill`, `subagent`, and `remote-agent` reserved.
 
-An `agent.step` covers one model call and the actions it requests through their resolution.
-`agent.action.kind` is an open discriminator for `tool`, `skill`, `subagent`, and `remote-agent`.
-Subagents use their own session trace and link back to the calling action.
+The `agent.*` namespace carries cheap structural attributes only: session/turn/step/attempt
+identity, action identity, agent and framework identity, channel and environment, principal, and
+parent/root lineage. Message content, model output, and tool payloads are optional capture, off by
+default. The OTel provider owns this mapping; the bridge and hooks contain no span names,
+attributes, or parent contexts.
 
-The `agent.*` namespace contains cheap structural attributes: session, turn, step and attempt
-identity; action identity; agent/framework identity; channel and environment; principal; and
-parent/root lineage. Message content, model output, tool arguments, and tool results are optional
-capture, off by default.
+### Session windows
 
-The OTel provider owns this mapping. The AI SDK bridge and lifecycle hooks do not contain OTel span
-names, attributes, or parent contexts.
+A session is one trace until it outgrows one. Sessions run for thousands of turns across days, and a
+single unbounded trace serves nobody: the local store evicts whole traces, and exporters cap spans
+per trace and assemble within a bounded time window, so late children get dropped. No local session
+is long enough to reach that, so windowing is for the production providers of phase 7; it is settled
+here because the window is what a subagent adopts and what a sampler decides on.
+
+A session therefore maps to a sequence of windowed traces. A window rolls on a turn count, chosen so
+ordinary sessions stay exactly one trace, and rolls only between turns so a turn's spans always
+share a trace. Turn count is the sole criterion because it is derived from state eve already
+persists, so a replaying worker reaches the same decision — an elapsed-time rule could not.
+`agent.session.window` is the zero-based index; each window's root records
+`agent.session.window.previous.trace.id`.
+
+Session identity does not live in the trace id. Every span carries `agent.session.id`, and eve's
+inspection path resolves a session to its windows through that attribute.
+
+### The window root is a real span
+
+`agent.session` is a real root span opened with OTel's `root` option, not a synthesized parent
+context. eve persists its span context — including the sampling decision it actually received — and
+later turns in the window parent to that stored context.
+
+This is what makes an authored sampler work. A synthesized parent asserting a sampled flag is a
+valid parent to `ParentBasedSampler`, which resolves through a parent branch and never consults the
+configured root rule. Asserting unsampled instead selects `localParentNotSampled`, which drops
+everything. A genuine root avoids both.
+
+Sampling is therefore per window, not per session: a ratio sampler may keep some windows of a long
+session and drop others. `agent.session.id` is a creation-time attribute, so an author who needs
+whole sessions can key a sampler on it.
+
+### Marker spans
+
+The window root is recorded and ended immediately, as `agent.turn` already is. A window outlives the
+worker that opened it and a span object cannot cross that boundary, so eve records the root,
+persists its span context, and parents later spans through it.
+
+The cost is that a backend reports the root's duration rather than the window's. Turn and step
+durations, where the time actually is, are unaffected, and `eve traces` renders a marker's
+descendant extent in place of its zero duration.
+
+A real duration would mean emitting the span once at window close, with explicit timestamps and a
+span id chosen before the span exists. The ids are reachable — `registerOTel` accepts an
+`idGenerator` — but the close is not: a session that goes idle and never resumes closes on nothing,
+so its root would never be emitted and every span in the trace would reference a parent that never
+arrives. A marker is the only representation that is always emitted. `agent.turn` does have a
+guaranteed close and could carry a real duration; that is tracked separately.
+
+Cross-window grouping relies on `agent.session.id` plus the previous-trace-id chain. Span links are
+the richer form but are not in eve's vendored OTel surface. Vercel Agent Runs is assembled from
+Workflow run tags rather than spans and is unaffected.
+
+### Subagents
+
+A subagent keeps its own session identity but records into the window its parent had open, so
+delegated work appears in the trace that caused it. Durable trace state is scoped to one session's
+context, so the window's `SpanContext` is handed down at dispatch rather than looked up by the
+child, and the child snapshots it — a later roll on the parent does not move work already recorded.
+A child with no handed-down window (a remote agent, running under its own deployment's tracing)
+opens its own root. A child that outgrows the adopted window rolls into its own, chained like any
+other roll. `eve traces` resolves any session recorded in a trace, not only the one that opened it.
 
 ## Runtime integration
-
-The bridge is injected per actual model attempt:
 
 ```text
 runModelCallWithRetries(attempt)
   -> create stable AttemptScope
   -> createAiSdkHookBridge(scope, hooks, runInContext)
   -> telemetry.integrations = [bridge, authoredOtel?]
-  -> AI SDK invokes callbacks and trusted runInContext
 ```
 
-The harness supplies `sessionId`, `turnId`, logical step index, and retry attempt index. The bridge
-derives stable model/tool identities once at their start callbacks and stores callback snapshots in
-invocation-local attempt state. `onStepEnd` and `onEnd` only snapshot results; the harness later
-publishes the canonical terminal event after durable actions are emitted. On replay, the harness
-recreates this attempt state; only provider-owned serializable context crosses Workflow boundaries.
+The harness supplies session id, turn id, logical step index, and retry attempt index. The bridge
+derives model/tool identities at their start callbacks and keeps callback snapshots in
+invocation-local state; `onStepEnd` and `onEnd` only snapshot, and the harness publishes the
+canonical terminal after durable actions are emitted. On replay the harness recreates attempt state;
+only provider-owned serializable context crosses Workflow boundaries.
 
-The existing eve stream keeps its current `step.started` boundary. AI SDK `onStepStart` is named
-`attempt.started` in the instrumentation lifecycle because it begins one concrete model attempt;
-retries and recovery calls therefore have distinct starts and terminals without introducing a
-second meaning for `step.started`.
+AI SDK `onStepStart` is named `attempt.started` because it begins one concrete model attempt, so
+retries have distinct starts and terminals without overloading the stream's `step.started`.
 
-AI SDK per-call integrations replace its global list. eve explicitly composes the bridge with its
-known `@ai-sdk/otel` adapter when the documented `instrumentation.ts` OTel path is active. Direct
-AI SDK `registerTelemetry()` calls are not part of eve's supported customization surface.
-
-Braintrust's documented eve integration uses eve hooks and `defineInstrumentation`, so per-call
-bridge injection does not disable it.
+Per-call integrations replace the AI SDK global list; eve composes the bridge with `@ai-sdk/otel`
+when the documented `instrumentation.ts` path is active. Direct `registerTelemetry()` calls are not
+a supported customization surface. Braintrust's documented integration uses eve hooks and
+`defineInstrumentation`, so per-call injection does not disable it.
 
 ## Compatibility
 
 Production keeps its current `defineInstrumentation` and `@ai-sdk/otel` behavior until provider
-migration is explicitly shipped.
-
-Without lifecycle hooks, no bridge override is present and production follows its existing authored
-instrumentation path unchanged.
-
-Existing stream hooks and current `step.started` semantics remain unchanged during the initial
-local-tracing work.
+migration ships. Without lifecycle hooks no bridge is installed and production follows the existing
+authored path unchanged. Stream hooks and `step.started` semantics are unchanged.
 
 ## Delivery phases
 
-1. **Lifecycle bridge.** Land the unused attempt scope, WeakMap-backed state, typed hooks, related
-   before/after correlation, a trusted context runner, and the AI SDK callback adapter. No
-   runtime wiring.
-2. **Per-attempt wiring.** Add optional internal lifecycle hooks to the harness and pass one bridge
-   through `telemetry.integrations` per retry attempt, composing authored OTel when active. No
-   provider or trace output yet.
-3. **Local OTel provider.** Add a private provider that maps lifecycle events to the `agent.*`
-   convention and proves the trace tree in memory. Production remains unchanged.
-4. **Persistence.** Write session traces as OTLP/JSON, restore provider-owned session context across
-   dev worker restarts, and apply payload capture policy. No browser UI.
-5. **Inspection.** Add minimal `eve traces ls` and `eve traces [trace]` commands. A graphical viewer is a
-   separate design after the trace model stabilizes.
-6. **Public providers.** Promote the proven lifecycle contract into public hooks and migrate OTel,
-   Vercel, Braintrust, and custom instrumentation onto it.
-
-The current bridge PR is phase 1 only: it lands unused primitives and cannot emit a trace.
+1. **Lifecycle bridge.** — _landed._ Attempt scope, WeakMap state, typed hooks, before/after
+   correlation, trusted context runner, AI SDK callback adapter.
+2. **Per-attempt wiring.** — _landed._ One bridge per retry attempt through
+   `telemetry.integrations`, composing authored OTel when active.
+3. **Local OTel provider.** — _landed._ Lifecycle events mapped to the `agent.*` convention.
+4. **Persistence.** — _landed._ OTLP/JSON segments, session context restored across dev worker
+   restarts, retention bounds, capture policy.
+5. **Inspection.** — _landed._ `eve traces ls` and `eve traces [trace]`.
+6. **Session windows.** — _in review._ Real `agent.session` root with its recorded sampling
+   decision, window rolling, subagent adoption, session-to-windows resolution in `eve traces`.
+7. **Public providers.** — _not started._ Promote the lifecycle contract into public hooks and
+   migrate OTel, Vercel, Braintrust, and custom instrumentation onto it.
 
 ## Acceptance criteria
 
-- The provider-neutral lifecycle layer imports no AI SDK or OTel types.
+- The lifecycle layer imports no OTel types. It does derive AI SDK callback payload shapes from
+  `Telemetry`, so `attempt`, `model.call`, and `tool.call` events currently expose AI SDK types to
+  providers — a known deviation from provider neutrality, to close in phase 7.
 - Multiple providers observe one attempt while execution occurs exactly once.
 - No provider definition receives model or tool execution functions.
 - Documented authored instrumentation continues to observe eve calls.
-- Each eve provider can build its trace without inheriting Workflow or another provider's trace.
+- Each provider builds its trace without inheriting Workflow or another provider's trace.
+- No eve span inherits a synthesized parent, so an authored sampler's root rule is consulted.
+- A session of ordinary length is exactly one trace; a session of any length has bounded traces.
+- `eve traces <session>` resolves every window of a session.
 - Parallel tool calls retain independent provider state.
 - Errors and aborts terminalize all started model and tool operations.
 - Local traces contain no Workflow spans.

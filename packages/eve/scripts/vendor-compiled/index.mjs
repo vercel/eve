@@ -14,6 +14,7 @@ import providerUtils from "./@ai-sdk/provider-utils.mjs";
 import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
+import photonChatAdapterIMessage from "./@photon-ai/chat-adapter-imessage.mjs";
 
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
@@ -69,6 +70,7 @@ export const MODULES = [
   opentelemetryApi,
   opentelemetryOtlpTransformer,
   otel,
+  photonChatAdapterIMessage,
   picocolors,
   provider,
   providerUtils,

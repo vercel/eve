@@ -408,29 +408,6 @@ describe("resolveProvisioning box", () => {
     expect(deps.requireAuth).toHaveBeenCalled();
   });
 
-  it("resolves to Vercel without asking when Slack was selected earlier", async () => {
-    const deps = fakeDeps();
-    // Only the project sub-question is asked; the where-to-run select would
-    // consume a value the prompter does not have, so reaching it throws.
-    const prompter = createPrompter({ selectValues: ["new"] });
-    const box = makeBox({
-      prompter,
-      targetDirectory: "/tmp/parent",
-      mode: { headless: false },
-      deps,
-    });
-    const state: SetupState = { ...stateWithAgentName("my-agent"), channelSelection: ["slack"] };
-
-    const result = await runInteractive([box], state, silentSink);
-
-    expect(result.kind).toBe("done");
-    if (result.kind !== "done") return;
-    expect(result.state.vercelProject).toEqual({ kind: "new", project: "my-agent", team: "team" });
-    expect(prompter.log.info).toHaveBeenCalledWith(
-      "Slack needs a public URL, so your agent will run on Vercel.",
-    );
-  });
-
   it("resolves to Vercel without asking when a Connect-backed connection was selected", async () => {
     const deps = fakeDeps();
     const prompter = createPrompter({ selectValues: ["new"] });
@@ -482,21 +459,6 @@ describe("resolveProvisioning box", () => {
       /provider API key/.test(option.label ?? ""),
     );
     expect(provider?.hint).toBe("OPENAI_API_KEY");
-  });
-
-  it("headless: refuses --skip-vercel against a Slack selection before any effect", async () => {
-    const deps = fakeDeps();
-    const box = makeBox({
-      prompter: createPrompter(),
-      targetDirectory: "/tmp/parent",
-      mode: { headless: true, project: { skipVercel: true }, aiGateway: {} },
-      deps,
-    });
-    const state: SetupState = { ...stateWithAgentName("my-agent"), channelSelection: ["slack"] };
-
-    await expect(runHeadless([box], state, silentSink)).rejects.toThrow(
-      "Slack requires a Vercel project. Remove --skip-vercel to add Slack.",
-    );
   });
 
   it("headless: refuses --skip-vercel against a Connect-backed connection selection", async () => {

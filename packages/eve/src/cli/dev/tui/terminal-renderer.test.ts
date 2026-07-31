@@ -1448,14 +1448,30 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
   });
 
-  it("promotes a successful command outcome to a top-level green check", () => {
+  it("hangs a successful command outcome from an elbow into a full-intensity rail", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("Registry items added: channel/discord.", "success");
+    renderer.renderCommandResult(
+      "Registry items added: channel/photon-imessage.\n" +
+        "Text your agent: +15550000000\n" +
+        "Photon project: https://app.photon.codes/dashboard/project-id",
+      "success",
+    );
     renderer.shutdown();
 
-    expect(screen.snapshot()).toContain("✓ Registry items added: channel/discord.");
-    expect(screen.snapshot()).not.toContain("⎿");
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("⎿  ✓ Registry items added: channel/photon-imessage.");
+    expect(snapshot).toContain("│ Text your agent: +15550000000");
+    expect(snapshot).toContain("└ Photon project: https://app.photon.codes/dashboard/project-id");
     expect(screen.rawOutput()).toContain("\u001b[32m✓\u001b[39m");
+    expect(screen.rawOutput()).not.toContain("\u001b[2mText your agent");
+  });
+
+  it("keeps a single-line successful command result under the elbow", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandResult("Registry items added: connection/linear.", "success");
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
   });
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {

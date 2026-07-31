@@ -95,6 +95,37 @@ describe("runRegistryFlow", () => {
     });
   });
 
+  it("uses the registry title when labeling an item", async () => {
+    const answers = ["category:channel", "action:back", "action:done"];
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        return answers.shift()!;
+      },
+    });
+    const flowDeps = deps({
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [
+          {
+            address: "channel/photon-imessage",
+            name: "channel/photon-imessage",
+            title: "Photon",
+            source: "Vercel",
+          },
+        ],
+        total: 1,
+        errors: [],
+      })),
+    });
+
+    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
+
+    expect(prompts[1]).toMatchObject({
+      options: expect.arrayContaining([expect.objectContaining({ label: "Photon" })]),
+    });
+  });
+
   it("keeps setup on the parent prompter without leasing the terminal", async () => {
     const answers = ["category:channel", "item:0", "add"];
     const fake = createFakePrompter({ single: () => answers.shift()! });

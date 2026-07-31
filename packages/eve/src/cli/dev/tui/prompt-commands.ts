@@ -8,6 +8,7 @@ export type PromptCommand =
   | { type: "exit" }
   | { type: "help" }
   | { type: "loglevel"; argument: string }
+  | { type: "traces"; argument: string }
   | { type: "extension"; name: PromptCommandExtensionName; argument: string };
 
 /**
@@ -90,6 +91,15 @@ const PROMPT_COMMAND_DEFINITIONS = [
     takesArgument: true,
     build: (argument) => ({ type: "loglevel", argument }),
     targets: ["local", "remote"],
+  },
+  {
+    name: "traces",
+    aliases: [],
+    description: "Open the local trace viewer",
+    argumentHint: "[trace]",
+    takesArgument: true,
+    build: (argument) => ({ type: "traces", argument }),
+    targets: ["local"],
   },
   {
     name: "add",

@@ -134,13 +134,25 @@ export interface EveEvalTaskResult {
 export type AssertionSeverity = "gate" | "soft";
 
 /**
+ * A rich value-assertion evaluation. Built-in assertions use this to retain a
+ * concise failure reason and structured evidence alongside the numeric score.
+ */
+export interface AssertionEvaluation {
+  /** Normalized 0–1 score. */
+  readonly score: number;
+  /** Concise human-readable reason, shown when the assertion fails. */
+  readonly message?: string;
+  /** Structured diagnostic evidence retained by artifacts and reporters. */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
  * A value-level assertion produced by the builders in `eve/evals/expect`
  * (e.g. `includes`, `equals`, `similarity`) and applied to an explicit value
  * via `t.check(value, assertion)`. Boolean assertions score exactly 0 or 1.
  *
  * The chainable `gate`/`soft`/`atLeast` return a new assertion with the
- * severity or threshold overridden, so the threshold rides on the assertion
- * itself rather than a detached map.
+ * severity or threshold overridden.
  */
 export interface Assertion {
   readonly name: string;
@@ -148,6 +160,8 @@ export interface Assertion {
   /** Minimum passing score. `undefined` on a soft assertion = tracked only. */
   readonly threshold?: number;
   score(value: unknown): number | Promise<number>;
+  /** Rich evaluation used by `t.check` and `t.require`; custom assertions may omit it. */
+  evaluate?(value: unknown): AssertionEvaluation | Promise<AssertionEvaluation>;
   gate(threshold?: number): Assertion;
   soft(threshold?: number): Assertion;
   atLeast(threshold: number): Assertion;
@@ -155,14 +169,17 @@ export interface Assertion {
 
 /**
  * Handle to a recorded assertion, returned by every `t` assertion method.
- * Chain `gate`/`soft`/`atLeast` to override the recorded severity or
- * threshold. Recorded assertions are finalized by the runner; use `t.require`
- * or a `require*` lookup when later control flow depends on a passing result.
+ * Chain `gate`/`soft`/`atLeast` to override the recorded severity or threshold,
+ * and `label` to distinguish repeated assertion families. Recorded assertions
+ * are finalized by the runner; use `t.require` or a `require*` lookup when
+ * later control flow depends on a passing result.
  */
 export interface AssertionHandle {
   gate(threshold?: number): this;
   soft(threshold?: number): this;
   atLeast(threshold: number): this;
+  /** Adds a stable human-readable label to this recorded assertion. */
+  label(label: string): this;
 }
 
 /**

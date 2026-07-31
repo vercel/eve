@@ -60,6 +60,7 @@ export type RegistryFlowResult =
   | { kind: "cancelled" };
 
 function itemLabel(item: RegistryCatalogItem): string {
+  if (item.title !== undefined) return item.title;
   const name = item.name.split("/").at(-1) ?? item.name;
   return name
     .split("-")

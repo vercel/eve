@@ -105,13 +105,11 @@ export interface ResolvedProvisioning {
  * flags.
  */
 interface VercelDemands {
-  slack: boolean;
   connectSlugs: string[];
 }
 
 function vercelDemands(state: Readonly<SetupState>): VercelDemands {
   return {
-    slack: state.channelSelection.includes("slack"),
     connectSlugs: state.connectionSelection
       .filter((plan) => plan.entry.auth?.kind === "connect")
       .map((plan) => plan.slug),
@@ -127,9 +125,6 @@ function connectClause(connectSlugs: readonly string[]): string {
 /** The reasons behind a forced Vercel resolution; empty when free to choose. */
 function vercelRequirements(demands: VercelDemands): string[] {
   const reasons: string[] = [];
-  if (demands.slack) {
-    reasons.push("Slack needs a public URL");
-  }
   if (demands.connectSlugs.length > 0) {
     reasons.push(connectClause(demands.connectSlugs));
   }
@@ -438,9 +433,6 @@ export function resolveProvisioning(
         // resolves to Vercel for those selections.
         if (plans.vercelProject.kind === "none") {
           const demands = vercelDemands(state);
-          if (demands.slack) {
-            throw new Error("Slack requires a Vercel project. Remove --skip-vercel to add Slack.");
-          }
           if (demands.connectSlugs.length > 0) {
             throw new Error(
               `${connectClause(demands.connectSlugs)}, which needs a Vercel project. Remove --skip-vercel to add ${demands.connectSlugs.length === 1 ? "it" : "them"}.`,

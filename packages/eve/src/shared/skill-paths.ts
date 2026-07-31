@@ -3,9 +3,10 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 export const MODEL_SKILL_ROOT = "$HOME/.agents/skills";
 export const FALLBACK_SKILL_ROOT = "/workspace/skills";
 
+const MODEL_HOME_ROOT = "$HOME";
 const HOME_SKILL_SUFFIX = ".agents/skills";
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
-const skillRootCache = new WeakMap<SandboxSession, Promise<string>>();
+const sandboxHomeCache = new WeakMap<SandboxSession, Promise<string | null>>();
 
 export function formatSkillModelPath(input: {
   readonly name: string;
@@ -32,14 +33,35 @@ export function formatFallbackSkillPath(input: {
 export async function resolveSandboxSkillRoot(input: {
   readonly sandbox: SandboxSession;
 }): Promise<string> {
-  const cached = skillRootCache.get(input.sandbox);
-  if (cached !== undefined) {
-    return await cached;
+  const home = await resolveSandboxHome(input.sandbox);
+  return home === null ? FALLBACK_SKILL_ROOT : joinHomeSkillRoot(home);
+}
+
+/**
+ * Resolves a leading `$HOME` in a model-supplied sandbox path without
+ * evaluating any other shell syntax. Skill paths retain their documented
+ * `/workspace/skills` fallback when the sandbox does not expose a usable
+ * home directory.
+ */
+export async function resolveSandboxModelPath(input: {
+  readonly path: string;
+  readonly sandbox: SandboxSession;
+}): Promise<string> {
+  if (!isModelHomePath(input.path)) {
+    return input.path;
   }
 
-  const next = probeSandboxSkillRoot(input.sandbox);
-  skillRootCache.set(input.sandbox, next);
-  return await next;
+  const home = await resolveSandboxHome(input.sandbox);
+  if (home !== null) {
+    const suffix = input.path.slice(MODEL_HOME_ROOT.length);
+    return suffix.length === 0 ? home : `${home === "/" ? "" : home}${suffix}`;
+  }
+
+  if (isModelSkillPath(input.path)) {
+    return `${FALLBACK_SKILL_ROOT}${input.path.slice(MODEL_SKILL_ROOT.length)}`;
+  }
+
+  return input.path;
 }
 
 export async function resolveSandboxSkillReadPaths(input: {
@@ -72,12 +94,11 @@ export async function resolveSandboxSeedFilePath(input: {
   readonly path: string;
   readonly sandbox: SandboxSession;
 }): Promise<string> {
-  if (!input.path.startsWith(`${MODEL_SKILL_ROOT}/`)) {
+  if (!isModelSkillPath(input.path)) {
     return input.path;
   }
 
-  const root = await resolveSandboxSkillRoot({ sandbox: input.sandbox });
-  return `${root}${input.path.slice(MODEL_SKILL_ROOT.length)}`;
+  return await resolveSandboxModelPath(input);
 }
 
 function formatSkillPath(input: {
@@ -88,22 +109,41 @@ function formatSkillPath(input: {
   return `${input.root}/${input.name}/${input.relativePath}`;
 }
 
-async function probeSandboxSkillRoot(sandbox: SandboxSession): Promise<string> {
+async function resolveSandboxHome(sandbox: SandboxSession): Promise<string | null> {
+  const cached = sandboxHomeCache.get(sandbox);
+  if (cached !== undefined) {
+    return await cached;
+  }
+
+  const next = probeSandboxHome(sandbox);
+  sandboxHomeCache.set(sandbox, next);
+  return await next;
+}
+
+async function probeSandboxHome(sandbox: SandboxSession): Promise<string | null> {
   try {
     const result = await sandbox.run({ command: HOME_PROBE_COMMAND });
     if (result.exitCode !== 0) {
-      return FALLBACK_SKILL_ROOT;
+      return null;
     }
 
     const home = result.stdout.trim();
     if (!isUsableSandboxHome(home)) {
-      return FALLBACK_SKILL_ROOT;
+      return null;
     }
 
-    return joinHomeSkillRoot(home);
+    return normalizeSandboxHome(home);
   } catch {
-    return FALLBACK_SKILL_ROOT;
+    return null;
   }
+}
+
+function isModelHomePath(path: string): boolean {
+  return path === MODEL_HOME_ROOT || path.startsWith(`${MODEL_HOME_ROOT}/`);
+}
+
+function isModelSkillPath(path: string): boolean {
+  return path === MODEL_SKILL_ROOT || path.startsWith(`${MODEL_SKILL_ROOT}/`);
 }
 
 function isUsableSandboxHome(path: string): boolean {
@@ -117,6 +157,9 @@ function isUsableSandboxHome(path: string): boolean {
 }
 
 function joinHomeSkillRoot(home: string): string {
-  const normalizedHome = home === "/" ? "" : home.replace(/\/+$/, "");
-  return `${normalizedHome}/${HOME_SKILL_SUFFIX}`;
+  return `${home === "/" ? "" : home}/${HOME_SKILL_SUFFIX}`;
+}
+
+function normalizeSandboxHome(home: string): string {
+  return home === "/" ? home : home.replace(/\/+$/, "");
 }

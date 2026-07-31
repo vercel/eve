@@ -30,7 +30,7 @@ import {
 } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
-import { AuthKey, ParentSessionKey } from "#context/keys.js";
+import { AuthKey, ParentSessionKey, ParentTraceContextKey } from "#context/keys.js";
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
 import { getActiveDynamicModelSelection } from "#context/dynamic-model-lifecycle.js";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
@@ -107,6 +107,8 @@ import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-c
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
+import { resolveParentLineage } from "#harness/parent-lineage.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   consumeDeferredStepInput,
   getApprovedTools,
@@ -536,11 +538,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     let emissionState = getHarnessEmissionState(session.state);
-    const parent = contextStorage.getStore()?.get(ParentSessionKey);
+    const store = contextStorage.getStore();
+    const parent = store?.get(ParentSessionKey);
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
       handleEvent: baseEmit,
       hooks: config.instrumentation?.hooks,
+      parentLineage: resolveParentLineage(parent, store?.get(ChannelKey)),
+      parentTraceContext: store?.get(ParentTraceContextKey),
       rootSessionId: parent?.rootSessionId,
       sessionId: session.sessionId,
       turnId: activeTurnId(emissionState),

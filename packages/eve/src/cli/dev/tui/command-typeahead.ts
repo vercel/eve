@@ -17,7 +17,7 @@ import { renderCursorRow } from "#setup/cli/option-row.js";
  * a command (e.g. `/exit`) out of view — windowing is for longer future lists.
  * Keep this >= the number of entries in `PROMPT_COMMANDS`.
  */
-const MAX_VISIBLE_SUGGESTIONS = 10;
+const MAX_VISIBLE_SUGGESTIONS = 11;
 
 export interface CommandTypeaheadState {
   /** The prompt text the matches were derived from. */
