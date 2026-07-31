@@ -1,4 +1,5 @@
 import { type FilePart, type TextPart, type UserContent } from "ai";
+import { EntityConflictError } from "#compiled/@workflow/errors/index.js";
 
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
@@ -23,11 +24,12 @@ import {
 } from "#protocol/message.js";
 import {
   EVE_CANCEL_TURN_ROUTE_PATTERN,
+  EVE_DELETE_SESSION_ROUTE_PATTERN,
   EVE_INFO_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
 } from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
-import { type AuthFn, routeAuth } from "#public/channels/auth.js";
+import { type AuthFn, isJwtAuthFn, type JwtAuthFn, routeAuth } from "#public/channels/auth.js";
 import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
@@ -37,6 +39,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import {
   defineChannel,
+  DELETE,
   POST,
   GET,
   type Channel,
@@ -130,6 +133,13 @@ export interface EveChannelInput {
    * the next; exhaustion (including the empty array) rejects with 401. Include `none()` last for anonymous traffic.
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
+  /**
+   * Dedicated built-in JWT policy for framework maintenance routes. This is
+   * intentionally separate from {@link auth}: application auth may require
+   * Turn context or accept users, while hard deletion must accept only an
+   * internal service JWT verified by {@link jwtHmac} or {@link jwtEcdsa}.
+   */
+  readonly maintenanceAuth?: JwtAuthFn | readonly JwtAuthFn[];
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
    * assert a forwarded principal on the create-session route (the
@@ -426,6 +436,62 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
       }),
 
+      DELETE(EVE_DELETE_SESSION_ROUTE_PATTERN, async (req, args) => {
+        const maintenanceAuth = normalizeMaintenanceAuth(input.maintenanceAuth);
+        if (maintenanceAuth === null) {
+          return Response.json(
+            { error: "Session deletion is unavailable.", ok: false },
+            { status: 501 },
+          );
+        }
+        const authResult = await routeAuth(req, maintenanceAuth);
+        if (authResult instanceof Response) return authResult;
+        if (authResult.principalType !== "service") {
+          return Response.json(
+            { error: "Session deletion requires an internal service JWT.", ok: false },
+            { status: 403 },
+          );
+        }
+
+        const sessionId = args.params.sessionId;
+        if (!sessionId) {
+          return Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
+        }
+
+        try {
+          const agent = readRouteAgent(args);
+          if (agent === undefined) {
+            throw new Error("Missing route agent.");
+          }
+          if (agent.deleteSession === undefined) {
+            return Response.json(
+              { error: "Session deletion is unavailable.", ok: false },
+              { status: 501 },
+            );
+          }
+          await agent.deleteSession(sessionId);
+          return new Response(null, {
+            headers: { "cache-control": "no-store" },
+            status: 204,
+          });
+        } catch (error) {
+          if (isPurgeConflict(error)) {
+            return Response.json(
+              { error: "Session deletion is still in progress.", ok: false },
+              {
+                headers: { "cache-control": "no-store", "retry-after": "1" },
+                status: 409,
+              },
+            );
+          }
+          const errorId = logError(log, "session-delete request failed", error);
+          return Response.json(
+            { error: "Failed to delete the session.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+      }),
+
       GET("/eve/v1/session/:sessionId/stream", async (req, { getSession, params }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
@@ -472,6 +538,21 @@ export function eveChannel(input: EveChannelInput): EveChannel {
     ],
     events: input.events,
   });
+}
+
+function isPurgeConflict(error: unknown): boolean {
+  return EntityConflictError.is(error);
+}
+
+function normalizeMaintenanceAuth(
+  auth: EveChannelInput["maintenanceAuth"],
+): JwtAuthFn | readonly JwtAuthFn[] | null {
+  if (auth === undefined) return null;
+  const entries = Array.isArray(auth) ? auth : [auth];
+  if (entries.length === 0 || !entries.every((entry) => isJwtAuthFn(entry))) {
+    return null;
+  }
+  return auth;
 }
 
 function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {

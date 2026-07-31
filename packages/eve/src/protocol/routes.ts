@@ -46,6 +46,12 @@ export const EVE_MESSAGE_STREAM_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:se
 export const EVE_CANCEL_TURN_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/cancel`;
 
 /**
+ * Framework-owned maintenance route for permanently deleting one session and
+ * its descendant workflow runs. Unlike reset, this removes durable history.
+ */
+export const EVE_DELETE_SESSION_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId`;
+
+/**
  * Framework-owned route pattern for dispatching one authored schedule
  * exactly once from the dev server.
  *
@@ -134,6 +140,11 @@ export function createEveContinueSessionRoutePath(sessionId: string): string {
  */
 export function createEveCancelTurnRoutePath(sessionId: string): string {
   return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}/cancel`;
+}
+
+/** Creates the stable framework-owned hard-delete route path. */
+export function createEveDeleteSessionRoutePath(sessionId: string): string {
+  return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}`;
 }
 
 /**

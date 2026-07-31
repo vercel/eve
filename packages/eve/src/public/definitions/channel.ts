@@ -9,6 +9,7 @@ import type { Session, SessionHandle } from "#channel/session.js";
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  DeleteSessionResult,
   DeliverInput,
   DeliverPayload,
   GetEventStreamOptions,
@@ -140,6 +141,8 @@ export interface Agent {
    * Both outcomes are successful.
    */
   cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+  /** Framework maintenance operation for permanent session-tree deletion. */
+  deleteSession?(sessionId: string): Promise<DeleteSessionResult>;
   /**
    * Sends a follow-up message to a session that is currently parked waiting
    * for input. Throws if no parked session exists for the supplied

@@ -8,6 +8,7 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  DeleteSessionResult,
   DeliverInput,
   GetEventStreamOptions,
   HookPayload,
@@ -198,6 +199,42 @@ export function createWorkflowRuntime(config: {
         }
         throw error;
       }
+    },
+
+    async deleteSession(sessionId: string): Promise<DeleteSessionResult> {
+      const world = await getWorld();
+      const purgeWorld = world as typeof world & {
+        capabilities?: { runTreePurge?: boolean };
+        purgeRunTree?: (
+          rootRunId: string,
+          options: {
+            descendantAttribute: { key: string; value: string };
+          },
+        ) => Promise<{ purgedRunCount: number; status: "absent" | "purged" }>;
+      };
+      const purge = purgeWorld.purgeRunTree;
+      if (purge === undefined || purgeWorld.capabilities?.runTreePurge !== true) {
+        throw new EntityConflictError(
+          "The configured Workflow World does not support run-tree purge.",
+        );
+      }
+
+      try {
+        await cancelRun(world, sessionId, {
+          cancelReason: "Session permanently deleted by maintenance",
+        });
+      } catch (error) {
+        if (!isAlreadyTerminalSessionError(error)) {
+          throw error;
+        }
+      }
+
+      const result = await purge(sessionId, {
+        descendantAttribute: { key: "$eve.root", value: sessionId },
+      });
+      return result.status === "absent"
+        ? { status: "absent" }
+        : { purgedRunCount: result.purgedRunCount, status: "deleted" };
     },
 
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {

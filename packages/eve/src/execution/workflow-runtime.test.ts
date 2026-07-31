@@ -255,6 +255,67 @@ describe("createWorkflowRuntime#terminateSession", () => {
   });
 });
 
+describe("createWorkflowRuntime#deleteSession", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("cancels then purges the root and every eve descendant", async () => {
+    const purgeRunTree = vi.fn().mockResolvedValue({
+      purgedRunCount: 3,
+      status: "purged",
+    });
+    const world = { capabilities: { runTreePurge: true }, purgeRunTree };
+    getWorldMock.mockResolvedValue(world);
+    cancelRunMock.mockResolvedValue(undefined);
+
+    await expect(buildRuntime().deleteSession?.("session-1")).resolves.toEqual({
+      purgedRunCount: 3,
+      status: "deleted",
+    });
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "session-1", {
+      cancelReason: "Session permanently deleted by maintenance",
+    });
+    expect(purgeRunTree).toHaveBeenCalledWith("session-1", {
+      descendantAttribute: { key: "$eve.root", value: "session-1" },
+    });
+  });
+
+  it("treats an already absent tree as idempotent success", async () => {
+    const { WorkflowRunNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    cancelRunMock.mockRejectedValue(new WorkflowRunNotFoundError("session-1"));
+    getWorldMock.mockResolvedValue({
+      capabilities: { runTreePurge: true },
+      purgeRunTree: vi.fn().mockResolvedValue({
+        purgedRunCount: 0,
+        status: "absent",
+      }),
+    });
+
+    await expect(buildRuntime().deleteSession?.("session-1")).resolves.toEqual({
+      status: "absent",
+    });
+  });
+
+  it("fails closed when the World has no purge capability", async () => {
+    getWorldMock.mockResolvedValue({});
+
+    await expect(buildRuntime().deleteSession?.("session-1")).rejects.toThrow(
+      "does not support run-tree purge",
+    );
+  });
+
+  it("fails closed when a World method is present without its capability", async () => {
+    getWorldMock.mockResolvedValue({
+      purgeRunTree: vi.fn(),
+    });
+
+    await expect(buildRuntime().deleteSession?.("session-1")).rejects.toMatchObject({
+      name: "EntityConflictError",
+    });
+  });
+});
+
 describe("createWorkflowRuntime#resolveSession", () => {
   function buildRuntime() {
     return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });

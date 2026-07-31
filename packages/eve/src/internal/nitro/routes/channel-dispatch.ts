@@ -250,10 +250,18 @@ function buildRouteArgs(
 }
 
 function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agent {
+  const deleteSession = runtime.deleteSession;
   return {
     async cancelTurn(input) {
       return await runtime.cancelTurn(input);
     },
+    ...(deleteSession === undefined
+      ? {}
+      : {
+          async deleteSession(sessionId: string) {
+            return await deleteSession(sessionId);
+          },
+        }),
     async deliver(input) {
       const deliverInput: DeliverInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
       return await runtime.deliver(deliverInput);
