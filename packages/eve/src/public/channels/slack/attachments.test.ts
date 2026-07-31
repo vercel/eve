@@ -232,6 +232,53 @@ describe("createSlackFetchFile", () => {
 
     await expect(fetchFile("https://files.slack.com/locked.csv")).rejects.toThrow("HTTP 403");
   });
+
+  it("rejects an HTTP 200 `text/html` sign-in page (missing files:read scope)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>Slack sign in</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+
+    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+
+    await expect(fetchFile("https://files.slack.com/a/b/locked.png")).rejects.toThrow(
+      /sign-in page.*files:read/is,
+    );
+  });
+
+  it("rejects an HTML sign-in page when the response omits a Content-Type", async () => {
+    // A bare string body makes `Response` default to `text/plain`, so strip
+    // the header explicitly to model Slack's sign-in HTML arriving untyped.
+    const response = new Response("<html><head><title>Slack</title></head></html>", {
+      status: 200,
+    });
+    response.headers.delete("content-type");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+
+    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+
+    await expect(fetchFile("https://files.slack.com/a/b/locked.png")).rejects.toThrow(
+      /sign-in page.*files:read/is,
+    );
+  });
+
+  it("still returns binary file bytes for ordinary attachments (no false positive)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Uint8Array([137, 80, 78, 71]), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      }),
+    );
+
+    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+    const result = await fetchFile("https://files.slack.com/a/b/cat.png");
+
+    expect(result).not.toBeNull();
+    expect(result!.bytes.equals(Buffer.from([137, 80, 78, 71]))).toBe(true);
+    expect(result!.mediaType).toBe("image/png");
+  });
 });
 
 describe("collectInboundFileParts", () => {
