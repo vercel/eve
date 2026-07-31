@@ -302,13 +302,11 @@ export type ResolvedRuntimeDelegationNode =
   | ResolvedRuntimeRemoteAgentNode
   | ResolvedRuntimeSubagentNode;
 
-/** Live availability resolver loaded from a subagent `agent.ts`. */
 export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
   readonly eventNames: readonly string[];
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
-  /** Static agent definition compiled into the child node. */
   readonly fallback: unknown;
 }
 

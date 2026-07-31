@@ -5,10 +5,6 @@ import type { JsonObject } from "#shared/json.js";
 import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
-/**
- * Runtime availability resolver metadata for a subagent whose definition is
- * wrapped in `defineDynamic`.
- */
 export interface CompiledDynamicSubagentDefinition {
   readonly eventNames: readonly string[];
 }

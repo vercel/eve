@@ -12,7 +12,6 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 
 type DynamicSubagentSource = ModuleSourceRef & CompiledDynamicSubagentDefinition;
 
-/** Resolves the live availability handlers from a dynamic subagent config module. */
 export async function resolveDynamicSubagentDefinition(input: {
   readonly definition: DynamicSubagentSource;
   readonly moduleMap: CompiledModuleMap;
@@ -41,7 +40,6 @@ export async function resolveDynamicSubagentDefinition(input: {
   }
 }
 
-/** Reattaches validated handlers to compiled dynamic-subagent metadata. */
 export function normalizeResolvedDynamicSubagentDefinition(
   definition: DynamicSubagentSource,
   value: unknown,

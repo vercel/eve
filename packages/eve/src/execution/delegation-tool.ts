@@ -2,7 +2,6 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 
-/** Converts a serializable delegation descriptor into a live harness tool. */
 export function createHarnessDelegationToolDefinition(
   tool: PreparedRuntimeDelegationTool,
 ): HarnessToolDefinition {

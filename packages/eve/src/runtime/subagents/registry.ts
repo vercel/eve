@@ -16,7 +16,6 @@ interface RuntimeRegisteredSubagent {
   readonly prepared: PreparedRuntimeDelegationTool;
 }
 
-/** One dynamic subagent resolver paired with its compiled delegation tool. */
 export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagentDefinition {
   readonly nodeId: string;
   readonly prepared: PreparedRuntimeDelegationTool;

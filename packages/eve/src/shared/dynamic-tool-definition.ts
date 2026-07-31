@@ -164,10 +164,6 @@ export type DynamicSentinel<TResult = unknown, TFallback = never> = {
   readonly events: DynamicEvents<TResult>;
 } & ([TFallback] extends [never] ? object : { readonly fallback: TFallback });
 
-/**
- * Throws when a dynamic sentinel in a slot without fallback semantics carries
- * a `fallback`.
- */
 export function rejectDynamicSentinelFallback(sentinel: DynamicSentinel, message: string): void {
   if (!("fallback" in sentinel)) {
     return;

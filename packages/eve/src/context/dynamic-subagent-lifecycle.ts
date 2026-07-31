@@ -65,7 +65,6 @@ async function resolveSelections(input: {
   return selections;
 }
 
-/** Resolves dynamic subagent availability at session and turn boundaries. */
 export async function dispatchDynamicSubagentEvent(input: {
   readonly ctx: ContextContainer;
   readonly event: UnstampedMessageStreamEvent;
@@ -88,7 +87,6 @@ export async function dispatchDynamicSubagentEvent(input: {
   }
 }
 
-/** Refreshes session-scoped availability after a deployment revision changes. */
 export async function refreshDynamicSessionSubagentsForRuntimeRevision(input: {
   readonly ctx: ContextContainer;
   readonly event: SessionStartedStreamEvent;
@@ -108,7 +106,6 @@ export async function refreshDynamicSessionSubagentsForRuntimeRevision(input: {
   input.ctx.set(SessionDynamicSubagentRuntimeRevisionKey, input.runtimeRevision);
 }
 
-/** Builds the currently active dynamic subagents as harness delegation tools. */
 export function buildDynamicSubagentTools(input: {
   get<T>(key: import("#context/key.js").ContextKey<T>): T | undefined;
 }): readonly HarnessToolDefinition[] {
@@ -134,7 +131,6 @@ export function buildDynamicSubagentTools(input: {
   return tools;
 }
 
-/** Returns whether a dynamic subagent is still active at dispatch time. */
 export function isDynamicSubagentAvailable(
   input: {
     get<T>(key: import("#context/key.js").ContextKey<T>): T | undefined;
