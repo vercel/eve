@@ -1,10 +1,5 @@
-import type {
-  AuthorizationRequiredStreamEvent,
-  MessageCompletedStreamEvent,
-  TurnFailureStreamEvent,
-  UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
-import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent, MessageCompletedStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import type { SessionState } from "#client/types.js";
 import type { InputRequest } from "#runtime/input/types.js";
 
@@ -20,12 +15,11 @@ export function createInitialSessionState(): SessionState {
  *
  * When the boundary event is `session.waiting`, the session is preserved for
  * the next message. For `session.completed` and `session.failed`, the session
- * resets so the next call starts a new conversation. Without a boundary, the
- * session stays resumable from its advanced cursor.
+ * resets so the next call starts a new conversation.
  */
 export function advanceSession(input: {
   readonly continuationToken?: string;
-  readonly events: readonly UnstampedMessageStreamEvent[];
+  readonly events: readonly HandleMessageStreamEvent[];
   readonly preserveCompletedSessions?: boolean;
   readonly sessionId: string;
   readonly session: SessionState;
@@ -38,17 +32,6 @@ export function advanceSession(input: {
     (input.preserveCompletedSessions === true && boundaryEvent?.type === "session.completed")
   ) {
     return {
-      continuationToken:
-        boundaryEvent?.type === "session.waiting"
-          ? boundaryEvent.data.continuationToken
-          : (input.continuationToken ?? input.session.continuationToken),
-      sessionId: input.sessionId,
-      streamIndex,
-    };
-  }
-
-  if (boundaryEvent === undefined) {
-    return {
       continuationToken: input.continuationToken ?? input.session.continuationToken,
       sessionId: input.sessionId,
       streamIndex,
@@ -58,77 +41,75 @@ export function advanceSession(input: {
   return createInitialSessionState();
 }
 
-/** A connection authorization challenge that remains unresolved at a turn boundary. */
-export interface PendingAuthorization {
-  readonly authorization?: AuthorizationRequiredStreamEvent["data"]["authorization"];
-  readonly description: string;
-  readonly name: string;
-  readonly webhookUrl?: string;
-}
-
-/** Canonical projection of the lifecycle state represented by one turn's events. */
-export interface TurnEventSummary {
-  readonly boundary: UnstampedMessageStreamEvent | undefined;
-  readonly failure: TurnFailureStreamEvent | undefined;
-  readonly inputRequests: readonly InputRequest[];
-  readonly message: string | undefined;
-  readonly pendingAuthorizations: readonly PendingAuthorization[];
-  readonly status: "completed" | "failed" | "waiting";
-}
-
-/** Reduces one turn's protocol events into their client-facing lifecycle state. */
-export function summarizeTurnEvents(
-  events: readonly UnstampedMessageStreamEvent[],
-): TurnEventSummary {
-  let boundary: UnstampedMessageStreamEvent | undefined;
-  let failure: TurnFailureStreamEvent | undefined;
-  let message: string | undefined;
-  const inputRequests: InputRequest[] = [];
-  const pendingAuthorizations = new Map<string, PendingAuthorization>();
-
-  for (const event of events) {
-    if (isCurrentTurnBoundaryEvent(event)) boundary = event;
-    if (isTurnFailureEvent(event)) failure = event;
-    if (isFinalMessageCompleted(event)) message = event.data.message ?? undefined;
-    if (event.type === "input.requested") inputRequests.push(...event.data.requests);
-    if (event.type === "authorization.required") {
-      pendingAuthorizations.set(event.data.name, event.data);
-    }
-    if (event.type === "authorization.completed") {
-      pendingAuthorizations.delete(event.data.name);
-    }
-  }
-
+/**
+ * Preserves a resumable session cursor when a streamed turn has not reached
+ * a boundary yet.
+ */
+export function preserveActiveSession(input: {
+  readonly continuationToken?: string;
+  readonly sessionId: string;
+  readonly session: SessionState;
+  readonly streamIndex: number;
+}): SessionState {
   return {
-    boundary,
-    failure,
-    inputRequests,
-    message,
-    pendingAuthorizations: [...pendingAuthorizations.values()],
-    status:
-      boundary?.type === "session.waiting"
-        ? "waiting"
-        : boundary?.type === "session.failed"
-          ? "failed"
-          : "completed",
+    continuationToken: input.continuationToken ?? input.session.continuationToken,
+    sessionId: input.sessionId,
+    streamIndex: input.streamIndex,
   };
 }
 
-/** Collects one segment of an event stream through its current-turn boundary. */
-export async function collectTurnEvents(
-  stream: AsyncIterable<UnstampedMessageStreamEvent>,
-): Promise<readonly UnstampedMessageStreamEvent[]> {
-  const events: UnstampedMessageStreamEvent[] = [];
-  for await (const event of stream) {
-    events.push(event);
-    if (isCurrentTurnBoundaryEvent(event)) break;
+/**
+ * Extracts the final completed assistant message text from a turn's events.
+ *
+ * Only considers terminal messages (finish reason is not `"tool-calls"`).
+ */
+export function extractCompletedMessage(
+  events: readonly HandleMessageStreamEvent[],
+): string | undefined {
+  let lastMessage: string | undefined;
+
+  for (const event of events) {
+    if (isFinalMessageCompleted(event)) {
+      lastMessage = event.data.message ?? undefined;
+    }
   }
-  return events;
+
+  return lastMessage;
+}
+
+/**
+ * Derives the result status from a turn's boundary event.
+ */
+export function deriveResultStatus(
+  events: readonly HandleMessageStreamEvent[],
+): "completed" | "failed" | "waiting" {
+  const boundary = findBoundaryEvent(events);
+
+  if (boundary?.type === "session.waiting") return "waiting";
+  if (boundary?.type === "session.failed") return "failed";
+  return "completed";
+}
+
+/**
+ * Collects HITL input requests emitted during one consumed turn.
+ */
+export function extractInputRequests(
+  events: readonly HandleMessageStreamEvent[],
+): readonly InputRequest[] {
+  const requests: InputRequest[] = [];
+
+  for (const event of events) {
+    if (event.type === "input.requested") {
+      requests.push(...event.data.requests);
+    }
+  }
+
+  return requests;
 }
 
 function findBoundaryEvent(
-  events: readonly UnstampedMessageStreamEvent[],
-): UnstampedMessageStreamEvent | undefined {
+  events: readonly HandleMessageStreamEvent[],
+): HandleMessageStreamEvent | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event !== undefined && isCurrentTurnBoundaryEvent(event)) return event;
@@ -137,7 +118,7 @@ function findBoundaryEvent(
 }
 
 function isFinalMessageCompleted(
-  event: UnstampedMessageStreamEvent,
+  event: HandleMessageStreamEvent,
 ): event is MessageCompletedStreamEvent {
   return event.type === "message.completed" && event.data.finishReason !== "tool-calls";
 }

@@ -126,6 +126,26 @@ for await (const event of response) {
 
 The same option is available on manual attachments as `session.stream({ streamReconnectPolicy: { reconnect: false } })`.
 
+If the stream ends before the current turn reaches `session.waiting`, `session.completed`, or
+`session.failed` and the reconnect budget is exhausted, the client throws
+`StreamReconnectExhaustedError`. The session cursor is preserved at the last consumed
+`streamIndex`, so persist `session.state` and reattach later instead of starting a fresh
+conversation:
+
+```ts
+import { StreamReconnectExhaustedError } from "eve/client";
+
+try {
+  await (await session.send("Run a long analysis.")).result();
+} catch (error) {
+  if (error instanceof StreamReconnectExhaustedError) {
+    await saveSession(session.state);
+    return;
+  }
+  throw error;
+}
+```
+
 ## Open a stream manually
 
 Use `session.stream()` when you already have a session cursor and only need to attach to the existing stream:

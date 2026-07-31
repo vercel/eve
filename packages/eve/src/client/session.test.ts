@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createMessageReceivedEvent,
+  createSessionWaitingEvent,
+  type HandleMessageStreamEvent,
+} from "#protocol/message.js";
+import { StreamReconnectExhaustedError } from "#client/session-errors.js";
 import { ClientSession } from "#client/session.js";
 import type { SessionState } from "#client/types.js";
 
@@ -13,10 +19,13 @@ function createSession(
     readonly preserveCompletedSessions?: boolean;
     readonly redirect?: "error" | "follow" | "manual";
     readonly resolveHeaders?: () => Promise<Headers>;
+    readonly maxReconnectAttempts?: number;
+    readonly preserveCompletedSessions?: boolean;
   } = {},
 ) {
   const context: ConstructorParameters<typeof ClientSession>[0] = {
     host: "https://eve.test",
+    maxReconnectAttempts: options.maxReconnectAttempts ?? 0,
     preserveCompletedSessions: options.preserveCompletedSessions ?? false,
     redirect: options.redirect,
     resolveHeaders: options.resolveHeaders ?? (async () => new Headers()),
@@ -297,6 +306,94 @@ describe("ClientSession", () => {
     expect(postRequests[1]!.body).toEqual({
       continuationToken: "eve:rekeyed",
       message: "second",
+    });
+  });
+
+  it("preserves the cursor when reconnect attempts end before a boundary", async () => {
+    const partialEvent = createMessageReceivedEvent({
+      message: "first",
+      sequence: 0,
+      turnId: "turn_1",
+    });
+    const waitingEvent = createSessionWaitingEvent();
+    const requests: Array<{ method: string; url: string }> = [];
+    let streamCount = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      const method = init?.method ?? "GET";
+      requests.push({ method, url });
+
+      if (method === "POST") {
+        return createAcceptedResponse();
+      }
+
+      streamCount += 1;
+      return streamCount === 1
+        ? createStreamResponse([partialEvent])
+        : createStreamResponse([waitingEvent]);
+    });
+
+    const session = createSession();
+    const response = await session.send("first");
+
+    let caught: unknown;
+    try {
+      await response.result();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(StreamReconnectExhaustedError);
+    expect(caught).toMatchObject({
+      maxReconnectAttempts: 0,
+      name: "StreamReconnectExhaustedError",
+      sessionId: "session_1",
+      streamIndex: 1,
+    });
+    expect(session.state).toEqual({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 1,
+    });
+
+    const reattached: HandleMessageStreamEvent[] = [];
+    for await (const event of session.stream()) {
+      reattached.push(event);
+    }
+
+    expect(reattached).toEqual([waitingEvent]);
+    expect(session.state).toEqual({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 2,
+    });
+
+    const streamRequests = requests.filter((request) => request.method === "GET");
+    expect(new URL(streamRequests[0]!.url).searchParams.get("startIndex")).toBeNull();
+    expect(new URL(streamRequests[1]!.url).searchParams.get("startIndex")).toBe("1");
+  });
+
+  it("preserves the cursor when reopening a partial stream fails", async () => {
+    const partialEvent = createMessageReceivedEvent({
+      message: "first",
+      sequence: 0,
+      turnId: "turn_1",
+    });
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createAcceptedResponse())
+      .mockResolvedValueOnce(createStreamResponse([partialEvent]))
+      .mockResolvedValueOnce(new Response("reopen failed", { status: 400 }));
+
+    const session = createSession({ streamIndex: 0 }, { maxReconnectAttempts: 1 });
+
+    await expect((await session.send("first")).result()).rejects.toThrow("reopen failed");
+    expect(session.state).toEqual({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 1,
     });
   });
 

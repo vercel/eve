@@ -3,6 +3,7 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   Client,
   ClientError,
+  StreamReconnectExhaustedError,
   type AgentInfoResult,
   type HandleMessageStreamEvent,
   type MessageStreamEvent,
@@ -657,6 +658,41 @@ describe("Session.send (reconnection)", () => {
     const reconnectUrl = String(fetchMock.mock.calls[2]?.[0]);
     expect(reconnectUrl).toContain("startIndex=1");
   });
+
+  it("preserves session state when the reconnect budget is exhausted", async () => {
+    const events: HandleMessageStreamEvent[] = [
+      createMessageReceivedEvent({ message: "Hello", sequence: 1, turnId: "turn_001" }),
+    ];
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createEagerStreamResponse(events));
+
+    const session = new Client({
+      host: "http://localhost:3000",
+      maxReconnectAttempts: 0,
+    }).session();
+    const response = await session.send("Hello");
+
+    let caught: unknown;
+    try {
+      await response.result();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(StreamReconnectExhaustedError);
+    expect(caught).toMatchObject({
+      maxReconnectAttempts: 0,
+      sessionId: "session_001",
+      streamIndex: 1,
+    });
+    expect(session.state).toEqual({
+      continuationToken: "http:session_001",
+      sessionId: "session_001",
+      streamIndex: 1,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -849,6 +885,94 @@ describe("Session.stream", () => {
     const url = String(fetchMock.mock.calls[0]?.[0]);
     expect(url).toContain("session_001/stream");
     expect(url).toContain("startIndex=10");
+  });
+
+  it("keeps the cursor unchanged when a manual stream has no new events", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createEagerStreamResponse([]));
+
+    const client = new Client({ host: "http://localhost:3000" });
+    const session = client.session({
+      continuationToken: "http:session_001",
+      sessionId: "session_001",
+      streamIndex: 10,
+    });
+
+    const collected: HandleMessageStreamEvent[] = [];
+    for await (const event of session.stream()) {
+      collected.push(event);
+    }
+
+    expect(collected).toEqual([]);
+    expect(session.state).toEqual({
+      continuationToken: "http:session_001",
+      sessionId: "session_001",
+      streamIndex: 10,
+    });
+  });
+
+  it("preserves partial events after a clean manual-stream EOF", async () => {
+    const event = createMessageReceivedEvent({
+      message: "Still running",
+      sequence: 11,
+      turnId: "turn_011",
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createEagerStreamResponse([event]));
+
+    const session = new Client({ host: "http://localhost:3000" }).session({
+      continuationToken: "http:session_001",
+      sessionId: "session_001",
+      streamIndex: 10,
+    });
+
+    const collected: HandleMessageStreamEvent[] = [];
+    for await (const streamedEvent of session.stream()) collected.push(streamedEvent);
+
+    expect(collected).toEqual([event]);
+    expect(session.state).toEqual({
+      continuationToken: "http:session_001",
+      sessionId: "session_001",
+      streamIndex: 11,
+    });
+  });
+
+  it("throws reconnect exhaustion only after a manual-stream disconnect", async () => {
+    const stream = createControlledStreamResponse();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(stream.response);
+
+    const session = new Client({
+      host: "http://localhost:3000",
+      maxReconnectAttempts: 0,
+    }).session({
+      continuationToken: "http:session_001",
+      sessionId: "session_001",
+      streamIndex: 10,
+    });
+
+    const event = createMessageReceivedEvent({
+      message: "Still running",
+      sequence: 11,
+      turnId: "turn_011",
+    });
+    setTimeout(() => {
+      stream.pushEvent(event);
+      stream.error(new TypeError("terminated"));
+    }, 0);
+
+    await expect(async () => {
+      for await (const _event of session.stream()) {
+        // Consume until the disconnect exhausts the reconnect budget.
+      }
+    }).rejects.toMatchObject({
+      maxReconnectAttempts: 0,
+      name: "StreamReconnectExhaustedError",
+      sessionId: "session_001",
+      streamIndex: 11,
+    });
+    expect(session.state).toEqual({
+      continuationToken: "http:session_001",
+      sessionId: "session_001",
+      streamIndex: 11,
+    });
   });
 });
 
