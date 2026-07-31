@@ -15,6 +15,7 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
 | `eve dev`                     | Start the local dev server and open the terminal UI                                                                                                   |
 | `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
+| `eve acp [url]`               | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                                         |
 | `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                                           |
 | `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                                     |
 | `eve traces ls`               | List locally captured agent traces, most recent first                                                                                                 |
@@ -183,6 +184,8 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
 
+`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Use eve through ACP](../guides/acp) for client configuration and capability limits.
+
 A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, opens `/model`, then offers categorized registry next steps before the first prompt. Other input stays editable in the prompt.
 
 For a URL target protected by HTTP Basic auth, put the credentials in the URL. eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
@@ -252,7 +255,15 @@ eve traces                 # show the most recent span tree
 eve traces <trace>         # show one span tree
 ```
 
-`eve traces ls` reads the immutable OTLP/JSON segments captured under `.eve/traces/v1`; `eve dev` does not need to be running. `eve traces` accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed or incomplete segments are skipped without hiding valid spans from the same trace.
+Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
+
+A subagent keeps its own session id but records into the trace its parent had open at dispatch, so delegated work appears under the session that caused it, tagged with `agent.root.session.id`. Either session id resolves to that trace. A remote agent traces under its own deployment and is not recorded here.
+
+A session long enough to outgrow one trace — far longer than anything you will drive locally — continues into a new one. Each is a session window, numbered from zero on `agent.session.window`; passing a session id shows every window it produced, oldest first, and a trace id shows just that window.
+
+One parent turn can dispatch several subagents into the same window, so a child's turn spans name the dispatch: `agent.parent.session.id`, `agent.parent.turn.id`, and `agent.parent.call_id` identify the tool call that created the child, and `agent.subagent.name` the subagent it invoked. Top-level sessions carry none of these.
+
+`agent.session` and `agent.turn` outlive the worker that opened them, so they are recorded as zero-duration markers. The span tree shows their descendant extent instead; `agent.step` and the model and tool spans beneath it carry real durations. A third-party OTel backend reports zero for the markers.
 
 ## `eve link`
 

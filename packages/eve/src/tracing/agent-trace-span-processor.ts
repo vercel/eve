@@ -10,7 +10,7 @@ interface SpanLike {
 export class AgentTraceSpanProcessor implements SpanProcessor {
   readonly #children: readonly SpanProcessor[];
   readonly #ownedTraceIds = new Set<string>();
-  readonly #sessionTraceIds = new Map<string, string>();
+  readonly #sessionTraceIds = new Map<string, Set<string>>();
   #attached = false;
 
   constructor(children: readonly SpanProcessor[]) {
@@ -30,9 +30,13 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     if (!isSpanLike(span)) return;
     const sessionId = span.attributes["agent.session.id"];
     if (typeof sessionId === "string") {
+      const rootSessionId = span.attributes["agent.root.session.id"];
+      const owner = typeof rootSessionId === "string" ? rootSessionId : sessionId;
       const traceId = span.spanContext().traceId;
       this.#ownedTraceIds.add(traceId);
-      this.#sessionTraceIds.set(sessionId, traceId);
+      const owned = this.#sessionTraceIds.get(owner) ?? new Set<string>();
+      owned.add(traceId);
+      this.#sessionTraceIds.set(owner, owned);
     }
     if (!this.#accepts(span)) return;
     for (const child of this.#children) child.onStart(span, parentContext);
@@ -48,11 +52,15 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     return this.#ownedTraceIds;
   }
 
-  /** Forgets one session's trace, reporting whether it owned one. */
+  /**
+   * Forgets every trace one root session owned, reporting whether it owned any.
+   * A subagent child owns none, so releasing one reports `false` and leaves the
+   * shared trace pinned until its root finishes.
+   */
   releaseSession(sessionId: string): boolean {
-    const traceId = this.#sessionTraceIds.get(sessionId);
-    if (traceId === undefined) return false;
-    this.#ownedTraceIds.delete(traceId);
+    const owned = this.#sessionTraceIds.get(sessionId);
+    if (owned === undefined) return false;
+    for (const traceId of owned) this.#ownedTraceIds.delete(traceId);
     this.#sessionTraceIds.delete(sessionId);
     return true;
   }

@@ -1,9 +1,9 @@
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import { registerOTel } from "#compiled/@vercel/otel/index.js";
 
-import { ContextAgentTraceStateStore } from "#harness/agent-trace-context-store.js";
-import { createAgentOtelInstrumentation } from "#harness/agent-otel-provider.js";
-import { AgentTraceSpanProcessor } from "#harness/agent-trace-span-processor.js";
+import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
+import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
+import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
 import {
   createInstrumentationHooks,
   type InstrumentationProviderDefinition,
@@ -16,8 +16,8 @@ import {
 import {
   requestLocalTraceStorePrune,
   resolveLocalTraceRetentionSettings,
-} from "#harness/local-trace-retention.js";
-import { LocalTraceSpanProcessor } from "#harness/local-trace-span-processor.js";
+} from "#tracing/local-trace-retention.js";
+import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
 
 /** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
 export function installLocalInstrumentationRuntime(input: {
@@ -49,6 +49,7 @@ export function installLocalInstrumentationRuntime(input: {
     throw new Error("eve could not register OpenTelemetry because another runtime already exists.");
   }
   const agentOtel = createAgentOtelInstrumentation({
+    captureContent: process.env.EVE_TRACES_CONTENT !== "off",
     frameworkVersion: input.frameworkVersion,
     stateStore: new ContextAgentTraceStateStore(),
     tracer: trace.getTracer("eve.agent", input.frameworkVersion),

@@ -7,11 +7,11 @@ import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { listLocalTraces } from "#cli/commands/trace.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { listLocalTraces } from "#tracing/local-trace-reader.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
-import { installLocalInstrumentationRuntime } from "#harness/local-instrumentation-runtime.js";
-import { LocalTraceSpanProcessor } from "#harness/local-trace-span-processor.js";
+import { installLocalInstrumentationRuntime } from "#tracing/local-instrumentation-runtime.js";
+import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
 
 const temporaryDirectories: string[] = [];
 

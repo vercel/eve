@@ -49,6 +49,7 @@ import { buildSubagentRunInput, type SubagentInputSource } from "#execution/suba
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import {
   type DelegatedRuntimeActionRequest,
   getSubagentDelegationName,
@@ -100,6 +101,9 @@ export async function dispatchRuntimeActionsStep(input: {
   const writer = input.parentWritable.getWriter();
 
   const delegationLimit = resolveSubagentDelegationLimit(session);
+  // Read here, not in the child: trace state is scoped to one session's
+  // context, so this is the last place the parent's window is visible.
+  const parentTraceContext = readSessionTraceContext(input.serializedContext, session.sessionId);
   // Split the parent's remaining token quota across the batch's local
   // subagent calls, the children that actually receive an enforced cap.
   // Remote agents run on their own deployment under their own limits and
@@ -152,6 +156,7 @@ export async function dispatchRuntimeActionsStep(input: {
               fanoutSize,
               initiatorAuth,
               parentContinuationToken: input.parentContinuationToken,
+              parentTraceContext,
               session,
               source,
             });
