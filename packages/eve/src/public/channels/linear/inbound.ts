@@ -1,6 +1,6 @@
 import type { UserContent } from "ai";
 
-import { isObject } from "#shared/guards.js";
+import { isObject, readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 /** Linear Agent Session webhook actions supported by the channel. */
@@ -102,34 +102,34 @@ export function parseLinearWebhookEvent(input: {
     event: input.headers.get("linear-event") ?? undefined,
     id: input.headers.get("linear-delivery") ?? undefined,
   };
-  const type = readString(raw.type);
+  const type = readNonEmptyString(raw.type);
   if (!type) return null;
 
   if (type === "AgentSessionEvent") {
     const agentSession = readAgentSession(raw.agentSession);
     if (agentSession === null) return null;
     return {
-      action: readString(raw.action) ?? "created",
+      action: readNonEmptyString(raw.action) ?? "created",
       agentActivity: readAgentActivity(raw.agentActivity),
       agentSession,
-      appUserId: readString(raw.appUserId),
-      createdAt: readString(raw.createdAt),
+      appUserId: readNonEmptyString(raw.appUserId),
+      createdAt: readNonEmptyString(raw.createdAt),
       delivery,
-      guidance: readString(raw.guidance),
+      guidance: readNonEmptyString(raw.guidance),
       kind: "agent_session",
-      oauthClientId: readString(raw.oauthClientId),
-      organizationId: readString(raw.organizationId),
+      oauthClientId: readNonEmptyString(raw.oauthClientId),
+      organizationId: readNonEmptyString(raw.organizationId),
       previousComments: readPreviousComments(raw.previousComments),
-      promptContext: readString(raw.promptContext),
+      promptContext: readNonEmptyString(raw.promptContext),
       raw,
     };
   }
 
   return {
-    action: readString(raw.action),
+    action: readNonEmptyString(raw.action),
     delivery,
     kind: "data",
-    organizationId: readString(raw.organizationId),
+    organizationId: readNonEmptyString(raw.organizationId),
     raw,
     type,
   };
@@ -225,7 +225,7 @@ function readAgentActivity(value: unknown): LinearAgentActivityRef | undefined {
 
 function readActivityBody(content: unknown): string | undefined {
   if (!isObject(content)) return undefined;
-  return readString(content.body);
+  return readNonEmptyString(content.body);
 }
 
 function readIssue(value: unknown): LinearIssueRef | null | undefined {
@@ -257,8 +257,4 @@ function readPreviousComments(value: unknown): readonly string[] {
       return null;
     })
     .filter((entry): entry is string => entry !== null);
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
