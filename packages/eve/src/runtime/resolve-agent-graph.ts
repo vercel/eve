@@ -21,10 +21,7 @@ import {
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
-import {
-  normalizeResolvedDynamicSubagentDefinition,
-  resolveDynamicSubagentDefinition,
-} from "#runtime/resolve-dynamic-subagent.js";
+import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
@@ -339,8 +336,12 @@ async function resolveRuntimeSubagent(input: {
       nodeId: input.sourceRef.nodeId,
     });
   }
+  const descriptionFields: { description?: string } = {};
+  if (input.sourceRef.description !== undefined) {
+    descriptionFields.description = input.sourceRef.description;
+  }
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
-    description: input.sourceRef.description,
+    ...descriptionFields,
     ...dynamicFields,
     kind: "subagent",
     logicalPath: input.sourceRef.logicalPath,
@@ -373,25 +374,14 @@ async function resolveRuntimeRemoteAgent(input: {
     moduleMap: input.moduleMap,
     nodeId: input.nodeScopeId,
   });
-  const dynamic =
-    input.sourceRef.dynamic === undefined
-      ? undefined
-      : normalizeResolvedDynamicSubagentDefinition(
-          {
-            ...input.sourceRef,
-            ...input.sourceRef.dynamic,
-          },
-          resolvedExportValue,
-        );
   const resolvedRecord = expectObjectRecord(
-    dynamic?.fallback ?? resolvedExportValue,
+    resolvedExportValue,
     `Expected remote agent source "${input.sourceRef.logicalPath}" to export an object.`,
   );
 
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
     description: string;
-    dynamic?: ResolvedRuntimeRemoteAgentNode["dynamic"];
     forwardPrincipal?: boolean;
     headers?: HeadersValue;
     kind: "remote";
@@ -419,10 +409,6 @@ async function resolveRuntimeRemoteAgent(input: {
       resolvedUrl: resolvedRecord.url,
     }),
   };
-
-  if (dynamic !== undefined) {
-    resolvedRemoteAgent.dynamic = dynamic;
-  }
 
   if (typeof resolvedRecord.auth === "function") {
     resolvedRemoteAgent.auth = resolvedRecord.auth as ResolvedRuntimeRemoteAgentNode["auth"];

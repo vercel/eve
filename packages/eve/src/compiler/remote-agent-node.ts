@@ -20,7 +20,6 @@ export type CompiledRemoteAgentNode = Readonly<
       description: string;
       entryPath: string;
       name: string;
-      dynamic?: CompiledDynamicSubagentDefinition;
       outputSchema?: JsonObject;
       path: string;
       rootPath: string;
@@ -40,12 +39,6 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
     logicalPath: z.string(),
     name: z.string(),
     nodeId: z.string(),
-    dynamic: z
-      .object({
-        eventNames: z.array(z.string()).readonly(),
-      })
-      .strict()
-      .optional(),
     outputSchema: jsonObjectSchema.optional(),
     path: z.string(),
     rootPath: z.string(),

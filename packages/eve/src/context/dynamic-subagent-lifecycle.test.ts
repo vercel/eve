@@ -4,7 +4,7 @@ import { ContextContainer } from "#context/container.js";
 import {
   buildDynamicSubagentTools,
   dispatchDynamicSubagentEvent,
-  isDynamicSubagentAvailable,
+  getDynamicSubagentSelection,
   refreshDynamicSessionSubagentsForRuntimeRevision,
 } from "#context/dynamic-subagent-lifecycle.js";
 import { SessionDynamicSubagentRuntimeRevisionKey, SessionIdKey } from "#context/keys.js";
@@ -25,15 +25,15 @@ describe("dynamic subagent lifecycle", () => {
     });
 
     expect(buildDynamicSubagentTools(ctx)).toEqual([]);
-    expect(isDynamicSubagentAvailable(ctx, resolver.nodeId)).toBe(false);
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeUndefined();
   });
 
-  it("exposes a subagent when its resolver returns the fallback definition", async () => {
+  it("exposes a subagent with the returned agent config", async () => {
     const ctx = createContext();
     const created = createResolver();
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
-      events: { "session.started": () => created.fallback },
+      events: { "session.started": () => created.agentConfig },
     };
 
     await dispatchDynamicSubagentEvent({
@@ -54,7 +54,7 @@ describe("dynamic subagent lifecycle", () => {
         },
       },
     ]);
-    expect(isDynamicSubagentAvailable(ctx, resolver.nodeId)).toBe(true);
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
   });
 
   it("lets a turn-scoped null hide a session-scoped selection", async () => {
@@ -65,7 +65,7 @@ describe("dynamic subagent lifecycle", () => {
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": () => created.fallback,
+        "session.started": () => created.agentConfig,
         "turn.started": () => null,
       },
     };
@@ -85,17 +85,56 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)).toEqual([]);
-    expect(isDynamicSubagentAvailable(ctx, resolver.nodeId)).toBe(false);
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeUndefined();
   });
 
-  it("omits a mismatched non-null agent definition", async () => {
+  it("lets a turn-scoped agent config switch the subagent model", async () => {
+    const ctx = createContext();
+    const created = createResolver({
+      eventNames: ["session.started", "turn.started"],
+    });
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: {
+        "session.started": () =>
+          defineAgent({
+            description: "Research the request.",
+            model: "anthropic/claude-sonnet-4.5",
+          }),
+        "turn.started": () =>
+          defineAgent({
+            description: "Research the request deeply.",
+            model: "anthropic/claude-opus-4.6",
+          }),
+      },
+    };
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)?.agentConfig.model.id).toBe(
+      "anthropic/claude-sonnet-4.5",
+    );
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
+      messages: [],
+      resolvers: [resolver],
+    });
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)?.agentConfig).toMatchObject({
+      description: "Research the request deeply.",
+      model: { id: "anthropic/claude-opus-4.6" },
+    });
+  });
+
+  it("omits an invalid non-null result", async () => {
     const ctx = createContext();
     const { resolver } = createResolver({
-      handler: () =>
-        defineAgent({
-          description: "A different definition.",
-          model: "openai/gpt-5.5",
-        }),
+      handler: () => false,
     });
 
     await dispatchDynamicSubagentEvent({
@@ -111,7 +150,7 @@ describe("dynamic subagent lifecycle", () => {
   it("refreshes session availability once per runtime revision", async () => {
     const ctx = createContext();
     const created = createResolver();
-    const handler = vi.fn(() => created.fallback);
+    const handler = vi.fn(() => created.agentConfig);
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: { "session.started": handler },
@@ -150,10 +189,10 @@ function createResolver(
     readonly handler?: () => unknown;
   } = {},
 ): {
-  readonly fallback: ReturnType<typeof defineAgent>;
+  readonly agentConfig: ReturnType<typeof defineAgent>;
   readonly resolver: ResolvedDynamicSubagentResolver;
 } {
-  const fallback = defineAgent({
+  const agentConfig = defineAgent({
     description: "Research the request.",
     model: "openai/gpt-5.5",
   });
@@ -161,22 +200,14 @@ function createResolver(
   const handler = input.handler ?? (() => null);
 
   return {
-    fallback,
+    agentConfig,
     resolver: {
       eventNames,
       events: Object.fromEntries(eventNames.map((eventName) => [eventName, handler])),
-      fallback,
+      kind: "subagent",
       logicalPath: "agent.ts",
+      name: "researcher",
       nodeId: "subagents/researcher",
-      prepared: {
-        description: fallback.description!,
-        inputSchema: { type: "object" },
-        kind: "subagent",
-        logicalPath: "subagents/researcher",
-        name: "researcher",
-        nodeId: "subagents/researcher",
-        sourceId: "subagents/researcher",
-      },
       sourceId: "agent.ts",
       sourceKind: "module",
     },

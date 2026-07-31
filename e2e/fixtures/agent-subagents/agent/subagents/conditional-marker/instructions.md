@@ -1,1 +1,1 @@
-Reply with exactly `DYNAMIC_SUBAGENT_ENABLED` and nothing else.
+Reply with the exact string `DYNAMIC_SUBAGENT_ENABLED` and nothing else.

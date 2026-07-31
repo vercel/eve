@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
@@ -6,6 +6,7 @@ import { defineDynamic } from "#public/definitions/tool.js";
 import {
   loadDynamicRuntimeModelDefinition,
   normalizeDynamicRuntimeModelResult,
+  resolveRuntimeModelReference,
 } from "#runtime/agent/resolve-model.js";
 
 const DYNAMIC_MODEL_SOURCE = {
@@ -16,6 +17,21 @@ const DYNAMIC_MODEL_SOURCE = {
 };
 
 describe("dynamic runtime model resolution", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("resolves a source-free eve mock model without the test environment", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    const model = await resolveRuntimeModelReference({ id: "eve-mock/dynamic-subagent" });
+
+    expect(typeof model).toBe("object");
+    if (typeof model === "string") throw new Error("expected a mock model instance");
+    expect(model.provider).toBe("eve-runtime-mock");
+    expect(model.modelId).toBe("eve-mock/dynamic-subagent");
+  });
+
   it("loads dynamic model definitions and normalizes string selections", async () => {
     const moduleMap = createModuleMap({
       default: {

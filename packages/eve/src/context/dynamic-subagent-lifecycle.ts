@@ -13,6 +13,8 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
+import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
+import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-subagents");
@@ -37,13 +39,21 @@ async function resolveSelections(input: {
       if (result === null || result === undefined) {
         return [resolver.nodeId, null] as const;
       }
-      if (result !== resolver.fallback) {
-        throw new Error(
-          `Dynamic subagent "${resolver.prepared.name}" must return its fallback agent definition or null.`,
-        );
-      }
+      const agentConfig = normalizeDynamicSubagentAgentConfig({
+        name: resolver.name,
+        value: result,
+      });
+      const prepared = createPreparedRuntimeSubagentTool({
+        description: agentConfig.description,
+        kind: resolver.kind,
+        logicalPath: resolver.logicalPath,
+        name: resolver.name,
+        nodeId: resolver.nodeId,
+        sourceId: resolver.sourceId,
+        sourceKind: resolver.sourceKind,
+      });
 
-      return [resolver.nodeId, resolver.prepared] as const;
+      return [resolver.nodeId, { agentConfig, prepared }] as const;
     }),
   );
   const selections: Record<string, DurableDynamicSubagentSelection> = {};
@@ -54,7 +64,7 @@ async function resolveSelections(input: {
     if (outcome.status === "rejected") {
       log.error(`Dynamic subagent resolver (${input.event.type}) threw — omitting subagent.`, {
         error: toErrorMessage(outcome.reason),
-        subagentName: resolver.prepared.name,
+        subagentName: resolver.name,
       });
       selections[resolver.nodeId] = null;
       continue;
@@ -119,29 +129,29 @@ export function buildDynamicSubagentTools(input: {
     if (selection === null) {
       continue;
     }
-    if (names.has(selection.name)) {
+    if (names.has(selection.prepared.name)) {
       throw new Error(
-        `Found multiple active dynamic subagents named "${selection.name}". Subagent names must be unique at runtime.`,
+        `Found multiple active dynamic subagents named "${selection.prepared.name}". Subagent names must be unique at runtime.`,
       );
     }
-    names.add(selection.name);
-    tools.push(createHarnessDelegationToolDefinition(selection));
+    names.add(selection.prepared.name);
+    tools.push(createHarnessDelegationToolDefinition(selection.prepared));
   }
 
   return tools;
 }
 
-export function isDynamicSubagentAvailable(
+export function getDynamicSubagentSelection(
   input: {
     get<T>(key: import("#context/key.js").ContextKey<T>): T | undefined;
   },
   nodeId: string,
-): boolean {
+): Exclude<DurableDynamicSubagentSelection, null> | undefined {
   const turn = input.get(TurnDynamicSubagentSelectionsKey) ?? {};
   if (Object.hasOwn(turn, nodeId)) {
-    return turn[nodeId] !== null && turn[nodeId] !== undefined;
+    return turn[nodeId] ?? undefined;
   }
 
   const session = input.get(SessionDynamicSubagentSelectionsKey) ?? {};
-  return session[nodeId] !== null && session[nodeId] !== undefined;
+  return session[nodeId] ?? undefined;
 }

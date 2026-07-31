@@ -157,7 +157,7 @@ export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
 /**
  * Return value of `defineDynamic`: the runtime shape of a dynamic export,
  * stamped with a sentinel kind the compiler/normalizer detects. `TFallback`
- * is used by dynamic agent models and dynamic subagent `agent.ts` exports.
+ * is used by dynamic agent models.
  */
 export type DynamicSentinel<TResult = unknown, TFallback = never> = {
   readonly kind: typeof DYNAMIC_SENTINEL_KIND;
@@ -169,7 +169,7 @@ export function rejectDynamicSentinelFallback(sentinel: DynamicSentinel, message
     return;
   }
   throw new Error(
-    `${message} "fallback" is only supported on a dynamic agent model or a dynamic subagent agent.ts. For dynamic tools, skills, and instructions, author a static entry as the default or return null.`,
+    `${message} "fallback" is only supported on a dynamic agent model. For dynamic tools, skills, instructions, and subagents, return null when the capability should be omitted.`,
   );
 }
 

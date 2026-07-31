@@ -167,7 +167,10 @@ export const LiveStepToolsKey = new ContextKey<
   import("#harness/execute-tool.js").HarnessToolDefinition[]
 >("eve.liveStepTools");
 
-export type DurableDynamicSubagentSelection = PreparedRuntimeDelegationTool | null;
+export type DurableDynamicSubagentSelection = {
+  readonly agentConfig: import("#runtime/subagents/dynamic-agent-config.js").DynamicSubagentAgentConfig;
+  readonly prepared: PreparedRuntimeDelegationTool;
+} | null;
 
 export const SessionDynamicSubagentSelectionsKey = new ContextKey<
   Readonly<Record<string, DurableDynamicSubagentSelection>>
@@ -180,6 +183,10 @@ export const TurnDynamicSubagentSelectionsKey = new ContextKey<
 export const SessionDynamicSubagentRuntimeRevisionKey = new ContextKey<string>(
   "eve.sessionDynamicSubagentRuntimeRevision",
 );
+
+export const DynamicSubagentAgentConfigKey = new ContextKey<
+  import("#runtime/subagents/dynamic-agent-config.js").DynamicSubagentAgentConfig
+>("eve.dynamicSubagentAgentConfig");
 
 // ---------------------------------------------------------------------------
 // Dynamic skill keys

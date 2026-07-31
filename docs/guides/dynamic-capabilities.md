@@ -17,41 +17,44 @@ uncached prices. See
 full contract.
 
 The agent always needs exactly one model, so the compiled fallback anchors
-build-time metadata. A dynamic subagent also uses `fallback` to compile its
-child configuration, as described below. Tools, skills, and instructions
-default by authoring a static entry (or returning `null`), so `fallback` on
-their `defineDynamic` export is a build error.
+build-time metadata. Tools, skills, instructions, and subagents default by
+authoring a static entry (or returning `null`), so `fallback` on their
+`defineDynamic` export is a build error.
 
 ## Dynamic subagents
 
 Wrap a declared subagent's own `agent.ts` in `defineDynamic` when its
 availability depends on the caller, tenant, environment, or a feature flag.
-Keep the child definition in one constant, pass it as `fallback`, and return
-that same value to expose the subagent. Return `null` or `undefined` to omit it
-from the parent's model-visible tools.
+Return the child definition to configure and expose it. Return `null` or
+`undefined` to omit it from the parent's model-visible tools.
 
 ```ts title="agent/subagents/finance/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
-const finance = defineAgent({
-  description: "Analyze financial and accounting data.",
-  model: "openai/gpt-5.5",
-});
-
 export default defineDynamic({
-  fallback: finance,
   events: {
     "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.plan === "enterprise" ? finance : null,
+      ctx.session.auth.current?.attributes.plan === "enterprise"
+        ? defineAgent({
+            description: "Analyze financial and accounting data.",
+            model: "openai/gpt-5.5",
+          })
+        : null,
   },
 });
 ```
 
-`fallback` is the definition eve compiles and runs when the subagent is
-selected; it does not make the subagent available by itself. A handler must
-return the exact fallback value. Dynamic subagents support `session.started`
-and `turn.started`, not `step.started`. A turn selection shadows the session
-selection for that turn, including when the turn handler returns nil.
+eve always compiles the subagent's filesystem manifest, including its
+instructions, tools, skills, connections, sandbox, and nested subagents. When
+the resolver selects it, eve injects the returned agent configuration into that
+compiled manifest. Each resolution can return a different model or other
+runtime agent settings. Runtime-selected models must use string model IDs;
+build and Workflow-world configuration cannot be selected at runtime.
+
+Dynamic subagents support `session.started` and `turn.started`, not
+`step.started`. A turn selection shadows the session selection for that turn,
+including when the turn handler returns nil. If a resolver throws or returns an
+invalid definition, eve logs the failure and omits the subagent.
 
 The resolved set applies to direct delegation and the `Workflow` tool. eve
 also checks availability again before starting the child, so a stale or

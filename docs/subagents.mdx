@@ -50,23 +50,21 @@ export default defineAgent({
 ### Conditional availability
 
 To expose a declared subagent only for certain sessions or turns, export
-`defineDynamic` from that subagent's `agent.ts`. The fallback is its compiled
-agent configuration; return that exact value to expose the subagent, or nil to
-omit it from the parent's tools.
+`defineDynamic` from that subagent's `agent.ts`. Return a `defineAgent`
+configuration to expose the subagent, or nil to omit it from the parent's tools.
 
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
-const researcher = defineAgent({
-  description: "Investigate ambiguous questions before the parent responds.",
-  model: "anthropic/claude-opus-4.8",
-});
-
 export default defineDynamic({
-  fallback: researcher,
   events: {
     "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.research === true ? researcher : null,
+      ctx.session.auth.current?.attributes.research === true
+        ? defineAgent({
+            description: "Investigate ambiguous questions before the parent responds.",
+            model: "anthropic/claude-opus-4.8",
+          })
+        : null,
   },
 });
 ```
@@ -74,6 +72,8 @@ export default defineDynamic({
 Resolvers run at `session.started` or `turn.started`; `step.started` is not
 supported for subagents. A nil result (`null` or `undefined`) removes the
 subagent's description and tool definition from the model-visible surface.
+The subagent's filesystem manifest is always compiled; a non-nil result injects
+the returned agent configuration when the child runs.
 See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for
 scope precedence, failure behavior, and the dispatch-time guard.
 
@@ -81,7 +81,7 @@ Minimum files:
 
 ```text
 agent/subagents/researcher/
-├── agent.ts            # required (must export a description)
+├── agent.ts            # required
 ├── instructions.md     # or instructions.ts, optional
 ├── tools/              # optional, its own tools
 ├── skills/             # optional, its own skills

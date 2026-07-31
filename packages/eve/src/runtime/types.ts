@@ -268,7 +268,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
 export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
-      description: string;
+      description?: string;
       dynamic?: ResolvedDynamicSubagentDefinition;
       kind: "subagent";
       name: string;
@@ -284,7 +284,6 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
     Node & {
       auth?: OutboundAuthFn;
       description: string;
-      dynamic?: ResolvedDynamicSubagentDefinition;
       forwardPrincipal?: boolean;
       headers?: HeadersValue;
       kind: "remote";
@@ -307,7 +306,6 @@ export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSource
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
-  readonly fallback: unknown;
 }
 
 /**

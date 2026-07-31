@@ -44,11 +44,11 @@ export function normalizeResolvedDynamicSubagentDefinition(
   definition: DynamicSubagentSource,
   value: unknown,
 ): ResolvedDynamicSubagentDefinition {
-  const message = `Expected the dynamic subagent export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to provide defineDynamic({ fallback, events }).`;
+  const message = `Expected the dynamic subagent export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to provide defineDynamic({ events }).`;
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["events", "fallback", "kind"], message);
+  expectOnlyKnownKeys(record, ["events", "kind"], message);
 
-  if (record.kind !== "eve:dynamic" || !Object.hasOwn(record, "fallback")) {
+  if (record.kind !== "eve:dynamic") {
     throw new Error(message);
   }
 
@@ -62,7 +62,6 @@ export function normalizeResolvedDynamicSubagentDefinition(
     eventNames: [...definition.eventNames],
     events: events as ResolvedDynamicSubagentDefinition["events"],
     exportName: definition.exportName,
-    fallback: record.fallback,
     logicalPath: definition.logicalPath,
     sourceId: definition.sourceId,
     sourceKind: "module",

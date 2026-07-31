@@ -11,6 +11,7 @@ import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineDynamic, experimental_workflow } from "#public/definitions/tool.js";
+import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 const mocks = vi.hoisted(() => ({
   compileAgentConfig: vi.fn(),
@@ -95,26 +96,20 @@ describe("compileAgentManifest", () => {
     expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
   });
 
-  it("compiles a dynamic subagent from its fallback definition", async () => {
-    const fallback = defineAgent({
-      description: "Research the request.",
-      model: "openai/gpt-5.5",
-    });
+  it("compiles a dynamic subagent manifest without resolving an agent config", async () => {
     const dynamic = defineDynamic({
-      fallback,
       events: {
-        "session.started": () => fallback,
+        "session.started": () =>
+          defineAgent({
+            description: "Research the request.",
+            model: "openai/gpt-5.5",
+          }),
         "turn.started": () => null,
       },
     });
     const manifest = createManifestWithSubagent();
     mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
-      input.agentId === "researcher"
-        ? createConfig({
-            description: fallback.description,
-            name: "researcher",
-          })
-        : createConfig({ name: "root" }),
+      createConfig({ name: input.agentId }),
     );
     mocks.loadModuleBackedDefinition.mockResolvedValue(dynamic);
 
@@ -123,15 +118,20 @@ describe("compileAgentManifest", () => {
     expect(compiled.subagents[0]?.dynamic).toEqual({
       eventNames: ["session.started", "turn.started"],
     });
+    expect(compiled.subagents[0]?.description).toBeUndefined();
     expect(mocks.compileAgentConfig.mock.calls[1]?.[2]).toMatchObject({
-      definition: fallback,
+      definition: { model: DEFAULT_AGENT_MODEL_ID },
     });
   });
 
-  it("rejects a dynamic subagent without a fallback definition", async () => {
+  it("rejects fallback on a dynamic subagent", async () => {
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
     mocks.loadModuleBackedDefinition.mockResolvedValue(
       defineDynamic({
+        fallback: defineAgent({
+          description: "Research the request.",
+          model: "openai/gpt-5.5",
+        }),
         events: {
           "session.started": () => null,
         },
@@ -139,21 +139,20 @@ describe("compileAgentManifest", () => {
     );
 
     await expect(compileAgentManifest(createManifestWithSubagent())).rejects.toThrow(
-      "Dynamic subagent definitions must include a fallback agent definition",
+      'Dynamic subagent definitions do not support "fallback"',
     );
   });
 
   it("rejects step-scoped dynamic subagents", async () => {
-    const fallback = defineAgent({
-      description: "Research the request.",
-      model: "openai/gpt-5.5",
-    });
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
     mocks.loadModuleBackedDefinition.mockResolvedValue(
       defineDynamic({
-        fallback,
         events: {
-          "step.started": () => fallback,
+          "step.started": () =>
+            defineAgent({
+              description: "Research the request.",
+              model: "openai/gpt-5.5",
+            }),
         },
       }),
     );

@@ -248,15 +248,11 @@ export interface CompiledHookDefinition extends ModuleSourceRef {
  */
 export type CompiledAgentNodeManifest = z.infer<typeof compiledAgentNodeManifestSchema>;
 
-/**
- * Flattened compiled subagent node emitted by the compiler. `name` and
- * `description` are copied from `agent.config` for fast registry lookup.
- */
 export type CompiledSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
       agent: CompiledAgentNodeManifest;
-      description: string;
+      description?: string;
       dynamic?: CompiledDynamicSubagentDefinition;
       entryPath: string;
       name: string;
@@ -667,7 +663,7 @@ const compiledAgentNodeManifestSchema = z
 const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z
   .object({
     agent: compiledAgentNodeManifestSchema,
-    description: z.string(),
+    description: z.string().optional(),
     dynamic: z
       .object({
         eventNames: z.array(z.string()).readonly(),

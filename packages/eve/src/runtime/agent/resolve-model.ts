@@ -8,6 +8,7 @@ import type {
 } from "#runtime/agent/bootstrap.js";
 import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
 import {
+  createMockAuthoredRuntimeModel,
   resolveMockAuthoredRuntimeModel,
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
@@ -21,7 +22,6 @@ import {
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { isDynamicSentinel } from "#shared/dynamic-tool-definition.js";
 
 export { shouldMockAuthoredRuntimeModels };
 
@@ -48,6 +48,10 @@ export async function resolveRuntimeModelReference(
 
   if (bootstrapModel !== null) {
     return bootstrapModel;
+  }
+
+  if (reference.source === undefined && reference.id.startsWith("eve-mock/")) {
+    return createMockAuthoredRuntimeModel(reference);
   }
 
   const mockModel = resolveMockAuthoredRuntimeModel(reference);
@@ -82,7 +86,7 @@ async function loadSourceBackedRuntimeModelReference(
     nodeId: scope.nodeId,
   });
   const normalizedDefinition = normalizeAgentDefinition(
-    unwrapDynamicSubagentDefinition(definition),
+    definition,
     `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
   );
   const model = normalizedDefinition.model;
@@ -119,7 +123,7 @@ export async function loadDynamicRuntimeModelDefinition(input: {
     nodeId: input.scope.nodeId,
   });
   const normalizedDefinition = normalizeAgentDefinition(
-    unwrapDynamicSubagentDefinition(definition),
+    definition,
     `Expected the authored agent config export "${input.dynamicModel.exportName ?? "default"}" from "${input.dynamicModel.logicalPath}" to match the public eve shape.`,
   );
   const authoredModel = normalizedDefinition.model;
@@ -131,10 +135,6 @@ export async function loadDynamicRuntimeModelDefinition(input: {
   }
 
   return authoredModel;
-}
-
-function unwrapDynamicSubagentDefinition(value: unknown): unknown {
-  return isDynamicSentinel(value) && "fallback" in value ? value.fallback : value;
 }
 
 export function normalizeDynamicRuntimeModelResult(input: {

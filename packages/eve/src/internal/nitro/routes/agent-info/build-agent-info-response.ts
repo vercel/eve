@@ -95,7 +95,7 @@ export interface AgentInfoScheduleEntry extends AgentInfoSource {
 }
 
 export interface AgentInfoSubagentEntry extends AgentInfoSource {
-  readonly description: string;
+  readonly description?: string;
   readonly entryPath: string;
   readonly name: string;
   readonly nodeId: string;

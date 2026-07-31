@@ -118,14 +118,13 @@ describe("resolveRuntimeAgentGraph", () => {
   });
 
   it("keeps dynamic subagents out of the static toolset and resolves their handlers", async () => {
-    const fallback = defineAgent({
-      description: "Research the request.",
-      model: TEST_DEFAULT_MODEL_ID,
-    });
     const dynamic = defineDynamic({
-      fallback,
       events: {
-        "session.started": () => fallback,
+        "session.started": () =>
+          defineAgent({
+            description: "Research the request.",
+            model: TEST_DEFAULT_MODEL_ID,
+          }),
       },
     });
     const manifest = createCompiledAgentManifest({
@@ -150,7 +149,6 @@ describe("resolveRuntimeAgentGraph", () => {
             agentRoot: "/app/agent/subagents/researcher",
             appRoot: "/app",
             config: {
-              description: fallback.description,
               model: {
                 id: TEST_DEFAULT_MODEL_ID,
                 routing: { kind: "gateway", target: "openai" },
@@ -163,7 +161,6 @@ describe("resolveRuntimeAgentGraph", () => {
               },
             },
           }),
-          description: fallback.description,
           dynamic: { eventNames: ["session.started"] },
           entryPath: "/app/agent/subagents/researcher/agent.ts",
           logicalPath: "subagents/researcher",
@@ -195,11 +192,10 @@ describe("resolveRuntimeAgentGraph", () => {
     expect(graph.root.subagentRegistry.dynamicResolvers).toMatchObject([
       {
         eventNames: ["session.started"],
+        name: "researcher",
         nodeId: "subagents/researcher",
-        prepared: { name: "researcher" },
       },
     ]);
-    expect(graph.root.subagentRegistry.dynamicResolvers[0]?.fallback).toBe(fallback);
     expect(graph.nodesByNodeId.has("subagents/researcher")).toBe(true);
   });
 

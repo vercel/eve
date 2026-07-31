@@ -4,7 +4,7 @@ const PROBE = "dynamic subagent availability probe";
 
 export default defineEval({
   description:
-    "Dynamic subagents are advertised when their resolver returns the fallback and omitted when it returns nil.",
+    "Dynamic subagents are advertised when their resolver returns an agent config and omitted when it returns nil.",
   async test(t) {
     await t.send(
       `${PROBE}: Call conditional-marker exactly once, then reply with its exact output. Do not call omitted-marker.`,

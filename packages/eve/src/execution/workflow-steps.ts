@@ -72,6 +72,7 @@ import {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
@@ -149,6 +150,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -221,10 +223,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   const initialSession = hydrateDurableSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
-    turnAgent: bundle.turnAgent,
+    turnAgent: effectiveAgent.turnAgent,
   });
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
@@ -330,9 +332,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({
         ctx,
-        dynamicModel: bundle.turnAgent.dynamicModel,
+        dynamicModel: effectiveAgent.turnAgent.dynamicModel,
         event: emitted,
-        fallback: bundle.turnAgent.model,
+        fallback: effectiveAgent.turnAgent.model,
         messages: messages ?? [],
         scope: {
           moduleMap: bundle.moduleMap,
@@ -376,7 +378,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     throwIfTurnAborted(input.abortSignal);
     stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
       const schemaSession = resolveEffectiveOutputSchema({
-        agentOutputSchema: bundle.turnAgent.outputSchema,
+        agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
         input: resolved,
         mode,
         session: enrichedSession,
@@ -405,10 +407,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ): Promise<StepResult> => {
         const refreshedSession = refreshSessionFromTurnAgent({
           compactionOverrides: {
-            thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+            thresholdPercent: effectiveAgent.thresholdPercent,
           },
           session: lifecycleSession,
-          turnAgent: bundle.turnAgent,
+          turnAgent: effectiveAgent.turnAgent,
         });
 
         const step = createExecutionNodeStep({

@@ -57,7 +57,7 @@ describe("compileAgentConfig", () => {
     });
   });
 
-  it("compiles an injected dynamic-subagent fallback without reloading agent.ts", async () => {
+  it("compiles an injected dynamic-subagent placeholder without reloading agent.ts", async () => {
     const manifest = createAgentSourceManifest({
       agentId: "researcher",
       agentRoot: "/app/agent/subagents/researcher",
@@ -73,14 +73,13 @@ describe("compileAgentConfig", () => {
       { modelCatalog: createModelCatalog() },
       {
         definition: {
-          description: "Research the request.",
           model: "openai/gpt-5.5",
         },
       },
     );
 
     expect(mocks.loadModuleBackedDefinition).not.toHaveBeenCalled();
-    expect(compiled.description).toBe("Research the request.");
+    expect(compiled.description).toBeUndefined();
     expect(compiled.source?.sourceId).toBe("agent-config");
   });
 });

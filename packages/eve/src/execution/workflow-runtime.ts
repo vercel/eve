@@ -44,6 +44,7 @@ import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
@@ -52,6 +53,7 @@ import {
   sessionCancelHookToken,
   type TurnCancelPayload,
 } from "#execution/turn-cancellation-token.js";
+import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -117,6 +119,7 @@ export const sessionTimeoutWorkflowReference = {
  */
 export function createWorkflowRuntime(config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
 }): Runtime {
   return {
@@ -125,10 +128,15 @@ export function createWorkflowRuntime(config: {
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
       });
-      const ctx = buildRunContext({ bundle, run: input });
+      const ctx = buildRunContext({
+        bundle,
+        dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
+        run: input,
+      });
+      const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
-      const sessionTimeoutMs = bundle.resolvedAgent.config.limits?.sessionTimeoutMs;
+      const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       const workflowInput: {
         -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
       } = {

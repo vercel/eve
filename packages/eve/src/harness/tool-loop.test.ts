@@ -962,13 +962,19 @@ describe("createToolLoopHarness", () => {
     const ctx = new ContextContainer();
     ctx.set(SessionDynamicSubagentSelectionsKey, {
       "subagents/researcher": {
-        description: "Research the request.",
-        inputSchema: { type: "object" },
-        kind: "subagent",
-        logicalPath: "subagents/researcher",
-        name: "researcher",
-        nodeId: "subagents/researcher",
-        sourceId: "subagents/researcher",
+        agentConfig: {
+          description: "Research the request.",
+          model: { id: "openai/gpt-5.5" },
+        },
+        prepared: {
+          description: "Research the request.",
+          inputSchema: { type: "object" },
+          kind: "subagent",
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          sourceId: "subagents/researcher",
+        },
       },
     });
     const { emit, events } = createEventCollector();

@@ -13,12 +13,13 @@ import { serializeInputSchema } from "#shared/tool-schema.js";
  */
 interface RuntimeRegisteredSubagent {
   readonly definition: ResolvedRuntimeDelegationNode;
-  readonly prepared: PreparedRuntimeDelegationTool;
+  readonly prepared?: PreparedRuntimeDelegationTool;
 }
 
 export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagentDefinition {
+  readonly kind: "subagent";
+  readonly name: string;
   readonly nodeId: string;
-  readonly prepared: PreparedRuntimeDelegationTool;
 }
 
 /**
@@ -83,13 +84,14 @@ export function createRuntimeSubagentRegistry(input: {
       );
     }
 
-    const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
-    const registeredSubagent: RuntimeRegisteredSubagent = {
-      definition: subagentDefinition,
-      prepared,
-    };
-
-    if (subagentDefinition.dynamic === undefined) {
+    let registeredSubagent: RuntimeRegisteredSubagent;
+    const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
+    if (dynamic === undefined) {
+      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
+      registeredSubagent = {
+        definition: subagentDefinition,
+        prepared,
+      };
       registry.register(subagentDefinition.name, registeredSubagent, {
         location,
         duplicateMessage: `Found multiple subagents named "${subagentDefinition.name}". Subagent names must be unique at runtime.`,
@@ -99,10 +101,17 @@ export function createRuntimeSubagentRegistry(input: {
     } else {
       dynamicNodeIds.add(subagentDefinition.nodeId);
       dynamicResolvers.push({
-        ...subagentDefinition.dynamic,
+        ...dynamic,
+        kind: "subagent",
+        logicalPath: subagentDefinition.logicalPath,
+        name: subagentDefinition.name,
         nodeId: subagentDefinition.nodeId,
-        prepared,
+        sourceId: subagentDefinition.sourceId,
+        sourceKind: "module",
       });
+      registeredSubagent = {
+        definition: subagentDefinition,
+      };
     }
     subagentsByNodeId.set(subagentDefinition.nodeId, registeredSubagent);
   }
@@ -116,9 +125,12 @@ export function createRuntimeSubagentRegistry(input: {
   };
 }
 
-function createPreparedRuntimeSubagentTool(
+export function createPreparedRuntimeSubagentTool(
   definition: ResolvedRuntimeDelegationNode,
 ): PreparedRuntimeDelegationTool {
+  if (definition.description === undefined) {
+    throw new Error(`Static subagent "${definition.name}" is missing a description.`);
+  }
   return {
     description: definition.description,
     inputSchema: SUBAGENT_TOOL_INPUT_JSON_SCHEMA,

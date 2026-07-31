@@ -388,6 +388,39 @@ describe("createWorkflowRuntime#run", () => {
     });
   });
 
+  it("serializes the selected dynamic subagent config for the child workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 86_400_000);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await createWorkflowRuntime({
+      compiledArtifactsSource,
+      dynamicSubagentAgentConfig: {
+        description: "Perform deep research.",
+        limits: { sessionTimeoutMs: 120_000 },
+        model: { id: "anthropic/claude-opus-4.6" },
+      },
+      nodeId: "subagents/researcher",
+    }).run({
+      adapter,
+      auth: null,
+      input: { message: "research this" },
+      mode: "task",
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput).toMatchObject({
+      serializedContext: {
+        "eve.dynamicSubagentAgentConfig": {
+          description: "Perform deep research.",
+          limits: { sessionTimeoutMs: 120_000 },
+          model: { id: "anthropic/claude-opus-4.6" },
+        },
+      },
+      sessionTimeoutMs: 120_000,
+    });
+  });
+
   it("serializes the channel request id into workflow context", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;

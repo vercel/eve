@@ -244,9 +244,8 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
  * - `agent/instructions/`: return a single `defineInstructions({ markdown })`,
  *   which lowers to one `{ role: "system", content: markdown }` message,
  *   or `null`. (Maps are not meaningful here.)
- * - `agent/subagents/<name>/agent.ts`: provide the static `defineAgent(...)`
- *   value as `fallback`, then return that same value to expose the subagent or
- *   `null` to omit it.
+ * - `agent/subagents/<name>/agent.ts`: return `defineAgent(...)` to configure
+ *   and expose the subagent, or `null` to omit it.
  *
  * Per-slot events: tools resolvers run at `session.started`,
  * `turn.started`, and `step.started`. Instructions and skills resolvers
