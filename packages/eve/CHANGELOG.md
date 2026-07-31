@@ -1,5 +1,23 @@
 # eve
 
+## 0.29.4
+
+### Patch Changes
+
+- e90a8c2: Launch local or deployed eve applications as stable ACP v1 agents with `eve acp [url]`, including streamed messages, tool activity, human input, cancellation, concurrent sessions, and verified Vercel authentication.
+- cec672d: Add guided Discord setup through `eve add channel/discord`, including Vercel Connect provisioning, trigger attachment, interactions endpoint configuration, slash-command registration, and channel scaffolding.
+- ed328e7: Render registry item titles with their exact registry-provided casing by loading manifests for each page of catalog results.
+- c875a67: Update the generated `AGENTS.md` to direct coding agents to the eve registry for discovering and installing integrations.
+- 5153b13: Add JSON output to `eve registry list` and `eve registry search` for scripts that inspect registry catalogs.
+- 155d46a: Connection registry items now configure their Vercel Connect connector during `eve add`, and registry setup commands close their IPC channel after reporting an outcome so `/add` returns instead of remaining stuck.
+- 6f3daca: Add `ClientSession.snapshot()` for reading a finite, cursor-consistent session event prefix that can hydrate server-rendered applications.
+- 67bfc76: Resolve sandbox skill roots and seed-file paths through the same `$HOME` resolver the file tools use, so the skills location is spelled once instead of twice.
+- a5acde8: Ensure exiting the dev TUI shuts down its owned server and any surviving workflow processes before the CLI exits. Persisted workflow messages now reach the ready worker during restart instead of being rejected while the file watcher starts.
+- 731464f: Give the local trace spool's on-disk layout a single owner: the shared trace reader now exposes the listing and segment-read primitives that `eve traces` and the `/traces` viewer both use, and payload formatting is shared between the detail panel and the conversation view.
+- f7ba3b3: Derive the `/traces` conversation viewer's line geometry from one prefix-sum helper so scroll, click, and wheel math cannot disagree, and reset the view through a single factory when the viewed trace changes.
+- 3f4bb9c: The `/traces` viewer now follows your terminal's colors instead of forcing a hardcoded black/grey truecolor palette. It probes the terminal's default background (OSC 11) and derives its card surfaces from your own theme — subtly elevated bands on dark and light backgrounds alike, with red bands for failures, and card titles that invert to black on light backgrounds so they stay legible. Terminals that don't answer the probe get a clean gutter-rail rendering drawn entirely with the shared TUI theme.
+- f5d0533: Derive the dev TUI's slash-command suggestion window from the command registry instead of a hand-maintained constant, and collapse the duplicated cursor step in the terminal line-wrap loop.
+
 ## 0.29.3
 
 ### Patch Changes
