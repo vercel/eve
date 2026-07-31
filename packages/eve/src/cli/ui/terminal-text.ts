@@ -2,8 +2,8 @@ import { graphemes } from "#shared/text-boundaries.js";
 
 const ansiEscape = String.fromCharCode(27);
 
-export const ansiPattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
-export const ansiPrefixPattern = new RegExp(`^${ansiEscape}\\[[0-?]*[ -/]*[@-~]`);
+const ansiPattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
+const ansiPrefixPattern = new RegExp(`^${ansiEscape}\\[[0-?]*[ -/]*[@-~]`);
 const emojiPresentationPattern = /\p{Emoji_Presentation}/u;
 const extendedPictographicPattern = /\p{Extended_Pictographic}/u;
 const keycapPattern = /^[#*0-9]\u{fe0f}?\u{20e3}$/u;
@@ -182,10 +182,6 @@ export function wrapVisibleLine(line: string, width: number): string[] {
     return [line];
   }
 
-  if (line.length === 0) {
-    return [""];
-  }
-
   const units = terminalTextUnits(line);
   let remainingWidth = 0;
   for (const unit of units) remainingWidth += unit.width;
@@ -194,25 +190,24 @@ export function wrapVisibleLine(line: string, width: number): string[] {
   let unitIndex = 0;
   let charOffset = 0;
 
-  const advanceTo = (targetOffset: number): void => {
-    while (charOffset < targetOffset && unitIndex < units.length) {
-      const unit = units[unitIndex]!;
-      charOffset += unit.text.length;
-      remainingWidth -= unit.width;
-      unitIndex += 1;
-    }
+  // The cursor moves one unit at a time: past the row just emitted, then past
+  // the whitespace the break consumed.
+  const consume = (): void => {
+    const unit = units[unitIndex]!;
+    charOffset += unit.text.length;
+    remainingWidth -= unit.width;
+    unitIndex += 1;
   };
 
   while (remainingWidth > width) {
     const breakAt = findVisibleBreakPoint(units, unitIndex, width);
     lines.push(line.slice(charOffset, charOffset + breakAt).trimEnd());
-    advanceTo(charOffset + breakAt);
+    const rowEnd = charOffset + breakAt;
+    while (charOffset < rowEnd && unitIndex < units.length) consume();
     while (unitIndex < units.length) {
       const unit = units[unitIndex]!;
       if (unit.ansi || unit.text.trimStart().length > 0) break;
-      charOffset += unit.text.length;
-      remainingWidth -= unit.width;
-      unitIndex += 1;
+      consume();
     }
   }
 
@@ -247,7 +242,7 @@ function findVisibleBreakPoint(
   return offset;
 }
 
-export function codePointWidth(codePoint: number): number {
+function codePointWidth(codePoint: number): number {
   if (codePoint === 0x09) {
     return 4;
   }
