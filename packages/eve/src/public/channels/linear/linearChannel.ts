@@ -1,5 +1,6 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { UserContent } from "ai";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -156,11 +157,23 @@ export interface LinearChannelEvents {
 /**
  * Result of an inbound Linear hook. Return `null` to acknowledge without
  * dispatching; return `{ auth }` to dispatch. Optional `context` strings are
- * added as `role: "user"` messages before the dispatched turn.
+ * added as `role: "user"` messages before the dispatched turn. `message`
+ * replaces the computed turn message and `previousComments` replaces the
+ * webhook's previous comments; both take precedence over channel config.
  */
 export type LinearInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /**
+   * Replaces the computed turn message. An empty or whitespace-only string,
+   * or an empty array, is treated as undefined (the default computation
+   * applies). Array-form content skips Linear inbound image attachment.
+   * Linear is the only channel with a message override because its turn
+   * message is a Linear-computed aggregate of other actors' content.
+   */
+  readonly message?: UserContent;
+  /** Replaces `event.previousComments` in the dispatched context. `[]` drops them. */
+  readonly previousComments?: readonly string[];
 } | null;
 
 /** Sync or async {@link LinearInboundResult}. */
@@ -172,6 +185,14 @@ export interface LinearChannelConfig {
   readonly credentials?: LinearChannelCredentials;
   readonly events?: LinearChannelEvents;
   readonly route?: string;
+
+  /**
+   * Strip other agents' `<other-thread>` blocks from the default turn
+   * message built from `promptContext` (fail closed: on malformed or
+   * drifted markup the message falls back to the session summary or issue
+   * title). A hook-returned `message` override bypasses this flag.
+   */
+  readonly excludeOtherThreads?: boolean;
 
   /** Inbound Agent Session hook. Defaults to dispatching `created` and `prompted` events. */
   onAgentSession?(
@@ -343,8 +364,13 @@ async function dispatchAgentSession(input: {
   const result = await input.onAgentSession(context, event);
   if (result === null) return;
 
+  const overrideMessage = normalizeMessageOverride(result.message);
   const message = await attachLinearInboundImages({
-    content: messageFromLinearAgentSessionEvent(event),
+    content:
+      overrideMessage ??
+      messageFromLinearAgentSessionEvent(event, {
+        excludeOtherThreads: input.config.excludeOtherThreads,
+      }),
     credentials: input.config.credentials,
     fetch: input.config.api?.fetch,
   });
@@ -353,7 +379,7 @@ async function dispatchAgentSession(input: {
     {
       context: [
         formatLinearContextBlock(event),
-        ...event.previousComments,
+        ...(result.previousComments ?? event.previousComments),
         ...(result.context ?? []),
       ],
       message,
@@ -364,6 +390,12 @@ async function dispatchAgentSession(input: {
       state: stateFromAgentSession(event.agentSession),
     },
   );
+}
+
+function normalizeMessageOverride(message: UserContent | undefined): UserContent | undefined {
+  if (message === undefined) return undefined;
+  if (typeof message === "string") return message.trim().length > 0 ? message : undefined;
+  return message.length > 0 ? message : undefined;
 }
 
 async function resolveReceiveSession(
