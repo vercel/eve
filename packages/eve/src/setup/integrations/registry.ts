@@ -1,3 +1,4 @@
+import { DISCORD_SETUP } from "./discord/setup.js";
 import { PHOTON_SETUP } from "./photon/setup.js";
 import { SLACK_SETUP } from "./slack/setup.js";
 import type { SetupIntegration } from "./types.js";
@@ -7,6 +8,7 @@ import { WEB_SETUP } from "./web/setup.js";
 export const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   WEB_SETUP,
   SLACK_SETUP,
+  DISCORD_SETUP,
   PHOTON_SETUP,
 ];
 
