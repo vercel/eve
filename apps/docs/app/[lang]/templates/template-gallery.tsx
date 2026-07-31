@@ -75,7 +75,7 @@ const TemplateCard = ({ entry }: { entry: TemplateEntry }) => (
       className="flex min-h-36 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
       href={`/templates/${entry.slug}`}
     >
-      <h2 className="text-[16px] leading-none font-medium text-gray-1000">{entry.title}</h2>
+      <h2 className="text-gray-1000 text-heading-16">{entry.title}</h2>
       <p className="mt-2 line-clamp-2 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
         {entry.description}
       </p>
