@@ -220,7 +220,7 @@ describe("multi-agent callback routing", () => {
     deploymentOrigin = await listen(deploymentServer);
 
     // Remote subagent: records the create-session body and returns a session
-    // id, like the eve channel's create-session route.
+    // id and continuation token, like the eve channel's create-session route.
     remoteAgentServer = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -230,7 +230,12 @@ describe("multi-agent callback routing", () => {
           "content-type": "application/json",
           [EVE_SESSION_ID_HEADER]: "remote-session-1",
         });
-        response.end(JSON.stringify({ ok: true }));
+        response.end(
+          JSON.stringify({
+            continuationToken: "remote-session-1:continuation",
+            ok: true,
+          }),
+        );
       });
     });
     remoteAgentOrigin = await listen(remoteAgentServer);

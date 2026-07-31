@@ -38,7 +38,6 @@ export interface RuntimeSubagentRegistry {
  * accept one free-form `message` string from the parent agent.
  */
 export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
-  description: z.string().describe("A short (3-5 word) description of the task."),
   message: z
     .string()
     .describe(

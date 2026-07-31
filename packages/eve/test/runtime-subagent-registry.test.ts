@@ -7,17 +7,13 @@ import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 const SUBAGENT_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
-    description: {
-      type: "string",
-      description: "A short (3-5 word) description of the task.",
-    },
     message: {
       type: "string",
       description:
         "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
     },
   },
-  required: ["description", "message"],
+  required: ["message"],
   additionalProperties: false,
 } as const;
 

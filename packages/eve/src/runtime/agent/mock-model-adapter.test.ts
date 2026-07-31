@@ -37,7 +37,7 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(shouldMockAuthoredRuntimeModels()).toBe(true);
   });
 
-  it("includes the required task description in delegated agent calls", async () => {
+  it("emits a message-only input for delegated agent calls", async () => {
     const result = await generateWithPrompt(
       [
         {
@@ -50,10 +50,9 @@ describe("createMockAuthoredRuntimeModel", () => {
           inputSchema: {
             additionalProperties: false,
             properties: {
-              description: { type: "string" },
               message: { type: "string" },
             },
-            required: ["description", "message"],
+            required: ["message"],
             type: "object",
           },
           name: "agent",
@@ -65,7 +64,6 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(result.content).toEqual([
       {
         input: JSON.stringify({
-          description: "use the wait_for_cancel tool",
           message: "use the wait_for_cancel tool.",
         }),
         toolCallId: "call_agent",
