@@ -493,6 +493,25 @@ describe("renderConversationItem", () => {
     expect(errorLines[3]).toContain("\x1b[48;2;58;26;31m");
   });
 
+  it("keeps the band behind the metrics when a styled title clips mid-row", () => {
+    const assistant = buildConversationItems(trace(weatherTurn())).find(
+      (item) => item.kind === "assistant",
+    )!;
+    const themed = createTheme({ color: true, unicode: true });
+    const surfaces = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 0 });
+    // Narrow enough (like a card beside the open drawer) that the styled
+    // title clips, which embeds a full SGR reset mid-row. The band must
+    // re-open after it, or the gap and right-aligned metrics render on the
+    // terminal's default background.
+    const title = renderConversationItem(assistant, 46, themed, false, false, surfaces)[1]!;
+    expect(stripAnsi(title)).toContain("↓50");
+    const afterResets = title.split("\x1b[0m").slice(1);
+    expect(afterResets.length).toBeGreaterThan(1);
+    for (const segment of afterResets) {
+      expect(segment.startsWith("\x1b[48;2;22;22;22m")).toBe(true);
+    }
+  });
+
   it("inverts primary text on light backgrounds so titles stay legible", () => {
     const assistant = buildConversationItems(trace(weatherTurn())).find(
       (item) => item.kind === "assistant",

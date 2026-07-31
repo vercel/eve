@@ -367,9 +367,14 @@ function cardRow(
   const clipped = clipVisible(line, Math.max(1, width - 8));
   const pad = " ".repeat(Math.max(0, width - 8 - visibleLength(clipped)));
   if (surface === undefined || !theme.color) return ` ${rail}  ${clipped}${pad}    `;
-  // The second surface open re-establishes the band past any embedded style
-  // reset in the clipped content, so the padding is covered too.
-  return ` ${rail}${surface}  ${clipped}\x1b[0m${surface}${pad}  ${SURFACE_CLOSE}  `;
+  // A style reset embedded in the content — `clipVisible` appends one when
+  // it truncates styled text, e.g. a title clipped by the details drawer —
+  // would drop the band's background for the rest of the row (the metrics
+  // after a clipped title would sit on the terminal's default background).
+  // Re-open the surface after every embedded reset, and once more before
+  // the padding to close any style the content left open.
+  const covered = clipped.replaceAll("\x1b[0m", `\x1b[0m${surface}`);
+  return ` ${rail}${surface}  ${covered}\x1b[0m${surface}${pad}  ${SURFACE_CLOSE}  `;
 }
 
 /**
