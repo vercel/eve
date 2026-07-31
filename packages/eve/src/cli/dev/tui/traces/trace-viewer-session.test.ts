@@ -112,10 +112,11 @@ describe("TraceViewerSession drag copy", () => {
       const last = frames[frames.length - 1]?.join("\n") ?? "";
       if (!last.includes("copy me please")) throw new Error("no conversation frame yet");
     });
-    // Drag across the user card's text row: press, motion, release.
-    session.handleKey({ type: "mouse", action: "press", button: 0, x: 1, y: 6 });
-    session.handleKey({ type: "mouse", action: "press", button: 32, x: 40, y: 6 });
-    session.handleKey({ type: "mouse", action: "release", button: 0, x: 40, y: 6 });
+    // Drag across the user card's text row (two header rows, then the
+    // card's band, title, band, and padding rows): press, motion, release.
+    session.handleKey({ type: "mouse", action: "press", button: 0, x: 1, y: 8 });
+    session.handleKey({ type: "mouse", action: "press", button: 32, x: 40, y: 8 });
+    session.handleKey({ type: "mouse", action: "release", button: 0, x: 40, y: 8 });
     expect(copied).toHaveLength(1);
     expect(copied[0]).toContain("copy me please");
     expect(frames[frames.length - 1]!.join("\n")).toContain("Copied to clipboard");
@@ -124,9 +125,9 @@ describe("TraceViewerSession drag copy", () => {
     // drawer starts right of the conversation's 46 columns, and detail
     // line 1 carries the selected span's name.
     session.handleKey({ type: "enter" });
-    session.handleKey({ type: "mouse", action: "press", button: 0, x: 49, y: 3 });
-    session.handleKey({ type: "mouse", action: "press", button: 32, x: 75, y: 3 });
-    session.handleKey({ type: "mouse", action: "release", button: 0, x: 75, y: 3 });
+    session.handleKey({ type: "mouse", action: "press", button: 0, x: 49, y: 5 });
+    session.handleKey({ type: "mouse", action: "press", button: 32, x: 75, y: 5 });
+    session.handleKey({ type: "mouse", action: "release", button: 0, x: 75, y: 5 });
     expect(copied).toHaveLength(2);
     expect(copied[1]).toContain("agent.turn");
     session.dispose();

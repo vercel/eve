@@ -180,9 +180,9 @@ describe("reduceTraceViewerKey", () => {
     };
     const assistantIndex = state.conversationItems.findIndex((item) => item.kind === "assistant");
     // Cards occupy 7 lines each (6 + separator); assistant starts at line
-    // assistantIndex*7. Click one row into it (y=2 is first body row, so
-    // bodyRow = clickY-2 maps to absolute line scrollRow+bodyRow).
-    const clickY = 2 + assistantIndex * 7 + 1;
+    // assistantIndex*7. Click one row into it (y=4 is first body row — three
+    // header rows — so bodyRow = clickY-4 maps to line scrollRow+bodyRow).
+    const clickY = 4 + assistantIndex * 7 + 1;
     const click = (): void => {
       state = reduceTraceViewerKey(
         state,
@@ -221,7 +221,7 @@ describe("reduceTraceViewerKey", () => {
     // columns are relative to the drawer's content area.
     state = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "press", button: 0, x: 85, y: 3 },
+      { type: "mouse", action: "press", button: 0, x: 85, y: 5 },
       env,
     ).state;
     expect(state.textSelection).toEqual({
@@ -232,12 +232,12 @@ describe("reduceTraceViewerKey", () => {
     });
     state = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "press", button: 32, x: 90, y: 5 },
+      { type: "mouse", action: "press", button: 32, x: 90, y: 7 },
       env,
     ).state;
     const result = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "release", button: 0, x: 90, y: 5 },
+      { type: "mouse", action: "release", button: 0, x: 90, y: 7 },
       env,
     );
     expect(result.copySelection).toEqual({
@@ -254,10 +254,39 @@ describe("reduceTraceViewerKey", () => {
     const env = { ...ENV, conversationLineCounts: state.conversationItems.map(() => 6) };
     state = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "press", button: 0, x: 85, y: 3 },
+      { type: "mouse", action: "press", button: 0, x: 85, y: 5 },
       env,
     ).state;
     expect(state.textSelection).toBeUndefined();
+  });
+
+  it("scrolls the drawer with the wheel when the pointer is over it", () => {
+    let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    const env = { ...ENV, conversationLineCounts: state.conversationItems.map(() => 6) };
+    state = reduceTraceViewerKey(state, key("enter"), env).state;
+    expect(state.panelOpen).toBe(true);
+    // Pointer right of the conversation (contentWidth 80): the drawer scrolls.
+    state = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "press", button: 65, x: 90, y: 5 },
+      env,
+    ).state;
+    expect(state.panelScroll).toBe(3);
+    expect(state.scrollRow).toBe(0);
+    // Wheel back up clamps at the top.
+    state = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "press", button: 64, x: 90, y: 5 },
+      env,
+    ).state;
+    expect(state.panelScroll).toBe(0);
+    // Over the conversation, the wheel scrolls the cards as before.
+    state = reduceTraceViewerKey(
+      state,
+      { type: "mouse", action: "press", button: 65, x: 10, y: 5 },
+      env,
+    ).state;
+    expect(state.panelScroll).toBe(0);
   });
 
   it("copies a drag selection on release instead of clicking", () => {
@@ -269,7 +298,7 @@ describe("reduceTraceViewerKey", () => {
 
     state = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "press", button: 0, x: 5, y: 3 },
+      { type: "mouse", action: "press", button: 0, x: 5, y: 5 },
       env,
     ).state;
     expect(state.textSelection).toEqual({
@@ -282,7 +311,7 @@ describe("reduceTraceViewerKey", () => {
     // Motion with the left button held (SGR button 32) extends the selection.
     state = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "press", button: 32, x: 20, y: 5 },
+      { type: "mouse", action: "press", button: 32, x: 20, y: 7 },
       env,
     ).state;
     expect(state.textSelection).toEqual({
@@ -294,7 +323,7 @@ describe("reduceTraceViewerKey", () => {
 
     const result = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "release", button: 0, x: 20, y: 5 },
+      { type: "mouse", action: "release", button: 0, x: 20, y: 7 },
       env,
     );
     expect(result.copySelection).toEqual({
@@ -313,7 +342,7 @@ describe("reduceTraceViewerKey", () => {
     const env = { ...ENV, conversationLineCounts: state.conversationItems.map(() => 6) };
     state = reduceTraceViewerKey(
       state,
-      { type: "mouse", action: "press", button: 0, x: 5, y: 3 },
+      { type: "mouse", action: "press", button: 0, x: 5, y: 4 },
       env,
     ).state;
     expect(state.textSelection).toBeDefined();

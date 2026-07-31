@@ -211,18 +211,19 @@ void (async () => {
     // A mouse click toggles a card open too: an SGR press+release at row 3
     // lands inside the first card (one header row, 1-based coordinates).
     // The click acts on release so drag selections never toggle cards.
-    input.send("\x1b[<0;10;3M");
-    input.send("\x1b[<0;10;3m");
+    input.send("\x1b[<0;10;4M");
+    input.send("\x1b[<0;10;4m");
     await screen.waitForText(SYSTEM_PROMPT_TAIL, 5_000);
     console.log(theme.muted("[tui-traces] mouse click expands a card"));
     input.left();
     await screen.waitForText("Click to expand", 5_000);
 
     // Dragging (press, SGR button-32 motion, release) selects text and
-    // copies it, confirmed by the header toast.
-    input.send("\x1b[<0;3;3M");
-    input.send("\x1b[<32;30;3M");
-    input.send("\x1b[<0;30;3m");
+    // copies it, confirmed by the toast. Row 4 is the first card's title
+    // row (two header rows, then the card's top band).
+    input.send("\x1b[<0;3;5M");
+    input.send("\x1b[<32;30;5M");
+    input.send("\x1b[<0;30;5m");
     await screen.waitForText("Copied to clipboard", 5_000);
     console.log(theme.muted("[tui-traces] drag selection copies to the clipboard"));
 

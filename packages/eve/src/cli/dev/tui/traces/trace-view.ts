@@ -22,10 +22,15 @@ import type { Theme } from "../theme.js";
 import { formatAttributeContent } from "./trace-content.js";
 import { renderConversationItem } from "./trace-conversation.js";
 import type { TextSelectionRange, TraceViewerState } from "./trace-viewer-state.js";
-import { orderedTextSelection, selectedTraceViewerSpan } from "./trace-viewer-state.js";
+import {
+  TRACE_VIEWER_HEADER_ROWS,
+  orderedTextSelection,
+  selectedTraceViewerSpan,
+} from "./trace-viewer-state.js";
 
-const HEADER_ROWS = 1;
-const FOOTER_ROWS = 2;
+const HEADER_ROWS = TRACE_VIEWER_HEADER_ROWS;
+/** Footer: padding row, key hints, and the position/notice line. */
+const FOOTER_ROWS = 3;
 /** The body always keeps at least this many columns. */
 const BODY_MIN_WIDTH = 20;
 const PANEL_MIN_WIDTH = 20;
@@ -96,6 +101,7 @@ export function renderTraceViewer(
     }
   }
   rows.push(...renderFooter(state, width, theme));
+  if (options.toast !== undefined) overlayToast(rows, options.toast, width, theme);
 
   return {
     rows: rows.map((row) => withViewerBase(row, width, theme)),
@@ -126,6 +132,42 @@ function withViewerBase(row: string, width: number, theme: Theme): string {
   return `${VIEWER_BASE_OPEN}${padded
     .replaceAll("\x1b[0m", VIEWER_BASE_REOPEN)
     .replaceAll("\x1b[49m", VIEWER_BASE_REOPEN_BG)}${RESET_ALL}`;
+}
+
+/**
+ * The toast floats over the frame's top-right corner as a small elevated
+ * surface: a greyish-white half-block bar down its left edge, a padding row
+ * above and below the message, and one column of canvas as right margin.
+ */
+const TOAST_SURFACE = "\x1b[48;2;36;36;36m";
+const TOAST_BAR = "\x1b[38;2;210;210;210m▌\x1b[39m";
+const TOAST_TEXT = "\x1b[97m";
+
+function overlayToast(rows: string[], message: string, width: number, theme: Theme): void {
+  const text = stripTerminalControls(message);
+  const inner = `  ${text}  `;
+  const innerWidth = visibleLength(inner);
+  const lines = theme.color
+    ? [
+        `${TOAST_SURFACE}${TOAST_BAR}${" ".repeat(innerWidth)}\x1b[0m`,
+        `${TOAST_SURFACE}${TOAST_BAR}${TOAST_TEXT}${inner}\x1b[0m`,
+        `${TOAST_SURFACE}${TOAST_BAR}${" ".repeat(innerWidth)}\x1b[0m`,
+      ]
+    : [`▌${" ".repeat(innerWidth)}`, `▌${inner}`, `▌${" ".repeat(innerWidth)}`];
+  // Below the title row, so the trace identity stays readable.
+  for (const [offset, line] of lines.entries()) {
+    const index = HEADER_ROWS - 1 + offset;
+    if (index >= rows.length) break;
+    rows[index] = overlayRight(rows[index]!, line, width, 1);
+  }
+}
+
+/** Splices `segment` over the right end of `row`, keeping `margin` canvas columns. */
+function overlayRight(row: string, segment: string, width: number, margin: number): string {
+  const cut = Math.max(0, width - margin - visibleLength(segment));
+  const rowWidth = visibleLength(row);
+  const padded = rowWidth < cut ? row + " ".repeat(cut - rowWidth) : row;
+  return `${sliceVisible(padded, cut)}\x1b[0m${segment}`;
 }
 
 /** Renders the attributes panel body for one span (name, facts, attributes). */
@@ -219,18 +261,16 @@ function renderHeader(state: TraceViewerState, options: RenderTraceViewerOptions
   const position =
     state.traces.length === 0 ? "" : colors.dim(`[${state.traceIndex + 1}/${state.traces.length}]`);
   const live = options.activeWindowEndNs !== undefined ? colors.green("● live") : "";
-  const toast =
-    options.toast === undefined
-      ? ""
-      : colors.green(`${theme.unicode ? "✓ " : ""}${stripTerminalControls(options.toast)}`);
-  const right = [toast, live, position].filter((part) => part.length > 0).join(" ");
+  const right = [live, position].filter((part) => part.length > 0).join(" ");
   // The badge keeps its room: the title (full session id and all) clips first.
   const header = joinRight(
-    clipVisible(title, Math.max(0, width - visibleLength(right) - 1)),
+    ` ${clipVisible(title, Math.max(0, width - visibleLength(right) - 2))}`,
     right,
     width,
   );
-  return [clipVisible(header, width)];
+  // Padding rows above and below keep the title off the terminal edge
+  // and separated from the cards.
+  return ["", clipVisible(header, width), ""];
 }
 
 /** The conversation flow: user/assistant/tool cards in turn order. */
@@ -378,7 +418,9 @@ function renderFooter(state: TraceViewerState, width: number, theme: Theme): str
   const position = itemCount === 0 ? "" : colors.dim(`item ${state.selectedRow + 1}/${itemCount}`);
   const notice = state.notice === undefined ? "" : colors.yellow(state.notice);
   const status = [notice, position].filter((part) => part.length > 0).join(colors.dim(" · "));
+  // A padding row separates the cards from the hints.
   return [
+    "",
     clipVisible(` ${colors.dim(hints)}`, width),
     clipVisible(status.length === 0 ? "" : ` ${status}`, width),
   ];

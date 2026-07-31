@@ -17,6 +17,13 @@ import {
 import type { TraceStoreEntry } from "#cli/dev/tui/traces/trace-store.js";
 import type { TerminalKey } from "#cli/dev/tui/stream-format.js";
 
+/**
+ * Rows above the conversation body (padding, title, padding). Lives here
+ * rather than in the renderer because the mouse handlers need the same
+ * offset to map terminal rows to conversation lines.
+ */
+export const TRACE_VIEWER_HEADER_ROWS = 3;
+
 export interface TraceViewerState {
   /** Stored traces, most recent activity first. */
   readonly traces: readonly TraceStoreEntry[];
@@ -240,9 +247,14 @@ export function reduceTraceViewerKey(
       return { state: base, effect: "close" };
     }
     case "mouse": {
-      // Scroll wheel (SGR button 64/65): scroll the conversation viewport.
+      // Scroll wheel (SGR button 64/65): over the open drawer it scrolls
+      // the drawer, otherwise the conversation viewport.
       if (key.action === "press" && (key.button === 64 || key.button === 65)) {
         const delta = key.button === 64 ? -3 : 3;
+        if (base.panelOpen && key.x - 1 >= environment.contentWidth) {
+          const panelScroll = Math.min(panelMaxScroll, Math.max(0, base.panelScroll + delta));
+          return { state: { ...base, panelScroll } };
+        }
         return { state: scrollConversation(base, delta, environment) };
       }
       // Left press anchors a possible drag selection in whichever region the
@@ -288,7 +300,7 @@ export function reduceTraceViewerKey(
         return { state: released, copySelection: selection };
       }
       // Left click selects and expands/collapses cards.
-      const bodyIndex = key.y - 2; // one header row, 1-based coordinates
+      const bodyIndex = key.y - 1 - TRACE_VIEWER_HEADER_ROWS; // 1-based coordinates
       if (bodyIndex < 0) return { state: released };
       const itemIndex = conversationItemAtBodyRow(released, environment, bodyIndex);
       if (itemIndex === undefined) return { state: released };
@@ -448,7 +460,7 @@ function conversationCellAt(
 ): TextSelectionPoint | undefined {
   const counts = environment.conversationLineCounts;
   if (counts === undefined || state.conversationItems.length === 0) return undefined;
-  const bodyIndex = y - 2; // one header row, 1-based coordinates
+  const bodyIndex = y - 1 - TRACE_VIEWER_HEADER_ROWS; // 1-based coordinates
   if (bodyIndex < 0 || bodyIndex >= environment.timelineViewportRows) return undefined;
   const column = x - 1;
   if (column < 0 || column >= environment.contentWidth) return undefined;
@@ -471,7 +483,7 @@ function panelCellAt(
   y: number,
 ): TextSelectionPoint | undefined {
   if (!state.panelOpen || environment.panelTotalRows === 0) return undefined;
-  const bodyIndex = y - 2; // one header row, 1-based coordinates
+  const bodyIndex = y - 1 - TRACE_VIEWER_HEADER_ROWS; // 1-based coordinates
   if (bodyIndex < 0 || bodyIndex >= environment.panelViewportRows) return undefined;
   const column = x - 1 - (environment.contentWidth + 1);
   if (column < 0) return undefined;

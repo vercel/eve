@@ -91,7 +91,7 @@ function clockTimeOf(nanoseconds: bigint): string {
 describe("renderTraceViewer", () => {
   it("renders the header with full session id, start time, counts, and position", () => {
     const frame = render(viewerState(conversationSpans()));
-    const header = stripAnsi(frame.rows[0]!);
+    const header = stripAnsi(frame.rows[1]!);
     expect(header).toContain("traces");
     expect(header).toContain("weather");
     expect(header).toContain("session session-123");
@@ -113,7 +113,7 @@ describe("renderTraceViewer", () => {
     expect(selectedRows.length).toBeGreaterThan(0);
   });
 
-  it("shows the copy toast in the header's top-right corner", () => {
+  it("shows the copy toast as a floating card below the title", () => {
     const state = viewerState(conversationSpans());
     const frame = renderTraceViewer(state, {
       width: 100,
@@ -121,7 +121,11 @@ describe("renderTraceViewer", () => {
       theme: THEME,
       toast: "Copied to clipboard",
     });
-    expect(stripAnsi(frame.rows[0]!)).toContain("✓ Copied to clipboard");
+    // Message row with the left bar, padding rows above and below.
+    expect(stripAnsi(frame.rows[3]!)).toContain("▌  Copied to clipboard");
+    expect(stripAnsi(frame.rows[2]!)).toMatch(/▌ +$/u);
+    expect(stripAnsi(frame.rows[4]!)).toMatch(/▌ +$/u);
+    expect(stripAnsi(frame.rows[1]!)).not.toContain("Copied");
   });
 
   it("paints an active drag selection in reverse video", () => {
@@ -305,9 +309,11 @@ describe("renderTraceViewer", () => {
   });
 
   it("reports viewport metrics for key handling", () => {
+    // 30 rows minus three header rows (padding, title, padding) and the three-row
+    // footer (padding + hints + status).
     const frame = render(viewerState(conversationSpans()), 100, 30);
-    expect(frame.timelineViewportRows).toBe(27);
-    expect(frame.panelViewportRows).toBe(27);
+    expect(frame.timelineViewportRows).toBe(24);
+    expect(frame.panelViewportRows).toBe(24);
     expect(frame.panelTotalRows).toBe(0);
   });
 
