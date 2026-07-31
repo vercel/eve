@@ -7,8 +7,8 @@ import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { listLocalTraces } from "#cli/commands/trace.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { listLocalTraces } from "#harness/local-trace-reader.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
 import { installLocalInstrumentationRuntime } from "#harness/local-instrumentation-runtime.js";
 import { LocalTraceSpanProcessor } from "#harness/local-trace-span-processor.js";

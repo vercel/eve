@@ -4,12 +4,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  listLocalTraces,
-  resolveLocalTraces,
-  runTraceListCommand,
-  runTraceShowCommand,
-} from "./trace.js";
+import { listLocalTraces } from "#harness/local-trace-reader.js";
+
+import { resolveLocalTraces, runTraceListCommand, runTraceShowCommand } from "./trace.js";
 
 const TRACE_ONE = "1".repeat(32);
 const TRACE_TWO = "2".repeat(32);
