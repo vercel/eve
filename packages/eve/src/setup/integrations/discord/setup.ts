@@ -68,10 +68,19 @@ export async function setupDiscord(
     );
   }
   try {
-    context.ui.prompter.note(
-      "Create a Discord application or open an existing one, then go to Bot → Reset Token and copy the new bot token:\n\nCreate: https://discord.com/developers/applications?new_application=true\nExisting applications: https://discord.com/developers/applications",
-      "Discord application",
-    );
+    const applicationInstructions = [
+      "Create a Discord application or open an existing one, then go to Bot → Reset Token and copy the new bot token.",
+      "Create: https://discord.com/developers/applications?new_application=true",
+      "Existing applications: https://discord.com/developers/applications",
+    ];
+    if (context.ui.prompter.acknowledge) {
+      await context.ui.prompter.acknowledge({
+        message: "Discord application",
+        lines: applicationInstructions,
+      });
+    } else {
+      context.ui.prompter.log.info(`Discord application\n${applicationInstructions.join("\n")}`);
+    }
     const botToken = (
       await context.ui.asker.ask(
         text({

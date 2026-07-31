@@ -1,4 +1,12 @@
+import { z } from "zod";
+
 const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
+
+const DiscordApplicationSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  verify_key: z.string(),
+});
 
 /** Non-secret Discord application metadata resolved from a bot token. */
 export interface DiscordApplication {
@@ -35,20 +43,9 @@ export async function resolveDiscordApplication(
     fetchImpl,
   );
   if (!response.ok) throw new Error(`Discord rejected the bot token (HTTP ${response.status}).`);
-  const value: unknown = await response.json();
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("id" in value) ||
-    typeof value.id !== "string" ||
-    !("name" in value) ||
-    typeof value.name !== "string" ||
-    !("verify_key" in value) ||
-    typeof value.verify_key !== "string"
-  ) {
-    throw new Error("Discord returned incomplete application details.");
-  }
-  return { id: value.id, name: value.name, publicKey: value.verify_key };
+  const parsed = DiscordApplicationSchema.safeParse(await response.json());
+  if (!parsed.success) throw new Error("Discord returned incomplete application details.");
+  return { id: parsed.data.id, name: parsed.data.name, publicKey: parsed.data.verify_key };
 }
 
 /** Registers the global command consumed by the default Discord channel. */
