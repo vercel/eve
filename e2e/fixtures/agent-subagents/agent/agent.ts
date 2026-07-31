@@ -16,9 +16,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
   const result = request.toolResults.find((entry) => entry.name === "conditional-marker");
   if (result !== undefined) {
-    const output =
-      typeof result.output === "string" ? result.output : JSON.stringify(result.output);
-    return `${output} NIL_SUBAGENT_OMITTED`;
+    return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
   }
 
   if (request.tools.some((tool) => tool.name === "conditional-marker")) {
