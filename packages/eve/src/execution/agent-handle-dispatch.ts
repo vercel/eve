@@ -274,18 +274,27 @@ async function deliverToAgentHandle(input: {
     nodeId: identity.nodeId,
   });
   try {
-    await childRuntime.deliver({
-      caller: {
-        callId: action.callId,
-        replyTo: { kind: "hook", token: input.parentToken },
-        subagentName: identity.name,
+    const result = await childRuntime.dispatchSession({
+      command: {
+        caller: {
+          callId: action.callId,
+          replyTo: { kind: "hook", token: input.parentToken },
+          subagentName: identity.name,
+        },
+        kind: "send",
+        payload: {
+          message: readSubagentMessage(action),
+          outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
+        },
       },
-      continuationToken: address.continuationToken,
-      payload: {
-        message: readSubagentMessage(action),
-        outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
-      },
+      sessionId: address.sessionId,
     });
+    if (result.status === "session_not_active") {
+      return err({
+        cause: new Error(`Agent session "${address.sessionId}" is no longer active.`),
+        permanent: true,
+      });
+    }
   } catch (error) {
     return err({ cause: error, permanent: isRuntimeNoActiveSessionError(error) });
   }

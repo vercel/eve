@@ -50,6 +50,12 @@ export async function startRemoteAgentSession(input: {
   readonly callbackToken?: string;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
+  /**
+   * Whether the dispatching agent opted into
+   * `experimental.subagentPersistentSessions`. Persistent remote children run
+   * in conversation mode so their sessions accept follow-up messages.
+   */
+  readonly persistentSessions?: boolean;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
 }): Promise<RemoteAgentSessionCoordinates> {
@@ -86,9 +92,7 @@ export async function startRemoteAgentSession(input: {
       ),
     },
     message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),
-    // Remote children run one turn per delivery in task mode; follow-ups
-    // arrive as continuations against the child's agent handle.
-    mode: "task",
+    mode: input.persistentSessions === true ? "conversation" : "task",
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
   };

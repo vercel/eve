@@ -77,11 +77,17 @@ describe("createWorkflowRuntime command dispatch", () => {
 
   it("dispatches send commands directly through a continuation alias", async () => {
     resumeHookMock.mockResolvedValue({ runId: "driver-run" });
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "research",
+    };
 
     await expect(
       buildRuntime().dispatchContinuation({
         command: {
           auth: null,
+          caller,
           kind: "send",
           payload: { message: "hello" },
           requestId: "req_deliver",
@@ -92,6 +98,7 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
       auth: null,
+      caller,
       kind: "send",
       payload: { message: "hello" },
       requestId: "req_deliver",

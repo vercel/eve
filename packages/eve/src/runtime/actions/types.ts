@@ -1,5 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
+import { agentTurnOutcomeSchema } from "#shared/agent-turn-outcome.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
 import { tokenUsageSchema } from "#shared/token-usage.js";
 
@@ -135,8 +136,16 @@ const runtimeToolResultActionResultSchema = z
  * dispatch window a replay-orphaned duplicate child holds the same token
  * and callId and may settle the call in place of the owned child — its
  * output is computed from the same input, and this is an accepted
- * trade-off, not an oversight. `usage` carries the completed child
- * session's token totals so the caller can attribute the subagent's spend.
+ * trade-off, not an oversight.
+ *
+ * `outcome` is the child engine's explicit lifecycle verdict for the settled
+ * turn. The parent settles the agent handle from `outcome.kind` and folds
+ * `outcome.usageDelta` into its session totals; `output`/`isError` remain
+ * the tool-result projection shown to the model. Every producer states the
+ * envelope explicitly — task-mode boundaries synthesize a terminal one —
+ * so the parent never infers lifecycle from an absent field. `usage`
+ * carries the turn's token spend so the caller can attribute the
+ * subagent's tokens.
  */
 export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResultSchema>;
 
@@ -149,6 +158,7 @@ const runtimeSubagentChildResultSchema = z
     isError: z.boolean().optional(),
     kind: z.literal("subagent-result"),
     origin: z.literal("child"),
+    outcome: agentTurnOutcomeSchema,
     output: jsonValueSchema,
     subagentName: z.string(),
     usage: tokenUsageSchema.optional(),

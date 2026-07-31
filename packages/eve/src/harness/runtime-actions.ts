@@ -5,7 +5,7 @@ import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import type { TokenUsage } from "#shared/token-usage.js";
+import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";
 import { settleAgentTurn } from "#harness/handles/transitions.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
@@ -26,22 +26,15 @@ const PENDING_RUNTIME_ACTION_BATCH_KEY = "eve.runtime.pendingActionBatch";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-const ZERO_TOKEN_USAGE: TokenUsage = {
-  cacheReadTokens: 0,
-  cacheWriteTokens: 0,
-  inputTokens: 0,
-  outputTokens: 0,
-};
-
 /**
- * Usage from a subagent result. Only `child`-origin results carry usage;
- * parent-synthesized dispatch failures never do, and their type omits the
- * field entirely.
+ * Lifecycle outcome from a subagent result. Only `child`-origin results
+ * carry one; parent-synthesized dispatch failures never do, and their type
+ * omits the field entirely.
  */
-function readSubagentResultUsage(
+function readSubagentResultOutcome(
   result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
-): TokenUsage | undefined {
-  return result.origin === "child" ? result.usage : undefined;
+): AgentTurnOutcome | undefined {
+  return result.origin === "child" ? result.outcome : undefined;
 }
 
 /**
@@ -231,10 +224,11 @@ export async function resolvePendingRuntimeActions(input: {
     }
   }
 
-  // Settle each bound child result against its running handle. Task-mode
-  // children are always terminal, so every settled handle is deleted; the
-  // proxy-input entry keyed by the child's continuation token is cleared
-  // first (the handle is the only record of that token) so future
+  // Settle each bound child result against its running handle from the
+  // outcome the child engine reported: `parked` keeps the handle (the child
+  // is idle and resumable), `terminal` deletes it. Before a terminal
+  // deletion the proxy-input entry keyed by the child's continuation token
+  // is cleared (the handle is the only record of that token) so future
   // deliveries don't route responses to a dead child.
   let nextSession: HarnessSession = input.session;
   for (const result of readyResults) {
@@ -247,19 +241,16 @@ export async function resolvePendingRuntimeActions(input: {
     if (handle === undefined) {
       continue;
     }
-    if (handle.address.continuationToken !== undefined) {
+    const outcome = readSubagentResultOutcome(result);
+    if (outcome === undefined) {
+      continue;
+    }
+    if (outcome.kind === "terminal" && handle.address.continuationToken !== undefined) {
       nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
     }
     const settled = settleAgentTurn(nextSession, {
       operationId: handle.operation.id,
-      outcome: {
-        kind: "terminal",
-        result:
-          result.isError === true
-            ? { error: result.output, kind: "failed" }
-            : { kind: "succeeded", output: result.output },
-        usageDelta: result.usage ?? ZERO_TOKEN_USAGE,
-      },
+      outcome,
     });
     if (settled.kind === "settled") {
       nextSession = settled.session;
@@ -273,24 +264,26 @@ export async function resolvePendingRuntimeActions(input: {
     state: Object.keys(state).length > 0 ? state : undefined,
   };
 
-  // Draw completed child spend down against the parent's session totals so
+  // Draw settled child spend down against the parent's session totals so
   // the session token limits and the remaining-quota budget granted to later
-  // delegations account for what the tree has already spent. Only
-  // child-produced results carry usage; parent-side dispatch failures
-  // never do.
+  // delegations account for what the tree has already spent. Every outcome
+  // carries the child turn's `usageDelta`, folded exactly once per settled
+  // result (each batch resolves once), so repeated turns of a persistent
+  // child never double-count earlier turns. Only child-produced results
+  // carry an outcome; parent-side dispatch failures never do.
   for (const result of readyResults) {
     if (result.kind !== "subagent-result") {
       continue;
     }
-    const usage = readSubagentResultUsage(result);
-    if (usage === undefined) {
+    const outcome = readSubagentResultOutcome(result);
+    if (outcome === undefined) {
       continue;
     }
     nextSession = setTurnUsageState(
       nextSession,
       accumulateSessionUsage({
         previous: getTurnUsageState(nextSession.state),
-        usage,
+        usage: outcome.usageDelta,
       }),
     );
   }

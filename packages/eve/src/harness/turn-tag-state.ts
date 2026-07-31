@@ -36,6 +36,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 export type { SessionRuntimeTokenLimits, SessionTokenLimitViolation };
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
+const REPORTED_SESSION_USAGE_STATE_KEY = "eve.harness.reportedSessionUsage";
 const SESSION_RUNTIME_TOKEN_LIMIT_KEY = "eve.harness.sessionRuntimeTokenLimit";
 
 export interface TokenUsageTotals {
@@ -163,6 +164,43 @@ function configuredSessionTokenLimits(
   return {
     inputTokens: session.limits?.maxInputTokensPerSession,
     outputTokens: session.limits?.maxOutputTokensPerSession,
+  };
+}
+
+/**
+ * Takes the session-usage delta accumulated since the previous take and
+ * marks it reported.
+ *
+ * Persisted on `session.state` (not in step-local memory) so the entry
+ * snapshot survives `"use step"` boundaries: the totals at the previous
+ * settled turn are the totals at this turn's entry, because a parked child
+ * runs no model calls in between. Blocked parks (authorization, queued
+ * input) between two settlements never lose usage — the delta always
+ * measures everything since the last report, so the deltas of a
+ * multi-turn persistent child sum exactly to its session totals.
+ */
+export function takeSessionUsageDelta(session: HarnessSession): {
+  readonly delta: TokenUsage;
+  readonly session: HarnessSession;
+} {
+  const totals = getSessionTokenUsage(session);
+  const reported =
+    (session.state?.[REPORTED_SESSION_USAGE_STATE_KEY] as TokenUsageTotals | undefined) ??
+    ZERO_TOKEN_USAGE;
+  return {
+    delta: {
+      cacheReadTokens: totals.cacheReadTokens - reported.cacheReadTokens,
+      cacheWriteTokens: totals.cacheWriteTokens - reported.cacheWriteTokens,
+      inputTokens: totals.inputTokens - reported.inputTokens,
+      outputTokens: totals.outputTokens - reported.outputTokens,
+    },
+    session: {
+      ...session,
+      state: {
+        ...session.state,
+        [REPORTED_SESSION_USAGE_STATE_KEY]: totals,
+      },
+    },
   };
 }
 

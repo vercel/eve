@@ -71,6 +71,13 @@ export function buildSubagentRunInput(input: {
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
+  /**
+   * Whether the parent agent opted into
+   * `experimental.subagentPersistentSessions`. Persistent children run in
+   * conversation mode so their sessions survive the first answer; otherwise
+   * children run as one-shot task sessions.
+   */
+  readonly persistentSessions?: boolean;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -128,10 +135,7 @@ export function buildSubagentRunInput(input: {
       outputSchema: requestedOutputSchema,
     },
     limits: inheritedLimits,
-    // Delegated children always run one turn at a time in task mode; a
-    // parked persistent child is continued through its agent handle, not by
-    // holding a conversation session open.
-    mode: "task",
+    mode: input.persistentSessions === true ? "conversation" : "task",
     parent: {
       callId: action.callId,
       rootSessionId,

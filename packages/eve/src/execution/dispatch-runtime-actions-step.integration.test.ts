@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
-import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import {
@@ -29,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   continueRemoteAgentSession: vi.fn(),
   createDurableSessionState: vi.fn(),
   deserializeContext: vi.fn(),
+  dispatchSession: vi.fn(),
   hydrateDurableSession: vi.fn(),
   readDurableSession: vi.fn(),
   createSession: vi.fn(),
@@ -52,6 +52,7 @@ vi.mock("#execution/session.js", () => ({
 vi.mock("#execution/workflow-runtime.js", () => ({
   createWorkflowRuntime: () => ({
     createSession: mocks.createSession,
+    dispatchSession: mocks.dispatchSession,
   }),
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
 }));
@@ -127,6 +128,7 @@ const REMOTE_REGISTRY_DEFINITION = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID });
+  mocks.dispatchSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID, status: "accepted" });
   mocks.continueRemoteAgentSession.mockResolvedValue(undefined);
   mocks.startRemoteAgentSession.mockResolvedValue({
     continuationToken: "remote-child-token",
@@ -301,6 +303,16 @@ describe("dispatchRuntimeActionsStep child starts", () => {
             callId: "call-unknown",
             kind: "subagent-result",
             origin: "child",
+            outcome: {
+              kind: "terminal",
+              result: { kind: "succeeded", output: "stray" },
+              usageDelta: {
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+              },
+            },
             output: "stray",
             subagentName: "research",
           },
@@ -317,6 +329,16 @@ describe("dispatchRuntimeActionsStep child starts", () => {
             callId: "call-1",
             kind: "subagent-result",
             origin: "child",
+            outcome: {
+              kind: "terminal",
+              result: { kind: "succeeded", output: "done" },
+              usageDelta: {
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+              },
+            },
             output: "done",
             subagentName: "research",
           },
@@ -351,17 +373,20 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     });
 
     expect(result.results).toEqual([]);
-    expect(mocks.deliver).toHaveBeenCalledWith({
-      caller: {
-        callId: "call-1",
-        replyTo: { kind: "hook", token: "turn-inbox" },
-        subagentName: "research",
+    expect(mocks.dispatchSession).toHaveBeenCalledWith({
+      command: {
+        caller: {
+          callId: "call-1",
+          replyTo: { kind: "hook", token: "turn-inbox" },
+          subagentName: "research",
+        },
+        kind: "send",
+        payload: {
+          message: "continue with raw input",
+          outputSchema: undefined,
+        },
       },
-      continuationToken: LOCAL_CHILD_CONTINUATION_TOKEN,
-      payload: {
-        message: "continue with raw input",
-        outputSchema: undefined,
-      },
+      sessionId: CHILD_SESSION_ID,
     });
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [
@@ -431,7 +456,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
         output: expect.objectContaining({ code }),
       }),
     ]);
-    expect(mocks.deliver).not.toHaveBeenCalled();
+    expect(mocks.dispatchSession).not.toHaveBeenCalled();
     expect(mocks.continueRemoteAgentSession).not.toHaveBeenCalled();
     // Addressing mistakes and busy conflicts never touch the store.
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual(
@@ -445,9 +470,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       agentId: LOCAL_PARKED_HANDLE.identity.id,
     });
     installContext(session);
-    mocks.deliver.mockRejectedValue(
-      new RuntimeNoActiveSessionError(LOCAL_CHILD_CONTINUATION_TOKEN),
-    );
+    mocks.dispatchSession.mockResolvedValue({ status: "session_not_active" });
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
