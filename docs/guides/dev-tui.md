@@ -40,11 +40,12 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 | `/vc:install` | Installs the Vercel CLI. Available locally and on a remote session.                                                                                          |
 | `/vc:login`   | Logs in to Vercel locally. On a remote session, resolves the deployment's project, refreshes its OIDC token, and confirms any required Trusted Sources rule. |
 | `/loglevel`   | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                             |
+| `/traces`     | Opens the full-screen local trace viewer. See [Inspect traces](#inspect-traces).                                                                             |
 | `/new`        | Starts a fresh session.                                                                                                                                      |
 | `/exit`       | Quits the TUI.                                                                                                                                               |
 | `/help`       | Lists the commands available for the current local or remote session.                                                                                        |
 
-`/model`, `/add`, and `/deploy` manage the local agent or its linked project. They are available only when `eve dev` runs the server locally, not when connected to a remote server with `--url`.
+`/model`, `/add`, `/deploy`, and `/traces` manage the local agent or its linked project. They are available only when `eve dev` runs the server locally, not when connected to a remote server with `--url`.
 
 ### Configure the model and provider
 
@@ -105,6 +106,24 @@ By default, `eve dev` shows `stderr` and keeps stdout and sandbox lines buffered
 Every captured line, tool failure, workflow error, and eve framework log record also lands in a private per-process diagnostic log under `.eve/logs/`, regardless of the display mode. The file is JSON Lines: each line is one JSON record with `at` and `source` fields (framework log records add `level`, `namespace`, `message`, and `fields`), so it parses with any JSONL tool — `jq -c 'select(.source=="tool")'` — even when a payload spans many stack-trace lines. Long stderr output collapses in the transcript to a one-line summary pointing at the file (the raw text stays available in the `all` mode). Read the logs with `eve logs` — see the [CLI reference](../reference/cli#eve-logs).
 
 Each log has a same-named `.dump` sibling — one JSON document with environment diagnostics (eve, Node.js, and Vercel CLI versions, the Vercel CLI path, and the size of the local session store) plus running session stats: prompts, token usage, tool calls by name, and subagent dispatches. `eve logs --dump` prints the dump and the log together as one parseable report to attach when filing an issue.
+
+## Inspect traces
+
+`/traces` opens a full-screen viewer over the local trace spool (`.eve/traces/v1`) that `eve dev` writes while you chat — see [Zero-config local traces](instrumentation#zero-config-local-traces). It reads the spool files directly and refreshes about once a second, so spans from the current session stream in live. The viewer takes over the terminal's alternate screen; closing it restores the transcript exactly where you left it.
+
+The viewer opens on your current session's trace (or the most recent one). It re-tells the trace as a chat-like flow of cards: the system prompt sits at the top as a collapsed card, then user and assistant messages (assistant cards carry model, duration, token, and gateway cost metadata), and tool calls show their inputs and results inline. Work a subagent performed appears in the same flow, ordered by when it happened — between the parent's dispatch step and its resumed reply — with a dim `subagent` badge (`subagent:<name>` when the dispatch named one) on every card of the delegated turn; the delegated prompt renders as a `task` card rather than a `user` message. Error spans paint their whole card red. The header names the agent, session, span count, and duration, plus a `● live` badge while spans are still landing. `/traces <trace>` opens a specific trace by id prefix.
+
+| Key       | Action                                                                   |
+| --------- | ------------------------------------------------------------------------ |
+| `↑` / `↓` | Move the card selection (scroll the attributes panel when it has focus). |
+| `←` / `→` | Expand / collapse the selected card (only cards with hidden content).    |
+| `Enter`   | Open the attributes panel for the selected card; close it when open.     |
+| `Tab`     | Move focus between the conversation and the attributes panel.            |
+| `[` / `]` | Cycle to the next / previous trace.                                      |
+| `Esc`     | Close the panel (or unfocus it), otherwise close the viewer.             |
+| `q`       | Close the viewer.                                                        |
+
+`←`/`→` or a mouse click expands a card to its full contents (the system prompt, long payloads) and collapses it back; cards that already fit have nothing to expand. The attributes panel opens on the right and stays metadata-only — status, timing, ids, and the span's non-payload OTLP attributes — since the cards already carry the payloads. Model spans capture the system prompt, the prompt messages (rendered as a chat transcript), and the response (text, tool calls, finish reason); tool-call spans capture the call arguments and result, pretty-printed — each capped at 32 KB, with provider transport metadata stripped. When a conversation's messages exceed the cap, the oldest messages are dropped and the transcript notes how many were omitted. Set `EVE_TRACES_CONTENT=off` to stop capturing payload content. With no spans yet, the viewer shows an empty state and keeps watching; if tracing is disabled (`EVE_TRACES=off`) it says so instead.
 
 ## Display flags
 

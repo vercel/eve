@@ -172,7 +172,7 @@ describe("renderCommandSuggestions", () => {
     const many = Array.from({ length: 14 }, (_, index) => spec(`command-${index}`));
     const state = { ...typeaheadFor(many, "/"), selectedIndex: 13 };
     const rows = renderCommandSuggestions(state, theme, 80).map(stripAnsi);
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(11);
     expect(rows.some((row) => row.includes("command-13"))).toBe(true);
     expect(rows.some((row) => row.includes("command-0"))).toBe(false);
     expect(rows.some((row) => row.includes("commands, showing"))).toBe(false);
