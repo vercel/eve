@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import {
+  browseRegistryCatalog,
   runAddCommand,
   runRegistryAddCommand,
   runRegistryListCommand,
@@ -55,6 +56,10 @@ function createLogger(): RegistryCommandLogger & { errors: string[]; logs: strin
 describe("registry commands", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }))),
+    );
     isEveProject.mockResolvedValue(true);
     readFile.mockResolvedValue(
       JSON.stringify({
@@ -66,6 +71,7 @@ describe("registry commands", () => {
 
   afterEach(() => {
     process.exitCode = undefined;
+    vi.unstubAllGlobals();
   });
 
   it("installs official items through the registry SDK", async () => {
@@ -363,7 +369,7 @@ describe("registry commands", () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([
       {
-        name: "channel/photon",
+        name: "channel/photon-imessage",
         type: "registry:item",
         meta: {
           eve: {
@@ -374,7 +380,7 @@ describe("registry commands", () => {
       },
     ]);
 
-    await runAddCommand(logger, "/project", "channel/photon", {});
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {});
 
     expect(logger.errors).toEqual([
       "This registry item requires eve >=0.30.0, but this project is using eve 0.27.8. Upgrade eve and run the command again.",
@@ -404,6 +410,25 @@ describe("registry commands", () => {
       "utf8",
     );
     expect(logger.logs).toContain("Added @other to package.json.");
+  });
+
+  it("uses the Photon iMessage title for the official provider", async () => {
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "https://eve.dev/r/registry.json",
+          name: "channel/photon-imessage",
+          addCommandArgument: "https://eve.dev/r/channel/photon-imessage.json",
+        },
+      ],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    });
+
+    await expect(browseRegistryCatalog("/project")).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({ name: "channel/photon-imessage", title: "Photon iMessage" }),
+      ],
+    });
   });
 
   it("lists the official registry without configured namespaces", async () => {

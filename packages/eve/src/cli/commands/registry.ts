@@ -48,6 +48,7 @@ export interface AddCommandDependencies extends RegistrySetupDependencies {
 export interface RegistryCatalogItem {
   address: string;
   name: string;
+  title?: string;
   type?: string;
   description?: string;
   source: string;
@@ -67,8 +68,11 @@ const defaultAddCommandDependencies: AddCommandDependencies = {
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
 };
 
-const OFFICIAL_REGISTRY = "https://eve.dev/r";
+const OFFICIAL_REGISTRY = process.env.EVE_DEV_OFFICIAL_REGISTRY_URL ?? "https://eve.dev/r";
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
+
+// shadcn's registry search response omits titles. Keep this one exception until it includes them.
+const OFFICIAL_CATALOG_TITLES = new Map([["channel/photon-imessage", "Photon iMessage"]]);
 
 function isRegistryAddress(value: string): boolean {
   return value.startsWith("@") || /^https?:\/\//.test(value);
@@ -228,6 +232,8 @@ export async function browseRegistryCatalog(
         name: item.name,
         source: item.registry === OFFICIAL_CATALOG ? "Vercel" : item.registry,
       };
+      const title = OFFICIAL_CATALOG_TITLES.get(item.name);
+      if (title !== undefined && item.registry === OFFICIAL_CATALOG) catalogItem.title = title;
       if (item.type !== undefined) catalogItem.type = item.type;
       if (item.description !== undefined) catalogItem.description = item.description;
       return catalogItem;

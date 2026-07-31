@@ -49,6 +49,7 @@ export function installLocalInstrumentationRuntime(input: {
     throw new Error("eve could not register OpenTelemetry because another runtime already exists.");
   }
   const agentOtel = createAgentOtelInstrumentation({
+    captureContent: process.env.EVE_TRACES_CONTENT !== "off",
     frameworkVersion: input.frameworkVersion,
     stateStore: new ContextAgentTraceStateStore(),
     tracer: trace.getTracer("eve.agent", input.frameworkVersion),

@@ -151,7 +151,7 @@ describe("runRegistrySetupCommand", () => {
       runRegistrySetupCommand(
         "/project",
         { package: "@acme/slack", bin: "acme-slack", args: [] },
-        "channel/photon",
+        "channel/photon-imessage",
         options(),
       ),
     ).rejects.toThrow("Photon approval was denied.\nat setupPhoton");
@@ -180,7 +180,7 @@ describe("runRegistrySetupCommand", () => {
       runRegistrySetupCommand(
         "/project",
         { package: "@acme/slack", bin: "acme-slack", args: [] },
-        "channel/photon",
+        "channel/photon-imessage",
         options(),
       ),
     ).resolves.toEqual({

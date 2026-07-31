@@ -42,10 +42,51 @@ describe("AgentTraceSpanProcessor", () => {
     expect([...processor.activeTraceIds()]).toEqual(["trace-2"]);
   });
 
+  it("releases every window a session owns", () => {
+    const processor = new AgentTraceSpanProcessor([]);
+    processor.onStart(span("window-0", { "agent.session.id": "session-1" }), {});
+    processor.onStart(span("window-1", { "agent.session.id": "session-1" }), {});
+    expect([...processor.activeTraceIds()].sort()).toEqual(["window-0", "window-1"]);
+
+    expect(processor.releaseSession("session-1")).toBe(true);
+    expect([...processor.activeTraceIds()]).toEqual([]);
+  });
+
   it("reports no release for a session it never owned", () => {
     const processor = new AgentTraceSpanProcessor([]);
 
     expect(processor.releaseSession("session-unknown")).toBe(false);
+  });
+
+  it("keeps a shared trace pinned when a subagent child finishes first", () => {
+    const child = {
+      forceFlush: vi.fn(async () => {}),
+      onEnd: vi.fn(),
+      onStart: vi.fn(),
+      shutdown: vi.fn(async () => {}),
+    };
+    const processor = new AgentTraceSpanProcessor([child]);
+    const owned = {
+      "agent.root.session.id": "session-1",
+      "agent.session.id": "session-1",
+    };
+    const delegated = {
+      "agent.root.session.id": "session-1",
+      "agent.session.id": "child-1",
+    };
+    processor.onStart(span("trace-1", owned), {});
+    processor.onStart(span("trace-1", delegated), {});
+
+    expect(processor.releaseSession("child-1")).toBe(false);
+    expect([...processor.activeTraceIds()]).toEqual(["trace-1"]);
+
+    // The parent is still writing to the trace the child recorded into.
+    const later = span("trace-1", owned);
+    processor.onEnd(later);
+    expect(child.onEnd).toHaveBeenCalledWith(later);
+
+    expect(processor.releaseSession("session-1")).toBe(true);
+    expect([...processor.activeTraceIds()]).toEqual([]);
   });
 
   it("excludes Workflow instrumentation from an agent trace", () => {

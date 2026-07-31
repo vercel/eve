@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   ROOT_CONTEXT,
   SpanStatusCode,
@@ -11,6 +9,13 @@ import {
   trace,
 } from "#compiled/@opentelemetry/api/index.js";
 
+import {
+  contentAttribute,
+  messagesContentAttribute,
+  systemPromptAttribute,
+  textContentAttribute,
+  toolResultsContentAttribute,
+} from "#harness/agent-otel-content.js";
 import type {
   InstrumentationAttemptMetadataEvent,
   InstrumentationAttemptScope,
@@ -21,6 +26,8 @@ import type {
   InstrumentationModelCallStartedEvent,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
+  InstrumentationParentLineage,
+  InstrumentationTraceContext,
   InstrumentationSessionTransitionEvent,
   InstrumentationToolCallStartedEvent,
   InstrumentationToolCallTerminalEvent,
@@ -42,12 +49,16 @@ interface ToolSpanState extends SpanState {
   readonly toolSpan: Span;
 }
 
+/** Sized so an ordinary session stays one trace and only an outsized one rolls. */
+export const SESSION_WINDOW_TURN_LIMIT = 200;
+
 export interface AgentSessionTraceState {
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly context: SpanContext;
-  readonly pendingStarted: boolean;
   readonly rootSessionId: string;
+  readonly turnsInWindow: number;
+  readonly window: number;
 }
 
 export interface AgentTurnTraceState {
@@ -106,6 +117,12 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
 }
 
 export interface AgentOtelInstrumentationInput {
+  /**
+   * Capture model prompts/responses and tool call inputs/outputs as span
+   * attributes. Content stays on the local machine — this provider only
+   * wires the dev-time local spool — but can be turned off per project.
+   */
+  readonly captureContent?: boolean;
   readonly frameworkVersion: string;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
@@ -121,6 +138,7 @@ export interface AgentOtelInstrumentation {
 export function createAgentOtelInstrumentation(
   input: AgentOtelInstrumentationInput,
 ): AgentOtelInstrumentation {
+  const captureContent = input.captureContent ?? true;
   const executionContexts = new WeakMap<
     InstrumentationAttemptScope,
     { readonly models: Map<string, Context>; readonly tools: Map<string, Context> }
@@ -135,13 +153,17 @@ export function createAgentOtelInstrumentation(
   };
 
   const onTurnStarted = async (event: InstrumentationTurnStartedEvent): Promise<void> => {
-    const session = await ensureSessionContext({
-      agentName: undefined,
-      channelKind: undefined,
-      rootSessionId: event.rootSessionId,
-      sessionId: event.sessionId,
-      type: "session.started",
-    });
+    const session = advanceSessionWindow(
+      event.sessionId,
+      await ensureSessionContext({
+        agentName: undefined,
+        channelKind: undefined,
+        parentTraceContext: event.parentTraceContext,
+        rootSessionId: event.rootSessionId,
+        sessionId: event.sessionId,
+        type: "session.started",
+      }),
+    );
     const span = input.tracer.startSpan(
       "agent.turn",
       {
@@ -149,8 +171,10 @@ export function createAgentOtelInstrumentation(
           "agent.framework.name": "eve",
           "agent.framework.version": input.frameworkVersion,
           "agent.name": session.agentName,
+          ...parentLineageAttributes(event.parentLineage),
           "agent.root.session.id": event.rootSessionId,
           "agent.session.id": event.sessionId,
+          "agent.session.window": session.window,
           "agent.turn.id": event.turnId,
           "agent.turn.sequence": event.sequence,
         },
@@ -158,12 +182,9 @@ export function createAgentOtelInstrumentation(
       contextFromSpanContext(session.context),
     );
     span.addEvent("turn.started");
-    if (session.pendingStarted) {
-      span.addEvent("session.started");
-    }
     await input.stateStore.setSession(event.sessionId, {
       ...session,
-      pendingStarted: false,
+      turnsInWindow: session.turnsInWindow + 1,
     });
     await input.stateStore.setTurn(event.sessionId, event.turnId, {
       context: span.spanContext(),
@@ -295,6 +316,12 @@ export function createAgentOtelInstrumentation(
       },
       attempt.operation.context,
     );
+    if (captureContent) {
+      const messages = messagesContentAttribute(event.source.messages);
+      if (messages !== undefined) span.setAttribute("ai.prompt.messages", messages);
+      const system = systemPromptAttribute(event.source.instructions);
+      if (system !== undefined) span.setAttribute("ai.prompt.system", system);
+    }
     const state = { context: trace.setSpan(attempt.operation.context, span), span };
     getExecutionContexts(event.scope).models.set(event.id, state.context);
     return state;
@@ -309,6 +336,45 @@ export function createAgentOtelInstrumentation(
       setUsage(state.span, event.source.usage);
       const attempt = steps.get(event.scope);
       if (attempt !== undefined) setUsage(attempt.step.span, event.source.usage);
+      if (captureContent) {
+        state.span.setAttribute("ai.response.finish_reason", event.source.finishReason);
+        const reasoning = textContentAttribute(
+          event.source.content
+            .filter((part) => part.type === "reasoning")
+            .map((part) => part.text)
+            .filter((part) => part.trim().length > 0)
+            .join("\n"),
+        );
+        if (reasoning !== undefined) state.span.setAttribute("ai.response.reasoning", reasoning);
+        const text = textContentAttribute(
+          event.source.content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join(""),
+        );
+        if (text !== undefined) state.span.setAttribute("ai.response.text", text);
+        const toolCalls = event.source.content
+          .filter((part) => part.type === "tool-call")
+          .map((part) => ({ input: part.input, toolName: part.toolName }));
+        if (toolCalls.length > 0) {
+          const json = contentAttribute(toolCalls, false);
+          if (json !== undefined) state.span.setAttribute("ai.response.tool_calls", json);
+        }
+        // Provider-executed tools (e.g. web_search) run inside the model call,
+        // never reach eve's tool loop, and so never get an ai.toolCall span.
+        // Their results only exist as content parts on the model response.
+        const toolResults = event.source.content
+          .filter((part) => part.type === "tool-result" || part.type === "tool-error")
+          .map((part) =>
+            part.type === "tool-result"
+              ? { input: part.input, output: part.output, toolName: part.toolName }
+              : { error: errorText(part.error), input: part.input, toolName: part.toolName },
+          );
+        if (toolResults.length > 0) {
+          const json = toolResultsContentAttribute(toolResults);
+          if (json !== undefined) state.span.setAttribute("ai.response.tool_results", json);
+        }
+      }
     }
     state.span.end();
   };
@@ -348,6 +414,10 @@ export function createAgentOtelInstrumentation(
       },
       actionContext,
     );
+    if (captureContent) {
+      const args = contentAttribute(event.source.toolCall.input, false);
+      if (args !== undefined) toolSpan.setAttribute("gen_ai.tool.call.arguments", args);
+    }
     const state: ToolSpanState = {
       context: trace.setSpan(actionContext, toolSpan),
       span: actionSpan,
@@ -366,9 +436,40 @@ export function createAgentOtelInstrumentation(
     } else if (event.source.toolOutput.type !== "tool-result") {
       recordError(state.toolSpan, event.source.toolOutput.error);
       recordError(state.span, event.source.toolOutput.error);
+    } else if (captureContent) {
+      const result = contentAttribute(event.source.toolOutput.output, false);
+      if (result !== undefined) state.toolSpan.setAttribute("gen_ai.tool.call.result", result);
     }
     state.toolSpan.end();
     state.span.end();
+  };
+
+  const openSessionWindow = (window: {
+    readonly agentName?: string;
+    readonly index: number;
+    readonly previousTraceId?: string;
+    readonly rootSessionId: string;
+    readonly sessionId: string;
+  }): SpanContext => {
+    const span = input.tracer.startSpan("agent.session", {
+      attributes: {
+        "agent.framework.name": "eve",
+        "agent.framework.version": input.frameworkVersion,
+        "agent.name": window.agentName,
+        "agent.root.session.id": window.rootSessionId,
+        "agent.session.id": window.sessionId,
+        "agent.session.window": window.index,
+        ...(window.previousTraceId === undefined
+          ? {}
+          : { "agent.session.window.previous.trace.id": window.previousTraceId }),
+      },
+      root: true,
+    });
+    span.addEvent(window.index === 0 ? "session.started" : "session.window.opened");
+    // The window outlives this worker, so the root is recorded as a marker and
+    // later spans parent through its persisted context, as `agent.turn` does.
+    span.end();
+    return span.spanContext();
   };
 
   const ensureSessionContext = async (
@@ -379,13 +480,42 @@ export function createAgentOtelInstrumentation(
       state = {
         agentName: event.agentName,
         channelKind: event.channelKind,
-        context: sessionTraceContext(event.sessionId),
-        pendingStarted: true,
+        context:
+          event.parentTraceContext === undefined
+            ? openSessionWindow({
+                agentName: event.agentName,
+                index: 0,
+                rootSessionId: event.rootSessionId,
+                sessionId: event.sessionId,
+              })
+            : adoptedSpanContext(event.parentTraceContext),
         rootSessionId: event.rootSessionId,
+        turnsInWindow: 0,
+        window: 0,
       };
       await input.stateStore.setSession(event.sessionId, state);
     }
     return state;
+  };
+
+  const advanceSessionWindow = (
+    sessionId: string,
+    session: AgentSessionTraceState,
+  ): AgentSessionTraceState => {
+    if (session.turnsInWindow < SESSION_WINDOW_TURN_LIMIT) return session;
+    const index = session.window + 1;
+    return {
+      ...session,
+      context: openSessionWindow({
+        agentName: session.agentName,
+        index,
+        previousTraceId: session.context.traceId,
+        rootSessionId: session.rootSessionId,
+        sessionId,
+      }),
+      turnsInWindow: 0,
+      window: index,
+    };
   };
 
   const onAttemptMetadata = (event: InstrumentationAttemptMetadataEvent): void => {
@@ -447,16 +577,30 @@ function turnKey(sessionId: string, turnId: string): string {
   return `${sessionId}:${turnId}`;
 }
 
-function sessionTraceContext(sessionId: string): SpanContext {
-  return {
-    spanId: digestId(`eve:session-parent:${sessionId}`, 16),
-    traceFlags: 1,
-    traceId: digestId(`eve:session:${sessionId}`, 32),
+function parentLineageAttributes(
+  lineage: InstrumentationParentLineage | undefined,
+): Record<string, string> {
+  if (lineage === undefined) return {};
+  const attributes: Record<string, string> = {
+    "agent.parent.call_id": lineage.callId,
+    "agent.parent.session.id": lineage.sessionId,
+    "agent.parent.turn.id": lineage.turnId,
   };
+  if (lineage.subagentName !== undefined) {
+    attributes["agent.subagent.name"] = lineage.subagentName;
+  }
+  return attributes;
 }
 
-function digestId(value: string, length: number): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, length);
+function adoptedSpanContext(handed: InstrumentationTraceContext): SpanContext {
+  return {
+    // Not remote: a subagent crosses the same worker boundary every restored
+    // session context does, not the wire.
+    isRemote: false,
+    spanId: handed.spanId,
+    traceFlags: handed.traceFlags,
+    traceId: handed.traceId,
+  };
 }
 
 function contextFromSpanContext(spanContext: SpanContext): Context {
@@ -543,11 +687,13 @@ function setUsage(
   }
 }
 
+function errorText(error: unknown): unknown {
+  return error instanceof Error ? error.message : error;
+}
+
 function recordError(span: Span, error: unknown): void {
   if (error instanceof Error) {
     span.recordException(error);
     span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  } else {
-    span.setStatus({ code: SpanStatusCode.ERROR });
-  }
+  } else span.setStatus({ code: SpanStatusCode.ERROR });
 }

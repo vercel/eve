@@ -4,12 +4,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  listLocalTraces,
-  resolveLocalTrace,
-  runTraceListCommand,
-  runTraceShowCommand,
-} from "./trace.js";
+import { listLocalTraces } from "#harness/local-trace-reader.js";
+
+import { resolveLocalTraces, runTraceListCommand, runTraceShowCommand } from "./trace.js";
 
 const TRACE_ONE = "1".repeat(32);
 const TRACE_TWO = "2".repeat(32);
@@ -72,11 +69,72 @@ describe("eve traces", () => {
     );
     const traces = await listLocalTraces(root);
 
-    expect(resolveLocalTrace(traces, TRACE_ONE).traceId).toBe(TRACE_ONE);
-    expect(resolveLocalTrace(traces, "session-two").traceId).toBe(TRACE_TWO);
-    expect(resolveLocalTrace(traces, "session-o").traceId).toBe(TRACE_ONE);
-    expect(() => resolveLocalTrace(traces, "session-")).toThrow(/matches 2 local traces/u);
-    expect(() => resolveLocalTrace(traces, "missing")).toThrow(/No local trace matches/u);
+    expect(ids(resolveLocalTraces(traces, TRACE_ONE))).toEqual([TRACE_ONE]);
+    expect(ids(resolveLocalTraces(traces, "session-two"))).toEqual([TRACE_TWO]);
+    expect(ids(resolveLocalTraces(traces, "session-o"))).toEqual([TRACE_ONE]);
+    expect(() => resolveLocalTraces(traces, "session-")).toThrow(/matches 2 local traces/u);
+    expect(() => resolveLocalTraces(traces, "missing")).toThrow(/No local trace matches/u);
+  });
+
+  it("resolves a windowed session to every window, oldest first", async () => {
+    const root = await createRoot();
+    await writeSegment(
+      root,
+      TRACE_TWO,
+      span("b", "agent.session", 100, 100, undefined, {
+        "agent.session.id": "session-one",
+        "agent.session.window": 1,
+      }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span("a", "agent.session", 10, 10, undefined, {
+        "agent.session.id": "session-one",
+        "agent.session.window": 0,
+      }),
+    );
+    const traces = await listLocalTraces(root);
+
+    expect(traces.map((trace) => trace.window)).toEqual([1, 0]);
+    expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE, TRACE_TWO]);
+
+    const output = collectingLogger();
+    await runTraceShowCommand(output.logger, root, "session-one");
+
+    expect(output.out[0]).toContain(TRACE_ONE);
+    expect(output.out[0]).toContain(TRACE_TWO);
+    expect(output.out[0]!.indexOf(TRACE_ONE)).toBeLessThan(output.out[0]!.indexOf(TRACE_TWO));
+    expect(output.out[0]).toContain("Window");
+  });
+
+  it("resolves a subagent child to the parent window it recorded into", async () => {
+    const root = await createRoot();
+    const window = "a".repeat(16);
+    const child = "b".repeat(16);
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(window, "agent.session", 10, 10, undefined, {
+        "agent.root.session.id": "session-one",
+        "agent.session.id": "session-one",
+        "agent.session.window": 0,
+      }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(child, "agent.turn", 20, 30, window, {
+        "agent.root.session.id": "session-one",
+        "agent.session.id": "child-one",
+      }),
+    );
+    const traces = await listLocalTraces(root);
+
+    // The opener still names the trace, so `eve trace ls` reads unchanged.
+    expect(traces[0]!.sessionId).toBe("session-one");
+    expect(ids(resolveLocalTraces(traces, "child-one"))).toEqual([TRACE_ONE]);
+    expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE]);
   });
 
   it("renders a parented span tree and tolerates missing parents", async () => {
@@ -126,6 +184,47 @@ describe("eve traces", () => {
     expect(output.out[0]).not.toContain("\u001B");
   });
 
+  it("shows subtree extent for a marker span instead of no duration", async () => {
+    const root = await createRoot();
+    const session = "a".repeat(16);
+    const turn = "b".repeat(16);
+    const step = "c".repeat(16);
+    const terminal = "d".repeat(16);
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(session, "agent.session", 10, 10, undefined, {
+        "agent.session.id": "session-one",
+      }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(turn, "agent.turn", 10, 10, session, { "agent.session.id": "session-one" }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(step, "agent.step", 20, 90, turn, { "agent.session.id": "session-one" }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(terminal, "agent.turn.terminal", 95, 95, turn, {
+        "agent.session.id": "session-one",
+      }),
+    );
+    const output = collectingLogger();
+
+    await runTraceShowCommand(output.logger, root, "session-one");
+
+    expect(output.out[0]).toContain("agent.session  85ms");
+    expect(output.out[0]).toContain("agent.turn  85ms");
+    expect(output.out[0]).toContain("agent.step  70ms");
+    // A marker with no descendants has no extent to borrow.
+    expect(output.out[0]).toContain("agent.turn.terminal  0ms");
+  });
+
   it("prints empty and JSON list output", async () => {
     const root = await createRoot();
     const empty = collectingLogger();
@@ -159,6 +258,10 @@ describe("eve traces", () => {
     return root;
   }
 });
+
+function ids(traces: readonly { readonly traceId: string }[]): string[] {
+  return traces.map((trace) => trace.traceId);
+}
 
 function collectingLogger() {
   const out: string[] = [];
