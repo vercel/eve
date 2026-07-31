@@ -621,10 +621,15 @@ function createApplicationNitroBundlerConfiguration(
     ).push(packageName);
   }
   const extensionScopePlugin = createExtensionScopePlugin(
-    (preparedHost.compileResult.manifest.extensionMounts ?? []).map((mount) => ({
-      sourceRoot: mount.sourceRoot,
-      packageNamespace: mount.packageNamespace,
-    })),
+    [
+      preparedHost.compileResult.manifest,
+      ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+    ].flatMap((node) =>
+      node.extensionMounts.map((mount) => ({
+        sourceRoot: mount.sourceRoot,
+        packageNamespace: mount.packageNamespace,
+      })),
+    ),
   );
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
