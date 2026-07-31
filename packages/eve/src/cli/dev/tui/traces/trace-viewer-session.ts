@@ -11,7 +11,11 @@ import type { TraceStore, TraceStoreEntry } from "./trace-store.js";
 import { createTraceStore } from "./trace-store.js";
 import { conversationItemLineCount } from "./trace-conversation.js";
 import { conversationSelectionText, panelSelectionText, renderTraceViewer } from "./trace-view.js";
-import type { TextSelectionRange, TraceViewerState } from "./trace-viewer-state.js";
+import type {
+  TextSelectionRange,
+  TraceViewerKeyEnvironment,
+  TraceViewerState,
+} from "./trace-viewer-state.js";
 import {
   applyLoadedTrace,
   applyTraceList,
@@ -68,13 +72,12 @@ export class TraceViewerSession {
   #disposed = false;
   #refreshing = false;
   #refreshAgain = false;
-  #metrics: {
-    timelineViewportRows: number;
-    panelViewportRows: number;
-    panelTotalRows: number;
-    contentWidth: number;
-    conversationLineCounts?: readonly number[];
-  } = { timelineViewportRows: 0, panelViewportRows: 0, panelTotalRows: 0, contentWidth: 0 };
+  #metrics: TraceViewerKeyEnvironment = {
+    timelineViewportRows: 0,
+    panelViewportRows: 0,
+    panelTotalRows: 0,
+    contentWidth: 0,
+  };
 
   constructor(options: TraceViewerSessionOptions) {
     this.#options = options;

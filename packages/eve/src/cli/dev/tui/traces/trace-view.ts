@@ -75,9 +75,9 @@ export function renderTraceViewer(
   const rows: string[] = [];
   rows.push(...renderHeader(state, options));
   if (state.traces.length === 0) {
-    rows.push(...padBody(renderEmptyState(options, theme, bodyRows), bodyRows));
+    rows.push(...renderEmptyState(options, theme, bodyRows));
   } else if (state.trace === undefined) {
-    rows.push(...padBody(center(bodyRows, theme.colors.dim("Loading trace…")), bodyRows));
+    rows.push(...center(bodyRows, theme.colors.dim("Loading trace…")));
   } else {
     const body = renderConversation(state, options, timelineWidth, bodyRows);
     for (let index = 0; index < bodyRows; index += 1) {
@@ -86,8 +86,6 @@ export function renderTraceViewer(
         rows.push(left);
         continue;
       }
-      // No divider: the base canvas separates the cards and drawer by itself.
-      const separator = " ";
       let panelLine = detailLines[state.panelScroll + index] ?? "";
       if (state.textSelection !== undefined && state.textSelection.region === "panel") {
         panelLine = highlightSelection(
@@ -97,7 +95,7 @@ export function renderTraceViewer(
           panelWidth,
         );
       }
-      rows.push(joinPanels(left, timelineWidth, separator, panelLine, width));
+      rows.push(joinPanels(left, timelineWidth, panelLine, width));
     }
   }
   rows.push(...renderFooter(state, width, theme));
@@ -435,35 +433,26 @@ function renderEmptyState(
     options.tracingDisabled === true
       ? ["Tracing is disabled (EVE_TRACES=off).", "Re-enable it and spans stream in live."]
       : ["No local traces yet.", "Chat with your agent — spans stream in live."];
-  const lines = Array.from({ length: bodyRows }, () => "");
+  return center(bodyRows, theme.colors.bold(first), theme.colors.dim(second));
+}
+
+/** Fills a `bodyRows`-tall body, centering `lines` as a block within it. */
+function center(bodyRows: number, ...lines: string[]): string[] {
+  const rows = Array.from({ length: bodyRows }, () => "");
   const top = Math.max(0, Math.floor(bodyRows / 2) - 1);
-  if (top < bodyRows) lines[top] = theme.colors.bold(first);
-  if (top + 1 < bodyRows) lines[top + 1] = theme.colors.dim(second);
-  return lines;
+  lines.forEach((line, index) => {
+    if (top + index < bodyRows) rows[top + index] = line;
+  });
+  return rows;
 }
 
-function center(bodyRows: number, line: string): string[] {
-  const top = Math.max(0, Math.floor(bodyRows / 2) - 1);
-  const lines = Array.from({ length: bodyRows }, () => "");
-  if (top < lines.length) lines[top] = line;
-  return lines;
-}
-
-function padBody(lines: readonly string[], bodyRows: number): string[] {
-  const padded = [...lines];
-  while (padded.length < bodyRows) padded.push("");
-  return padded.slice(0, bodyRows);
-}
-
-function joinPanels(
-  left: string,
-  leftWidth: number,
-  separator: string,
-  right: string,
-  width: number,
-): string {
+/**
+ * Joins one conversation row to its drawer row. The single separating column
+ * carries no divider: the base canvas already separates the two.
+ */
+function joinPanels(left: string, leftWidth: number, right: string, width: number): string {
   const rightWidth = Math.max(0, width - leftWidth - 1);
-  return `${padTo(left, leftWidth)}${separator}${clipVisible(right, rightWidth)}`;
+  return `${padTo(left, leftWidth)} ${clipVisible(right, rightWidth)}`;
 }
 
 function joinRight(left: string, right: string, width: number): string {

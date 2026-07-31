@@ -106,9 +106,28 @@ export interface TraceViewerKeyResult {
 }
 
 export function createTraceViewerState(): TraceViewerState {
+  return { ...clearedTraceView(), traces: [], traceIndex: 0 };
+}
+
+/**
+ * The view fields a different trace resets: nothing loaded, nothing expanded,
+ * selected, scrolled, or open. A fresh set each call, since each state owns
+ * its own expansion set.
+ */
+function clearedTraceView(): Pick<
+  TraceViewerState,
+  | "conversationItems"
+  | "expandedItems"
+  | "panelFocus"
+  | "panelOpen"
+  | "panelScroll"
+  | "scrollRow"
+  | "selectedRow"
+  | "textSelection"
+  | "trace"
+> {
   return {
-    traces: [],
-    traceIndex: 0,
+    trace: undefined,
     conversationItems: [],
     expandedItems: new Set(),
     selectedRow: 0,
@@ -116,6 +135,7 @@ export function createTraceViewerState(): TraceViewerState {
     panelOpen: false,
     panelFocus: false,
     panelScroll: 0,
+    textSelection: undefined,
   };
 }
 
@@ -160,21 +180,7 @@ export function applyTraceList(
         ? undefined
         : state.notice;
   if (!switched) return { ...state, traces: entries, traceIndex, notice };
-  return {
-    ...state,
-    traces: entries,
-    traceIndex,
-    notice,
-    trace: undefined,
-    conversationItems: [],
-    expandedItems: new Set(),
-    selectedRow: 0,
-    scrollRow: 0,
-    panelOpen: false,
-    panelFocus: false,
-    panelScroll: 0,
-    textSelection: undefined,
-  };
+  return { ...state, ...clearedTraceView(), traces: entries, traceIndex, notice };
 }
 
 /**
@@ -390,19 +396,7 @@ function switchTrace(state: TraceViewerState, delta: number): TraceViewerState {
   if (state.traces.length === 0) return state;
   const traceIndex = Math.min(Math.max(0, state.traceIndex + delta), state.traces.length - 1);
   if (traceIndex === state.traceIndex) return state;
-  return {
-    ...state,
-    traceIndex,
-    trace: undefined,
-    conversationItems: [],
-    expandedItems: new Set(),
-    selectedRow: 0,
-    scrollRow: 0,
-    panelOpen: false,
-    panelFocus: false,
-    panelScroll: 0,
-    textSelection: undefined,
-  };
+  return { ...state, ...clearedTraceView(), traceIndex };
 }
 
 function moveSelection(
@@ -422,6 +416,26 @@ function moveSelection(
 }
 
 /** First line offset that keeps the selected card's last line visible. */
+/**
+ * First body line of each card, plus the conversation's total line count as a
+ * final entry. Every card is followed by one separator row, and a card with no
+ * measured height counts as one line, so a frame measured before a repaint
+ * still maps rows to cards.
+ */
+function cardLineOffsets(state: TraceViewerState, counts: readonly number[]): number[] {
+  const offsets = [0];
+  for (let index = 0; index < state.conversationItems.length; index += 1) {
+    offsets.push(offsets[index]! + (counts[index] ?? 1) + 1);
+  }
+  return offsets;
+}
+
+/** Lines the whole conversation paints, separators included. */
+function conversationLineTotal(state: TraceViewerState, counts: readonly number[]): number {
+  const offsets = cardLineOffsets(state, counts);
+  return offsets[offsets.length - 1]!;
+}
+
 function conversationScrollRow(
   state: TraceViewerState,
   environment: TraceViewerKeyEnvironment,
@@ -429,11 +443,8 @@ function conversationScrollRow(
   const counts = environment.conversationLineCounts;
   if (counts === undefined) return state.scrollRow;
   const viewportRows = environment.timelineViewportRows;
-  // Line range of the selected card (card lines + separator after each).
-  let cardStart = 0;
-  for (let index = 0; index < state.selectedRow; index += 1) {
-    cardStart += (counts[index] ?? 1) + 1;
-  }
+  const offsets = cardLineOffsets(state, counts);
+  const cardStart = offsets[state.selectedRow] ?? 0;
   const cardHeight = counts[state.selectedRow] ?? 1;
   const cardEnd = cardStart + cardHeight;
   // Already visible? Keep the current offset.
@@ -464,8 +475,7 @@ function conversationCellAt(
   if (bodyIndex < 0 || bodyIndex >= environment.timelineViewportRows) return undefined;
   const column = x - 1;
   if (column < 0 || column >= environment.contentWidth) return undefined;
-  let totalLines = 0;
-  for (const count of counts) totalLines += count + 1;
+  const totalLines = conversationLineTotal(state, counts);
   const line = state.scrollRow + bodyIndex;
   if (line >= totalLines) return undefined;
   return { column, line };
@@ -517,11 +527,9 @@ function conversationItemAtBodyRow(
   const counts = environment.conversationLineCounts;
   if (counts === undefined) return undefined;
   const absoluteLine = state.scrollRow + bodyRow;
-  let line = 0;
+  const offsets = cardLineOffsets(state, counts);
   for (let index = 0; index < state.conversationItems.length; index += 1) {
-    const cardHeight = (counts[index] ?? 1) + 1; // card lines + separator
-    if (absoluteLine < line + cardHeight) return index;
-    line += cardHeight;
+    if (absoluteLine < offsets[index + 1]!) return index;
   }
   return undefined;
 }
@@ -535,10 +543,7 @@ function scrollConversation(
   const counts = environment.conversationLineCounts;
   if (counts === undefined || state.conversationItems.length === 0) return state;
   const viewportRows = environment.timelineViewportRows;
-  // Total lines including separators.
-  let totalLines = 0;
-  for (const count of counts) totalLines += count + 1;
-  const maxScroll = Math.max(0, totalLines - viewportRows);
+  const maxScroll = Math.max(0, conversationLineTotal(state, counts) - viewportRows);
   const scrollRow = Math.min(maxScroll, Math.max(0, state.scrollRow + delta));
   if (scrollRow === state.scrollRow) return state;
   // The selection stays on the same card even when it scrolls out of view;
