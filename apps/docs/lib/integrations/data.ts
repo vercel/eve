@@ -287,25 +287,23 @@ export default githubChannel({
     logo: "linear",
     docsHref: "/docs/channels/linear",
     keywords: ["issues", "comments", "agent sessions", "developer preview", "webhook"],
-    install: `Add this channel from eve's registry. This writes \`agent/channels/linear.ts\`:
+    install: `Add this channel from eve's registry to create a Vercel Connect client, route verified Agent Session events, and write \`agent/channels/linear.ts\`:
 
 \`\`\`bash
 eve add channel/linear-agent
 \`\`\``,
-    quickStart: `Create \`agent/channels/linear.ts\`:
+    quickStart: `The guided setup writes \`agent/channels/linear.ts\`:
 
 \`\`\`ts
 // agent/channels/linear.ts
+import { connectLinearCredentials } from "@vercel/connect/eve";
 import { linearChannel } from "eve/channels/linear";
 
 export default linearChannel({
-  credentials: {
-    accessToken: () => process.env.LINEAR_AGENT_ACCESS_TOKEN!,
-    webhookSecret: () => process.env.LINEAR_WEBHOOK_SECRET!,
-  },
+  credentials: connectLinearCredentials("linear/my-agent"),
 });
 \`\`\``,
-    configure: `Create a Linear OAuth app with Agent Session events enabled, make the app assignable and mentionable, and point the webhook at eve's route (\`/eve/v1/linear\`). Provide the app access token and webhook secret through environment variables. See the [Linear channel docs](/docs/channels/linear) for scopes and Agent Activity behavior.`,
+    configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the Linear app, and attach its verified AgentSessionEvent trigger to \`/eve/v1/linear\`. Deploy, install the app in your Linear workspace from Vercel Connect, then delegate an issue or mention the agent. See the [Linear channel docs](/docs/channels/linear) for Agent Activity behavior.`,
   },
   eve: {
     logo: "eve",

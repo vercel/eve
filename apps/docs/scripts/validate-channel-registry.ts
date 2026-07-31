@@ -35,6 +35,7 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
 
 const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
   discord: "discord",
+  "linear-agent": "linear",
   eve: "web",
   photon: "photon",
 };
@@ -114,6 +115,7 @@ for (const [index, item] of items.entries()) {
   if (
     entry.slug === "slack" ||
     entry.slug === "discord" ||
+    entry.slug === "linear-agent" ||
     entry.slug === "eve" ||
     entry.slug === "photon"
   ) {

@@ -1178,18 +1178,19 @@
       "name": "channel/linear-agent",
       "type": "registry:item",
       "title": "Linear Agent",
-      "description": "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
-      "envVars": {
-        "LINEAR_AGENT_ACCESS_TOKEN": "",
-        "LINEAR_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/linear-agent.ts",
-          "type": "registry:file",
-          "target": "agent/channels/linear.ts"
+      "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "linear"]
+          },
+          "requires": ">=0.31.0"
         }
-      ]
+      },
+      "dependencies": ["@vercel/connect"]
     },
     {
       "name": "channel/web",

@@ -129,7 +129,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "linear-agent",
     name: "Linear Agent",
     kind: "channel",
-    tagline: "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
+    tagline:
+      "Delegate Linear issues and comments through Agent Sessions, with guided Connect setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
