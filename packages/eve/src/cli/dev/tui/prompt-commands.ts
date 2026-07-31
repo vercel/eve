@@ -104,7 +104,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   {
     name: "add",
     aliases: [],
-    description: "Browse and add registry integrations",
+    description: "Add an integration from the registry",
     takesArgument: false,
     build: () => ({ type: "extension", name: "add", argument: "" }),
     targets: ["local"],

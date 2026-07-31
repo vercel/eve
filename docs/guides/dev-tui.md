@@ -35,7 +35,7 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 | Command       | Does                                                                                                                                                         |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/model`      | Opens a configure menu that loops until Done (or Esc). See [Configure the model and provider](#configure-the-model-and-provider).                            |
-| `/add`        | Searches registry integrations or adds an item address entered directly.                                                                                     |
+| `/add`        | Adds an integration from the registry or an item address entered directly.                                                                                   |
 | `/deploy`     | Ships the agent to Vercel production, linking the directory first when it is unlinked.                                                                       |
 | `/vc:install` | Installs the Vercel CLI. Available locally and on a remote session.                                                                                          |
 | `/vc:login`   | Logs in to Vercel locally. On a remote session, resolves the deployment's project, refreshes its OIDC token, and confirms any required Trusted Sources rule. |
@@ -55,11 +55,11 @@ The provider row opens one menu: AI Gateway via a project, AI Gateway via `AI_GA
 
 The provider row demands attention (a bold yellow "Configure model access" with a yellow "Not configured" hint that dims when unselected and uses the terminal foreground when selected) until a link or gateway credential is detected, then names the connection afterward (for example "AI Gateway (Linked to my-project in my-team)"). Setup menus mark the cursor row with a padded, filled-arrow inverse label that inherits the row's accent: blue normally and yellow for warning rows. In stacked menus, the selected row's description appears directly beneath that option. The completed command's outcome stays in the transcript after the panel closes. When a turn fails because AI Gateway authentication is missing or stale, the error points you at `/model` directly.
 
-### Browse registry integrations
+### Add registry integrations
 
-`/add` first organizes integrations by what they add: a way to chat, tools and data, capabilities, or observability. Pick a category to open its searchable catalog from the official eve registry and the registry namespaces configured in `package.json`, or browse everything. Each integration shows its source beside its name, such as `Vercel` or a configured registry namespace. Select a result to review its source, packages, environment variables, and target files before adding it, or type an official item path, configured namespace address, or HTTP(S) URL directly into the search bar. After an add attempt finishes, the panel closes instead of returning to the catalog.
+`/add` groups integrations by their role: **Channels** for where people talk to your agent, **MCP connections** for external services and data, **Extensions** for reusable capabilities, and **Observability** for tracing and evaluation. Pick a category to open its searchable catalog from the official eve registry and the registry namespaces configured in `package.json`, or browse every integration. Each result shows its source beside its name, such as `Vercel` or a configured registry namespace. Select a result to review its source, packages, environment variables, and target files before adding it, or enter an official item path, configured namespace address, or HTTP(S) URL directly in the search bar. After an add attempt finishes, the panel closes instead of returning to the catalog.
 
-Connection registry items install their definition and then configure Vercel Connect through the same `/add` flow. If the directory is unlinked, setup first offers to create or link a project. Run `eve add connection/<name>` for the equivalent CLI flow.
+MCP connection registry items install their definition and then configure Vercel Connect through the same `/add` flow. If the directory is unlinked, setup first offers to create or link a project. Run `eve add connection/<name>` for the equivalent CLI flow.
 
 ## Keyboard shortcuts
 
