@@ -491,6 +491,19 @@ describe("registry commands", () => {
     expect(logger.logs).toEqual(["No registry items found."]);
   });
 
+  it("emits list results as JSON", async () => {
+    const logger = createLogger();
+    const result = {
+      items: [{ registry: "https://eve.dev/r/registry.json", name: "extension/browser" }],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    };
+    searchRegistries.mockResolvedValue(result);
+
+    await runRegistryListCommand(logger, "/project", undefined, { json: true });
+
+    expect(logger.logs).toEqual([JSON.stringify(result, null, 2)]);
+  });
+
   it("preserves explicit registry URLs in list output", async () => {
     const logger = createLogger();
     searchRegistries.mockResolvedValue({
@@ -550,6 +563,35 @@ describe("registry commands", () => {
       "extension/agent-browser",
       "@acme/browser",
     ]);
+  });
+
+  it("emits search results as JSON", async () => {
+    const logger = createLogger();
+    const result = {
+      items: [{ registry: "@acme", name: "browser", addCommandArgument: "@acme/browser" }],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    };
+    searchRegistries.mockResolvedValue(result);
+
+    await runRegistrySearchCommand(logger, "/project", "browser", undefined, { json: true });
+
+    expect(logger.logs).toEqual([JSON.stringify(result, null, 2)]);
+  });
+
+  it("emits JSON when every registry search fails", async () => {
+    const logger = createLogger();
+    const result = {
+      items: [],
+      errors: [{ registry: "https://eve.dev/r/registry.json", message: "eve unavailable" }],
+      pagination: { total: 0, offset: 0, limit: 0, hasMore: false },
+    };
+    searchRegistries.mockResolvedValue(result);
+
+    await runRegistryListCommand(logger, "/project", undefined, { json: true });
+
+    expect(logger.logs).toEqual([JSON.stringify(result, null, 2)]);
+    expect(logger.errors).toEqual(["https://eve.dev/r/registry.json: eve unavailable"]);
+    expect(process.exitCode).toBe(1);
   });
 
   it("reports total registry failure without describing it as an empty result", async () => {
