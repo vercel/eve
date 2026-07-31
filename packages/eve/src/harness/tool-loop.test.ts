@@ -43,6 +43,7 @@ import {
   setPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -688,6 +689,95 @@ describe("createToolLoopHarness", () => {
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
+  });
+
+  it("derives the current agents listing from the handle store for each model call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
+    );
+    const session = createTestSession({
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "private-token",
+                kind: "agent/local",
+                sessionId: "child-session-123456789012",
+              },
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              lastStatus: "waiting",
+              phase: "parked",
+            },
+          ],
+        },
+      },
+    });
+
+    await runStep(session, { message: "Hi" });
+
+    const instructions = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions;
+    expect(instructions).toMatchObject({
+      content: expect.stringContaining(
+        '<agent id="ag_research:123456789012" name="research">waiting</agent>',
+      ),
+      role: "system",
+    });
+    expect(JSON.stringify(instructions)).not.toContain("private-token");
+  });
+
+  it("skips the agents snippet when no handle is parked", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
+    );
+    const session = createTestSession({
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              operation: {
+                callId: "call-1",
+                id: "op-1",
+                kind: "start",
+                parentTurnId: "turn-1",
+              },
+              phase: "starting",
+              target: { continuationToken: "private-token", kind: "agent/local" },
+            },
+          ],
+        },
+      },
+    });
+
+    await runStep(session, { message: "Hi" });
+
+    const instructions = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions;
+    expect(JSON.stringify(instructions ?? "")).not.toContain("<agents>");
   });
 
   it("uses dynamic model selection for the model call", async () => {

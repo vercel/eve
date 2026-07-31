@@ -278,6 +278,12 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
+  /**
+   * Whether the agent opted into `experimental.subagentPersistentSessions`.
+   * Gates the model-visible `<agents>` listing of parked delegated-agent
+   * handles injected into each model call.
+   */
+  readonly persistentSubagentSessions?: boolean;
   readonly dispatchDynamicModelEvent?: (input: {
     readonly ctx: AlsContext;
     readonly event: UnstampedMessageStreamEvent;

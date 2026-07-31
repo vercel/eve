@@ -8,12 +8,8 @@ import {
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type {
-  RuntimeRemoteAgentCallActionRequest,
-  RuntimeSubagentCallActionRequest,
-} from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import type { ContextContainer } from "#context/container.js";
@@ -26,17 +22,21 @@ const CANCEL_RETRY_INITIAL_DELAY_MS = 250;
 const CANCEL_RETRY_MAX_DELAY_MS = 1_500;
 const log = createLogger("execution.cancel-descendant-turns");
 
-/** Cancels every successfully adopted child in the current pending batch. */
+type RunningAgentHandle = Extract<AgentHandle, { phase: "running" }>;
+
+/** Cancels every running delegated child recorded in the agent handle store. */
 export async function cancelDescendantTurnsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<void> {
   "use step";
 
-  let batch;
+  let running: readonly RunningAgentHandle[];
   try {
     const session = await readDurableSession(input.sessionState);
-    batch = getPendingRuntimeActionBatch(session.state);
+    running = (getAgentHandleStore(session.state)?.handles ?? []).filter(
+      (handle): handle is RunningAgentHandle => handle.phase === "running",
+    );
   } catch (error) {
     logError(log, "failed to read pending descendants during cancellation", error, {
       sessionId: input.sessionState.sessionId,
@@ -44,16 +44,8 @@ export async function cancelDescendantTurnsStep(input: {
     return;
   }
 
-  if (batch === undefined) {
-    log.warn("no pending batch found while cancelling descendants; nothing to cancel", {
-      sessionId: input.sessionState.sessionId,
-    });
-    return;
-  }
-  const childSessionIds = batch.childSessionIds;
-  if (childSessionIds === undefined) {
-    log.warn("pending batch carries no child session ids; descendants cannot be cancelled", {
-      actionCount: batch.actions.length,
+  if (running.length === 0) {
+    log.warn("no running agent handles found while cancelling descendants; nothing to cancel", {
       sessionId: input.sessionState.sessionId,
     });
     return;
@@ -71,91 +63,86 @@ export async function cancelDescendantTurnsStep(input: {
       registry: ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
     })));
 
-  const cancellations = batch.actions.flatMap((action): Promise<void>[] => {
-    const childSessionId = childSessionIds[action.callId];
-    if (childSessionId === undefined) return [];
-
-    if (action.kind === "subagent-call") {
-      return [cancelLocalDescendant({ action, childSessionId })];
-    }
-    if (action.kind === "remote-agent-call") {
-      return [
-        cancelRemoteDescendant({
-          action,
-          childSessionId,
-          remoteContext: getRemoteContext(),
-        }),
-      ];
-    }
-    return [];
-  });
-
-  await Promise.all(cancellations);
+  await Promise.all(
+    running.map((handle) =>
+      handle.address.kind === "agent/remote"
+        ? cancelRemoteDescendant({ handle, remoteContext: getRemoteContext() })
+        : cancelLocalDescendant({ handle }),
+    ),
+  );
 }
 
 async function cancelLocalDescendant(input: {
-  readonly action: RuntimeSubagentCallActionRequest;
-  readonly childSessionId: string;
+  readonly handle: RunningAgentHandle;
 }): Promise<void> {
+  const { handle } = input;
   try {
     const final = await requestCancellationWithRetry({
-      request: () => requestWorkflowTurnCancellation({ sessionId: input.childSessionId }),
+      request: () => requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId }),
       shouldRetryError: () => false,
     });
     if (final.status !== "accepted") {
       log.warn("descendant cancel was never accepted; the child may run to completion", {
-        callId: input.action.callId,
-        childSessionId: input.childSessionId,
+        callId: handle.operation.callId,
+        childSessionId: handle.address.sessionId,
         finalStatus: final.status,
         reason: final.reason,
-        subagentName: input.action.subagentName,
+        subagentName: handle.identity.name,
       });
     }
   } catch (error) {
     logError(log, "failed to cancel local descendant turn", error, {
-      callId: input.action.callId,
-      childSessionId: input.childSessionId,
-      subagentName: input.action.subagentName,
+      callId: handle.operation.callId,
+      childSessionId: handle.address.sessionId,
+      subagentName: handle.identity.name,
     });
   }
 }
 
 async function cancelRemoteDescendant(input: {
-  readonly action: RuntimeRemoteAgentCallActionRequest;
-  readonly childSessionId: string;
   readonly remoteContext: Promise<{
     readonly ctx: ContextContainer;
     readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
   }>;
+  readonly handle: RunningAgentHandle;
 }): Promise<void> {
+  const { handle } = input;
+  if (handle.address.kind !== "agent/remote") {
+    return;
+  }
+  const childUrl = handle.address.url;
   try {
     const { ctx, registry } = await input.remoteContext;
-    const selection = getDynamicSubagentSelection(ctx, input.action.nodeId);
-    const remote = await resolveRemoteAgentForAction({
+    const selection = getDynamicSubagentSelection(ctx, handle.identity.nodeId);
+    const resolved = await resolveRemoteAgentForAction({
       dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
-      nodeId: input.action.nodeId,
-      remoteAgentName: input.action.remoteAgentName,
+      nodeId: handle.identity.nodeId,
+      remoteAgentName: handle.identity.name,
       registry,
     });
+    // Cancel where the child actually runs: the registry URL may point at a
+    // newer deployment than the one that adopted this child, so the
+    // dispatch-recorded URL wins — mirroring continuation delivery.
+    const remote = { ...resolved, url: childUrl };
 
     const final = await requestCancellationWithRetry({
-      request: () => cancelRemoteAgentTurn({ remote, sessionId: input.childSessionId }),
+      request: () => cancelRemoteAgentTurn({ remote, sessionId: handle.address.sessionId }),
       shouldRetryError: isRetryableRemoteAgentCancelError,
     });
     if (final.status !== "accepted") {
       log.warn("remote descendant cancel was never accepted; the child may run to completion", {
-        callId: input.action.callId,
-        childSessionId: input.childSessionId,
+        callId: handle.operation.callId,
+        childSessionId: handle.address.sessionId,
         finalStatus: final.status,
         reason: final.reason,
-        remoteAgentName: input.action.remoteAgentName,
+        remoteAgentName: handle.identity.name,
       });
     }
   } catch (error) {
     logError(log, "failed to cancel remote descendant turn", error, {
-      callId: input.action.callId,
-      childSessionId: input.childSessionId,
-      remoteAgentName: input.action.remoteAgentName,
+      callId: handle.operation.callId,
+      childSessionId: handle.address.sessionId,
+      remoteAgentName: handle.identity.name,
     });
   }
 }

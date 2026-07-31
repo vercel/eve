@@ -282,7 +282,11 @@ function createSubagentDelegationResult(
     return null;
   }
 
-  const toolInput = { message: directive[1].trim() };
+  const message = directive[1].trim();
+  const toolInput = {
+    description: createMockDelegationDescription(message),
+    message,
+  };
 
   return createToolCallGenerateResult({
     input: toolInput,
@@ -292,6 +296,17 @@ function createSubagentDelegationResult(
     toolCallId: createToolCallId(SUBAGENT_TOOL_NAME),
     toolName: SUBAGENT_TOOL_NAME,
   });
+}
+
+function createMockDelegationDescription(message: string): string {
+  const words = message.match(/[\p{L}\p{N}_-]+/gu)?.slice(0, 5) ?? [];
+  const fallbackWords = ["delegated", "task", "request"];
+
+  while (words.length < 3) {
+    words.push(fallbackWords[words.length] ?? "task");
+  }
+
+  return words.join(" ");
 }
 
 function createAuthoredToolCallResult(

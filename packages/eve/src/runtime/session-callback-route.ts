@@ -1,8 +1,9 @@
 import { resumeHook } from "#internal/workflow/runtime.js";
+import { REMOTE_AGENT_FAILED } from "#harness/agent-handle-errors.js";
 import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
 
@@ -10,11 +11,11 @@ export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 
 const HANDLED_METHODS: readonly ChannelMethod[] = ["POST"];
 
-type SessionTerminalCallbackPayload =
+type SessionCallbackPayload =
   | {
       readonly callId: string;
-      readonly kind: "session.completed";
-      readonly output: string;
+      readonly kind: "session.completed" | "turn.completed";
+      readonly output: JsonValue;
       readonly sessionId: string;
       readonly subagentName: string;
       readonly usage?: TokenUsage;
@@ -23,6 +24,13 @@ type SessionTerminalCallbackPayload =
       readonly callId: string;
       readonly error: JsonValue;
       readonly kind: "session.failed";
+      readonly sessionId: string;
+      readonly subagentName: string;
+    }
+  | {
+      readonly callId: string;
+      readonly error: JsonValue;
+      readonly kind: "turn.failed";
       readonly sessionId: string;
       readonly subagentName: string;
     };
@@ -85,26 +93,28 @@ export async function handleSessionCallbackRequest(
   return Response.json({ ok: true }, { status: 202 });
 }
 
-function projectSessionCallbackResult(
-  value: unknown,
-): RuntimeSubagentResultActionResult | Response {
+function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResult | Response {
   if (value === null || typeof value !== "object") {
     return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
   }
 
-  const payload = value as Partial<SessionTerminalCallbackPayload>;
+  const payload = value as Partial<SessionCallbackPayload>;
   if (typeof payload.callId !== "string" || payload.callId.length === 0) {
     return Response.json({ error: "Missing callback callId.", ok: false }, { status: 400 });
   }
   if (typeof payload.subagentName !== "string" || payload.subagentName.length === 0) {
     return Response.json({ error: "Missing callback subagentName.", ok: false }, { status: 400 });
   }
+  if (typeof payload.sessionId !== "string" || payload.sessionId.length === 0) {
+    return Response.json({ error: "Missing callback sessionId.", ok: false }, { status: 400 });
+  }
 
-  if (payload.kind === "session.completed") {
-    const base: RuntimeSubagentResultActionResult = {
+  if (payload.kind === "session.completed" || payload.kind === "turn.completed") {
+    const base: RuntimeSubagentChildResult = {
       callId: payload.callId,
       kind: "subagent-result",
       output: payload.output ?? "",
+      sessionId: payload.sessionId,
       subagentName: payload.subagentName,
     };
     const usage = parseCallbackUsage((payload as { usage?: unknown }).usage);
@@ -119,10 +129,25 @@ function projectSessionCallbackResult(
       output:
         payload.error === undefined
           ? {
-              code: "REMOTE_AGENT_FAILED",
+              code: REMOTE_AGENT_FAILED,
               message: "Remote agent failed.",
             }
           : payload.error,
+      sessionId: payload.sessionId,
+      subagentName: payload.subagentName,
+    };
+  }
+
+  if (payload.kind === "turn.failed") {
+    if (payload.error === undefined) {
+      return Response.json({ error: "Missing callback error.", ok: false }, { status: 400 });
+    }
+    return {
+      callId: payload.callId,
+      isError: true,
+      kind: "subagent-result",
+      output: payload.error,
+      sessionId: payload.sessionId,
       subagentName: payload.subagentName,
     };
   }

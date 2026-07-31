@@ -20,6 +20,7 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -740,6 +741,78 @@ describe("eveChannel — onMessage", () => {
     const options = handler.send.mock.calls[0]?.[1] as SendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
   });
+
+  it("maps validated continuation callback metadata onto the turn caller", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        callback: {
+          callId: "call-2",
+          subagentName: "research",
+          token: "tok123",
+          url: "https://caller.example.com/eve/v1/callback/tok123",
+        },
+        continuationToken: "http:existing",
+        message: "follow up",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler.send).toHaveBeenCalledWith(
+      expect.not.objectContaining({ caller: expect.anything() }),
+      expect.objectContaining({
+        caller: {
+          callId: "call-2",
+          replyTo: {
+            kind: "callback",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          subagentName: "research",
+        },
+        intent: "resume",
+      }),
+    );
+  });
+
+  it("rejects invalid callback metadata on continuation requests", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        callback: {
+          callId: "call-2",
+          subagentName: "research",
+          token: "tok123",
+          url: "https://caller.example.com/eve/v1/callback/other",
+        },
+        continuationToken: "http:existing",
+        message: "follow up",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("returns SESSION_NOT_RESUMABLE instead of starting a replacement session", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+    handler.send.mockRejectedValueOnce(new RuntimeNoActiveSessionError("eve:http:existing"));
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        continuationToken: "http:existing",
+        message: "follow up",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      code: "SESSION_NOT_RESUMABLE",
+      error: "Session is not active and cannot be resumed.",
+      ok: false,
+    });
+  });
 });
 
 describe("eveChannel — create session (text)", () => {
@@ -763,7 +836,21 @@ describe("eveChannel — create session (text)", () => {
     expect(handler.send.mock.calls[0]?.[1]).toMatchObject({ mode: "task" });
   });
 
-  it("accepts remote-agent callback metadata for task sessions", async () => {
+  it("accepts an explicit empty capability set for conversation sessions", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ capabilities: {}, message: "hi", mode: "conversation" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send.mock.calls[0]?.[1]).toMatchObject({
+      capabilities: {},
+      mode: "conversation",
+    });
+  });
+
+  it("accepts remote-agent callback metadata for conversation sessions", async () => {
     const handler = createEveCreateHandler({ auth: none() });
 
     const response = await handler.fetch(
@@ -775,7 +862,7 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
         message: "hi",
-        mode: "task",
+        mode: "conversation",
       }),
     );
 
@@ -788,7 +875,7 @@ describe("eveChannel — create session (text)", () => {
         token: "tok123",
         url: "https://caller.example.com/eve/v1/callback/tok123",
       },
-      mode: "task",
+      mode: "conversation",
     });
   });
 

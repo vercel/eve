@@ -99,6 +99,8 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     instrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
+    persistentSubagentSessions:
+      input.node.agent.config?.experimental?.subagentPersistentSessions === true,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),

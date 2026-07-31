@@ -4,6 +4,9 @@ import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#prot
 import { getRuntimeActionRequestKey, getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
+import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
+import { settleAgentTurn } from "#harness/handles/transitions.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
 import {
   accumulateSessionUsage,
@@ -22,6 +25,13 @@ const PENDING_RUNTIME_ACTION_BATCH_KEY = "eve.runtime.pendingActionBatch";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
+const ZERO_TOKEN_USAGE: TokenUsage = {
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+};
+
 /**
  * Serializable event coordinates for one pending runtime-action batch.
  *
@@ -37,14 +47,12 @@ interface PendingRuntimeActionEventMetadata {
 /**
  * Serializable pending runtime-action batch stored on `session.state`.
  *
- * `childContinuationTokens` lets the harness clear local proxy-input entries
- * on result resolution. `childSessionIds` lets the turn workflow cancel every
- * successfully adopted local or remote child before dropping the batch.
+ * Child ownership does not live here: the agent handle store records every
+ * dispatched child (from before its start side effect) and is the sole
+ * authority for continuing, settling, and cancelling children.
  */
 export interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
-  readonly childContinuationTokens?: Readonly<Record<string, string>>;
-  readonly childSessionIds?: Readonly<Record<string, string>>;
   readonly event: PendingRuntimeActionEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
 }
@@ -117,49 +125,6 @@ export function setPendingRuntimeActionBatch(input: {
   return { ...input.session, state };
 }
 
-type PendingSubagentChildIdentity =
-  | {
-      readonly continuationToken: string;
-      readonly kind: "local";
-      readonly sessionId: string;
-    }
-  | {
-      readonly kind: "remote";
-      readonly sessionId: string;
-    };
-
-/** Records one successfully dispatched child's durable identities. */
-export function recordPendingSubagentChild(input: {
-  readonly callId: string;
-  readonly child: PendingSubagentChildIdentity;
-  readonly session: HarnessSession;
-}): HarnessSession {
-  const batch = getPendingRuntimeActionBatch(input.session.state);
-
-  if (batch === undefined) {
-    return input.session;
-  }
-
-  const state = { ...input.session.state };
-  state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
-    ...batch,
-    ...(input.child.kind === "local"
-      ? {
-          childContinuationTokens: {
-            ...batch.childContinuationTokens,
-            [input.callId]: input.child.continuationToken,
-          },
-        }
-      : {}),
-    childSessionIds: {
-      ...batch.childSessionIds,
-      [input.callId]: input.child.sessionId,
-    },
-  } satisfies PendingRuntimeActionBatch;
-
-  return { ...input.session, state };
-}
-
 /**
  * Returns the stable ordered runtime-action results for the current pending
  * batch when every action has a matching result. Unknown and duplicate results
@@ -175,17 +140,94 @@ function resolveReadyRuntimeActionResults(input: {
     return undefined;
   }
 
-  return resolveRuntimeActionResultsForBatch({ batch, results: input.results });
+  return resolveRuntimeActionResultsForBatch({
+    batch,
+    results: input.results,
+    state: input.session.state,
+  });
 }
 
 function resolveRuntimeActionResultsForBatch(input: {
   readonly batch: PendingRuntimeActionBatch;
   readonly results: readonly RuntimeActionResult[];
+  readonly state: SessionStateMap | undefined;
 }): RuntimeActionResult[] | undefined {
   return resolveRuntimeActionResultsForKeys({
     pendingKeys: input.batch.actions.map((action) => getRuntimeActionRequestKey(action)),
-    results: input.results,
+    results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
   });
+}
+
+type RunningAgentHandle = Extract<AgentHandle, { phase: "running" }>;
+
+/**
+ * Finds the running agent handle a child-produced result must settle: the
+ * handle whose recorded operation carries the result's callId and whose
+ * confirmed address names the claiming child session.
+ */
+function findRunningAgentHandle(
+  state: SessionStateMap | undefined,
+  input: { readonly callId: string; readonly sessionId: string },
+): RunningAgentHandle | undefined {
+  const handles = getAgentHandleStore(state)?.handles ?? [];
+  return handles.find(
+    (handle): handle is RunningAgentHandle =>
+      handle.phase === "running" &&
+      handle.operation.callId === input.callId &&
+      handle.address.sessionId === input.sessionId,
+  );
+}
+
+/**
+ * Subagent results arrive through the parent's shared callback hook, which
+ * every remote callee in a batch can reach. Dispatch-time ownership is
+ * authoritative: a result claiming a child `sessionId` may settle a call
+ * only when a running handle binds that callId to that session, so one
+ * callee cannot forge a sibling's result.
+ *
+ * Results without a `sessionId` pass: the dispatch step synthesizes error
+ * results for calls whose child never started, and those reach the harness
+ * through the trusted step-result path where they bind by callId. Untrusted
+ * channels must use {@link isInboxResultFromRunningHandle} instead.
+ */
+export function isResultBoundToRunningHandle(
+  state: SessionStateMap | undefined,
+  result: RuntimeActionResult,
+): boolean {
+  if (result.kind !== "subagent-result") {
+    return true;
+  }
+  if (result.sessionId === undefined) {
+    return true;
+  }
+  return (
+    findRunningAgentHandle(state, { callId: result.callId, sessionId: result.sessionId }) !==
+    undefined
+  );
+}
+
+/**
+ * Strict variant of {@link isResultBoundToRunningHandle} for results arriving
+ * over the shared turn inbox (child notifications and remote callbacks).
+ * Every legitimate inbox subagent result comes from a dispatched child that
+ * claims its own session, so a result without a matching running handle —
+ * including one for a callId whose dispatch already failed — is forged and
+ * must not overwrite the dispatch-produced error result.
+ */
+export function isInboxResultFromRunningHandle(
+  state: SessionStateMap | undefined,
+  result: RuntimeActionResult,
+): boolean {
+  if (result.kind !== "subagent-result") {
+    return true;
+  }
+  if (result.sessionId === undefined) {
+    return false;
+  }
+  return (
+    findRunningAgentHandle(state, { callId: result.callId, sessionId: result.sessionId }) !==
+    undefined
+  );
 }
 
 /** Returns results in pending-key order once every requested action has completed. */
@@ -282,35 +324,59 @@ export async function resolvePendingRuntimeActions(input: {
     }
   }
 
-  const state = { ...input.session.state };
-  delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
-
-  let nextSession: HarnessSession = {
-    ...input.session,
-    state: Object.keys(state).length > 0 ? state : undefined,
-  };
-
-  // Clear proxy-input entries for completed children so future
+  // Settle each bound child result against its running handle. Task-mode
+  // children are always terminal, so every settled handle is deleted; the
+  // proxy-input entry keyed by the child's continuation token is cleared
+  // first (the handle is the only record of that token) so future
   // deliveries don't route responses to a dead child.
-  const childTokens = batch.childContinuationTokens;
-  if (childTokens !== undefined) {
-    for (const result of readyResults) {
-      if (result.kind !== "subagent-result") {
-        continue;
-      }
-
-      const childToken = childTokens[result.callId];
-      if (childToken !== undefined) {
-        nextSession = clearProxyInputRequestsForChild(nextSession, childToken);
-      }
+  let nextSession: HarnessSession = input.session;
+  for (const result of readyResults) {
+    if (result.kind !== "subagent-result" || result.sessionId === undefined) {
+      continue;
+    }
+    const handle = findRunningAgentHandle(nextSession.state, {
+      callId: result.callId,
+      sessionId: result.sessionId,
+    });
+    if (handle === undefined) {
+      continue;
+    }
+    nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
+    const settled = settleAgentTurn(nextSession, {
+      operationId: handle.operation.id,
+      outcome: {
+        kind: "terminal",
+        result:
+          result.isError === true
+            ? { error: result.output, kind: "failed" }
+            : { kind: "succeeded", output: result.output },
+        usageDelta: result.usage ?? ZERO_TOKEN_USAGE,
+      },
+      sessionId: result.sessionId,
+    });
+    if (settled.kind === "settled") {
+      nextSession = settled.session;
     }
   }
 
+  const state = { ...nextSession.state };
+  delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
+  nextSession = {
+    ...nextSession,
+    state: Object.keys(state).length > 0 ? state : undefined,
+  };
+
   // Draw completed child spend down against the parent's session totals so
   // the session token limits and the remaining-quota budget granted to later
-  // delegations account for what the tree has already spent.
+  // delegations account for what the tree has already spent. Only
+  // child-produced results (`sessionId` present) carry usage; parent-side
+  // dispatch failures never do.
   for (const result of readyResults) {
-    if (result.kind !== "subagent-result" || result.usage === undefined) {
+    if (
+      result.kind !== "subagent-result" ||
+      result.sessionId === undefined ||
+      result.usage === undefined
+    ) {
       continue;
     }
     nextSession = setTurnUsageState(
@@ -358,7 +424,6 @@ export async function resolvePendingRuntimeActions(input: {
       role: "tool",
     });
   }
-
   return {
     messages,
     outcome: "resolved",

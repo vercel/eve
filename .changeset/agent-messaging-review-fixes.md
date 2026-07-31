@@ -1,0 +1,5 @@
+---
+"eve": patch
+---
+
+Agent handles are now a durable lifecycle store that owns every delegated child from before its start side effect: dispatch commits a `starting` handle, confirms it as `running` with the child's delivery address, and settles it when the child's turn resolves (task-mode children settle terminally and are deleted). Child results bind through the handle — a result must claim the callId and child session a running handle records, so a callee can no longer settle a sibling's call through the shared callback — and cancellation reads the same store. Error-code-based terminal inference is removed: lifecycle is carried explicitly by settlement outcomes, never derived from error codes. Failed continuation deliveries still settle as a retryable error in a single attempt (restoring the parked handle) instead of re-sending a turn the callee may have already accepted, `POST /eve/v1/session/:sessionId` against a dead session returns `404 SESSION_NOT_RESUMABLE`, and for agents opted into `experimental.subagentPersistentSessions` the model-visible `<agents>` listing renders only parked (resumable) handles and is injected only when one exists.

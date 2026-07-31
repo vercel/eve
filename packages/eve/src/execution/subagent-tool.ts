@@ -128,6 +128,9 @@ export function buildSubagentRunInput(input: {
       outputSchema: requestedOutputSchema,
     },
     limits: inheritedLimits,
+    // Delegated children always run one turn at a time in task mode; a
+    // parked persistent child is continued through its agent handle, not by
+    // holding a conversation session open.
     mode: "task",
     parent: {
       callId: action.callId,

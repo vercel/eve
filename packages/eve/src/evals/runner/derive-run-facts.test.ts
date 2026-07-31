@@ -79,6 +79,7 @@ function subagentResult(input: {
         callId: input.callId,
         kind: "subagent-result",
         output: input.output as never,
+        sessionId: "child-session",
         subagentName: input.subagentName,
       },
       sequence: 1,

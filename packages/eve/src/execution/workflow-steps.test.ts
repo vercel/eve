@@ -16,10 +16,8 @@ import {
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
-import {
-  getPendingRuntimeActionBatch,
-  setPendingRuntimeActionBatch,
-} from "#harness/runtime-actions.js";
+import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
@@ -420,16 +418,21 @@ describe("dispatchRuntimeActionsStep", () => {
       ],
       sessionState: expect.any(Object),
     });
-    expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
-      {
-        childContinuationTokens: {
-          "call-1": "subagent:parent-session:call-1",
-        },
-        childSessionIds: {
-          "call-1": "child-run",
-        },
-      },
-    );
+    // The started child stays owned as a running handle; the dead start's
+    // prepared handle was rejected.
+    expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [
+        expect.objectContaining({
+          address: {
+            continuationToken: "subagent:parent-session:call-1",
+            kind: "agent/local",
+            sessionId: "child-run",
+          },
+          operation: expect.objectContaining({ callId: "call-1", kind: "start" }),
+          phase: "running",
+        }),
+      ],
+    });
     expect(startMock).toHaveBeenCalledWith(
       workflowEntryReference,
       [
@@ -545,30 +548,30 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionId: "parent-session",
     });
 
-    await expect(
-      dispatchRuntimeActionsStep({
-        callbackBaseUrl: "https://caller.example.com",
-        parentContinuationToken: "turn-inbox",
-        parentWritable: createTestWritable(),
-        serializedContext: createSerializedContext(),
-        sessionState,
-      }),
-    ).resolves.toEqual({
-      results: [
-        {
-          callId: "call-1",
-          isError: true,
-          kind: "subagent-result",
-          output: {
-            code: "REMOTE_AGENT_START_FAILED",
-            message: 'Remote agent "research" create-session request failed with HTTP 503.',
-          },
-          subagentName: "research",
-        },
-      ],
-      // A remote-agent dispatch failure does not mutate the session,
-      // so the step returns the input sessionState unchanged.
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
       sessionState,
+    });
+
+    expect(result.results).toEqual([
+      {
+        callId: "call-1",
+        isError: true,
+        kind: "subagent-result",
+        output: {
+          code: "REMOTE_AGENT_START_FAILED",
+          message: 'Remote agent "research" create-session request failed with HTTP 503.',
+        },
+        subagentName: "research",
+      },
+    ]);
+    // The prepared handle was committed before the effect and rejected as
+    // dead when the start failed, so no handle survives.
+    expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [],
     });
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback.token).toBe(
       "turn-inbox",
@@ -614,7 +617,7 @@ describe("dispatchRuntimeActionsStep", () => {
         .fn()
         .mockResolvedValue(
           Response.json(
-            { ok: true, sessionId: "remote-child" },
+            { continuationToken: "remote-continuation", ok: true, sessionId: "remote-child" },
             { headers: { "x-eve-session-id": "remote-child" }, status: 202 },
           ),
         ),
@@ -653,11 +656,18 @@ describe("dispatchRuntimeActionsStep", () => {
     });
 
     expect(result.results).toEqual([]);
-    expect(getPendingRuntimeActionBatch(result.sessionState.snapshot?.session.state)).toMatchObject(
-      {
-        childSessionIds: { "call-remote": "remote-child" },
-      },
-    );
+    expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [
+        expect.objectContaining({
+          address: expect.objectContaining({
+            kind: "agent/remote",
+            sessionId: "remote-child",
+            url: "https://remote.example.com",
+          }),
+          phase: "running",
+        }),
+      ],
+    });
   });
 
   it("starts a remote agent from the current dynamic selection", async () => {

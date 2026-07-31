@@ -29,6 +29,7 @@ describe("runtime action keys", () => {
         callId: "call_2",
         kind: "subagent-result",
         output: "done",
+        sessionId: "child-session",
         subagentName: "reviewer",
       }),
     ).toBe("subagent-call:reviewer:call_2");

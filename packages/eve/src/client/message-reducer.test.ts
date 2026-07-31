@@ -129,6 +129,7 @@ describe("defaultMessageReducer", () => {
           callId: "call_1",
           kind: "subagent-result",
           output: { summary: "done" },
+          sessionId: "child-session",
           subagentName: "research",
         },
         sequence: 0,

@@ -54,6 +54,22 @@ describe("createSendFn", () => {
     warn.mockRestore();
   });
 
+  it("rethrows a typed no-active-session error when resume intent forbids fallback", async () => {
+    const noSession = new RuntimeNoActiveSessionError("test:token");
+    const runtime = createRuntime(noSession);
+
+    const send = createSendFn(runtime, ADAPTER, "test");
+    await expect(
+      send("hello", {
+        auth: null,
+        continuationToken: "token",
+        intent: "resume",
+      }),
+    ).rejects.toBe(noSession);
+
+    expect(runtime.run).not.toHaveBeenCalled();
+  });
+
   it("propagates unexpected delivery failures without starting a new session", async () => {
     const failure = new Error("boom");
     const runtime = createRuntime(failure);
@@ -114,6 +130,36 @@ describe("createSendFn", () => {
     expect(vi.mocked(runRuntime.run).mock.calls[0]![0].input).toEqual({
       message: "hello",
       context,
+    });
+  });
+
+  it("forwards the turn caller from options onto the deliver input", async () => {
+    const runtime: Runtime = {
+      cancelTurn: vi.fn(),
+      deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
+      resolveSession: vi.fn(),
+      run: vi.fn().mockResolvedValue(createMockRunHandle()),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
+      terminateSession: vi.fn(),
+    };
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "research",
+    };
+
+    await createSendFn(
+      runtime,
+      ADAPTER,
+      "test",
+    )({ message: "follow up" }, { auth: null, caller, continuationToken: "token" });
+
+    expect(runtime.deliver).toHaveBeenCalledWith({
+      auth: null,
+      caller,
+      continuationToken: "test:token",
+      payload: expect.not.objectContaining({ caller: expect.anything() }),
     });
   });
 

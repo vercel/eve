@@ -523,6 +523,7 @@ describe("workflowEntry", () => {
           code: "SUBAGENT_EXECUTION_FAILED",
           message: "persistent recoverable failure",
         },
+        sessionId: "wrun_test_123",
         subagentName: "researcher",
       },
       serializedContext,

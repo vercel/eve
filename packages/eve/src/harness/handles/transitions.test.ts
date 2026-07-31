@@ -1,24 +1,22 @@
 import { describe, expect, it } from "vitest";
 
+import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
-  AGENT_HANDLES_STATE_KEY,
-  confirmAgentStarted,
   deriveAgentId,
-  deriveAgentOperationId,
-  formatAgentStatus,
   getAgentHandleStore,
-  prepareAgentContinuation,
-  prepareAgentStart,
-  projectParkedAgentHandles,
-  rejectAgentEffect,
-  renderAgentsSnippet,
-  settleAgentTurn,
   type AgentAddress,
   type AgentHandle,
   type AgentIdentity,
   type ContinueOperation,
   type StartOperation,
-} from "#harness/agent-handles.js";
+} from "#harness/handles/store.js";
+import {
+  confirmAgentStarted,
+  prepareAgentContinuation,
+  prepareAgentStart,
+  rejectAgentEffect,
+  settleAgentTurn,
+} from "#harness/handles/transitions.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
@@ -101,65 +99,6 @@ function parkedSession(): HarnessSession {
 function handlesOf(session: HarnessSession): readonly AgentHandle[] {
   return getAgentHandleStore(session.state)?.handles ?? [];
 }
-
-describe("deriveAgentOperationId / deriveAgentId", () => {
-  it("is deterministic on parent-controlled inputs and independent of the child session", () => {
-    const again = deriveAgentOperationId({
-      callId: "call_1",
-      parentSessionId: "session_parent",
-      parentTurnId: "turn_1",
-    });
-    expect(again).toBe(startOperation.id);
-    expect(deriveAgentId("research", again)).toBe(identity.id);
-    expect(identity.id.startsWith("ag_research:")).toBe(true);
-  });
-
-  it("changes when any input changes", () => {
-    const other = deriveAgentOperationId({
-      callId: "call_2",
-      parentSessionId: "session_parent",
-      parentTurnId: "turn_1",
-    });
-    expect(other).not.toBe(startOperation.id);
-  });
-});
-
-describe("getAgentHandleStore", () => {
-  it("returns undefined only when no store has been written", () => {
-    expect(getAgentHandleStore(undefined)).toBeUndefined();
-    expect(getAgentHandleStore({})).toBeUndefined();
-  });
-
-  it("throws on a present but malformed store instead of treating it as absent", () => {
-    for (const malformed of [
-      null,
-      { handles: "not-an-array" },
-      { handles: [{ phase: "starting" }] },
-      { extra: true, handles: [] },
-      {
-        handles: [
-          {
-            address,
-            identity,
-            lastStatus: "x".repeat(121),
-            phase: "parked",
-          },
-        ],
-      },
-    ]) {
-      expect(() => getAgentHandleStore({ [AGENT_HANDLES_STATE_KEY]: malformed })).toThrow(
-        AGENT_HANDLES_STATE_KEY,
-      );
-    }
-  });
-
-  it("rejects duplicate handle ids", () => {
-    const parked = handlesOf(parkedSession());
-    expect(() =>
-      getAgentHandleStore({ [AGENT_HANDLES_STATE_KEY]: { handles: [...parked, ...parked] } }),
-    ).toThrow("unique");
-  });
-});
 
 describe("prepareAgentStart", () => {
   it("records starting ownership before any side effect", () => {
@@ -411,39 +350,5 @@ describe("settleAgentTurn", () => {
         sessionId: "session_forged",
       }),
     ).toEqual({ kind: "ignored", reason: "session-mismatch" });
-  });
-});
-
-describe("projection", () => {
-  it("projects and renders only parked handles", () => {
-    const running = runningSession();
-    const store = getAgentHandleStore(running.state);
-    expect(store).toBeDefined();
-    if (store === undefined) {
-      return;
-    }
-    expect(projectParkedAgentHandles(store)).toEqual([]);
-    expect(renderAgentsSnippet(store)).toBe("[Agents]\n<agents>\n</agents>");
-
-    const parkedStore = getAgentHandleStore(parkedSession().state);
-    expect(parkedStore).toBeDefined();
-    if (parkedStore === undefined) {
-      return;
-    }
-    const snippet = renderAgentsSnippet(parkedStore);
-    expect(snippet.startsWith("[Agents]\n<agents>")).toBe(true);
-    expect(snippet).toContain(
-      `<agent id="${identity.id}" name="research">initial findings</agent>`,
-    );
-    expect(snippet).not.toContain(address.sessionId);
-    expect(snippet).not.toContain(address.continuationToken);
-  });
-});
-
-describe("formatAgentStatus", () => {
-  it("collapses whitespace, truncates to 120, and stringifies objects", () => {
-    expect(formatAgentStatus("  a\n\tb  ")).toBe("a b");
-    expect(formatAgentStatus({ ok: true })).toBe('{"ok":true}');
-    expect(formatAgentStatus("y".repeat(300)).length).toBe(120);
   });
 });

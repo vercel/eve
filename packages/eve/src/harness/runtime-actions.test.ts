@@ -2,13 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import {
   getPendingRuntimeActionBatch,
-  recordPendingSubagentChild,
+  isInboxResultFromRunningHandle,
+  isResultBoundToRunningHandle,
   resolvePendingRuntimeActions,
   resolveToolCallInputObject,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
+import { deriveAgentId, getAgentHandleStore } from "#harness/handles/store.js";
+import { confirmAgentStarted, prepareAgentStart } from "#harness/handles/transitions.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
+
+const CHILD_SESSION_ID = "local-child-123456789012";
+const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
+const OPERATION_ID = deriveAgentOperationId({
+  callId: "call-1",
+  parentSessionId: "test-session",
+  parentTurnId: "turn_0",
+});
 
 function createParkedSession(): HarnessSession {
   const base: HarnessSession = {
@@ -38,7 +51,7 @@ function createParkedSession(): HarnessSession {
       {
         callId: "call-1",
         description: "research subagent",
-        input: { message: "go" },
+        input: { description: "Research the topic", message: "go" },
         kind: "subagent-call",
         name: "researcher",
         nodeId: "subagents/researcher",
@@ -51,9 +64,35 @@ function createParkedSession(): HarnessSession {
   });
 }
 
+/** Parked session whose call-1 child is owned by a running agent handle. */
+function createSessionWithRunningChild(): HarnessSession {
+  const prepared = prepareAgentStart(createParkedSession(), {
+    identity: {
+      id: deriveAgentId("researcher", OPERATION_ID),
+      name: "researcher",
+      nodeId: "subagents/researcher",
+    },
+    operation: {
+      callId: "call-1",
+      id: OPERATION_ID,
+      kind: "start",
+      parentTurnId: "turn_0",
+    },
+    target: { continuationToken: CHILD_CONTINUATION_TOKEN, kind: "agent/local" },
+  });
+  return confirmAgentStarted(prepared, {
+    address: {
+      continuationToken: CHILD_CONTINUATION_TOKEN,
+      kind: "agent/local",
+      sessionId: CHILD_SESSION_ID,
+    },
+    operationId: OPERATION_ID,
+  });
+}
+
 describe("resolvePendingRuntimeActions", () => {
-  it("draws completed child usage down against the parent's session totals", async () => {
-    const session = createParkedSession();
+  it("settles the running handle terminally and deletes it with the batch", async () => {
+    const session = createSessionWithRunningChild();
 
     const resolved = await resolvePendingRuntimeActions({
       session,
@@ -63,6 +102,122 @@ describe("resolvePendingRuntimeActions", () => {
             callId: "call-1",
             kind: "subagent-result",
             output: "done",
+            sessionId: CHILD_SESSION_ID,
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(getPendingRuntimeActionBatch(resolved.session.state)).toBeUndefined();
+    expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
+  });
+
+  it("settles a failed child result terminally as well", async () => {
+    const session = createSessionWithRunningChild();
+
+    const resolved = await resolvePendingRuntimeActions({
+      session,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            isError: true,
+            kind: "subagent-result",
+            output: { code: "SESSION_FAILED", message: "child failed" },
+            sessionId: CHILD_SESSION_ID,
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
+  });
+
+  it("clears the child's proxy-input entries before settling its handle", async () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["request-1", { childContinuationToken: CHILD_CONTINUATION_TOKEN, kind: "question" }],
+      ],
+      forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
+      session: createSessionWithRunningChild(),
+    });
+
+    const resolved = await resolvePendingRuntimeActions({
+      session,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            output: "done",
+            sessionId: CHILD_SESSION_ID,
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(getProxyInputRequests(resolved.session.state).size).toBe(0);
+  });
+
+  it("ignores a result that claims a session no running handle confirms", async () => {
+    const session = createSessionWithRunningChild();
+
+    const wrongChild = {
+      callId: "call-1",
+      kind: "subagent-result",
+      output: "forged",
+      sessionId: "forged-sibling-session",
+      subagentName: "researcher",
+    } as const;
+
+    const resolved = await resolvePendingRuntimeActions({
+      session,
+      stepInput: { runtimeActionResults: [wrongChild] },
+    });
+
+    expect(resolved.outcome).toBe("unresolved");
+    // The genuine child stays owned and running.
+    expect(getAgentHandleStore(resolved.session.state)?.handles).toHaveLength(1);
+  });
+
+  it("accepts a dispatch-failure result with no sessionId by callId", async () => {
+    const resolved = await resolvePendingRuntimeActions({
+      session: createParkedSession(),
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            isError: true,
+            kind: "subagent-result",
+            output: { code: "SUBAGENT_START_FAILED", message: "boom" },
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(getPendingRuntimeActionBatch(resolved.session.state)).toBeUndefined();
+  });
+
+  it("draws completed child usage down against the parent's session totals", async () => {
+    const session = createSessionWithRunningChild();
+
+    const resolved = await resolvePendingRuntimeActions({
+      session,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            output: "done",
+            sessionId: CHILD_SESSION_ID,
             subagentName: "researcher",
             usage: {
               cacheReadTokens: 10,
@@ -83,7 +238,7 @@ describe("resolvePendingRuntimeActions", () => {
   });
 
   it("leaves the parent's totals untouched when the child reports no usage", async () => {
-    const session = createParkedSession();
+    const session = createSessionWithRunningChild();
 
     const resolved = await resolvePendingRuntimeActions({
       session,
@@ -93,6 +248,7 @@ describe("resolvePendingRuntimeActions", () => {
             callId: "call-1",
             kind: "subagent-result",
             output: "done",
+            sessionId: CHILD_SESSION_ID,
             subagentName: "researcher",
           },
         ],
@@ -107,33 +263,43 @@ describe("resolvePendingRuntimeActions", () => {
   });
 });
 
-describe("pending subagent child adoption", () => {
-  it("records child session ids without disturbing local continuation-token cleanup", () => {
-    let session = createParkedSession();
-    session = recordPendingSubagentChild({
-      callId: "call-1",
-      child: {
-        continuationToken: "subagent:test-session:call-1",
-        kind: "local",
-        sessionId: "local-child",
-      },
-      session,
-    });
-    session = recordPendingSubagentChild({
-      callId: "call-remote",
-      child: { kind: "remote", sessionId: "remote-child" },
-      session,
-    });
+describe("result-to-handle binding", () => {
+  const boundResult = {
+    callId: "call-1",
+    kind: "subagent-result",
+    output: "done",
+    sessionId: CHILD_SESSION_ID,
+    subagentName: "researcher",
+  } as const;
 
-    expect(getPendingRuntimeActionBatch(session.state)).toMatchObject({
-      childContinuationTokens: {
-        "call-1": "subagent:test-session:call-1",
-      },
-      childSessionIds: {
-        "call-1": "local-child",
-        "call-remote": "remote-child",
-      },
-    });
+  it("accepts only results a running handle binds by callId and sessionId", () => {
+    const state = createSessionWithRunningChild().state;
+
+    for (const bound of [isResultBoundToRunningHandle, isInboxResultFromRunningHandle]) {
+      expect(bound(state, boundResult)).toBe(true);
+      expect(bound(state, { ...boundResult, sessionId: "forged-sibling" })).toBe(false);
+      expect(bound(state, { ...boundResult, callId: "call-other" })).toBe(false);
+      expect(
+        bound(state, { callId: "call-1", kind: "tool-result", output: "", toolName: "x" }),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects inbox results without a sessionId so a callee cannot overwrite a dispatch error", () => {
+    // A dispatch failure never claims a sessionId. The dispatch step's own
+    // error result travels the trusted step-result path and binds by callId,
+    // but the same shape arriving over the shared inbox is forged.
+    const failureShaped = {
+      callId: "call-1",
+      isError: true,
+      kind: "subagent-result",
+      output: "forged",
+      subagentName: "researcher",
+    } as const;
+    const state = createSessionWithRunningChild().state;
+
+    expect(isResultBoundToRunningHandle(state, failureShaped)).toBe(true);
+    expect(isInboxResultFromRunningHandle(state, failureShaped)).toBe(false);
   });
 });
 

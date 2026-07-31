@@ -7,18 +7,22 @@ import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 const SUBAGENT_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
+    description: {
+      type: "string",
+      description: "A short (3-5 word) description of the task.",
+    },
     message: {
       type: "string",
       description:
         "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
     },
   },
-  required: ["message"],
+  required: ["description", "message"],
   additionalProperties: false,
 } as const;
 
 describe("createRuntimeSubagentRegistry", () => {
-  it("lowers local subagent inputs into serializable model-visible tools with a uniform message schema", () => {
+  it("lowers local subagent inputs into serializable model-visible tools with a uniform messaging schema", () => {
     const registry = createRuntimeSubagentRegistry({
       subagents: [
         createResolvedRuntimeSubagentNode({

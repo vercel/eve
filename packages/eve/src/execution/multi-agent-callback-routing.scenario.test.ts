@@ -266,7 +266,7 @@ describe("multi-agent callback routing", () => {
     const callbackToken = `${sessionId}:callback-token`;
     const bodyCountBefore = createSessionBodies.length;
 
-    const remoteSessionId = await startRemoteAgentSession({
+    const { sessionId: remoteSessionId } = await startRemoteAgentSession({
       action: {
         callId: `call-${agentName}`,
         description: "delegate research",
