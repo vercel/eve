@@ -178,11 +178,11 @@ describe("renderCommandSuggestions", () => {
     expect(rows.some((row) => row.includes("commands, showing"))).toBe(false);
   });
 
-  it("shows the whole command registry on a bare slash", () => {
+  it("shows the first window of the command registry on a bare slash", () => {
     const state = typeaheadFor(PROMPT_COMMANDS, "/");
     const rows = renderCommandSuggestions(state, theme, 80).map(stripAnsi);
-    expect(rows).toHaveLength(PROMPT_COMMANDS.length);
-    expect(rows.some((row) => row.includes("/exit (/quit)"))).toBe(true);
+    expect(rows).toHaveLength(Math.min(PROMPT_COMMANDS.length, 10));
+    expect(rows[0]).toContain("/help");
   });
 
   it("clips rows to the terminal width", () => {

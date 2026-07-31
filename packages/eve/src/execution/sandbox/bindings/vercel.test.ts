@@ -6,6 +6,15 @@ import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-
 import { vercel } from "#public/sandbox/backends/vercel.js";
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 
+// The credential fallback consults the developer's Vercel CLI auth and the
+// repo's `.vercel` project link; on a linked, logged-in machine it would
+// inject real project credentials into the asserted SDK calls.
+vi.mock("#compiled/@vercel/oidc/index.js", () => ({
+  getVercelOidcToken: vi.fn(async () => {
+    throw new Error("No ambient Vercel OIDC token in unit tests.");
+  }),
+}));
+
 function createMockCommandResult() {
   return {
     exitCode: 0,

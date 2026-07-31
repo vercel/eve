@@ -50,6 +50,8 @@ export interface RunVercelOptions {
   extraEnv?: Readonly<Record<string, string>>;
   /** Pass `--non-interactive` and close stdin so automation cannot stop on a prompt. */
   nonInteractive?: boolean;
+  /** UTF-8 data written to stdin, used to keep connector secrets out of argv. */
+  stdin?: string;
   /** Streams command output to a parent-owned renderer instead of writing outside it. */
   onOutput?: ProcessOutputHandler;
   /** Aborts the Vercel CLI subprocess when its parent setup flow is interrupted. */
@@ -158,11 +160,26 @@ export function resolveVercelInvocation(
     : { command: localBinary, commandArgs: args };
 }
 
+function stdinMode(options: RunVercelOptions): "inherit" | "ignore" | "pipe" {
+  if (options.stdin !== undefined) return "pipe";
+  return options.nonInteractive ? "ignore" : "inherit";
+}
+
+function writeStdin(
+  child: ChildProcess,
+  input: string | undefined,
+  onError: (error: NodeJS.ErrnoException) => void,
+): void {
+  if (input === undefined || child.stdin === null) return;
+  child.stdin.once("error", onError);
+  child.stdin.end(input, "utf8");
+}
+
 function stdioForRun(
   options: RunVercelOptions,
-): ["inherit" | "ignore", "pipe", "pipe"] | "inherit" {
-  if (options.onOutput) {
-    return [options.nonInteractive ? "ignore" : "inherit", "pipe", "pipe"];
+): ["inherit" | "ignore" | "pipe", "pipe", "pipe"] | "inherit" {
+  if (options.onOutput || options.stdin !== undefined) {
+    return [stdinMode(options), "pipe", "pipe"];
   }
   return options.nonInteractive ? ["ignore", "pipe", "pipe"] : "inherit";
 }
@@ -209,6 +226,10 @@ export async function runVercel(args: string[], options: RunVercelOptions): Prom
       reportFailure(timeoutMessage(args, options.timeoutMs ?? 0));
       settle(false);
     });
+    writeStdin(child, options.stdin, (error) => {
+      reportFailure(`vercel ${args.join(" ")} stdin failed: ${error.message}`);
+      settle(false);
+    });
 
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (isAbortError(error, options.signal)) {
@@ -247,6 +268,7 @@ export async function runVercel(args: string[], options: RunVercelOptions): Prom
 export interface RunVercelCaptureResult {
   ok: boolean;
   stdout: string;
+  stderr?: string;
 }
 
 /**
@@ -262,33 +284,35 @@ export async function runVercelCaptureStdout(
   args: string[],
   options: RunVercelOptions,
 ): Promise<RunVercelCaptureResult> {
-  if (options.signal?.aborted === true) return { ok: false, stdout: "" };
+  if (options.signal?.aborted === true) return { ok: false, stdout: "", stderr: "" };
   return new Promise<RunVercelCaptureResult>((resolvePromise) => {
     const cwd = existingDir(options.cwd);
     const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
     const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
     const child = spawn(invocation.command, invocation.commandArgs, {
       cwd,
-      stdio: [
-        options.nonInteractive ? "ignore" : "inherit",
-        "pipe",
-        options.onOutput ? "pipe" : "inherit",
-      ],
+      stdio: [stdinMode(options), "pipe", options.onOutput ? "pipe" : "inherit"],
       env: buildSpawnEnv(options.extraEnv ?? {}),
       shell: invocation.shell,
       signal: options.signal,
     });
     const disarmAbort = armProcessAbort(child, options.signal);
     const chunks: string[] = [];
+    const errorChunks: string[] = [];
     child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk.toString("utf8")));
-    child.stderr?.on("data", (chunk: Buffer) => outputBuffer?.write("stderr", chunk));
+    child.stderr?.on("data", (chunk: Buffer) => {
+      errorChunks.push(chunk.toString("utf8"));
+      outputBuffer?.write("stderr", chunk);
+    });
 
     let settled = false;
     function settle(ok: boolean): void {
       if (settled) return;
       settled = true;
       outputBuffer?.flush();
-      resolvePromise({ ok, stdout: chunks.join("") });
+      const stdout = chunks.join("");
+      const stderr = errorChunks.join("");
+      resolvePromise(stderr.length === 0 ? { ok, stdout } : { ok, stdout, stderr });
     }
     function reportFailure(message: string): void {
       if (options.onOutput) {
@@ -300,6 +324,10 @@ export async function runVercelCaptureStdout(
 
     const disarmDeadline = armDeadline(child, options.timeoutMs, () => {
       reportFailure(timeoutMessage(args, options.timeoutMs ?? 0));
+      settle(false);
+    });
+    writeStdin(child, options.stdin, (error) => {
+      reportFailure(`vercel ${args.join(" ")} stdin failed: ${error.message}`);
       settle(false);
     });
 
@@ -385,7 +413,7 @@ export async function captureVercel(
     const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
     const child = spawn(invocation.command, invocation.commandArgs, {
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       env: buildSpawnEnv(options.extraEnv ?? {}),
       shell: invocation.shell,
       signal: options.signal,
@@ -420,6 +448,14 @@ export async function captureVercel(
         stdout: stdoutChunks.join(""),
         stderr: stderrChunks.join(""),
         message: timeoutMessage(args, options.timeoutMs ?? 0),
+      });
+    });
+    writeStdin(child, options.stdin, (error) => {
+      fail({
+        errno: error.code,
+        stdout: stdoutChunks.join(""),
+        stderr: stderrChunks.join(""),
+        message: `vercel ${args.join(" ")} stdin failed: ${error.message}`,
       });
     });
 

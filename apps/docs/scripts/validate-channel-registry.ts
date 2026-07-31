@@ -30,6 +30,12 @@ interface Registry {
 
 const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
+  photon: "photon-imessage",
+};
+
+const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
+  eve: "web",
+  photon: "photon",
 };
 
 const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
@@ -44,7 +50,6 @@ const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-liveblocks": "@liveblocks/chat-sdk-adapter",
   "chat-sdk-linq": "@linqapp/chat-sdk-adapter",
   "chat-sdk-kapso": "@kapso/chat-adapter",
-  "chat-sdk-photon": "@photon-ai/chat-adapter-imessage",
   "chat-sdk-dial": "@getdial/chat-sdk-adapter",
   "chat-sdk-agentphone": "@agentphone/chat-sdk-adapter",
   "chat-sdk-lark": "@larksuite/vercel-chat-adapter",
@@ -65,7 +70,6 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-liveblocks": "liveblocks",
   "chat-sdk-linq": "linq",
   "chat-sdk-kapso": "kapso",
-  "chat-sdk-photon": "imessage",
   "chat-sdk-dial": "dial",
   "chat-sdk-agentphone": "agentphone",
   "chat-sdk-lark": "lark",
@@ -106,8 +110,12 @@ for (const [index, item] of items.entries()) {
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
   const registrySlug = expectedSlugs[index];
 
-  if (entry.slug === "slack" || entry.slug === "eve") {
-    const expectedArgs = ["integration", "setup", registrySlug];
+  if (entry.slug === "slack" || entry.slug === "eve" || entry.slug === "photon") {
+    const expectedArgs = [
+      "integration",
+      "setup",
+      setupKindsByCatalogSlug[entry.slug] ?? registrySlug,
+    ];
     if (
       setup?.command !== "eve" ||
       setup.package !== "eve" ||
@@ -115,7 +123,7 @@ for (const [index, item] of items.entries()) {
       JSON.stringify(setup.args) !== JSON.stringify(expectedArgs)
     ) {
       throw new Error(
-        `Registry item "${item.name}" must delegate setup to eve integration setup ${registrySlug}.`,
+        `Registry item "${item.name}" must delegate setup to eve integration setup ${expectedArgs[2]}.`,
       );
     }
     continue;

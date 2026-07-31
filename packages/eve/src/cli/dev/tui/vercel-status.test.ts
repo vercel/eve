@@ -30,8 +30,8 @@ describe("createVercelStatusTracker", () => {
     tracker.refreshIdentity();
     await settled();
 
-    expect(snapshots).toEqual([{ identity, pendingDeploy: false }]);
-    expect(tracker.current()).toEqual({ identity, pendingDeploy: false });
+    expect(snapshots).toEqual([{ identity }]);
+    expect(tracker.current()).toEqual({ identity });
   });
 
   it("emits a snapshot without identity for an unlinked directory", async () => {
@@ -45,7 +45,7 @@ describe("createVercelStatusTracker", () => {
     tracker.refreshIdentity();
     await settled();
 
-    expect(snapshots).toEqual([{ pendingDeploy: false }]);
+    expect(snapshots).toEqual([{}]);
     expect(tracker.current().identity).toBeUndefined();
   });
 
@@ -71,7 +71,7 @@ describe("createVercelStatusTracker", () => {
     resolveSlow!({ projectName: "stale", teamName: "stale-team" });
     await settled();
 
-    expect(snapshots).toEqual([{ identity: { projectName: "newer" }, pendingDeploy: false }]);
+    expect(snapshots).toEqual([{ identity: { projectName: "newer" } }]);
   });
 
   it("keeps the last identity when a probe throws", async () => {
@@ -91,32 +91,8 @@ describe("createVercelStatusTracker", () => {
     tracker.refreshIdentity();
     await settled();
 
-    expect(snapshots).toEqual([{ identity, pendingDeploy: false }]);
-    expect(tracker.current()).toEqual({ identity, pendingDeploy: false });
-  });
-
-  it("sets pending on channels-added and clears it on deployed", async () => {
-    const { snapshots, onChange } = collect();
-    let probes = 0;
-    const tracker = createVercelStatusTracker({
-      appRoot: "/app",
-      onChange,
-      detectIdentity: async () => {
-        probes += 1;
-        return identity;
-      },
-    });
-
-    tracker.applyEffect({ kind: "channels-added" });
-    expect(tracker.current().pendingDeploy).toBe(true);
-
-    tracker.applyEffect({ kind: "deployed" });
-    await settled();
-
-    expect(tracker.current()).toEqual({ identity, pendingDeploy: false });
-    // The deployed effect re-probes: the deploy flow can create the link.
-    expect(probes).toBe(1);
-    expect(snapshots.map((s) => s.pendingDeploy)).toEqual([true, false, false]);
+    expect(snapshots).toEqual([{ identity }]);
+    expect(tracker.current()).toEqual({ identity });
   });
 
   it("re-probes on refresh-identity without emitting until the probe lands", async () => {
@@ -131,7 +107,7 @@ describe("createVercelStatusTracker", () => {
     expect(snapshots).toEqual([]);
     await settled();
 
-    expect(snapshots).toEqual([{ identity, pendingDeploy: false }]);
+    expect(snapshots).toEqual([{ identity }]);
   });
 
   it("suppresses emissions after dispose, including in-flight probes", async () => {
@@ -145,7 +121,7 @@ describe("createVercelStatusTracker", () => {
     tracker.refreshIdentity();
     tracker.dispose();
     await settled();
-    tracker.applyEffect({ kind: "channels-added" });
+    tracker.applyEffect({ kind: "refresh-identity" });
 
     expect(snapshots).toEqual([]);
   });

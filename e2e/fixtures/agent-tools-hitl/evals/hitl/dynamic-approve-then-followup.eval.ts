@@ -14,6 +14,7 @@ const TOOL_NAME = "dynamic_guarded_echo";
  * 400 lands, turning `session.waiting` into a terminal `session.failed`.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "HITL regression (#533): a resolved approval park replays on the next turn.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "replay-probe".`);

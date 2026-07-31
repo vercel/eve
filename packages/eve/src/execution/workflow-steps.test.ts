@@ -7,8 +7,12 @@ import { ContextKey } from "#context/key.js";
 import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import {
+  getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
+} from "#harness/runtime-actions.js";
 import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
+import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -662,6 +666,36 @@ describe("turnStep", () => {
     expect(createDurableSessionState).toHaveBeenLastCalledWith({
       session: expect.objectContaining({ sessionId: "turn-step-session" }),
     });
+  });
+
+  it("projects a requested sleep onto the durable step result", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        requestTurnSleep(2_500);
+        return {
+          next: async () => ({ next: null, session: stepSession }),
+          session: stepSession,
+        };
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "wait before checking" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "continue",
+      sleepDurationMs: 2_500,
+    });
+    expect(result.serializedContext).not.toHaveProperty("eve.pendingTurnSleepDuration");
   });
 
   it("persists onDeliver context into the next durable step", async () => {

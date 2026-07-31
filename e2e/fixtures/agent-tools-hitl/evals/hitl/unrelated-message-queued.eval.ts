@@ -8,6 +8,7 @@ import { GUARDED_ECHO_TOKEN } from "./shared";
  * receives an explicit terminal answer.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "HITL smoke: unrelated message during approval is queued.",
   async test(t) {
     const parked = await t.send('Call the guarded-echo tool with note "queued-approval".');

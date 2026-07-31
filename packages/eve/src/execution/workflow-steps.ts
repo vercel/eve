@@ -20,6 +20,7 @@ import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { preserveSerializedAgentTraceState } from "#harness/agent-trace-context-store.js";
+import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
@@ -96,6 +97,11 @@ export type DurableStepResult =
       readonly action: "continue" | "done";
       readonly output?: unknown;
       readonly isError?: boolean;
+      /**
+       * Optional durable pause for the turn workflow to fulfill before
+       * dispatching this result's next action.
+       */
+      readonly sleepDurationMs?: number;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
       /** Session-total token usage; set on `done` when the session spent any. */
@@ -112,12 +118,14 @@ export type DurableStepResult =
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingRuntimeActionKeys?: readonly string[];
+      readonly sleepDurationMs?: number;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     }
   | {
       readonly action: "dispatch-workflow-runtime-actions";
       readonly pendingRuntimeActionKeys: readonly string[];
+      readonly sleepDurationMs?: number;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     };
@@ -418,6 +426,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   stepResult = { ...stepResult, session: rekeyed };
 
   const nextState = createDurableSessionState({ session: stepResult.session });
+  const sleepDurationMs = readTurnSleepDurationMs(ctx);
+  const sleepTransition = sleepDurationMs === undefined ? {} : { sleepDurationMs };
 
   if (
     stepResult.next !== null &&
@@ -430,6 +440,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       action: "done",
       output: stepResult.next.output,
       isError: stepResult.next.isError,
+      ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
       usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
@@ -449,6 +460,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         pendingRuntimeActionKeys: getRuntimeActionKeysFromWorkflowInterrupt(
           workflowInterrupt.interrupt,
         ),
+        ...sleepTransition,
         serializedContext: nextSerializedContext,
         sessionState: nextState,
       };
@@ -457,6 +469,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     return {
       action: "park",
       ...derivePendingState(stepResult.session),
+      ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
     };
@@ -465,6 +478,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   writer.releaseLock();
   return {
     action: "continue",
+    ...sleepTransition,
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };

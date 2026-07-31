@@ -197,7 +197,7 @@ local-tracing work.
    convention and proves the trace tree in memory. Production remains unchanged.
 4. **Persistence.** Write session traces as OTLP/JSON, restore provider-owned session context across
    dev worker restarts, and apply payload capture policy. No browser UI.
-5. **Inspection.** Add minimal `eve trace ls` and `eve trace [trace]` commands. A graphical viewer is a
+5. **Inspection.** Add minimal `eve traces ls` and `eve traces [trace]` commands. A graphical viewer is a
    separate design after the trace model stabilizes.
 6. **Public providers.** Promote the proven lifecycle contract into public hooks and migrate OTel,
    Vercel, Braintrust, and custom instrumentation onto it.

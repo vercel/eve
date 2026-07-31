@@ -1,6 +1,7 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Consumer-authored and mounted-extension tools coexist and both run in one turn.",
   async test(t) {
     await t.send(

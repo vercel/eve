@@ -172,19 +172,23 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {});
   });
 
-  it("maps missing and terminal targets to 'no_active_turn'", async () => {
+  it("maps missing and terminal targets to 'no_active_turn' with a classified reason", async () => {
     const { EntityConflictError, HookNotFoundError, RunExpiredError, WorkflowRunNotFoundError } =
       await import("#compiled/@workflow/errors/index.js");
     const errors = [
-      new HookNotFoundError("session-1:cancel"),
-      new WorkflowRunNotFoundError("turn-run"),
-      new RunExpiredError("turn already completed"),
-      new EntityConflictError("turn completed during cancellation"),
+      { error: new HookNotFoundError("session-1:cancel"), reason: "HookNotFoundError" },
+      { error: new WorkflowRunNotFoundError("turn-run"), reason: "WorkflowRunNotFoundError" },
+      { error: new RunExpiredError("turn already completed"), reason: "RunExpiredError" },
+      {
+        error: new EntityConflictError("turn completed during cancellation"),
+        reason: "EntityConflictError",
+      },
     ];
 
-    for (const error of errors) {
+    for (const { error, reason } of errors) {
       resumeHookMock.mockRejectedValueOnce(error);
       await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).resolves.toEqual({
+        reason,
         status: "no_active_turn",
       });
     }

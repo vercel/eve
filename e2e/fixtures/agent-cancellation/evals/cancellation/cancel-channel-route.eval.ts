@@ -35,6 +35,7 @@ async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unkn
  * unknown thread reports the benign `no_active_turn` outcome.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Cancel an in-flight turn from a custom channel stop route.",
   timeoutMs: 240_000,
 

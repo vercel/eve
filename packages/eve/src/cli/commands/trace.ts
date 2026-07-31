@@ -84,7 +84,7 @@ export function resolveLocalTrace(traces: readonly LocalTrace[], reference: stri
   if (matches.length === 1) return matches[0]!;
   if (matches.length === 0) {
     throw new Error(
-      `No local trace matches "${sanitizeForTerminal(reference)}". Run \`eve trace ls\` to list traces.`,
+      `No local trace matches "${sanitizeForTerminal(reference)}". Run \`eve traces ls\` to list traces.`,
     );
   }
   throw ambiguousTraceError(matches, reference);

@@ -22,6 +22,7 @@ const FORWARDED_MARKER =
   "WHOAMI current=user:e2e-user-2 initiator=user:e2e-user forwarded-by=router-app";
 
 export default defineEval({
+  tags: ["real-model"],
   description:
     "Remote-agent principal forwarding: the child session runs as the parent's end user, with the distinct initiator preserved and the forwarder stamped.",
   async test(t) {

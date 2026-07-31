@@ -7,6 +7,7 @@ const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol";
  * turn, and the runtime identity reports `dynamic:<fallback id>`.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic model smoke: null selection serves the fallback model.",
   async test(t) {
     await t.send('Reply with exactly the text "fallback ping" and nothing else.');

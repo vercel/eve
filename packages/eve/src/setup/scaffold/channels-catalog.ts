@@ -1,6 +1,6 @@
 /**
  * Build-time catalog of channels used by programmatic setup and
- * `eve channels add`.
+ * `eve add channel/slack`.
  *
  * Channel *identity* (slug, name, and whether it is scaffoldable) is owned by
  * `@vercel/eve-catalog`, the cross-surface source of truth shared with the docs
