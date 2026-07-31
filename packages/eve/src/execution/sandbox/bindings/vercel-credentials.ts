@@ -1,25 +1,24 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { decodeVercelOidcTokenClaims } from "#shared/vercel-project.js";
 import { withPackageUserAgent } from "#internal/user-agent.js";
-import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-options.js";
 
 export function getVercelSandboxFetch(createOptions: VercelCreateOptions): typeof globalThis.fetch {
-  const fetchOverride = (createOptions as { readonly fetch?: typeof globalThis.fetch }).fetch;
-  return withPackageUserAgent(fetchOverride);
+  return withPackageUserAgent(createOptions.fetch);
 }
 
 export async function getVercelSandboxCredentials(
   createOptions: VercelCreateOptions,
 ): Promise<VercelSandboxCredentials> {
   const teamId =
-    readNonEmptyString(createOptions, "teamId") ??
+    readNonEmptyString(createOptions.teamId) ??
     readNonEmptyEnvironmentVariable("VERCEL_TEAM_ID") ??
     readNonEmptyEnvironmentVariable("VERCEL_ORG_ID");
   const projectId =
-    readNonEmptyString(createOptions, "projectId") ??
+    readNonEmptyString(createOptions.projectId) ??
     readNonEmptyEnvironmentVariable("VERCEL_PROJECT_ID");
   const envToken =
-    readNonEmptyString(createOptions, "token") ??
+    readNonEmptyString(createOptions.token) ??
     readNonEmptyEnvironmentVariable("VERCEL_OIDC_TOKEN") ??
     readNonEmptyEnvironmentVariable("VERCEL_TOKEN");
 
@@ -34,8 +33,7 @@ export async function getVercelSandboxCredentials(
   return getVercelSandboxCredentialsFromOidcToken(oidcToken);
 }
 
-function readNonEmptyString(object: object, key: string): string | undefined {
-  const value = (object as Record<string, unknown>)[key];
+function readNonEmptyString(value: string | undefined): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 

@@ -339,8 +339,8 @@ describe("stageAttachmentsForAdapter", () => {
     expect(filePart.mediaType).toBe("application/octet-stream");
   });
 
-  it("resolves authored paths through the sandbox so backend-specific workspace roots are honored", async () => {
-    // The runtime's real Vercel sandbox backend rewrites /workspace/...
+  it("resolves authored paths through the sandbox so provider-specific workspace roots are honored", async () => {
+    // The runtime's real Vercel sandbox provider rewrites /workspace/...
     // to /vercel/sandbox/workspace/..., matching what read_file and bash
     // see. The mock sandbox does not itself rewrite (it anchors relative
     // paths under /workspace/), so this test pins the expected format

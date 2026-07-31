@@ -99,12 +99,12 @@ export async function installPackageIntoProject(input: {
 }
 
 /**
- * Loads an optional engine package, auto-installing it into the
+ * Loads an optional provider package, auto-installing it into the
  * project when missing. Installs run only during `eve dev`; any other
  * process fails with the caller-supplied actionable message so
  * production deployments never mutate the application.
  */
-export async function loadOptionalEnginePackage<T>(input: {
+export async function loadOptionalProviderPackage<T>(input: {
   readonly appRoot: string;
   readonly autoInstall: boolean;
   readonly importInstalledModule?: () => Promise<T>;
@@ -122,13 +122,13 @@ export async function loadOptionalEnginePackage<T>(input: {
     const importInstalledModule =
       input.importInstalledModule ??
       (async () =>
-        await importInstalledEnginePackage<T>({
+        await importInstalledProviderPackage<T>({
           appRoot: input.appRoot,
           packageName: input.packageName,
         }));
     const isInstalledModuleLoadable =
       input.importInstalledModule === undefined
-        ? async () => await isInstalledEnginePackageLoadable(input)
+        ? async () => await isInstalledProviderPackageLoadable(input)
         : async () => {
             try {
               await importInstalledModule();
@@ -170,21 +170,21 @@ export async function loadOptionalEnginePackage<T>(input: {
   }
 }
 
-/** Imports an optional engine from the application without installing it. */
-export async function importInstalledEnginePackage<T>(input: {
+/** Imports an optional provider package from the application without installing it. */
+export async function importInstalledProviderPackage<T>(input: {
   readonly appRoot: string;
   readonly packageName: string;
 }): Promise<T> {
-  const entrypointHref = await resolveInstalledEnginePackageEntrypointHref(input);
+  const entrypointHref = await resolveInstalledProviderPackageEntrypointHref(input);
   return (await import(entrypointHref)) as T;
 }
 
-async function isInstalledEnginePackageLoadable(input: {
+async function isInstalledProviderPackageLoadable(input: {
   readonly appRoot: string;
   readonly packageName: string;
 }): Promise<boolean> {
   try {
-    const entrypointHref = await resolveInstalledEnginePackageEntrypointHref(input);
+    const entrypointHref = await resolveInstalledProviderPackageEntrypointHref(input);
     await importEntrypointInWorker(entrypointHref);
     return true;
   } catch {
@@ -192,7 +192,7 @@ async function isInstalledEnginePackageLoadable(input: {
   }
 }
 
-async function resolveInstalledEnginePackageEntrypointHref(input: {
+async function resolveInstalledProviderPackageEntrypointHref(input: {
   readonly appRoot: string;
   readonly packageName: string;
 }): Promise<string> {

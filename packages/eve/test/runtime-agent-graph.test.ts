@@ -33,7 +33,7 @@ describe("resolveRuntimeAgentGraph", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults agents to the Vercel sandbox backend on hosted Vercel", async () => {
+  it("gives every agent a lazy durable default sandbox", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
       appRoot: "/app",
@@ -109,11 +109,11 @@ describe("resolveRuntimeAgentGraph", () => {
       },
     });
 
-    expect(graph.root.sandboxRegistry.sandbox?.definition.backend.name).toBe("vercel");
+    expect(typeof graph.root.sandboxRegistry.sandbox.definition.definition).toBe("function");
+    expect(graph.root.sandboxRegistry.sandbox.definition.templates).toHaveLength(0);
     expect(
-      graph.nodesByNodeId.get("subagents/researcher")?.sandboxRegistry.sandbox?.definition.backend
-        .name,
-    ).toBe("vercel");
+      graph.nodesByNodeId.get("subagents/researcher")?.sandboxRegistry.sandbox.definition.templates,
+    ).toHaveLength(0);
   });
 
   it("resolves recursive local subagents into a cached runtime graph bundle", async () => {

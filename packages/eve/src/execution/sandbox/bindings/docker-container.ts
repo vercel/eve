@@ -3,9 +3,10 @@ import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import type { ResolvedDockerSandboxOptions } from "#execution/sandbox/bindings/docker-options.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
 import { withDevelopmentSandboxTags } from "#execution/sandbox/development-run.js";
-import type { SandboxBackendTags } from "#public/definitions/sandbox-backend.js";
 import type { DockerSandboxNetworkPolicy } from "#public/sandbox/docker-sandbox.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
+
+type SandboxResourceTags = Readonly<Record<string, string>>;
 
 export const DOCKER_SANDBOX_LABEL = "eve.sandbox";
 
@@ -21,8 +22,8 @@ export async function startDockerContainer(input: {
   readonly initialNetworkPolicy: DockerSandboxNetworkPolicy;
   readonly options: ResolvedDockerSandboxOptions;
   readonly role: "session" | "template-build";
-  readonly tags?: SandboxBackendTags;
-}): Promise<void> {
+  readonly tags?: SandboxResourceTags;
+}): Promise<string> {
   const args = [
     "run",
     "-d",
@@ -53,10 +54,16 @@ export async function startDockerContainer(input: {
     ...DOCKER_KEEPALIVE_ARGS,
   );
 
+  const result = await input.cli.run(args);
   expectDockerSuccess(
-    await input.cli.run(args),
+    result,
     `start sandbox container "${input.containerName}" from "${input.image}"`,
   );
+  const containerId = result.stdout.trim();
+  if (containerId.length === 0) {
+    throw new Error(`Docker did not return an id for sandbox container "${input.containerName}".`);
+  }
+  return containerId;
 }
 
 export async function runDockerBaseSetup(cli: DockerCli, containerName: string): Promise<void> {

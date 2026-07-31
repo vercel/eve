@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EVE_DEV_ENV_FLAG,
   installPackageIntoProject,
-  loadOptionalEnginePackage,
+  loadOptionalProviderPackage,
 } from "#internal/application/optional-package-install.js";
 
 vi.mock("node:child_process", async (importOriginal) => ({
@@ -121,7 +121,7 @@ beforeEach(() => {
   });
 });
 
-describe("loadOptionalEnginePackage", () => {
+describe("loadOptionalProviderPackage", () => {
   it("retries loading the package after auto-install finishes", async () => {
     const appRoot = "/repo/retry-app";
     vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
@@ -144,7 +144,7 @@ describe("loadOptionalEnginePackage", () => {
     });
 
     await expect(
-      loadOptionalEnginePackage({
+      loadOptionalProviderPackage({
         appRoot,
         autoInstall: true,
         importInstalledModule,
@@ -177,7 +177,7 @@ describe("loadOptionalEnginePackage", () => {
       return loadedModule;
     });
 
-    const first = loadOptionalEnginePackage({
+    const first = loadOptionalProviderPackage({
       appRoot,
       autoInstall: true,
       importInstalledModule,
@@ -186,7 +186,7 @@ describe("loadOptionalEnginePackage", () => {
       packageName: "microsandbox",
     });
     await flushMicrotasks();
-    const second = loadOptionalEnginePackage({
+    const second = loadOptionalProviderPackage({
       appRoot,
       autoInstall: true,
       importInstalledModule,
@@ -219,7 +219,7 @@ describe("loadOptionalEnginePackage", () => {
     });
 
     await expect(
-      loadOptionalEnginePackage({
+      loadOptionalProviderPackage({
         appRoot,
         autoInstall: true,
         importInstalledModule,
@@ -244,7 +244,7 @@ describe("loadOptionalEnginePackage", () => {
       });
     });
 
-    const result = loadOptionalEnginePackage({
+    const result = loadOptionalProviderPackage({
       appRoot,
       autoInstall: true,
       importModule,
@@ -287,7 +287,7 @@ describe("loadOptionalEnginePackage", () => {
     });
 
     await expect(
-      loadOptionalEnginePackage({
+      loadOptionalProviderPackage({
         appRoot,
         autoInstall: true,
         importModule,

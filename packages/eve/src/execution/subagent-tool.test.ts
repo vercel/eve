@@ -292,8 +292,8 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.input.outputSchema).toBeUndefined();
   });
 
-  it("includes parentSandboxState and sandboxSessionId for self-delegation", () => {
-    const sandboxState = { initialized: true, session: null };
+  it("includes the parent's durable sandbox state for self-delegation", () => {
+    const sandboxState = createSandboxState();
     const session = { ...makeSession(), sandboxState };
     const action: RuntimeSubagentCallActionRequest = {
       ...makeAction(),
@@ -309,12 +309,12 @@ describe("buildSubagentRunInput", () => {
 
     expect(runInput.adapter.state).toMatchObject({
       parentSandboxState: sandboxState,
-      sandboxSessionId: "parent-session",
+      rootSandboxState: sandboxState,
     });
   });
 
-  it("does not include sandbox sharing fields for normal subagents", () => {
-    const sandboxState = { initialized: true, session: null };
+  it("makes the parent's durable sandbox available to normal subagents", () => {
+    const sandboxState = createSandboxState();
     const session = { ...makeSession(), sandboxState };
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
@@ -324,7 +324,48 @@ describe("buildSubagentRunInput", () => {
       session,
     });
 
-    expect(runInput.adapter.state).not.toHaveProperty("parentSandboxState");
-    expect(runInput.adapter.state).not.toHaveProperty("sandboxSessionId");
+    expect(runInput.adapter.state).toMatchObject({
+      parentSandboxState: sandboxState,
+      rootSandboxState: sandboxState,
+    });
+  });
+
+  it("preserves the original root sandbox through nested delegation", () => {
+    const rootSandboxState = createSandboxState();
+    const parentSandboxState = {
+      ...createSandboxState(),
+      root: rootSandboxState,
+      value: {
+        adapterId: "test-adapter",
+        id: "parent-child-sandbox",
+        reference: { id: "parent-child-sandbox" },
+        resourceId: "parent-child-sandbox",
+      },
+    };
+    const session = { ...makeSession(), sandboxState: parentSandboxState };
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session,
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      parentSandboxState,
+      rootSandboxState,
+    });
   });
 });
+
+function createSandboxState() {
+  return {
+    revision: "sandbox-revision",
+    value: {
+      adapterId: "test-adapter",
+      id: "test-sandbox",
+      reference: { id: "test-sandbox" },
+      resourceId: "test-sandbox",
+    },
+  } as const;
+}

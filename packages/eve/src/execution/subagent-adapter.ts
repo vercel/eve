@@ -8,6 +8,7 @@ import type {
 } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
+import { isSandboxStateValue, type SandboxStateValue } from "#sandbox/state.js";
 
 const log = createLogger("execution.subagent-adapter");
 
@@ -34,8 +35,10 @@ export const SUBAGENT_ADAPTER_KIND = "subagent";
  */
 export interface SubagentAdapterState extends Record<string, unknown> {
   readonly callId: string;
+  readonly parentSandboxState?: SandboxStateValue;
   readonly parentContinuationToken: string;
   readonly parentSessionId: string;
+  readonly rootSandboxState?: SandboxStateValue;
   readonly subagentName: string;
 }
 
@@ -56,12 +59,49 @@ export function isSubagentAdapterState(value: unknown): value is SubagentAdapter
   return (
     typeof state.callId === "string" &&
     state.callId.length > 0 &&
+    (state.parentSandboxState === undefined || isSandboxStateValue(state.parentSandboxState)) &&
     typeof state.parentContinuationToken === "string" &&
     state.parentContinuationToken.length > 0 &&
     typeof state.parentSessionId === "string" &&
+    (state.rootSandboxState === undefined || isSandboxStateValue(state.rootSandboxState)) &&
     typeof state.subagentName === "string" &&
     state.subagentName.length > 0
   );
+}
+
+/**
+ * Reads the validated parent and root sandbox state carried by a subagent
+ * adapter. Other channel adapters do not carry sandbox ancestry.
+ */
+export function readSubagentSandboxAncestorStates(adapter: ChannelAdapter | undefined): {
+  readonly parentState?: SandboxStateValue;
+  readonly rootState?: SandboxStateValue;
+} {
+  if (adapter?.kind !== SUBAGENT_ADAPTER_KIND) {
+    return {};
+  }
+
+  const state =
+    adapter.state !== null && typeof adapter.state === "object" ? adapter.state : undefined;
+  const parentState = state?.parentSandboxState;
+  const rootState = state?.rootSandboxState;
+  if (
+    (parentState !== undefined && !isSandboxStateValue(parentState)) ||
+    (rootState !== undefined && !isSandboxStateValue(rootState))
+  ) {
+    throw new TypeError("Invalid sandbox ancestry in subagent adapter state.");
+  }
+  const ancestry: {
+    parentState?: SandboxStateValue;
+    rootState?: SandboxStateValue;
+  } = {};
+  if (parentState !== undefined) {
+    ancestry.parentState = parentState;
+  }
+  if (rootState !== undefined) {
+    ancestry.rootState = rootState;
+  }
+  return ancestry;
 }
 
 /**

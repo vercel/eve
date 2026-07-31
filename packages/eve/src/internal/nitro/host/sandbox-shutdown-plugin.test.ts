@@ -64,7 +64,7 @@ describe("installSandboxShutdownHandlers", () => {
 
   it("stops tracked sandboxes and exits 143 on SIGTERM", async () => {
     const handle = { shutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ backendName: "docker", handle, sessionKey: "session-1" });
+    trackActiveSandboxHandle({ provider: "docker", handle, resourceId: "session-1" });
     const fakeProcess = createFakeProcess();
 
     installSandboxShutdownHandlers({ log: () => {}, process: fakeProcess });
@@ -78,7 +78,7 @@ describe("installSandboxShutdownHandlers", () => {
 
   it("stops tracked sandboxes and exits 130 on SIGINT", async () => {
     const handle = { shutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ backendName: "docker", handle, sessionKey: "session-1" });
+    trackActiveSandboxHandle({ provider: "docker", handle, resourceId: "session-1" });
     const fakeProcess = createFakeProcess();
 
     installSandboxShutdownHandlers({ log: () => {}, process: fakeProcess });
@@ -92,7 +92,7 @@ describe("installSandboxShutdownHandlers", () => {
 
   it("stops tracked sandboxes through the nitro close hook", async () => {
     const handle = { shutdown: vi.fn(async () => {}) };
-    trackActiveSandboxHandle({ backendName: "docker", handle, sessionKey: "session-1" });
+    trackActiveSandboxHandle({ provider: "docker", handle, resourceId: "session-1" });
     let closeHandler: (() => Promise<void>) | undefined;
     const nitroApp = {
       hooks: {
@@ -121,7 +121,7 @@ describe("runSandboxShutdown", () => {
     vi.useFakeTimers();
     try {
       const handle = { shutdown: vi.fn(() => new Promise<void>(() => {})) };
-      trackActiveSandboxHandle({ backendName: "docker", handle, sessionKey: "session-1" });
+      trackActiveSandboxHandle({ provider: "docker", handle, resourceId: "session-1" });
       const log = vi.fn();
 
       const shutdown = runSandboxShutdown(log);

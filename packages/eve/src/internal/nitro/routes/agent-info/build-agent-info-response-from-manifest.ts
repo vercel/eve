@@ -173,11 +173,8 @@ export function buildAgentInfoResponseFromManifest(
         ? null
         : {
             ...toSource(manifest.sandbox),
-            description: manifest.sandbox.description,
-            hasBootstrap: false,
-            hasOnSession: false,
-            revalidationKey: manifest.sandbox.revalidationKey,
             sourceHash: manifest.sandbox.sourceHash,
+            templateExports: manifest.sandbox.templateExports,
           },
     schedules: data.schedules.map(renderSchedule),
     skills: {

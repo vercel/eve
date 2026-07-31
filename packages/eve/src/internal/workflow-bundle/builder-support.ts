@@ -322,7 +322,7 @@ export async function bundleWorkflowStepRegistrations(input: {
   const chunk = await buildSingleRolldownChunk(`step registrations bundle for "${input.outfile}"`, {
     cwd: input.workingDir,
     input: WORKFLOW_VIRTUAL_ENTRY_ID,
-    // Optional runtime packages (the just-bash sandbox engine and its
+    // Optional runtime packages (the just-bash sandbox provider and its
     // native codecs) resolve lazily against the application install at
     // run time; inlining them would drag platform-specific `.node`
     // binaries into the step bundle.

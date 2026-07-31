@@ -1,6 +1,6 @@
 /**
  * Stable root directory for every workspace eve exposes to agents and
- * sandbox backends.
+ * sandbox providers.
  *
  * This is both the model-facing logical path and the live `bash` cwd
  * for every backend. Backends must initialize their filesystems so

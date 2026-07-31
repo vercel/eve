@@ -24,7 +24,7 @@ const SANDBOX_DIRECTORY_NAME = "sandbox";
 
 /**
  * Subdirectory inside the sandbox folder that mounts authored files
- * into the live sandbox cwd at session bootstrap.
+ * into the build-prewarmed template before authored preparation.
  */
 const SANDBOX_WORKSPACE_DIRECTORY_NAME = "workspace";
 

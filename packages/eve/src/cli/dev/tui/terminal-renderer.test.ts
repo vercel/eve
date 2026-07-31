@@ -2897,13 +2897,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     process.stdout.write('eve: sandbox template "root" (microsandbox): checking cached snapshot\n');
     process.stdout.write("eve: initializing 3 sandbox templates...\n");
-    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
+    process.stdout.write('eve: built sandbox template "root" on provider "microsandbox".\n');
     process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain(
-      'sandbox · built sandbox template "root" on backend "microsandbox".',
+      'sandbox · built sandbox template "root" on provider "microsandbox".',
     );
     expect(snapshot).not.toContain("initializing 3 sandbox templates");
     expect(snapshot).not.toContain("checking cached snapshot");
@@ -2924,7 +2924,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
+    process.stdout.write('eve: built sandbox template "root" on provider "microsandbox".\n');
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -2944,13 +2944,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
+    process.stdout.write('eve: built sandbox template "root" on provider "microsandbox".\n');
     process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain(
-      'sandbox · built sandbox template "root" on backend "microsandbox".',
+      'sandbox · built sandbox template "root" on provider "microsandbox".',
     );
     expect(snapshot).toContain("ordinary stdout log");
   });
@@ -2969,12 +2969,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     renderer.renderSandboxLog?.('eve: sandbox template "root" (docker): checking Docker daemon');
     renderer.renderSandboxLog?.("eve: initializing 3 sandbox templates...");
-    renderer.renderSandboxLog?.('eve: built sandbox template "root" on backend "docker".');
+    renderer.renderSandboxLog?.('eve: built sandbox template "root" on provider "docker".');
     renderer.renderSandboxLog?.("ordinary stdout log");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain('sandbox · built sandbox template "root" on backend "docker".');
+    expect(snapshot).toContain('sandbox · built sandbox template "root" on provider "docker".');
     expect(snapshot).not.toContain("initializing 3 sandbox templates");
     expect(snapshot).not.toContain("checking Docker daemon");
     expect(snapshot).not.toContain("ordinary stdout log");

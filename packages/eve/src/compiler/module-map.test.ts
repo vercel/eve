@@ -32,6 +32,7 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
     remoteAgents: [],
     schedules: [],
     sandbox: null,
+    sandboxTemplateReferences: {},
     sandboxWorkspaces: [],
     skills: [],
     subagentEdges: [],

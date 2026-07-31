@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { Readable } from "node:stream";
+
+import { nodeReadableToWebStream } from "#execution/sandbox/stream-utils.js";
 
 /**
  * Buffered result of one `docker …` invocation.
@@ -26,7 +27,7 @@ export interface DockerRunOptions {
 /**
  * Handle to one streaming `docker …` invocation (e.g. `docker exec`).
  * Mirrors the AI SDK `Experimental_SandboxProcess` stream/wait/kill
- * shape so the sandbox engine can adapt it directly.
+ * shape so the sandbox provider can adapt it directly.
  */
 export interface DockerProcess {
   readonly stdout: ReadableStream<Uint8Array>;
@@ -36,8 +37,8 @@ export interface DockerProcess {
 }
 
 /**
- * Minimal Docker CLI driver the local sandbox engine runs on. A thin
- * subprocess wrapper in production; injectable so engine logic is unit
+ * Minimal Docker CLI driver the local sandbox provider runs on. A thin
+ * subprocess wrapper in production; injectable so provider logic is unit
  * testable without a Docker daemon.
  */
 export interface DockerCli {
@@ -56,11 +57,11 @@ export class DockerUnavailableError extends Error {
   readonly hint =
     "Install and start Docker Desktop, OrbStack, Colima, or another runtime exposing a " +
     "Docker-compatible `docker` CLI (or point EVE_DOCKER_PATH at one, e.g. Podman). " +
-    "Alternatively use microsandbox(), the dependency-free justbash(), " +
-    "vercel(), or defaultSandbox() to pick by availability.";
+    "Alternatively use MicrosandboxSandbox, the dependency-free JustBashSandbox, " +
+    "VercelSandbox, or DefaultSandbox.";
 
   constructor(cause?: unknown) {
-    super("The Docker sandbox backend requires Docker, but the `docker` CLI was not found.", {
+    super("The Docker sandbox provider requires Docker, but the `docker` CLI was not found.", {
       cause,
     });
     this.name = "DockerUnavailableError";
@@ -74,13 +75,12 @@ export class DockerDaemonUnavailableError extends Error {
   /** Structured remediation, surfaced by the semantic-error catalog. */
   readonly hint =
     "Start Docker Desktop (or your Docker-compatible runtime) and retry. Alternatively use " +
-    "microsandbox(), the dependency-free justbash() (installed automatically " +
-    "by `eve dev`, or `pnpm add -D just-bash`), vercel(), or defaultSandbox() " +
-    "to pick by availability.";
+    "MicrosandboxSandbox, the dependency-free JustBashSandbox (installed automatically " +
+    "by `eve dev`, or `pnpm add -D just-bash`), VercelSandbox, or DefaultSandbox.";
 
   constructor(detail: string) {
     super(
-      "The Docker sandbox backend requires a running Docker daemon, but it is not reachable. " +
+      "The Docker sandbox provider requires a running Docker daemon, but it is not reachable. " +
         `Docker reported: ${detail}`,
     );
     this.name = "DockerDaemonUnavailableError";
@@ -88,7 +88,7 @@ export class DockerDaemonUnavailableError extends Error {
 }
 
 /**
- * Verifies the Docker daemon answers before the engine performs its
+ * Verifies the Docker daemon answers before the provider performs its
  * first real operation, converting CLI/daemon failures into actionable
  * errors instead of letting individual commands fail obscurely.
  */
@@ -108,8 +108,8 @@ let cachedDockerAvailability: boolean | undefined;
 
 /**
  * Synchronously probes whether a Docker daemon is reachable, for
- * `defaultSandbox()`'s availability chain. The result is cached for the
- * process lifetime: backend selection must be stable, and the probe
+ * `DefaultSandbox` availability chain. The result is cached for the
+ * process lifetime: provider selection must be stable, and the probe
  * costs a subprocess round-trip.
  */
 export function isDockerDaemonAvailableSync(): boolean {
@@ -181,8 +181,8 @@ export function createDockerCli(): DockerCli {
       exit.catch(() => {});
 
       return {
-        stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-        stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+        stdout: nodeReadableToWebStream(child.stdout),
+        stderr: nodeReadableToWebStream(child.stderr),
         async wait() {
           return { exitCode: await exit };
         },

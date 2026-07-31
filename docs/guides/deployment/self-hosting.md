@@ -1,6 +1,6 @@
 ---
 title: "Self-host eve"
-description: "Run an eve agent as a Node service with your own workflow storage, sandbox backend, and routing."
+description: "Run an eve agent as a Node service with your own workflow storage, sandbox provider, and routing."
 ---
 
 Self-host eve when you operate a Node service, container platform, or reverse proxy. You run eve’s Nitro server and choose the infrastructure that stores workflows and executes sandbox sessions.
@@ -46,11 +46,11 @@ The package must export a default factory or `createWorld()` function. Read cred
 
 See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying Workflow software development kit (SDK) abstraction.
 
-## Select a sandbox backend
+## Select a sandbox
 
-`defaultBackend()` selects a local sandbox backend in availability order. You can instead select Docker, microsandbox, or a custom `SandboxBackend` adapter for your container, virtual machine, or isolation service.
+With no authored definition, `DefaultSandbox` selects a local provider in availability order. You can instead return `DockerSandbox.create()`, `MicrosandboxSandbox.create()`, a local filesystem sandbox, or a custom durable `Sandbox` implementation.
 
-Don’t select `vercel()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for backend configuration and selection order.
+Don’t return `VercelSandbox.create()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for provider configuration, templates, and selection order.
 
 ## Configure proxy routes
 
@@ -85,4 +85,4 @@ Use these guides to secure and observe the deployed agent:
 
 - [Auth and route protection](../auth-and-route-protection): configure the host’s route policy
 - [Observability](../instrumentation): export traces and diagnose runtime failures
-- [Sandbox](../../sandbox): select and secure a sandbox backend
+- [Sandbox](../../sandbox): select and secure a sandbox provider

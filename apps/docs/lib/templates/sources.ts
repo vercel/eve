@@ -307,13 +307,12 @@ You are the organization's design collaborator. Give decisive, practical design 
       "agent/sandbox/sandbox.ts",
       "typescript",
       `import { defineSandbox } from 'eve/sandbox';
-import { vercel } from 'eve/sandbox/vercel';
+import { VercelSandbox } from 'eve/sandbox/vercel';
 
-export default defineSandbox({
-  backend: vercel({ networkPolicy: 'deny-all' }),
-  async onSession({ use }) {
-    await use({ networkPolicy: 'deny-all' });
-  },
+export default defineSandbox(() => {
+  return VercelSandbox.create({
+    networkPolicy: 'deny-all',
+  });
 });
 `,
     ),

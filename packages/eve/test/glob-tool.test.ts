@@ -32,7 +32,7 @@ function createFakeAccess(
   const probeExitCode = options.probeExitCode ?? 0;
   return {
     async captureState() {
-      return { initialized: false, session: null };
+      return null;
     },
 
     async get() {

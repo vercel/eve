@@ -1,0 +1,15 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "state",
+  "epoch": 3,
+  "sha256": "86af08ad0a61a698ea364619e9bc8a85be642be7a52e3e80da7879fcc3f76d41",
+  "exports": [
+    "Session",
+    "SessionAuth",
+    "SessionAuthContext",
+    "SessionContext",
+    "SessionParent",
+    "SessionTurn",
+    "defineState"
+  ]
+}

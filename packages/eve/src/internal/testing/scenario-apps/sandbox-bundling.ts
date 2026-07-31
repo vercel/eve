@@ -3,7 +3,7 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 /**
  * Scenario-tier descriptor exercising sandbox-bundling diagnostics. Used by
  * the Vercel e2e deployment tests to verify the hosted bundle loads cleanly:
- * the local sandbox backend (Docker + optional just-bash engines) must be
+ * the local sandbox providers (Docker plus optional just-bash and microsandbox) must be
  * pruned and the vendored `@vercel/sandbox` chunk must resolve.
  */
 export const SANDBOX_BUNDLING_DESCRIPTOR: ScenarioAppDescriptor = {

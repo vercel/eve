@@ -7,16 +7,16 @@ import {
   copyDirectoryAtomically,
   createFileBackedInternalSandboxSession,
   pathExists,
-  resolveLocalBackendSessionRootPath,
-  resolveLocalBackendTemplateRootPath,
-  resolveLocalBackendTemplatesDirectory,
+  resolveLocalProviderSessionRootPath,
+  resolveLocalProviderTemplateRootPath,
+  resolveLocalProviderTemplatesDirectory,
   touchDirectory,
-  writeSandboxSeedFiles,
-} from "#execution/sandbox/bindings/local-backend-utils.js";
+} from "#execution/sandbox/bindings/local-workspace-utils.js";
 import {
   createBashSandbox,
-  createJustBashHandle,
+  createJustBashSandboxSession,
   justBashSetNetworkPolicyUnsupported,
+  type BashSandbox,
 } from "#execution/sandbox/bindings/just-bash-runtime.js";
 import {
   LOCAL_SANDBOX_TEMPLATE_RECENT_WINDOW_MS,
@@ -26,62 +26,91 @@ import {
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
-import type {
-  SandboxBackend,
-  SandboxBackendCreateInput,
-  SandboxBackendHandle,
-  SandboxBackendPrewarmInput,
-  SandboxBackendPrewarmResult,
-} from "#public/definitions/sandbox-backend.js";
-import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
+import {
+  SandboxResourceUnavailableError,
+  SandboxTemplateUnavailableError,
+} from "#shared/sandbox-errors.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
+import type { SandboxProviderContext } from "#shared/sandbox-value.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const JUST_BASH_CACHE_DIRECTORY_NAME = "just-bash";
 
 /**
- * Stable backend name. Participates in template/session key derivation
+ * Stable provider name. Participates in template/session key derivation
  * and persisted reconnect state.
  */
-export const JUST_BASH_BACKEND_NAME = "just-bash";
+export const JUST_BASH_PROVIDER = "just-bash";
 
-/**
- * Construction input for {@link createJustBashSandboxBackend}. Internal —
- * the public surface is the `justbash()` factory under
- * `eve/sandbox`.
- */
-export interface CreateJustBashSandboxBackendInput {
+export interface CreateJustBashSandboxProviderInput {
   readonly createOptions?: JustBashSandboxCreateOptions;
 }
 
+export interface JustBashSandboxTemplateReference extends JsonObject {
+  readonly rootPath: string;
+  readonly templateId: string;
+}
+
+export interface JustBashSandboxReference extends JsonObject {
+  readonly configuration: JsonObject;
+  readonly resourceId: string;
+  readonly rootPath: string;
+  readonly sessionKey: string;
+}
+
+export interface JustBashSandboxResource {
+  readonly configuration: JsonObject;
+  readonly sandbox: BashSandbox;
+  readonly session: SandboxSession;
+  shutdown(): Promise<void>;
+}
+
+export interface JustBashSandboxProvider {
+  create(input: {
+    readonly context: SandboxProviderContext;
+    readonly reference?: JustBashSandboxReference;
+    readonly template?: JustBashSandboxTemplateReference;
+  }): Promise<JustBashSandboxResource>;
+  prewarm(input: {
+    readonly appRoot: string;
+    readonly log?: (message: string) => void;
+    readonly prepare: (resource: JustBashSandboxResource) => Promise<void>;
+    readonly templateId: string;
+  }): Promise<JustBashSandboxTemplateReference>;
+}
+
+const activeJustBashResources = new Map<string, Promise<JustBashSandboxResource>>();
+
 /**
- * Creates the just-bash sandbox backend.
+ * Creates the just-bash sandbox provider.
  *
  * The cache directory is derived from the runtime context's `appRoot`
- * on every `create` call so the backend stays stateless and matches
+ * on every `create` call so the provider stays stateless and matches
  * the framework's per-call dispatch contract.
  */
-export function createJustBashSandboxBackend(
-  input: CreateJustBashSandboxBackendInput = {},
-): SandboxBackend {
+export function createJustBashSandboxProvider(
+  input: CreateJustBashSandboxProviderInput = {},
+): JustBashSandboxProvider {
   const autoInstall = input.createOptions?.autoInstall ?? true;
+  const configuration = parseJsonObject(input.createOptions ?? {});
   return {
-    name: JUST_BASH_BACKEND_NAME,
-    async prewarm(prewarmInput: SandboxBackendPrewarmInput): Promise<SandboxBackendPrewarmResult> {
-      const cacheDirectory = resolveSandboxCacheDirectory(prewarmInput.runtimeContext.appRoot);
-      const templateRootPath = resolveTemplateRootPath(cacheDirectory, prewarmInput.templateKey);
+    async prewarm(prewarmInput): Promise<JustBashSandboxTemplateReference> {
+      const cacheDirectory = resolveSandboxCacheDirectory(prewarmInput.appRoot);
+      const templateRootPath = resolveTemplateRootPath(cacheDirectory, prewarmInput.templateId);
 
       if (await pathExists(templateRootPath)) {
         await touchDirectory(templateRootPath);
-        return { reused: true };
+        return { rootPath: templateRootPath, templateId: prewarmInput.templateId };
       }
 
       const temporaryTemplateRootPath = `${templateRootPath}.${randomUUID()}.tmp`;
       let published = false;
       const templateSandbox = await createBashSandbox({
-        appRoot: prewarmInput.runtimeContext.appRoot,
+        appRoot: prewarmInput.appRoot,
         autoInstall,
         rootPath: temporaryTemplateRootPath,
-        sessionKey: prewarmInput.templateKey,
+        sessionKey: prewarmInput.templateId,
       });
       const templateSession = buildSandboxSession(
         createFileBackedInternalSandboxSession({
@@ -92,23 +121,21 @@ export function createJustBashSandboxBackend(
       );
 
       try {
-        await writeSandboxSeedFiles(templateSession, prewarmInput.seedFiles);
-
-        if (prewarmInput.bootstrap !== undefined) {
-          prewarmInput.log?.("running sandbox bootstrap");
-          await prewarmInput.bootstrap({
-            use: async () =>
-              createLoggingSandboxSession({
-                log: prewarmInput.log,
-                session: templateSession,
-              }),
-          });
-        }
+        prewarmInput.log?.("running template preparation");
+        await prewarmInput.prepare({
+          configuration,
+          sandbox: templateSandbox,
+          session: createLoggingSandboxSession({
+            log: prewarmInput.log,
+            session: templateSession,
+          }),
+          async shutdown() {},
+        });
 
         const captured = await templateSandbox.captureState();
         if (captured === null) {
           throw new Error(
-            `Failed to capture local sandbox template state for "${prewarmInput.templateKey}".`,
+            `Failed to capture local sandbox template state for "${prewarmInput.templateId}".`,
           );
         }
 
@@ -118,7 +145,7 @@ export function createJustBashSandboxBackend(
           published = true;
         } catch (error) {
           if (await pathExists(templateRootPath)) {
-            return { reused: true };
+            return { rootPath: templateRootPath, templateId: prewarmInput.templateId };
           }
           throw error;
         }
@@ -129,41 +156,150 @@ export function createJustBashSandboxBackend(
         }
       }
 
-      return { reused: false };
+      return { rootPath: templateRootPath, templateId: prewarmInput.templateId };
     },
-    async create(createInput: SandboxBackendCreateInput): Promise<SandboxBackendHandle> {
-      const cacheDirectory = resolveSandboxCacheDirectory(createInput.runtimeContext.appRoot);
+    async create(createInput): Promise<JustBashSandboxResource> {
+      const cacheDirectory = resolveSandboxCacheDirectory(createInput.context.appRoot);
+      const persistedIdentity = createInput.reference;
+      const sessionKey = createInput.reference?.sessionKey ?? createInput.context.resourceId;
       const sessionRootPath =
-        getLocalRootPath(createInput.existingMetadata) ??
-        resolveSessionRootPath(cacheDirectory, createInput.sessionKey);
-
-      if (!(await pathExists(sessionRootPath))) {
-        if (createInput.templateKey === null) {
-          await mkdir(sessionRootPath, { recursive: true });
-        } else {
-          const templateRootPath = resolveTemplateRootPath(cacheDirectory, createInput.templateKey);
-
-          if (!(await pathExists(templateRootPath))) {
-            throw new SandboxTemplateNotProvisionedError({
-              backendName: JUST_BASH_BACKEND_NAME,
-              templateKey: createInput.templateKey,
-            });
-          }
-
-          await copyDirectoryAtomically(templateRootPath, sessionRootPath);
+        persistedIdentity?.rootPath ?? resolveSessionRootPath(cacheDirectory, sessionKey);
+      const active = activeJustBashResources.get(sessionRootPath);
+      if (active !== undefined) {
+        const resource = await expectJustBashResourceIdentity(
+          active,
+          persistedIdentity,
+          sessionKey,
+        );
+        if (await pathExists(sessionRootPath)) {
+          return resource;
+        }
+        await resource.shutdown();
+        if (persistedIdentity !== undefined) {
+          throw new SandboxResourceUnavailableError({
+            provider: JUST_BASH_PROVIDER,
+            sessionKey,
+          });
         }
       }
 
-      const sandbox = await createBashSandbox({
-        appRoot: createInput.runtimeContext.appRoot,
-        autoInstall,
-        rootPath: sessionRootPath,
-        sessionKey: createInput.sessionKey,
-      });
+      let resourcePromise: Promise<JustBashSandboxResource>;
+      resourcePromise = (async () => {
+        let createdSessionRoot = false;
 
-      return createJustBashHandle(sandbox, JUST_BASH_BACKEND_NAME);
+        if (!(await pathExists(sessionRootPath))) {
+          if (createInput.reference !== undefined) {
+            throw new SandboxResourceUnavailableError({
+              provider: JUST_BASH_PROVIDER,
+              sessionKey,
+            });
+          }
+          if (createInput.template === undefined) {
+            await mkdir(sessionRootPath, { recursive: true });
+            createdSessionRoot = true;
+          } else {
+            const templateRootPath = createInput.template.rootPath;
+
+            if (!(await pathExists(templateRootPath))) {
+              throw new SandboxTemplateUnavailableError({
+                provider: JUST_BASH_PROVIDER,
+                templateKey: createInput.template.templateId,
+              });
+            }
+
+            await copyDirectoryAtomically(templateRootPath, sessionRootPath);
+            createdSessionRoot = true;
+          }
+        }
+
+        const sandbox = await createBashSandbox({
+          appRoot: createInput.context.appRoot,
+          autoInstall,
+          resourceId: createdSessionRoot ? randomUUID() : undefined,
+          rootPath: sessionRootPath,
+          sessionKey,
+        });
+        if (
+          persistedIdentity !== undefined &&
+          sandbox.resourceId !== persistedIdentity.resourceId
+        ) {
+          await sandbox.dispose();
+          throw new SandboxResourceUnavailableError({
+            provider: JUST_BASH_PROVIDER,
+            sessionKey,
+          });
+        }
+
+        return {
+          configuration,
+          sandbox,
+          session: createJustBashSandboxSession(sandbox),
+          async shutdown() {
+            if (activeJustBashResources.get(sessionRootPath) === resourcePromise) {
+              activeJustBashResources.delete(sessionRootPath);
+            }
+            await sandbox.dispose();
+          },
+        };
+      })();
+      activeJustBashResources.set(sessionRootPath, resourcePromise);
+
+      try {
+        return await resourcePromise;
+      } catch (error) {
+        if (activeJustBashResources.get(sessionRootPath) === resourcePromise) {
+          activeJustBashResources.delete(sessionRootPath);
+        }
+        throw error;
+      }
     },
   };
+}
+
+async function expectJustBashResourceIdentity(
+  resourcePromise: Promise<JustBashSandboxResource>,
+  reference: JustBashSandboxReference | undefined,
+  sessionKey: string,
+): Promise<JustBashSandboxResource> {
+  const resource = await resourcePromise;
+  if (reference !== undefined && resource.sandbox.resourceId !== reference.resourceId) {
+    throw new SandboxResourceUnavailableError({
+      provider: JUST_BASH_PROVIDER,
+      sessionKey,
+    });
+  }
+  return resource;
+}
+
+export async function referenceJustBashSandboxResource(
+  resource: JustBashSandboxResource,
+): Promise<JustBashSandboxReference> {
+  await resource.sandbox.captureState();
+  return {
+    configuration: resource.configuration,
+    resourceId: resource.sandbox.resourceId,
+    rootPath: resource.sandbox.rootPath,
+    sessionKey: resource.sandbox.sessionKey,
+  };
+}
+
+export async function restoreJustBashSandboxResource(
+  reference: JustBashSandboxReference,
+  context: SandboxProviderContext,
+): Promise<JustBashSandboxResource> {
+  return await createJustBashSandboxProvider({
+    createOptions: decodeJustBashSandboxCreateOptions(reference.configuration),
+  }).create({ context, reference });
+}
+
+function decodeJustBashSandboxCreateOptions(value: JsonObject): JustBashSandboxCreateOptions {
+  if (
+    Object.keys(value).some((key) => key !== "autoInstall") ||
+    (value.autoInstall !== undefined && typeof value.autoInstall !== "boolean")
+  ) {
+    throw new TypeError("Invalid just-bash sandbox configuration in durable state.");
+  }
+  return { autoInstall: value.autoInstall };
 }
 
 /**
@@ -176,7 +312,7 @@ export async function pruneJustBashSandboxTemplates(input: {
   readonly recentWindowMs?: number;
   readonly retainCount?: number;
 }): Promise<void> {
-  const templatesDirectory = resolveLocalBackendTemplatesDirectory(
+  const templatesDirectory = resolveLocalProviderTemplatesDirectory(
     resolveSandboxCacheDirectory(input.appRoot),
     JUST_BASH_CACHE_DIRECTORY_NAME,
   );
@@ -226,7 +362,7 @@ export async function pruneJustBashSandboxTemplates(input: {
 }
 
 function resolveTemplateRootPath(cacheDirectory: string, templateKey: string): string {
-  return resolveLocalBackendTemplateRootPath(
+  return resolveLocalProviderTemplateRootPath(
     cacheDirectory,
     JUST_BASH_CACHE_DIRECTORY_NAME,
     templateKey,
@@ -234,14 +370,9 @@ function resolveTemplateRootPath(cacheDirectory: string, templateKey: string): s
 }
 
 function resolveSessionRootPath(cacheDirectory: string, sessionKey: string): string {
-  return resolveLocalBackendSessionRootPath(
+  return resolveLocalProviderSessionRootPath(
     cacheDirectory,
     JUST_BASH_CACHE_DIRECTORY_NAME,
     sessionKey,
   );
-}
-
-function getLocalRootPath(metadata: Record<string, unknown> | undefined): string | undefined {
-  const rootPath = metadata?.rootPath;
-  return typeof rootPath === "string" ? rootPath : undefined;
 }

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createJustBashSandboxBackend } from "#execution/sandbox/bindings/just-bash.js";
+import { createJustBashSandboxProvider } from "#execution/sandbox/bindings/just-bash.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
-// Simulate an application that configured the just-bash backend without
+// Simulate an application that configured the just-bash provider without
 // the optional `just-bash` package being installed or installable.
 vi.mock("just-bash", () => {
   throw new Error("Cannot find module 'just-bash'");
@@ -11,18 +11,20 @@ vi.mock("just-bash", () => {
 
 const createScratchDirectory = useTemporaryDirectories();
 
-describe("just-bash backend without the optional dependency installed", () => {
+describe("just-bash provider without the optional dependency installed", () => {
   it("fails with an actionable install hint outside eve dev", async () => {
     const appRoot = await createScratchDirectory("eve-just-bash-missing-");
-    const backend = createJustBashSandboxBackend();
+    const provider = createJustBashSandboxProvider();
 
     // Outside `eve dev` (no EVE_DEV flag) the loader must not attempt a
     // package-manager install — it fails actionably instead.
     await expect(
-      backend.create({
-        runtimeContext: { appRoot },
-        sessionKey: "session-missing-dependency",
-        templateKey: null,
+      provider.create({
+        context: {
+          appRoot,
+          resourceId: "session-missing-dependency",
+          signal: new AbortController().signal,
+        },
       }),
     ).rejects.toThrow(/pnpm add -D just-bash/);
   });
@@ -31,13 +33,15 @@ describe("just-bash backend without the optional dependency installed", () => {
     vi.stubEnv("EVE_DEV", "1");
     try {
       const appRoot = await createScratchDirectory("eve-just-bash-no-autoinstall-");
-      const backend = createJustBashSandboxBackend({ createOptions: { autoInstall: false } });
+      const provider = createJustBashSandboxProvider({ createOptions: { autoInstall: false } });
 
       await expect(
-        backend.create({
-          runtimeContext: { appRoot },
-          sessionKey: "session-no-autoinstall",
-          templateKey: null,
+        provider.create({
+          context: {
+            appRoot,
+            resourceId: "session-no-autoinstall",
+            signal: new AbortController().signal,
+          },
         }),
       ).rejects.toThrow(/pnpm add -D just-bash/);
     } finally {

@@ -1,8 +1,7 @@
-import type { Optional } from "#shared/optional.js";
-import type {
-  SandboxDefinitionWithBootstrap as SharedSandboxDefinitionWithBootstrap,
-  SandboxDefinitionWithoutBootstrap as SharedSandboxDefinitionWithoutBootstrap,
-} from "#shared/sandbox-definition.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { Sandbox } from "#shared/sandbox-value.js";
+
+const SANDBOX_DEFINITION = Symbol.for("eve.sandbox-definition");
 
 export type {
   SandboxCommandResult,
@@ -18,38 +17,54 @@ export type {
   SandboxWriteFileOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
-export type {
-  SandboxBootstrapUseFn,
-  SandboxRevalidationKeyFn,
-  SandboxSessionUseFn,
-  SandboxBootstrapContext,
-  SandboxSessionContext,
-} from "#shared/sandbox-definition.js";
+export type { Sandbox } from "#shared/sandbox-value.js";
+export type { SandboxTemplate } from "#shared/sandbox-template.js";
 
 /**
- * The shape passed to {@link defineSandbox}: a discriminated union over
- * whether a `bootstrap` hook is present. `backend` is optional here (it is
- * required on the shared base): when omitted, eve substitutes
- * `defaultBackend()` at runtime. `BO`/`SO` type the options for the
- * bootstrap-use and session-use functions respectively.
+ * Sandbox value exposed by a parent or root agent.
  */
-export type SandboxDefinition<BO = Record<string, never>, SO = Record<string, never>> =
-  | Optional<SharedSandboxDefinitionWithBootstrap<BO, SO>, "backend">
-  | Optional<SharedSandboxDefinitionWithoutBootstrap<BO, SO>, "backend">;
+export interface SandboxDefinitionAncestor {
+  readonly sandbox: Promise<Sandbox>;
+}
 
 /**
- * Defines the sandbox an agent (or subagent) runs in. Authored at the
- * path-derived location `agent/sandbox.ts` (or `agent/sandbox/sandbox.ts`
- * when paired with a `workspace/` folder); subagents use
- * `subagents/<name>/sandbox.ts`.
+ * Runtime context passed to an authored sandbox definition.
+ */
+export interface SandboxDefinitionContext {
+  readonly parent: SandboxDefinitionAncestor | null;
+  readonly root: SandboxDefinitionAncestor | null;
+  readonly runtime: {
+    readonly mode: "development" | "production";
+  };
+  readonly session: SessionContext["session"];
+  readonly signal: AbortSignal;
+}
+
+/**
+ * Chooses or creates the durable sandbox used by one agent session.
+ */
+export type SandboxDefinition = (context: SandboxDefinitionContext) => Sandbox | Promise<Sandbox>;
+
+/**
+ * Defines how an agent obtains its sandbox.
  *
- * Returns the definition unchanged: this is an identity helper that only
- * attaches types. `backend` is optional and defaults to `defaultBackend()`
- * at runtime. The `BO`/`SO` generics type the options accepted by the
- * `use()` calls inside `bootstrap` and `onSession` respectively.
+ * The function runs only when the owning session has no compatible persisted
+ * sandbox. Return the actual durable sandbox to use, including a parent's
+ * sandbox when the child should share it.
  */
-export function defineSandbox<BO = Record<string, never>, SO = Record<string, never>>(
-  definition: SandboxDefinition<BO, SO>,
-): SandboxDefinition<BO, SO> {
+export function defineSandbox(definition: SandboxDefinition): SandboxDefinition {
+  Object.defineProperty(definition, SANDBOX_DEFINITION, {
+    configurable: false,
+    enumerable: false,
+    value: true,
+    writable: false,
+  });
   return definition;
+}
+
+/**
+ * Returns whether a module export was created with {@link defineSandbox}.
+ */
+export function isSandboxDefinition(value: unknown): value is SandboxDefinition {
+  return typeof value === "function" && Reflect.get(value, SANDBOX_DEFINITION) === true;
 }

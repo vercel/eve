@@ -122,12 +122,8 @@ export interface AgentInfoHookEntry extends AgentInfoSource {
 }
 
 export interface AgentInfoSandboxEntry extends AgentInfoSource {
-  readonly backendKind?: string;
-  readonly description?: string;
-  readonly hasBootstrap: boolean;
-  readonly hasOnSession: boolean;
-  readonly revalidationKey?: string;
-  readonly sourceHash?: string;
+  readonly sourceHash: string;
+  readonly templateExports: readonly string[];
 }
 
 export interface AgentInformation {
@@ -460,10 +456,10 @@ function ensureAgentInformation(value: unknown): AgentInformation {
 
   if (payload.sandbox !== null) {
     const sandbox = assertSource(payload.sandbox);
-    expectOptionalString(sandbox.backendKind, INFO_API_PATH);
-    expectOptionalString(sandbox.description, INFO_API_PATH);
-    expectBoolean(sandbox.hasBootstrap, INFO_API_PATH);
-    expectBoolean(sandbox.hasOnSession, INFO_API_PATH);
+    expectString(sandbox.sourceHash, INFO_API_PATH);
+    expectArray(sandbox.templateExports, INFO_API_PATH).forEach((exportName) => {
+      expectString(exportName, INFO_API_PATH);
+    });
   }
 
   expectArray(payload.schedules, INFO_API_PATH).forEach((entry) => {

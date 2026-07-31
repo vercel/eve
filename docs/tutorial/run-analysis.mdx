@@ -9,7 +9,7 @@ This takes two pieces. First seed reference files the model can read, then compu
 
 ## Seed the schema into the workspace
 
-Mount the warehouse schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout, where anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
+Hydrate the warehouse schema into the sandbox so the model isn't guessing at table shapes. The folder sandbox layout puts anything under `agent/sandbox/workspace/` into `/workspace` during template preparation.
 
 ```text
 agent/sandbox/
@@ -67,7 +67,7 @@ export default defineTool({
 });
 ```
 
-This tool shells out to `python` with matplotlib, which the sandbox base image does not preinstall. Install the runtime in sandbox bootstrap (or bake it into a custom image) so `python plot.py` resolves. See [Sandbox](../sandbox) for where bootstrap runs.
+This tool shells out to `python` with matplotlib, which the sandbox base image does not preinstall. Install the runtime in an exported sandbox template's `prepare()` callback (or bake it into a custom image) so `python plot.py` resolves. See [Sandbox](../sandbox) for the build-time template lifecycle.
 
 Now ask for something past plain SQL. If you skipped Step 4, this still works against the Step 3 sample dataset:
 
@@ -81,7 +81,7 @@ The model queries for the numbers (the warehouse from Step 4, or the sample data
 
 The sandbox has no `process.env` and no access to your app's secrets. Your warehouse token lives in the app runtime, and firewall brokering is the only path it takes to the warehouse host. It never enters the sandbox process.
 
-The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
+The local provider runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, providers, and network policy are in [Sandbox](../sandbox).
 
 → Next: [Remember definitions](./remember-definitions)
 

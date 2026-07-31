@@ -22,13 +22,18 @@ export async function computeDevelopmentHostFingerprint(
           sourceRoot: mount.sourceRoot,
         }))
         .sort((left, right) => left.sourceRoot.localeCompare(right.sourceRoot)),
-      sandboxBackends: [
-        ...new Set(
-          agentNodes
-            .map((node) => node.sandbox?.backendName)
-            .filter((backendName): backendName is string => backendName !== undefined),
-        ),
-      ].sort((left, right) => left.localeCompare(right)),
+      sandboxes: agentNodes
+        .flatMap((node) =>
+          node.sandbox === null
+            ? []
+            : [
+                {
+                  sourceHash: node.sandbox.sourceHash,
+                  templateExports: node.sandbox.templateExports,
+                },
+              ],
+        )
+        .sort((left, right) => left.sourceHash.localeCompare(right.sourceHash)),
     },
     channels: computeChannelRouteRegistrations(host),
     environment: readDevelopmentEnvironmentHostValues(host.appRoot),

@@ -5,9 +5,10 @@ import { describe, expect, it } from "vitest";
 
 import { discoverAgent } from "../../src/discover/discover-agent.js";
 import { resolveDiscoveryProject } from "../../src/discover/project.js";
-// The just-bash engine keeps this scenario hermetic (no Docker daemon
+// The just-bash provider keeps this scenario hermetic (no Docker daemon
 // requirement); the workspace devDependency provides the install.
-import { createJustBashSandboxBackend } from "../../src/execution/sandbox/bindings/just-bash.js";
+import { createJustBashSandboxProvider } from "../../src/execution/sandbox/bindings/just-bash.js";
+import { writeSandboxSeedFiles } from "../../src/execution/sandbox/bindings/local-workspace-utils.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { SANDBOX_WORKSPACES_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/sandbox-workspaces.js";
 import { materializeWorkspaceDirectory } from "../../src/runtime/workspace/seed-files.js";
@@ -28,7 +29,7 @@ describe("sandbox workspace folder convention", () => {
     // files. Production routes these through
     // `materializeWorkspaceResources` → `prewarmSandboxes`; this test
     // exercises the disk → sandbox round trip directly with the
-    // discovery output so it can stay focused on the local backend.
+    // discovery output so it can stay focused on the local provider.
     const files = (
       await Promise.all(
         discovered.manifest.sandboxWorkspaces.map((workspace) =>
@@ -38,18 +39,26 @@ describe("sandbox workspace folder convention", () => {
     ).flat();
 
     const appRoot = await createScratchDirectory("eve-sandbox-workspace-folders-");
-    const backend = createJustBashSandboxBackend();
+    const provider = createJustBashSandboxProvider();
 
-    await backend.prewarm({
-      runtimeContext: { appRoot },
-      seedFiles: files.map((file) => ({ content: file.content, path: file.path })),
-      templateKey: "template-default-workspace",
+    const template = await provider.prewarm({
+      appRoot,
+      async prepare(resource) {
+        await writeSandboxSeedFiles(
+          resource.session,
+          files.map((file) => ({ content: file.content, path: file.path })),
+        );
+      },
+      templateId: "template-default-workspace",
     });
 
-    const handle = await backend.create({
-      runtimeContext: { appRoot },
-      sessionKey: "session-default-workspace",
-      templateKey: "template-default-workspace",
+    const handle = await provider.create({
+      context: {
+        appRoot,
+        resourceId: "session-default-workspace",
+        signal: new AbortController().signal,
+      },
+      template,
     });
 
     const notesContent = await handle.session.readTextFile({ path: "/workspace/notes.md" });
@@ -67,23 +76,26 @@ describe("sandbox workspace folder convention", () => {
     const roundTrip = await handle.session.readTextFile({ path: "/workspace/authored.txt" });
     expect(roundTrip).toBe("round-trip");
 
-    await handle.shutdown();
+    await handle.sandbox.dispose();
   });
 
   it("opens an empty prewarmed template when the sandbox has no authored workspace files", async () => {
     const appRoot = await createScratchDirectory("eve-sandbox-no-workspace-");
-    const backend = createJustBashSandboxBackend();
+    const provider = createJustBashSandboxProvider();
 
-    await backend.prewarm({
-      runtimeContext: { appRoot },
-      seedFiles: [],
-      templateKey: "template-empty-workspace",
+    const template = await provider.prewarm({
+      appRoot,
+      async prepare() {},
+      templateId: "template-empty-workspace",
     });
 
-    const handle = await backend.create({
-      runtimeContext: { appRoot },
-      sessionKey: "session-empty-workspace",
-      templateKey: "template-empty-workspace",
+    const handle = await provider.create({
+      context: {
+        appRoot,
+        resourceId: "session-empty-workspace",
+        signal: new AbortController().signal,
+      },
+      template,
     });
 
     // An empty prewarmed template snapshots a clean `/workspace` and
@@ -95,7 +107,7 @@ describe("sandbox workspace folder convention", () => {
     expect(result.exitCode).toBe(0);
     expect(Number(result.stdout.trim())).toBe(0);
 
-    await handle.shutdown();
+    await handle.sandbox.dispose();
   });
 
   it("materializes a fixture default workspace folder into a deterministic file list", async () => {

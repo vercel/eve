@@ -19,6 +19,8 @@ import { ContextKey } from "#context/key.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { InternalSandboxTemplate } from "#shared/sandbox-template.js";
+import type { Sandbox, SandboxProviderContext } from "#shared/sandbox-value.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -87,6 +89,14 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCa
 
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
+export const SandboxProviderContextKey = new ContextKey<SandboxProviderContext>(
+  "eve.sandboxProviderContext",
+);
+export const SandboxCreatedKey = new ContextKey<(sandbox: Sandbox) => void>("eve.sandboxCreated");
+export const SandboxTemplateBindingsKey = new ContextKey<
+  ReadonlyMap<InternalSandboxTemplate, unknown>
+>("eve.sandboxTemplateBindings");
+export const TurnAbortSignalKey = new ContextKey<AbortSignal>("eve.turnAbortSignal");
 
 // ---------------------------------------------------------------------------
 // Dynamic model keys

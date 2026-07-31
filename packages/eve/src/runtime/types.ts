@@ -33,8 +33,8 @@ import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
-import type { SandboxBackend } from "#shared/sandbox-backend.js";
-import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
+import type { SandboxDefinition } from "#public/definitions/sandbox.js";
+import type { SandboxTemplate } from "#shared/sandbox-template.js";
 import type { ToolSchema } from "#shared/tool-schema.js";
 
 /**
@@ -121,27 +121,18 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
  * Runtime-owned authored sandbox definition resolved from a compiled module
  * map.
  *
- * The resolved `backend` is non-optional: every sandbox in the runtime
- * graph carries a concrete SandboxBackend value, even when the
- * authored definition omits `backend`. The unauthored case is filled
- * in by `defaultSandbox()` (which itself selects between
- * `vercel()`, `docker()`, `microsandbox()`, and `justbash()` based on the current
- * environment).
+ * The definition is invoked only when a session has no compatible durable
+ * sandbox. Named template exports are build-time values and are never returned
+ * as the session sandbox.
  */
 export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
-  readonly bootstrap?: (input: SandboxBootstrapContext) => Promise<void> | void;
-  readonly revalidationKey?: string;
-  readonly sourceHash?: string;
-  /**
-   * Resolved backend value. The authored `SandboxDefinition.backend`
-   * accepts either a `SandboxBackend` or a `() => SandboxBackend`; by
-   * the time it reaches the runtime the function form has been
-   * unwrapped via `lazyBackend(...)` so consumers always see a plain
-   * value.
-   */
-  readonly backend: SandboxBackend;
-  readonly description?: string;
-  readonly onSession?: (input: SandboxSessionContext) => Promise<void> | void;
+  readonly definition: SandboxDefinition;
+  readonly sourceHash: string;
+  readonly templates: ReadonlyArray<{
+    readonly exportName: string;
+    readonly reference?: unknown;
+    readonly template: SandboxTemplate;
+  }>;
 };
 
 /**

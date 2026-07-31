@@ -4,7 +4,7 @@ const passThroughMessage = (link: { readonly message: string }) => link.message;
 const passThroughHint = (link: { readonly hint?: string }) => link.hint;
 
 /**
- * Error class names come from eve's own sandbox backends —
+ * Error class names come from eve's own sandbox providers —
  * `DockerUnavailableError` / `DockerDaemonUnavailableError` in
  * `execution/sandbox/bindings/docker-cli.ts` and
  * `MicrosandboxDiagnosticError` in

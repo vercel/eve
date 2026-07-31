@@ -122,25 +122,16 @@
       }
     },
     {
-      "name": "public-sandbox-backends",
-      "description": "Public sandbox implementation barrels have matching backend implementation files.",
-      "paths": [
-        "packages/eve/src/public/sandbox/{sandboxName}.ts",
-        "!packages/eve/src/public/sandbox/index.ts",
-        "!packages/eve/src/public/sandbox/*-sandbox.ts"
-      ],
+      "name": "public-sandbox-providers",
+      "description": "Built-in sandbox provider modules export their provider object and matching create options.",
+      "paths": "packages/eve/src/public/sandbox/{sandboxName:matches(^(docker|just-bash|microsandbox|vercel)$)}.ts",
       "must": [
         {
-          "name": "public-sandbox-barrels-must-reexport-their-backend",
-          "description": "Public sandbox barrels re-export their backend factory and create options from matching implementation files.",
+          "name": "public-sandbox-providers-must-export-their-provider-and-options",
+          "description": "Built-in sandbox provider modules export their PascalCase provider object and create options from the matching options file.",
           "must": {
-            "haveFiles": ["backends/${sandboxName}.ts", "${sandboxName}-sandbox.ts"],
-            "export": [
-              {
-                "name": "${sandboxName.toFlatCase()}",
-                "from": "#public/sandbox/backends/${sandboxName}.js"
-              }
-            ],
+            "haveFiles": ["${sandboxName}-sandbox.ts"],
+            "exportConstants": ["${sandboxName.toPascalCase()}Sandbox"],
             "exportTypes": [
               {
                 "name": "${sandboxName.toPascalCase()}SandboxCreateOptions",
@@ -157,27 +148,6 @@
           },
           "must": {
             "exportTypes": ["${sandboxName.toPascalCase()}SandboxCreateOptions"]
-          }
-        },
-        {
-          "name": "public-sandbox-backends-must-export-their-factory",
-          "description": "Public sandbox backend implementation files export the matching backend factory using the public create options type.",
-          "for": {
-            "files": ["backends/${sandboxName}.ts"]
-          },
-          "must": {
-            "importTypes": [
-              {
-                "name": "${sandboxName.toPascalCase()}SandboxCreateOptions",
-                "from": "#public/sandbox/${sandboxName}-sandbox.js"
-              }
-            ],
-            "exportFunctions": [
-              {
-                "name": "${sandboxName.toFlatCase()}",
-                "receiveParamsOfTypes": ["${sandboxName.toPascalCase()}SandboxCreateOptions"]
-              }
-            ]
           }
         }
       ]

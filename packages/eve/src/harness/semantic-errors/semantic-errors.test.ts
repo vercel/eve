@@ -117,7 +117,7 @@ describe("summarizeKnownError (catalog table)", () => {
       title: "docker daemon unreachable",
       error: named(
         "DockerDaemonUnavailableError",
-        "The Docker sandbox backend requires a running Docker daemon.",
+        "The Docker sandbox provider requires a running Docker daemon.",
       ),
       id: "sandbox-docker-daemon-unreachable",
     },

@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createDockerCli, DockerUnavailableError } from "#execution/sandbox/bindings/docker-cli.js";
-import { createDockerSandboxBackend } from "#execution/sandbox/bindings/docker.js";
+import {
+  createDockerSandboxProvider,
+  referenceDockerSandboxResource,
+} from "#execution/sandbox/bindings/docker.js";
+import { writeSandboxSeedFiles } from "#execution/sandbox/bindings/local-workspace-utils.js";
 import {
   createDockerSandboxOptionsHash,
   DEFAULT_DOCKER_SANDBOX_IMAGE,
@@ -11,6 +15,7 @@ import {
 } from "#execution/sandbox/bindings/docker-options.js";
 import { dockerTemplateImageReference } from "#execution/sandbox/bindings/docker-templates.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
+import type { SandboxProviderContext } from "#shared/sandbox-value.js";
 
 // Real-daemon scenarios are opt-in: they pull images and create
 // containers, so CI and dev machines without Docker stay green.
@@ -28,10 +33,14 @@ describe("docker CLI resolution", () => {
     vi.stubEnv("EVE_DOCKER_PATH", "/nonexistent/docker-binary");
     try {
       const appRoot = await createScratchDirectory("eve-docker-missing-");
-      const engine = createDockerSandboxBackend();
+      const provider = createDockerSandboxProvider();
 
       await expect(
-        engine.prewarm({ runtimeContext: { appRoot }, seedFiles: [], templateKey: "tpl-x" }),
+        provider.prewarm({
+          appRoot,
+          async prepare() {},
+          templateId: "tpl-x",
+        }),
       ).rejects.toThrow(DockerUnavailableError);
     } finally {
       vi.unstubAllEnvs();
@@ -39,7 +48,7 @@ describe("docker CLI resolution", () => {
   });
 });
 
-describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon", () => {
+describe.runIf(runDockerScenarios)("docker sandbox provider against a real daemon", () => {
   const runId = randomUUID().slice(0, 8);
   const templateKey = `eve-sbx-tpl-test-${runId}`;
   const templateImageReference = dockerTemplateImageReference({
@@ -55,8 +64,16 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
     return key;
   }
 
-  function createEngine() {
-    return createDockerSandboxBackend({ createOptions: { image: TEST_IMAGE } });
+  function createProvider() {
+    return createDockerSandboxProvider({ createOptions: { image: TEST_IMAGE } });
+  }
+
+  function providerContext(appRoot: string, resourceId: string): SandboxProviderContext {
+    return {
+      appRoot,
+      resourceId,
+      signal: new AbortController().signal,
+    };
   }
 
   afterAll(async () => {
@@ -70,26 +87,34 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
     "prewarms a template with seed files and opens a session from it",
     async () => {
       const appRoot = await createScratchDirectory("eve-docker-scenario-");
-      const engine = createEngine();
+      const provider = createProvider();
 
-      const first = await engine.prewarm({
-        runtimeContext: { appRoot },
-        seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
-        templateKey,
+      const first = await provider.prewarm({
+        appRoot,
+        async prepare(resource) {
+          await writeSandboxSeedFiles(resource.session, [
+            { content: "# Weather skill\n", path: "/workspace/skills/weather.md" },
+          ]);
+        },
+        templateId: templateKey,
       });
-      expect(first).toEqual({ reused: false });
+      expect(first).toEqual({ image: templateImageReference, templateId: templateKey });
 
-      const second = await engine.prewarm({
-        runtimeContext: { appRoot },
-        seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
-        templateKey,
+      const second = await provider.prewarm({
+        appRoot,
+        async prepare(resource) {
+          await writeSandboxSeedFiles(resource.session, [
+            { content: "# Weather skill\n", path: "/workspace/skills/weather.md" },
+          ]);
+        },
+        templateId: templateKey,
       });
-      expect(second).toEqual({ reused: true });
+      expect(second).toEqual(first);
 
-      const handle = await engine.create({
-        runtimeContext: { appRoot },
-        sessionKey: nextSessionKey("seeded"),
-        templateKey,
+      const sessionKey = nextSessionKey("seeded");
+      const handle = await provider.create({
+        context: providerContext(appRoot, sessionKey),
+        template: first,
       });
 
       const result = await handle.session.run({
@@ -105,11 +130,10 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
     "runs commands with env vars and streams spawned output",
     async () => {
       const appRoot = await createScratchDirectory("eve-docker-scenario-");
-      const engine = createEngine();
-      const handle = await engine.create({
-        runtimeContext: { appRoot },
-        sessionKey: nextSessionKey("env"),
-        templateKey,
+      const provider = createProvider();
+      const handle = await provider.create({
+        context: providerContext(appRoot, nextSessionKey("env")),
+        template: { image: templateImageReference, templateId: templateKey },
       });
 
       const result = await handle.session.run({
@@ -136,11 +160,10 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
     "kill() terminates the spawned process tree inside the container",
     async () => {
       const appRoot = await createScratchDirectory("eve-docker-scenario-");
-      const engine = createEngine();
-      const handle = await engine.create({
-        runtimeContext: { appRoot },
-        sessionKey: nextSessionKey("kill-tree"),
-        templateKey,
+      const provider = createProvider();
+      const handle = await provider.create({
+        context: providerContext(appRoot, nextSessionKey("kill-tree")),
+        template: { image: templateImageReference, templateId: templateKey },
       });
 
       // Counts container processes whose cmdline matches the sentinel
@@ -186,11 +209,10 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
     "round-trips files, preserves binary bytes, and removes paths",
     async () => {
       const appRoot = await createScratchDirectory("eve-docker-scenario-");
-      const engine = createEngine();
-      const handle = await engine.create({
-        runtimeContext: { appRoot },
-        sessionKey: nextSessionKey("files"),
-        templateKey,
+      const provider = createProvider();
+      const handle = await provider.create({
+        context: providerContext(appRoot, nextSessionKey("files")),
+        template: { image: templateImageReference, templateId: templateKey },
       });
 
       await handle.session.writeTextFile({ content: "hello", path: "deep/nested/note.txt" });
@@ -219,16 +241,15 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
     "flips a deny-all-created session to allow-all and back",
     async () => {
       const appRoot = await createScratchDirectory("eve-docker-scenario-");
-      const engine = createDockerSandboxBackend({
+      const provider = createDockerSandboxProvider({
         createOptions: { image: TEST_IMAGE, networkPolicy: "deny-all" },
       });
       // Create from the suite's prewarmed template: bash is already
       // baked in there, which a `--network none` container could not
       // install on the fly.
-      const handle = await engine.create({
-        runtimeContext: { appRoot },
-        sessionKey: nextSessionKey("network-flip"),
-        templateKey,
+      const handle = await provider.create({
+        context: providerContext(appRoot, nextSessionKey("network-flip")),
+        template: { image: templateImageReference, templateId: templateKey },
       });
 
       // `--network none` containers have no interfaces beyond loopback.
@@ -250,29 +271,30 @@ describe.runIf(runDockerScenarios)("docker sandbox engine against a real daemon"
     "persists session state across shutdown and reattach",
     async () => {
       const appRoot = await createScratchDirectory("eve-docker-scenario-");
-      const engine = createEngine();
+      const provider = createProvider();
       const sessionKey = nextSessionKey("reconnect");
 
-      const firstHandle = await engine.create({
-        runtimeContext: { appRoot },
-        sessionKey,
-        templateKey,
+      const firstHandle = await provider.create({
+        context: providerContext(appRoot, sessionKey),
+        template: { image: templateImageReference, templateId: templateKey },
       });
       await firstHandle.session.writeTextFile({
         content: "survives reconnect",
         path: "persisted.txt",
       });
-      const state = await firstHandle.captureState();
-      expect(state.metadata).toEqual({ containerName: sessionKey });
+      const reference = referenceDockerSandboxResource(firstHandle);
+      expect(reference).toMatchObject({
+        containerId: expect.any(String),
+        containerName: sessionKey,
+        sessionKey,
+      });
       // Server shutdown stops the container; reattach must restart it
       // transparently.
       await firstHandle.shutdown();
 
-      const reconnected = await engine.create({
-        existingMetadata: state.metadata,
-        runtimeContext: { appRoot },
-        sessionKey,
-        templateKey,
+      const reconnected = await provider.create({
+        context: providerContext(appRoot, sessionKey),
+        reference,
       });
       await expect(reconnected.session.readTextFile({ path: "persisted.txt" })).resolves.toBe(
         "survives reconnect",

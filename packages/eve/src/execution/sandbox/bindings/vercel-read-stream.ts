@@ -1,9 +1,7 @@
 import { Readable } from "node:stream";
 
-/**
- * Normalizes the Vercel SDK's Node-readable file response to Eve's public
- * WHATWG byte-stream contract.
- */
+import { nodeReadableToWebStream } from "#execution/sandbox/stream-utils.js";
+
 export function normalizeVercelReadStream(
   stream: object | null,
 ): ReadableStream<Uint8Array> | null {
@@ -11,7 +9,7 @@ export function normalizeVercelReadStream(
     return stream;
   }
   if (stream instanceof Readable) {
-    return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+    return nodeReadableToWebStream(stream);
   }
   throw new TypeError("Vercel Sandbox returned an unsupported file stream.");
 }

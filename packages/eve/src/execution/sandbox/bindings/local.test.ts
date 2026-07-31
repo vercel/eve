@@ -1,39 +1,38 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  createDockerSandboxBackend,
-  createJustBashSandboxBackend,
-  createMicrosandboxSandboxBackend,
-  DOCKER_BACKEND_NAME,
-  JUST_BASH_BACKEND_NAME,
-  MICROSANDBOX_BACKEND_NAME,
+  createDockerSandboxProvider,
+  createJustBashSandboxProvider,
+  createMicrosandboxSandboxProvider,
+  DOCKER_PROVIDER,
+  JUST_BASH_PROVIDER,
+  MICROSANDBOX_PROVIDER,
 } from "#execution/sandbox/bindings/local.js";
 
-describe("local sandbox backend factories", () => {
-  it("expose distinct stable backend names", () => {
-    // Backend names participate in template/session key derivation and
-    // persisted reconnect state, so the engines must never collide.
-    expect(createDockerSandboxBackend().name).toBe(DOCKER_BACKEND_NAME);
-    expect(createJustBashSandboxBackend().name).toBe(JUST_BASH_BACKEND_NAME);
-    expect(createMicrosandboxSandboxBackend().name).toBe(MICROSANDBOX_BACKEND_NAME);
+describe("local sandbox provider factories", () => {
+  it("expose distinct stable provider names", () => {
+    // Provider names participate in diagnostics and persisted reconnect
+    // state, so the protocols must never collide.
     expect(
-      new Set([DOCKER_BACKEND_NAME, JUST_BASH_BACKEND_NAME, MICROSANDBOX_BACKEND_NAME, "vercel"])
-        .size,
+      new Set([DOCKER_PROVIDER, JUST_BASH_PROVIDER, MICROSANDBOX_PROVIDER, "vercel"]).size,
     ).toBe(4);
   });
 
-  it("constructing a backend performs no environment probing or installs", () => {
+  it("constructing a provider performs no environment probing or installs", () => {
     // Construction must stay side-effect free: probing and installs are
     // deferred to first use so `defineSandbox` evaluation (including at
     // compile time) stays cheap on any host.
-    expect(createDockerSandboxBackend({ createOptions: { image: "alpine:3" } }).name).toBe(
-      "docker",
-    );
-    expect(createMicrosandboxSandboxBackend({ createOptions: { cpus: 2 } }).name).toBe(
-      "microsandbox",
-    );
-    expect(createJustBashSandboxBackend({ createOptions: { autoInstall: false } }).name).toBe(
-      "just-bash",
-    );
+    expect(createDockerSandboxProvider({ createOptions: { image: "alpine:3" } })).toMatchObject({
+      create: expect.any(Function),
+      prewarm: expect.any(Function),
+    });
+    expect(createMicrosandboxSandboxProvider({ createOptions: { cpus: 2 } })).toMatchObject({
+      create: expect.any(Function),
+      prewarm: expect.any(Function),
+    });
+    expect(createJustBashSandboxProvider({ createOptions: { autoInstall: false } })).toMatchObject({
+      create: expect.any(Function),
+      prewarm: expect.any(Function),
+    });
   });
 });

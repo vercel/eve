@@ -11,7 +11,8 @@ import {
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { InternalInstructionsDefinition } from "#shared/instructions-definition.js";
-import { jsonObjectSchema } from "#shared/json-schemas.js";
+import type { JsonValue } from "#shared/json.js";
+import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
 import type { Node } from "#shared/node.js";
 import type {
   MarkdownSourceRef,
@@ -41,7 +42,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 37;
+export const COMPILED_AGENT_MANIFEST_VERSION = 39;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -157,7 +158,7 @@ export type CompiledSandboxDefinition = z.infer<typeof compiledSandboxDefinition
  * Compiled sandbox workspace folder preserved in the compiled manifest.
  *
  * Corresponds to the `agent/sandbox/workspace/` directory discovered on
- * disk. Mounted into the live sandbox cwd at session bootstrap.
+ * disk. Hydrated into the build-prewarmed sandbox template.
  */
 type CompiledSandboxWorkspace = z.infer<typeof compiledSandboxWorkspaceSchema>;
 
@@ -502,22 +503,12 @@ const compiledScheduleDefinitionSchema = z
 
 const compiledSandboxDefinitionSchema = z
   .object({
-    /**
-     * Stable name of the authored backend (`"local"`, `"vercel"`,
-     * `"local-just-bash"`, or a custom backend's name), captured at
-     * compile time so build pipelines can make backend-aware decisions
-     * (for example including the optional just-bash engine package in
-     * hosted output). Absent when the definition omits `backend` or the
-     * backend's name could not be resolved at compile time.
-     */
-    backendName: z.string().optional(),
-    description: z.string().optional(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
-    revalidationKey: z.string().optional(),
     sourceHash: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+    templateExports: z.array(z.string()).readonly(),
   })
   .strict();
 
@@ -651,6 +642,7 @@ const compiledAgentNodeManifestSchema = z
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
     hooks: z.array(compiledHookDefinitionSchema),
     sandbox: compiledSandboxDefinitionSchema.nullable(),
+    sandboxTemplateReferences: z.record(z.string(), jsonValueSchema),
     sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
     schedules: z.array(compiledScheduleDefinitionSchema),
     remoteAgents: z.array(compiledRemoteAgentNodeSchema),
@@ -740,6 +732,7 @@ export const compiledAgentManifestSchema = z
     kind: z.literal(COMPILED_AGENT_MANIFEST_KIND),
     remoteAgents: z.array(compiledRemoteAgentNodeSchema),
     sandbox: compiledSandboxDefinitionSchema.nullable(),
+    sandboxTemplateReferences: z.record(z.string(), jsonValueSchema),
     sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
     schedules: z.array(compiledScheduleDefinitionSchema),
     skills: z.array(compiledSkillSourceSchema).readonly(),
@@ -770,6 +763,7 @@ export function createCompiledAgentNodeManifest(input: {
   readonly hooks?: readonly CompiledHookDefinition[];
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
   readonly sandbox?: CompiledSandboxDefinition | null;
+  readonly sandboxTemplateReferences?: Readonly<Record<string, JsonValue>>;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];
@@ -851,6 +845,7 @@ export function createCompiledAgentNodeManifest(input: {
     hooks: [...(input.hooks ?? [])],
     remoteAgents: [...(input.remoteAgents ?? [])],
     sandbox: input.sandbox ?? null,
+    sandboxTemplateReferences: { ...input.sandboxTemplateReferences },
     sandboxWorkspaces: [...(input.sandboxWorkspaces ?? [])],
     schedules: [...(input.schedules ?? [])],
     skills: [...(input.skills ?? [])],
@@ -923,6 +918,7 @@ export function createCompiledAgentManifest(input: {
   readonly hooks?: readonly CompiledHookDefinition[];
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
   readonly sandbox?: CompiledSandboxDefinition | null;
+  readonly sandboxTemplateReferences?: Readonly<Record<string, JsonValue>>;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];

@@ -48,7 +48,7 @@ eve stores durable session and workflow state needed to resume conversations, st
 
 ## Credential brokering
 
-Credential brokering gives the model _authenticated_ network access from inside the sandbox, like a `git clone` of a private repo or an authenticated `curl`, when there's no [tool](../tools) or [connection](../connections) to route it through. On the Vercel Sandbox backend, auth headers get injected at the sandbox's network firewall for matching domains. The secret stays in the app runtime; the sandbox process only ever sees the response. See [Vercel Sandbox Credential Brokering](https://vercel.com/docs/sandbox/concepts/firewall#credentials-brokering) for the platform mechanism, and [Sandbox](../sandbox) for the eve policy API.
+Credential brokering gives the model _authenticated_ network access from inside the sandbox, like a `git clone` of a private repo or an authenticated `curl`, when there's no [tool](../tools) or [connection](../connections) to route it through. With the Vercel Sandbox provider, auth headers get injected at the sandbox's network firewall for matching domains. The secret stays in the app runtime; the sandbox process only ever sees the response. See [Vercel Sandbox Credential Brokering](https://vercel.com/docs/sandbox/concepts/firewall#credentials-brokering) for the platform mechanism, and [Sandbox](../sandbox) for the eve policy API.
 
 ## Connection credentials
 
@@ -100,6 +100,6 @@ Before exposing an agent to real traffic:
 ## What to read next
 
 - [Auth & route protection](../guides/auth-and-route-protection): the full auth walk and verifier helpers
-- [Sandbox](../sandbox): backends, network policy, and brokering config
+- [Sandbox](../sandbox): providers, network policy, and brokering config
 - [Execution model and durability](./execution-model-and-durability): how durable sessions run
 - [Connections](../connections): static-token and OAuth connections

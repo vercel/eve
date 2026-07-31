@@ -351,61 +351,66 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // runtime-action wait) must settle before the park-resume stages run,
     // or the pending batch would re-park and later re-dispatch.
     throwIfTurnAborted(input.abortSignal);
-    stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
-      const schemaSession = resolveEffectiveOutputSchema({
-        agentOutputSchema: bundle.turnAgent.outputSchema,
-        input: resolved,
-        mode,
-        session: enrichedSession,
-      });
-      if (completedAuths) {
-        const emissionState = getHarnessEmissionState(schemaSession.state);
-        for (const { name, authorization } of completedAuths) {
-          await handleEvent(
-            createAuthorizationCompletedEvent({
-              authorization,
-              name,
-              outcome: "authorized",
-              sequence: emissionState.sequence,
-              stepIndex: emissionState.stepIndex,
-              turnId: emissionState.turnId,
-            }),
-          );
-        }
-      }
-
-      const capabilities = ctx.get(CapabilitiesKey);
-
-      const runHarnessStep = async (
-        lifecycleSession: HarnessSession,
-        stepInput: StepInput | undefined,
-      ): Promise<StepResult> => {
-        const refreshedSession = refreshSessionFromTurnAgent({
-          compactionOverrides: {
-            thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
-          },
-          session: lifecycleSession,
-          turnAgent: bundle.turnAgent,
-        });
-
-        const step = createExecutionNodeStep({
-          abortSignal: input.abortSignal,
-          capabilities,
-          createRuntime: createWorkflowRuntime,
-          handleEvent,
+    stepResult = await runStep(
+      ctx,
+      initialSession,
+      async (enrichedSession) => {
+        const schemaSession = resolveEffectiveOutputSchema({
+          agentOutputSchema: bundle.turnAgent.outputSchema,
+          input: resolved,
           mode,
-          modelResolutionScope: {
-            moduleMap: bundle.moduleMap,
-            nodeId: bundle.nodeId,
-          },
-          node: bundle.graph.root,
-          workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
+          session: enrichedSession,
         });
-        return step(refreshedSession, stepInput);
-      };
+        if (completedAuths) {
+          const emissionState = getHarnessEmissionState(schemaSession.state);
+          for (const { name, authorization } of completedAuths) {
+            await handleEvent(
+              createAuthorizationCompletedEvent({
+                authorization,
+                name,
+                outcome: "authorized",
+                sequence: emissionState.sequence,
+                stepIndex: emissionState.stepIndex,
+                turnId: emissionState.turnId,
+              }),
+            );
+          }
+        }
 
-      return runHarnessStep(schemaSession, resolved);
-    });
+        const capabilities = ctx.get(CapabilitiesKey);
+
+        const runHarnessStep = async (
+          lifecycleSession: HarnessSession,
+          stepInput: StepInput | undefined,
+        ): Promise<StepResult> => {
+          const refreshedSession = refreshSessionFromTurnAgent({
+            compactionOverrides: {
+              thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+            },
+            session: lifecycleSession,
+            turnAgent: bundle.turnAgent,
+          });
+
+          const step = createExecutionNodeStep({
+            abortSignal: input.abortSignal,
+            capabilities,
+            createRuntime: createWorkflowRuntime,
+            handleEvent,
+            mode,
+            modelResolutionScope: {
+              moduleMap: bundle.moduleMap,
+              nodeId: bundle.nodeId,
+            },
+            node: bundle.graph.root,
+            workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
+          });
+          return step(refreshedSession, stepInput);
+        };
+
+        return runHarnessStep(schemaSession, resolved);
+      },
+      { abortSignal: input.abortSignal },
+    );
   } catch (error) {
     if (!isTurnCancellation(error)) throw error;
     writer.releaseLock();

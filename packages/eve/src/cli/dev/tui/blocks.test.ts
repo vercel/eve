@@ -365,11 +365,13 @@ describe("renderBlockLines", () => {
     const lines = render(
       {
         kind: "sandbox",
-        body: 'built sandbox template "root" on backend "microsandbox".',
+        body: 'built sandbox template "root" on provider "microsandbox".',
       },
       100,
     );
-    expect(lines).toEqual(['│ sandbox · built sandbox template "root" on backend "microsandbox".']);
+    expect(lines).toEqual([
+      '│ sandbox · built sandbox template "root" on provider "microsandbox".',
+    ]);
   });
 
   it("suppresses the label when sandbox progress continues", () => {

@@ -5,6 +5,7 @@ import {
   subscribeDevelopmentSandboxPrewarmLogs,
   waitForDevelopmentSandboxPrewarm,
 } from "#execution/sandbox/development-prewarm.js";
+import type { PrewarmedSandboxTemplateBinding } from "#execution/sandbox/prewarm.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 const mocks = vi.hoisted(() => ({
@@ -12,9 +13,14 @@ const mocks = vi.hoisted(() => ({
     vi.fn<
       (input: {
         readonly log?: (message: string) => void;
-        readonly onPrewarmSignature?: (signature: string) => void;
-        readonly shouldPrewarmSignature?: (signature: string) => boolean;
-      }) => Promise<void>
+        readonly onPrewarmSignature?: (
+          signature: string,
+          bindings: readonly PrewarmedSandboxTemplateBinding[],
+        ) => void;
+        readonly reusePrewarmSignature?: (
+          signature: string,
+        ) => readonly PrewarmedSandboxTemplateBinding[] | undefined;
+      }) => Promise<readonly PrewarmedSandboxTemplateBinding[]>
     >(),
 }));
 
@@ -28,7 +34,7 @@ describe("development sandbox prewarm coordination", () => {
   });
 
   it("waits for an in-flight prewarm by authored app root or compiled snapshot root", async () => {
-    const prewarm = createDeferred<void>();
+    const prewarm = createDeferred<readonly PrewarmedSandboxTemplateBinding[]>();
     mocks.prewarmAppSandboxes.mockReturnValueOnce(prewarm.promise);
     const appRoot = "/tmp/eve-app";
     const snapshotRoot = "/tmp/eve-app/.eve/dev-runtime/snapshots/current";
@@ -58,7 +64,7 @@ describe("development sandbox prewarm coordination", () => {
     expect(authoredWaitResolved).toBe(false);
     expect(snapshotWaitResolved).toBe(false);
 
-    prewarm.resolve();
+    prewarm.resolve([]);
     await Promise.all([authoredWait, snapshotWait]);
 
     expect(authoredWaitResolved).toBe(true);
@@ -66,7 +72,7 @@ describe("development sandbox prewarm coordination", () => {
   });
 
   it("waits for an in-flight prewarm by the stable sandbox app root", async () => {
-    const prewarm = createDeferred<void>();
+    const prewarm = createDeferred<readonly PrewarmedSandboxTemplateBinding[]>();
     mocks.prewarmAppSandboxes.mockReturnValueOnce(prewarm.promise);
     const appRoot = "/tmp/eve-app";
     const snapshotRoot = "/tmp/eve-app/.eve/dev-runtime/snapshots/current/app";
@@ -91,14 +97,14 @@ describe("development sandbox prewarm coordination", () => {
     await Promise.resolve();
     expect(sandboxRootWaitResolved).toBe(false);
 
-    prewarm.resolve();
+    prewarm.resolve([]);
     await sandboxRootWait;
 
     expect(sandboxRootWaitResolved).toBe(true);
   });
 
   it("replays and forwards prewarm progress logs to waiters", async () => {
-    const prewarm = createDeferred<void>();
+    const prewarm = createDeferred<readonly PrewarmedSandboxTemplateBinding[]>();
     let prewarmLog: ((message: string) => void) | undefined;
     mocks.prewarmAppSandboxes.mockImplementationOnce(async (input) => {
       prewarmLog = input.log;
@@ -122,7 +128,7 @@ describe("development sandbox prewarm coordination", () => {
     await Promise.resolve();
     prewarmLog?.('eve: sandbox template "root" (microsandbox): apt-get update');
 
-    prewarm.resolve();
+    prewarm.resolve([]);
     await wait;
 
     expect(logs).toEqual(
@@ -134,7 +140,7 @@ describe("development sandbox prewarm coordination", () => {
   });
 
   it("replays retained logs and forwards future logs to subscribers", async () => {
-    const prewarm = createDeferred<void>();
+    const prewarm = createDeferred<readonly PrewarmedSandboxTemplateBinding[]>();
     let prewarmLog: ((message: string) => void) | undefined;
     mocks.prewarmAppSandboxes.mockImplementationOnce(async (input) => {
       prewarmLog = input.log;
@@ -147,7 +153,7 @@ describe("development sandbox prewarm coordination", () => {
       appRoot,
       compiledArtifactsSource,
     });
-    prewarmLog?.('eve: built sandbox template "root" on backend "docker".');
+    prewarmLog?.('eve: built sandbox template "root" on provider "docker".');
 
     const logs: string[] = [];
     const unsubscribe = subscribeDevelopmentSandboxPrewarmLogs({
@@ -158,11 +164,11 @@ describe("development sandbox prewarm coordination", () => {
 
     unsubscribe();
     prewarmLog?.('eve: sandbox template "root" (docker): apt-get install curl');
-    prewarm.resolve();
+    prewarm.resolve([]);
     await prewarm.promise;
 
     expect(logs).toEqual([
-      'eve: built sandbox template "root" on backend "docker".',
+      'eve: built sandbox template "root" on provider "docker".',
       'eve: sandbox template "root" (docker): apt-get update',
     ]);
   });
@@ -171,7 +177,8 @@ describe("development sandbox prewarm coordination", () => {
     const appRoot = "/tmp/eve-completed-app";
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
     mocks.prewarmAppSandboxes.mockImplementationOnce(async (input) => {
-      input.log?.('eve: built sandbox template "root" on backend "docker".');
+      input.log?.('eve: built sandbox template "root" on provider "docker".');
+      return [];
     });
 
     startDevelopmentSandboxPrewarmInBackground({
@@ -192,20 +199,64 @@ describe("development sandbox prewarm coordination", () => {
       log: (message) => secondLogs.push(message),
     });
 
-    expect(firstLogs).toEqual(['eve: built sandbox template "root" on backend "docker".']);
+    expect(firstLogs).toEqual(['eve: built sandbox template "root" on provider "docker".']);
     expect(secondLogs).toEqual([]);
   });
 
-  it("skips completed prewarm work when the sandbox signature is unchanged", async () => {
+  it("hands completed prewarm bindings to every runtime access until the next prewarm", async () => {
+    const appRoot = "/tmp/eve-completed-bindings-app";
+    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
+    const bindings = [
+      {
+        exportName: "template",
+        nodeId: "__root__",
+        reference: { snapshotId: "snapshot-1" },
+        templateKey: "private-template-key",
+      },
+    ] as const;
+    mocks.prewarmAppSandboxes.mockResolvedValueOnce(bindings);
+
+    startDevelopmentSandboxPrewarmInBackground({
+      appRoot,
+      compiledArtifactsSource,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await expect(
+      waitForDevelopmentSandboxPrewarm({
+        appRoot,
+        compiledArtifactsSource,
+      }),
+    ).resolves.toEqual(bindings);
+    await expect(
+      waitForDevelopmentSandboxPrewarm({
+        appRoot,
+        compiledArtifactsSource,
+      }),
+    ).resolves.toEqual(bindings);
+  });
+
+  it("reuses completed bindings when the sandbox signature is unchanged", async () => {
     const appRoot = "/tmp/eve-signature-app";
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
+    const bindings = [
+      {
+        exportName: "template",
+        nodeId: "__root__",
+        reference: { snapshotId: "snapshot-1" },
+        templateKey: "private-template-key",
+      },
+    ] as const;
     let prewarmCount = 0;
     mocks.prewarmAppSandboxes.mockImplementation(async (input) => {
-      if (input.shouldPrewarmSignature?.("signature-a") === false) {
-        return;
+      const reused = input.reusePrewarmSignature?.("signature-a");
+      if (reused !== undefined) {
+        return reused;
       }
       prewarmCount += 1;
-      input.onPrewarmSignature?.("signature-a");
+      input.onPrewarmSignature?.("signature-a", bindings);
+      return bindings;
     });
 
     startDevelopmentSandboxPrewarmInBackground({
@@ -222,6 +273,12 @@ describe("development sandbox prewarm coordination", () => {
     await Promise.resolve();
 
     expect(prewarmCount).toBe(1);
+    await expect(
+      waitForDevelopmentSandboxPrewarm({
+        appRoot,
+        compiledArtifactsSource,
+      }),
+    ).resolves.toEqual(bindings);
   });
 });
 

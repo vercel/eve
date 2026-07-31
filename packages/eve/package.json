@@ -161,6 +161,11 @@
       "import": "./dist/src/public/sandbox/vercel.js",
       "default": "./dist/src/public/sandbox/vercel.js"
     },
+    "./sandbox/provider": {
+      "types": "./dist/src/public/sandbox/provider.d.ts",
+      "import": "./dist/src/public/sandbox/provider.js",
+      "default": "./dist/src/public/sandbox/provider.js"
+    },
     "./evals": {
       "types": "./dist/src/evals/index.d.ts",
       "import": "./dist/src/evals/index.js",

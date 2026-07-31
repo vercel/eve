@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { buildSessionHandle } from "#channel/session.js";
-import { type SubagentAdapterState } from "#execution/subagent-adapter.js";
+import {
+  readSubagentSandboxAncestorStates,
+  type SubagentAdapterState,
+} from "#execution/subagent-adapter.js";
 import { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -189,6 +192,70 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
     );
 
     expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("readSubagentSandboxAncestorStates", () => {
+  const sandboxState = {
+    revision: "sandbox-revision",
+    value: {
+      adapterId: "example.com/sandbox",
+      id: "sandbox-1",
+      reference: { id: "sandbox-1" },
+      resourceId: "sandbox-1",
+    },
+  } as const;
+
+  it("returns validated sandbox ancestry only for the subagent adapter", () => {
+    expect(
+      readSubagentSandboxAncestorStates({
+        kind: "subagent",
+        state: {
+          callId: "call-123",
+          parentContinuationToken: "parent-token",
+          parentSandboxState: sandboxState,
+          parentSessionId: "parent-session",
+          rootSandboxState: sandboxState,
+          subagentName: "reviewer",
+        },
+      }),
+    ).toEqual({
+      parentState: sandboxState,
+      rootState: sandboxState,
+    });
+    expect(
+      readSubagentSandboxAncestorStates({
+        kind: "http",
+        state: {
+          parentSandboxState: sandboxState,
+          rootSandboxState: sandboxState,
+        },
+      }),
+    ).toEqual({});
+  });
+
+  it("allows subagent contexts that carry no sandbox ancestry", () => {
+    expect(
+      readSubagentSandboxAncestorStates({
+        kind: "subagent",
+        state: {},
+      }),
+    ).toEqual({});
+  });
+
+  it("rejects malformed sandbox ancestry at the workflow boundary", () => {
+    expect(() =>
+      readSubagentSandboxAncestorStates({
+        kind: "subagent",
+        state: {
+          callId: "call-123",
+          parentContinuationToken: "parent-token",
+          parentSandboxState: { id: "not-a-sandbox-state" },
+          parentSessionId: "parent-session",
+          subagentName: "reviewer",
+        },
+      }),
+    ).toThrow("Invalid sandbox ancestry in subagent adapter state.");
   });
 });
 

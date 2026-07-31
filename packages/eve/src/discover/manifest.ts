@@ -101,7 +101,7 @@ export type SandboxSourceRef = ModuleSourceRef;
  *
  * Emitted when `agent/sandbox/workspace/` is found on disk. The
  * compiler and runtime mount the contents of `sourcePath` into the
- * sandbox's live cwd at session bootstrap.
+ * sandbox template before authored preparation.
  */
 export interface SandboxWorkspaceFolderSourceRef {
   /**
@@ -222,7 +222,7 @@ export interface AgentSourceManifest {
   /**
    * Authored sandbox workspace folder discovered under
    * `agent/sandbox/workspace/`. At most one entry per agent; mounted
-   * into the live sandbox cwd at session bootstrap.
+   * into the build-prewarmed sandbox template before authored preparation.
    */
   sandboxWorkspaces: SandboxWorkspaceFolderSourceRef[];
   schedules: ScheduleSourceRef[];

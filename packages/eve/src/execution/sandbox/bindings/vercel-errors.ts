@@ -1,10 +1,6 @@
 export function isVercelSnapshotUnavailableError(error: unknown): boolean {
   for (const candidate of walkErrorChain(error)) {
-    const status =
-      (candidate as { response?: { status?: number } }).response?.status ??
-      (candidate as { status?: number }).status ??
-      (candidate as { statusCode?: number }).statusCode;
-    if (status === 410) {
+    if (readErrorStatus(candidate) === 410) {
       return true;
     }
   }
@@ -14,11 +10,7 @@ export function isVercelSnapshotUnavailableError(error: unknown): boolean {
 
 export function isVercelSandboxMissingError(error: unknown): boolean {
   for (const candidate of walkErrorChain(error)) {
-    const status =
-      (candidate as { response?: { status?: number } }).response?.status ??
-      (candidate as { status?: number }).status ??
-      (candidate as { statusCode?: number }).statusCode;
-    if (status === 404) {
+    if (readErrorStatus(candidate) === 404) {
       return true;
     }
   }
@@ -32,6 +24,17 @@ function* walkErrorChain(error: unknown): Generator<unknown> {
   while (current !== undefined && current !== null && !seen.has(current)) {
     seen.add(current);
     yield current;
-    current = (current as { cause?: unknown }).cause;
+    current = readProperty(current, "cause");
   }
+}
+
+function readErrorStatus(value: unknown): number | undefined {
+  const responseStatus = readProperty(readProperty(value, "response"), "status");
+  const status =
+    responseStatus ?? readProperty(value, "status") ?? readProperty(value, "statusCode");
+  return typeof status === "number" ? status : undefined;
+}
+
+function readProperty(value: unknown, key: string): unknown {
+  return value !== null && typeof value === "object" ? Reflect.get(value, key) : undefined;
 }

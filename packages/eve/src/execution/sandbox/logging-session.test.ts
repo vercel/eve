@@ -5,7 +5,7 @@ import { MAX_OUTPUT_LINES } from "#execution/sandbox/truncate-output.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 describe("createLoggingSandboxSession", () => {
-  it("logs bootstrap commands and file operations without logging contents", async () => {
+  it("logs preparation commands and file operations without logging contents", async () => {
     const log = vi.fn();
     const session = createTestSession();
     const wrapped = createLoggingSandboxSession({ log, session });
@@ -16,10 +16,10 @@ describe("createLoggingSandboxSession", () => {
     await wrapped.removePath({ path: "old.txt" });
 
     expect(log.mock.calls.map((call) => call[0])).toEqual([
-      "bootstrap run: echo secret-value",
-      "bootstrap write text file: /workspace/config.txt (10 chars)",
-      "bootstrap write binary file: asset.bin (3 bytes)",
-      "bootstrap remove path: old.txt",
+      "prepare run: echo secret-value",
+      "prepare write text file: /workspace/config.txt (10 chars)",
+      "prepare write binary file: asset.bin (3 bytes)",
+      "prepare remove path: old.txt",
     ]);
     expect(log.mock.calls.flat().join("\n")).not.toContain("do-not-log");
   });
@@ -29,7 +29,7 @@ describe("createLoggingSandboxSession", () => {
     expect(createLoggingSandboxSession({ session })).not.toBe(session);
   });
 
-  it("fails bootstrap when a run command exits with code 1", async () => {
+  it("fails preparation when a run command exits with code 1", async () => {
     const session = createTestSession({
       exitCode: 1,
       stderr: "install failed\nmissing package\n",
@@ -39,7 +39,7 @@ describe("createLoggingSandboxSession", () => {
 
     await expect(wrapped.run({ command: "pnpm install --frozen-lockfile" })).rejects.toThrow(
       [
-        "Sandbox bootstrap failed because sandbox.run command exited with code 1:",
+        "Sandbox preparation failed because sandbox.run command exited with code 1:",
         "pnpm install --frozen-lockfile",
         "",
         "stdout:",
@@ -51,7 +51,7 @@ describe("createLoggingSandboxSession", () => {
     );
   });
 
-  it("truncates bootstrap failure stdout and stderr", async () => {
+  it("truncates preparation failure stdout and stderr", async () => {
     const stdout = Array.from({ length: MAX_OUTPUT_LINES + 2 }, (_, i) => `stdout ${i + 1}`).join(
       "\n",
     );

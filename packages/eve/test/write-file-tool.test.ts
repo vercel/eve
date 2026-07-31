@@ -58,7 +58,7 @@ function createFakeAccess(files: Record<string, string>): {
   return {
     access: {
       async captureState() {
-        return { initialized: false, session: null };
+        return null;
       },
       async get() {
         return session;

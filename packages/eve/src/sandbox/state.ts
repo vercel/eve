@@ -1,35 +1,51 @@
-import type { SandboxSession } from "#public/definitions/sandbox.js";
-import type { SandboxBackendSessionState } from "#public/definitions/sandbox-backend.js";
+import { parseJsonValue } from "#shared/json.js";
+import type { Sandbox, SerializedSandbox } from "#shared/sandbox-value.js";
 
 /**
- * Serializable sandbox reconnect record stored on the harness session.
- * Alias for {@link SandboxBackendSessionState} kept at this layer so
- * `SandboxState.session` can describe itself without importing the
- * backend's public-API spelling into harness code.
+ * Serializable sandbox value stored on the durable eve session.
  */
-export type SandboxSessionState = SandboxBackendSessionState;
+export interface SandboxStateValue {
+  readonly revision: string;
+  readonly value: SerializedSandbox;
+}
+
+export interface SandboxState extends SandboxStateValue {
+  readonly root?: SandboxStateValue;
+}
 
 /**
- * Serializable sandbox state carried on the harness session across
- * step boundaries.
- *
- * Contains only stable identifiers — live handles stay in a
- * process-level cache and are rehydrated per step via the backend.
- * Every agent owns exactly one sandbox, so the state is just a single
- * `initialized` flag and an optional persisted session record.
+ * Returns whether a workflow value is a complete serialized sandbox state.
  */
-export interface SandboxState {
-  readonly initialized: boolean;
-  readonly session: SandboxSessionState | null;
+export function isSandboxStateValue(value: unknown): value is SandboxStateValue {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+
+  const revision = Reflect.get(value, "revision");
+  const sandbox = Reflect.get(value, "value");
+  if (
+    typeof revision !== "string" ||
+    sandbox === null ||
+    typeof sandbox !== "object" ||
+    typeof Reflect.get(sandbox, "adapterId") !== "string" ||
+    typeof Reflect.get(sandbox, "id") !== "string" ||
+    typeof Reflect.get(sandbox, "resourceId") !== "string"
+  ) {
+    return false;
+  }
+
+  try {
+    parseJsonValue(Reflect.get(sandbox, "reference"));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Lazy sandbox accessor bound to one step execution.
- *
- * Returned by `ensureSandboxAccess` and placed on the `AlsContext` (via
- * `SandboxKey`) so tools can call `ctx.getSandbox()`.
  */
 export interface SandboxAccess {
-  captureState(): Promise<SandboxState>;
-  get(): Promise<SandboxSession | null>;
+  captureState(): Promise<SandboxState | null>;
+  get(): Promise<Sandbox | null>;
 }

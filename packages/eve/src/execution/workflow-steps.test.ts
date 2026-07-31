@@ -37,6 +37,9 @@ import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { defineSandboxAdapter } from "#shared/sandbox-value.js";
 import {
   dispatchTurnStep,
   resolveEffectiveOutputSchema,
@@ -96,6 +99,26 @@ const DEFAULT_WORKFLOW_STREAM_NAMESPACE = "__default__";
 const getRunMock = vi.fn();
 const startMock = vi.fn();
 const workflowWritesByNamespace = new Map<string, unknown[]>();
+const dispatchTestSandboxHandles = new Map<string, ReturnType<typeof mockSandbox>>();
+const asDispatchTestSandbox = defineSandboxAdapter<
+  ReturnType<typeof mockSandbox>,
+  { readonly id: string }
+>({
+  type: "eve/dispatch-test-sandbox",
+  reference(sandbox) {
+    return { id: sandbox.session.id };
+  },
+  restore(reference) {
+    const sandbox = dispatchTestSandboxHandles.get(reference.id);
+    if (sandbox === undefined) {
+      throw new Error(`Missing dispatch test sandbox "${reference.id}".`);
+    }
+    return sandbox;
+  },
+  session(sandbox) {
+    return sandbox.session;
+  },
+});
 
 function createTestWritable(
   namespace = DEFAULT_WORKFLOW_STREAM_NAMESPACE,
@@ -192,6 +215,7 @@ function createSerializedContext(): Record<string, unknown> {
 }
 
 afterEach(() => {
+  dispatchTestSandboxHandles.clear();
   getRunMock.mockReset();
   startMock.mockReset();
   workflowWritesByNamespace.clear();
@@ -313,6 +337,118 @@ describe("dispatchTurnStep", () => {
 });
 
 describe("dispatchRuntimeActionsStep", () => {
+  it("materializes and captures the parent sandbox before starting a local child", async () => {
+    const parentSandboxHandle = mockSandbox({ id: "parent-sandbox" });
+    dispatchTestSandboxHandles.set(parentSandboxHandle.session.id, parentSandboxHandle);
+    const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
+    const sandboxRegistry = {
+      sandbox: {
+        definition: {
+          definition: () => asDispatchTestSandbox(parentSandboxHandle),
+          logicalPath: "agent/sandbox.ts",
+          sourceHash: "parent-sandbox-source",
+          sourceId: "agent/sandbox",
+          sourceKind: "module",
+          templates: [],
+        },
+        workspaceResourceRoot: {
+          logicalPath: "",
+          rootEntries: [],
+        },
+      },
+    };
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          nodeId: "__root__",
+          sandboxRegistry,
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: { name: "parent" } },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([
+          [
+            "subagents/reviewer",
+            {
+              definition: {
+                description: "Review the work.",
+                kind: "subagent",
+              },
+            },
+          ],
+        ]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    startMock.mockResolvedValue({ runId: "child-run" });
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Delegate review.",
+          input: { message: "review this" },
+          kind: "subagent-call",
+          name: "reviewer",
+          nodeId: "subagents/reviewer",
+          subagentName: "reviewer",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    const expectedSandboxState = {
+      revision: expect.any(String),
+      value: {
+        adapterId: "eve/dispatch-test-sandbox",
+        id: "parent-sandbox",
+        reference: { id: "parent-sandbox" },
+        resourceId: expect.any(String),
+      },
+    };
+    expect(startMock).toHaveBeenCalledWith(
+      workflowEntryReference,
+      [
+        expect.objectContaining({
+          serializedContext: expect.objectContaining({
+            "eve.channel": expect.objectContaining({
+              state: expect.objectContaining({
+                parentSandboxState: expectedSandboxState,
+                rootSandboxState: expectedSandboxState,
+              }),
+            }),
+          }),
+        }),
+      ],
+      expect.any(Object),
+    );
+    expect(result.sessionState.snapshot?.session.sandboxState).toEqual(expectedSandboxState);
+  });
+
   it("preserves a started local child when a later start fails", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as never;

@@ -2,15 +2,11 @@ import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 
 type PrewarmAppSandboxesInput = Parameters<typeof prewarmAppSandboxes>[0];
 
-const MISSING_VERCEL_BUILD_OIDC_ERROR =
-  "Cannot build deployable Vercel output because this app requires sandbox templates and " +
-  "VERCEL_OIDC_TOKEN is missing. Run `vercel link` and `vercel pull`, then retry " +
-  "`vercel build`. Do not deploy the generated .vercel/output.";
-
 /**
  * Vercel build-time sandbox prewarm hook. Failures here are treated as
- * build failures because the same sandbox bootstrap would otherwise
- * break at runtime.
+ * build failures because the same sandbox preparation would otherwise
+ * break at runtime. Credential requirements belong to each provider:
+ * Docker and custom templates do not implicitly require Vercel OIDC.
  *
  * Returns `true` after validating a Vercel build's template requirements,
  * `false` outside a Vercel build.
@@ -20,16 +16,6 @@ export async function runVercelBuildPrewarm(input: PrewarmAppSandboxesInput): Pr
     return false;
   }
 
-  if (process.env.VERCEL_OIDC_TOKEN?.trim()) {
-    await prewarmAppSandboxes(input);
-    return true;
-  }
-
-  await prewarmAppSandboxes({
-    ...input,
-    async dispatch() {
-      throw new Error(MISSING_VERCEL_BUILD_OIDC_ERROR);
-    },
-  });
+  await prewarmAppSandboxes(input);
   return true;
 }

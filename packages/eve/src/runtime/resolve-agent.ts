@@ -98,7 +98,12 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   const authoredSandbox =
     input.manifest.sandbox === null
       ? null
-      : await resolveSandboxDefinition(input.manifest.sandbox, input.moduleMap, input.nodeId);
+      : await resolveSandboxDefinition(
+          input.manifest.sandbox,
+          input.moduleMap,
+          input.nodeId,
+          input.manifest.sandboxTemplateReferences,
+        );
   const instructions = createResolvedInstructionsDefinition(input.manifest.instructions);
   const workspaceResourceRoot = input.manifest.workspaceResourceRoot;
   const resolvedAgent: ResolvedAgent = {

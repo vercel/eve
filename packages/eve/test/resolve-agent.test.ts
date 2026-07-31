@@ -8,6 +8,7 @@ import {
 } from "../src/compiler/manifest.js";
 import type { CompiledModuleMap } from "../src/compiler/module-map.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
+import { defineSandbox } from "../src/public/definitions/sandbox.js";
 import { ResolveAgentError, resolveAgent } from "../src/runtime/resolve-agent.js";
 import { serializeInputSchema } from "../src/shared/tool-schema.js";
 
@@ -51,6 +52,7 @@ describe("resolveAgent", () => {
         sourceHash: "sandbox-source-hash",
         sourceId: "sandbox/sandbox.mjs",
         sourceKind: "module",
+        templateExports: [],
       },
       skills: [
         {
@@ -127,14 +129,9 @@ describe("resolveAgent", () => {
               },
             },
             "sandbox/sandbox.mjs": {
-              default() {
-                return {
-                  description: "Use this sandbox for repository shell work.",
-                  onSession() {
-                    return undefined;
-                  },
-                };
-              },
+              default: defineSandbox(() => {
+                throw new Error("sandbox definition should remain lazy");
+              }),
             },
             "tools/get-weather.mjs": {
               default() {
@@ -205,19 +202,13 @@ describe("resolveAgent", () => {
       sourceKind: "markdown",
     });
     expect(resolved.sandbox).toEqual({
-      backend: expect.objectContaining({
-        create: expect.any(Function),
-        name: expect.any(String),
-      }),
-      bootstrap: undefined,
-      description: undefined,
+      definition: expect.any(Function),
       exportName: undefined,
       logicalPath: "sandbox/sandbox.mjs",
-      onSession: expect.any(Function),
-      revalidationKey: undefined,
       sourceHash: "sandbox-source-hash",
       sourceId: "sandbox/sandbox.mjs",
       sourceKind: "module",
+      templates: [],
     });
     expect(resolved.skills).toEqual([
       {

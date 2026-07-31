@@ -198,7 +198,7 @@ describe("authored tool execution", () => {
     expect(sandbox.files.get("/workspace/note.txt")).toBe("sandbox-note");
   });
 
-  it("lets authored tools resolve backend-native sandbox paths through ctx.getSandbox()", async () => {
+  it("lets authored tools resolve provider-native sandbox paths through ctx.getSandbox()", async () => {
     const sandbox = mockSandbox({
       id: "sbx_resolve",
       run: async ({ command }) => {

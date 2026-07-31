@@ -36,9 +36,8 @@ await provision("tools-sandbox", async (ctx) => {
 /**
  * Builds an author snapshot outside eve: create a standalone Vercel Sandbox,
  * write a fresh marker token outside `/workspace`, snapshot it, and delete
- * the seed. The fixture's sandbox definition rebinds its backend to
- * `vercel({ source: { type: "snapshot", snapshotId } })` when
- * `EVE_TEST_AUTHOR_SNAPSHOT_ID` is set.
+ * the seed. The fixture selects a `VercelSandbox.template()` with that
+ * snapshot as its base when `EVE_TEST_AUTHOR_SNAPSHOT_ID` is set.
  */
 async function seedAuthorSnapshot(): Promise<{ snapshotId: string; markerToken: string }> {
   /*

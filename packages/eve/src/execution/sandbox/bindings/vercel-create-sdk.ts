@@ -1,15 +1,10 @@
 import { getVercelSandboxFetch } from "#execution/sandbox/bindings/vercel-credentials.js";
-import type {
-  VercelCreateOptions,
-  VercelModule,
-  VercelSandbox,
-} from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelModule, VercelSandbox } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-options.js";
 
 export type VercelSandboxCreateParams = VercelCreateOptions & {
   readonly name: string;
   readonly persistent: boolean;
-  readonly source?: VercelCreateOptions["source"];
-  tags?: Record<string, string> | undefined;
 } & VercelSandboxInternalCreateOptions;
 
 type VercelSandboxInternalCreateOptions = {
@@ -25,7 +20,7 @@ export async function createVercelEveImageSandbox(input: {
   readonly createOptions: VercelSandboxCreateParams;
   readonly sandboxModule: VercelModule;
 }): Promise<VercelSandbox> {
-  const { image: _image, runtime: _runtime, source, ...createOptions } = input.createOptions;
+  const { image, runtime: _runtime, source, ...createOptions } = input.createOptions;
   const fetch = getVercelSandboxFetch(input.createOptions);
 
   /*
@@ -42,7 +37,7 @@ export async function createVercelEveImageSandbox(input: {
   return await input.sandboxModule.Sandbox.create({
     ...createOptions,
     source,
-    image: VERCEL_EVE_SANDBOX_IMAGE,
+    image: image ?? VERCEL_EVE_SANDBOX_IMAGE,
     fetch,
   });
 }

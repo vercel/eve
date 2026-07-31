@@ -25,26 +25,24 @@ A string model ID routes requests through the [Vercel AI Gateway](https://vercel
 
 Add credentials for direct model providers, tools, and connections to the Vercel project environment. Add any signing keys or passwords required by your [route authentication policy](../auth-and-route-protection). Replace `placeholderAuth()` before a browser sends a production request.
 
-## Select the sandbox backend
+## Select the sandbox
 
-Leave the sandbox `backend` unset to use `defaultBackend()`. On Vercel, it selects Vercel Sandbox. You can also select the backend explicitly:
+With no authored sandbox, eve selects Vercel Sandbox automatically on Vercel. You can also return it explicitly:
 
 ```typescript
 import { defineSandbox } from "eve/sandbox";
-import { vercel } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
-export default defineSandbox({
-  backend: vercel(),
-});
+export default defineSandbox(() => VercelSandbox.create());
 ```
 
-See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle hooks.
+See [Sandbox](../../sandbox) for resources, network policy, durable reuse, and build-prewarmed templates.
 
 <Callout type="info" title="Sandbox prewarming">
-  During a Vercel build, eve automatically creates or reuses a sandbox template when your sandbox
-  has `bootstrap()` or seed files. The build needs permission to create Vercel Sandbox templates,
-  and a prewarm failure stops the deployment. See the [sandbox lifecycle](../../sandbox#lifecycle)
-  for template and session setup.
+  During a Vercel build, eve prepares every named template exported from a sandbox module. It
+  hydrates managed workspace files, runs `prepare()`, and freezes the exact Vercel snapshot
+  reference into the deployment. The build needs permission to create Vercel Sandbox templates, and
+  a prewarm failure stops the deployment.
 </Callout>
 
 ## Deploy the agent
@@ -62,7 +60,7 @@ Vercel uses the generated output to configure these services:
 - **Web runtime**: serves health, session, stream, channel, callback, and schedule routes
 - **Vercel Workflow**: persists and resumes durable runs, with optimistic replay preconditions enabled so stale event-log snapshots reload before they can commit
 - **Vercel Cron**: invokes authored schedules
-- **Vercel Sandbox**: runs sandbox sessions selected by `defaultBackend()`
+- **Vercel Sandbox**: runs the framework default or sandboxes returned by `VercelSandbox`
 
 ## Verify the deployment
 

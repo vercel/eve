@@ -365,7 +365,7 @@ async function startNitroDevelopmentServer(
 ): Promise<DevelopmentServerStartResult> {
   // Marks this process tree as an `eve dev` session so runtime features
   // that must never run in production (for example auto-installing
-  // optional sandbox engine packages) can gate on it.
+  // optional sandbox provider packages) can gate on it.
   process.env[EVE_DEV_ENV_FLAG] ??= "1";
 
   const project = await resolveDiscoveryProject(rootDir);

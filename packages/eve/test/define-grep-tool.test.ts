@@ -13,7 +13,7 @@ function createFakeAccess(
 ): SandboxAccess {
   return {
     async captureState() {
-      return { initialized: false, session: null };
+      return null;
     },
 
     async get() {
@@ -101,7 +101,7 @@ describe("defineGrepTool", () => {
   it("throws a clear error when no sandbox session is available", async () => {
     const fakeAccess: SandboxAccess = {
       async captureState() {
-        return { initialized: false, session: null };
+        return null;
       },
 
       async get() {

@@ -71,7 +71,7 @@ export interface RunAsSessionInit {
   readonly sandbox?: MockSandbox;
   /**
    * Explicit `SandboxAccess` override. Use this when you want to bypass
-   * {@link MockSandbox} entirely (e.g. to use a real backend).
+   * {@link MockSandbox} entirely (e.g. to use a real provider).
    */
   readonly sandboxAccess?: SandboxAccess;
   /**

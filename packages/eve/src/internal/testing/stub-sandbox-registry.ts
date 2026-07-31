@@ -15,7 +15,7 @@ import {
 export function createStubSandboxRegistry(): RuntimeSandboxRegistry {
   return {
     sandbox: {
-      definition: createFrameworkSandboxDefinition(),
+      definition: createFrameworkSandboxDefinition({ hasWorkspace: false }),
       workspaceResourceRoot: {
         logicalPath: "test:stub-sandbox/workspace",
         rootEntries: [],

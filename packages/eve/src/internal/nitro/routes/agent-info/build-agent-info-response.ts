@@ -149,12 +149,8 @@ export interface AgentInfoHookEntry extends AgentInfoSource {
 }
 
 export interface AgentInfoSandboxEntry extends AgentInfoSource {
-  readonly backendKind?: string;
-  readonly description?: string;
-  readonly hasBootstrap: boolean;
-  readonly hasOnSession: boolean;
-  readonly revalidationKey?: string;
-  readonly sourceHash?: string;
+  readonly sourceHash: string;
+  readonly templateExports: readonly string[];
 }
 
 export interface AgentInfoDiagnostics {
@@ -509,12 +505,8 @@ function renderSandbox(sandbox: ResolvedSandboxDefinition | null): AgentInfoSand
 
   return {
     ...toSource(sandbox),
-    backendKind: resolveBackendKind(sandbox.backend),
-    description: sandbox.description,
-    hasBootstrap: sandbox.bootstrap !== undefined,
-    hasOnSession: sandbox.onSession !== undefined,
-    revalidationKey: sandbox.revalidationKey,
     sourceHash: sandbox.sourceHash,
+    templateExports: sandbox.templates.map((template) => template.exportName),
   };
 }
 
@@ -571,13 +563,4 @@ export function toSource(source: {
     sourceId: source.sourceId,
     sourceKind: source.sourceKind,
   };
-}
-
-function resolveBackendKind(backend: unknown): string | undefined {
-  if (backend === null || typeof backend !== "object") {
-    return undefined;
-  }
-
-  const kind = (backend as { readonly kind?: unknown }).kind;
-  return typeof kind === "string" ? kind : undefined;
 }

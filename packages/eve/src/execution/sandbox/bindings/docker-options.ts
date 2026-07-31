@@ -5,17 +5,10 @@ import type {
   DockerSandboxNetworkPolicy,
   DockerSandboxPullPolicy,
 } from "#public/sandbox/docker-sandbox.js";
+import type { JsonObject } from "#shared/json.js";
 
-/**
- * Default base image for the Docker backend: eve's published sandbox
- * runtime image.
- */
 export const DEFAULT_DOCKER_SANDBOX_IMAGE = "ghcr.io/vercel/eve:latest";
 
-/**
- * Fully-defaulted Docker backend options consumed by the backend
- * implementation.
- */
 export interface ResolvedDockerSandboxOptions {
   readonly env: Readonly<Record<string, string>>;
   readonly image: string;
@@ -23,9 +16,6 @@ export interface ResolvedDockerSandboxOptions {
   readonly pullPolicy: DockerSandboxPullPolicy;
 }
 
-/**
- * Applies defaults to `docker(opts)`.
- */
 export function resolveDockerSandboxOptions(
   options: DockerSandboxCreateOptions = {},
 ): ResolvedDockerSandboxOptions {
@@ -34,6 +24,30 @@ export function resolveDockerSandboxOptions(
     image: options.image ?? DEFAULT_DOCKER_SANDBOX_IMAGE,
     networkPolicy: options.networkPolicy ?? "allow-all",
     pullPolicy: options.pullPolicy ?? "if-not-present",
+  };
+}
+
+/** Durable references are runtime data, so provider options are validated before reuse. */
+export function decodeDockerSandboxCreateOptions(value: JsonObject): DockerSandboxCreateOptions {
+  if (
+    !hasOnlyKeys(value, ["env", "image", "networkPolicy", "pullPolicy"]) ||
+    (value.env !== undefined && !isStringRecord(value.env)) ||
+    (value.image !== undefined && typeof value.image !== "string") ||
+    (value.networkPolicy !== undefined &&
+      value.networkPolicy !== "allow-all" &&
+      value.networkPolicy !== "deny-all") ||
+    (value.pullPolicy !== undefined &&
+      value.pullPolicy !== "always" &&
+      value.pullPolicy !== "if-not-present" &&
+      value.pullPolicy !== "never")
+  ) {
+    throw new TypeError("Invalid Docker sandbox configuration in durable state.");
+  }
+  return {
+    env: value.env,
+    image: value.image,
+    networkPolicy: value.networkPolicy,
+    pullPolicy: value.pullPolicy,
   };
 }
 
@@ -59,4 +73,17 @@ function sortStringRecord(
   return Object.fromEntries(
     Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
   );
+}
+
+function isStringRecord(value: unknown): value is Readonly<Record<string, string>> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value).every((entry) => typeof entry === "string")
+  );
+}
+
+function hasOnlyKeys(value: JsonObject, keys: readonly string[]): boolean {
+  return Object.keys(value).every((key) => keys.includes(key));
 }

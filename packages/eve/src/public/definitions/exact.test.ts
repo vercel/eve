@@ -13,7 +13,7 @@ import {
 } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineInstrumentation } from "#public/definitions/instrumentation.js";
-import { defineSandbox } from "#public/definitions/sandbox.js";
+import { defineSandbox, type Sandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
@@ -240,34 +240,23 @@ function typeOnlyFixtures(): void {
     },
   });
 
-  defineSandbox({
-    async onSession({ ctx, use }) {
-      const sessionId: string = ctx.session.id;
-      const sandbox = await use();
-      void sandbox;
-      void sessionId;
-    },
+  const durableSandbox = {} as Sandbox;
+  defineSandbox(async ({ parent, root, runtime, session, signal }) => {
+    const sessionId: string = session.id;
+    const runtimeMode: "development" | "production" = runtime.mode;
+    const parentSandbox: Promise<Sandbox> | undefined = parent?.sandbox;
+    const rootSandbox: Promise<Sandbox> | undefined = root?.sandbox;
+    const aborted: boolean = signal.aborted;
+    void aborted;
+    void parentSandbox;
+    void rootSandbox;
+    void runtimeMode;
+    void sessionId;
+    return durableSandbox;
   });
 
-  defineSandbox({
-    async bootstrap({ use }) {
-      const sandbox = await use();
-      void sandbox;
-    },
-  });
-
-  defineSandbox({
-    revalidationKey: () => "bootstrap-v1",
-    async bootstrap({ use }) {
-      const sandbox = await use();
-      void sandbox;
-    },
-  });
-
-  // @ts-expect-error Sandbox revalidation keys are only valid with bootstrap.
-  defineSandbox({
-    revalidationKey: () => "unused",
-  });
+  // @ts-expect-error Sandbox definitions are functions that return a durable Sandbox.
+  defineSandbox({ backend: "vercel" });
 
   defineTool({
     description: "Fetch current weather for a city.",

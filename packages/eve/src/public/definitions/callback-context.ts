@@ -8,8 +8,9 @@ export type { SessionAuth, SessionParent, SessionTurn };
  * Shared runtime context available to all authored callbacks that run
  * inside the ALS-scoped harness step (tools, hooks, channel events).
  *
- * Non-ALS callbacks (schedule `run`, sandbox `bootstrap`/`onSession`,
- * instrumentation `setup`) do not receive this context. They get
+ * Callbacks with their own lifecycle inputs (schedule `run`, sandbox
+ * definitions and template preparation, instrumentation `setup`) do not
+ * receive this context. They get
  * domain-specific arguments instead.
  */
 export interface SessionContext {

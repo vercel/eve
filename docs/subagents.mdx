@@ -16,7 +16,7 @@ The root session receives `agent` by default. The model calls it to delegate a t
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. To run independent tasks in parallel, emit multiple `agent` calls in one response; eve runs the batch concurrently and returns every result before the root continues. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox definition. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history, state, and—unless the definition deliberately returns `parent.sandbox`—sandbox. To run independent tasks in parallel, emit multiple `agent` calls in one response; eve runs the batch concurrently and returns every result before the root continues.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -65,21 +65,32 @@ agent/subagents/researcher/
 
 A declared subagent inherits nothing from the root's authored slots. Discovery treats its directory as its own agent root, so it has only the instructions, tools, connections, skills, sandbox, hooks, and nested subagents authored under `agent/subagents/<id>/`. An absent slot falls back to the framework default, not to the root's version.
 
-| Slot         | Root built-in `agent` tool    | Declared subagent                      |
-| ------------ | ----------------------------- | -------------------------------------- |
-| Instructions | Inherited (copy of the agent) | Own `instructions.{md,ts}`, optional   |
-| Tools        | Inherited except root-only    | Own `tools/`                           |
-| Connections  | Inherited                     | Own `connections/`                     |
-| Skills       | Inherited                     | Own `skills/`                          |
-| Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
-| Hooks        | Inherited                     | Own `hooks/`                           |
-| State        | Fresh                         | Fresh                                  |
-| Channels     | Root-only                     | Root-only                              |
-| Schedules    | Root-only                     | Root-only                              |
+| Slot         | Root built-in `agent` tool           | Declared subagent                      |
+| ------------ | ------------------------------------ | -------------------------------------- |
+| Instructions | Inherited (copy of the agent)        | Own `instructions.{md,ts}`, optional   |
+| Tools        | Inherited except root-only           | Own `tools/`                           |
+| Connections  | Inherited                            | Own `connections/`                     |
+| Skills       | Inherited                            | Own `skills/`                          |
+| Sandbox      | Same definition; sharing is explicit | Own `sandbox/`, else framework default |
+| Hooks        | Inherited                            | Own `hooks/`                           |
+| State        | Fresh                                | Fresh                                  |
+| Channels     | Root-only                            | Root-only                              |
+| Schedules    | Root-only                            | Root-only                              |
 
-For a declared subagent this means duplicating anything the child needs. When two subagents need the same procedure, copy the markdown under each `skills/` directory, or share typed helpers via `lib/`. The sandbox does not inherit from the parent; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
+For a declared subagent this means duplicating anything the child needs. When two subagents need the same procedure, copy the markdown under each `skills/` directory, or share typed helpers via `lib/`. Its sandbox falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
 
-The root built-in `agent` tool is the exception. Its children share the root's sandbox and tools because they are copies of the same agent working on the same files.
+Any child can intentionally share live files and processes by returning the ancestor's durable value:
+
+```ts title="agent/subagents/reviewer/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox(({ parent }) => {
+  if (parent === null) throw new Error("reviewer must run as a child");
+  return parent.sandbox;
+});
+```
+
+A root sandbox definition can use the same `parent` branch when copies created by the built-in `agent` tool should share the root workspace. Nested children can return `root.sandbox`. See [Sandbox](./sandbox#reuse-and-sharing).
 
 `defineState` is never shared, for either kind. Each child starts with fresh durable state.
 

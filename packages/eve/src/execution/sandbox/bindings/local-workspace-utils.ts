@@ -5,7 +5,6 @@ import { dirname, join } from "node:path";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { resolveSandboxSeedFilePath } from "#shared/skill-paths.js";
-import type { SandboxSeedFile } from "#shared/sandbox-backend.js";
 import type {
   InternalSandboxSession,
   SandboxProcess,
@@ -13,6 +12,11 @@ import type {
   SandboxSession,
   SandboxSpawnOptions,
 } from "#shared/sandbox-session.js";
+
+export interface SandboxSeedFile {
+  readonly content: string | Buffer;
+  readonly path: string;
+}
 
 export interface FileBackedSandbox {
   readFileBytes(path: string): Promise<Buffer | null>;
@@ -88,27 +92,30 @@ export async function touchDirectory(path: string): Promise<void> {
   await utimes(path, now, now);
 }
 
-export function resolveLocalBackendTemplateRootPath(
+export function resolveLocalProviderTemplateRootPath(
   cacheDirectory: string,
-  backendCacheName: string,
+  providerCacheName: string,
   templateKey: string,
 ): string {
-  return join(resolveLocalBackendTemplatesDirectory(cacheDirectory, backendCacheName), templateKey);
+  return join(
+    resolveLocalProviderTemplatesDirectory(cacheDirectory, providerCacheName),
+    templateKey,
+  );
 }
 
-export function resolveLocalBackendTemplatesDirectory(
+export function resolveLocalProviderTemplatesDirectory(
   cacheDirectory: string,
-  backendCacheName: string,
+  providerCacheName: string,
 ): string {
-  return join(cacheDirectory, backendCacheName, "templates");
+  return join(cacheDirectory, providerCacheName, "templates");
 }
 
-export function resolveLocalBackendSessionRootPath(
+export function resolveLocalProviderSessionRootPath(
   cacheDirectory: string,
-  backendCacheName: string,
+  providerCacheName: string,
   sessionKey: string,
 ): string {
-  return join(cacheDirectory, backendCacheName, "sessions", sessionKey);
+  return join(cacheDirectory, providerCacheName, "sessions", sessionKey);
 }
 
 export async function writeSandboxSeedFiles(

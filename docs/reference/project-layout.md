@@ -57,7 +57,7 @@ The Subagents column states whether a local subagent (`subagents/<id>/`) can aut
 | `skills/`                                               | On-demand procedures and capability packs   | Yes       | Flat markdown, module-backed skills, or packaged skills. Seeded into `$HOME/.agents/skills/...`, with `/workspace/skills/...` as a fallback if `$HOME` is unavailable.                                                |
 | `lib/`                                                  | Shared authored helper code                 | Yes       | Import-only; not mounted into the workspace.                                                                                                                                                                          |
 | `sandbox.ts` or `sandbox/sandbox.ts`                    | The agent's single sandbox                  | Yes       | Use top-level `sandbox.ts` for a definition-only override; use `sandbox/sandbox.ts` + `sandbox/workspace/**` to also seed files. Framework default applies when neither is authored.                                  |
-| `sandbox/workspace/**`                                  | Files seeded into the sandbox               | Yes       | Mirrored into `/workspace/...` at session bootstrap.                                                                                                                                                                  |
+| `sandbox/workspace/**`                                  | Files hydrated into the sandbox             | Yes       | Captured under `/workspace/...` in the exported sandbox template.                                                                                                                                                     |
 | `tools/`                                                | Typed executable integrations               | Yes       | Module-backed only.                                                                                                                                                                                                   |
 | `schedules/`                                            | Recurring jobs                              | No        | Each schedule is `<name>.ts` (default-exported `defineSchedule`) or `<name>.md` (frontmatter `cron:` + prompt body). Recursive nesting supported. Root-only.                                                          |
 | `subagents/`                                            | Specialist child agents                     | Yes       | Each child is its own local package under `subagents/<id>/`. Nested subagents are supported.                                                                                                                          |
@@ -66,7 +66,7 @@ The Subagents column states whether a local subagent (`subagents/<id>/`) can aut
 
 eve does not mount the whole tree. Authored workspace files land in the sandbox workspace:
 
-- `agent/sandbox/workspace/**` → `/workspace/...` at session bootstrap
+- `agent/sandbox/workspace/**` → `/workspace/...` during exported template preparation
 
 Skill files land outside the workspace, under `$HOME/.agents/skills/...`. If `$HOME` is unavailable, eve falls back to `/workspace/skills/...`. Packaged skill references such as `references/checklist.md` resolve relative to the directory containing that skill's `SKILL.md`.
 

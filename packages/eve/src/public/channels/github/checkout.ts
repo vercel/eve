@@ -58,7 +58,7 @@ export interface GitHubCheckoutInput extends GitHubCheckoutOptions {
  *
  * The installation token is brokered at the sandbox firewall
  * (`sandbox.setNetworkPolicy`) rather than embedded in the remote URL, so it
- * never enters the sandbox process. Requires a firewall-capable backend; the
+ * never enters the sandbox process. Requires a firewall-capable provider; the
  * local backend rejects `setNetworkPolicy`.
  *
  * Channel-internal; not part of the public GitHub channel API.

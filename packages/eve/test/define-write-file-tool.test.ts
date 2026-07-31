@@ -15,7 +15,7 @@ import {
 function createFakeAccess(files: Record<string, string>): SandboxAccess {
   return {
     async captureState() {
-      return { initialized: false, session: null };
+      return null;
     },
 
     async get() {
@@ -107,7 +107,7 @@ describe("defineWriteFileTool", () => {
   it("throws a clear error when no sandbox session is available", async () => {
     const fakeAccess: SandboxAccess = {
       async captureState() {
-        return { initialized: false, session: null };
+        return null;
       },
 
       async get() {

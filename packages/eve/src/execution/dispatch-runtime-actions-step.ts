@@ -8,12 +8,14 @@
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
+import { callAdapterEventHandler, getAdapterKind } from "#channel/adapter.js";
 import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  ParentSessionKey,
+  TurnAbortSignalKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -47,6 +49,9 @@ import { createWorkflowRuntime, workflowEntryReference } from "#execution/workfl
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { getActiveRuntimeNode } from "#context/node.js";
+import { readSubagentSandboxAncestorStates } from "#execution/subagent-adapter.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -72,7 +77,7 @@ export async function dispatchRuntimeActionsStep(input: {
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
-  const session = hydrateDurableSession({
+  let session = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
     },
@@ -93,6 +98,46 @@ export async function dispatchRuntimeActionsStep(input: {
   // Remote agents run on their own deployment under their own limits and
   // do not dilute the local shares.
   const fanoutSize = batch.actions.filter((action) => action.kind === "subagent-call").length;
+
+  if (fanoutSize > 0) {
+    const node = getActiveRuntimeNode(ctx);
+    const { parentState, rootState } = readSubagentSandboxAncestorStates(adapter);
+    const sandboxAccess = await ensureSandboxAccess({
+      compiledArtifactsSource: bundle.compiledArtifactsSource,
+      context: ctx,
+      nodeId: node.nodeId,
+      parentState,
+      registry: node.sandboxRegistry,
+      rootState,
+      signal: ctx.get(TurnAbortSignalKey),
+      session: {
+        auth: {
+          current: auth,
+          initiator: initiatorAuth,
+        },
+        id: session.sessionId,
+        parent: ctx.get(ParentSessionKey),
+        turn: {
+          id: batch.event.turnId,
+          sequence: batch.event.sequence,
+        },
+      },
+      sessionId: session.sessionId,
+      state: session.sandboxState ?? null,
+      tags: {
+        agent:
+          (node as { readonly agent?: { readonly config?: { readonly name?: string } } }).agent
+            ?.config?.name ?? node.nodeId,
+        channel: getAdapterKind(adapter),
+        sessionId: session.sessionId,
+      },
+    });
+    await sandboxAccess.get();
+    const sandboxState = await sandboxAccess.captureState();
+    if (sandboxState !== null) {
+      session = { ...session, sandboxState };
+    }
+  }
 
   let nextSession = session;
   const results: RuntimeSubagentResultActionResult[] = [];

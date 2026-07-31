@@ -1,66 +1,80 @@
-import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
-type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
-
-type VercelUpdateOptions = Parameters<Vercel.Sandbox["update"]>[0];
-
-type VercelSandboxInternalCreateOptions = {
-  readonly [key: `__${string}`]: unknown;
+type VercelSandboxGitSource = {
+  readonly depth?: number;
+  readonly password?: string;
+  readonly revision?: string;
+  readonly type: "git";
+  readonly url: string;
+  readonly username?: string;
 };
 
-type VercelSandboxAuthorCreateOptions<T> = T extends unknown
-  ? Omit<T, "name" | "onResume" | "persistent" | "runtime" | "signal"> &
-      VercelSandboxInternalCreateOptions
-  : never;
+type VercelSandboxTarballSource = {
+  readonly type: "tarball";
+  readonly url: string;
+};
+
+type VercelSandboxSnapshotSource = {
+  readonly snapshotId: string;
+  readonly type: "snapshot";
+};
+
+/** Filesystem source used to initialize a Vercel Sandbox. */
+export type VercelSandboxSource =
+  | VercelSandboxGitSource
+  | VercelSandboxTarballSource
+  | VercelSandboxSnapshotSource;
 
 /**
- * Options accepted by `vercel(opts)`. Forwarded to Vercel
- * Sandbox creation for every fresh sandbox the framework creates
- * (template at prewarm time, session at first-time session-create).
- * Skipped on resume (`Sandbox.get`) since no create happens there.
- *
- * `networkPolicy` is deferred until after framework-owned base setup
- * for fresh templates and template-less sessions, so eve can install
- * required packages before authored bootstrap code runs. Template-backed
- * session creates receive it at creation time because the template
- * already contains the prepared base runtime.
- *
- * Framework-injected fields (`name`, `onResume`, `persistent`, `signal`)
- * are excluded: the framework owns those and overrides any
- * author-supplied values.
- *
- * `runtime` is excluded as well: eve always boots its sandboxes from the
- * published eve image, which is mutually exclusive with a stock runtime.
- *
- * `source` is honored only on the template create at prewarm time, so
- * an author-supplied snapshot, git revision, or tarball becomes the
- * base layer for the template. Framework setup, bootstrap, and seed
- * files all run on top, and the resulting
- * framework-owned snapshot is what every later session derives from,
- * so `source` is stripped from the session-create path. eve does not
- * detect external snapshot changes; to pick up a rebuilt external
- * snapshot, force a template rebuild (e.g. by changing the sandbox
- * definition so its template key changes).
+ * Options applied when a Vercel Sandbox session starts. These are accepted by
+ * a template's `create()` and `getOrCreate()` methods.
  */
-export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelCreateOptions>;
+export interface VercelSandboxSessionOptions {
+  /** Default environment variables inherited by sandbox commands. */
+  readonly env?: Record<string, string>;
+  /** Limits how many recent snapshots the provider retains. */
+  readonly keepLastSnapshots?: {
+    readonly count: number;
+    readonly deleteEvicted?: boolean;
+    readonly expiration?: number;
+  };
+  /** Network access granted to the sandbox. */
+  readonly networkPolicy?: SandboxNetworkPolicy;
+  /** Ports exposed by the sandbox. */
+  readonly ports?: number[];
+  /** Vercel project used for the sandbox. */
+  readonly projectId?: string;
+  /** Compute allocated to the sandbox. */
+  readonly resources?: {
+    readonly vcpus: number;
+  };
+  /** Default expiration applied to snapshots, in milliseconds. */
+  readonly snapshotExpiration?: number;
+  /** Provider tags added alongside eve's framework tags. */
+  readonly tags?: Record<string, string>;
+  /** Vercel team used for the sandbox. */
+  readonly teamId?: string;
+  /** Provider timeout in milliseconds. */
+  readonly timeout?: number;
+}
 
 /**
- * Options accepted by the Vercel backend's `bootstrap({ use })` hook.
- * Tracks the Vercel SDK's `Sandbox.update(...)` parameter because bootstrap
- * applies its options to the template via `sandbox.update(...)` after
- * `Sandbox.create()` and before the snapshot is captured. The Vercel
- * SDK persists `update`-d settings on the sandbox so they survive into
- * the snapshot, which becomes the seed for every later session.
+ * Options accepted by `VercelSandbox.create()` and `VercelSandbox.template()`.
  *
- * Today this is the same shape as
- * {@link VercelSandboxSessionUseOptions}; both are exposed as separate
- * named aliases so future divergence is non-breaking.
+ * eve owns this API. Provider authentication, durable resource names,
+ * persistence, cancellation, and restoration are supplied by the framework.
  */
-export type VercelSandboxBootstrapUseOptions = VercelUpdateOptions;
-
-/**
- * Options accepted by the Vercel backend's `onSession({ use })` hook.
- * Tracks the Vercel SDK's `Sandbox.update(...)` parameter; passed values are
- * applied to the live session via the SDK's `update`.
- */
-export type VercelSandboxSessionUseOptions = VercelUpdateOptions;
+export type VercelSandboxCreateOptions = VercelSandboxSessionOptions &
+  (
+    | {
+        /** Vercel Container Registry image used as the sandbox base. */
+        readonly image?: string;
+        /** Git repository or tarball used as the sandbox base. */
+        readonly source?: Exclude<VercelSandboxSource, VercelSandboxSnapshotSource>;
+      }
+    | {
+        readonly image?: never;
+        /** Existing Vercel snapshot used as the sandbox base. */
+        readonly source: VercelSandboxSnapshotSource;
+      }
+  );

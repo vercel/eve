@@ -42,25 +42,30 @@ const PORTABILITY_CASES: readonly PortabilityCase[] = [
   {
     descriptor: {
       files: {
-        "agent/sandbox.ts": `import { defaultBackend, defineSandbox } from "eve/sandbox";
-import { docker } from "eve/sandbox/docker";
-import { justbash } from "eve/sandbox/just-bash";
-import { microsandbox } from "eve/sandbox/microsandbox";
-import { vercel } from "eve/sandbox/vercel";
+        "agent/sandbox.ts": `import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+import { DockerSandbox } from "eve/sandbox/docker";
+import { JustBashSandbox } from "eve/sandbox/just-bash";
+import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+import {
+  defineSandboxAdapter,
+  defineSandboxTemplate,
+  type Sandbox,
+  type SandboxSession,
+} from "eve/sandbox/provider";
 
-const fallback = defaultBackend({
-  docker: { image: "ghcr.io/vercel/eve:latest" },
-  justBash: {},
-  microsandbox: {},
-  vercel: { resources: { vcpus: 2 } },
-});
+void DockerSandbox;
+void JustBashSandbox;
+void MicrosandboxSandbox;
+void defineSandboxAdapter;
+void defineSandboxTemplate;
+void ({} as Sandbox);
+void ({} as SandboxSession);
 
-void docker;
-void justbash;
-void microsandbox;
-
-export default defineSandbox({
-  backend: process.env.VERCEL === "1" ? vercel() : fallback,
+export default defineSandbox(() => {
+  return process.env.VERCEL === "1"
+    ? VercelSandbox.create({ resources: { vcpus: 2 } })
+    : DefaultSandbox.create({ docker: { image: "ghcr.io/vercel/eve:latest" } });
 });
 `,
       },
@@ -72,8 +77,9 @@ export default defineSandbox({
       "src/public/sandbox/just-bash.ts",
       "src/public/sandbox/microsandbox.ts",
       "src/public/sandbox/vercel.ts",
+      "src/public/sandbox/provider.ts",
     ],
-    name: "lets tsc typecheck sandbox backend factories from nested subpath imports",
+    name: "lets tsc typecheck durable sandbox APIs from nested subpath imports",
     packageExports: {
       "./sandbox": {
         types: "./dist/src/public/sandbox/index.d.ts",
@@ -89,6 +95,9 @@ export default defineSandbox({
       },
       "./sandbox/vercel": {
         types: "./dist/src/public/sandbox/vercel.d.ts",
+      },
+      "./sandbox/provider": {
+        types: "./dist/src/public/sandbox/provider.d.ts",
       },
     },
   },

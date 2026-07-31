@@ -1,19 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createMicrosandboxSandboxBackend } from "#execution/sandbox/bindings/microsandbox.js";
+import { createMicrosandboxSandboxProvider } from "#execution/sandbox/bindings/microsandbox.js";
 import {
   createMicrosandboxNetworkPlan,
   createTransformBrokerEnvironment,
   serializeMicrosandboxNetworkPolicyJson,
 } from "#execution/sandbox/bindings/microsandbox-network.js";
 import {
+  decodeMicrosandboxCreateOptions,
   MICROSANDBOX_DEFAULT_IMAGE,
   resolveMicrosandboxOptions,
 } from "#execution/sandbox/bindings/microsandbox-options.js";
 
 const lifecycleMocks = vi.hoisted(() => ({
-  createMicrosandboxHandle: vi.fn(),
+  createMicrosandboxResource: vi.fn(),
   prewarmMicrosandboxTemplate: vi.fn(),
+  referenceMicrosandboxResource: vi.fn(),
 }));
 
 vi.mock("#execution/sandbox/bindings/microsandbox-lifecycle.js", () => lifecycleMocks);
@@ -22,13 +24,40 @@ vi.mock("#execution/sandbox/bindings/microsandbox-lifecycle.js", () => lifecycle
 // glibc Linux only; keep every microsandbox suite off Windows.
 const onWindows = process.platform === "win32";
 
-describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
+describe("decodeMicrosandboxCreateOptions", () => {
+  it("validates durable provider options", () => {
+    expect(
+      decodeMicrosandboxCreateOptions({
+        cpus: 2,
+        env: { TOKEN: "value" },
+        networkPolicy: { allow: ["api.example.com"] },
+        setup: { autoInstall: false },
+      }),
+    ).toEqual({
+      cpus: 2,
+      env: { TOKEN: "value" },
+      image: undefined,
+      memoryMiB: undefined,
+      networkPolicy: { allow: ["api.example.com"] },
+      pullPolicy: undefined,
+      setup: { autoInstall: false },
+    });
+    expect(() => decodeMicrosandboxCreateOptions({ networkPolicy: { allow: [42] } })).toThrow(
+      "Invalid microsandbox configuration",
+    );
+  });
+});
+
+describe.skipIf(onWindows)("createMicrosandboxSandboxProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("exposes the stable backend name without loading microsandbox", () => {
-    expect(createMicrosandboxSandboxBackend().name).toBe("microsandbox");
+  it("constructs without loading microsandbox", () => {
+    expect(createMicrosandboxSandboxProvider()).toMatchObject({
+      create: expect.any(Function),
+      prewarm: expect.any(Function),
+    });
   });
 
   it("defaults to eve's published sandbox runtime image", () => {
@@ -52,10 +81,10 @@ describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
     );
     lifecycleMocks.prewarmMicrosandboxTemplate.mockRejectedValueOnce(cause);
 
-    const prewarm = createMicrosandboxSandboxBackend().prewarm?.({
-      runtimeContext: { appRoot: "/tmp/eve-app" },
-      seedFiles: [],
-      templateKey: "template-key",
+    const prewarm = createMicrosandboxSandboxProvider().prewarm({
+      appRoot: "/tmp/eve-app",
+      async prepare() {},
+      templateId: "template-key",
     });
 
     await expect(prewarm).rejects.toMatchObject({

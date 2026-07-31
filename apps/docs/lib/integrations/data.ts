@@ -1404,7 +1404,7 @@ For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`
 eve add extension/agent-browser
 \`\`\`
 
-The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox backend with real process execution, such as Vercel Sandbox, Docker, or microsandbox.`,
+The extension installs agent-browser automatically on first use and runs it inside the agent's sandbox. It requires a sandbox provider with real process execution, such as Vercel Sandbox, Docker, or microsandbox.`,
     quickStart: `Mount the extension under \`agent/extensions/\`:
 
 \`\`\`ts title="agent/extensions/browser.ts"

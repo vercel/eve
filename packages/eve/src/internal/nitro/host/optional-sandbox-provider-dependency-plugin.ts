@@ -1,13 +1,13 @@
 /**
- * Optional sandbox engine packages eve's runtime references through
+ * Optional sandbox provider packages eve's runtime references through
  * lazy dynamic imports. Bundlers follow literal dynamic imports like
  * static imports — so without intervention mere *resolvability* (for
  * example eve's own workspace devDependencies) would pull them into
  * every hosted build. The source of truth for whether an application
- * opted in is its compiled sandbox config: the backend names captured
+ * opted in is its compiled sandbox config: the provider names captured
  * into the manifest at compile time.
  */
-export const OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME: Readonly<Record<string, string>> = {
+export const OPTIONAL_SANDBOX_PROVIDER_PACKAGES: Readonly<Record<string, string>> = {
   "just-bash": "just-bash",
   microsandbox: "microsandbox",
 };
@@ -21,15 +21,15 @@ interface BundlerPluginShape {
 }
 
 /**
- * Creates the bundler plugin that pins unconfigured optional engine
+ * Creates the bundler plugin that pins unconfigured optional sandbox provider
  * packages as plain externals — never inlined and never traced — so a
  * resolvable-but-unrequested install adds nothing to hosted output.
  * The lazy runtime import then fails only at first use, with an
- * actionable install error. Packages whose backend the app configured
+ * actionable install error. Packages whose provider the app configured
  * are excluded here and take Nitro's externalize-and-trace path
  * instead, keeping their hosted output self-contained.
  */
-export function createOptionalEngineDependencyPlugin(
+export function createOptionalSandboxProviderDependencyPlugin(
   unconfiguredPackages: readonly string[],
 ): BundlerPluginShape | null {
   if (unconfiguredPackages.length === 0) {
@@ -39,7 +39,7 @@ export function createOptionalEngineDependencyPlugin(
   const unconfigured = new Set(unconfiguredPackages);
 
   return {
-    name: "eve-optional-engine-dependency-external",
+    name: "eve-optional-sandbox-provider-dependency-external",
     resolveId(source) {
       if (!unconfigured.has(source)) {
         return null;

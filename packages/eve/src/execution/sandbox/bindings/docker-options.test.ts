@@ -2,9 +2,31 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDockerSandboxOptionsHash,
+  decodeDockerSandboxCreateOptions,
   DEFAULT_DOCKER_SANDBOX_IMAGE,
   resolveDockerSandboxOptions,
 } from "#execution/sandbox/bindings/docker-options.js";
+
+describe("decodeDockerSandboxCreateOptions", () => {
+  it("validates durable provider options", () => {
+    expect(
+      decodeDockerSandboxCreateOptions({
+        env: { TOKEN: "value" },
+        image: "ubuntu:26.04",
+        networkPolicy: "deny-all",
+        pullPolicy: "never",
+      }),
+    ).toEqual({
+      env: { TOKEN: "value" },
+      image: "ubuntu:26.04",
+      networkPolicy: "deny-all",
+      pullPolicy: "never",
+    });
+    expect(() => decodeDockerSandboxCreateOptions({ pullPolicy: "sometimes" })).toThrow(
+      "Invalid Docker sandbox configuration",
+    );
+  });
+});
 
 describe("resolveDockerSandboxOptions", () => {
   it("defaults to eve's published sandbox runtime image with permissive networking", () => {

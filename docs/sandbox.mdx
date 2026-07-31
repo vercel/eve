@@ -1,236 +1,309 @@
 ---
 title: "Sandbox"
-description: "The agent's isolated bash environment, including built-in file tools, a seeded /workspace, backends, lifecycle, and network policy."
+description: "Choose, prepare, persist, and share the filesystem and process environment used by an eve agent."
 ---
 
-The sandbox is the agent's isolated bash environment: a filesystem rooted at `/workspace` where it can run shell commands, execute scripts, and read or write files without ever touching your app runtime. Every eve agent has exactly one. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools already target it, and your authored code can too.
+Every eve agent has a sandbox: a filesystem rooted at `/workspace` with process and file operations. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools use it automatically.
 
-A working sandbox exists by default, with nothing to author. Override it only to add setup, seed files, pick a backend, or lock down the network.
-
-The default sandbox is not a substitute for configuring network policy, credentials, retention, deletion, or other controls your application requires.
+You do not need to author anything for the default sandbox. Add `agent/sandbox.ts` or `agent/sandbox/sandbox.ts` when you need a particular provider, build-time setup, session-dependent selection, intentional sharing, or direct access to the host filesystem.
 
 ## Using the sandbox
 
-The model already has shell and file access through the default tools:
-
-| Tool                       | Does                                |
-| -------------------------- | ----------------------------------- |
-| `bash`                     | run a shell command in the sandbox  |
-| `read_file` / `write_file` | read/write files under `/workspace` |
-| `glob`                     | find files by pattern               |
-| `grep`                     | search file contents                |
-
-All of them run with `/workspace` as the working directory. Any authored runtime function (a tool, a step, a model callback) can get a live sandbox handle with `ctx.getSandbox()`.
+Authored runtime code gets the current sandbox from its callback context:
 
 ```ts title="agent/tools/run_analysis.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineTool({
-  description: "Run a Python analysis script and return its output.",
+  description: "Run a Python analysis script.",
   inputSchema: z.object({ script: z.string() }),
   async execute({ script }, ctx) {
     const sandbox = await ctx.getSandbox();
     await sandbox.writeTextFile({ path: "analysis/run.py", content: script });
-    const result = await sandbox.run({ command: "python analysis/run.py" });
-    return { stdout: result.stdout };
+    return await sandbox.run({ command: "python analysis/run.py" });
   },
 });
 ```
 
-`ctx.getSandbox()` takes no arguments, is async, and only works inside authored runtime execution.
+Relative paths resolve from `/workspace`; absolute paths pass through. `sandbox.resolvePath("repo/build.py")` returns `/workspace/repo/build.py`.
 
-`/workspace` is one namespace across every backend, so `/workspace/foo` points at the same file whether the backend is local or Vercel. When you need to interpolate a path into a generated command, `sandbox.resolvePath("repo/build.py")` anchors a relative path to its absolute `/workspace/repo/build.py` form.
+| Method                                   | Use                                                    |
+| ---------------------------------------- | ------------------------------------------------------ |
+| `run({ command })`                       | Run a command and wait for its result                  |
+| `spawn(options)`                         | Start a long-running process                           |
+| `readTextFile` / `writeTextFile`         | Read or write text                                     |
+| `readBinaryFile` / `writeBinaryFile`     | Read or write bytes                                    |
+| `readFile` / `writeFile`                 | Stream bytes                                           |
+| `removePath({ path, force, recursive })` | Remove a file or directory                             |
+| `resolvePath(path)`                      | Resolve a path against `/workspace`                    |
+| `setNetworkPolicy(policy)`               | Change the live sandbox's egress policy when supported |
 
-The handle does more than `run` and `writeTextFile`. In every method, relative paths resolve from `/workspace` and absolute paths pass through untouched:
+## Returning a sandbox
 
-| Method                                   | Does                                                                                            |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `run({ command })`                       | run one command, block until it exits, return `{ stdout, stderr, ... }`                         |
-| `spawn(options)`                         | launch a long-running process (server, watcher) and return a `SandboxProcess` handle            |
-| `readTextFile` / `writeTextFile`         | read/write a UTF-8 (or specified encoding) file; `readTextFile` supports 1-based line ranges    |
-| `readBinaryFile` / `writeBinaryFile`     | read/write raw bytes (images, archives, anything non-text)                                      |
-| `readFile` / `writeFile`                 | stream a file in/out as bytes                                                                   |
-| `removePath({ path, force, recursive })` | delete one file or directory; `force` ignores missing paths, `recursive` removes non-empty dirs |
-| `resolvePath(path)`                      | anchor a relative path to its absolute `/workspace/...` form                                    |
-| `setNetworkPolicy(policy)`               | change egress policy mid-turn (backend-dependent; see [Network policy](#network-policy))        |
+A sandbox definition is a function that returns the actual durable `Sandbox` the agent should use:
 
-Since `run` blocks until the command exits, use `spawn` when the process should keep running while the agent does other work:
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export default defineSandbox(() => {
+  return VercelSandbox.create({
+    resources: { vcpus: 2 },
+  });
+});
+```
+
+The function runs on the first sandbox access for a session. eve persists the returned provider handle. Later turns and runs restore that handle directly without invoking the definition again.
+
+The definition receives only information useful for choosing or configuring the sandbox:
 
 ```ts
-const sandbox = await ctx.getSandbox();
-const server = await sandbox.spawn({ command: "python -m http.server 8000" });
-// ...do other work against the server...
-await server.kill();
+defineSandbox(({ session, runtime, signal, parent, root }) => {
+  // session: current session and auth
+  // runtime.mode: "development" | "production"
+  // signal: creation cancellation signal
+  // parent?.sandbox: parent's durable Sandbox
+  // root?.sandbox: root agent's durable Sandbox
+});
 ```
 
-A `SandboxProcess` exposes `stdout`/`stderr` byte streams, `wait()` (resolves with the exit code), and `kill()` (idempotent).
+There are no authored sandbox ids, cache keys, template keys, or revalidation keys.
 
-`sandbox.id` is a stable per-session identifier that persists across reconnects to the same logical session. Use it as the cache key for per-session state that must outlive individual step executions.
+## Build-prewarmed templates
 
-The option types (`SandboxSpawnOptions`, `SandboxReadBinaryFileOptions`, `SandboxWriteBinaryFileOptions`, and so on) are named exports from `eve/sandbox`, alongside `SandboxProcess`.
-
-## Seeding `/workspace`
-
-Mount authored files into the sandbox at session start by placing them under `agent/sandbox/workspace/`. This requires the folder layout (`agent/sandbox/sandbox.ts`), not the top-level shorthand:
-
-```text
-agent/sandbox/
-  sandbox.ts                ← optional override (see below)
-  workspace/
-    schema.sql              ← lands at /workspace/schema.sql
-    scripts/run.sh          ← lands at /workspace/scripts/run.sh
-```
-
-Every file under `workspace/` mirrors into the sandbox cwd with its structure intact, and eve lists the top-level entries to the model in the prompt automatically. `agent/skills/` files are materialized separately under `$HOME/.agents/skills/`, so `agent/sandbox/workspace/skills/...` is an ordinary workspace subtree when you choose to author one.
-
-## Overriding the sandbox
-
-To add setup, seed files, or pick a backend, author `defineSandbox`. There are two layouts:
-
-- `agent/sandbox.ts`: shorthand. Use it when you need only a definition, no seeded files.
-- `agent/sandbox/sandbox.ts`: folder layout. Use it when you also seed `agent/sandbox/workspace/**`. If both exist, the folder layout wins.
+Build-time setup is a separate, statically discoverable value. Export a provider template and return a sandbox created from it:
 
 ```ts title="agent/sandbox/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
-import { vercel } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
-export default defineSandbox({
-  backend: vercel({ resources: { vcpus: 2 } }),
-  revalidationKey: () => "repo-bootstrap-v1",
-  async bootstrap({ use }) {
-    const sandbox = await use();
-    await sandbox.run({ command: "apt-get install -y jq" });
+export const template = VercelSandbox.template({
+  async prepare(sandbox) {
+    await sandbox.run({
+      command: "pnpm install --frozen-lockfile",
+    });
   },
-  async onSession({ use }) {
-    await use({ networkPolicy: "deny-all" });
-  },
+});
+
+export default defineSandbox(() => {
+  return template.create({
+    resources: { vcpus: 4 },
+  });
 });
 ```
 
-`defineSandbox` and `defaultBackend` live on `eve/sandbox`. Omit `backend` and the runtime falls back to `defaultBackend()` (see [Backends](#backends)).
+`VercelSandbox.template()` is synchronous and has no provider side effects. During `eve build`, eve discovers the named export, hydrates managed files, runs `prepare()`, captures the provider result, and freezes its exact snapshot reference into the deployment. At runtime, `template.create()` starts the session sandbox from that result.
 
-## Backends
-
-The backend decides where the sandbox runs. eve ships four pinned factories from nested `eve/sandbox/*` imports plus an availability-aware default from `eve/sandbox`:
-
-| Backend            | Runs the sandbox                                                                               |
-| ------------------ | ---------------------------------------------------------------------------------------------- |
-| `vercel()`         | on [Vercel Sandbox](https://vercel.com/docs/sandbox).                                          |
-| `docker()`         | locally in a Docker container, driven through the `docker` CLI.                                |
-| `microsandbox()`   | locally in a lightweight [microsandbox](https://www.npmjs.com/package/microsandbox) VM.        |
-| `justbash()`       | locally in the pure-JS `just-bash` interpreter (no daemon or VM, but no real binaries either). |
-| `defaultBackend()` | picks the best available: Vercel Sandbox on hosted Vercel → Docker → microsandbox → just-bash. |
-
-Configuring a pinned factory uses that backend unconditionally. `docker()` always requires a reachable Docker daemon, and `vercel()` always creates hosted sandboxes (including from local dev, with Vercel credentials).
-
-With `backend` omitted, eve uses `defaultBackend()`, which resolves on first use in priority order:
-
-1. **Vercel Sandbox** when deploying on Vercel (`process.env.VERCEL` is set), since local container/VM runtimes can't run there.
-2. **Docker** when a daemon is reachable through a Docker-compatible `docker` CLI (Docker Desktop, OrbStack, Colima, Podman via its docker-compatible CLI; override the binary with `EVE_DOCKER_PATH`).
-3. **microsandbox** when the host supports it: macOS on Apple Silicon, or glibc Linux with KVM enabled.
-4. **just-bash** as the dependency-free fallback.
-
-`defaultBackend()` also accepts a keyed bag so each inner backend gets its own typed create options:
+The session definition is never executed during build. It can safely inspect auth, choose among exported templates, or return a parent sandbox:
 
 ```ts
-import { defaultBackend, defineSandbox } from "eve/sandbox";
+export const standard = VercelSandbox.template();
+export const python = VercelSandbox.template({
+  async prepare(sandbox) {
+    await sandbox.run({ command: "uv sync --frozen" });
+  },
+});
 
-export default defineSandbox({
-  backend: defaultBackend({
-    vercel: { networkPolicy: "deny-all", resources: { vcpus: 4 } },
-    docker: { image: "ghcr.io/vercel/eve:latest" },
-    microsandbox: { memoryMiB: 2048 },
-  }),
+export default defineSandbox(({ session }) => {
+  return session.auth.current?.attributes.runtime === "python"
+    ? python.create()
+    : standard.create();
 });
 ```
 
-### Docker
+Every template a runtime branch can choose must be a named export so eve can prewarm it.
 
-`docker()` drives the Docker CLI directly. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Configure it through `docker({ image, env, pullPolicy, networkPolicy })`, and install authored runtime tools in sandbox bootstrap or provide them through a custom image. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
+## Seeding `/workspace`
 
-### microsandbox
+Files under `agent/sandbox/workspace/` are copied into the prewarmed template:
 
-`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. During framework setup, before authored bootstrap code runs, eve verifies Bash and creates `/workspace` and the sandbox user. Install authored runtime tools in sandbox bootstrap or provide them through a custom image. Supported hosts are macOS on Apple Silicon, or Linux (glibc) with KVM. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
+```text
+agent/sandbox/
+├── sandbox.ts
+└── workspace/
+    ├── schema.sql
+    └── scripts/run.sh
+```
 
-### just-bash
+Use the folder layout and export a template whenever an authored sandbox owns managed workspace files:
 
-`justbash()` needs no daemon or VM, but commands run in a simulated bash with a virtual filesystem under `.eve/sandbox-cache/`, with no real binaries (`git`, `node`, package managers) and no network isolation. The `just-bash` package is an optional peer dependency, so `eve dev` installs it into your application automatically when missing (disable with `autoInstall: false`); production processes fail with an actionable install error instead.
+```ts title="agent/sandbox/sandbox.ts"
+import { DefaultSandbox, defineSandbox } from "eve/sandbox";
 
-You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. Handles returned by `create` implement `shutdown()`, which stops the underlying compute at server shutdown. See the `SandboxBackend*` types on `eve/sandbox`.
+export const template = DefaultSandbox.template();
 
-## Lifecycle
+export default defineSandbox(() => template.create());
+```
 
-There are two hooks, scoped differently:
+The workspace contents and relevant compiled preparation code participate in eve's private template revision. Change the source or managed files and eve builds a new compatible template automatically.
 
-- **`bootstrap({ use })`** is template-scoped and runs once when the template is built. Put reusable setup here that every later session inherits, such as cloning a baseline repo, installing dependencies, or seeding files. Call `use()` to get a `SandboxSession`. Only template filesystem state and supported backend metadata carry into later sessions; config like network policy does not. If external inputs affect what bootstrap produces, set `revalidationKey: () => string` so eve knows when to rebuild the template (authored sandbox source and seed contents are already tracked for you).
-- **`onSession({ use, ctx })`** is durable-session-scoped and runs once per session (and again if a sandbox definition change replaces the session's sandbox). Put per-session setup here, including network policy, resources, timeout, per-user credentials, and one-time markers. Because it runs inside the active runtime context, it can read `ctx.session` and derive the current principal without baking credentials into the template. Call `use(opts?)` to get a `SandboxSession`; `opts` flow to the backend's update path after create.
+## One-time session setup
 
-If you require a network policy or other configuration for every session, configure it on the backend factory or in `onSession`; do not rely on bootstrap-only configuration.
+Configure the live sandbox before returning it. This code runs only when the owning session needs a new sandbox, not during restoration:
+
+```ts
+export default defineSandbox(async ({ session }) => {
+  const sandbox = await template.create({
+    resources: { vcpus: 4 },
+  });
+
+  await sandbox.setNetworkPolicy(
+    session.auth.current === null ? "deny-all" : { allow: ["api.github.com"] },
+  );
+  await sandbox.writeTextFile({
+    path: ".eve/owner.txt",
+    content: `${session.auth.current?.principalId ?? "anonymous"}\n`,
+  });
+
+  return sandbox;
+});
+```
+
+## Reuse and sharing
+
+Reuse across runs of one eve session is automatic. The definition runs once, eve persists the returned `Sandbox`, and later runs reconnect to it.
+If the persisted provider resource has been deleted or replaced, restoration fails instead of silently substituting a fresh sandbox.
+
+To intentionally share one Vercel sandbox across independent eve sessions, choose the same provider resource:
+
+```ts
+export const template = VercelSandbox.template();
+
+export default defineSandbox(({ session }) => {
+  const teamId = session.auth.current?.attributes.teamId;
+  if (typeof teamId !== "string") {
+    throw new Error("A team identity is required");
+  }
+
+  return template.getOrCreate({
+    name: `team-${teamId}-workspace`,
+  });
+});
+```
+
+Both eve sessions persist their own handle to the same provider sandbox. They see the same files and processes, and their commands can race, so do not use this shape when credentials or network policies must differ.
+
+eve shutdown hooks may stop active compute, but they never delete durable provider state. Provider retention and deletion remain explicit provider or application operations, including when a child returns an ancestor sandbox.
+
+A child can deliberately return its parent's exact durable sandbox:
+
+```ts title="agent/subagents/reviewer/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox(({ parent }) => {
+  if (parent === null) {
+    throw new Error("reviewer must run as a child");
+  }
+  return parent.sandbox;
+});
+```
+
+Nested children can return `root.sandbox` the same way. Declared subagents still use their own sandbox definition or the framework default unless they explicitly return an ancestor.
+
+## Providers
+
+| Provider API          | Runs the sandbox                                                                  |
+| --------------------- | --------------------------------------------------------------------------------- |
+| `VercelSandbox`       | Hosted [Vercel Sandbox](https://vercel.com/docs/sandbox)                          |
+| `DockerSandbox`       | A local container through the Docker CLI                                          |
+| `MicrosandboxSandbox` | A lightweight local microsandbox VM                                               |
+| `JustBashSandbox`     | A pure-JavaScript shell and virtual filesystem; no real binaries                  |
+| `DefaultSandbox`      | Vercel when hosted, then Docker, microsandbox, or just-bash by local availability |
+
+Each provider exposes `create(options)` and, when it supports prewarming, `template(options)`.
+
+```ts
+import { DockerSandbox } from "eve/sandbox/docker";
+
+export const template = DockerSandbox.template({
+  image: "node:24-bookworm",
+  pullPolicy: "if-not-present",
+  async prepare(sandbox) {
+    await sandbox.run({ command: "corepack enable" });
+  },
+});
+
+export default defineSandbox(() => template.create());
+```
+
+Development can deliberately use a local container while production uses hosted compute:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
-import { vercel } from "eve/sandbox/vercel";
+import { DockerSandbox } from "eve/sandbox/docker";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
-export default defineSandbox({
-  backend: vercel(),
-  async onSession({ use, ctx }) {
-    const sandbox = await use({ networkPolicy: "deny-all" });
-    const user = ctx.session.auth.current;
-    if (user === null) return;
-    await sandbox.writeTextFile({ path: "SESSION_USER.txt", content: `${user.principalId}\n` });
+export default defineSandbox(({ runtime }) => {
+  if (runtime.mode === "development") {
+    return DockerSandbox.create();
+  }
+  return VercelSandbox.create();
+});
+```
+
+## Custom providers
+
+Provider packages create and adapt native handles with `defineSandboxAdapter`. eve supplies the stable resource identity; the adapter maps it to provider creation, serialization, and restoration. App definitions still return only `Sandbox` values. The provider-owned `type` identifies its durable wire protocol and stays inside the provider implementation.
+
+```ts
+import { defineSandboxAdapter } from "eve/sandbox/provider";
+
+const asDevboxSandbox = defineSandboxAdapter<Devbox, { id: string }>({
+  type: "example.com/devbox/v1",
+  reference(devbox) {
+    return { id: devbox.id };
+  },
+  restore({ id }, { signal }) {
+    return Devbox.get({ id, signal });
+  },
+  session(devbox) {
+    return adaptDevboxSession(devbox);
+  },
+});
+
+export const DevboxSandbox = {
+  create(options: { owner?: string } = {}) {
+    return asDevboxSandbox.create(({ resourceId, signal }) => {
+      return Devbox.getOrCreate({
+        id: resourceId,
+        owner: options.owner,
+        signal,
+      });
+    });
+  },
+};
+
+export default defineSandbox(({ session }) =>
+  DevboxSandbox.create({
+    owner: session.auth.current?.principalId,
+  }),
+);
+```
+
+`adapter.create()` supplies eve's stable resource id, cancellation signal, app root, and resource tags to provider implementation code. App definitions never forward that framework bookkeeping.
+The serialized provider reference must keep identifying the same durable resource. Providers that rotate snapshots or checkpoints keep the latest checkpoint behind that identity instead of invalidating handles already held by a parent or child session.
+
+A provider that supports build prewarming can additionally expose a template using `defineSandboxTemplate` from `eve/sandbox/provider`. The template supplies its own stable, versioned `type`, such as `"example.com/devbox-template/v1"`. Its `prewarm({ appRoot, assets, hydrate, log, templateId })` implementation returns a JSON-serializable provider reference; its `create({ options, reference })` implementation returns a durable `Sandbox`. References are scoped to the active definition invocation, so one immutable template value can be used safely by concurrent sessions.
+
+## Network policy
+
+Default egress is `allow-all`. For sensitive or production workloads, set `deny-all` or an explicit allow-list before running untrusted commands:
+
+```ts
+const sandbox = await VercelSandbox.create({
+  networkPolicy: {
+    allow: ["ai-gateway.vercel.sh", "*.github.com"],
+    subnets: { deny: ["10.0.0.0/8"] },
   },
 });
 ```
 
-Sessions are persistent, and how the underlying runtime idles out depends on the backend. On the Vercel backend, the VM times out after a period of inactivity (default 30 minutes); eve preserves the filesystem and resumes the sandbox on the next message as if nothing happened, even days later. The Docker backend keeps a long-lived container per durable session and persists `/workspace` across turns without that timeout, and the just-bash backend stores its virtual filesystem under `.eve/sandbox-cache/`. In every case, `/workspace` survives between turns for the same session.
-
-Session sandboxes are keyed per durable session, not per deployment, so redeploying your app does not discard them. A session gets a replacement sandbox only when the sandbox definition itself changes — the authored sandbox source, workspace seed content, or `revalidationKey` — in which case the next turn starts from the rebuilt template and `onSession` runs again.
-
-When the eve server stops, no sandbox compute outlives it. `eve dev` stops the sandboxes it started when the dev server closes, and a self-hosted production server stops every open sandbox on shutdown (`SIGTERM`/`SIGINT`). Session state persists across the stop — the next server start reattaches each durable session from its stopped container, VM, or snapshot. Custom `SandboxBackend` adapters participate through the handle's `shutdown()` method: stop the underlying compute, keeping the session reattachable from persisted state where the backend supports it.
-
-## Network policy
-
-Egress rules go on the backend factory or in `onSession`'s `use()`. There are three forms:
-
-```ts
-networkPolicy: "allow-all"; // default
-networkPolicy: "deny-all";  // block all egress, including DNS
-
-networkPolicy: {
-  allow: ["ai-gateway.vercel.sh", "*.github.com"],
-  subnets: { deny: ["10.0.0.0/8"] },
-};
-```
-
-Default egress is `allow-all`. For non-public, sensitive, regulated, or production workloads, configure `deny-all` or an explicit allow-list before running untrusted tools or handling sensitive data.
-
-Set it on the factory (`vercel({ networkPolicy: "deny-all" })`) and it applies before authored `bootstrap` code runs; framework-owned base setup may briefly keep egress open to install required packages. Set it in `onSession`'s `use()` to override per-session. The common pattern combines both: leave the factory open so `bootstrap` can `git clone`, then lock down in `onSession`. To change the policy mid-turn, call `sandbox.setNetworkPolicy(...)` on the live handle.
-
-Domain-level allow-lists and credential brokering are supported by `vercel()` and `microsandbox()`. The Docker backend honors only `"allow-all"` and `"deny-all"` (at creation and via `setNetworkPolicy`); the just-bash backend rejects `setNetworkPolicy` entirely.
-
-## Credential brokering
-
-Secrets never enter the sandbox. Instead, the network policy's per-domain `transform` injects credentials at the firewall, so a header can authenticate egress to a host while the secret stays out of the sandbox process entirely:
-
-```ts
-async onSession({ use }) {
-  await use({
-    networkPolicy: {
-      allow: {
-        "github.com": [{ transform: [{ headers: { authorization: "Basic your_base64_credentials_here" } }] }],
-        "*": [],
-      },
-    },
-  });
-}
-```
-
-The `"*": []` catch-all keeps general egress open while the `transform` applies only to `github.com`. For mid-turn brokering, call `setNetworkPolicy` with the same shape. The [Vercel Sandbox docs](https://vercel.com/docs/sandbox) cover the brokering mechanism itself.
+You can also call `sandbox.setNetworkPolicy(...)` before returning the sandbox or during a turn. Vercel Sandbox and microsandbox support domain policies and credential brokering. Docker supports `"allow-all"` and `"deny-all"`. just-bash does not provide network isolation.
 
 ## What to read next
 
-- [Subagents](./subagents): each subagent gets its own sandbox, independent of its parent.
-- [Tools](./tools): authored tools run in the app runtime (full `process.env`); only sandbox tools run in the sandbox.
-- [Security model](./concepts/security-model): the app-runtime/sandbox trust boundary in full.
-- [Vercel Sandbox](https://vercel.com/docs/sandbox): platform docs, including credential brokering and persistence limits.
+- [Subagents](./subagents): isolate a specialist or explicitly return an ancestor sandbox.
+- [Tools](./tools): authored tools run in the app runtime; sandbox tools run against the returned sandbox.
+- [Security model](./concepts/security-model): understand the app-runtime and sandbox trust boundary.
+- [Vercel Sandbox](https://vercel.com/docs/sandbox): provider limits, persistence, and network controls.

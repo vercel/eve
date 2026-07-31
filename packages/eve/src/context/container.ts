@@ -20,6 +20,8 @@ export interface AlsContext extends ContextAccessor {
    * Used by the serialization layer to persist context at step boundaries.
    */
   entries(): Iterable<readonly [ContextKey<unknown>, unknown]>;
+  /** Removes a step-local value without touching durable state. */
+  deleteVirtualContext<T>(key: ContextKey<T>): void;
   /** Stores a step-local value that shadows the durable value and is never serialized. */
   setVirtualContext<T>(key: ContextKey<T>, value: T): void;
 }
@@ -73,6 +75,10 @@ export class ContextContainer implements AlsContext {
    */
   clearVirtualContext(): void {
     this._virtualValues.clear();
+  }
+
+  deleteVirtualContext<T>(key: ContextKey<T>): void {
+    this._virtualValues.delete(key.name);
   }
 
   /**

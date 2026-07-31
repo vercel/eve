@@ -3,10 +3,10 @@ import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
-  resolveLocalBackendSessionRootPath,
-  resolveLocalBackendTemplateRootPath,
-  resolveLocalBackendTemplatesDirectory,
-} from "#execution/sandbox/bindings/local-backend-utils.js";
+  resolveLocalProviderSessionRootPath,
+  resolveLocalProviderTemplateRootPath,
+  resolveLocalProviderTemplatesDirectory,
+} from "#execution/sandbox/bindings/local-workspace-utils.js";
 import {
   LOCAL_SANDBOX_TEMPLATE_RECENT_WINDOW_MS,
   LOCAL_SANDBOX_TEMPLATE_RETAIN_COUNT,
@@ -65,7 +65,7 @@ export function resolveMicrosandboxTemplateRootPath(
   cacheDirectory: string,
   templateKey: string,
 ): string {
-  return resolveLocalBackendTemplateRootPath(
+  return resolveLocalProviderTemplateRootPath(
     cacheDirectory,
     MICROSANDBOX_CACHE_DIRECTORY_NAME,
     templateKey,
@@ -73,14 +73,14 @@ export function resolveMicrosandboxTemplateRootPath(
 }
 
 export function resolveMicrosandboxTemplatesDirectory(cacheDirectory: string): string {
-  return resolveLocalBackendTemplatesDirectory(cacheDirectory, MICROSANDBOX_CACHE_DIRECTORY_NAME);
+  return resolveLocalProviderTemplatesDirectory(cacheDirectory, MICROSANDBOX_CACHE_DIRECTORY_NAME);
 }
 
 export function resolveMicrosandboxSessionRootPath(
   cacheDirectory: string,
   sessionKey: string,
 ): string {
-  return resolveLocalBackendSessionRootPath(
+  return resolveLocalProviderSessionRootPath(
     cacheDirectory,
     MICROSANDBOX_CACHE_DIRECTORY_NAME,
     sessionKey,

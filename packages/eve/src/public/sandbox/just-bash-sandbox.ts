@@ -1,7 +1,7 @@
 /**
- * Options accepted by `justbash(opts)`.
+ * Options accepted by `JustBashSandbox.create()` and `JustBashSandbox.template()`.
  *
- * The just-bash backend runs the workspace under the pure-JS `just-bash`
+ * The just-bash provider runs the workspace under the pure-JS `just-bash`
  * interpreter with a virtual filesystem — no daemon or VM required, but
  * no real binaries either. The `just-bash` package is not bundled with
  * eve; it is loaded lazily from the application install.

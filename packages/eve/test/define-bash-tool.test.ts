@@ -37,10 +37,7 @@ describe("defineBashTool", () => {
     const recordedCommands: { command: string }[] = [];
     const fakeAccess: SandboxAccess = {
       async captureState() {
-        return {
-          initialized: false,
-          session: null,
-        };
+        return null;
       },
 
       async get() {
@@ -94,10 +91,7 @@ describe("defineBashTool", () => {
   it("throws a clear error when no sandbox session is available", async () => {
     const fakeAccess: SandboxAccess = {
       async captureState() {
-        return {
-          initialized: false,
-          session: null,
-        };
+        return null;
       },
 
       async get() {
@@ -130,7 +124,7 @@ describe("defineBashTool", () => {
     const largeOutput = Array.from({ length: 3000 }, (_, i) => `line ${i + 1}`).join("\n");
     const fakeAccess: SandboxAccess = {
       async captureState() {
-        return { initialized: false, session: null };
+        return null;
       },
 
       async get() {

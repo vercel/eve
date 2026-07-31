@@ -47,9 +47,9 @@ describe.sequential("sandbox-bundling Vercel deployment integration", () => {
     async () => {
       // Reaching this point already proves the deployed function evaluated
       // its top-level module graph without crashing: the hosted bundle must
-      // prune the local sandbox backend (Docker engine + optional just-bash
-      // engine) via the sandbox-backend prune plugin, and resolve the Vercel
-      // backend's vendored `@vercel/sandbox` chunk. The end-to-end message
+      // prune the local Docker and just-bash providers via the local-provider
+      // prune plugin, and resolve the Vercel
+      // provider's vendored `@vercel/sandbox` chunk. The end-to-end message
       // round-trip then confirms the framework runtime path is wired up and
       // the response stream completes.
       if (deploymentFixture === undefined) {

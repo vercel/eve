@@ -3,7 +3,7 @@ import { dirname as posixDirname } from "node:path/posix";
 
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
-import { resolveWorkspacePath } from "#execution/sandbox/bindings/local-backend-utils.js";
+import { resolveWorkspacePath } from "#execution/sandbox/bindings/local-workspace-utils.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";

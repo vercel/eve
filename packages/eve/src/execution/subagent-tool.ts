@@ -111,9 +111,15 @@ export function buildSubagentRunInput(input: {
         parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
         parentSessionId: session.sessionId,
         subagentName: action.subagentName,
-        ...(action.subagentName === "agent" && session.sandboxState
-          ? { parentSandboxState: session.sandboxState, sandboxSessionId: session.sessionId }
-          : {}),
+        ...(session.sandboxState === undefined
+          ? {}
+          : {
+              parentSandboxState: session.sandboxState,
+              rootSandboxState: session.sandboxState.root ?? {
+                revision: session.sandboxState.revision,
+                value: session.sandboxState.value,
+              },
+            }),
       },
     },
     auth,

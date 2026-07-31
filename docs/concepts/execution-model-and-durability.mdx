@@ -19,7 +19,7 @@ The Workflow SDK is not inherently tied to Vercel. In local development and in a
 
 When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current instructions, model, and tools. The durable session keeps its conversation history and authored state, so identity-based channels such as Telegram private chats and Twilio phone-number conversations adopt agent updates without requiring a new session.
 
-Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
+Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or sandbox compute. Workflow uses the active world implementation, while an authored sandbox definition returns the durable provider sandbox the agent should use. Without an authored definition, eve selects its availability-aware default.
 
 For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
 
@@ -50,7 +50,7 @@ App-side code reaches the sandbox through `ctx.getSandbox()`. The built-in `bash
 
 The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have decoupled lifetimes: the durable workflow can park or restart independently, while the app runtime opens or reuses sandbox compute only when code needs it.
 
-This split gives the agent a real filesystem and process environment without putting credentials or trusted integration code in model-controlled compute. The workflow can park without holding sandbox compute, while sandbox capacity and backends can change independently of durable orchestration. Because access flows through app-side tools, sandbox work gets the same approval and instrumentation path as any other tool call.
+This split gives the agent a real filesystem and process environment without putting credentials or trusted integration code in model-controlled compute. The workflow can park without holding sandbox compute, while sandbox capacity and providers can change independently of durable orchestration. Because access flows through app-side tools, sandbox work gets the same approval and instrumentation path as any other tool call.
 
 Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay in the app runtime. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) handles the request without exposing the credential to the process.
 

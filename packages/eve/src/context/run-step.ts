@@ -4,6 +4,7 @@ import type { FrameworkContextProvider } from "#context/provider.js";
 import { connectionProvider } from "#context/providers/connection.js";
 import { sandboxProvider } from "#context/providers/sandbox.js";
 import { sessionProvider } from "#context/providers/session.js";
+import { TurnAbortSignalKey } from "#context/keys.js";
 
 /**
  * Framework providers in dependency order.
@@ -34,35 +35,41 @@ export async function withContextScope<T>(
   ctx: ContextContainer,
   harnessSession: HarnessSession,
   callback: (session: HarnessSession) => Promise<ContextScopeResult<T>>,
+  options: { readonly abortSignal?: AbortSignal } = {},
 ): Promise<ContextScopeResult<T>> {
   let session = harnessSession;
 
   ctx.clearVirtualContext();
+  if (options.abortSignal !== undefined) {
+    ctx.setVirtualContext(TurnAbortSignalKey, options.abortSignal);
+  }
 
-  for (const provider of frameworkProviders) {
-    const result = await provider.create(ctx, session);
-    if (result !== undefined) {
-      ctx.setVirtualContext(provider.key, result.value);
-      if (result.session !== undefined) {
-        session = result.session;
+  return await contextStorage.run(ctx, async () => {
+    for (const provider of frameworkProviders) {
+      const result = await provider.create(ctx, session);
+      if (result !== undefined) {
+        ctx.setVirtualContext(provider.key, result.value);
+        if (result.session !== undefined) {
+          session = result.session;
+        }
       }
     }
-  }
 
-  const scopeResult = await contextStorage.run(ctx, () => callback(session));
+    const scopeResult = await callback(session);
 
-  let committed = scopeResult.session;
-  for (const provider of frameworkProviders) {
-    if (provider.commit && ctx.has(provider.key)) {
-      committed = await provider.commit(ctx.require(provider.key), committed);
+    let committed = scopeResult.session;
+    for (const provider of frameworkProviders) {
+      if (provider.commit && ctx.has(provider.key)) {
+        committed = await provider.commit(ctx.require(provider.key), committed);
+      }
     }
-  }
 
-  if (committed === scopeResult.session) {
-    return scopeResult;
-  }
+    if (committed === scopeResult.session) {
+      return scopeResult;
+    }
 
-  return { result: scopeResult.result, session: committed };
+    return { result: scopeResult.result, session: committed };
+  });
 }
 
 /**
@@ -75,11 +82,17 @@ export async function runStep(
   ctx: ContextContainer,
   harnessSession: HarnessSession,
   callback: (session: HarnessSession) => Promise<StepResult>,
+  options: { readonly abortSignal?: AbortSignal } = {},
 ): Promise<StepResult> {
-  const { result, session } = await withContextScope(ctx, harnessSession, async (enriched) => {
-    const stepResult = await callback(enriched);
-    return { result: stepResult.next, session: stepResult.session };
-  });
+  const { result, session } = await withContextScope(
+    ctx,
+    harnessSession,
+    async (enriched) => {
+      const stepResult = await callback(enriched);
+      return { result: stepResult.next, session: stepResult.session };
+    },
+    options,
+  );
 
   return { next: result, session };
 }

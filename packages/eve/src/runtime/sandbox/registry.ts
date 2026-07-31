@@ -1,5 +1,5 @@
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
-import { defaultSandbox } from "#public/sandbox/backends/default.js";
+import { DefaultSandbox } from "#public/sandbox/default.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
 
 /**
@@ -21,7 +21,7 @@ export const DEFAULT_SANDBOX_SOURCE_ID = "eve:default-sandbox";
  * compiled workspace resource tree owned by this graph node. The
  * prewarm orchestrator resolves the descriptor's logical path against
  * the active compiled artifacts source and writes the contents into
- * the sandbox template snapshot. Runtime `backend.create(...)` never
+ * the sandbox template snapshot. Runtime provider creation never
  * reads these files.
  */
 export interface RuntimeRegisteredSandbox {
@@ -50,9 +50,17 @@ export interface RuntimeSandboxRegistry {
  */
 export function createRuntimeSandboxRegistry(input: {
   readonly authoredSandbox: ResolvedSandboxDefinition | null;
+  readonly templateReferences: Readonly<Record<string, unknown>>;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): RuntimeSandboxRegistry {
-  const definition = input.authoredSandbox ?? createFrameworkSandboxDefinition();
+  const definition =
+    input.authoredSandbox ??
+    createFrameworkSandboxDefinition({
+      hasWorkspace:
+        input.workspaceResourceRoot.contentHash !== undefined ||
+        input.workspaceResourceRoot.rootEntries.length > 0,
+      templateReferences: input.templateReferences,
+    });
   return {
     sandbox: {
       definition,
@@ -65,18 +73,31 @@ export function createRuntimeSandboxRegistry(input: {
  * Builds the framework default sandbox definition used when no agent
  * authored override is present.
  *
- * The `backend` is resolved through {@link defaultSandbox} on each
- * call so the framework default picks up the same environment-aware
- * fallback as authored sandboxes that omit `backend` (`vercel()`
- * on hosted Vercel, then Docker, microsandbox, or just-bash by availability). Implemented as
- * a factory rather than a constant so the environment is read at
- * graph-resolution time rather than at module-load time.
+ * `DefaultSandbox` chooses Vercel when hosted, then Docker, microsandbox, or
+ * just-bash by local availability. A managed workspace adds an internal
+ * exported template so build prewarming remains explicit in the resolved
+ * definition.
  */
-export function createFrameworkSandboxDefinition(): ResolvedSandboxDefinition {
+export function createFrameworkSandboxDefinition(input: {
+  readonly hasWorkspace: boolean;
+  readonly templateReferences?: Readonly<Record<string, unknown>>;
+}): ResolvedSandboxDefinition {
+  const template = input.hasWorkspace ? DefaultSandbox.template() : null;
   return {
-    backend: defaultSandbox(),
+    definition: () => (template === null ? DefaultSandbox.create() : template.create()),
     logicalPath: "eve:framework/default-sandbox",
+    sourceHash: DEFAULT_SANDBOX_SOURCE_ID,
     sourceId: DEFAULT_SANDBOX_SOURCE_ID,
     sourceKind: "module",
+    templates:
+      template === null
+        ? []
+        : [
+            {
+              exportName: "template",
+              reference: input.templateReferences?.template,
+              template,
+            },
+          ],
   };
 }

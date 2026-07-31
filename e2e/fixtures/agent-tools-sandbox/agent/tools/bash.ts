@@ -2,7 +2,7 @@ import { defineTool, defineBashTool } from "eve/tools";
 import { never } from "eve/tools/approval";
 
 /**
- * Bash tool exposed to the model for the sandbox-bootstrap smoke
+ * Bash tool exposed to the model for the sandbox preparation smoke
  * test. `approval: never()` keeps the smoke test single-turn
  * and avoids tripping the HITL machinery already exercised by
  * `tool-approval.ts` / `tool-denial.ts`.

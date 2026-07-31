@@ -169,6 +169,31 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
     );
   });
 
+  it("restores the captured snapshot instead of a running replacement with the same name", async () => {
+    const sandbox = createMockMicrosandbox();
+    const runtime = createMockMicrosandboxModule(sandbox, {
+      snapshots: ["eve-sbx-state-existing"],
+      status: "running",
+    });
+    const metadata: MicrosandboxSessionMetadata = {
+      networkPolicy: "allow-all",
+      optionsHash: "options-hash",
+      sandboxName: "eve-sbx-ses-old",
+      stateSnapshotName: "eve-sbx-state-existing",
+      version: 2,
+    };
+
+    await connectMicrosandbox({
+      metadata,
+      metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
+      module: runtime.module,
+      options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+      sessionKey: "session-key",
+    });
+
+    expect(runtime.createdFromSnapshot).toBe("eve-sbx-state-existing");
+  });
+
   it("returns null when a stopped session snapshot disappeared", async () => {
     const sandbox = createMockMicrosandbox();
     const runtime = createMockMicrosandboxModule(sandbox, { status: "stopped" });

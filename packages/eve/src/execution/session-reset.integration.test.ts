@@ -1,19 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { ContextContainer } from "#context/container.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
-import { clearActiveSandboxHandlesForTest } from "#execution/sandbox/active-handles.js";
 import { sessionDeliveryHookWorkflow } from "#internal/testing/session-delivery-hook-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
+import type { JsonObject } from "#shared/json.js";
+import { defineSandboxAdapter } from "#shared/sandbox-value.js";
 
 describe("session reset integration", () => {
   it("releases a parked continuation token and initializes a fresh sandbox", async () => {
@@ -51,49 +50,49 @@ describe("session reset integration", () => {
         });
         await expect(sandboxes.open(second.runId)).resolves.toMatchObject({ id: "sandbox-2" });
         expect(sandboxes.initializedSessionIds).toEqual([first.runId, second.runId]);
-        expect(sandboxes.sessionKeys).toHaveLength(2);
-        expect(sandboxes.sessionKeys[0]).not.toBe(sandboxes.sessionKeys[1]);
       } finally {
         await second.cancel();
       }
     } finally {
       await first.cancel();
-      clearActiveSandboxHandlesForTest();
     }
   });
 });
 
 function createSessionSandboxHarness() {
   const initializedSessionIds: string[] = [];
-  const sessionKeys: string[] = [];
   let sandboxCount = 0;
-  const backend: SandboxBackend = {
-    async create(input) {
-      sessionKeys.push(input.sessionKey);
+  const handles = new Map<string, ReturnType<typeof mockSandbox>>();
+  interface Reference extends JsonObject {
+    readonly id: string;
+  }
+  const adapt = defineSandboxAdapter<ReturnType<typeof mockSandbox>, Reference>({
+    type: "eve/session-reset-test-sandbox",
+    reference(sandbox) {
+      return { id: sandbox.session.id };
+    },
+    restore({ id }) {
+      const sandbox = handles.get(id);
+      if (sandbox === undefined) throw new Error(`Missing sandbox "${id}".`);
+      return sandbox;
+    },
+    session(sandbox) {
+      return sandbox.session;
+    },
+  });
+  const definition: ResolvedSandboxDefinition = {
+    definition({ session }) {
+      initializedSessionIds.push(session.id);
       sandboxCount += 1;
       const sandbox = mockSandbox({ id: `sandbox-${sandboxCount}` });
-      return {
-        captureState: async () => ({
-          backendName: "session-reset-test",
-          metadata: {},
-          sessionKey: input.sessionKey,
-        }),
-        session: sandbox.session,
-        shutdown: async () => {},
-        useSessionFn: async () => sandbox.session,
-      };
+      handles.set(sandbox.session.id, sandbox);
+      return adapt(sandbox);
     },
-    name: "session-reset-test",
-    prewarm: async () => ({ reused: false }),
-  };
-  const definition: ResolvedSandboxDefinition = {
-    backend,
     logicalPath: "agent/sandbox/sandbox.ts",
-    onSession({ ctx }) {
-      initializedSessionIds.push(ctx.session.id);
-    },
+    sourceHash: "session-reset-sandbox-source",
     sourceId: "agent/sandbox/sandbox",
     sourceKind: "module",
+    templates: [],
   };
   const registry: RuntimeSandboxRegistry = {
     sandbox: {
@@ -104,19 +103,17 @@ function createSessionSandboxHarness() {
 
   return {
     initializedSessionIds,
-    sessionKeys,
     async open(sessionId: string) {
-      const context = new ContextContainer();
-      context.set(SessionKey, {
-        auth: { current: null, initiator: null },
-        sessionId,
-        turn: { id: "turn_0", sequence: 0 },
-      });
       const access = await ensureSandboxAccess({
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        context: new ContextContainer(),
         nodeId: "__root__",
         registry,
-        runOnSession: async (callback) => await contextStorage.run(context, callback),
+        session: {
+          auth: { current: null, initiator: null },
+          id: sessionId,
+          turn: { id: "turn_0", sequence: 0 },
+        },
         sessionId,
         state: null,
       });

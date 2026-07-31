@@ -70,7 +70,7 @@ Behavior:
 - It only works when sandbox access is attached to the active runtime path.
 - Visibility is node-local. A subagent sees its own sandbox, not the parent's.
 
-`SandboxSession` also exposes `resolvePath(path)`, which returns the live backend-native path for a logical `/workspace/...` location. Use it when authored code needs that path before passing it to shell code or a child process.
+`SandboxSession` also exposes `resolvePath(path)`, which returns the live provider-native path for a logical `/workspace/...` location. Use it when authored code needs that path before passing it to shell code or a child process.
 
 See [Sandbox](../sandbox) for lifecycle details.
 

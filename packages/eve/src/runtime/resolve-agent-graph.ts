@@ -212,6 +212,7 @@ async function resolveRuntimeAgentNode(
 
   const sandboxRegistry = createRuntimeSandboxRegistry({
     authoredSandbox: agent.sandbox,
+    templateReferences: input.manifest.sandboxTemplateReferences,
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({

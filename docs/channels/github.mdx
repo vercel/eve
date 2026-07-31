@@ -120,7 +120,7 @@ Summon the agent on a PR and it always sees the diff. PR metadata and the change
 
 ### Sandbox checkout
 
-Before the first model call, every triggered turn checks out the relevant ref into the sandbox, so `read_file`/`glob`/`grep`/`bash` all run against the real tree. The installation token never enters the sandbox. `git` fetches a token-free URL, and the platform injects auth on egress at the firewall. That requires a firewall-capable backend (Vercel); the local backend skips checkout. Within a session, checkout is incremental across turns.
+Before the first model call, every triggered turn checks out the relevant ref into the sandbox, so `read_file`/`glob`/`grep`/`bash` all run against the real tree. The installation token never enters the sandbox. `git` fetches a token-free URL, and the platform injects auth on egress at the firewall. That requires a firewall-capable provider (Vercel); local providers skip checkout. Within a session, checkout is incremental across turns.
 
 ### Arbitrary API calls
 

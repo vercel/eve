@@ -363,24 +363,24 @@ describe("app runtime dependency tracing", () => {
 
     expect(enabledServerSource).toContain("[Unprintable QuickJS value]");
     // The Workflow sandbox runtime ships bundled inline, never traced — and
-    // these apps do not declare the optional just-bash engine, so its
+    // these apps do not declare the optional just-bash provider, so its
     // quickjs dependency must not sneak into the trace either.
     expect(disabledTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
     expect(tracedServerPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
   }, 60_000);
 
-  it("includes the optional just-bash engine in hosted output only when the sandbox config selects it", async () => {
+  it("includes the optional just-bash provider only when an authored sandbox selects it", async () => {
     async function createMinimalApp(input: {
-      justBashEngine: boolean;
+      justBashProvider: boolean;
       label: string;
     }): Promise<string> {
-      const appRoot = await createScratchDirectory(`eve-optional-engine-${input.label}-`);
+      const appRoot = await createScratchDirectory(`eve-optional-provider-${input.label}-`);
       await mkdir(join(appRoot, "agent"), { recursive: true });
       await writeFile(
         join(appRoot, "package.json"),
         `${JSON.stringify(
           {
-            name: `optional-engine-${input.label}-test`,
+            name: `optional-provider-${input.label}-test`,
             private: true,
             type: "module",
           },
@@ -392,9 +392,9 @@ describe("app runtime dependency tracing", () => {
         join(appRoot, "agent", "agent.ts"),
         ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
       );
-      await writeFile(join(appRoot, "agent", "instructions.md"), "Optional engine tracing.\n");
+      await writeFile(join(appRoot, "agent", "instructions.md"), "Optional provider tracing.\n");
 
-      if (input.justBashEngine) {
+      if (input.justBashProvider) {
         // The compiled sandbox config is the opt-in signal. Authored
         // modules resolve `eve/sandbox` through the app's node_modules,
         // so link the workspace package into the scratch app.
@@ -404,11 +404,9 @@ describe("app runtime dependency tracing", () => {
           join(appRoot, "agent", "sandbox.ts"),
           [
             'import { defineSandbox } from "eve/sandbox";',
-            'import { justbash } from "eve/sandbox/just-bash";',
+            'import { JustBashSandbox } from "eve/sandbox/just-bash";',
             "",
-            "export default defineSandbox({",
-            "  backend: justbash(),",
-            "});",
+            "export default defineSandbox(() => JustBashSandbox.create());",
             "",
           ].join("\n"),
         );
@@ -416,26 +414,26 @@ describe("app runtime dependency tracing", () => {
       return appRoot;
     }
 
-    // No just-bash sandbox config: the engine package resolves in this
+    // No authored just-bash sandbox: the provider package resolves in this
     // workspace (it is an eve devDependency), but resolvability is not
     // opt-in — nothing of just-bash may reach the hosted output.
-    const dockerOutputDir = await buildApplication(
-      await createMinimalApp({ justBashEngine: false, label: "docker" }),
+    const defaultOutputDir = await buildApplication(
+      await createMinimalApp({ justBashProvider: false, label: "default" }),
       DEPLOYABLE_BUILD_OPTIONS,
     );
-    const dockerTraced = await readTracedServerPackageJson(dockerOutputDir);
-    expect(dockerTraced.dependencies).not.toHaveProperty("just-bash");
-    expect(dockerTraced.dependencies).not.toHaveProperty("quickjs-emscripten");
-    expect(existsSync(join(dockerOutputDir, "server", "node_modules", "just-bash"))).toBe(false);
-    const dockerEntries = await readdir(join(dockerOutputDir, "server"), {
+    const defaultTraced = await readTracedServerPackageJson(defaultOutputDir);
+    expect(defaultTraced.dependencies).not.toHaveProperty("just-bash");
+    expect(defaultTraced.dependencies).not.toHaveProperty("quickjs-emscripten");
+    expect(existsSync(join(defaultOutputDir, "server", "node_modules", "just-bash"))).toBe(false);
+    const defaultEntries = await readdir(join(defaultOutputDir, "server"), {
       recursive: true,
     });
-    expect(dockerEntries.filter((entry) => entry.includes("just-bash"))).toEqual([]);
+    expect(defaultEntries.filter((entry) => entry.includes("just-bash"))).toEqual([]);
 
-    // Sandbox config selects the engine: the opt-in. The package is
+    // An authored sandbox selects the provider. The package is
     // externalized and traced so the output stays self-contained.
     const justBashOutputDir = await buildApplication(
-      await createMinimalApp({ justBashEngine: true, label: "just-bash" }),
+      await createMinimalApp({ justBashProvider: true, label: "just-bash" }),
       DEPLOYABLE_BUILD_OPTIONS,
     );
     const justBashTraced = await readTracedServerPackageJson(justBashOutputDir);

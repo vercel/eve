@@ -5,19 +5,30 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import { toErrorMessage } from "#shared/errors.js";
 
-import { prewarmAppSandboxes } from "./prewarm.js";
+import { prewarmAppSandboxes, type PrewarmedSandboxTemplateBinding } from "./prewarm.js";
 
 const MAX_RETAINED_PREWARM_LOGS = 50;
+const MAX_RETAINED_PREWARM_RECORDS = 50;
 
 interface DevelopmentPrewarmRecord {
   readonly logs: string[];
-  promise: Promise<void>;
+  promise: Promise<readonly PrewarmedSandboxTemplateBinding[]>;
+  settled: boolean;
   readonly subscribers: Set<(message: string) => void>;
+}
+
+interface CompletedDevelopmentPrewarm {
+  readonly bindings: readonly PrewarmedSandboxTemplateBinding[];
+  readonly signature: string;
 }
 
 const pendingDevelopmentPrewarms = new Map<string, DevelopmentPrewarmRecord>();
 const retainedDevelopmentPrewarmLogs = new Map<string, readonly string[]>();
-const completedDevelopmentPrewarmSignatures = new Map<string, string>();
+const retainedDevelopmentPrewarmBindings = new Map<
+  string,
+  readonly PrewarmedSandboxTemplateBinding[]
+>();
+const completedDevelopmentPrewarms = new Map<string, CompletedDevelopmentPrewarm>();
 
 export function startDevelopmentSandboxPrewarmInBackground(input: {
   readonly appRoot: string;
@@ -33,28 +44,42 @@ export function startDevelopmentSandboxPrewarmInBackground(input: {
 
   const record: DevelopmentPrewarmRecord = {
     logs: [],
-    promise: Promise.resolve(),
+    promise: Promise.resolve([]),
+    settled: false,
     subscribers: new Set(),
   };
   for (const key of keys) {
     retainedDevelopmentPrewarmLogs.delete(key);
+    retainedDevelopmentPrewarmBindings.delete(key);
   }
   const signatureCacheKey = resolvePrewarmSignatureCacheKey(input);
   const promise = prewarmAppSandboxes({
     appRoot: input.appRoot,
     compiledArtifactsSource: input.compiledArtifactsSource,
     log: (message) => recordPrewarmLog(record, message, input.log),
-    onPrewarmSignature: (signature) => {
-      completedDevelopmentPrewarmSignatures.set(signatureCacheKey, signature);
+    onPrewarmSignature: (signature, bindings) => {
+      setBoundedRecord(completedDevelopmentPrewarms, signatureCacheKey, {
+        bindings,
+        signature,
+      });
     },
-    shouldPrewarmSignature: (signature) =>
-      completedDevelopmentPrewarmSignatures.get(signatureCacheKey) !== signature,
+    reusePrewarmSignature: (signature) => {
+      const completed = completedDevelopmentPrewarms.get(signatureCacheKey);
+      return completed?.signature === signature ? completed.bindings : undefined;
+    },
   });
   record.promise = promise;
   registerPrewarmAliases(keys, record);
 
   void promise
+    .then((bindings) => {
+      record.settled = true;
+      for (const key of keys) {
+        setBoundedRecord(retainedDevelopmentPrewarmBindings, key, bindings);
+      }
+    })
     .catch((error) => {
+      record.settled = true;
       recordPrewarmLog(
         record,
         `eve: failed to initialize sandbox templates in the background: ${toErrorMessage(error)}`,
@@ -67,7 +92,7 @@ export function startDevelopmentSandboxPrewarmInBackground(input: {
           pendingDevelopmentPrewarms.delete(key);
         }
         if (record.subscribers.size === 0 && record.logs.length > 0) {
-          retainedDevelopmentPrewarmLogs.set(key, [...record.logs]);
+          setBoundedRecord(retainedDevelopmentPrewarmLogs, key, [...record.logs]);
         }
       }
     });
@@ -81,6 +106,10 @@ export function subscribeDevelopmentSandboxPrewarmLogs(input: {
   if (pending !== undefined) {
     for (const message of pending.logs) {
       input.log(message);
+    }
+    if (pending.settled) {
+      pending.logs.length = 0;
+      return () => {};
     }
     pending.subscribers.add(input.log);
     return () => pending.subscribers.delete(input.log);
@@ -102,10 +131,11 @@ export async function waitForDevelopmentSandboxPrewarm(input: {
   readonly appRoot: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly log?: (message: string) => void;
-}): Promise<void> {
-  const pending = findPendingPrewarm(resolvePrewarmKeys(input));
+}): Promise<readonly PrewarmedSandboxTemplateBinding[]> {
+  const keys = resolvePrewarmKeys(input);
+  const pending = findPendingPrewarm(keys);
   if (pending === undefined) {
-    return;
+    return findRetainedPrewarmBindings(keys) ?? [];
   }
 
   let unsubscribe: (() => void) | undefined;
@@ -119,13 +149,37 @@ export async function waitForDevelopmentSandboxPrewarm(input: {
   }
 
   try {
-    await withProgressHeartbeat(
+    return await withProgressHeartbeat(
       "waiting for background sandbox template prewarm",
       input.log,
       () => pending.promise,
     );
   } finally {
     unsubscribe?.();
+  }
+}
+
+function findRetainedPrewarmBindings(
+  keys: readonly string[],
+): readonly PrewarmedSandboxTemplateBinding[] | undefined {
+  for (const key of keys) {
+    const bindings = retainedDevelopmentPrewarmBindings.get(key);
+    if (bindings !== undefined) {
+      return bindings;
+    }
+  }
+  return undefined;
+}
+
+function setBoundedRecord<Key, Value>(map: Map<Key, Value>, key: Key, value: Value): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > MAX_RETAINED_PREWARM_RECORDS) {
+    const oldest = map.keys().next();
+    if (oldest.done) {
+      return;
+    }
+    map.delete(oldest.value);
   }
 }
 

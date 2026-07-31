@@ -1,108 +1,77 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { SandboxSourceRef } from "#discover/manifest.js";
-import { normalizeSandboxDefinition } from "#internal/authored-definition/sandbox.js";
 import type { CompiledSandboxDefinition } from "#compiler/manifest.js";
 import {
-  loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
-} from "#compiler/normalize-helpers.js";
-import { toErrorMessage } from "#shared/errors.js";
+  bundleAuthoredModuleForGeneration,
+  loadAuthoredModuleNamespace,
+} from "#internal/authored-module-loader.js";
+import { getAuthoredModuleExport } from "#internal/authored-module.js";
+import { isSandboxDefinition } from "#public/definitions/sandbox.js";
+import { isSandboxTemplate } from "#shared/sandbox-template.js";
+import type { ModuleBackedDefinitionLoadOptions } from "#compiler/normalize-helpers.js";
 
 /**
- * Compiles one authored sandbox module into the normalized sandbox
- * definition stored on the compiled agent manifest.
+ * Compiles sandbox module metadata without invoking the authored definition.
+ *
+ * The default export is session-dependent runtime code. Build only validates
+ * its brand and discovers named template exports that can be prewarmed safely.
  */
 export async function compileSandboxDefinition(
   agentRoot: string,
   source: SandboxSourceRef,
   options: ModuleBackedDefinitionLoadOptions = {},
 ): Promise<CompiledSandboxDefinition> {
-  const message = `Expected the sandbox export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
-  const normalized = normalizeSandboxDefinition(
-    await loadModuleBackedDefinition({
-      agentRoot,
+  const modulePath = join(agentRoot, source.logicalPath);
+  const [moduleNamespace, sourceHash] = await Promise.all([
+    loadAuthoredModuleNamespace(modulePath, {
       externalDependencies: options.externalDependencies,
-      kind: "sandbox",
-      source,
     }),
-    message,
+    resolveSandboxSourceHash(modulePath, options),
+  ]);
+  const definition = getAuthoredModuleExport(moduleNamespace, source);
+
+  if (!isSandboxDefinition(definition)) {
+    throw new Error(
+      `Expected the sandbox export "${source.exportName ?? "default"}" from "${source.logicalPath}" to be created with defineSandbox((ctx) => sandbox).`,
+    );
+  }
+
+  const templateEntries = Object.entries(moduleNamespace).filter(
+    ([exportName, value]) => exportName !== "default" && isSandboxTemplate(value),
   );
-  const revalidationKey =
-    normalized.revalidationKey === undefined
-      ? undefined
-      : await resolveSandboxRevalidationKey({
-          message,
-          revalidationKey: normalized.revalidationKey,
-          source,
-        });
+  const exportNamesByTemplate = new Map<unknown, string[]>();
+  for (const [exportName, template] of templateEntries) {
+    const names = exportNamesByTemplate.get(template) ?? [];
+    names.push(exportName);
+    exportNamesByTemplate.set(template, names);
+  }
+  const duplicate = [...exportNamesByTemplate.values()].find((names) => names.length > 1);
+  if (duplicate !== undefined) {
+    throw new Error(
+      `Sandbox template exports ${duplicate.map((name) => `"${name}"`).join(", ")} from ` +
+        `"${source.logicalPath}" reference the same template. Create one template value per export.`,
+    );
+  }
+  const templateExports = templateEntries.map(([exportName]) => exportName).sort();
 
   return {
-    backendName: resolveCompiledBackendName(normalized.backend),
-    description: normalized.description,
     exportName: source.exportName,
     logicalPath: source.logicalPath,
-    revalidationKey,
-    sourceHash: await resolveSandboxSourceHash(agentRoot, source),
+    sourceHash,
     sourceId: source.sourceId,
     sourceKind: "module",
+    templateExports,
   };
 }
 
-/**
- * Captures the authored backend's stable name into the manifest.
- *
- * Reading `.name` forces a lazily-wrapped backend factory exactly once
- * at compile time; a factory that throws here is tolerated (it already
- * fails at runtime, where the error surfaces with full context) and
- * simply leaves the name unrecorded.
- */
-function resolveCompiledBackendName(
-  backend: { readonly name: string } | undefined,
-): string | undefined {
-  if (backend === undefined) {
-    return undefined;
-  }
-  try {
-    return backend.name;
-  } catch {
-    return undefined;
-  }
-}
-
-async function resolveSandboxRevalidationKey(input: {
-  readonly message: string;
-  readonly revalidationKey: () => Promise<string> | string;
-  readonly source: SandboxSourceRef;
-}): Promise<string> {
-  let resolved: unknown;
-  try {
-    resolved = await input.revalidationKey();
-  } catch (error) {
-    throw new Error(
-      `${input.message} Failed to execute the "revalidationKey" function from "${input.source.logicalPath}": ${toErrorMessage(error)}`,
-    );
-  }
-
-  if (typeof resolved !== "string") {
-    throw new Error(`${input.message} The "revalidationKey" function must return a string.`);
-  }
-
-  if (resolved.trim().length === 0) {
-    throw new Error(
-      `${input.message} The "revalidationKey" function must return a non-empty string.`,
-    );
-  }
-
-  return resolved;
-}
-
 async function resolveSandboxSourceHash(
-  agentRoot: string,
-  source: SandboxSourceRef,
+  modulePath: string,
+  options: ModuleBackedDefinitionLoadOptions,
 ): Promise<string> {
-  const content = await readFile(join(agentRoot, source.logicalPath));
-  return createHash("sha256").update(content).digest("hex");
+  const bundle = await bundleAuthoredModuleForGeneration(modulePath, {
+    externalDependencies: options.externalDependencies,
+  });
+  return createHash("sha256").update(bundle).digest("hex");
 }

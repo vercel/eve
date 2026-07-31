@@ -17,7 +17,7 @@ import { ReadFileStateKey } from "../src/runtime/framework-tools/file-state.js";
 function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
   return {
     async captureState() {
-      return { initialized: false, session: null };
+      return null;
     },
 
     async get() {

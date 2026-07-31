@@ -19,7 +19,7 @@ export async function createMicrosandboxWithProgress(input: {
   readonly log?: (message: string) => void;
   readonly source: string;
 }): Promise<MicrosandboxSandbox> {
-  const progress = { phase: "resolving the image" as MicrosandboxCreatePhase };
+  const progress: { phase: MicrosandboxCreatePhase } = { phase: "resolving the image" };
 
   try {
     const creation = await input.builder.createWithPullProgress();
@@ -137,9 +137,6 @@ async function withHeartbeat<T>(
   }
 }
 
-// Recovery guidance keyed by error code, and the single source of truth
-// for which microsandbox codes we recognize: only codes with guidance
-// are trusted when duck-typing (see `readMicrosandboxErrorCode`).
 const MICROSANDBOX_ERROR_HINTS: Partial<Record<MicrosandboxErrorCode, string>> = {
   database:
     "Check that the microsandbox npm package and installed VM runtime use the same version. If versions changed, use a clean MSB_HOME or migrate the existing database.",
@@ -155,19 +152,21 @@ function readMicrosandboxErrorCode(
   if (errorType !== undefined && error instanceof errorType) {
     return error.code;
   }
-  // Without the module's error class we can only duck-type. Trust a
-  // `code` string only when it names a code we have guidance for, so a
-  // generic Node error (e.g. ENOENT) surfacing during prewarm is not
-  // mislabeled as a microsandbox code.
   if (
     error instanceof Error &&
     "code" in error &&
     typeof error.code === "string" &&
-    Object.hasOwn(MICROSANDBOX_ERROR_HINTS, error.code)
+    isMicrosandboxErrorCode(error.code)
   ) {
-    return error.code as MicrosandboxErrorCode;
+    return error.code;
   }
   return undefined;
+}
+
+function isMicrosandboxErrorCode(value: string): value is MicrosandboxErrorCode {
+  // Node errors also expose string codes, so only codes with provider-specific
+  // guidance are safe to attribute to microsandbox.
+  return Object.hasOwn(MICROSANDBOX_ERROR_HINTS, value);
 }
 
 function microsandboxErrorHint(code: MicrosandboxErrorCode | undefined): string | undefined {

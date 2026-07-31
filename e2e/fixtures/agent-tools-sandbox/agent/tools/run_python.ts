@@ -6,7 +6,7 @@ import { z } from "zod";
  * `ctx.getSandbox()` runtime API — the headline authored-sandbox path from
  * the docs. It writes a generated script with `writeTextFile`, executes it
  * with `run`, and returns the parsed result, exercising `getSandbox`,
- * `writeTextFile`, and `run` together against a real backend.
+ * `writeTextFile`, and `run` together against a real provider.
  *
  * The computation is deterministic given its input (the sum of the supplied
  * integers) so the eval can assert an exact value while still proving the

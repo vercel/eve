@@ -12,7 +12,7 @@ import { ReadFileStateKey } from "../src/runtime/framework-tools/file-state.js";
 function createFakeAccess(files: Record<string, string>): SandboxAccess {
   return {
     async captureState() {
-      return { initialized: false, session: null };
+      return null;
     },
 
     async get() {
@@ -97,7 +97,7 @@ describe("defineReadFileTool", () => {
   it("throws a clear error when no sandbox session is available", async () => {
     const fakeAccess: SandboxAccess = {
       async captureState() {
-        return { initialized: false, session: null };
+        return null;
       },
 
       async get() {

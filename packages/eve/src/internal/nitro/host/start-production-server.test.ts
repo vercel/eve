@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   existsSync: vi.fn(() => true),
   loadDevelopmentEnvironmentFiles: vi.fn(),
-  prewarmBuiltAppSandboxes: vi.fn(async () => undefined),
   spawn: vi.fn(),
 }));
 
@@ -23,10 +22,6 @@ vi.mock("node:child_process", async (importOriginal) => ({
 
 vi.mock("#cli/dev/environment.js", () => ({
   loadDevelopmentEnvironmentFiles: mocks.loadDevelopmentEnvironmentFiles,
-}));
-
-vi.mock("#execution/sandbox/prewarm.js", () => ({
-  prewarmBuiltAppSandboxes: mocks.prewarmBuiltAppSandboxes,
 }));
 
 function createChildProcess(): ChildProcess {
@@ -97,10 +92,6 @@ describe("startProductionServer", () => {
 
     expect(server.url).toBe("http://127.0.0.1:4321/");
     expect(mocks.loadDevelopmentEnvironmentFiles).toHaveBeenCalledWith("/tmp/app");
-    expect(mocks.prewarmBuiltAppSandboxes).toHaveBeenCalledWith({
-      appRoot: "/tmp/app",
-      log: expect.any(Function),
-    });
     expect(mocks.spawn).toHaveBeenCalledWith(
       process.execPath,
       ["/tmp/app/.output/server/index.mjs"],
