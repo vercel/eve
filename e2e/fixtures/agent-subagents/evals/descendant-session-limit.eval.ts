@@ -16,6 +16,7 @@ const DELEGATE_PROMPT = [
  * route back to the child that minted it.
  */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "A descendant session-limit prompt reaches the root; continue resumes the child and stop leaves the root session reusable.",
   timeoutMs: 90_000,

@@ -114,10 +114,10 @@ describe("CLI command registration", () => {
       log: (message: string) => output.push(message),
     };
 
-    await runCli(["trace", "--help"], logger).catch(() => {});
+    await runCli(["traces", "--help"], logger).catch(() => {});
 
     const help = output.join("\n");
-    expect(help).toContain("Usage: eve trace [options] [trace]");
+    expect(help).toContain("Usage: eve traces [options] [trace]");
     expect(help).not.toContain("show <trace>");
     expect(help).toContain("ls");
   });

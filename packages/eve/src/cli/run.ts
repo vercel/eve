@@ -24,12 +24,23 @@ import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js"
 import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
 import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import type { EvalCliOptions } from "#evals/cli/eval.js";
 import {
   registerRuntimeInvokeCommand,
   type InvokeCliRuntimeDependencies,
 } from "#cli/invoke/command.js";
-import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import {
+  parseContextSizeOption,
+  parseDisplayMode,
+  parseLogsMode,
+  parsePortOption,
+  parseStatsMode,
+} from "#cli/option-parsers.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
+import {
+  resumeDevelopmentRuntimeArtifacts,
+  suspendDevelopmentRuntimeArtifacts,
+} from "#services/dev-client/runtime-artifacts.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -110,19 +121,6 @@ function createDevBootProgressReporter(
   };
 }
 
-interface EvalCliOptions {
-  json?: boolean;
-  junit?: string;
-  list?: boolean;
-  maxConcurrency?: string;
-  skipReport?: boolean;
-  strict?: boolean;
-  tag?: string[];
-  timeout?: string;
-  url?: string;
-  verbose?: boolean;
-}
-
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
   return (await import("#cli/commands/info.js")).printApplicationInfo;
 }
@@ -144,64 +142,6 @@ const loadIsActiveDevelopmentServerForApp = async () =>
 
 async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startProductionHost"]> {
   return (await import("#internal/nitro/host.js")).startProductionServer;
-}
-
-function parsePortOption(value: string): number {
-  if (!/^-?\d+$/.test(value)) {
-    throw new InvalidArgumentError(`Expected a numeric port, received "${value}".`);
-  }
-
-  const port = Number(value);
-
-  if (port < 0 || port > 65_535) {
-    throw new InvalidArgumentError(`Expected a port between 0 and 65535, received "${value}".`);
-  }
-
-  return port;
-}
-
-const DISPLAY_MODES = new Set(["full", "collapsed", "auto-collapsed", "hidden"]);
-const STATS_MODES = new Set(["tokens", "tokensPerSecond"]);
-
-function parseDisplayMode(value: string): TerminalPartDisplayMode {
-  if (!DISPLAY_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...DISPLAY_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as TerminalPartDisplayMode;
-}
-
-function parseStatsMode(value: string): AssistantResponseStatsMode {
-  if (!STATS_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...STATS_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as AssistantResponseStatsMode;
-}
-
-function parseLogsMode(value: string): LogDisplayMode {
-  const mode = parseLogDisplayMode(value);
-  if (mode === undefined) {
-    throw new InvalidArgumentError(
-      `Expected one of ${LOG_DISPLAY_MODES.join(", ")}, received "${value}".`,
-    );
-  }
-
-  return mode;
-}
-
-function parseContextSizeOption(value: string): number {
-  const size = Number(value);
-
-  if (!Number.isFinite(size) || size <= 0) {
-    throw new InvalidArgumentError(`Expected a positive number, received "${value}".`);
-  }
-
-  return size;
 }
 
 function hasInteractiveTerminal(): boolean {
@@ -234,21 +174,9 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       },
     });
 
-  const channels = program
+  program
     .command("channels")
-    .description("Manage user-authored channels in the current project.");
-
-  channels
-    .command("add [kind]")
-    .description("Add channels interactively, or scaffold a channel kind (slack | web).")
-    .option("-f, --force", "Overwrite existing channel files")
-    .option("-y, --yes", "Assume yes for confirmations; requires an explicit channel kind")
-    .action(async (kind: string | undefined, options: { force?: boolean; yes?: boolean }) => {
-      const { runChannelsAddCompatibilityCommand } = await import("#cli/commands/channels.js");
-      await runChannelsAddCompatibilityCommand(logger, appRoot, { kind, options });
-    });
-
-  channels
+    .description("Manage user-authored channels in the current project.")
     .command("list")
     .description("List user-authored channels in the current project.")
     .option("--json", "Output as JSON")
@@ -453,13 +381,31 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
         const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
-        const tuiInput = {
+        const tuiInput: RunDevelopmentTuiInput = {
           target,
           initialInput: options.input,
           onBootProgress: report,
           lifecycle,
           ...display,
-        } satisfies RunDevelopmentTuiInput;
+        };
+        if (target.kind === "local") {
+          tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
+            const run = async (): Promise<T> => {
+              if (!(await suspendDevelopmentRuntimeArtifacts({ serverUrl: input.serverUrl }))) {
+                throw new Error("Could not pause the development server for integration setup.");
+              }
+              try {
+                return await task();
+              } finally {
+                await resumeDevelopmentRuntimeArtifacts({
+                  serverUrl: input.serverUrl,
+                  silent: true,
+                });
+              }
+            };
+            return await run();
+          };
+        }
         if (remoteTarget?.headers !== undefined) {
           await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
         } else {
@@ -597,8 +543,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     });
 
   const traces = program
-    .command("trace [trace]")
-    .usage("[options] [trace]\n       eve trace ls [options]")
+    .command("traces [trace]")
+    .usage("[options] [trace]\n       eve traces ls [options]")
     .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
     .action(async (reference: string | undefined) => {
       const { runTraceShowCommand } = await import("#cli/commands/trace.js");
@@ -633,6 +579,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     )
     .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
+    .option("--exclude-tag <tag...>", "Skip evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")
     .option("--timeout <ms>", "Per-eval timeout in milliseconds")

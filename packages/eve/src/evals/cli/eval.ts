@@ -6,6 +6,7 @@ import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
+import { filterEvalsByTags } from "#evals/cli/filter.js";
 import {
   discoverAndImportEvals,
   discoverEvalConfig,
@@ -18,7 +19,8 @@ import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import { resolveEvalTargetHandle } from "#evals/target.js";
 import type { EveEval, EveEvalTargetHandle } from "#evals/types.js";
 
-interface EvalCliOptions {
+/** Parsed Commander options accepted by {@link runEvalCommand}. */
+export interface EvalCliOptions {
   url?: string;
   timeout?: string;
   maxConcurrency?: string;
@@ -28,6 +30,7 @@ interface EvalCliOptions {
   strict?: boolean;
   list?: boolean;
   tag?: string[];
+  excludeTag?: string[];
   verbose?: boolean;
 }
 
@@ -38,7 +41,9 @@ type EvalCliLogger = { log(message: string): void; error(message: string): void 
  *
  * Exit codes: `0` when every executed eval passed its gate assertions (and
  * soft thresholds under `--strict`), `1` when any eval failed, `2` for runner
- * or configuration errors (no evals discovered, no evals matching filters).
+ * or configuration errors (no evals discovered, no evals matching `--tag`).
+ * When `--exclude-tag` removes every matching eval the run succeeds with
+ * nothing executed.
  */
 export async function runEvalCommand(
   evalIds: readonly string[],
@@ -70,10 +75,31 @@ export async function runEvalCommand(
     return;
   }
 
-  const evaluations = filterEvalsByTag(discovered, options.tag ?? []);
-  if (evaluations.length === 0) {
-    logger.error(`No evals matched the provided tags (${(options.tag ?? []).join(", ")}).`);
+  const includeTags = options.tag ?? [];
+  const excludeTags = options.excludeTag ?? [];
+  const included = filterEvalsByTags({ evaluations: discovered, includeTags, excludeTags: [] });
+  if (included.length === 0) {
+    logger.error(`No evals matched the provided tags (${includeTags.join(", ")}).`);
     process.exitCode = 2;
+    return;
+  }
+
+  const evaluations = filterEvalsByTags({ evaluations: included, includeTags: [], excludeTags });
+
+  // List mode reports the post-exclusion set — even when it is empty — so
+  // suite runners can probe "does anything run here?" with `--list --json`.
+  if (options.list === true) {
+    printEvalList(evaluations, options.json === true, logger);
+    return;
+  }
+
+  if (evaluations.length === 0) {
+    // Every matching eval was excluded. Unlike an include filter with no
+    // matches, this is a legitimate "nothing applies to this run" outcome
+    // (e.g. a world suite excluding real-model evals), so it succeeds.
+    logger.log(
+      `All ${included.length} matching evals are excluded by tags (${excludeTags.join(", ")}); nothing to run.`,
+    );
     return;
   }
 
@@ -85,11 +111,6 @@ export async function runEvalCommand(
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
-    return;
-  }
-
-  if (options.list === true) {
-    printEvalList(evaluations, options.json === true, logger);
     return;
   }
 
@@ -199,18 +220,6 @@ function parseNonNegativeInteger(value: string | undefined, flag: string): numbe
     throw new Error(`${flag} must be a non-negative integer; got "${value}".`);
   }
   return parsed;
-}
-
-// ---------------------------------------------------------------------------
-// Eval filtering
-// ---------------------------------------------------------------------------
-
-/** Applies `--tag` filtering: an eval runs when it carries any requested tag. */
-function filterEvalsByTag(evaluations: readonly EveEval[], tags: readonly string[]): EveEval[] {
-  if (tags.length === 0) return [...evaluations];
-  return evaluations.filter(
-    (evaluation) => evaluation.tags?.some((tag) => tags.includes(tag)) ?? false,
-  );
 }
 
 // ---------------------------------------------------------------------------

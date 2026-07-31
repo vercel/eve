@@ -16,6 +16,7 @@ const HEARTBEAT_TOKEN = "schedule-heartbeat-ok-P2N";
  * Vercel Cron Job that cannot be triggered on demand from an eval.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Schedule dispatch: firing a markdown schedule runs the agent and its tool.",
 
   async test(t) {

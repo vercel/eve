@@ -9,6 +9,7 @@ const DYNAMIC_INSTRUCTIONS_TOKEN = "dynamic-instructions-ok-M3K8";
  * reply honors its exact-token directive, proving delivery.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Skills smoke: dynamic instructions injection at session start.",
   async test(t) {
     await t.send("Acknowledge this message.");

@@ -6,6 +6,7 @@ import { defineEval } from "eve/evals";
  * resolves inside the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error.
  */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "Workflow calls beyond the tool's maxSubagents config resolve with WORKFLOW_SUBAGENT_LIMIT_REACHED instead of spawning children.",
   async test(t) {

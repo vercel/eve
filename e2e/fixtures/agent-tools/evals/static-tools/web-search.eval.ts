@@ -41,6 +41,7 @@ function providerRequestsPrecedeResults(events: readonly MessageStreamEvent[]): 
 }
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Provider tools smoke: gateway web search answers a current-events question.",
   async test(t) {
     const turn = await t.send(

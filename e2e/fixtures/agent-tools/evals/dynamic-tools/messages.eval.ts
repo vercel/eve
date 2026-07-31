@@ -4,6 +4,7 @@ import { satisfies } from "eve/evals/expect";
 // The step.started resolver sees the accumulated message history: the
 // second turn's count must exceed the first.
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic tools smoke: step.started resolver sees accumulated message history.",
   async test(t) {
     const first = await t.send(

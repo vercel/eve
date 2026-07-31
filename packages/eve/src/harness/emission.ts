@@ -458,6 +458,9 @@ async function consumeStreamContent(
       invalidInputToolCallIds.add(toolCall.toolCallId);
       await emitActionResult(createRuntimeToolResultFromToolError(resolved.toolError));
       handledInlineToolResultCallIds.add(toolCall.toolCallId);
+      trailingInlineToolResultParts.push(
+        createToolResultMessagePartFromToolError(resolved.toolError),
+      );
       return;
     }
 

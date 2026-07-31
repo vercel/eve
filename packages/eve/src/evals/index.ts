@@ -27,6 +27,7 @@ export type {
 
 export type {
   Assertion,
+  AssertionEvaluation,
   AssertionHandle,
   AssertionResult,
   AssertionSeverity,

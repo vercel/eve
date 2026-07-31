@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import type { AddChannelsDeps } from "#setup/boxes/add-channels.js";
-import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
+import { runIntegrationSetup } from "#setup/integrations/runner.js";
 
 import { runIntegrationSetupCommand } from "./integration-setup.js";
 import type { RegistryCommandLogger } from "./registry.js";
@@ -13,44 +12,22 @@ vi.mock("#setup/scaffold/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#setup/scaffold/index.js")>()),
   isEveProject,
 }));
+vi.mock("#setup/integrations/runner.js", () => ({ runIntegrationSetup: vi.fn() }));
 
 function logger(): RegistryCommandLogger & { errors: string[] } {
   const errors: string[] = [];
   return { errors, error: (message) => errors.push(message), log: () => {} };
 }
 
-function addChannelsDeps(): AddChannelsDeps {
-  return {
-    ensureChannel: vi.fn<AddChannelsDeps["ensureChannel"]>(async (options) => ({
-      kind: "web",
-      action: "created",
-      filesWritten: [`${options.projectRoot}/app/page.tsx`],
-      filesSkipped: [],
-      packageJsonUpdated: [],
-    })),
-    deriveSlackConnectorSlug,
-    provisionSlackbot: vi.fn(),
-    reconcileSlackUid: vi.fn(async () => true),
-    detectPackageManager: vi.fn<AddChannelsDeps["detectPackageManager"]>(async () => ({
-      kind: "pnpm",
-      source: "default",
-    })),
-    runPackageManagerInstall: vi.fn(async () => true),
-    runVercel: vi.fn(async () => true),
-    detectDeployment: vi.fn<AddChannelsDeps["detectDeployment"]>(async () => ({
-      state: "unlinked",
-    })),
-  };
-}
-
 afterEach(() => {
   process.exitCode = undefined;
+  vi.clearAllMocks();
 });
 
 describe("runIntegrationSetupCommand", () => {
-  it("runs registry-owned setup without mutating or installing dependencies", async () => {
+  it("delegates registry-owned setup to the integration runner", async () => {
+    vi.mocked(runIntegrationSetup).mockResolvedValue({ kind: "done" });
     const output = logger();
-    const deps = addChannelsDeps();
     const fake = createFakePrompter();
 
     await runIntegrationSetupCommand(
@@ -60,16 +37,14 @@ describe("runIntegrationSetupCommand", () => {
       {},
       {
         createPrompter: () => fake.prompter,
-        detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
-        getVercelAuthStatus: vi.fn(async () => "cli-missing" as const),
-        addChannelsDeps: deps,
       },
     );
 
-    expect(deps.ensureChannel).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "web", skipDependencyMutation: true }),
+    expect(runIntegrationSetup).toHaveBeenCalledWith(
+      "web",
+      expect.objectContaining({ appRoot: "/project", prompter: fake.prompter }),
+      undefined,
     );
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
     expect(output.errors).toEqual([]);
   });
 });

@@ -1,5 +1,56 @@
 # eve
 
+## 0.29.2
+
+### Patch Changes
+
+- f3ecdcd: Eval config timeouts are now applied to every eval and enforced even when an eval task does not cooperate with its abort signal, preventing stalled eval runs.
+- f3ecdcd: Malformed raw tool arguments now preserve the original JSON syntax error and return it to the model as a failed tool result instead of reporting a misleading serialization error.
+
+## 0.29.1
+
+### Patch Changes
+
+- 438ae8a: Add an opt-in OpenTelemetry `SERVER` span around each inbound HTTP channel request. Enable it with `defineInstrumentation({ traceChannelRequests: true })` — it is off by default. When enabled, the span is named for the registered route (e.g. `POST /eve/v1/session/:sessionId`), respects an incoming `traceparent` (becoming a child of the upstream span, or a trace root when there is none), and becomes the parent of nested channel and Workflow spans such as `hook.resume` and outgoing HTTP calls. It records only low-cardinality, non-sensitive attributes (`http.request.method`, `http.route` — the path template alone, per the OTel HTTP convention — `http.response.status_code`, `url.scheme`, `server.address`, `eve.channel.name`, `eve.channel.kind`) — never session ids, tokens, headers, bodies, or query parameters. This is observability-only: it does not change request handling and performs no synchronous span export in the request path, adding only minimal in-process tracing overhead.
+
+## 0.29.0
+
+### Minor Changes
+
+- 2b09840: Remove the `/channels` dev TUI command, `eve channels add`, and the unused programmatic onboarding API. Channel integrations install through `eve add`, run isolated integration setup without deploying, and leave deployment as an explicit `eve deploy` step.
+- 38cdff8: Renames the `eve trace` CLI command to `eve traces` so it matches the `/traces` TUI command and the plural `eve logs` command. `eve traces ls` and `eve traces <trace>` work as before; the old singular form is removed.
+
+### Patch Changes
+
+- 6dd3006: Cancelling a parent turn now delivers descendant cancellations more reliably: the cancel request retries with exponential backoff (~8s budget instead of 3s), `no_active_turn` results carry the error class that marked the target inactive, and every previously silent drop path (missing pending batch, missing child session ids, exhausted retries) now logs a warning so an uncancelled child no longer runs to completion without a trace.
+- 255027e: Add an opt-in durable `sleep` tool from `eve/tools/sleep`. Agents can export `sleep()` from `agent/tools/sleep.ts` to let the model pause a turn before checking progress or status again without holding an application runtime open.
+- 01ed80d: `eve eval` gains a repeatable `--exclude-tag <tag...>` flag that skips evals carrying a tag. Exclusion applies after `--tag` inclusion, and a run where exclusion removes every matching eval now exits successfully with nothing executed. `--list` reports the post-filter selection — `--list --json` prints `[]` when exclusion removes everything — so suite runners can probe whether anything would run.
+- f09a399: Allow `eve init .` to scaffold in directories that already contain common, source-controlled toolchain and development-environment manifests. Existing mise configs and lockfiles, Node version selectors, proto, Devbox, Nix flake, and devenv configuration are preserved.
+- 2b09840: Remove the `/connect` dev TUI command. Add connections through `eve add` or `/add`; official Connect-backed connection items now configure and patch their Vercel connector during registry setup.
+- 0179111: Report concise, actionable diagnostics for failed value and LLM judge assertions, including actual and expected values, schema issues, evaluated prompts, and judge rationale. Add assertion labels, preserve structured evidence in artifacts, and prevent duplicate Braintrust score names from overwriting each other.
+- 2b09840: Add a `/add` dev TUI command with categorized registry browsing, manifest inspection, and integration installation without leaving the interactive session. Fresh `eve init` sessions open this next-steps hub after model setup.
+- 6dd3006: A turn cancellation observed while a durable turn step is returning now settles the turn as cancelled instead of losing the race to an ordinary completion. Previously the step could miss the abort signal and finish `done`, leaving the session in a completed state after the user had already cancelled. The cancel signal also now aborts in the same microtask that consumes the cancel payload, so a cancel replayed alongside a completed step can no longer lose the settle check by one task-queue hop.
+- 6dd3006: Upgrade the vendored Workflow DevKit to `@workflow/core@5.0.0-beta.38`. This picks up the upstream fix for runs going dormant after an accepted hook resume (vercel/workflow#3183): a session cancelled while parked on subagents could previously hold the accepted cancel indefinitely — its turn only settling as cancelled when unrelated traffic happened to wake the run. beta.38 also restored runtime world selection in core's `createWorld()`, which statically imports both first-party worlds; eve stubs those imports at vendor time so hosted Vercel bundles keep excluding local-world infrastructure.
+
+## 0.28.0
+
+### Minor Changes
+
+- 98d17c7: Input requests now include a required `kind` discriminator so clients can route tool approvals, questions, and session-limit decisions without inferring behavior from tool names or request IDs. Descendant session-limit Stop responses now let the parent own turn cancellation, avoiding a parent-child wait cycle.
+- 7ff4f77: Every session stream event now carries a stable, `evt_`-prefixed ULID in `meta.id`, and stream consumers use it to drop re-delivery without collapsing distinct events. Retried steps re-emit under new ids, while reconnects, rewinds, and saved-log overlap preserve the original id.
+
+  **Breaking:** `MessageStreamEvent` is now the canonical public type for events read from a stream, with `meta.id` and `meta.at` required. `HandleMessageStreamEvent` remains as a deprecated alias, so existing imports continue to compile; code that constructs unstamped events under that type must add the envelope. Client, channel, hook, frontend, and eval APIs carry `MessageStreamEvent` end to end, so consumers can read `meta.id` without guards. Events persisted by an earlier version carry `meta.at` but no `meta.id`, so rewinding into a session that started before this release yields events whose id is absent despite the type. eve passes those through rather than dropping them, and they cannot be deduplicated; the exposure ends when those sessions do.
+
+### Patch Changes
+
+- 28417c4: Declining a session token-limit prompt no longer leaves a stale copy of the prompt in the parked session. Previously the cancelled turn settled with a snapshot that resurrected the already-answered prompt, so every follow-up message was queued behind it and never re-raised the prompt; follow-ups now reach the budget gate, which re-raises a fresh prompt while the session is over budget.
+- 33ea372: Records Vercel AI Gateway cost on local trace spans: `agent.step` spans now carry `gen_ai.usage.cost`, `gen_ai.usage.gateway_cost`, `gen_ai.usage.input_cost`/`output_cost`, and `gen_ai.generation.id` when the gateway reports them. The attributes only exist for gateway-served calls — other providers emit nothing.
+- 28417c4: Session token limits are now tracked as a runtime limit — an absolute lifetime-usage ceiling that each approved continuation re-anchors to `usage + configured limit` — replacing the window-baseline bookkeeping. Behavior is unchanged except the continuation prompt's `usedTokens` now reports the absolute session total instead of the window-relative amount.
+- feac858: Complete durable sessions after 30 days by default, and add `limits.sessionTimeoutMs` to configure or disable the lifetime for each agent. Once an expired session settles, the next qualifying channel message for its continuation starts a fresh session.
+- 28417c4: Keep one session token-limit prompt pending while concurrent input queues behind it. Approving restores the configured budget window, delegated sessions inherit from the fresh window, and zero-quota child tasks no longer raise continuation prompts that cannot grant tokens.
+- dbc8eae: Splits token usage on local trace spans: model and step spans now record `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_creation.input_tokens` (OTel GenAI semantic-convention names) alongside the input/output totals when the provider reports detailed usage — cached tokens price differently, so the split makes cost attribution exact. Providers without detailed usage emit only the totals.
+- 46c6ce3: The dev TUI now renders the session token-limit continuation prompt as a proper question — prompt copy and labeled Approve/Stop options in the question pane — instead of a generic y/n tool-approval line, and answers every confirmation prompt with the request's own option ids instead of hardcoded `approve`/`deny`. Previously, approving the continuation prompt in the TUI submitted an option the server did not recognize, so the same prompt was re-raised indefinitely.
+
 ## 0.27.13
 
 ### Patch Changes

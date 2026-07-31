@@ -5,6 +5,7 @@ const TOOL_NAME = "gate";
 
 /** Regression reproduction for https://github.com/vercel/eve/issues/533. */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "HITL repro (#533): unrelated input does not replay an unresolved authored tool call.",
   async test(t) {

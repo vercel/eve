@@ -31,6 +31,20 @@ export function preserveSerializedAgentTraceState(
     : { ...original, [AgentTraceContextKey.name]: traceState };
 }
 
+/**
+ * Reads a named session's trace window straight out of a serialized context,
+ * which {@link ContextAgentTraceStateStore} cannot do — its reads are scoped
+ * to the ambient session.
+ */
+export function readSessionTraceContext(
+  serializedContext: Readonly<Record<string, unknown>>,
+  sessionId: string,
+): SpanContext | undefined {
+  const raw = serializedContext[AgentTraceContextKey.name];
+  if (raw === undefined) return undefined;
+  return deserializeState(raw).sessions[sessionId]?.context;
+}
+
 /** Durable trace state backed by eve's serialized Workflow context. */
 export class ContextAgentTraceStateStore implements AgentTraceStateStore {
   deleteSession(sessionId: string): void {
@@ -115,8 +129,9 @@ function deserializeState(data: unknown): AgentTraceContextState {
       agentName: typeof value.agentName === "string" ? value.agentName : undefined,
       channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
       context: value.context,
-      pendingStarted: value.pendingStarted === true,
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
+      turnsInWindow: typeof value.turnsInWindow === "number" ? value.turnsInWindow : 0,
+      window: typeof value.window === "number" ? value.window : 0,
     } satisfies AgentSessionTraceState;
   });
   const turns = deserializeRecord(data.turns, (value) => {

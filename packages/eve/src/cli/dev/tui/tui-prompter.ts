@@ -28,7 +28,14 @@ function setupSelectRequest<T extends PrompterValue>(
   encode: (value: T) => string,
   encodeOptions: (options: readonly SelectOption<T>[]) => SetupSelectRequest["options"],
 ): SetupSelectRequest {
-  const base = { message: opts.message, options };
+  const base: {
+    message: string;
+    options: SetupSelectRequest["options"];
+    description?: string;
+    metadata?: SetupSelectRequest["metadata"];
+  } = { message: opts.message, options };
+  if (opts.description !== undefined) base.description = opts.description;
+  if (opts.metadata !== undefined) base.metadata = opts.metadata;
   const withNotices = <Request extends SetupSelectRequest>(request: Request): Request => {
     if (opts.notices !== undefined) request.notices = opts.notices;
     return request;
@@ -193,6 +200,8 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     intro() {},
 
     outro() {},
+
+    withInheritedStdio: (task) => renderer.withInheritedStdio(task),
 
     log: {
       message: line("info"),

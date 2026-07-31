@@ -5,6 +5,7 @@ const TOOL_NAME = "gate";
 
 /** Regression reproduction for https://github.com/vercel/eve/issues/533. */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "HITL repro (#533): a separate approval response executes an authored always-gated tool.",
   async test(t) {
