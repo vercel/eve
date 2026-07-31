@@ -408,12 +408,36 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
   });
 
   it.each([
-    {
-      handle: undefined,
-      agentId: "ag_research:missing",
-      code: "AGENT_UNKNOWN",
-      title: "unknown",
-    },
+    { agentId: "ag_research:missing", title: "matches no stored handle" },
+    { agentId: "", title: "is an empty string from a strict provider" },
+    { agentId: null, title: "is null from a strict provider" },
+  ])("starts a fresh agent when the agentId $title", async ({ agentId }) => {
+    const session = createPendingSession({ agentId, handle: undefined });
+    installContext(session);
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results).toEqual([]);
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(mocks.deliver).not.toHaveBeenCalled();
+    // The fallback dispatches through the normal start path: the fresh
+    // child is owned by a confirmed running handle, not the stale id.
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
+      handles: [
+        expect.objectContaining({
+          address: expect.objectContaining({ sessionId: CHILD_SESSION_ID }),
+          phase: "running",
+        }),
+      ],
+    });
+  });
+
+  it.each([
     {
       handle: {
         ...LOCAL_PARKED_HANDLE,
@@ -484,6 +508,54 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       output: { code: "AGENT_UNREACHABLE" },
     });
     expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [],
+    });
+  });
+
+  it("reports AGENT_UNREACHABLE when the handle disappears mid-batch instead of starting a fresh agent", async () => {
+    // Two continuations to one agentId in a single batch: the first delivery
+    // fails permanently and deletes the handle, so the second — planned as a
+    // resume while the handle still existed — must fail rather than fall
+    // back to an unplanned fresh start.
+    const session = setPendingRuntimeActionBatch({
+      actions: [1, 2].map((n) => ({
+        callId: `call-${n}`,
+        description: "Research",
+        input: { agentId: LOCAL_PARKED_HANDLE.identity.id, message: `continue ${n}` },
+        kind: "subagent-call" as const,
+        name: "research",
+        nodeId: "subagents/research",
+        subagentName: "research",
+      })),
+      event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+      responseMessages: [],
+      session: createBaseSession(LOCAL_PARKED_HANDLE),
+    });
+    installContext(session);
+    mocks.deliver.mockRejectedValue(
+      new RuntimeNoActiveSessionError(LOCAL_CHILD_CONTINUATION_TOKEN),
+    );
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.deliver).toHaveBeenCalledTimes(1);
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
+      }),
+      expect.objectContaining({
+        isError: true,
+        output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
+      }),
+    ]);
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [],
     });
   });
@@ -652,7 +724,7 @@ function createStartSession(input: { readonly kind: "local" | "remote" }): Harne
 
 function createPendingSession(input: {
   readonly handle?: AgentHandle;
-  readonly agentId: string;
+  readonly agentId: string | null;
 }): HarnessSession {
   return setPendingRuntimeActionBatch({
     actions: [

@@ -7,5 +7,8 @@ if (process.env.EVE_E2E_MODEL === "mock") {
 
 export default defineAgent({
   ...e2eAgentConfig(),
+  experimental: {
+    subagentPersistentSessions: true,
+  },
   reasoning: "high",
 });

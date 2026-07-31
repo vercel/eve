@@ -8,12 +8,7 @@
  * dead (handle deleted) or retryable (handle restored to `parked`).
  */
 
-import {
-  AGENT_BUSY,
-  AGENT_MISMATCH,
-  AGENT_UNKNOWN,
-  AGENT_UNREACHABLE,
-} from "#harness/agent-handle-errors.js";
+import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import type { AgentAddress, AgentHandle, ContinueOperation } from "#harness/handles/store.js";
 import { prepareAgentContinuation, rejectAgentEffect } from "#harness/handles/transitions.js";
@@ -83,7 +78,9 @@ export type DispatchOutcome =
 /**
  * Delivers one `agentId` continuation to the child the handle names.
  *
- * Unknown ids, name mismatches, and busy handles report `AGENT_UNKNOWN` /
+ * Planning converts initially unknown ids into fresh starts, so an id that
+ * matches no handle here disappeared mid-batch and reports
+ * `AGENT_UNREACHABLE`. Name mismatches and busy handles report
  * `AGENT_MISMATCH` / `AGENT_BUSY` without touching the store. Delivery
  * failures report `AGENT_UNREACHABLE`: permanent ones resolve the handle as
  * dead, transient ones restore it to `parked` so the model can retry the
@@ -123,12 +120,14 @@ export async function dispatchToAgentHandle(input: {
 
   switch (prepared.kind) {
     case "unknown":
+      // Planning resolved this id against the store, so the handle was
+      // deleted by an earlier action in this batch; no retry can reach it.
       return {
         kind: "error",
         result: createAgentErrorResult({
           action,
-          code: AGENT_UNKNOWN,
-          message: `No agent from the <agents> list found for id "${agentId}".`,
+          code: AGENT_UNREACHABLE,
+          message: `Agent with id "${agentId}" is no longer reachable.`,
         }),
         session: input.currentSession,
       };

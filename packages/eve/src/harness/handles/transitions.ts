@@ -74,7 +74,7 @@ export type PrepareAgentContinuationResult =
  * session instead of a busy conflict.
  *
  * `unknown`, `mismatch`, and `busy` do not change the session; the caller
- * maps them onto `AGENT_UNKNOWN`, `AGENT_MISMATCH`, and `AGENT_BUSY`
+ * maps them onto `AGENT_UNREACHABLE`, `AGENT_MISMATCH`, and `AGENT_BUSY`
  * results.
  */
 export function prepareAgentContinuation(

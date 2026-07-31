@@ -276,6 +276,15 @@ export async function dispatchRuntimeActionsStep(input: {
  * Classifies every batch action before anything dispatches, so invalid
  * batches fail without starting children and rejections never interleave
  * with dispatch work.
+ *
+ * This is the single place that decides fresh start vs. continuation:
+ * an omitted, null, empty, or whitespace-only agentId is a fresh start
+ * (strict tool-calling providers force every schema property to be present,
+ * so models emit `""`/`null` when they mean "no continuation"), and an
+ * agentId that matches no stored handle also falls back to a fresh start —
+ * models sometimes pass a hallucinated or stale id, and hard-failing made
+ * them conclude the subagent itself was unavailable. Only an id that
+ * resolves to a stored handle becomes a resume.
  */
 function planDispatch(input: {
   readonly actions: readonly RuntimeActionRequest[];
@@ -283,99 +292,133 @@ function planDispatch(input: {
   readonly ctx: Parameters<typeof getDynamicSubagentSelection>[0];
   readonly session: RuntimeSession;
 }): DispatchPlanEntry[] {
+  const handles = getAgentHandleStore(input.session.state)?.handles ?? [];
+
+  return input.actions.map((action): DispatchPlanEntry => {
+    const rawAgentId = action.input.agentId;
+    const agentId =
+      typeof rawAgentId === "string" && rawAgentId.trim() !== "" ? rawAgentId : undefined;
+    if (agentId !== undefined && isAgentHandleAction(action)) {
+      // Resume classification runs before the recursion guard: an agentId
+      // continuation resumes an already-adopted child rather than starting
+      // a new one. Unknown ids go through classifyFreshStart below, which
+      // re-applies the guard the resume path bypasses.
+      if (handles.some((handle) => handle.identity.id === agentId)) {
+        const dynamicSubagentSelection =
+          input.bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true
+            ? getDynamicSubagentSelection(input.ctx, action.nodeId)
+            : undefined;
+        return {
+          action,
+          agentId,
+          dynamicRemoteAgent:
+            action.kind === "remote-agent-call" && dynamicSubagentSelection?.kind === "remote"
+              ? dynamicSubagentSelection.remoteAgent
+              : undefined,
+          kind: "resume",
+        };
+      }
+      log.warn("unknown agentId on subagent call; starting a new agent", {
+        agentId,
+        callId: action.callId,
+      });
+    }
+
+    return classifyFreshStart({
+      action,
+      bundle: input.bundle,
+      ctx: input.ctx,
+      session: input.session,
+    });
+  });
+}
+
+/**
+ * Classifies one action for fresh dispatch: rejected by the recursion guard,
+ * or started against a local/remote target. Shared by plain starts and the
+ * unknown-agentId fallback, so both paths enforce the same guard.
+ */
+function classifyFreshStart(input: {
+  readonly action: RuntimeActionRequest;
+  readonly bundle: CompiledBundle;
+  readonly ctx: Parameters<typeof getDynamicSubagentSelection>[0];
+  readonly session: RuntimeSession;
+}): Extract<DispatchPlanEntry, { kind: "reject" | "start" }> {
+  const { action } = input;
   const registry = input.bundle.subagentRegistry.subagentsByNodeId;
   const subagentDepth = resolveSubagentDepth(input.session);
   const rootOnly = input.session.rootSessionId !== undefined || subagentDepth.currentDepth > 0;
 
-  return input.actions.map((action): DispatchPlanEntry => {
-    const isDynamicSubagent =
-      (action.kind === "subagent-call" || action.kind === "remote-agent-call") &&
-      input.bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true;
-    const dynamicSubagentSelection = isDynamicSubagent
-      ? getDynamicSubagentSelection(input.ctx, action.nodeId)
-      : undefined;
-    const agentId = typeof action.input.agentId === "string" ? action.input.agentId : undefined;
-    // Resume classification runs before the recursion guard: an agentId
-    // continuation resumes an already-adopted child rather than starting a
-    // new one, and a non-root session can never own an `agent`-tool handle,
-    // so an agentId-carrying recursive call falls through to AGENT_UNKNOWN.
-    if (agentId !== undefined && isAgentHandleAction(action)) {
+  const isDynamicSubagent =
+    (action.kind === "subagent-call" || action.kind === "remote-agent-call") &&
+    input.bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true;
+  const dynamicSubagentSelection = isDynamicSubagent
+    ? getDynamicSubagentSelection(input.ctx, action.nodeId)
+    : undefined;
+  if (
+    isDynamicSubagent &&
+    (dynamicSubagentSelection === undefined ||
+      (action.kind === "subagent-call" && dynamicSubagentSelection.kind !== "subagent") ||
+      (action.kind === "remote-agent-call" && dynamicSubagentSelection.kind !== "remote"))
+  ) {
+    const subagentName = getSubagentName(action);
+    log.warn("dynamic subagent call blocked after availability changed", {
+      callId: action.callId,
+      nodeId: action.nodeId,
+      subagentName,
+    });
+    return { kind: "reject", result: createUnavailableDynamicSubagentResult(action) };
+  }
+
+  if (isRecursiveAgentAction(action, registry) && rootOnly) {
+    log.warn("recursive agent call blocked outside the root session", {
+      callId: action.callId,
+      currentDepth: subagentDepth.currentDepth,
+      nodeId: action.nodeId,
+      subagentName: action.subagentName,
+    });
+    return { kind: "reject", result: createRecursiveAgentRootOnlyResult(action) };
+  }
+
+  switch (action.kind) {
+    case "subagent-call": {
+      const dynamicAgentConfig =
+        dynamicSubagentSelection?.kind === "subagent"
+          ? dynamicSubagentSelection.agentConfig
+          : undefined;
+      const registered = registry.get(action.nodeId);
+      const description =
+        dynamicAgentConfig?.description ??
+        (registered?.definition.kind === "subagent"
+          ? registered.definition.description
+          : undefined);
+      const source: SubagentInputSource =
+        description !== undefined ? { description, type: "local" } : { type: "runtime" };
       return {
-        action,
-        agentId,
-        dynamicRemoteAgent:
-          action.kind === "remote-agent-call" && dynamicSubagentSelection?.kind === "remote"
-            ? dynamicSubagentSelection.remoteAgent
-            : undefined,
-        kind: "resume",
+        kind: "start",
+        target: {
+          action,
+          dynamicSubagentAgentConfig: dynamicAgentConfig,
+          kind: "local",
+          source,
+        },
       };
     }
-
-    if (
-      isDynamicSubagent &&
-      (dynamicSubagentSelection === undefined ||
-        (action.kind === "subagent-call" && dynamicSubagentSelection.kind !== "subagent") ||
-        (action.kind === "remote-agent-call" && dynamicSubagentSelection.kind !== "remote"))
-    ) {
-      const subagentName = getSubagentName(action);
-      log.warn("dynamic subagent call blocked after availability changed", {
-        callId: action.callId,
-        nodeId: action.nodeId,
-        subagentName,
-      });
-      return { kind: "reject", result: createUnavailableDynamicSubagentResult(action) };
-    }
-
-    if (isRecursiveAgentAction(action, registry) && rootOnly) {
-      log.warn("recursive agent call blocked outside the root session", {
-        callId: action.callId,
-        currentDepth: subagentDepth.currentDepth,
-        nodeId: action.nodeId,
-        subagentName: action.subagentName,
-      });
-      return { kind: "reject", result: createRecursiveAgentRootOnlyResult(action) };
-    }
-
-    switch (action.kind) {
-      case "subagent-call": {
-        const dynamicAgentConfig =
-          dynamicSubagentSelection?.kind === "subagent"
-            ? dynamicSubagentSelection.agentConfig
-            : undefined;
-        const registered = registry.get(action.nodeId);
-        const description =
-          dynamicAgentConfig?.description ??
-          (registered?.definition.kind === "subagent"
-            ? registered.definition.description
-            : undefined);
-        const source: SubagentInputSource =
-          description !== undefined ? { description, type: "local" } : { type: "runtime" };
-        return {
-          kind: "start",
-          target: {
-            action,
-            dynamicSubagentAgentConfig: dynamicAgentConfig,
-            kind: "local",
-            source,
-          },
-        };
-      }
-      case "remote-agent-call":
-        return {
-          kind: "start",
-          target: {
-            action,
-            dynamicRemoteAgent:
-              dynamicSubagentSelection?.kind === "remote"
-                ? dynamicSubagentSelection.remoteAgent
-                : undefined,
-            kind: "remote",
-          },
-        };
-      default:
-        throw new Error(`Unsupported runtime action kind "${action.kind}" in workflow runtime.`);
-    }
-  });
+    case "remote-agent-call":
+      return {
+        kind: "start",
+        target: {
+          action,
+          dynamicRemoteAgent:
+            dynamicSubagentSelection?.kind === "remote"
+              ? dynamicSubagentSelection.remoteAgent
+              : undefined,
+          kind: "remote",
+        },
+      };
+    default:
+      throw new Error(`Unsupported runtime action kind "${action.kind}" in workflow runtime.`);
+  }
 }
 
 async function startSubagent(input: {
