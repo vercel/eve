@@ -6,6 +6,14 @@ import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
 /**
+ * Runtime availability resolver metadata for a subagent whose definition is
+ * wrapped in `defineDynamic`.
+ */
+export interface CompiledDynamicSubagentDefinition {
+  readonly eventNames: readonly string[];
+}
+
+/**
  * Remote subagent entry owned by one compiled agent node manifest. Like
  * channels, remote subagents are node-local manifest entries rather than a
  * separate graph-level list.
@@ -16,6 +24,7 @@ export type CompiledRemoteAgentNode = Readonly<
       description: string;
       entryPath: string;
       name: string;
+      dynamic?: CompiledDynamicSubagentDefinition;
       outputSchema?: JsonObject;
       path: string;
       rootPath: string;
@@ -35,6 +44,12 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
     logicalPath: z.string(),
     name: z.string(),
     nodeId: z.string(),
+    dynamic: z
+      .object({
+        eventNames: z.array(z.string()).readonly(),
+      })
+      .strict()
+      .optional(),
     outputSchema: jsonObjectSchema.optional(),
     path: z.string(),
     rootPath: z.string(),

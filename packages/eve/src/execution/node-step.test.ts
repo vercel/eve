@@ -204,6 +204,8 @@ function createTestNode(
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: createStubSandboxRegistry(),
     subagentRegistry: {
+      dynamicNodeIds: new Set(),
+      dynamicResolvers: [],
       preparedTools: [],
       subagentsByName: new Map(),
       subagentsByNodeId: new Map(),

@@ -91,7 +91,7 @@ agent/subagents/researcher/
 
 Rules:
 
-- `agent.ts` is required, and must declare a `description`. The parent reads it on the lowered subagent tool to decide when to delegate.
+- `agent.ts` is required, and its agent definition must declare a `description`. For a dynamic subagent, the `fallback` agent definition carries that description. The parent reads it on the lowered subagent tool to decide when to delegate.
 - `instructions.md` / `instructions.ts` is optional (unlike the root agent, where it is required).
 - `connections/`, `hooks/`, `skills/`, `lib/`, `sandbox/`, and `tools/` are all supported, discovered from the subagent's own directory.
 - `channels/` and `schedules/` are not supported inside local subagents.

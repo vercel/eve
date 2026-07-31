@@ -1,9 +1,9 @@
 ---
 title: "Dynamic Capabilities"
-description: "Resolve models, tools, skills, and instructions at runtime: dynamic model selection, defineDynamic resolver events, execution order, and durable dynamic tools."
+description: "Resolve models, subagents, tools, skills, and instructions at runtime with defineDynamic resolver events."
 ---
 
-`defineDynamic` resolves the model, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic` resolves the model, subagents, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
 
 ## Dynamic models
 
@@ -16,10 +16,49 @@ uncached prices. See
 [agent configuration](../agent-config#choose-the-model-dynamically) for the
 full contract.
 
-`fallback` is model-only: the agent always needs exactly one model, and the
-compiled fallback anchors build-time metadata. Tools, skills, and instructions
+The agent always needs exactly one model, so the compiled fallback anchors
+build-time metadata. A dynamic subagent also uses `fallback` to compile its
+child configuration, as described below. Tools, skills, and instructions
 default by authoring a static entry (or returning `null`), so `fallback` on
 their `defineDynamic` export is a build error.
+
+## Dynamic subagents
+
+Wrap a declared subagent's own `agent.ts` in `defineDynamic` when its
+availability depends on the caller, tenant, environment, or a feature flag.
+Keep the child definition in one constant, pass it as `fallback`, and return
+that same value to expose the subagent. Return `null` or `undefined` to omit it
+from the parent's model-visible tools.
+
+```ts title="agent/subagents/finance/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+const finance = defineAgent({
+  description: "Analyze financial and accounting data.",
+  model: "openai/gpt-5.5",
+});
+
+export default defineDynamic({
+  fallback: finance,
+  events: {
+    "session.started": (_event, ctx) =>
+      ctx.session.auth.current?.attributes.plan === "enterprise" ? finance : null,
+  },
+});
+```
+
+`fallback` is the definition eve compiles and runs when the subagent is
+selected; it does not make the subagent available by itself. A handler must
+return the exact fallback value. Dynamic subagents support `session.started`
+and `turn.started`, not `step.started`. A turn selection shadows the session
+selection for that turn, including when the turn handler returns nil.
+
+The resolved set applies to direct delegation and the `Workflow` tool. eve
+also checks availability again before starting the child, so a stale or
+manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
+availability as capability composition, not as the only authorization
+boundary: sensitive child tools still need their own authorization and
+approval checks.
 
 ## Dynamic tools
 
@@ -162,6 +201,7 @@ Both resolve before the prompt is assembled, so the model sees the right instruc
 
 ## What to read next
 
+- Conditionally expose a specialist → [Subagents](../subagents)
 - The static tool basics this builds on → [Tools](../tools)
 - The built-in tools and how to override them → [Default harness](../concepts/default-harness)
 - Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)

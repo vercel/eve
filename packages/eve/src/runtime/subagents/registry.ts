@@ -2,7 +2,10 @@ import { z } from "#compiled/zod/index.js";
 
 import { RuntimeRegistry, RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
-import type { ResolvedRuntimeDelegationNode } from "#runtime/types.js";
+import type {
+  ResolvedDynamicSubagentDefinition,
+  ResolvedRuntimeDelegationNode,
+} from "#runtime/types.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
 
 /**
@@ -13,10 +16,18 @@ interface RuntimeRegisteredSubagent {
   readonly prepared: PreparedRuntimeDelegationTool;
 }
 
+/** One dynamic subagent resolver paired with its compiled delegation tool. */
+export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagentDefinition {
+  readonly nodeId: string;
+  readonly prepared: PreparedRuntimeDelegationTool;
+}
+
 /**
  * Runtime-owned registry that exposes resolved subagents as model-visible tools.
  */
 export interface RuntimeSubagentRegistry {
+  readonly dynamicNodeIds: ReadonlySet<string>;
+  readonly dynamicResolvers: readonly ResolvedDynamicSubagentResolver[];
   readonly preparedTools: readonly PreparedRuntimeDelegationTool[];
   readonly subagentsByName: ReadonlyMap<string, RuntimeRegisteredSubagent>;
   readonly subagentsByNodeId: ReadonlyMap<string, RuntimeRegisteredSubagent>;
@@ -51,6 +62,8 @@ export function createRuntimeSubagentRegistry(input: {
   readonly subagents: readonly ResolvedRuntimeDelegationNode[];
 }): RuntimeSubagentRegistry {
   const preparedTools: PreparedRuntimeDelegationTool[] = [];
+  const dynamicNodeIds = new Set<string>();
+  const dynamicResolvers: ResolvedDynamicSubagentResolver[] = [];
   const registry = new RuntimeRegistry<RuntimeRegisteredSubagent>(
     "subagent",
     input.reservedToolNames ?? [],
@@ -77,17 +90,27 @@ export function createRuntimeSubagentRegistry(input: {
       prepared,
     };
 
-    registry.register(subagentDefinition.name, registeredSubagent, {
-      location,
-      duplicateMessage: `Found multiple subagents named "${subagentDefinition.name}". Subagent names must be unique at runtime.`,
-      reservedMessage: `Subagent "${subagentDefinition.name}" collides with another runtime-visible tool name.`,
-    });
-
-    preparedTools.push(prepared);
+    if (subagentDefinition.dynamic === undefined) {
+      registry.register(subagentDefinition.name, registeredSubagent, {
+        location,
+        duplicateMessage: `Found multiple subagents named "${subagentDefinition.name}". Subagent names must be unique at runtime.`,
+        reservedMessage: `Subagent "${subagentDefinition.name}" collides with another runtime-visible tool name.`,
+      });
+      preparedTools.push(prepared);
+    } else {
+      dynamicNodeIds.add(subagentDefinition.nodeId);
+      dynamicResolvers.push({
+        ...subagentDefinition.dynamic,
+        nodeId: subagentDefinition.nodeId,
+        prepared,
+      });
+    }
     subagentsByNodeId.set(subagentDefinition.nodeId, registeredSubagent);
   }
 
   return {
+    dynamicNodeIds,
+    dynamicResolvers,
     preparedTools,
     subagentsByName: registry.asMap(),
     subagentsByNodeId,

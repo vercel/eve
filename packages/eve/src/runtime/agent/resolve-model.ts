@@ -21,6 +21,7 @@ import {
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { isDynamicSentinel } from "#shared/dynamic-tool-definition.js";
 
 export { shouldMockAuthoredRuntimeModels };
 
@@ -81,7 +82,7 @@ async function loadSourceBackedRuntimeModelReference(
     nodeId: scope.nodeId,
   });
   const normalizedDefinition = normalizeAgentDefinition(
-    definition,
+    unwrapDynamicSubagentDefinition(definition),
     `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
   );
   const model = normalizedDefinition.model;
@@ -118,7 +119,7 @@ export async function loadDynamicRuntimeModelDefinition(input: {
     nodeId: input.scope.nodeId,
   });
   const normalizedDefinition = normalizeAgentDefinition(
-    definition,
+    unwrapDynamicSubagentDefinition(definition),
     `Expected the authored agent config export "${input.dynamicModel.exportName ?? "default"}" from "${input.dynamicModel.logicalPath}" to match the public eve shape.`,
   );
   const authoredModel = normalizedDefinition.model;
@@ -130,6 +131,10 @@ export async function loadDynamicRuntimeModelDefinition(input: {
   }
 
   return authoredModel;
+}
+
+function unwrapDynamicSubagentDefinition(value: unknown): unknown {
+  return isDynamicSentinel(value) && "fallback" in value ? value.fallback : value;
 }
 
 export function normalizeDynamicRuntimeModelResult(input: {

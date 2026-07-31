@@ -20,6 +20,7 @@ import { ContextKey } from "#context/key.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -165,6 +166,27 @@ export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamic
 export const LiveStepToolsKey = new ContextKey<
   import("#harness/execute-tool.js").HarnessToolDefinition[]
 >("eve.liveStepTools");
+
+// ---------------------------------------------------------------------------
+// Dynamic subagent keys
+// ---------------------------------------------------------------------------
+
+export type DurableDynamicSubagentSelection = PreparedRuntimeDelegationTool | null;
+
+/** Session-scoped subagent availability keyed by compiled child node id. */
+export const SessionDynamicSubagentSelectionsKey = new ContextKey<
+  Readonly<Record<string, DurableDynamicSubagentSelection>>
+>("eve.sessionDynamicSubagentSelections");
+
+/** Turn-scoped subagent availability keyed by compiled child node id. */
+export const TurnDynamicSubagentSelectionsKey = new ContextKey<
+  Readonly<Record<string, DurableDynamicSubagentSelection>>
+>("eve.turnDynamicSubagentSelections");
+
+/** Runtime revision that last refreshed session-scoped dynamic subagents. */
+export const SessionDynamicSubagentRuntimeRevisionKey = new ContextKey<string>(
+  "eve.sessionDynamicSubagentRuntimeRevision",
+);
 
 // ---------------------------------------------------------------------------
 // Dynamic skill keys

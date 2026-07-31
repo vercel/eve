@@ -5,6 +5,7 @@ import {
   discoverDiagnosticsSummarySchema,
 } from "#discover/diagnostics.js";
 import {
+  type CompiledDynamicSubagentDefinition,
   compiledRemoteAgentNodeSchema,
   type CompiledRemoteAgentNode,
 } from "#compiler/remote-agent-node.js";
@@ -41,7 +42,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 37;
+export const COMPILED_AGENT_MANIFEST_VERSION = 38;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -256,6 +257,7 @@ export type CompiledSubagentNode = Readonly<
     Node & {
       agent: CompiledAgentNodeManifest;
       description: string;
+      dynamic?: CompiledDynamicSubagentDefinition;
       entryPath: string;
       name: string;
       rootPath: string;
@@ -666,6 +668,12 @@ const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z
   .object({
     agent: compiledAgentNodeManifestSchema,
     description: z.string(),
+    dynamic: z
+      .object({
+        eventNames: z.array(z.string()).readonly(),
+      })
+      .strict()
+      .optional(),
     entryPath: z.string(),
     logicalPath: z.string(),
     name: z.string(),

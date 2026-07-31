@@ -6,6 +6,10 @@ import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-li
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
+  dispatchDynamicSubagentEvent,
+  refreshDynamicSessionSubagentsForRuntimeRevision,
+} from "#context/dynamic-subagent-lifecycle.js";
+import {
   dispatchDynamicToolEvent,
   refreshDynamicSessionToolsForRuntimeRevision,
 } from "#context/dynamic-tool-lifecycle.js";
@@ -13,6 +17,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   ModeKey,
+  SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -273,24 +278,36 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const hookRegistry = bundle.hookRegistry;
   const dynamicInstructionsResolvers = bundle.resolvedAgent.dynamicInstructionsResolvers ?? [];
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
+  const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
   const runtimeIdentity = buildRuntimeIdentity(bundle.graph.root);
   const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  const dynamicToolRuntimeRevision = deploymentId
+  const dynamicRuntimeRevision = deploymentId
     ? `deployment:${deploymentId}`
     : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
   const sessionStarted = getHarnessEmissionState(initialSession.state).sessionStarted;
 
   if (!sessionStarted) {
-    ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicToolRuntimeRevision);
+    ctx.set(SessionDynamicSubagentRuntimeRevisionKey, dynamicRuntimeRevision);
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicRuntimeRevision);
   } else {
-    await refreshDynamicSessionToolsForRuntimeRevision({
-      ctx,
-      resolvers: dynamicToolResolvers,
-      event: createSessionStartedEvent({ runtime: runtimeIdentity }),
-      messages: initialSession.history,
-      runtimeRevision: dynamicToolRuntimeRevision,
-    });
+    const refreshEvent = createSessionStartedEvent({ runtime: runtimeIdentity });
+    await Promise.all([
+      refreshDynamicSessionSubagentsForRuntimeRevision({
+        ctx,
+        resolvers: dynamicSubagentResolvers,
+        event: refreshEvent,
+        messages: initialSession.history,
+        runtimeRevision: dynamicRuntimeRevision,
+      }),
+      refreshDynamicSessionToolsForRuntimeRevision({
+        ctx,
+        resolvers: dynamicToolResolvers,
+        event: refreshEvent,
+        messages: initialSession.history,
+        runtimeRevision: dynamicRuntimeRevision,
+      }),
+    ]);
   }
 
   const writer = input.parentWritable.getWriter();
@@ -323,6 +340,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         },
       });
     }
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      resolvers: dynamicSubagentResolvers,
+      event: emitted,
+      messages: messages ?? [],
+    });
     await dispatchDynamicToolEvent({
       ctx,
       resolvers: dynamicToolResolvers,

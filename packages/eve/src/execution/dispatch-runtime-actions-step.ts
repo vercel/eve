@@ -48,6 +48,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { isDynamicSubagentAvailable } from "#context/dynamic-subagent-lifecycle.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -114,6 +115,21 @@ export async function dispatchRuntimeActionsStep(input: {
           subagentName: action.subagentName,
         });
         results.push(createRecursiveAgentRootOnlyResult(action));
+        continue;
+      }
+
+      if (
+        (action.kind === "subagent-call" || action.kind === "remote-agent-call") &&
+        bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true &&
+        !isDynamicSubagentAvailable(ctx, action.nodeId)
+      ) {
+        const subagentName = getSubagentName(action);
+        log.warn("dynamic subagent call blocked after availability changed", {
+          callId: action.callId,
+          nodeId: action.nodeId,
+          subagentName,
+        });
+        results.push(createUnavailableDynamicSubagentResult(action));
         continue;
       }
 
@@ -248,6 +264,28 @@ export async function dispatchRuntimeActionsStep(input: {
       : createDurableSessionState({ session: nextSession });
 
   return { results, sessionState: nextState };
+}
+
+function createUnavailableDynamicSubagentResult(
+  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
+): RuntimeSubagentResultActionResult {
+  const subagentName = getSubagentName(action);
+  return {
+    callId: action.callId,
+    isError: true,
+    kind: "subagent-result",
+    output: {
+      code: "SUBAGENT_UNAVAILABLE",
+      message: `Subagent "${subagentName}" is not available in the current session context.`,
+    },
+    subagentName,
+  };
+}
+
+function getSubagentName(
+  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
+): string {
+  return action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
 }
 
 function createRemoteAgentStartFailureResult(input: {

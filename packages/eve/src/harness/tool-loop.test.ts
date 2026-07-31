@@ -22,6 +22,7 @@ import {
   SessionKey,
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
+  SessionDynamicSubagentSelectionsKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
@@ -926,6 +927,71 @@ describe("createToolLoopHarness", () => {
         nodeId: "workers",
         subagentName: "worker",
       },
+    ]);
+  });
+
+  it("parks dynamic subagent calls as pending runtime actions", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { message: "investigate" },
+                toolCallId: "call-dynamic",
+                toolName: "researcher",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { message: "investigate" },
+          toolCallId: "call-dynamic",
+          toolName: "researcher",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+    const ctx = new ContextContainer();
+    ctx.set(SessionDynamicSubagentSelectionsKey, {
+      "subagents/researcher": {
+        description: "Research the request.",
+        inputSchema: { type: "object" },
+        kind: "subagent",
+        logicalPath: "subagents/researcher",
+        name: "researcher",
+        nodeId: "subagents/researcher",
+        sourceId: "subagents/researcher",
+      },
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Research this." }),
+    );
+
+    expect(events.find((event) => event.type === "actions.requested")?.data.actions).toEqual([
+      expect.objectContaining({
+        callId: "call-dynamic",
+        kind: "subagent-call",
+        nodeId: "subagents/researcher",
+        subagentName: "researcher",
+      }),
+    ]);
+    expect(getPendingRuntimeActionBatch(result.session.state)?.actions).toEqual([
+      expect.objectContaining({
+        callId: "call-dynamic",
+        kind: "subagent-call",
+        nodeId: "subagents/researcher",
+      }),
     ]);
   });
 
