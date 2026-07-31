@@ -21,6 +21,7 @@ import { describeLocalTraceSpan } from "#tracing/local-trace-reader.js";
 import type { Theme } from "../theme.js";
 import { formatAttributeContent } from "./trace-content.js";
 import { renderConversationItem } from "./trace-conversation.js";
+import type { TraceViewerSurfaces } from "./trace-surfaces.js";
 import type { TextSelectionRange, TraceViewerState } from "./trace-viewer-state.js";
 import {
   TRACE_VIEWER_HEADER_ROWS,
@@ -58,6 +59,11 @@ export interface RenderTraceViewerOptions {
   readonly tracingDisabled?: boolean;
   /** Transient confirmation shown in the header's top-right corner. */
   readonly toast?: string;
+  /**
+   * Card surfaces derived from the terminal's background (OSC 11 probe).
+   * Absent when the terminal never answered — cards fall back to rails.
+   */
+  readonly surfaces?: TraceViewerSurfaces;
 }
 
 export function renderTraceViewer(
@@ -65,11 +71,12 @@ export function renderTraceViewer(
   options: RenderTraceViewerOptions,
 ): TraceViewerFrame {
   const { width, height, theme } = options;
+  const chrome = chromeStyles(theme, options.surfaces);
   const bodyRows = Math.max(1, height - HEADER_ROWS - FOOTER_ROWS);
   const panelWidth = state.panelOpen ? panelWidthFor(width) : 0;
   const timelineWidth = Math.max(20, width - (panelWidth === 0 ? 0 : panelWidth + 1));
 
-  const detailLines = panelDetailLines(state, panelWidth, theme);
+  const detailLines = panelDetailLines(state, panelWidth, theme, options.surfaces);
   const panelViewportRows = bodyRows;
 
   const rows: string[] = [];
@@ -77,7 +84,7 @@ export function renderTraceViewer(
   if (state.traces.length === 0) {
     rows.push(...renderEmptyState(options, theme, bodyRows));
   } else if (state.trace === undefined) {
-    rows.push(...center(bodyRows, theme.colors.dim("Loading trace…")));
+    rows.push(...center(bodyRows, chrome.muted("Loading trace…")));
   } else {
     const body = renderConversation(state, options, timelineWidth, bodyRows);
     for (let index = 0; index < bodyRows; index += 1) {
@@ -98,11 +105,16 @@ export function renderTraceViewer(
       rows.push(joinPanels(left, timelineWidth, panelLine, width));
     }
   }
-  rows.push(...renderFooter(state, width, theme));
-  if (options.toast !== undefined) overlayToast(rows, options.toast, width, theme);
+  rows.push(...renderFooter(state, width, theme, options.surfaces));
+  if (options.toast !== undefined) {
+    overlayToast(rows, options.toast, width, theme, options.surfaces);
+  }
 
+  // Rows render on the terminal's own background — the alt-screen painter
+  // erases the screen before each frame, so no canvas fill is needed and the
+  // viewer follows the user's palette like the rest of the TUI.
   return {
-    rows: rows.map((row) => withViewerBase(row, width, theme)),
+    rows,
     panelTotalRows: detailLines.length,
     timelineViewportRows: bodyRows,
     panelViewportRows,
@@ -111,47 +123,52 @@ export function renderTraceViewer(
 }
 
 /**
- * The viewer's canvas: Catppuccin Macchiato `base` behind every row, so the
- * whole screen reads as one surface and the `surface1` cards elevate above
- * it. Rows are padded to full width; embedded style resets AND bg-closes are
- * followed by a base re-open so neither a truncated line nor a card's
- * trailing bg-close can drop the canvas (card bg-closes once let the
- * terminal's default background bleed through the drawer). Truecolor is
- * exempt from tinted-theme palette remapping.
+ * Text styles for the viewer's chrome (header, footer controls, drawer,
+ * empty states). Once the terminal has answered the background probe, both
+ * styles anchor to the probed background — truecolor white-on-dark /
+ * black-on-light primary and a truecolor grey muted — instead of trusting
+ * how the terminal styles its default foreground. Without a reply they fall
+ * back to the theme's plain emphasis.
  */
-const VIEWER_BASE_OPEN = "\x1b[48;2;0;0;0m";
-const VIEWER_BASE_REOPEN = `\x1b[0m${VIEWER_BASE_OPEN}`;
-const VIEWER_BASE_REOPEN_BG = `\x1b[49m${VIEWER_BASE_OPEN}`;
-const RESET_ALL = "\x1b[0m";
-
-function withViewerBase(row: string, width: number, theme: Theme): string {
-  if (!theme.color) return row;
-  const padded = visibleLength(row) >= width ? row : row + " ".repeat(width - visibleLength(row));
-  return `${VIEWER_BASE_OPEN}${padded
-    .replaceAll("\x1b[0m", VIEWER_BASE_REOPEN)
-    .replaceAll("\x1b[49m", VIEWER_BASE_REOPEN_BG)}${RESET_ALL}`;
+function chromeStyles(
+  theme: Theme,
+  surfaces: TraceViewerSurfaces | undefined,
+): { readonly muted: (text: string) => string; readonly primary: (text: string) => string } {
+  const active = theme.color ? surfaces : undefined;
+  return {
+    muted: active?.mutedText ?? theme.colors.dim,
+    primary: active?.primaryText ?? ((text: string) => text),
+  };
 }
 
 /**
  * The toast floats over the frame's top-right corner as a small elevated
- * surface: a greyish-white half-block bar down its left edge, a padding row
- * above and below the message, and one column of canvas as right margin.
+ * card: a bright half-block bar down its left edge, a padding row above and
+ * below the message, and one column of margin on the right. When card
+ * surfaces are available (OSC 11 answered) the toast sits on the body band;
+ * otherwise the bar alone carries it.
  */
-const TOAST_SURFACE = "\x1b[48;2;36;36;36m";
-const TOAST_BAR = "\x1b[38;2;210;210;210m▌\x1b[39m";
-const TOAST_TEXT = "\x1b[97m";
-
-function overlayToast(rows: string[], message: string, width: number, theme: Theme): void {
+function overlayToast(
+  rows: string[],
+  message: string,
+  width: number,
+  theme: Theme,
+  surfaces?: TraceViewerSurfaces,
+): void {
   const text = stripTerminalControls(message);
   const inner = `  ${text}  `;
   const innerWidth = visibleLength(inner);
-  const lines = theme.color
-    ? [
-        `${TOAST_SURFACE}${TOAST_BAR}${" ".repeat(innerWidth)}\x1b[0m`,
-        `${TOAST_SURFACE}${TOAST_BAR}${TOAST_TEXT}${inner}\x1b[0m`,
-        `${TOAST_SURFACE}${TOAST_BAR}${" ".repeat(innerWidth)}\x1b[0m`,
-      ]
-    : [`▌${" ".repeat(innerWidth)}`, `▌${inner}`, `▌${" ".repeat(innerWidth)}`];
+  const bar = theme.unicode ? "▌" : theme.glyph.rule;
+  const active = theme.color ? surfaces : undefined;
+  const surface = active === undefined ? "" : active.body;
+  // Surface-matched primary keeps the toast legible on light backgrounds.
+  const primary = active?.primaryText ?? theme.colors.white;
+  const close = theme.color ? "\x1b[0m" : "";
+  const lines = [
+    `${surface}${primary(bar)}${" ".repeat(innerWidth)}${close}`,
+    `${surface}${primary(bar)}${primary(inner)}${close}`,
+    `${surface}${primary(bar)}${" ".repeat(innerWidth)}${close}`,
+  ];
   // Below the title row, so the trace identity stays readable.
   for (const [offset, line] of lines.entries()) {
     const index = HEADER_ROWS - 1 + offset;
@@ -160,7 +177,7 @@ function overlayToast(rows: string[], message: string, width: number, theme: The
   }
 }
 
-/** Splices `segment` over the right end of `row`, keeping `margin` canvas columns. */
+/** Splices `segment` over the right end of `row`, keeping `margin` empty columns. */
 function overlayRight(row: string, segment: string, width: number, margin: number): string {
   const cut = Math.max(0, width - margin - visibleLength(segment));
   const rowWidth = visibleLength(row);
@@ -188,17 +205,21 @@ export function renderSpanDetail(
   span: LocalTraceSpan,
   innerWidth: number,
   theme: Theme,
-  options?: { readonly excludeKeys?: ReadonlySet<string> },
+  options?: {
+    readonly excludeKeys?: ReadonlySet<string>;
+    readonly surfaces?: TraceViewerSurfaces;
+  },
 ): string[] {
   const { colors } = theme;
+  const { muted, primary } = chromeStyles(theme, options?.surfaces);
   const lines: string[] = [];
   const name = stripTerminalControls(span.name);
-  lines.push(...wrapVisibleLine(colors.bold(name), innerWidth));
+  lines.push(...wrapVisibleLine(colors.bold(primary(name)), innerWidth));
   const summary = describeLocalTraceSpan(span).map(stripTerminalControls);
-  if (summary.length > 0) lines.push(colors.dim(summary.join(", ")));
+  if (summary.length > 0) lines.push(muted(summary.join(", ")));
   lines.push("");
 
-  const fact = (label: string, value: string): string => `${colors.dim(label.padEnd(10))}${value}`;
+  const fact = (label: string, value: string): string => `${muted(label.padEnd(10))}${value}`;
   const error = span.statusCode === 2;
   lines.push(fact("status", error ? colors.red("ERROR") : colors.green("ok")));
   lines.push(fact("duration", formatElapsed(durationMs(span.startTimeNs, span.endTimeNs))));
@@ -212,17 +233,17 @@ export function renderSpanDetail(
     .filter((key) => options?.excludeKeys?.has(key) !== true)
     .sort();
   if (keys.length === 0) {
-    lines.push(colors.dim("no attributes"));
+    lines.push(muted("no attributes"));
   } else {
-    lines.push(colors.dim(`attributes (${keys.length})`));
+    lines.push(muted(`attributes (${keys.length})`));
     for (const key of keys) {
       const block = formatAttributeContent(key, span.attributes[key], theme, innerWidth - 2);
       const cleanKey = stripTerminalControls(key);
       if (block.length === 1) {
         // Scalars stay beside the key; multi-line content nests beneath it.
-        lines.push(...wrapVisibleLine(`${colors.dim(cleanKey)} ${block[0]}`, innerWidth));
+        lines.push(...wrapVisibleLine(`${muted(cleanKey)} ${block[0]}`, innerWidth));
       } else {
-        lines.push(colors.dim(cleanKey));
+        lines.push(muted(cleanKey));
         for (const line of block) {
           lines.push(`  ${line}`);
         }
@@ -235,6 +256,7 @@ export function renderSpanDetail(
 function renderHeader(state: TraceViewerState, options: RenderTraceViewerOptions): string[] {
   const { theme, width } = options;
   const { colors, glyph } = theme;
+  const { muted, primary } = chromeStyles(theme, options.surfaces);
   const segments: string[] = [];
   if (state.trace?.agentName !== undefined) {
     segments.push(stripTerminalControls(state.trace.agentName));
@@ -253,11 +275,11 @@ function renderHeader(state: TraceViewerState, options: RenderTraceViewerOptions
       formatElapsed(durationMs(state.trace.startTimeNs, end)),
     );
   }
-  const title = `${colors.bold(`${glyph.brand} traces`)}${
-    segments.length === 0 ? "" : colors.dim(` · ${segments.join(" · ")}`)
+  const title = `${colors.bold(primary(`${glyph.brand} traces`))}${
+    segments.length === 0 ? "" : muted(` · ${segments.join(" · ")}`)
   }`;
   const position =
-    state.traces.length === 0 ? "" : colors.dim(`[${state.traceIndex + 1}/${state.traces.length}]`);
+    state.traces.length === 0 ? "" : muted(`[${state.traceIndex + 1}/${state.traces.length}]`);
   const live = options.activeWindowEndNs !== undefined ? colors.green("● live") : "";
   const right = [live, position].filter((part) => part.length > 0).join(" ");
   // The badge keeps its room: the title (full session id and all) clips first.
@@ -281,14 +303,14 @@ function renderConversation(
   const { theme } = options;
   if (state.conversationItems.length === 0) {
     return [
-      theme.colors.dim(
+      chromeStyles(theme, options.surfaces).muted(
         "  No conversation content in this trace — content capture may be off (EVE_TRACES_CONTENT).",
       ),
     ];
   }
   // Render all cards, then apply the line-level scroll offset so expanded
   // cards taller than the viewport can be scrolled through to the end.
-  const allLines = conversationLines(state, width, theme);
+  const allLines = conversationLines(state, width, theme, options.surfaces);
   const visible = allLines.slice(state.scrollRow, state.scrollRow + bodyRows);
   if (state.textSelection === undefined || state.textSelection.region !== "conversation") {
     return visible;
@@ -298,7 +320,12 @@ function renderConversation(
   );
 }
 
-function conversationLines(state: TraceViewerState, width: number, theme: Theme): string[] {
+function conversationLines(
+  state: TraceViewerState,
+  width: number,
+  theme: Theme,
+  surfaces?: TraceViewerSurfaces,
+): string[] {
   const allLines: string[] = [];
   for (let index = 0; index < state.conversationItems.length; index += 1) {
     allLines.push(
@@ -308,6 +335,7 @@ function conversationLines(state: TraceViewerState, width: number, theme: Theme)
         theme,
         index === state.selectedRow,
         state.expandedItems.has(index),
+        surfaces,
       ),
       "",
     );
@@ -321,13 +349,19 @@ function conversationLines(state: TraceViewerState, width: number, theme: Theme)
  * doesn't fit (very narrow terminal) isn't modeled as open — otherwise key
  * handling would scroll content nobody can see.
  */
-function panelDetailLines(state: TraceViewerState, panelWidth: number, theme: Theme): string[] {
+function panelDetailLines(
+  state: TraceViewerState,
+  panelWidth: number,
+  theme: Theme,
+  surfaces?: TraceViewerSurfaces,
+): string[] {
   const selected = selectedTraceViewerSpan(state);
   if (!state.panelOpen || panelWidth <= 0 || selected === undefined) return [];
   return [
     "",
     ...renderSpanDetail(selected, Math.max(16, panelWidth - 3), theme, {
       excludeKeys: CONVERSATION_CONTENT_KEYS,
+      surfaces,
     }).map((line) => ` ${line}`),
   ];
 }
@@ -341,8 +375,9 @@ export function conversationSelectionText(
   width: number,
   theme: Theme,
   selection: TextSelectionRange,
+  surfaces?: TraceViewerSurfaces,
 ): string {
-  return selectionText(conversationLines(state, width, theme), selection);
+  return selectionText(conversationLines(state, width, theme, surfaces), selection);
 }
 
 /**
@@ -406,20 +441,26 @@ function highlightSelection(
   return `${prefix}\x1b[7m${inverted}\x1b[27m${suffix}`;
 }
 
-function renderFooter(state: TraceViewerState, width: number, theme: Theme): string[] {
+function renderFooter(
+  state: TraceViewerState,
+  width: number,
+  theme: Theme,
+  surfaces?: TraceViewerSurfaces,
+): string[] {
   const { colors } = theme;
+  const { muted } = chromeStyles(theme, surfaces);
   const [upDown, leftRight] = theme.unicode ? ["↑↓", "←→"] : ["^/v", "</>"];
   const hints = state.panelFocus
     ? `${upDown} scroll · tab cards · esc back`
     : `${upDown} select · ${leftRight} expand · enter attrs · tab focus · [ ] traces · q close`;
   const itemCount = state.conversationItems.length;
-  const position = itemCount === 0 ? "" : colors.dim(`item ${state.selectedRow + 1}/${itemCount}`);
+  const position = itemCount === 0 ? "" : muted(`item ${state.selectedRow + 1}/${itemCount}`);
   const notice = state.notice === undefined ? "" : colors.yellow(state.notice);
-  const status = [notice, position].filter((part) => part.length > 0).join(colors.dim(" · "));
+  const status = [notice, position].filter((part) => part.length > 0).join(muted(" · "));
   // A padding row separates the cards from the hints.
   return [
     "",
-    clipVisible(` ${colors.dim(hints)}`, width),
+    clipVisible(` ${muted(hints)}`, width),
     clipVisible(status.length === 0 ? "" : ` ${status}`, width),
   ];
 }
@@ -429,11 +470,12 @@ function renderEmptyState(
   theme: Theme,
   bodyRows: number,
 ): string[] {
+  const { muted, primary } = chromeStyles(theme, options.surfaces);
   const [first, second] =
     options.tracingDisabled === true
       ? ["Tracing is disabled (EVE_TRACES=off).", "Re-enable it and spans stream in live."]
       : ["No local traces yet.", "Chat with your agent — spans stream in live."];
-  return center(bodyRows, theme.colors.bold(first), theme.colors.dim(second));
+  return center(bodyRows, theme.colors.bold(primary(first)), muted(second));
 }
 
 /** Fills a `bodyRows`-tall body, centering `lines` as a block within it. */
@@ -448,7 +490,7 @@ function center(bodyRows: number, ...lines: string[]): string[] {
 
 /**
  * Joins one conversation row to its drawer row. The single separating column
- * carries no divider: the base canvas already separates the two.
+ * carries no divider: the blank gap already separates the two.
  */
 function joinPanels(left: string, leftWidth: number, right: string, width: number): string {
   const rightWidth = Math.max(0, width - leftWidth - 1);
