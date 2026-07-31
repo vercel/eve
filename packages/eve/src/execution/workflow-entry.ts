@@ -8,7 +8,6 @@ import type {
   SessionCapabilities,
   TurnCaller,
 } from "#channel/types.js";
-import { coalesceDeliveries } from "#harness/messages.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
@@ -23,7 +22,7 @@ import {
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
@@ -33,10 +32,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import {
-  createSessionCommandInbox,
-  type SessionCommandInbox,
-} from "#execution/session-command-inbox.js";
+import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
@@ -79,16 +75,6 @@ type DriverLoopOutcome =
       readonly kind: "result";
       readonly result: WorkflowEntryResult;
     };
-
-type NextSessionAction =
-  | { readonly kind: "clear" }
-  | { readonly kind: "compact" }
-  | {
-      readonly delivery: DeliverHookPayload | null;
-      readonly kind: "delivery";
-    }
-  | { readonly kind: "expired" }
-  | { readonly kind: "reset" };
 
 /**
  * Write-through cell owned by {@link workflowEntry}: written
@@ -337,7 +323,7 @@ async function runDriverLoop(input: {
     });
     input.crashCleanupState.lastSessionState = action.sessionState;
 
-    driverLoop: while (true) {
+    while (true) {
       if (action.kind === "done") {
         return {
           kind: "result",
@@ -415,89 +401,79 @@ async function runDriverLoop(input: {
         input.crashCleanupState.caller = undefined;
       }
 
-      while (true) {
-        const nextAction = await waitForNextSessionAction({
-          bufferedDeliveries,
-          bufferedSessionControls,
-          commandInbox,
-        });
+      const next = await nextTurnDelivery({
+        bufferedDeliveries,
+        bufferedSessionControls,
+        commandInbox,
+        driverWritable: input.driverWritable,
+        sessionState: action.sessionState,
+      });
 
-        if (nextAction.kind === "expired") {
-          return {
-            kind: "expired",
-            serializedContext: action.serializedContext,
-            sessionState: action.sessionState,
-          };
-        }
-
-        if (nextAction.kind === "reset") {
-          await terminateChildSessionsStep({ sessionState: action.sessionState });
-          return { kind: "result", result: { output: "" } };
-        }
-
-        if (nextAction.kind === "clear" || nextAction.kind === "compact") {
-          action = await runTurn({
-            delivery: { kind: nextAction.kind },
-            serializedContext: action.serializedContext,
-            sessionState: action.sessionState,
-          });
-          input.crashCleanupState.lastSessionState = action.sessionState;
-          continue driverLoop;
-        }
-
-        const nextDeliver = nextAction.delivery;
-        if (nextDeliver === null) {
-          return { kind: "result", result: { output: "" } };
-        }
-
-        const routed = await routeDeliverToChildren({
-          auth: nextDeliver.auth,
-          parentWritable: input.driverWritable,
-          payloads: nextDeliver.payloads,
+      if (next.kind === "expired") {
+        return {
+          kind: "expired",
+          serializedContext: action.serializedContext,
           sessionState: action.sessionState,
-        });
+        };
+      }
 
-        if (routed.kind === "cancel-turn") {
-          await cancelDescendantTurnsStep({
-            serializedContext: action.serializedContext,
-            sessionState: action.sessionState,
-          });
-          const cancelled = await settleCancelledTurnStep({
-            parentWritable: input.driverWritable,
-            serializedContext: action.serializedContext,
-            sessionState: action.sessionState,
-          });
-          action = {
-            ...action,
-            serializedContext: cancelled.serializedContext,
-            sessionState: cancelled.sessionState,
-          };
-          input.crashCleanupState.caller = undefined;
-          input.crashCleanupState.lastSessionState = action.sessionState;
-          continue driverLoop;
-        }
+      if (next.kind === "reset") {
+        await terminateChildSessionsStep({ sessionState: action.sessionState });
+        return { kind: "result", result: { output: "" } };
+      }
 
-        if (routed.remainder === undefined) {
-          // Fully routed to a descendant; parent has no turn to run.
-          continue;
-        }
-
-        if (nextDeliver.caller !== undefined) {
-          input.crashCleanupState.caller = nextDeliver.caller;
-        }
+      if (next.kind === "clear" || next.kind === "compact") {
         action = await runTurn({
-          delivery: {
-            auth: nextDeliver.auth,
-            kind: "deliver",
-            payloads: [routed.remainder],
-            requestId: nextDeliver.requestId,
-          },
+          delivery: { kind: next.kind },
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
         input.crashCleanupState.lastSessionState = action.sessionState;
-        break;
+        continue;
       }
+
+      if (next.kind === "closed") {
+        return { kind: "result", result: { output: "" } };
+      }
+
+      if (next.kind === "cancel-turn") {
+        await cancelDescendantTurnsStep({
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        const cancelled = await settleCancelledTurnStep({
+          parentWritable: input.driverWritable,
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        // Re-enter with `settled` cleared: the parked answer was already
+        // delivered to its caller before this wait, so the next iteration
+        // must not treat it as a fresh settlement.
+        action = {
+          ...action,
+          serializedContext: cancelled.serializedContext,
+          sessionState: cancelled.sessionState,
+          settled: undefined,
+        };
+        input.crashCleanupState.caller = undefined;
+        input.crashCleanupState.lastSessionState = action.sessionState;
+        continue;
+      }
+
+      if (next.deliver.caller !== undefined) {
+        input.crashCleanupState.caller = next.deliver.caller;
+      }
+      action = await runTurn({
+        delivery: {
+          auth: next.deliver.auth,
+          kind: "deliver",
+          payloads: [next.remainder],
+          requestId: next.deliver.requestId,
+        },
+        serializedContext: action.serializedContext,
+        sessionState: action.sessionState,
+      });
+      input.crashCleanupState.lastSessionState = action.sessionState;
     }
   } finally {
     await disposeSettledTurnControl?.();
@@ -508,63 +484,6 @@ async function runDriverLoop(input: {
     // async iterator only honors `return()` after that read settles.
     await disposeHook(authHook);
   }
-}
-
-async function waitForNextSessionAction(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
-  readonly commandInbox: SessionCommandInbox;
-}): Promise<NextSessionAction> {
-  const pendingSessionControl = input.bufferedSessionControls.shift();
-  if (pendingSessionControl !== undefined) {
-    return { kind: pendingSessionControl };
-  }
-
-  if (input.bufferedDeliveries.length > 0) {
-    return {
-      delivery: takeBufferedTurnDelivery(input.bufferedDeliveries),
-      kind: "delivery",
-    };
-  }
-
-  while (true) {
-    const first = await input.commandInbox.next();
-    input.commandInbox.consumeNext();
-
-    if (first.done) {
-      return { delivery: null, kind: "delivery" };
-    }
-
-    if (first.value.kind === "session-timeout") {
-      return { kind: "expired" };
-    }
-
-    if (
-      first.value.kind === "clear" ||
-      first.value.kind === "compact" ||
-      first.value.kind === "reset"
-    ) {
-      return { kind: first.value.kind };
-    }
-
-    if (first.value.kind === "cancel") {
-      continue;
-    }
-
-    return { delivery: commandToDelivery(first.value), kind: "delivery" };
-  }
-}
-
-function commandToDelivery(
-  command: Extract<import("#channel/types.js").SessionCommand, { readonly kind: "send" }>,
-): DeliverHookPayload {
-  return {
-    auth: command.auth,
-    caller: command.caller,
-    kind: "deliver",
-    payloads: [command.payload],
-    requestId: command.requestId,
-  };
 }
 
 async function finalizeExpiredSession(input: {
@@ -646,28 +565,4 @@ async function finalizeDone(input: {
     });
   }
   return { output };
-}
-function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): DeliverHookPayload {
-  const first = bufferedDeliveries.shift();
-  if (first === undefined) {
-    throw new Error("Cannot take a turn delivery from an empty buffer.");
-  }
-
-  const turnDeliveries = [first];
-  let caller = first.caller;
-  while (bufferedDeliveries.length > 0) {
-    const next = bufferedDeliveries[0];
-    if (next === undefined || (caller !== undefined && next.caller !== undefined)) {
-      break;
-    }
-
-    const delivery = bufferedDeliveries.shift();
-    if (delivery === undefined) {
-      throw new Error("Buffered turn delivery disappeared while partitioning.");
-    }
-    turnDeliveries.push(delivery);
-    caller ??= delivery.caller;
-  }
-
-  return coalesceDeliveries(turnDeliveries);
 }
