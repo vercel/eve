@@ -7,6 +7,7 @@ import { ContextKey } from "#context/key.js";
 import {
   AuthKey,
   ContinuationTokenKey,
+  DynamicSubagentAgentConfigKey,
   ModeKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -32,7 +33,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { createExecutionNodeStep } from "#execution/node-step.js";
+import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
@@ -833,6 +834,69 @@ describe("dispatchRuntimeActionsStep", () => {
 });
 
 describe("turnStep", () => {
+  it("uses the selected dynamic subagent model for execution identity", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: { done: true, output: "ok" },
+        session: stepSession,
+      });
+    });
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "dynamic-subagent");
+    ctx.set(DynamicSubagentAgentConfigKey, {
+      description: "Perform deep research.",
+      model: { id: "anthropic/claude-opus-4.6" },
+    });
+    ctx.set(ModeKey, "task");
+    ctx.set(SessionIdKey, "session-1");
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "research this" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    const effectiveNode = expect.objectContaining({
+      turnAgent: expect.objectContaining({
+        model: { id: "anthropic/claude-opus-4.6" },
+      }),
+    });
+    expect(buildRuntimeIdentity).toHaveBeenCalledWith(effectiveNode);
+    expect(createExecutionNodeStep).toHaveBeenCalledWith(
+      expect.objectContaining({ node: effectiveNode }),
+    );
+  });
+
   it("reads the durable session from normalized turn-step input", async () => {
     const session = createStubSession({
       continuationToken: "http:turn-step",

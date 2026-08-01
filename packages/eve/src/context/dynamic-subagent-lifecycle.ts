@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { ContextContainer } from "#context/container.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import type { ContextReader } from "#context/key.js";
 import {
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicSubagentSelectionsKey,
@@ -116,9 +117,7 @@ export async function refreshDynamicSessionSubagentsForRuntimeRevision(input: {
   input.ctx.set(SessionDynamicSubagentRuntimeRevisionKey, input.runtimeRevision);
 }
 
-export function buildDynamicSubagentTools(input: {
-  get<T>(key: import("#context/key.js").ContextKey<T>): T | undefined;
-}): readonly HarnessToolDefinition[] {
+export function buildDynamicSubagentTools(input: ContextReader): readonly HarnessToolDefinition[] {
   const session = input.get(SessionDynamicSubagentSelectionsKey) ?? {};
   const turn = input.get(TurnDynamicSubagentSelectionsKey) ?? {};
   const effective = { ...session, ...turn };
@@ -142,9 +141,7 @@ export function buildDynamicSubagentTools(input: {
 }
 
 export function getDynamicSubagentSelection(
-  input: {
-    get<T>(key: import("#context/key.js").ContextKey<T>): T | undefined;
-  },
+  input: ContextReader,
   nodeId: string,
 ): Exclude<DurableDynamicSubagentSelection, null> | undefined {
   const turn = input.get(TurnDynamicSubagentSelectionsKey) ?? {};

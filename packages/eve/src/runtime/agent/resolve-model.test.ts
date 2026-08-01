@@ -21,8 +21,17 @@ describe("dynamic runtime model resolution", () => {
     vi.unstubAllEnvs();
   });
 
-  it("resolves a source-free eve mock model without the test environment", async () => {
+  it("does not resolve a source-free eve mock model without the test seam", async () => {
     vi.stubEnv("NODE_ENV", "production");
+
+    const model = await resolveRuntimeModelReference({ id: "eve-mock/dynamic-subagent" });
+
+    expect(model).toBe("eve-mock/dynamic-subagent");
+  });
+
+  it("resolves a source-free eve mock model through the explicit test seam", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "1");
 
     const model = await resolveRuntimeModelReference({ id: "eve-mock/dynamic-subagent" });
 

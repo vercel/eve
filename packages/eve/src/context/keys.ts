@@ -17,6 +17,8 @@ import type {
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -163,12 +165,10 @@ export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamic
  * framework tools (which lack bundler step-function metadata) work.
  * Re-resolved every step — no cross-step persistence needed.
  */
-export const LiveStepToolsKey = new ContextKey<
-  import("#harness/execute-tool.js").HarnessToolDefinition[]
->("eve.liveStepTools");
+export const LiveStepToolsKey = new ContextKey<HarnessToolDefinition[]>("eve.liveStepTools");
 
 export type DurableDynamicSubagentSelection = {
-  readonly agentConfig: import("#runtime/subagents/dynamic-agent-config.js").DynamicSubagentAgentConfig;
+  readonly agentConfig: DynamicSubagentAgentConfig;
   readonly prepared: PreparedRuntimeDelegationTool;
 } | null;
 
@@ -184,9 +184,9 @@ export const SessionDynamicSubagentRuntimeRevisionKey = new ContextKey<string>(
   "eve.sessionDynamicSubagentRuntimeRevision",
 );
 
-export const DynamicSubagentAgentConfigKey = new ContextKey<
-  import("#runtime/subagents/dynamic-agent-config.js").DynamicSubagentAgentConfig
->("eve.dynamicSubagentAgentConfig");
+export const DynamicSubagentAgentConfigKey = new ContextKey<DynamicSubagentAgentConfig>(
+  "eve.dynamicSubagentAgentConfig",
+);
 
 // ---------------------------------------------------------------------------
 // Dynamic skill keys

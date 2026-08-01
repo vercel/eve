@@ -282,7 +282,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
   const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
-  const runtimeIdentity = buildRuntimeIdentity(bundle.graph.root);
+  const effectiveNode = {
+    ...bundle.graph.root,
+    turnAgent: effectiveAgent.turnAgent,
+  };
+  const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
   const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
   const dynamicRuntimeRevision = deploymentId
     ? `deployment:${deploymentId}`
@@ -423,7 +427,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             moduleMap: bundle.moduleMap,
             nodeId: bundle.nodeId,
           },
-          node: bundle.graph.root,
+          node: effectiveNode,
           workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });
         return step(refreshedSession, stepInput);

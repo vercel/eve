@@ -8,7 +8,6 @@ import type {
 } from "#runtime/agent/bootstrap.js";
 import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
 import {
-  createMockAuthoredRuntimeModel,
   resolveMockAuthoredRuntimeModel,
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
@@ -48,10 +47,6 @@ export async function resolveRuntimeModelReference(
 
   if (bootstrapModel !== null) {
     return bootstrapModel;
-  }
-
-  if (reference.source === undefined && reference.id.startsWith("eve-mock/")) {
-    return createMockAuthoredRuntimeModel(reference);
   }
 
   const mockModel = resolveMockAuthoredRuntimeModel(reference);
