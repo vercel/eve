@@ -621,6 +621,7 @@ function createUnavailableDynamicSubagentResult(
     callId: action.callId,
     isError: true,
     kind: "subagent-result",
+    origin: "dispatch",
     output: {
       code: "SUBAGENT_UNAVAILABLE",
       message: `Subagent "${subagentName}" is not available in the current session context.`,

@@ -136,6 +136,7 @@ describe("createSendFn", () => {
   it("forwards the turn caller from options onto the deliver input", async () => {
     const runtime: Runtime = {
       cancelTurn: vi.fn(),
+      compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
       resolveSession: vi.fn(),
       run: vi.fn().mockResolvedValue(createMockRunHandle()),
