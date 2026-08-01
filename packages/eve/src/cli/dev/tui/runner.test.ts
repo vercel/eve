@@ -197,8 +197,9 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("recognizes /new, /clear, /compact, /exit, and /quit", () => {
+  it("recognizes /new, /cancel, /clear, /compact, /exit, and /quit", () => {
     expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
     expect(parsePromptCommand("/clear")).toEqual({ type: "clear" });
     expect(parsePromptCommand("/compact")).toEqual({ type: "compact" });
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
@@ -735,6 +736,71 @@ describe("EveTUIRunner development session continuity", () => {
     expect(stream).toHaveBeenCalledOnce();
     expect(session.send).not.toHaveBeenCalled();
     expect(results).toEqual(["Context clear requested."]);
+  });
+
+  it("cancels an active turn without sending a prompt", async () => {
+    const session = stubClient().session({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 0,
+    });
+    const cancel = vi
+      .spyOn(session, "cancel")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    const send = vi.spyOn(session, "send");
+    const stream = vi.spyOn(session, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent(
+          {
+            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            type: "session.waiting",
+          },
+          0,
+        );
+      })(),
+    );
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/cancel", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) {
+            void event;
+          }
+        }),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(results).toEqual(["Turn cancellation requested."]);
+  });
+
+  it("does not call the cancel API before a session has started", async () => {
+    const session = stubSession();
+    const cancel = vi.spyOn(session, "cancel");
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/cancel", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(results).toEqual(["No active turn to cancel."]);
   });
 
   it("keeps the current transcript and session when /new cannot reset the owner", async () => {

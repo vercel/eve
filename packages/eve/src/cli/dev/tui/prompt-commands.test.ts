@@ -13,6 +13,10 @@ describe("parsePromptCommand", () => {
     expect(parsePromptCommand("/new")).toEqual({ type: "new" });
   });
 
+  it("parses /cancel", () => {
+    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
+  });
+
   it("parses /exit and its /quit alias", () => {
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });

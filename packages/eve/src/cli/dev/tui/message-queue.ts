@@ -7,8 +7,8 @@
  * the next turn's message. Esc pops the oldest message to steer the
  * conversation instead of waiting: the renderer requests cooperative turn
  * cancellation and the runner submits the popped message as the next turn.
- * Esc on an empty queue arms cancellation; a second Esc cancels the turn
- * without a replacement message.
+ * `/cancel` requests cancellation directly. Esc on an empty queue arms
+ * cancellation; a second Esc cancels the turn without a replacement message.
  *
  * The renderer owns lifecycle (keys, cancel requests, when the runner drains
  * the queue); this module only holds the queue state machine and paints rows.
@@ -99,6 +99,12 @@ export class MessageQueue {
     }
     this.#cancelRequested = true;
     return "cancel";
+  }
+
+  /** Marks a direct cancellation request without consuming queued messages. */
+  requestCancellation(): void {
+    this.#escArmed = false;
+    this.#cancelRequested = true;
   }
 
   /** Any non-Esc activity backs out of the armed press-again state. */

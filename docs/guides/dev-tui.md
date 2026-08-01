@@ -42,6 +42,7 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 | `/loglevel`   | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                             |
 | `/traces`     | Opens the full-screen local trace viewer. See [Inspect traces](#inspect-traces).                                                                             |
 | `/new`        | Starts a fresh session.                                                                                                                                      |
+| `/cancel`     | Cooperatively cancels the running turn while preserving the session and settled context.                                                                     |
 | `/clear`      | Clears model-message history while preserving the current session and its durable resources.                                                                 |
 | `/compact`    | Queues context compaction for the current session without sending a message.                                                                                 |
 | `/exit`       | Quits the TUI.                                                                                                                                               |
@@ -83,7 +84,7 @@ In terminals that support bracketed paste, pasting multi-line text into chat or 
 
 ### Queue and steer while the agent works
 
-Sending a message while a turn is still running does not interrupt it — the message joins a queue of up to five, pinned in a panel directly above the input with one line per message. When the turn ends, the queued messages coalesce into the next turn's message.
+Sending a message while a turn is still running does not interrupt it — the message joins a queue of up to five, pinned in a panel directly above the input with one line per message. When the turn ends, the queued messages coalesce into the next turn's message. Submit `/cancel` during a turn to cancel it immediately without queueing the command as model input; `/cancel` also works from the idle prompt when a prior stream disconnected while its server turn may still be running.
 
 `Esc` steers instead of waiting: it pops the oldest queued message, cancels the running turn cooperatively, and submits the popped message as the replacement turn. In the transcript, a steered message carries an accent `↑` on its own line above its gutter bar; a queued message that waited for the boundary carries it below. Any remaining messages stay queued behind it. With nothing queued, the first `Esc` arms cancellation and a second `Esc` cancels the turn. Unlike `Ctrl+C` — which drops the stream client-side — a cancelled turn ends cleanly on the server and the session keeps its context; the conversation picks up at the next prompt.
 

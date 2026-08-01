@@ -533,9 +533,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #todoCommittedSignature?: string;
   /**
    * Messages submitted while a turn streams, pinned in a panel directly
-   * above the input. Enter queues, Esc pops-to-steer or (empty) arms and
-   * then cancels; the runner drains via {@link takeQueuedPrompt} at a clean
-   * turn boundary and {@link readPrompt} restores any leftovers as a draft.
+   * above the input. Enter queues, `/cancel` cancels directly, and Esc
+   * pops-to-steer or (empty) arms and then cancels; the runner drains via
+   * {@link takeQueuedPrompt} at a clean turn boundary and {@link readPrompt}
+   * restores any leftovers as a draft.
    */
   readonly #messageQueue = new MessageQueue();
   /** The streaming result's cooperative cancel, armed for Esc while it renders. */
@@ -2962,11 +2963,24 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
         break;
       case "enter": {
+        const message = this.#streamDraft.text;
+        if (message.trim().length === 0) break;
+        if (
+          parsePromptCommand(message)?.type === "cancel" &&
+          this.#requestTurnCancel !== undefined
+        ) {
+          this.#streamDraft = EMPTY_LINE;
+          this.#messageQueue.requestCancellation();
+          this.#cancelRequestedByUser = true;
+          this.renderCommandInvocation(message.trim());
+          this.renderCommandResult("Turn cancellation requested.");
+          this.#requestTurnCancel();
+          this.#paint();
+          break;
+        }
         // Mid-turn Enter queues the draft as a message for the next turn
         // (or for an Esc steer pop). A full queue keeps the draft in place —
         // the panel header says why — rather than silently dropping input.
-        const message = this.#streamDraft.text;
-        if (message.trim().length === 0) break;
         if (this.#messageQueue.enqueue(message)) {
           this.#streamDraft = EMPTY_LINE;
         }

@@ -1757,6 +1757,44 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("runs a mid-turn /cancel as a control instead of queueing it", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const cancel = vi.fn();
+    const rendering = renderer.renderStream(
+      {
+        cancel,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+    input.type("/cancel");
+    input.enter();
+
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(screen.snapshot()).toContain("/cancel");
+      expect(screen.snapshot()).toContain("Turn cancellation requested.");
+      expect(screen.snapshot()).toContain("Cancelling turn…");
+    });
+
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
+    await rendering;
+
+    expect(renderer.takeQueuedPrompt()).toBeUndefined();
+    expect(screen.snapshot()).toContain("Cancelled");
+    renderer.shutdown();
+  });
+
   it("pops the oldest queued message on Esc, cancels the turn, and stages the steer prompt", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {

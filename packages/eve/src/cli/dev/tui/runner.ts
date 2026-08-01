@@ -126,10 +126,10 @@ export type AgentTUIStreamResult = {
   abort?: () => void;
   /**
    * Requests cooperative server-side cancellation of the streaming turn
-   * (Esc Esc, or an Esc steer pop). Unlike {@link abort} — which drops the
-   * client stream and forces a fresh session — the server settles the turn
-   * as `turn.cancelled` → `session.waiting`, so the stream reaches its
-   * boundary normally and the session keeps its context. Best-effort and
+   * (`/cancel`, Esc Esc, or an Esc steer pop). Unlike {@link abort} — which
+   * drops the client stream and forces a fresh session — the server settles
+   * the turn as `turn.cancelled` → `session.waiting`, so the stream reaches
+   * its boundary normally and the session keeps its context. Best-effort and
    * idempotent; scoped to the turn the user observed when its id is known.
    */
   cancel?: () => void;
@@ -787,6 +787,43 @@ export class EveTUIRunner {
         if (command?.type === "exit") {
           this.#lifecycle?.requestStop();
           return;
+        }
+
+        if (command?.type === "cancel") {
+          if (this.#session.state.sessionId === undefined) {
+            this.#renderCommandOutcome("No active turn to cancel.");
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          try {
+            const result = await this.#session.cancel();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Turn cancellation requested."
+                : "No active turn to cancel.",
+            );
+            if (result.status === "no_active_turn") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
         }
 
         if (command?.type === "new") {

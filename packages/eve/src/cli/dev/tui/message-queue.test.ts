@@ -63,6 +63,16 @@ describe("MessageQueue", () => {
     expect(queue.handleEscape()).toBe("armed");
   });
 
+  it("requests direct cancellation without consuming queued messages", () => {
+    const queue = new MessageQueue();
+    queue.enqueue("follow-up");
+
+    queue.requestCancellation();
+
+    expect(queue.view()).toMatchObject({ armed: false, cancelling: true });
+    expect(queue.takePrompt()).toBe("follow-up");
+  });
+
   it("drains the whole queue as one coalesced prompt at a turn boundary", () => {
     const queue = new MessageQueue();
     queue.enqueue("first");
