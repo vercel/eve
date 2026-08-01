@@ -35,6 +35,20 @@ describe("Teams inbound parsing", () => {
     );
   });
 
+  it("prefers channel-thread messageid suffixes as the Teams thread root", () => {
+    const activity = parseTeamsActivity(
+      messageActivity({
+        conversationId: "CONV;messageid=ROOT_FROM_CONVERSATION",
+        conversationType: "channel",
+        replyToId: "VOLATILE_REPLY",
+      }),
+    );
+
+    expect(activity?.type === "message" ? teamsThreadRootActivityId(activity) : "bad").toBe(
+      "ROOT_FROM_CONVERSATION",
+    );
+  });
+
   it("keeps ambient RSC messages parseable but unmentioned", () => {
     const raw = messageActivity({ conversationType: "groupChat", text: "ambient" });
     raw.entities = [];
@@ -64,7 +78,9 @@ describe("Teams inbound parsing", () => {
 });
 
 function messageActivity(input: {
+  readonly conversationId?: string;
   readonly conversationType: string;
+  readonly replyToId?: string;
   readonly text?: string;
 }): Record<string, unknown> {
   return {
@@ -73,7 +89,7 @@ function messageActivity(input: {
       team: { id: "TEAM" },
       tenant: { id: "TENANT" },
     },
-    conversation: { conversationType: input.conversationType, id: "CONV" },
+    conversation: { conversationType: input.conversationType, id: input.conversationId ?? "CONV" },
     entities: [
       {
         mentioned: { id: "BOT", name: "eve Bot" },
@@ -84,6 +100,7 @@ function messageActivity(input: {
     from: { id: "USER", name: "Ada" },
     id: "ACTIVITY_1",
     recipient: { id: "BOT", name: "eve Bot" },
+    replyToId: input.replyToId,
     serviceUrl: "https://smba.example.test/teams",
     text: input.text ?? "hello",
     textFormat: "xml",

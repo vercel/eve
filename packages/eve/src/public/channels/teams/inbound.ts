@@ -12,6 +12,7 @@ import type {
   TeamsChannelAccount,
   TeamsMention,
 } from "#public/channels/teams/api.js";
+import { parseTeamsConversationThreadId } from "#public/channels/teams/api.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import { parseJsonObject } from "#shared/json.js";
 
@@ -126,7 +127,11 @@ export function teamsThreadRootActivityId(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
 ): string | null {
   if (activity.scope === "personal") return null;
-  return activity.replyToId ?? activity.id;
+  return (
+    parseTeamsConversationThreadId(activity.conversation.id).threadRootActivityId ??
+    activity.replyToId ??
+    activity.id
+  );
 }
 
 /**

@@ -129,38 +129,50 @@ const accessTokenCache = new Map<
   { readonly accessToken: string; readonly expiresAt: number }
 >();
 
+/** Normalized Teams conversation id plus the thread root encoded in `;messageid=...`, when present. */
+export interface TeamsConversationThreadParts {
+  readonly conversationId: string;
+  readonly threadRootActivityId?: string;
+}
+
+/** Splits Bot Framework channel-thread conversation ids like `19:...;messageid=...`. */
+export function parseTeamsConversationThreadId(
+  conversationId: string,
+): TeamsConversationThreadParts {
+  const [baseConversationId, ...parameters] = conversationId.split(";");
+  let threadRootActivityId: string | undefined;
+
+  for (const parameter of parameters) {
+    const separatorIndex = parameter.indexOf("=");
+    const key = separatorIndex === -1 ? parameter : parameter.slice(0, separatorIndex);
+    if (key.toLowerCase() !== "messageid") continue;
+
+    const rawValue = separatorIndex === -1 ? "" : parameter.slice(separatorIndex + 1);
+    const decodedValue = decodeTeamsConversationPart(rawValue);
+    if (decodedValue) threadRootActivityId = decodedValue;
+    break;
+  }
+
+  return {
+    conversationId: baseConversationId || conversationId,
+    threadRootActivityId,
+  };
+}
+
 /** Builds the channel-local continuation token for one Teams conversation/thread. */
 export function teamsContinuationToken(input: {
   readonly conversationId: string;
   readonly replyToActivityId?: string | null;
   readonly tenantId?: string | null;
 }): string {
-  const address = normalizeTeamsContinuationAddress(input);
-  return [input.tenantId ?? "_", address.conversationId, address.replyToActivityId ?? ""]
+  const conversation = parseTeamsConversationThreadId(input.conversationId);
+  return [
+    input.tenantId ?? "_",
+    conversation.conversationId,
+    input.replyToActivityId ?? conversation.threadRootActivityId ?? "",
+  ]
     .map((component) => encodeURIComponent(component))
     .join(":");
-}
-
-/** Normalizes the thread suffix that Teams inconsistently includes in channel conversation ids. */
-export function normalizeTeamsContinuationAddress(input: {
-  readonly conversationId: string;
-  readonly replyToActivityId?: string | null;
-}): { readonly conversationId: string; readonly replyToActivityId: string | null } {
-  const marker = ";messageid=";
-  const markerIndex = input.conversationId.lastIndexOf(marker);
-  if (markerIndex < 0) {
-    return {
-      conversationId: input.conversationId,
-      replyToActivityId: input.replyToActivityId ?? null,
-    };
-  }
-
-  const conversationId = input.conversationId.slice(0, markerIndex);
-  const threadRoot = input.conversationId.slice(markerIndex + marker.length);
-  return {
-    conversationId,
-    replyToActivityId: threadRoot || input.replyToActivityId || null,
-  };
 }
 
 /** Resolves a Teams app id, falling back to `MICROSOFT_APP_ID` then `TEAMS_APP_ID`. */
@@ -387,6 +399,14 @@ function normalizeAccessTokenResult(result: TeamsAccessTokenResult): {
     accessToken: result.accessToken,
     expiresAt,
   };
+}
+
+function decodeTeamsConversationPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function toPostedActivity(body: unknown): TeamsPostedActivity {
