@@ -71,6 +71,7 @@ type DriverLoopOutcome =
     };
 
 type NextSessionAction =
+  | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | {
       readonly delivery: DeliverHookPayload | null;
@@ -338,9 +339,9 @@ async function runDriverLoop(input: {
         };
       }
 
-      if (nextAction.kind === "compact") {
+      if (nextAction.kind === "clear" || nextAction.kind === "compact") {
         action = await runTurn({
-          delivery: { kind: "compact" },
+          delivery: { kind: nextAction.kind },
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
@@ -412,8 +413,9 @@ async function waitForNextSessionAction(input: {
     return { kind: "expired" };
   }
 
-  if (input.deliveryHook.consumeCompactRequest()) {
-    return { kind: "compact" };
+  const pendingSessionControl = input.deliveryHook.consumeSessionControl();
+  if (pendingSessionControl !== undefined) {
+    return { kind: pendingSessionControl };
   }
 
   if (input.bufferedDeliveries.length > 0) {
@@ -435,9 +437,12 @@ async function waitForNextSessionAction(input: {
       return { kind: "expired" };
     }
 
-    if (first.value.kind === "compact") {
-      input.deliveryHook.consumeCompactRequest();
-      return { kind: "compact" };
+    if (first.value.kind === "clear" || first.value.kind === "compact") {
+      const sessionControl = input.deliveryHook.consumeSessionControl();
+      if (sessionControl === undefined) {
+        throw new Error("Session control was consumed without being latched.");
+      }
+      return { kind: sessionControl };
     }
 
     if (first.value.kind !== "deliver") {
@@ -466,7 +471,7 @@ async function waitForNextSessionAction(input: {
 
       input.deliveryHook.consumeNext();
 
-      if (ready.value.kind === "compact") {
+      if (ready.value.kind === "clear" || ready.value.kind === "compact") {
         continue;
       }
 

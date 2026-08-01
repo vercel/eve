@@ -41,6 +41,7 @@ import {
   createActionResultEvent,
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
+  createContextClearedEvent,
   createInputRequestedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
@@ -572,6 +573,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       sessionId: session.sessionId,
       turnId: activeTurnId(emissionState),
     });
+
+    if (config.clearOnly === true) {
+      session = {
+        ...session,
+        compaction: {
+          recentWindowSize: session.compaction.recentWindowSize,
+          threshold: session.compaction.threshold,
+        },
+        history: [],
+      };
+      await emit?.(
+        createContextClearedEvent({
+          sequence: emissionState.sequence,
+          sessionId: session.sessionId,
+          turnId: activeTurnId(emissionState),
+        }),
+      );
+      await emit?.(createSessionWaitingEvent(session.continuationToken));
+      return { next: null, session };
+    }
 
     if (config.compactOnly === true) {
       if (session.history.length > 0) {

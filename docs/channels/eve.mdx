@@ -25,6 +25,7 @@ The application exposes a health route plus eve channel routes that inspect the 
 - `POST /eve/v1/session` (start a session)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
+- `POST /eve/v1/session/clear` (clear the continuation owner's model history)
 - `POST /eve/v1/session/compact` (compact the continuation owner's context)
 - `POST /eve/v1/session/reset` (retire the continuation owner)
 - `GET /eve/v1/session/:sessionId/stream` (stream events, NDJSON)
@@ -55,6 +56,17 @@ curl -X POST https://<deployment>/eve/v1/session/ses_01h.../cancel
 ```
 
 Cancellation is asynchronous: `"accepted"` means a cancellation hook accepted the request. Confirm the effective outcome on the stream as `turn.cancelled` followed by `session.waiting` — never as a failure. Active local and remote subagents are cancelled recursively before the parent settles; their own streams carry their cancellation boundaries, and cancelled work does not emit `subagent.completed` on the parent. Content emitted before the cancel stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally. When there is no resumable cancellation target (including an unknown session, a settled turn, or a duplicate cancel), the route responds with `"no_active_turn"` — also a success, so a stop button can fire and forget. A `turnId` naming any other turn is accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
+
+Clear the model-message history of the session that owns a continuation token:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session/clear \
+  -H "Content-Type: application/json" \
+  -d '{"continuationToken":"eve:7f3c..."}'
+# {"ok":true,"sessionId":"ses_01h...","status":"accepted"}
+```
+
+An accepted clear emits `context.cleared` followed by `session.waiting`. The next message resumes the same session without prior model messages; the system prompt, tools and skills, durable state, limits, and session-scoped sandbox remain.
 
 Compact the session that owns a continuation token without sending a message:
 

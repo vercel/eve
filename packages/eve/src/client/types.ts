@@ -3,6 +3,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
+import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -237,6 +238,18 @@ export interface CancelSessionResult {
   /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
   readonly status: CancelTurnStatus;
 }
+
+/** Result of requesting a context clear for a client session. */
+export type ClearResult =
+  | {
+      /** Session whose clear request was queued. */
+      readonly sessionId: string;
+      readonly status: Extract<ClearStatus, "accepted">;
+    }
+  | {
+      /** The client had no continuation token or the token was already free. */
+      readonly status: Extract<ClearStatus, "no_active_session">;
+    };
 
 /** Result of requesting context compaction for a client session. */
 export type CompactResult =

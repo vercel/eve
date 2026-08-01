@@ -7775,6 +7775,58 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("clears model history without replacing the session or its durable state", async () => {
+    const { emit, events } = createEventCollector();
+    const resolveModel = vi.fn();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        clearOnly: true,
+        resolveModel,
+      }),
+    );
+    const state = { retained: "yes" };
+    const limits = { maxInputTokensPerSession: 1_000 };
+    const outputSchema = { type: "string" };
+    const session = createTestSession({
+      compaction: {
+        lastKnownInputTokens: 9000,
+        lastKnownPromptMessageCount: 2,
+        recentWindowSize: 10,
+        threshold: 100_000,
+      },
+      history: [
+        { content: "old message", role: "user" },
+        { content: "old reply", role: "assistant" },
+      ],
+      limits,
+      outputSchema,
+      state,
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toMatchObject({
+      agent: session.agent,
+      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      continuationToken: session.continuationToken,
+      history: [],
+      limits,
+      outputSchema,
+      sessionId: session.sessionId,
+      state,
+    });
+    expect(getCompatibilityEventTypes(events)).toEqual(["context.cleared", "session.waiting"]);
+    expect(events.find((event) => event.type === "context.cleared")?.data).toEqual({
+      sequence: 0,
+      sessionId: "test-session",
+      turnId: "turn_0",
+    });
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(compactMessages).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
   it("forces compaction without starting a model turn", async () => {
     const compactedHistory: ModelMessage[] = [
       { content: "Summary of our conversation so far:", role: "user" },

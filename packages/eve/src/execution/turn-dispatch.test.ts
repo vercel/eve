@@ -217,7 +217,7 @@ describe("dispatchAndAwaitTurn", () => {
 
 function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
   return {
-    consumeCompactRequest: vi.fn(() => false),
+    consumeSessionControl: vi.fn(() => undefined),
     consumeNext: vi.fn(),
     consumeSessionTimeout: vi.fn(() => false),
     next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),

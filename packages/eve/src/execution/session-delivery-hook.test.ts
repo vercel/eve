@@ -108,8 +108,22 @@ describe("createSessionDeliveryHook", () => {
     await expect(deliveryHook.next()).resolves.toEqual(compact());
     deliveryHook.consumeNext();
 
-    expect(deliveryHook.consumeCompactRequest()).toBe(true);
-    expect(deliveryHook.consumeCompactRequest()).toBe(false);
+    expect(deliveryHook.consumeSessionControl()).toBe("compact");
+    expect(deliveryHook.consumeSessionControl()).toBeUndefined();
+    await deliveryHook.dispose();
+  });
+
+  it("latches clear requests consumed while a turn owns delivery reads", async () => {
+    const hook = createMockHook({ reads: [Promise.resolve(clear())], token: "active" });
+    installHooks(hook);
+    const deliveryHook = createSessionDeliveryHook([]);
+
+    await deliveryHook.rekey("active");
+    await expect(deliveryHook.next()).resolves.toEqual(clear());
+    deliveryHook.consumeNext();
+
+    expect(deliveryHook.consumeSessionControl()).toBe("clear");
+    expect(deliveryHook.consumeSessionControl()).toBeUndefined();
     await deliveryHook.dispose();
   });
 
@@ -288,6 +302,10 @@ function sessionTimeout(): IteratorResult<HookPayload> {
 
 function compact(): IteratorResult<HookPayload> {
   return { done: false, value: { kind: "compact" } };
+}
+
+function clear(): IteratorResult<HookPayload> {
+  return { done: false, value: { kind: "clear" } };
 }
 
 function createDeferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void } {

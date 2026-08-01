@@ -34,6 +34,12 @@ export const EVE_RESET_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/reset`;
 export const EVE_COMPACT_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/compact`;
 
 /**
+ * Stable framework-owned route for clearing the model history of the session
+ * that owns a client continuation token.
+ */
+export const EVE_CLEAR_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/clear`;
+
+/**
  * Stable framework-owned route pattern for sending a message to an existing
  * session.
  */

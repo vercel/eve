@@ -2,6 +2,7 @@ import { type FilePart, type TextPart, type UserContent } from "ai";
 
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
+import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import type { SendOptions } from "#channel/routes.js";
@@ -24,6 +25,7 @@ import {
 } from "#protocol/message.js";
 import {
   EVE_CANCEL_TURN_ROUTE_PATTERN,
+  EVE_CLEAR_SESSION_ROUTE_PATH,
   EVE_COMPACT_SESSION_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
@@ -286,7 +288,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
-        const body = await parseResetSessionBody(req);
+        const body = await parseContinuationTokenBody(req);
         if (body instanceof Response) return body;
 
         let result: Awaited<ReturnType<typeof reset>>;
@@ -312,11 +314,39 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         });
       }),
 
+      POST(EVE_CLEAR_SESSION_ROUTE_PATH, async (req, { clear }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const body = await parseContinuationTokenBody(req);
+        if (body instanceof Response) return body;
+
+        let result: Awaited<ReturnType<typeof clear>>;
+        try {
+          result = await clear({ continuationToken: body.continuationToken });
+        } catch (error) {
+          const errorId = logError(log, "session-clear request failed", error);
+          return Response.json(
+            { error: "Failed to clear the session context.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+
+        const response: ClearResponse =
+          result.status === "accepted"
+            ? { ok: true, sessionId: result.sessionId, status: "accepted" }
+            : { ok: true, status: "no_active_session" };
+        return Response.json(response, {
+          headers: { "cache-control": "no-store" },
+          status: result.status === "accepted" ? 202 : 200,
+        });
+      }),
+
       POST(EVE_COMPACT_SESSION_ROUTE_PATH, async (req, { compact }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
-        const body = await parseResetSessionBody(req);
+        const body = await parseContinuationTokenBody(req);
         if (body instanceof Response) return body;
 
         let result: Awaited<ReturnType<typeof compact>>;
@@ -711,11 +741,13 @@ interface ParsedCancelTurnBody {
   turnId?: string;
 }
 
-interface ParsedResetSessionBody {
+interface ParsedContinuationTokenBody {
   readonly continuationToken: string;
 }
 
-async function parseResetSessionBody(req: Request): Promise<ParsedResetSessionBody | Response> {
+async function parseContinuationTokenBody(
+  req: Request,
+): Promise<ParsedContinuationTokenBody | Response> {
   let payload: unknown;
   try {
     payload = await req.json();

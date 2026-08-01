@@ -295,6 +295,42 @@ describe("ClientSession", () => {
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
   });
 
+  it("queues a context clear without clearing the local session cursor", async () => {
+    const state = { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 };
+    const requests: Array<{ body?: string; method: string; url: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push({
+        body: typeof init?.body === "string" ? init.body : undefined,
+        method: init?.method ?? "GET",
+        url,
+      });
+      return Response.json(
+        { ok: true, sessionId: "session_1", status: "accepted" },
+        { status: 202 },
+      );
+    });
+    const session = createSession(state);
+
+    await expect(session.clear()).resolves.toEqual({
+      sessionId: "session_1",
+      status: "accepted",
+    });
+
+    expect(session.state).toEqual(state);
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/clear");
+    expect(requests[0]!.method).toBe("POST");
+    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({ continuationToken: "eve:test" });
+  });
+
+  it("treats clearing a never-started session as a successful no-op", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(createSession().clear()).resolves.toEqual({ status: "no_active_session" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("queues compaction without clearing the local session cursor", async () => {
     const state = { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 };
     const requests: Array<{ body?: string; method: string; url: string }> = [];

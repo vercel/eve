@@ -39,6 +39,10 @@ export default defineChannel({
       const result = await compact({ continuationToken: params.threadId ?? "" });
       return Response.json(result);
     }),
+    POST("/threads/:threadId/clear", async (_request, { clear, params }) => {
+      const result = await clear({ continuationToken: params.threadId ?? "" });
+      return Response.json(result);
+    }),
     POST("/threads/:threadId/owner", async (_request, { params, resolveActiveSession }) => {
       const owner = await resolveActiveSession({ continuationToken: params.threadId ?? "" });
       return Response.json({ sessionId: owner?.sessionId ?? null });

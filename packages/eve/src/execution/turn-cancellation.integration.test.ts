@@ -252,6 +252,9 @@ function createCancelRouteCaller(): (
         cancel: () => {
           throw new Error("cancel route must not use the channel cancel helper");
         },
+        clear: () => {
+          throw new Error("cancel route must not clear session context");
+        },
         compact: () => {
           throw new Error("cancel route must not compact a session");
         },

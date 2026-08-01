@@ -197,8 +197,9 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("recognizes /new, /compact, /exit, and /quit", () => {
+  it("recognizes /new, /clear, /compact, /exit, and /quit", () => {
     expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+    expect(parsePromptCommand("/clear")).toEqual({ type: "clear" });
     expect(parsePromptCommand("/compact")).toEqual({ type: "compact" });
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });
@@ -694,6 +695,46 @@ describe("EveTUIRunner development session continuity", () => {
     expect(stream).toHaveBeenCalledOnce();
     expect(session.send).not.toHaveBeenCalled();
     expect(results).toEqual(["Compaction requested."]);
+  });
+
+  it("clears the active session context without sending a prompt", async () => {
+    const session = sessionYielding([]);
+    const clear = vi
+      .spyOn(session, "clear")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    const stream = vi.spyOn(session, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent(
+          {
+            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            type: "session.waiting",
+          },
+          0,
+        );
+      })(),
+    );
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/clear", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) {
+            void event;
+          }
+        }),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(clear).toHaveBeenCalledOnce();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(session.send).not.toHaveBeenCalled();
+    expect(results).toEqual(["Context clear requested."]);
   });
 
   it("keeps the current transcript and session when /new cannot reset the owner", async () => {

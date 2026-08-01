@@ -238,6 +238,8 @@ export interface ToolLoopHarnessConfig {
    * per-step toolset to decide whether `ask_question` is available.
    */
   readonly capabilities?: SessionCapabilities;
+  /** Clears model-message history without running a model turn. */
+  readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
   /**

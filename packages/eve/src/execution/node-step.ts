@@ -53,6 +53,8 @@ export interface CreateExecutionNodeStepInput {
    * current run.
    */
   readonly capabilities?: SessionCapabilities;
+  /** Runs only a context clear and returns to the parked session. */
+  readonly clearOnly?: boolean;
   /** Runs only a forced context compaction and returns to the parked session. */
   readonly compactOnly?: boolean;
   /**
@@ -89,6 +91,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const step = createToolLoopHarness({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
+    clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,

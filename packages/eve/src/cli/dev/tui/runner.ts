@@ -831,6 +831,35 @@ export class EveTUIRunner {
           prompt = undefined;
         }
 
+        if (command?.type === "clear") {
+          try {
+            const result = await this.#session.clear();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Context clear requested."
+                : "No active session to clear.",
+            );
+            if (result.status === "no_active_session") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't clear the session: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+        }
+
         // Help renders locally; unlike extension commands it must work even
         // without a prompt-command handler (e.g. remote --url sessions).
         if (command?.type === "help") {

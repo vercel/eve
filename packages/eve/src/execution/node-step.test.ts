@@ -219,6 +219,7 @@ function createTestNode(
 function createNoopRuntime(): Runtime {
   return {
     cancelTurn: vi.fn(),
+    clearSession: vi.fn(),
     compactSession: vi.fn(),
     deliver: vi.fn(),
     resolveSession: vi.fn(),

@@ -26,6 +26,13 @@ const compaction = await session.compact();
 console.log(compaction.status);
 ```
 
+Use `session.clear()` to remove model-message history while retaining the session and its durable resources. Consume `context.cleared` and the following `session.waiting` before sending the next turn.
+
+```ts
+const cleared = await session.clear();
+console.log(cleared.status);
+```
+
 ## Aggregate a turn
 
 Use `result()` when you only need the final turn summary:

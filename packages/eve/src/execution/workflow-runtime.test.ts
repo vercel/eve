@@ -232,6 +232,31 @@ describe("createWorkflowRuntime#compactSession", () => {
   });
 });
 
+describe("createWorkflowRuntime#clearSession", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("queues a clear on the continuation hook and returns its owner", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+
+    await expect(buildRuntime().clearSession({ continuationToken: "eve:token" })).resolves.toEqual({
+      sessionId: "session-1",
+      status: "accepted",
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", { kind: "clear" });
+  });
+
+  it("reports a missing continuation hook as an inactive session", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("eve:missing"));
+
+    await expect(
+      buildRuntime().clearSession({ continuationToken: "eve:missing" }),
+    ).resolves.toEqual({ status: "no_active_session" });
+  });
+});
+
 describe("createWorkflowRuntime#terminateSession", () => {
   function buildRuntime() {
     return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });

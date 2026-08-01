@@ -17,6 +17,7 @@ function createMockRunHandle(): RunHandle {
 function createRuntime(deliverError: unknown): Runtime {
   return {
     cancelTurn: vi.fn(),
+    clearSession: vi.fn(),
     compactSession: vi.fn(),
     deliver: vi.fn().mockRejectedValue(deliverError),
     resolveSession: vi.fn(),
@@ -82,6 +83,7 @@ describe("createSendFn", () => {
     const context = ["thread background"];
     const deliverRuntime: Runtime = {
       cancelTurn: vi.fn(),
+      clearSession: vi.fn(),
       compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
       resolveSession: vi.fn(),
@@ -118,6 +120,7 @@ describe("createSendFn", () => {
   it("adds channel request ids to deliver and run inputs when provided", async () => {
     const deliverRuntime: Runtime = {
       cancelTurn: vi.fn(),
+      clearSession: vi.fn(),
       compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
       resolveSession: vi.fn(),
@@ -149,6 +152,7 @@ describe("createSendFn", () => {
     } as const;
     const deliverRuntime: Runtime = {
       cancelTurn: vi.fn(),
+      clearSession: vi.fn(),
       compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
       resolveSession: vi.fn(),

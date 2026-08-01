@@ -25,6 +25,7 @@ declare const CHANNEL_METADATA_TYPE: unique symbol;
 export type {
   CancelTurnInput,
   CancelTurnResult,
+  ClearSessionResult,
   CompactSessionResult,
   GetEventStreamOptions,
 } from "#channel/types.js";
@@ -34,6 +35,8 @@ export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
   CancelFn,
   CancelOptions,
+  ClearFn,
+  ClearOptions,
   CompactFn,
   CompactOptions,
   ResetFn,
@@ -243,6 +246,7 @@ type ChannelSessionFailedHandler<TCtx> = (
  * and the channel context, with no `ctx`.
  */
 export interface ChannelEvents<TCtx = void> {
+  readonly "context.cleared"?: ChannelEventHandler<"context.cleared", TCtx>;
   readonly "compaction.requested"?: ChannelEventHandler<"compaction.requested", TCtx>;
   readonly "compaction.completed"?: ChannelEventHandler<"compaction.completed", TCtx>;
   readonly "turn.started"?: ChannelEventHandler<"turn.started", TCtx>;
@@ -348,6 +352,7 @@ export function defineChannel<
 // The Record type fails to compile if this map drifts from the ChannelEvents
 // keys in either direction.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  "context.cleared": null,
   "compaction.requested": null,
   "compaction.completed": null,
   "turn.started": null,

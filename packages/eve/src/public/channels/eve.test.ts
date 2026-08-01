@@ -79,6 +79,7 @@ function createEveCreateHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
         compact: vi.fn(),
         reset: vi.fn(),
         getSession: vi.fn(),
@@ -127,6 +128,7 @@ function createEveContinueHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
         compact: vi.fn(),
         reset: vi.fn(),
         getSession: mockGetSession,
@@ -162,6 +164,7 @@ function createEveCancelHandler(input: EveChannelInput) {
           send: vi.fn(),
           resolveActiveSession: async () => undefined,
           cancel: vi.fn(),
+          clear: vi.fn(),
           compact: vi.fn(),
           reset: vi.fn(),
           getSession: vi.fn(),
@@ -209,6 +212,7 @@ function createEveResetHandler(input: EveChannelInput) {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
         compact: vi.fn(),
         reset,
         getSession: vi.fn(),
@@ -228,6 +232,48 @@ function resetRequest(body: unknown): Request {
     headers: { "content-type": "application/json" },
     method: "POST",
   });
+}
+
+function clearRequest(body: unknown): Request {
+  return new Request("https://example.com/eve/v1/session/clear", {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+}
+
+/** Creates a POST handler test harness for the continuation-addressed clear route. */
+function createEveClearHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const clearRoute = channel.routes.find(
+    (route) => route.method === "POST" && route.path === "/eve/v1/session/clear",
+  );
+  if (!clearRoute) throw new Error("No session clear POST route found");
+
+  const clear = vi.fn().mockResolvedValue({
+    sessionId: "test-session-id",
+    status: "accepted",
+  });
+
+  return {
+    clear,
+    async fetch(req: Request) {
+      const args: RouteHandlerArgs = {
+        send: vi.fn(),
+        resolveActiveSession: async () => undefined,
+        cancel: vi.fn(),
+        clear,
+        compact: vi.fn(),
+        reset: vi.fn(),
+        getSession: vi.fn(),
+        receive: vi.fn() as any,
+        params: {},
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      };
+      return (clearRoute as any).handler(req, args);
+    },
+  };
 }
 
 /** Creates a POST handler test harness for the continuation-addressed compact route. */
@@ -250,6 +296,7 @@ function createEveCompactHandler(input: EveChannelInput) {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
         compact,
         reset: vi.fn(),
         getSession: vi.fn(),
@@ -289,6 +336,7 @@ function createEveStreamHandler(input: EveChannelInput) {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
         compact: vi.fn(),
         reset: vi.fn(),
         getSession: mockGetSession,
@@ -1597,6 +1645,33 @@ describe("eveChannel — compact session", () => {
     handler.compact.mockResolvedValue({ status: "no_active_session" });
 
     const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
+  });
+});
+
+describe("eveChannel — clear session context", () => {
+  it("queues a clear for the supplied channel-local continuation token", async () => {
+    const handler = createEveClearHandler({ auth: none() });
+
+    const response = await handler.fetch(clearRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "test-session-id",
+      status: "accepted",
+    });
+    expect(handler.clear).toHaveBeenCalledWith({ continuationToken: "eve:token" });
+  });
+
+  it("reports a token that no active session owns", async () => {
+    const handler = createEveClearHandler({ auth: none() });
+    handler.clear.mockResolvedValue({ status: "no_active_session" });
+
+    const response = await handler.fetch(clearRequest({ continuationToken: "eve:token" }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });

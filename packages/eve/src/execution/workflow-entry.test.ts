@@ -383,6 +383,34 @@ describe("workflowEntry", () => {
     expect(routeDeliverToChildren).not.toHaveBeenCalled();
   });
 
+  it("dispatches a clear control without converting it into a delivery", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [{ kind: "clear" }, { kind: "session-timeout" }],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState }),
+        turnResult({ action: "park", sessionState }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello there" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(dispatchTurnStep).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({ kind: "clear" });
+    expect(routeDeliverToChildren).not.toHaveBeenCalled();
+  });
+
   it("does not complete at the deadline until the active turn settles", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();

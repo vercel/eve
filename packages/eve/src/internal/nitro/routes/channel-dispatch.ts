@@ -8,6 +8,7 @@ import {
 import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createCancelFn } from "#channel/cancel.js";
+import { createClearFn } from "#channel/clear-session.js";
 import { createCompactFn } from "#channel/compact-session.js";
 import { createResetFn } from "#channel/reset-session.js";
 import { createSendFn } from "#channel/send.js";
@@ -215,6 +216,7 @@ function buildRouteArgs(
   const send = createSendFn(bundle.runtime, adapter, channelName, { requestId });
   const resolveActiveSession = createResolveActiveSessionFn(bundle.runtime, channelName);
   const cancel = createCancelFn(bundle.runtime, channelName);
+  const clear = createClearFn(bundle.runtime, channelName);
   const compact = createCompactFn(bundle.runtime, channelName);
   const reset = createResetFn(bundle.runtime, channelName);
   const getSession = createGetSessionFn(bundle.runtime);
@@ -229,6 +231,7 @@ function buildRouteArgs(
         send,
         resolveActiveSession,
         cancel,
+        clear,
         compact,
         reset,
         getSession,

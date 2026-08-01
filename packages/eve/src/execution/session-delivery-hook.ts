@@ -21,7 +21,7 @@ interface SessionDeliveryHookState {
 
 /** Reads and rekeys the public delivery hook for one session driver. */
 export interface SessionDeliveryHook {
-  consumeCompactRequest(): boolean;
+  consumeSessionControl(): "clear" | "compact" | undefined;
   consumeNext(): void;
   consumeSessionTimeout(): boolean;
   next(): Promise<IteratorResult<HookPayload>>;
@@ -51,7 +51,7 @@ export function createSessionDeliveryHook(
   let offered: Promise<IteratorResult<HookPayload>> | null = null;
   let offeredRead: HookRead | undefined;
   let sessionTimedOut = false;
-  let compactRequested = false;
+  const pendingSessionControls = new Set<"clear" | "compact">();
   let wake: (() => void) | undefined;
 
   const enqueue = (read: HookRead): void => {
@@ -122,8 +122,8 @@ export function createSessionDeliveryHook(
           bufferedDeliveries.push(read.result.value);
         } else if (read.result.value.kind === "session-timeout") {
           sessionTimedOut = true;
-        } else if (read.result.value.kind === "compact") {
-          compactRequested = true;
+        } else if (read.result.value.kind === "clear" || read.result.value.kind === "compact") {
+          pendingSessionControls.add(read.result.value.kind);
         }
       }
 
@@ -133,10 +133,12 @@ export function createSessionDeliveryHook(
   };
 
   return {
-    consumeCompactRequest(): boolean {
-      const requested = compactRequested;
-      compactRequested = false;
-      return requested;
+    consumeSessionControl(): "clear" | "compact" | undefined {
+      for (const control of pendingSessionControls) {
+        pendingSessionControls.delete(control);
+        return control;
+      }
+      return undefined;
     },
 
     consumeNext(): void {
@@ -147,8 +149,11 @@ export function createSessionDeliveryHook(
       if (!offeredRead.result.done && offeredRead.result.value.kind === "session-timeout") {
         sessionTimedOut = true;
       }
-      if (!offeredRead.result.done && offeredRead.result.value.kind === "compact") {
-        compactRequested = true;
+      if (
+        !offeredRead.result.done &&
+        (offeredRead.result.value.kind === "clear" || offeredRead.result.value.kind === "compact")
+      ) {
+        pendingSessionControls.add(offeredRead.result.value.kind);
       }
       offeredRead.state.pending = false;
       offeredRead.state.resolved = undefined;

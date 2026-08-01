@@ -8,6 +8,8 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  ClearSessionInput,
+  ClearSessionResult,
   CompactSessionInput,
   CompactSessionResult,
   DeliverInput,
@@ -197,20 +199,11 @@ export function createWorkflowRuntime(config: {
     },
 
     async compactSession(input: CompactSessionInput): Promise<CompactSessionResult> {
-      try {
-        const hook = normalizeWorkflowHook(
-          await resumeHook(input.continuationToken, { kind: "compact" }),
-        );
-        return { sessionId: hook.runId, status: "accepted" };
-      } catch (error) {
-        if (HookNotFoundError.is(error) || isAlreadyTerminalSessionError(error)) {
-          return { status: "no_active_session" };
-        }
-        logError(log, "failed to request session compaction", error, {
-          continuationToken: input.continuationToken,
-        });
-        throw error;
-      }
+      return await requestWorkflowSessionControl(input.continuationToken, "compact");
+    },
+
+    async clearSession(input: ClearSessionInput): Promise<ClearSessionResult> {
+      return await requestWorkflowSessionControl(input.continuationToken, "clear");
     },
 
     async terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult> {
@@ -284,6 +277,22 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+async function requestWorkflowSessionControl(
+  continuationToken: string,
+  kind: "clear" | "compact",
+): Promise<ClearSessionResult> {
+  try {
+    const hook = normalizeWorkflowHook(await resumeHook(continuationToken, { kind }));
+    return { sessionId: hook.runId, status: "accepted" };
+  } catch (error) {
+    if (HookNotFoundError.is(error) || isAlreadyTerminalSessionError(error)) {
+      return { status: "no_active_session" };
+    }
+    logError(log, `failed to request session ${kind}`, error, { continuationToken });
+    throw error;
+  }
 }
 
 /** Requests cancellation through a session's stable workflow hook. */

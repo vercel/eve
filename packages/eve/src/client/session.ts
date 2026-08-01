@@ -1,10 +1,12 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
+import { ClearResponseSchema } from "#protocol/clear-session.js";
 import { CompactResponseSchema } from "#protocol/compact-session.js";
 import { ResetResponseSchema } from "#protocol/reset-session.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
+  EVE_CLEAR_SESSION_ROUTE_PATH,
   EVE_COMPACT_SESSION_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
   createEveCancelTurnRoutePath,
@@ -18,6 +20,7 @@ import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
 import type {
   CancelSessionResult,
+  ClearResult,
   CompactResult,
   ClientRedirectPolicy,
   ResetResult,
@@ -196,6 +199,68 @@ export class ClientSession {
     }
 
     return { sessionId: result.data.sessionId, status: result.data.status };
+  }
+
+  /**
+   * Queues removal of this session's durable model-message history. The
+   * session identity, agent configuration, state, limits, and sandbox remain.
+   * Consume the durable stream through `context.cleared` and its following
+   * `session.waiting` boundary before sending another turn.
+   */
+  async clear(): Promise<ClearResult> {
+    const state = this.#state;
+    const continuationToken = state.continuationToken;
+
+    if (continuationToken === undefined) {
+      if (state.sessionId !== undefined) {
+        throw new Error(
+          "Session has no continuation token. Consume its event stream before clearing.",
+        );
+      }
+      return { status: "no_active_session" };
+    }
+
+    const url = createClientUrl(this.#context.host, EVE_CLEAR_SESSION_ROUTE_PATH);
+    const headers = await this.#context.resolveHeaders();
+    headers.set("content-type", "application/json");
+
+    const response = await fetch(
+      url,
+      withRedirectPolicy(
+        {
+          body: JSON.stringify({ continuationToken }),
+          headers,
+          method: "POST",
+        },
+        this.#context.redirect,
+      ),
+    );
+    const body = await response.text();
+
+    if (!response.ok) {
+      throw new ClientError(response.status, body, response.headers);
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      throw new Error(`Clear route returned invalid JSON (${response.status}).`);
+    }
+
+    const result = ClearResponseSchema.safeParse(payload);
+    if (
+      !result.success ||
+      (result.data.status === "accepted" &&
+        state.sessionId !== undefined &&
+        result.data.sessionId !== state.sessionId)
+    ) {
+      throw new Error(`Clear route returned an invalid response (${response.status}).`);
+    }
+
+    return result.data.status === "accepted"
+      ? { sessionId: result.data.sessionId, status: "accepted" }
+      : { status: "no_active_session" };
   }
 
   /**

@@ -8,6 +8,7 @@ import {
   createActionResultEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
+  createContextClearedEvent,
   createMessageReceivedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
@@ -38,6 +39,15 @@ describe("message stream protocol", () => {
     expect(createTurnCancelledEvent({ sequence: 2, turnId: "turn_2" })).toEqual({
       data: { sequence: 2, turnId: "turn_2" },
       type: "turn.cancelled",
+    });
+  });
+
+  it("creates context.cleared events", () => {
+    expect(
+      createContextClearedEvent({ sequence: 2, sessionId: "session_1", turnId: "turn_2" }),
+    ).toEqual({
+      data: { sequence: 2, sessionId: "session_1", turnId: "turn_2" },
+      type: "context.cleared",
     });
   });
 

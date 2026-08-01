@@ -3,6 +3,7 @@ import type { UserContent } from "ai";
 import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
 import type {
   CancelTurnResult,
+  ClearSessionResult,
   CompactSessionResult,
   SessionAuthContext,
   SessionCallback,
@@ -18,12 +19,13 @@ type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Recor
 /**
  * Second argument passed to every route handler. `send` starts or continues a
  * session on this channel; `cancel` stops the active turn on a session
- * addressed by continuation token; `compact` summarizes its context without
- * sending model input; `reset` retires a session so its
- * token can start a fresh session; `getSession` looks one up by id; `receive`
- * hands inbound work to a different channel; `params` contains the matched
- * path parameters; `waitUntil` keeps background work alive past the response;
- * `requestIp` is the client IP, or `null` when the host cannot provide it.
+ * addressed by continuation token; `clear` removes its model-message history;
+ * `compact` summarizes its context without sending model input; `reset` retires
+ * a session so its token can start a fresh session; `getSession` looks one up by
+ * id; `receive` hands inbound work to a different channel; `params` contains
+ * the matched path parameters; `waitUntil` keeps background work alive past
+ * the response; `requestIp` is the client IP, or `null` when the host cannot
+ * provide it.
  */
 export interface RouteHandlerArgs<TState = undefined> {
   send: SendFn<TState>;
@@ -33,6 +35,7 @@ export interface RouteHandlerArgs<TState = undefined> {
    */
   resolveActiveSession: ResolveActiveSessionFn;
   cancel: CancelFn;
+  clear: ClearFn;
   compact: CompactFn;
   reset: ResetFn;
   getSession: GetSessionFn;
@@ -152,6 +155,20 @@ export interface CompactOptions {
  * followed by `compaction.completed` on the session stream.
  */
 export type CompactFn = (options: CompactOptions) => Promise<CompactSessionResult>;
+
+/** Options for {@link ClearFn}. */
+export interface ClearOptions {
+  /** Channel-local raw token, in the same format accepted by {@link SendFn}. */
+  readonly continuationToken: string;
+}
+
+/**
+ * Queues removal of the model-message history for the session owning a
+ * continuation token. Preserves the session, agent configuration, durable
+ * state, limits, and sandbox. Completion is `context.cleared` followed by
+ * `session.waiting` on the session stream.
+ */
+export type ClearFn = (options: ClearOptions) => Promise<ClearSessionResult>;
 
 /** Options for {@link ResetFn}. */
 export interface ResetOptions {

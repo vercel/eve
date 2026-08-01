@@ -47,6 +47,16 @@ export type CompactSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "no_active_session" };
 
+/** Identifies the continuation hook whose durable session should clear context. */
+export interface ClearSessionInput {
+  readonly continuationToken: string;
+}
+
+/** Result of queueing a manual context clear for a session. */
+export type ClearSessionResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "no_active_session" };
+
 /** Identifies a session to transition permanently to a terminal state. */
 export interface TerminateSessionInput {
   /** Human-readable reason recorded on the terminal workflow transition. */
@@ -196,6 +206,11 @@ export interface CompactSessionHookPayload {
   readonly kind: "compact";
 }
 
+/** Requests a context clear without delivering model input. */
+export interface ClearSessionHookPayload {
+  readonly kind: "clear";
+}
+
 /**
  * Runtime-action results resumed back into a parked parent workflow.
  */
@@ -258,6 +273,7 @@ export interface SubagentAuthorizationEventHookPayload {
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
+  | ClearSessionHookPayload
   | CompactSessionHookPayload
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
@@ -456,6 +472,9 @@ export interface Runtime {
 
   /** Queues context compaction on the session owning a continuation token. */
   compactSession(input: CompactSessionInput): Promise<CompactSessionResult>;
+
+  /** Queues a context clear on the session owning a continuation token. */
+  clearSession(input: ClearSessionInput): Promise<ClearSessionResult>;
 
   /** Terminally retires a session and releases its non-retained continuation hooks. */
   terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult>;
