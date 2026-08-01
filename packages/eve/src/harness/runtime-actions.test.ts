@@ -1,5 +1,5 @@
 import {
-  isInboxResultFromRunningHandle,
+  isInboxSubagentResultFromRunningHandle,
   isResultBoundToRunningHandle,
 } from "#harness/handles/query.js";
 import { describe, expect, it } from "vitest";
@@ -308,16 +308,21 @@ describe("result-to-handle binding", () => {
   it("accepts only results a running handle binds by callId and sessionId", () => {
     const state = createSessionWithRunningChild().state;
 
-    for (const bound of [isResultBoundToRunningHandle, isInboxResultFromRunningHandle]) {
+    for (const bound of [isResultBoundToRunningHandle, isInboxSubagentResultFromRunningHandle]) {
       expect(bound(state, boundResult)).toBe(true);
       expect(
         bound(state, { ...boundResult, claim: { kind: "session", sessionId: "forged-sibling" } }),
       ).toBe(false);
       expect(bound(state, { ...boundResult, callId: "call-other" })).toBe(false);
-      expect(
-        bound(state, { callId: "call-1", kind: "tool-result", output: "", toolName: "x" }),
-      ).toBe(true);
     }
+    expect(
+      isResultBoundToRunningHandle(state, {
+        callId: "call-1",
+        kind: "tool-result",
+        output: "",
+        toolName: "x",
+      }),
+    ).toBe(true);
   });
 
   it("binds call-only claims by callId alone, as older deployments send them", () => {
@@ -336,15 +341,18 @@ describe("result-to-handle binding", () => {
     const state = createSessionWithRunningChild().state;
 
     expect(isResultBoundToRunningHandle(state, legacyShaped)).toBe(true);
-    expect(isInboxResultFromRunningHandle(state, legacyShaped)).toBe(true);
-    expect(isInboxResultFromRunningHandle(state, { ...legacyShaped, callId: "call-unknown" })).toBe(
-      false,
-    );
+    expect(isInboxSubagentResultFromRunningHandle(state, legacyShaped)).toBe(true);
+    expect(
+      isInboxSubagentResultFromRunningHandle(state, {
+        ...legacyShaped,
+        callId: "call-unknown",
+      }),
+    ).toBe(false);
   });
 
-  it("rejects dispatch-origin results on the inbox while the step path trusts them", () => {
-    // Dispatch failures are parent-synthesized and only travel the trusted
-    // step-result path; one arriving over the shared inbox is a forgery.
+  it("trusts dispatch-origin results on the parent step path", () => {
+    // The subagent-only inbox type cannot represent dispatch failures. These
+    // parent-synthesized results enter through the trusted step-result path.
     const dispatchFailure = {
       callId: "call-1",
       isError: true,
@@ -356,7 +364,6 @@ describe("result-to-handle binding", () => {
     const state = createSessionWithRunningChild().state;
 
     expect(isResultBoundToRunningHandle(state, dispatchFailure)).toBe(true);
-    expect(isInboxResultFromRunningHandle(state, dispatchFailure)).toBe(false);
   });
 });
 

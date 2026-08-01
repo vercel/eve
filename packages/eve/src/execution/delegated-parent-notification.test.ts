@@ -8,7 +8,7 @@ import { notifyDelegatedParentStep } from "#execution/delegated-parent-notificat
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeSubagentResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -22,7 +22,7 @@ const resumeHookMock = vi.mocked(resumeHook);
 
 const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
 
-function createSuccessResult(): RuntimeSubagentResult {
+function createSuccessResult(): RuntimeSubagentChildResult {
   return {
     callId: "call-1",
     claim: { kind: "session", sessionId: "child-session" },
@@ -99,7 +99,7 @@ describe("notifyDelegatedParentStep", () => {
   });
 
   it("never attaches usage to error results", async () => {
-    const errorResult: RuntimeSubagentResult = {
+    const errorResult: RuntimeSubagentChildResult = {
       callId: "call-1",
       claim: { kind: "session", sessionId: "child-session" },
       isError: true,

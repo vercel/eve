@@ -1,4 +1,8 @@
-import type { ChildSessionClaim, RuntimeActionResult } from "#runtime/actions/types.js";
+import type {
+  ChildSessionClaim,
+  RuntimeActionResult,
+  RuntimeSubagentChildResult,
+} from "#runtime/actions/types.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/state-key.js";
 import type { AgentHandle } from "#harness/handles/store.js";
 import type { SessionStateMap } from "#harness/types.js";
@@ -60,7 +64,7 @@ export function findRunningAgentHandle(
  * `dispatch`-origin failures pass unconditionally: the parent synthesizes
  * them for calls whose child never started, and they reach the harness only
  * through the trusted step-result path. Untrusted channels must use
- * {@link isInboxResultFromRunningHandle} instead.
+ * {@link isInboxSubagentResultFromRunningHandle} instead.
  */
 export function isResultBoundToRunningHandle(
   state: SessionStateMap | undefined,
@@ -86,16 +90,10 @@ export function isResultBoundToRunningHandle(
  * overwrite the dispatch-produced error result, and a `dispatch`-origin
  * result on the inbox is a forgery by definition.
  */
-export function isInboxResultFromRunningHandle(
+export function isInboxSubagentResultFromRunningHandle(
   state: SessionStateMap | undefined,
-  result: RuntimeActionResult,
+  result: RuntimeSubagentChildResult,
 ): boolean {
-  if (result.kind !== "subagent-result") {
-    return true;
-  }
-  if (result.origin === "dispatch") {
-    return false;
-  }
   return (
     findRunningAgentHandle(state, { callId: result.callId, claim: result.claim }) !== undefined
   );

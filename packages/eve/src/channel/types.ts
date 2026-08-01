@@ -3,7 +3,7 @@ import type { UserContent } from "ai";
 import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
@@ -212,11 +212,14 @@ export interface ClearSessionHookPayload {
 }
 
 /**
- * Runtime-action results resumed back into a parked parent workflow.
+ * Child-produced subagent results resumed back into a parked parent workflow.
+ *
+ * The `runtime-action-result` discriminator predates this subagent-only inbox
+ * lane. Parent-produced dispatch results never travel through this hook.
  */
 export interface RuntimeActionResultHookPayload {
   readonly kind: "runtime-action-result";
-  readonly results: readonly RuntimeActionResult[];
+  readonly results: readonly RuntimeSubagentChildResult[];
 }
 
 /**

@@ -1,4 +1,4 @@
-import { isInboxResultFromRunningHandle } from "#harness/handles/query.js";
+import { isInboxSubagentResultFromRunningHandle } from "#harness/handles/query.js";
 import {
   createHook,
   getWorkflowMetadata,
@@ -339,7 +339,7 @@ async function waitForRuntimeActionResults(input: {
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
       results.push(
         ...value.results.filter((result) =>
-          isInboxResultFromRunningHandle(sessionSnapshotState, result),
+          isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
         ),
       );
       continue;

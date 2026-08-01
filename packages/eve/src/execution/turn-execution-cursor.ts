@@ -1,8 +1,11 @@
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { sendTurnControlStep } from "#execution/turn-control-protocol.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
+import type {
+  TurnStepInput,
+  TurnStepPayload,
+} from "#execution/durable-session-migrations/turn-workflow.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 interface TurnTransition {
@@ -67,7 +70,7 @@ export class TurnExecutionCursor {
   }
 
   /** Builds the next atomic turn-step input from the cursor's current state. */
-  createStepInput(input: HookPayload | undefined, abortSignal?: AbortSignal): TurnStepInput {
+  createStepInput(input: TurnStepPayload | undefined, abortSignal?: AbortSignal): TurnStepInput {
     return {
       abortSignal,
       input,
