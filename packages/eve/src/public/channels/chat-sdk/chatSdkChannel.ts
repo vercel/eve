@@ -270,7 +270,9 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       { inputResponses: [response] },
       {
         auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-        thread: event.thread,
+        // ActionEvent types `thread` as `Thread<TRawMessage>` (generic in the wrong slot),
+        // so narrow to the bridgeSend-accepted Thread<Record<string, unknown>, unknown>.
+        thread: event.thread as unknown as Thread,
       },
     );
   });

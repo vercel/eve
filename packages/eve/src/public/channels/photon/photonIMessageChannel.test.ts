@@ -27,7 +27,26 @@ vi.mock("#compiled/@photon-ai/chat-adapter-imessage/index.js", () => ({
 vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
 
 import { photonIMessageChannel } from "#public/channels/photon/photonIMessageChannel.js";
-import { Message } from "#compiled/chat/index.js";
+import { Message, parseMarkdown } from "#compiled/chat/index.js";
+
+function buildMessage(text: string, threadId: string): Message {
+  return new Message({
+    attachments: [],
+    author: {
+      fullName: "Test User",
+      isBot: false,
+      isMe: false,
+      userId: "user",
+      userName: "user",
+    },
+    formatted: parseMarkdown(text),
+    id: "message-id",
+    metadata: { dateSent: new Date("2026-01-01T00:00:00.000Z"), edited: false },
+    raw: {},
+    text,
+    threadId,
+  });
+}
 
 describe("photonIMessageChannel", () => {
   beforeEach(() => {
@@ -41,13 +60,7 @@ describe("photonIMessageChannel", () => {
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
-    const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
-      id: "message-id",
-      raw: {},
-      text: "Steer this response",
-      threadId: thread.id,
-    });
+    const message = buildMessage("Steer this response", thread.id);
 
     await handler(thread, message);
 
@@ -64,13 +77,7 @@ describe("photonIMessageChannel", () => {
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
-    const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
-      id: "message-id",
-      raw: {},
-      text: "  \n",
-      threadId: thread.id,
-    });
+    const message = buildMessage("  \n", thread.id);
 
     await handler(thread, message);
 
@@ -86,13 +93,7 @@ describe("photonIMessageChannel", () => {
       throw new Error("Expected an inbound group-message handler.");
     }
     const thread = { id: "group-thread-id" };
-    const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
-      id: "message-id",
-      raw: {},
-      text: "Hello group",
-      threadId: thread.id,
-    });
+    const message = buildMessage("Hello group", thread.id);
 
     expect(pattern.test(message.text)).toBe(true);
     await handler(thread, message);
