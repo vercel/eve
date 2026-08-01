@@ -3,9 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import {
   cancelRemoteAgentTurn,
-  continueRemoteAgentSession,
   isRetryableRemoteAgentCancelError,
-  isRetryableRemoteAgentContinueError,
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
@@ -475,92 +473,6 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
       "forwardedPrincipal",
     );
-  });
-});
-
-describe("continueRemoteAgentSession", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("posts raw continuation input with callback metadata and fresh auth headers", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await continueRemoteAgentSession({
-      callback: {
-        callId: "call-next",
-        subagentName: "research",
-        token: "parent-inbox",
-        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
-      },
-      continuationToken: "remote-token",
-      message: "follow up",
-      outputSchema: { type: "object" },
-      remote: createRemoteAgent(),
-      sessionId: "remote-session",
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/v1/session/remote-session",
-      {
-        body: JSON.stringify({
-          callback: {
-            callId: "call-next",
-            subagentName: "research",
-            token: "parent-inbox",
-            url: "https://caller.example.com/eve/v1/callback/parent-inbox",
-          },
-          continuationToken: "remote-token",
-          message: "follow up",
-          outputSchema: { type: "object" },
-        }),
-        headers: {
-          authorization: "Bearer remote-token",
-          "content-type": "application/json",
-          "x-static": "yes",
-        },
-        method: "POST",
-      },
-    );
-  });
-
-  it("classifies only missing-session continue failures as permanent", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, { status: 503 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ code: "SESSION_NOT_RESUMABLE" }), { status: 410 }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 404 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const continueInput = () => ({
-      callback: {
-        callId: "call-next",
-        subagentName: "research",
-        token: "parent-inbox",
-        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
-      },
-      continuationToken: "remote-token",
-      message: "follow up",
-      remote: createRemoteAgent(),
-      sessionId: "remote-session",
-    });
-    const transient = await continueRemoteAgentSession(continueInput()).catch(
-      (error: unknown) => error,
-    );
-    const notResumable = await continueRemoteAgentSession(continueInput()).catch(
-      (error: unknown) => error,
-    );
-    const missing = await continueRemoteAgentSession(continueInput()).catch(
-      (error: unknown) => error,
-    );
-
-    expect(isRetryableRemoteAgentContinueError(transient)).toBe(true);
-    expect(isRetryableRemoteAgentContinueError(notResumable)).toBe(false);
-    expect(isRetryableRemoteAgentContinueError(missing)).toBe(false);
-    expect(isRetryableRemoteAgentContinueError(new TypeError("network unavailable"))).toBe(true);
   });
 });
 
