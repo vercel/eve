@@ -52,6 +52,7 @@ import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
+import { emitActionInvalidEvent } from "#harness/invalid-tool-call-events.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -59,10 +60,6 @@ import type {
   SessionStateMap,
   StepInput,
 } from "#harness/types.js";
-
-// ---------------------------------------------------------------------------
-// Emission state
-// ---------------------------------------------------------------------------
 
 /**
  * Tracks emission lifecycle state across harness step invocations.
@@ -126,10 +123,6 @@ export function setHarnessEmissionState(
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// Turn lifecycle helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Emits `session.started` (once), `turn.started`, and `message.received` at the
@@ -297,10 +290,6 @@ export async function emitTurnEpilogue(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
 /**
  * Maps an AI SDK finish reason string to the eve-owned
  * {@link AssistantStepFinishReason} union. Unknown values become `"other"`.
@@ -320,10 +309,6 @@ export function normalizeAssistantStepFinishReason(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Stream content emission
-// ---------------------------------------------------------------------------
-
 /**
  * Result of consuming one step's `fullStream`.
  *
@@ -332,6 +317,7 @@ export function normalizeAssistantStepFinishReason(
  */
 interface EmittedStreamContent {
   readonly emittedActionCallIds: ReadonlySet<string>;
+  readonly emittedInvalidToolCallIds: ReadonlySet<string>;
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
   readonly invalidInputToolCallIds: ReadonlySet<string>;
   readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
@@ -393,6 +379,7 @@ async function consumeStreamContent(
   const toolCallIdsSeenInStream = new Set<string>();
   const emittedActionCallIds = new Set<string>();
   const emittedActionResultCallIds = new Set<string>();
+  const emittedInvalidToolCallIds = new Set<string>();
   const providerToolCallIdsSeen = new Set<string>();
   const handledInlineToolResultCallIds = new Set<string>();
   const invalidInputToolCallIds = new Set<string>();
@@ -400,7 +387,7 @@ async function consumeStreamContent(
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
 
   const flushCurrentMessage = async (): Promise<void> => {
-    if (currentMessage.length === 0) {
+    if (currentMessage.trim().length === 0) {
       return;
     }
     await emitFn(
@@ -420,9 +407,7 @@ async function consumeStreamContent(
       return;
     }
 
-    if (currentMessage.trim().length > 0) {
-      await flushCurrentMessage();
-    }
+    await flushCurrentMessage();
 
     emittedActionCallIds.add(action.callId);
     await emitFn(
@@ -449,9 +434,7 @@ async function consumeStreamContent(
     }
     emittedActionCallIds.add(toolCall.toolCallId);
 
-    if (currentMessage.trim().length > 0) {
-      await flushCurrentMessage();
-    }
+    await flushCurrentMessage();
 
     const resolved = resolveProviderToolCallRequest(toolCall);
     if (resolved.toolError !== undefined) {
@@ -483,11 +466,22 @@ async function consumeStreamContent(
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
-    if (isInvalidToolCall(toolCall)) {
-      invalidInputToolCallIds.add(toolCall.toolCallId);
+    if (options === undefined) {
       return;
     }
-    if (options === undefined || options.excludedActionToolNames.has(toolCall.toolName)) {
+
+    if (toolCall.invalid === true) {
+      await emitActionInvalidEvent({
+        emitFn,
+        emittedToolCallIds: emittedInvalidToolCallIds,
+        flushBeforeEmit: flushCurrentMessage,
+        state,
+        toolCall,
+      });
+      return;
+    }
+
+    if (options.excludedActionToolNames.has(toolCall.toolName)) {
       return;
     }
 
@@ -502,9 +496,7 @@ async function consumeStreamContent(
       if (error instanceof TypeError) {
         const toolError = createInvalidToolCallInputError({ error, toolCall });
         invalidInputToolCallIds.add(toolCall.toolCallId);
-        if (currentMessage.trim().length > 0) {
-          await flushCurrentMessage();
-        }
+        await flushCurrentMessage();
         await emitActionResult(createRuntimeToolResultFromToolError(toolError));
         handledInlineToolResultCallIds.add(toolCall.toolCallId);
         trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
@@ -561,7 +553,10 @@ async function consumeStreamContent(
       case "tool-call": {
         const toolCall = part as TypedToolCall<ToolSet>;
         toolCallIdsSeenInStream.add(toolCall.toolCallId);
-        if (toolCall.providerExecuted === true) {
+        if (toolCall.invalid === true) {
+          await providerActionBatch.flush();
+          await emitToolCall(toolCall);
+        } else if (toolCall.providerExecuted === true) {
           await collectProviderToolCall(toolCall);
         } else {
           await providerActionBatch.flush();
@@ -573,6 +568,9 @@ async function consumeStreamContent(
         const inlineToolResult = part as TypedToolResult<ToolSet>;
         // Preliminary chunks can be superseded by the terminal result.
         if (inlineToolResult.preliminary === true) {
+          break;
+        }
+        if (emittedInvalidToolCallIds.has(inlineToolResult.toolCallId)) {
           break;
         }
         if (inlineToolResult.providerExecuted === true) {
@@ -616,6 +614,9 @@ async function consumeStreamContent(
       }
       case "tool-error": {
         const toolError = part as TypedToolError<ToolSet>;
+        if (emittedInvalidToolCallIds.has(toolError.toolCallId)) {
+          break;
+        }
         if (toolError.providerExecuted === true) {
           await collectProviderToolCall(toolError);
           await providerActionBatch.flush();
@@ -691,6 +692,7 @@ async function consumeStreamContent(
 
   return {
     emittedActionCallIds,
+    emittedInvalidToolCallIds,
     handledInlineToolResultCallIds,
     invalidInputToolCallIds,
     inlineAuthorizationResults,

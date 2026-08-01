@@ -32,6 +32,7 @@ import {
 } from "#harness/prompt-cache.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
+import { createActionInvalidEventFromToolCall } from "#harness/invalid-tool-call-events.js";
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
@@ -195,13 +196,11 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
  * Emits `actions.requested`, `action.result`, and `step.completed` events
  * from a captured step result.
  *
- * Tool calls and results that match `excludedActionToolNames`, belong to
- * tool-approval requests, or are marked `invalid` by the AI SDK (e.g. the
- * model emitted unparsable JSON) are filtered out of the emitted events.
- * The AI SDK feeds the invalid-call error back to the model on the next
- * step via `step.response.messages` so it can retry with well-formed
- * arguments — the runtime event stream only sees successfully parsed
- * tool calls.
+ * Tool calls and results that match `excludedActionToolNames` or belong to
+ * tool-approval requests are filtered out of `actions.requested` /
+ * `action.result`. Tool calls marked `invalid` by the AI SDK (e.g. the model
+ * emitted unparsable JSON or targeted an unknown tool) emit `action.invalid`
+ * instead, then stay out of the action lifecycle.
  *
  * `handledInlineToolResultCallIds` contains results emitted by
  * `emitStreamContent` or sent to authorization. Skip them here.
@@ -212,6 +211,7 @@ export async function emitStepActions(
   step: HarnessStepResult,
   options: {
     readonly emittedActionCallIds?: ReadonlySet<string>;
+    readonly emittedInvalidToolCallIds?: ReadonlySet<string>;
     readonly excludedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionToolNames: ReadonlySet<string>;
     readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
@@ -223,6 +223,7 @@ export async function emitStepActions(
       .filter(isProviderExecutedToolCall)
       .map((toolCall) => toolCall.toolCallId),
   );
+  const invalidToolCalls = (step.toolCalls as TypedToolCall<ToolSet>[]).filter(isInvalidToolCall);
   const excludedCallIds = new Set<string>([
     ...(options.excludedActionCallIds ?? []),
     ...providerExecutedCallIds,
@@ -230,13 +231,19 @@ export async function emitStepActions(
       content: (step.content ?? []) as ContentPart<ToolSet>[],
       excludedCallIds: options.excludedActionCallIds,
     }).map((request) => request.action.callId),
-    ...(step.toolCalls as TypedToolCall<ToolSet>[])
-      .filter(isInvalidToolCall)
-      .map((toolCall) => toolCall.toolCallId),
+    ...invalidToolCalls.map((toolCall) => toolCall.toolCallId),
   ]);
 
   const isExcluded = (toolCallId: string, toolName: string): boolean =>
     excludedCallIds.has(toolCallId) || options.excludedActionToolNames.has(toolName);
+
+  for (const toolCall of invalidToolCalls) {
+    if (options.emittedInvalidToolCallIds?.has(toolCall.toolCallId)) {
+      continue;
+    }
+
+    await emitFn(createActionInvalidEventFromToolCall({ state, toolCall }));
+  }
 
   // Streamed calls already emitted their request. The loop below emits their
   // result.

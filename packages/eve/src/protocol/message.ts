@@ -75,6 +75,12 @@ export interface MessageStreamEventMeta {
 export type ActionResultStatus = "completed" | "failed" | "rejected";
 
 /**
+ * Stable reason for one model-emitted tool call that could not become a
+ * runtime action.
+ */
+export type ActionInvalidReason = "invalid-input" | "no-such-tool";
+
+/**
  * Stable failure payload projected onto `action.result`.
  *
  * This keeps UI consumers from having to parse provider- or tool-specific
@@ -252,6 +258,24 @@ export interface ActionResultStreamEvent {
     turnId: string;
   };
   type: "action.result";
+}
+
+/**
+ * Stream event emitted when the model produced a tool call that failed
+ * validation before the runtime could request or execute the action.
+ */
+export interface ActionInvalidStreamEvent {
+  data: {
+    callId: string;
+    errorText: string;
+    input?: JsonValue;
+    reason: ActionInvalidReason;
+    sequence: number;
+    stepIndex: number;
+    toolName: string;
+    turnId: string;
+  };
+  type: "action.invalid";
 }
 
 /**
@@ -618,6 +642,7 @@ export type UnstampedMessageStreamEvent =
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
   | ActionResultStreamEvent
+  | ActionInvalidStreamEvent
   | ReasoningCompletedStreamEvent
   | StepCompletedStreamEvent
   | StepFailedStreamEvent
@@ -944,6 +969,38 @@ export function createActionsRequestedEvent(input: {
       turnId: input.turnId,
     },
     type: "actions.requested",
+  };
+}
+
+/**
+ * Creates the `action.invalid` event for one model-emitted tool call that
+ * failed validation before it could be requested or executed.
+ */
+export function createActionInvalidEvent(input: {
+  readonly callId: string;
+  readonly errorText: string;
+  readonly input?: JsonValue;
+  readonly reason: ActionInvalidReason;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly toolName: string;
+  readonly turnId: string;
+}): ActionInvalidStreamEvent {
+  const data: ActionInvalidStreamEvent["data"] = {
+    callId: input.callId,
+    errorText: input.errorText,
+    reason: input.reason,
+    sequence: input.sequence,
+    stepIndex: input.stepIndex,
+    toolName: input.toolName,
+    turnId: input.turnId,
+  };
+  if (input.input !== undefined) {
+    data.input = input.input;
+  }
+  return {
+    data,
+    type: "action.invalid",
   };
 }
 

@@ -1,4 +1,4 @@
-import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
+import { jsonSchema, NoSuchToolError, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -534,6 +534,101 @@ describe("emitStreamContent action requests", () => {
       },
     ]);
     expect(providerResult.trailingInlineToolResultParts).toEqual([]);
+  });
+
+  it("emits invalid action events for AI SDK invalid tool calls", async () => {
+    const emit = createEmitStub();
+    const error = new NoSuchToolError({
+      availableTools: ["web_search"],
+      toolName: "missing_tool",
+    });
+
+    const result = await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "text-1", text: "I'll check that.", type: "text-delta" },
+        {
+          dynamic: true,
+          error,
+          input: { query: "eve" },
+          invalid: true,
+          toolCallId: "call-missing",
+          toolName: "missing_tool",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map(),
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual([
+      "message.appended",
+      "message.completed",
+      "action.invalid",
+    ]);
+    expect(events[2]).toEqual({
+      data: {
+        callId: "call-missing",
+        errorText: error.message,
+        input: { query: "eve" },
+        reason: "no-such-tool",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "missing_tool",
+        turnId: "turn_0",
+      },
+      type: "action.invalid",
+    });
+    expect([...result.emittedInvalidToolCallIds]).toEqual(["call-missing"]);
+    expect([...result.emittedActionCallIds]).toEqual([]);
+  });
+
+  it("does not leak provider-executed invalid calls into the action lifecycle", async () => {
+    const emit = createEmitStub();
+    const error = new NoSuchToolError({
+      availableTools: ["web_search"],
+      toolName: "missing_tool",
+    });
+
+    const result = await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          dynamic: true,
+          error,
+          input: { query: "eve" },
+          invalid: true,
+          providerExecuted: true,
+          toolCallId: "call-missing",
+          toolName: "missing_tool",
+          type: "tool-call",
+        },
+        {
+          input: { query: "eve" },
+          output: { results: [] },
+          providerExecuted: true,
+          toolCallId: "call-missing",
+          toolName: "missing_tool",
+          type: "tool-result",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map(),
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual(["action.invalid"]);
+    expect([...result.emittedInvalidToolCallIds]).toEqual(["call-missing"]);
+    expect([...result.emittedActionCallIds]).toEqual([]);
   });
 
   it("turns non-object tool call input into a failed tool result for the model", async () => {

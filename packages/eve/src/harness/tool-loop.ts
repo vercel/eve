@@ -1013,6 +1013,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           });
           const {
             emittedActionCallIds,
+            emittedInvalidToolCallIds,
             handledInlineToolResultCallIds,
             invalidInputToolCallIds,
             inlineAuthorizationResults,
@@ -1036,6 +1037,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }
           await emitStepActions(emit, emissionState, stepResult, {
             emittedActionCallIds,
+            emittedInvalidToolCallIds,
             excludedActionCallIds: invalidInputToolCallIds,
             excludedActionToolNames,
             handledInlineToolResultCallIds,
