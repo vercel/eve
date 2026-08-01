@@ -25,9 +25,10 @@ const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outp
 function createSuccessResult(): RuntimeSubagentResult {
   return {
     callId: "call-1",
+    claim: { kind: "session", sessionId: "child-session" },
     kind: "subagent-result",
+    origin: "child",
     output: "done",
-    sessionId: "child-session",
     subagentName: "research",
   };
 }
@@ -74,9 +75,10 @@ describe("notifyDelegatedParentStep", () => {
       results: [
         {
           callId: "call-1",
+          claim: { kind: "session", sessionId: "child-session" },
           kind: "subagent-result",
+          origin: "child",
           output: "done",
-          sessionId: "child-session",
           subagentName: "research",
           usage: USAGE,
         },
@@ -99,8 +101,10 @@ describe("notifyDelegatedParentStep", () => {
   it("never attaches usage to error results", async () => {
     const errorResult: RuntimeSubagentResult = {
       callId: "call-1",
+      claim: { kind: "session", sessionId: "child-session" },
       isError: true,
       kind: "subagent-result",
+      origin: "child",
       output: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
       subagentName: "research",
     };

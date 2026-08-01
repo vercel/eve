@@ -1,20 +1,27 @@
 import {
   AGENT_HANDLES_STATE_KEY,
+  assertPersistableAgentHandleStore,
   formatAgentStatus,
   getAgentHandleStore,
   type AgentAddress,
   type AgentHandle,
-  type AgentHandleStore,
   type AgentIdentity,
   type ContinueOperation,
   type StartOperation,
 } from "#harness/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
+import type { ChildSessionClaim } from "#runtime/actions/types.js";
 
 /**
- * Records intent to start a fresh child. Must commit before the start
- * side effect runs so a crashed dispatch never orphans an unowned child.
+ * Records intent to start a fresh child. Must be applied to the step's
+ * working snapshot before the start side effect runs, so the returned state
+ * owns any child the step may have created.
+ *
+ * The guarantee is intra-step, not exactly-once: the prepared handle
+ * durably commits only when the enclosing dispatch step's result commits.
+ * A crash between an accepted start and that commit replays the step from
+ * the pre-step snapshot and re-runs the side effect.
  *
  * Throws when the identity or operation already exists: fresh starts mint
  * a new identity, so a collision means corrupted derivation, not a replay.
@@ -56,13 +63,20 @@ export type PrepareAgentContinuationResult =
   | { readonly kind: "busy" };
 
 /**
- * Records intent to deliver a follow-up turn to a parked child. Must
- * commit before the delivery side effect runs.
+ * Records intent to deliver a follow-up turn to a parked child. Must be
+ * applied to the step's working snapshot before the delivery side effect
+ * runs.
+ *
+ * Delivery is at-least-once, not exactly-once: the `running` handle durably
+ * commits only when the enclosing dispatch step's result commits. If the
+ * step dies after a successful delivery, replay starts from `parked` and
+ * delivers the same operation again — which is why replaying the operation
+ * already recorded on a running handle returns `ready` with the unchanged
+ * session instead of a busy conflict.
  *
  * `unknown`, `mismatch`, and `busy` do not change the session; the caller
  * maps them onto `AGENT_UNKNOWN`, `AGENT_MISMATCH`, and `AGENT_BUSY`
- * results. Replaying the operation already recorded on a running handle
- * returns `ready` with the unchanged session.
+ * results.
  */
 export function prepareAgentContinuation(
   session: HarnessSession,
@@ -213,16 +227,15 @@ export type SettleAgentTurnResult =
  * outcome or is deleted for a terminal outcome.
  *
  * The settlement must carry the operation currently recorded on the
- * running handle and the child session the address confirms; anything else
- * is ignored so a stale or forged delivery can never move a newer turn.
- * Results from older eve deployments claim no sessionId and settle on the
- * operation alone.
+ * running handle and a claim the handle's address confirms (see
+ * {@link ChildSessionClaim}); anything else is ignored so a stale or forged
+ * delivery can never move a newer turn.
  */
 export function settleAgentTurn(
   session: HarnessSession,
   input: {
     readonly operationId: string;
-    readonly sessionId: string | undefined;
+    readonly claim: ChildSessionClaim;
     readonly outcome: AgentTurnOutcome;
   },
 ): SettleAgentTurnResult {
@@ -233,7 +246,7 @@ export function settleAgentTurn(
   if (existing === undefined || existing.phase !== "running") {
     return { kind: "ignored", reason: "unknown-operation" };
   }
-  if (input.sessionId !== undefined && existing.address.sessionId !== input.sessionId) {
+  if (input.claim.kind === "session" && existing.address.sessionId !== input.claim.sessionId) {
     return { kind: "ignored", reason: "session-mismatch" };
   }
 
@@ -272,12 +285,19 @@ export function settleAgentTurn(
   };
 }
 
+/**
+ * Persists the handle store, validating it against the strict store schema
+ * first. This write-time check is what lets the schema-free driver-side
+ * reader (`query.ts`) trust any stored value without revalidating: a
+ * transition bug fails loudly here instead of poisoning the session for
+ * every later read.
+ */
 function writeHandles(session: HarnessSession, handles: readonly AgentHandle[]): HarnessSession {
   return {
     ...session,
     state: {
       ...session.state,
-      [AGENT_HANDLES_STATE_KEY]: { handles } satisfies AgentHandleStore,
+      [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore({ handles }),
     },
   };
 }

@@ -34,14 +34,14 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
 };
 
 /**
- * Usage from a subagent result. Only child-produced results carry usage;
+ * Usage from a subagent result. Only `child`-origin results carry usage;
  * parent-synthesized dispatch failures never do, and their type omits the
  * field entirely.
  */
 function readSubagentResultUsage(
   result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
 ): TokenUsage | undefined {
-  return "usage" in result ? result.usage : undefined;
+  return result.origin === "child" ? result.usage : undefined;
 }
 
 /**
@@ -238,12 +238,14 @@ export async function resolvePendingRuntimeActions(input: {
   // deliveries don't route responses to a dead child.
   let nextSession: HarnessSession = input.session;
   for (const result of readyResults) {
-    if (result.kind !== "subagent-result") {
+    // Dispatch failures never settle handles: the dispatch step already
+    // rejected (deleted) the handle when it synthesized the failure.
+    if (result.kind !== "subagent-result" || result.origin !== "child") {
       continue;
     }
     const handle = findRunningAgentHandle(nextSession.state, {
       callId: result.callId,
-      sessionId: result.sessionId,
+      claim: result.claim,
     });
     if (handle === undefined) {
       continue;
@@ -252,6 +254,7 @@ export async function resolvePendingRuntimeActions(input: {
       nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
     }
     const settled = settleAgentTurn(nextSession, {
+      claim: result.claim,
       operationId: handle.operation.id,
       outcome: {
         kind: "terminal",
@@ -259,9 +262,8 @@ export async function resolvePendingRuntimeActions(input: {
           result.isError === true
             ? { error: result.output, kind: "failed" }
             : { kind: "succeeded", output: result.output },
-        usageDelta: readSubagentResultUsage(result) ?? ZERO_TOKEN_USAGE,
+        usageDelta: result.usage ?? ZERO_TOKEN_USAGE,
       },
-      sessionId: result.sessionId,
     });
     if (settled.kind === "settled") {
       nextSession = settled.session;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
   AGENT_HANDLES_STATE_KEY,
+  assertPersistableAgentHandleStore,
   deriveAgentId,
   formatAgentStatus,
   getAgentHandleStore,
@@ -99,6 +100,23 @@ describe("getAgentHandleStore", () => {
         [AGENT_HANDLES_STATE_KEY]: { handles: [parkedHandle, parkedHandle] },
       }),
     ).toThrow("unique");
+  });
+});
+
+describe("assertPersistableAgentHandleStore", () => {
+  it("returns a valid store unchanged in shape", () => {
+    expect(assertPersistableAgentHandleStore({ handles: [parkedHandle] })).toEqual({
+      handles: [parkedHandle],
+    });
+  });
+
+  it("refuses to persist a malformed store", () => {
+    const corrupt = {
+      handles: [{ ...parkedHandle, lastStatus: "x".repeat(121) }],
+    };
+    expect(() => assertPersistableAgentHandleStore(corrupt)).toThrow(
+      "Refusing to persist a corrupt agent handle store",
+    );
   });
 });
 

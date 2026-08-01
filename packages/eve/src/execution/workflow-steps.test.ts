@@ -409,6 +409,7 @@ describe("dispatchRuntimeActionsStep", () => {
           callId: "call-2",
           isError: true,
           kind: "subagent-result",
+          origin: "dispatch",
           output: {
             code: "SUBAGENT_START_FAILED",
             message: "child start failed",
@@ -561,6 +562,7 @@ describe("dispatchRuntimeActionsStep", () => {
         callId: "call-1",
         isError: true,
         kind: "subagent-result",
+        origin: "dispatch",
         output: {
           code: "REMOTE_AGENT_START_FAILED",
           message: 'Remote agent "research" create-session request failed with HTTP 503.',
@@ -848,6 +850,7 @@ describe("dispatchRuntimeActionsStep", () => {
           callId: "call-1",
           isError: true,
           kind: "subagent-result",
+          origin: "dispatch",
           output: {
             code: "RECURSIVE_AGENT_ROOT_ONLY",
             message: 'The built-in "agent" tool is only available to the root session.',

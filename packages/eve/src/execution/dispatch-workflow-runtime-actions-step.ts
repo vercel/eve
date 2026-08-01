@@ -116,6 +116,7 @@ function createWorkflowSubagentLimitResult(input: {
     callId: input.action.callId,
     isError: true,
     kind: "subagent-result",
+    origin: "dispatch",
     output: {
       code: "WORKFLOW_SUBAGENT_LIMIT_REACHED",
       maxSubagents: input.plan.maxSubagents,

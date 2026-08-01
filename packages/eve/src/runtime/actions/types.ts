@@ -126,14 +126,33 @@ const runtimeToolResultActionResultSchema = z
   .strict();
 
 /**
+ * Which child session a subagent result claims to have produced it.
+ *
+ * `session` names the callee session; the parent accepts the result only when
+ * a running agent handle binds the result's callId to that session, so one
+ * callee cannot settle a sibling's call. `call-only` exists solely for
+ * callbacks from older eve deployments that predate session claims: those
+ * results bind to a running handle by callId alone. This is the single
+ * definition of that compatibility carve-out — every matcher and transition
+ * takes the claim as-is instead of re-encoding the rule.
+ */
+export type ChildSessionClaim = z.infer<typeof childSessionClaimSchema>;
+
+/**
+ * Zod schema for one child-session claim.
+ */
+export const childSessionClaimSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("session"), sessionId: z.string().min(1) }),
+  z.strictObject({ kind: z.literal("call-only") }),
+]);
+
+/**
  * Subagent result produced by a dispatched child session and delivered back
  * through the parent's resume hook.
  *
- * `sessionId` names the callee session claiming the result; the parent
- * verifies it against the child identity captured at dispatch, so one callee
- * cannot settle a sibling's call. Older eve deployments do not send it, and
- * their results bind by callId alone. `usage` carries the completed child
- * session's token totals so the caller can attribute the subagent's spend.
+ * `claim` names the child session asserting the result (see
+ * {@link ChildSessionClaim}). `usage` carries the completed child session's
+ * token totals so the caller can attribute the subagent's spend.
  */
 export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResultSchema>;
 
@@ -143,10 +162,11 @@ export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResu
 const runtimeSubagentChildResultSchema = z
   .object({
     callId: z.string(),
+    claim: childSessionClaimSchema,
     isError: z.boolean().optional(),
     kind: z.literal("subagent-result"),
+    origin: z.literal("child"),
     output: jsonValueSchema,
-    sessionId: z.string().optional(),
     subagentName: z.string(),
     usage: tokenUsageSchema.optional(),
   })
@@ -155,7 +175,9 @@ const runtimeSubagentChildResultSchema = z
 /**
  * Subagent failure synthesized on the parent side when no child produced a
  * result: dispatch rejections, start failures, and agentId-continuation
- * delivery errors. Always an error, and never claims a child `sessionId`.
+ * delivery errors. Always an error; carries no session claim because no
+ * child session exists to assert one. Enters the harness only through the
+ * trusted step-result path, never through the shared callback inbox.
  */
 export type RuntimeSubagentDispatchFailure = z.infer<typeof runtimeSubagentDispatchFailureSchema>;
 
@@ -167,15 +189,17 @@ const runtimeSubagentDispatchFailureSchema = z
     callId: z.string(),
     isError: z.literal(true),
     kind: z.literal("subagent-result"),
+    origin: z.literal("dispatch"),
     output: jsonValueSchema,
-    sessionId: z.undefined().optional(),
     subagentName: z.string(),
   })
   .strict();
 
 /**
- * Runtime-owned subagent result projected back into a harness resume call:
- * either a child-produced result or a parent-synthesized dispatch failure.
+ * Runtime-owned subagent result projected back into a harness resume call,
+ * discriminated on `origin`: `child` results come from a dispatched child
+ * session and must bind to a running agent handle; `dispatch` failures are
+ * parent-synthesized and trusted by construction.
  */
 export type RuntimeSubagentResult = RuntimeSubagentChildResult | RuntimeSubagentDispatchFailure;
 

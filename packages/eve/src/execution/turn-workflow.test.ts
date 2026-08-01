@@ -561,9 +561,10 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: "child-session" },
             kind: "subagent-result",
+            origin: "child",
             output: "child output",
-            sessionId: "child-session",
             subagentName: "delegate",
           },
         ],
@@ -696,6 +697,7 @@ describe("turnWorkflow", () => {
           callId: "call-1",
           isError: true,
           kind: "subagent-result",
+          origin: "dispatch",
           output: { code: "REMOTE_AGENT_START_FAILED", message: "remote unavailable" },
           subagentName: "research",
         },
@@ -770,9 +772,10 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: "child-session" },
             kind: "subagent-result",
+            origin: "child",
             output: "approved child output",
-            sessionId: "child-session",
             subagentName: "delegate",
           },
         ],
@@ -946,9 +949,10 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: "child-session" },
             kind: "subagent-result",
+            origin: "child",
             output: "authorized child output",
-            sessionId: "child-session",
             subagentName: "delegate",
           },
         ],
@@ -1039,9 +1043,10 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: "child-session-1" },
             kind: "subagent-result",
+            origin: "child",
             output: "first",
-            sessionId: "child-session-1",
             subagentName: "delegate",
           },
         ],
@@ -1059,9 +1064,10 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-2",
+            claim: { kind: "session", sessionId: "child-session-2" },
             kind: "subagent-result",
+            origin: "child",
             output: "second",
-            sessionId: "child-session-2",
             subagentName: "delegate",
           },
         ],

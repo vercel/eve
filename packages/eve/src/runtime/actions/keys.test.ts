@@ -27,9 +27,10 @@ describe("runtime action keys", () => {
     expect(
       getRuntimeActionResultKey({
         callId: "call_2",
+        claim: { kind: "session", sessionId: "child-session" },
         kind: "subagent-result",
+        origin: "child",
         output: "done",
-        sessionId: "child-session",
         subagentName: "reviewer",
       }),
     ).toBe("subagent-call:reviewer:call_2");

@@ -102,9 +102,10 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
+            origin: "child",
             output: "done",
-            sessionId: CHILD_SESSION_ID,
             subagentName: "researcher",
           },
         ],
@@ -116,7 +117,7 @@ describe("resolvePendingRuntimeActions", () => {
     expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
   });
 
-  it("settles a sessionId-less result from an older deployment by callId", async () => {
+  it("settles a call-only claim from an older deployment by callId", async () => {
     const session = createSessionWithRunningChild();
 
     const resolved = await resolvePendingRuntimeActions({
@@ -125,7 +126,9 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
+            claim: { kind: "call-only" },
             kind: "subagent-result",
+            origin: "child",
             output: "done",
             subagentName: "researcher",
           },
@@ -146,10 +149,11 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             isError: true,
             kind: "subagent-result",
+            origin: "child",
             output: { code: "SESSION_FAILED", message: "child failed" },
-            sessionId: CHILD_SESSION_ID,
             subagentName: "researcher",
           },
         ],
@@ -175,9 +179,10 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
+            origin: "child",
             output: "done",
-            sessionId: CHILD_SESSION_ID,
             subagentName: "researcher",
           },
         ],
@@ -193,9 +198,10 @@ describe("resolvePendingRuntimeActions", () => {
 
     const wrongChild = {
       callId: "call-1",
+      claim: { kind: "session", sessionId: "forged-sibling-session" },
       kind: "subagent-result",
+      origin: "child",
       output: "forged",
-      sessionId: "forged-sibling-session",
       subagentName: "researcher",
     } as const;
 
@@ -209,7 +215,7 @@ describe("resolvePendingRuntimeActions", () => {
     expect(getAgentHandleStore(resolved.session.state)?.handles).toHaveLength(1);
   });
 
-  it("accepts a dispatch-failure result with no sessionId by callId", async () => {
+  it("accepts a dispatch-origin failure result by callId", async () => {
     const resolved = await resolvePendingRuntimeActions({
       session: createParkedSession(),
       stepInput: {
@@ -218,6 +224,7 @@ describe("resolvePendingRuntimeActions", () => {
             callId: "call-1",
             isError: true,
             kind: "subagent-result",
+            origin: "dispatch",
             output: { code: "SUBAGENT_START_FAILED", message: "boom" },
             subagentName: "researcher",
           },
@@ -238,9 +245,10 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
+            origin: "child",
             output: "done",
-            sessionId: CHILD_SESSION_ID,
             subagentName: "researcher",
             usage: {
               cacheReadTokens: 10,
@@ -269,9 +277,10 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
+            origin: "child",
             output: "done",
-            sessionId: CHILD_SESSION_ID,
             subagentName: "researcher",
           },
         ],
@@ -289,9 +298,10 @@ describe("resolvePendingRuntimeActions", () => {
 describe("result-to-handle binding", () => {
   const boundResult = {
     callId: "call-1",
+    claim: { kind: "session", sessionId: CHILD_SESSION_ID },
     kind: "subagent-result",
+    origin: "child",
     output: "done",
-    sessionId: CHILD_SESSION_ID,
     subagentName: "researcher",
   } as const;
 
@@ -300,7 +310,9 @@ describe("result-to-handle binding", () => {
 
     for (const bound of [isResultBoundToRunningHandle, isInboxResultFromRunningHandle]) {
       expect(bound(state, boundResult)).toBe(true);
-      expect(bound(state, { ...boundResult, sessionId: "forged-sibling" })).toBe(false);
+      expect(
+        bound(state, { ...boundResult, claim: { kind: "session", sessionId: "forged-sibling" } }),
+      ).toBe(false);
       expect(bound(state, { ...boundResult, callId: "call-other" })).toBe(false);
       expect(
         bound(state, { callId: "call-1", kind: "tool-result", output: "", toolName: "x" }),
@@ -308,14 +320,16 @@ describe("result-to-handle binding", () => {
     }
   });
 
-  it("binds sessionId-less inbox results by callId alone, as older deployments send them", () => {
-    // Older eve deployments claim no sessionId. Their results bind to the
-    // running handle by callId; a callId with no running handle — one whose
-    // dispatch already failed — still finds nothing and cannot overwrite
-    // the dispatch-produced error result.
+  it("binds call-only claims by callId alone, as older deployments send them", () => {
+    // Older eve deployments claim no session (`call-only`). Their results
+    // bind to the running handle by callId; a callId with no running handle
+    // — one whose dispatch already failed — still finds nothing and cannot
+    // overwrite the dispatch-produced error result.
     const legacyShaped = {
       callId: "call-1",
+      claim: { kind: "call-only" },
       kind: "subagent-result",
+      origin: "child",
       output: "done",
       subagentName: "researcher",
     } as const;
@@ -326,6 +340,23 @@ describe("result-to-handle binding", () => {
     expect(isInboxResultFromRunningHandle(state, { ...legacyShaped, callId: "call-unknown" })).toBe(
       false,
     );
+  });
+
+  it("rejects dispatch-origin results on the inbox while the step path trusts them", () => {
+    // Dispatch failures are parent-synthesized and only travel the trusted
+    // step-result path; one arriving over the shared inbox is a forgery.
+    const dispatchFailure = {
+      callId: "call-1",
+      isError: true,
+      kind: "subagent-result",
+      origin: "dispatch",
+      output: { code: "SUBAGENT_START_FAILED", message: "boom" },
+      subagentName: "researcher",
+    } as const;
+    const state = createSessionWithRunningChild().state;
+
+    expect(isResultBoundToRunningHandle(state, dispatchFailure)).toBe(true);
+    expect(isInboxResultFromRunningHandle(state, dispatchFailure)).toBe(false);
   });
 });
 

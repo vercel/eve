@@ -26,9 +26,10 @@ const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outp
 function subagentResult(overrides: Partial<RuntimeSubagentChildResult> = {}): RuntimeActionResult {
   return {
     callId: "call-1",
+    claim: { kind: "session", sessionId: "child-session" },
     kind: "subagent-result",
+    origin: "child",
     output: "done",
-    sessionId: "child-session",
     subagentName: "research",
     ...overrides,
   };

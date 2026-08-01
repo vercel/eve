@@ -40,9 +40,10 @@ export function createDelegatedSubagentSuccessResult(
 
   return {
     callId: String(channel.state?.callId ?? ""),
+    claim: { kind: "session", sessionId },
     kind: "subagent-result",
+    origin: "child",
     output: output as JsonValue,
-    sessionId,
     subagentName: String(channel.state?.subagentName ?? ""),
   };
 }

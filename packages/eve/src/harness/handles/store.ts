@@ -231,6 +231,20 @@ export function formatAgentStatus(output: unknown): string {
 }
 
 /**
+ * Validates one agent handle store about to be persisted, returning the
+ * parsed value. Throws instead of writing an invalid store: transitions run
+ * this on every write, which is the invariant that lets the schema-free
+ * driver-side reader (`query.ts`) trust stored values without revalidating.
+ */
+export function assertPersistableAgentHandleStore(store: AgentHandleStore): AgentHandleStore {
+  const parsed = agentHandleStoreSchema.safeParse(store);
+  if (!parsed.success) {
+    throw new Error(`Refusing to persist a corrupt agent handle store: ${parsed.error.message}`);
+  }
+  return parsed.data;
+}
+
+/**
  * Reads and validates the agent handle store from session state.
  *
  * Returns `undefined` only when no store has been written. A present but

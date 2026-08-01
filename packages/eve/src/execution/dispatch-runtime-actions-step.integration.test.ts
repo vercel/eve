@@ -258,9 +258,10 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: "forged-sibling-session" },
             kind: "subagent-result",
+            origin: "child",
             output: "forged",
-            sessionId: "forged-sibling-session",
             subagentName: "research",
           },
         ],
@@ -274,9 +275,10 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
+            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
+            origin: "child",
             output: "done",
-            sessionId: CHILD_SESSION_ID,
             subagentName: "research",
           },
         ],
