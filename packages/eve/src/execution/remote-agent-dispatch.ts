@@ -18,13 +18,17 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 
 const CreateSessionResponseSchema = z.object({
-  continuationToken: z.string().min(1),
+  // Older eve deployments do not return a continuationToken. Their children
+  // still run to completion as task-mode one-shots; they just can never be
+  // continued, so the handle records no token.
+  continuationToken: z.string().min(1).optional(),
   sessionId: z.string().min(1).optional(),
 });
 
-type RemoteAgentSessionCoordinates = Readonly<
-  Required<z.infer<typeof CreateSessionResponseSchema>>
->;
+type RemoteAgentSessionCoordinates = {
+  readonly continuationToken?: string;
+  readonly sessionId: string;
+};
 
 class RemoteAgentCancelRequestError extends Error {
   readonly retryable: boolean;
@@ -125,14 +129,14 @@ export async function startRemoteAgentSession(input: {
         : undefined;
 
   if (!parsed.success || sessionId === undefined) {
-    const missing = parsed.success ? "a sessionId" : "a continuationToken";
     throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session response did not include ${missing}. ` +
-        "Older eve deployments return only a sessionId; the remote agent may need upgrading.",
+      `Remote agent "${input.action.remoteAgentName}" create-session response did not include a sessionId.`,
     );
   }
 
-  return { continuationToken: parsed.data.continuationToken, sessionId };
+  return parsed.data.continuationToken === undefined
+    ? { sessionId }
+    : { continuationToken: parsed.data.continuationToken, sessionId };
 }
 
 function buildForwardedPrincipalField(input: {

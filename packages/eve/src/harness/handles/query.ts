@@ -26,18 +26,19 @@ function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHan
 /**
  * Finds the running agent handle a child-produced result must settle: the
  * handle whose recorded operation carries the result's callId and whose
- * confirmed address names the claiming child session.
+ * confirmed address names the claiming child session. Results from older
+ * eve deployments carry no sessionId and bind by callId alone.
  */
 export function findRunningAgentHandle(
   state: SessionStateMap | undefined,
-  input: { readonly callId: string; readonly sessionId: string },
+  input: { readonly callId: string; readonly sessionId: string | undefined },
 ): RunningAgentHandle | undefined {
   const handles = readAgentHandles(state);
   return handles.find(
     (handle): handle is RunningAgentHandle =>
       handle.phase === "running" &&
       handle.operation.callId === input.callId &&
-      handle.address.sessionId === input.sessionId,
+      (input.sessionId === undefined || handle.address.sessionId === input.sessionId),
   );
 }
 
@@ -72,10 +73,12 @@ export function isResultBoundToRunningHandle(
 /**
  * Strict variant of {@link isResultBoundToRunningHandle} for results arriving
  * over the shared turn inbox (child notifications and remote callbacks).
- * Every legitimate inbox subagent result comes from a dispatched child that
- * claims its own session, so a result without a matching running handle —
- * including one for a callId whose dispatch already failed — is forged and
- * must not overwrite the dispatch-produced error result.
+ * An inbox subagent result must bind to a running handle: when it claims a
+ * sessionId the handle's address must match it, and when it carries none
+ * (older eve deployments) the callId alone must name a running handle. A
+ * result with no matching running handle — including one for a callId whose
+ * dispatch already failed — must not overwrite the dispatch-produced error
+ * result.
  */
 export function isInboxResultFromRunningHandle(
   state: SessionStateMap | undefined,
@@ -83,9 +86,6 @@ export function isInboxResultFromRunningHandle(
 ): boolean {
   if (result.kind !== "subagent-result") {
     return true;
-  }
-  if (result.sessionId === undefined) {
-    return false;
   }
   return (
     findRunningAgentHandle(state, { callId: result.callId, sessionId: result.sessionId }) !==

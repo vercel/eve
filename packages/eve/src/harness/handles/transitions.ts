@@ -215,12 +215,14 @@ export type SettleAgentTurnResult =
  * The settlement must carry the operation currently recorded on the
  * running handle and the child session the address confirms; anything else
  * is ignored so a stale or forged delivery can never move a newer turn.
+ * Results from older eve deployments claim no sessionId and settle on the
+ * operation alone.
  */
 export function settleAgentTurn(
   session: HarnessSession,
   input: {
     readonly operationId: string;
-    readonly sessionId: string;
+    readonly sessionId: string | undefined;
     readonly outcome: AgentTurnOutcome;
   },
 ): SettleAgentTurnResult {
@@ -231,7 +233,7 @@ export function settleAgentTurn(
   if (existing === undefined || existing.phase !== "running") {
     return { kind: "ignored", reason: "unknown-operation" };
   }
-  if (existing.address.sessionId !== input.sessionId) {
+  if (input.sessionId !== undefined && existing.address.sessionId !== input.sessionId) {
     return { kind: "ignored", reason: "session-mismatch" };
   }
 

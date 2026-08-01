@@ -68,6 +68,36 @@ describe("session callback route", () => {
     });
   });
 
+  it("accepts a sessionId-less callback from an older eve deployment", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify({
+          callId: "call-1",
+          kind: "session.completed",
+          output: "done",
+          subagentName: "research",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+      kind: "runtime-action-result",
+      results: [
+        {
+          callId: "call-1",
+          kind: "subagent-result",
+          output: "done",
+          subagentName: "research",
+        },
+      ],
+    });
+  });
+
   it("projects reported usage onto the resumed result", async () => {
     resumeHookMock.mockResolvedValue(undefined);
 

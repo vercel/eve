@@ -34,6 +34,17 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
 };
 
 /**
+ * Usage from a subagent result. Only child-produced results carry usage;
+ * parent-synthesized dispatch failures never do, and their type omits the
+ * field entirely.
+ */
+function readSubagentResultUsage(
+  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
+): TokenUsage | undefined {
+  return "usage" in result ? result.usage : undefined;
+}
+
+/**
  * Serializable event coordinates for one pending runtime-action batch.
  *
  * Runtime action results are projected back onto the parent stream using the
@@ -227,7 +238,7 @@ export async function resolvePendingRuntimeActions(input: {
   // deliveries don't route responses to a dead child.
   let nextSession: HarnessSession = input.session;
   for (const result of readyResults) {
-    if (result.kind !== "subagent-result" || result.sessionId === undefined) {
+    if (result.kind !== "subagent-result") {
       continue;
     }
     const handle = findRunningAgentHandle(nextSession.state, {
@@ -237,7 +248,9 @@ export async function resolvePendingRuntimeActions(input: {
     if (handle === undefined) {
       continue;
     }
-    nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
+    if (handle.address.continuationToken !== undefined) {
+      nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
+    }
     const settled = settleAgentTurn(nextSession, {
       operationId: handle.operation.id,
       outcome: {
@@ -246,7 +259,7 @@ export async function resolvePendingRuntimeActions(input: {
           result.isError === true
             ? { error: result.output, kind: "failed" }
             : { kind: "succeeded", output: result.output },
-        usageDelta: result.usage ?? ZERO_TOKEN_USAGE,
+        usageDelta: readSubagentResultUsage(result) ?? ZERO_TOKEN_USAGE,
       },
       sessionId: result.sessionId,
     });
@@ -265,21 +278,21 @@ export async function resolvePendingRuntimeActions(input: {
   // Draw completed child spend down against the parent's session totals so
   // the session token limits and the remaining-quota budget granted to later
   // delegations account for what the tree has already spent. Only
-  // child-produced results (`sessionId` present) carry usage; parent-side
-  // dispatch failures never do.
+  // child-produced results carry usage; parent-side dispatch failures
+  // never do.
   for (const result of readyResults) {
-    if (
-      result.kind !== "subagent-result" ||
-      result.sessionId === undefined ||
-      result.usage === undefined
-    ) {
+    if (result.kind !== "subagent-result") {
+      continue;
+    }
+    const usage = readSubagentResultUsage(result);
+    if (usage === undefined) {
       continue;
     }
     nextSession = setTurnUsageState(
       nextSession,
       accumulateSessionUsage({
         previous: getTurnUsageState(nextSession.state),
-        usage: result.usage,
+        usage,
       }),
     );
   }

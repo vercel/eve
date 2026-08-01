@@ -99,7 +99,8 @@ describe("remote agent auth forwarding", () => {
           session: createParentSession(),
         });
         expect(child.sessionId.length).toBeGreaterThan(0);
-        expect(child.continuationToken.length).toBeGreaterThan(0);
+        expect(child.continuationToken).toBeDefined();
+        expect(child.continuationToken?.length).toBeGreaterThan(0);
 
         // Mismatch: an authenticated caller outside the forwarder allow-list
         // fails loud at the hop instead of downgrading to service identity.

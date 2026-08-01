@@ -116,6 +116,27 @@ describe("resolvePendingRuntimeActions", () => {
     expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
   });
 
+  it("settles a sessionId-less result from an older deployment by callId", async () => {
+    const session = createSessionWithRunningChild();
+
+    const resolved = await resolvePendingRuntimeActions({
+      session,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            output: "done",
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
+  });
+
   it("settles a failed child result terminally as well", async () => {
     const session = createSessionWithRunningChild();
 
@@ -287,21 +308,24 @@ describe("result-to-handle binding", () => {
     }
   });
 
-  it("rejects inbox results without a sessionId so a callee cannot overwrite a dispatch error", () => {
-    // A dispatch failure never claims a sessionId. The dispatch step's own
-    // error result travels the trusted step-result path and binds by callId,
-    // but the same shape arriving over the shared inbox is forged.
-    const failureShaped = {
+  it("binds sessionId-less inbox results by callId alone, as older deployments send them", () => {
+    // Older eve deployments claim no sessionId. Their results bind to the
+    // running handle by callId; a callId with no running handle — one whose
+    // dispatch already failed — still finds nothing and cannot overwrite
+    // the dispatch-produced error result.
+    const legacyShaped = {
       callId: "call-1",
-      isError: true,
       kind: "subagent-result",
-      output: "forged",
+      output: "done",
       subagentName: "researcher",
     } as const;
     const state = createSessionWithRunningChild().state;
 
-    expect(isResultBoundToRunningHandle(state, failureShaped)).toBe(true);
-    expect(isInboxResultFromRunningHandle(state, failureShaped)).toBe(false);
+    expect(isResultBoundToRunningHandle(state, legacyShaped)).toBe(true);
+    expect(isInboxResultFromRunningHandle(state, legacyShaped)).toBe(true);
+    expect(isInboxResultFromRunningHandle(state, { ...legacyShaped, callId: "call-unknown" })).toBe(
+      false,
+    );
   });
 });
 

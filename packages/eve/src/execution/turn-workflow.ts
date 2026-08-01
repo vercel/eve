@@ -330,11 +330,12 @@ async function waitForRuntimeActionResults(input: {
     if (value.kind === "runtime-action-result") {
       // The inbox token is shared by every callee in the batch, so an inbox
       // subagent result must bind to a running agent handle in the adopted
-      // session snapshot: its callId on the handle's operation and its
-      // claimed sessionId on the handle's address. Anything else — a callee
-      // settling a sibling's call, or a result for a callId whose dispatch
-      // failed — is dropped; the genuine child's result (or the dispatch
-      // error already in `results`) still resolves the wait.
+      // session snapshot: its callId on the handle's operation and, when it
+      // claims a sessionId, that session on the handle's address (older eve
+      // deployments claim none and bind by callId alone). Anything else — a
+      // callee settling a sibling's call, or a result for a callId whose
+      // dispatch failed — is dropped; the genuine child's result (or the
+      // dispatch error already in `results`) still resolves the wait.
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
       results.push(
         ...value.results.filter((result) =>

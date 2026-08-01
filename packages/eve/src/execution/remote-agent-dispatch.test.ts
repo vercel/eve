@@ -145,6 +145,68 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it("accepts a create-session response without a continuationToken from an older deployment", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const coordinates = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: {
+        agent: {
+          modelReference: { id: "mock/test" },
+          system: "",
+          tools: [],
+        },
+        compaction: {
+          recentWindowSize: 10,
+          threshold: 100000,
+        },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    expect(coordinates).toEqual({ sessionId: "remote-session" });
+  });
+
+  it("rejects a create-session response without any sessionId", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        remote: createRemoteAgent(),
+        session: {
+          agent: {
+            modelReference: { id: "mock/test" },
+            system: "",
+            tools: [],
+          },
+          compaction: {
+            recentWindowSize: 10,
+            threshold: 100000,
+          },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+      }),
+    ).rejects.toThrow("create-session response did not include a sessionId");
+  });
+
   it("preserves a prefixed remote base path on create-session requests", async () => {
     const fetchMock = vi
       .fn()

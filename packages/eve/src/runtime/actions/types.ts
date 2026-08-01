@@ -131,7 +131,8 @@ const runtimeToolResultActionResultSchema = z
  *
  * `sessionId` names the callee session claiming the result; the parent
  * verifies it against the child identity captured at dispatch, so one callee
- * cannot settle a sibling's call. `usage` carries the completed child
+ * cannot settle a sibling's call. Older eve deployments do not send it, and
+ * their results bind by callId alone. `usage` carries the completed child
  * session's token totals so the caller can attribute the subagent's spend.
  */
 export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResultSchema>;
@@ -145,7 +146,7 @@ const runtimeSubagentChildResultSchema = z
     isError: z.boolean().optional(),
     kind: z.literal("subagent-result"),
     output: jsonValueSchema,
-    sessionId: z.string(),
+    sessionId: z.string().optional(),
     subagentName: z.string(),
     usage: tokenUsageSchema.optional(),
   })

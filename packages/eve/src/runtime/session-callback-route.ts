@@ -16,7 +16,8 @@ type SessionCallbackPayload =
       readonly callId: string;
       readonly kind: "session.completed" | "turn.completed";
       readonly output: JsonValue;
-      readonly sessionId: string;
+      /** Absent on callbacks from older eve deployments. */
+      readonly sessionId?: string;
       readonly subagentName: string;
       readonly usage?: TokenUsage;
     }
@@ -24,14 +25,14 @@ type SessionCallbackPayload =
       readonly callId: string;
       readonly error: JsonValue;
       readonly kind: "session.failed";
-      readonly sessionId: string;
+      readonly sessionId?: string;
       readonly subagentName: string;
     }
   | {
       readonly callId: string;
       readonly error: JsonValue;
       readonly kind: "turn.failed";
-      readonly sessionId: string;
+      readonly sessionId?: string;
       readonly subagentName: string;
     };
 
@@ -105,17 +106,20 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
   if (typeof payload.subagentName !== "string" || payload.subagentName.length === 0) {
     return Response.json({ error: "Missing callback subagentName.", ok: false }, { status: 400 });
   }
-  if (typeof payload.sessionId !== "string" || payload.sessionId.length === 0) {
-    return Response.json({ error: "Missing callback sessionId.", ok: false }, { status: 400 });
-  }
+  // Older eve deployments send no sessionId; their results bind by callId
+  // alone, exactly as before sessionId verification existed.
+  const sessionId =
+    typeof payload.sessionId === "string" && payload.sessionId.length > 0
+      ? payload.sessionId
+      : undefined;
 
   if (payload.kind === "session.completed" || payload.kind === "turn.completed") {
     const base: RuntimeSubagentChildResult = {
       callId: payload.callId,
       kind: "subagent-result",
       output: payload.output ?? "",
-      sessionId: payload.sessionId,
       subagentName: payload.subagentName,
+      ...(sessionId === undefined ? {} : { sessionId }),
     };
     const usage = parseCallbackUsage((payload as { usage?: unknown }).usage);
     return usage === undefined ? base : { ...base, usage };
@@ -133,8 +137,8 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
               message: "Remote agent failed.",
             }
           : payload.error,
-      sessionId: payload.sessionId,
       subagentName: payload.subagentName,
+      ...(sessionId === undefined ? {} : { sessionId }),
     };
   }
 
@@ -147,8 +151,8 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
       isError: true,
       kind: "subagent-result",
       output: payload.error,
-      sessionId: payload.sessionId,
       subagentName: payload.subagentName,
+      ...(sessionId === undefined ? {} : { sessionId }),
     };
   }
 
