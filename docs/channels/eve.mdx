@@ -65,7 +65,7 @@ curl -X POST https://<deployment>/eve/v1/session/compact \
 # {"ok":true,"sessionId":"ses_01h...","status":"accepted"}
 ```
 
-Compaction is asynchronous. An accepted request emits `compaction.requested` and `compaction.completed`; when a turn is active, the operation waits for it to settle. `"no_active_session"` is the successful no-op response when the token has no owner.
+Compaction is asynchronous. A successful operation emits `compaction.requested` and `compaction.completed`, then returns through `session.waiting`; when a turn is active, the operation waits for it to settle. If summarization fails, the session still returns to `session.waiting` with its previous history. `"no_active_session"` is the successful no-op response when the token has no owner.
 
 See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the full request and stream flow, including the complete event set.
 

@@ -147,8 +147,9 @@ export interface CompactOptions {
 
 /**
  * Queues context compaction for the session owning a continuation token.
- * Never sends model input or starts a new session. An accepted request emits
- * `compaction.requested` and `compaction.completed` on the session stream.
+ * Never sends model input or starts a new session. An accepted request returns
+ * to `session.waiting`; successful compaction emits `compaction.requested`
+ * followed by `compaction.completed` on the session stream.
  */
 export type CompactFn = (options: CompactOptions) => Promise<CompactSessionResult>;
 

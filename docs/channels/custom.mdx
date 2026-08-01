@@ -104,7 +104,7 @@ export default defineChannel({
 });
 ```
 
-`"accepted"` means the durable session queued the operation. Confirm completion with `compaction.requested` followed by `compaction.completed` on the event stream. If a turn is active, eve runs the compaction after that turn settles; it does not cancel the turn. `"no_active_session"` means the token has no current owner. Both outcomes are successful, and compaction never starts a session or appends a synthetic user message.
+`"accepted"` means the durable session queued the operation. A successful compaction emits `compaction.requested` followed by `compaction.completed`, then the operation returns through `session.waiting`. If summarization fails, the stream returns through `session.waiting` without `compaction.completed` and preserves the previous history. If a turn is active, eve runs the compaction after that turn settles; it does not cancel the turn. `"no_active_session"` means the token has no current owner. Both outcomes are successful, and compaction never starts a session or appends a synthetic user message.
 
 ## Reset a session
 

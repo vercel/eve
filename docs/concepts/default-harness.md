@@ -20,7 +20,7 @@ export default defineAgent({
 
 Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 
-Clients and channels can also request compaction between turns. Call `ClientSession.compact()` or a custom route's `compact({ continuationToken })` helper. The request does not append a user message; if a turn is running, eve queues it until that turn settles. The session stream emits the same `compaction.requested` and `compaction.completed` events as automatic compaction.
+Clients and channels can also request compaction between turns. Call `ClientSession.compact()` or a custom route's `compact({ continuationToken })` helper. The request does not append a user message; if a turn is running, eve queues it until that turn settles. A successful manual compaction emits the same `compaction.requested` and `compaction.completed` events as automatic compaction, followed by `session.waiting`.
 
 ## Built-in tools
 

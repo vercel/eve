@@ -7818,7 +7818,71 @@ describe("createToolLoopHarness", () => {
     expect(getCompatibilityEventTypes(events)).toEqual([
       "compaction.requested",
       "compaction.completed",
+      "session.waiting",
     ]);
+  });
+
+  it("returns an empty session to its waiting boundary after manual compaction", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+      }),
+    );
+    const session = createTestSession({ history: [] });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(compactMessages).not.toHaveBeenCalled();
+  });
+
+  it("returns a failed manual compaction to its waiting boundary", async () => {
+    vi.mocked(compactMessages).mockRejectedValueOnce(new Error("summary failed"));
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
+      }),
+    );
+    const session = createTestSession({
+      history: [{ content: "old message", role: "user" }],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["compaction.requested", "session.waiting"]);
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns a failed manual model resolution to its waiting boundary", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        resolveModel: vi.fn().mockRejectedValueOnce(new Error("model unavailable")),
+      }),
+    );
+    const session = createTestSession({
+      history: [{ content: "old message", role: "user" }],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(compactMessages).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
   it("uses the authored compaction model when one is configured", async () => {

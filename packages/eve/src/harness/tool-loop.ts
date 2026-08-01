@@ -43,6 +43,7 @@ import {
   createCompactionRequestedEvent,
   createInputRequestedEvent,
   createResultCompletedEvent,
+  createSessionWaitingEvent,
   createStepStartedEvent,
 } from "#protocol/message.js";
 import type { InstrumentationDefinition } from "#public/instrumentation/index.js";
@@ -573,47 +574,46 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
 
     if (config.compactOnly === true) {
-      if (session.history.length === 0) {
-        return { next: null, session };
-      }
+      if (session.history.length > 0) {
+        try {
+          const ctx = contextStorage.getStore();
+          const resolvedModel = await resolveActiveRuntimeModel({ config, ctx, session });
+          session = resolvedModel.session;
 
-      const ctx = contextStorage.getStore();
-      const resolvedModel = await resolveActiveRuntimeModel({ config, ctx, session });
-      session = resolvedModel.session;
+          const compacted = await maybeCompact({
+            abortSignal: config.abortSignal,
+            emit,
+            emissionState: {
+              ...emissionState,
+              turnId: activeTurnId(emissionState),
+            },
+            force: true,
+            messages: [...session.history],
+            model: resolvedModel.model,
+            onCompaction: config.onCompaction,
+            resolveModel: config.resolveModel,
+            runtimeIdentity: config.runtimeIdentity,
+            session,
+            telemetry: enrichTelemetry(telemetryConfig, agentName) ?? undefined,
+          });
 
-      try {
-        const compacted = await maybeCompact({
-          abortSignal: config.abortSignal,
-          emit,
-          emissionState: {
-            ...emissionState,
-            turnId: activeTurnId(emissionState),
-          },
-          force: true,
-          messages: [...session.history],
-          model: resolvedModel.model,
-          onCompaction: config.onCompaction,
-          resolveModel: config.resolveModel,
-          runtimeIdentity: config.runtimeIdentity,
-          session,
-          telemetry: enrichTelemetry(telemetryConfig, agentName) ?? undefined,
-        });
-
-        return {
-          next: null,
-          session: {
+          session = {
             ...compacted.session,
             compaction: {
               recentWindowSize: compacted.session.compaction.recentWindowSize,
               threshold: compacted.session.compaction.threshold,
             },
             history: compacted.messages,
-          },
-        };
-      } catch (error) {
-        logError(log, "manual session compaction failed", error, { sessionId: session.sessionId });
-        return { next: null, session };
+          };
+        } catch (error) {
+          logError(log, "manual session compaction failed", error, {
+            sessionId: session.sessionId,
+          });
+        }
       }
+
+      await emit?.(createSessionWaitingEvent(session.continuationToken));
+      return { next: null, session };
     }
 
     // Resolve deferred input, runtime actions, then HITL input; each stage
