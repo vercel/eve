@@ -268,11 +268,18 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
 export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
-      description?: string;
-      dynamic?: ResolvedDynamicSubagentDefinition;
       kind: "subagent";
       name: string;
-    }
+    } & (
+      | {
+          description: string;
+          dynamic?: never;
+        }
+      | {
+          description?: never;
+          dynamic: ResolvedDynamicSubagentDefinition;
+        }
+    )
 >;
 
 /**

@@ -198,10 +198,22 @@ async function compileSubagent(input: {
 
   const description = agent.config.description;
 
-  if (input.dynamic === undefined && !description) {
-    throw new Error(
-      `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,
-    );
+  let variant:
+    | { readonly description: string; readonly dynamic?: never }
+    | {
+        readonly description?: never;
+        readonly dynamic: { readonly eventNames: readonly string[] };
+      };
+
+  if (input.dynamic !== undefined) {
+    variant = { dynamic: input.dynamic };
+  } else {
+    if (!description) {
+      throw new Error(
+        `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,
+      );
+    }
+    variant = { description };
   }
 
   const descendants = await compileSubagentGraph({
@@ -212,18 +224,6 @@ async function compileSubagent(input: {
     parentNodeId: nodeId,
     subagents: input.source.manifest.subagents,
   });
-  const dynamicFields: {
-    description?: string;
-    dynamic?: { readonly eventNames: readonly string[] };
-  } = {};
-
-  if (description !== undefined) {
-    dynamicFields.description = description;
-  }
-  if (input.dynamic !== undefined) {
-    dynamicFields.dynamic = input.dynamic;
-  }
-
   return {
     descendants,
     node: {
@@ -231,7 +231,7 @@ async function compileSubagent(input: {
         ...agent,
         remoteAgents: [...descendants.remoteAgents],
       },
-      ...dynamicFields,
+      ...variant,
       entryPath: input.source.entryPath,
       logicalPath: input.source.logicalPath,
       name: subagentName,

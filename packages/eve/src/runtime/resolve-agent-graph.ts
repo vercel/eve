@@ -30,6 +30,7 @@ import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type {
   ResolvedChannelDefinition,
+  ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
   ResolvedRuntimeSubagentNode,
@@ -322,27 +323,23 @@ async function resolveRuntimeSubagent(input: {
       },
     );
   }
-  const dynamicFields: {
-    dynamic?: ResolvedRuntimeSubagentNode["dynamic"];
-  } = {};
-
-  if (input.sourceRef.dynamic !== undefined) {
-    dynamicFields.dynamic = await resolveDynamicSubagentDefinition({
-      definition: {
-        ...dynamicSource!,
-        ...input.sourceRef.dynamic,
-      },
-      moduleMap: input.moduleMap,
-      nodeId: input.sourceRef.nodeId,
-    });
-  }
-  const descriptionFields: { description?: string } = {};
-  if (input.sourceRef.description !== undefined) {
-    descriptionFields.description = input.sourceRef.description;
-  }
+  const variant:
+    | { readonly description: string; readonly dynamic?: never }
+    | { readonly description?: never; readonly dynamic: ResolvedDynamicSubagentDefinition } =
+    input.sourceRef.dynamic === undefined
+      ? { description: input.sourceRef.description }
+      : {
+          dynamic: await resolveDynamicSubagentDefinition({
+            definition: {
+              ...dynamicSource!,
+              ...input.sourceRef.dynamic,
+            },
+            moduleMap: input.moduleMap,
+            nodeId: input.sourceRef.nodeId,
+          }),
+        };
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
-    ...descriptionFields,
-    ...dynamicFields,
+    ...variant,
     kind: "subagent",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
