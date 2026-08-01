@@ -271,26 +271,23 @@ TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
     logo: "github",
     docsHref: "/docs/channels/github",
     keywords: ["issues", "pull requests", "app", "webhook", "code"],
-    install: `Add this channel from eve's registry. This writes \`agent/channels/github.ts\`:
+    install: `Add this channel from eve's registry to create a Vercel Connect GitHub App, route verified webhooks, and write \`agent/channels/github.ts\`:
 
 \`\`\`bash
 eve add channel/github
 \`\`\``,
-    quickStart: `Create \`agent/channels/github.ts\`:
+    quickStart: `The guided setup writes \`agent/channels/github.ts\`:
 
 \`\`\`ts
 // agent/channels/github.ts
+import { connectGitHubCredentials } from "@vercel/connect/eve";
 import { githubChannel } from "eve/channels/github";
 
 export default githubChannel({
-  credentials: {
-    appId: () => process.env.GITHUB_APP_ID!,
-    privateKey: () => process.env.GITHUB_APP_PRIVATE_KEY!,
-    webhookSecret: () => process.env.GITHUB_WEBHOOK_SECRET!,
-  },
+  credentials: connectGitHubCredentials("github/my-agent"),
 });
 \`\`\``,
-    configure: `Create a GitHub App, subscribe to issue and pull-request events, and set the webhook URL to eve's route (\`/eve/v1/github\`). Provide the app ID, private key, and webhook secret through environment variables. See the [GitHub channel docs](/docs/channels/github) for required permissions.`,
+    configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the GitHub App, and attach its verified webhook trigger to \`/eve/v1/github\`. Deploy, install the app from Vercel Connect, then mention it in an issue, pull request, or review comment. See the [GitHub channel docs](/docs/channels/github) for permissions and events.`,
   },
   "linear-agent": {
     logo: "linear",

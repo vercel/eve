@@ -1,4 +1,5 @@
 import { DISCORD_SETUP } from "./discord/setup.js";
+import { GITHUB_SETUP } from "./github/setup.js";
 import { LINEAR_SETUP } from "./linear/setup.js";
 import { PHOTON_SETUP } from "./photon/setup.js";
 import { SLACK_SETUP } from "./slack/setup.js";
@@ -10,6 +11,7 @@ export const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   WEB_SETUP,
   SLACK_SETUP,
   DISCORD_SETUP,
+  GITHUB_SETUP,
   LINEAR_SETUP,
   PHOTON_SETUP,
 ];

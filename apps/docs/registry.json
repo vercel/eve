@@ -1209,19 +1209,19 @@
       "name": "channel/github",
       "type": "registry:item",
       "title": "GitHub",
-      "description": "Drive your agent from issues, pull requests, and comments.",
-      "envVars": {
-        "GITHUB_APP_ID": "",
-        "GITHUB_APP_PRIVATE_KEY": "",
-        "GITHUB_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/github.ts",
-          "type": "registry:file",
-          "target": "agent/channels/github.ts"
+      "description": "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "github"]
+          },
+          "requires": ">=0.30.7"
         }
-      ]
+      },
+      "dependencies": ["@vercel/connect"]
     },
     {
       "name": "channel/linear-agent",
