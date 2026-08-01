@@ -27,20 +27,8 @@ export function createDelegatedSubagentSuccessResult(
     return undefined;
   }
 
-  // The child's own session id: the parent verifies it against the identity
-  // captured at dispatch before the result may settle the pending call. An
-  // empty claim would be silently dropped by that filter and hang the parent
-  // forever, so a missing key must fail loud here instead.
-  const sessionId = serializedContext["eve.sessionId"];
-  if (typeof sessionId !== "string" || sessionId.length === 0) {
-    throw new Error(
-      "Serialized context is missing eve.sessionId; the delegated parent result cannot claim its session.",
-    );
-  }
-
   return {
     callId: String(channel.state?.callId ?? ""),
-    claim: { kind: "session", sessionId },
     kind: "subagent-result",
     origin: "child",
     output: output as JsonValue,

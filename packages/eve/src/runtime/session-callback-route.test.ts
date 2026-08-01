@@ -59,7 +59,6 @@ describe("session callback route", () => {
       results: [
         {
           callId: "call-1",
-          claim: { kind: "session", sessionId: "remote-session" },
           kind: "subagent-result",
           origin: "child",
           output: "done",
@@ -91,7 +90,6 @@ describe("session callback route", () => {
       results: [
         {
           callId: "call-1",
-          claim: { kind: "call-only" },
           kind: "subagent-result",
           origin: "child",
           output: "done",
@@ -125,7 +123,6 @@ describe("session callback route", () => {
       results: [
         {
           callId: "call-1",
-          claim: { kind: "session", sessionId: "remote-session" },
           kind: "subagent-result",
           origin: "child",
           output: "done",
@@ -201,7 +198,6 @@ describe("session callback route", () => {
       results: [
         {
           callId: "call-1",
-          claim: { kind: "session", sessionId: "remote-session" },
           kind: "subagent-result",
           origin: "child",
           output: "done",
@@ -234,7 +230,6 @@ describe("session callback route", () => {
       results: [
         {
           callId: "call-2",
-          claim: { kind: "session", sessionId: "remote-session" },
           kind: "subagent-result",
           origin: "child",
           output: "next result",
@@ -242,35 +237,6 @@ describe("session callback route", () => {
         },
       ],
     });
-  });
-
-  it("rejects a turn callback without a sessionId instead of binding by callId", async () => {
-    // `turn.*` kinds postdate session claims, so no older deployment can send
-    // them; a claim-less turn callback must not inherit the legacy loophole.
-    for (const body of [
-      { callId: "call-2", kind: "turn.completed", output: "done", subagentName: "research" },
-      {
-        callId: "call-2",
-        error: { code: "X", message: "boom" },
-        kind: "turn.failed",
-        subagentName: "research",
-      },
-    ]) {
-      const response = await handleSessionCallbackRequest(
-        new Request("https://app.example.com/eve/v1/callback/tok123", {
-          body: JSON.stringify(body),
-          method: "POST",
-        }),
-        createRouteContext({ token: "tok123" }),
-      );
-
-      expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({
-        error: "Missing callback sessionId.",
-        ok: false,
-      });
-    }
-    expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
   it("resumes a failed conversation turn as an error result", async () => {
@@ -299,7 +265,6 @@ describe("session callback route", () => {
       results: [
         {
           callId: "call-2",
-          claim: { kind: "session", sessionId: "remote-session" },
           isError: true,
           kind: "subagent-result",
           origin: "child",

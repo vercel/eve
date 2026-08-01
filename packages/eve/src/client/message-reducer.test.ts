@@ -127,7 +127,6 @@ describe("defaultMessageReducer", () => {
       createActionResultEvent({
         result: {
           callId: "call_1",
-          claim: { kind: "session", sessionId: "child-session" },
           kind: "subagent-result",
           origin: "child",
           output: { summary: "done" },

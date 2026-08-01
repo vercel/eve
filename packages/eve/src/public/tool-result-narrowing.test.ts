@@ -32,7 +32,6 @@ function toolResult(toolName: string, output: unknown, isError?: boolean): Runti
 function subagentResult(): RuntimeActionResult {
   return {
     callId: "call_2",
-    claim: { kind: "session", sessionId: "child-session" },
     kind: "subagent-result",
     origin: "child",
     output: "done",

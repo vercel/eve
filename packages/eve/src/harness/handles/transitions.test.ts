@@ -88,7 +88,6 @@ function parkedSession(): HarnessSession {
       result: { kind: "succeeded", output: "initial findings" },
       usageDelta: ZERO_USAGE,
     },
-    claim: { kind: "session", sessionId: address.sessionId },
   });
   if (settled.kind !== "settled") {
     throw new Error("expected settled");
@@ -280,7 +279,6 @@ describe("settleAgentTurn", () => {
         result: { kind: "succeeded", output: `  padded\n${"x".repeat(200)}  ` },
         usageDelta: ZERO_USAGE,
       },
-      claim: { kind: "session", sessionId: address.sessionId },
     });
     expect(settled.kind).toBe("settled");
     if (settled.kind !== "settled") {
@@ -302,23 +300,6 @@ describe("settleAgentTurn", () => {
         result: { error: { code: "BOOM" }, kind: "failed" },
         usageDelta: ZERO_USAGE,
       },
-      claim: { kind: "session", sessionId: address.sessionId },
-    });
-    expect(settled.kind).toBe("settled");
-    if (settled.kind === "settled") {
-      expect(handlesOf(settled.session)).toEqual([]);
-    }
-  });
-
-  it("settles a call-only claim from an older deployment on the operation alone", () => {
-    const settled = settleAgentTurn(runningSession(), {
-      claim: { kind: "call-only" },
-      operationId: startOperation.id,
-      outcome: {
-        kind: "terminal",
-        result: { kind: "succeeded", output: "done" },
-        usageDelta: ZERO_USAGE,
-      },
     });
     expect(settled.kind).toBe("settled");
     if (settled.kind === "settled") {
@@ -334,7 +315,6 @@ describe("settleAgentTurn", () => {
         result: { error: "model overloaded", kind: "failed" },
         usageDelta: ZERO_USAGE,
       },
-      claim: { kind: "session", sessionId: address.sessionId },
     });
     expect(settled.kind).toBe("settled");
     if (settled.kind === "settled") {
@@ -342,7 +322,7 @@ describe("settleAgentTurn", () => {
     }
   });
 
-  it("ignores stale operations and mismatched child sessions", () => {
+  it("ignores stale operations", () => {
     expect(
       settleAgentTurn(runningSession(), {
         operationId: "op_stale",
@@ -351,20 +331,7 @@ describe("settleAgentTurn", () => {
           result: { kind: "succeeded", output: "" },
           usageDelta: ZERO_USAGE,
         },
-        claim: { kind: "session", sessionId: address.sessionId },
       }),
     ).toEqual({ kind: "ignored", reason: "unknown-operation" });
-
-    expect(
-      settleAgentTurn(runningSession(), {
-        operationId: startOperation.id,
-        outcome: {
-          kind: "parked",
-          result: { kind: "succeeded", output: "" },
-          usageDelta: ZERO_USAGE,
-        },
-        claim: { kind: "session", sessionId: "session_forged" },
-      }),
-    ).toEqual({ kind: "ignored", reason: "session-mismatch" });
   });
 });

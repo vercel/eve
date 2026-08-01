@@ -1,8 +1,4 @@
-import type {
-  ChildSessionClaim,
-  RuntimeActionResult,
-  RuntimeSubagentChildResult,
-} from "#runtime/actions/types.js";
+import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/state-key.js";
 import type { AgentHandle } from "#harness/handles/store.js";
 import type { SessionStateMap } from "#harness/types.js";
@@ -30,36 +26,31 @@ function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHan
 
 /**
  * Finds the running agent handle a child-produced result must settle: the
- * handle whose recorded operation carries the result's callId and whose
- * confirmed address names the claimed child session. A `call-only` claim
- * (see {@link ChildSessionClaim}) binds by callId alone.
+ * handle whose recorded operation carries the result's callId.
+ *
+ * Binding is by callId alone. Possession of the parent's callback token is
+ * the authorization to settle; the handle's recorded address is used for
+ * outbound delivery (continuation, cancellation), never as an inbound
+ * identity check. Under the accepted at-least-once dispatch window a
+ * replay-orphaned duplicate child holds the same token and callId and may
+ * settle the call in place of the owned child — an accepted trade-off,
+ * since both children computed the same input.
  */
 export function findRunningAgentHandle(
   state: SessionStateMap | undefined,
-  input: { readonly callId: string; readonly claim: ChildSessionClaim },
+  input: { readonly callId: string },
 ): RunningAgentHandle | undefined {
-  // Inbox hook payloads are durable: one persisted by an older build during
-  // an in-flight deploy may predate the claim field. Such a result is
-  // unclaimable and must drop, not throw inside the driver loop.
-  const claim = input.claim as ChildSessionClaim | undefined;
-  if (claim === undefined) {
-    return undefined;
-  }
   const handles = readAgentHandles(state);
   return handles.find(
     (handle): handle is RunningAgentHandle =>
-      handle.phase === "running" &&
-      handle.operation.callId === input.callId &&
-      (claim.kind === "call-only" || handle.address.sessionId === claim.sessionId),
+      handle.phase === "running" && handle.operation.callId === input.callId,
   );
 }
 
 /**
- * Subagent results arrive through the parent's shared callback hook, which
- * every remote callee in a batch can reach. Dispatch-time ownership is
- * authoritative: a child result may settle a call only when a running handle
- * binds that callId to its claimed session, so one callee cannot forge a
- * sibling's result.
+ * A subagent result may settle a call only when a running handle records
+ * its callId: a late or duplicate result for an already-settled call finds
+ * no running handle and is dropped.
  *
  * `dispatch`-origin failures pass unconditionally: the parent synthesizes
  * them for calls whose child never started, and they reach the harness only
@@ -76,25 +67,19 @@ export function isResultBoundToRunningHandle(
   if (result.origin === "dispatch") {
     return true;
   }
-  return (
-    findRunningAgentHandle(state, { callId: result.callId, claim: result.claim }) !== undefined
-  );
+  return findRunningAgentHandle(state, { callId: result.callId }) !== undefined;
 }
 
 /**
  * Strict variant of {@link isResultBoundToRunningHandle} for results arriving
  * over the shared turn inbox (child notifications and remote callbacks).
- * Only `child`-origin results ever travel the inbox, and each must bind to a
- * running handle under its claim. A result with no matching running handle —
- * including one for a callId whose dispatch already failed — must not
- * overwrite the dispatch-produced error result, and a `dispatch`-origin
- * result on the inbox is a forgery by definition.
+ * An inbox result must bind to a running handle by callId; one with no
+ * matching running handle — including one for a callId whose dispatch
+ * already failed — must not overwrite the dispatch-produced error result.
  */
 export function isInboxSubagentResultFromRunningHandle(
   state: SessionStateMap | undefined,
   result: RuntimeSubagentChildResult,
 ): boolean {
-  return (
-    findRunningAgentHandle(state, { callId: result.callId, claim: result.claim }) !== undefined
-  );
+  return findRunningAgentHandle(state, { callId: result.callId }) !== undefined;
 }

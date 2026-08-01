@@ -947,6 +947,7 @@ describe("dispatchRuntimeActionsStep", () => {
           callId: "call-dynamic",
           isError: true,
           kind: "subagent-result",
+          origin: "dispatch",
           output: {
             code: "SUBAGENT_UNAVAILABLE",
             message: 'Subagent "researcher" is not available in the current session context.',

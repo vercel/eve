@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { projectParkedAgentHandles, renderAgentsSnippet } from "#harness/handles/prompt.js";
+import {
+  projectParkedAgentHandles,
+  renderAgentsSnippet,
+  resolveAgentsAnnouncement,
+} from "#harness/handles/prompt.js";
 import type { AgentHandle } from "#harness/handles/store.js";
 
 const identity = {
@@ -63,5 +67,44 @@ describe("projectParkedAgentHandles / renderAgentsSnippet", () => {
     expect(snippet).not.toContain(parkedRemoteHandle.address.continuationToken);
     expect(snippet).not.toContain("URL_SENTINEL");
     expect(snippet).not.toContain("CALLBACK_SENTINEL");
+  });
+});
+
+describe("resolveAgentsAnnouncement", () => {
+  it("announces a changed listing without replacing earlier conversation content", () => {
+    const messages = [{ content: "Earlier response", role: "assistant" as const }];
+    const content = resolveAgentsAnnouncement({
+      messages,
+      store: { handles: [parkedRemoteHandle] },
+    });
+
+    expect(content).toContain(`<agent id="${identity.id}"`);
+    expect(messages).toEqual([{ content: "Earlier response", role: "assistant" }]);
+  });
+
+  it("does not repeat an unchanged listing", () => {
+    const content = renderAgentsSnippet({ handles: [parkedRemoteHandle] });
+
+    expect(
+      resolveAgentsAnnouncement({
+        messages: [{ content, role: "assistant" }],
+        store: { handles: [parkedRemoteHandle] },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("announces an empty listing after the last parked handle disappears", () => {
+    const previous = renderAgentsSnippet({ handles: [parkedRemoteHandle] });
+
+    expect(
+      resolveAgentsAnnouncement({
+        messages: [{ content: previous, role: "assistant" }],
+        store: { handles: [runningHandle] },
+      }),
+    ).toBe("[Agents]\n<agents>\n</agents>");
+  });
+
+  it("skips empty scaffolding when no listing was previously announced", () => {
+    expect(resolveAgentsAnnouncement({ messages: [], store: undefined })).toBeUndefined();
   });
 });

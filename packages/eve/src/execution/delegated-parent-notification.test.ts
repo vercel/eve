@@ -25,7 +25,6 @@ const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outp
 function createSuccessResult(): RuntimeSubagentChildResult {
   return {
     callId: "call-1",
-    claim: { kind: "session", sessionId: "child-session" },
     kind: "subagent-result",
     origin: "child",
     output: "done",
@@ -75,7 +74,6 @@ describe("notifyDelegatedParentStep", () => {
       results: [
         {
           callId: "call-1",
-          claim: { kind: "session", sessionId: "child-session" },
           kind: "subagent-result",
           origin: "child",
           output: "done",
@@ -101,7 +99,6 @@ describe("notifyDelegatedParentStep", () => {
   it("never attaches usage to error results", async () => {
     const errorResult: RuntimeSubagentChildResult = {
       callId: "call-1",
-      claim: { kind: "session", sessionId: "child-session" },
       isError: true,
       kind: "subagent-result",
       origin: "child",

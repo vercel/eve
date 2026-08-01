@@ -561,7 +561,6 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: "child-session" },
             kind: "subagent-result",
             origin: "child",
             output: "child output",
@@ -772,7 +771,6 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: "child-session" },
             kind: "subagent-result",
             origin: "child",
             output: "approved child output",
@@ -949,7 +947,6 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: "child-session" },
             kind: "subagent-result",
             origin: "child",
             output: "authorized child output",
@@ -1043,7 +1040,6 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: "child-session-1" },
             kind: "subagent-result",
             origin: "child",
             output: "first",
@@ -1064,7 +1060,6 @@ describe("turnWorkflow", () => {
         results: [
           {
             callId: "call-2",
-            claim: { kind: "session", sessionId: "child-session-2" },
             kind: "subagent-result",
             origin: "child",
             output: "second",

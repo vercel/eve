@@ -102,7 +102,6 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
             origin: "child",
             output: "done",
@@ -117,29 +116,6 @@ describe("resolvePendingRuntimeActions", () => {
     expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
   });
 
-  it("settles a call-only claim from an older deployment by callId", async () => {
-    const session = createSessionWithRunningChild();
-
-    const resolved = await resolvePendingRuntimeActions({
-      session,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            claim: { kind: "call-only" },
-            kind: "subagent-result",
-            origin: "child",
-            output: "done",
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(resolved.outcome).toBe("resolved");
-    expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
-  });
-
   it("settles a failed child result terminally as well", async () => {
     const session = createSessionWithRunningChild();
 
@@ -149,7 +125,6 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             isError: true,
             kind: "subagent-result",
             origin: "child",
@@ -179,7 +154,6 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
             origin: "child",
             output: "done",
@@ -191,28 +165,6 @@ describe("resolvePendingRuntimeActions", () => {
 
     expect(resolved.outcome).toBe("resolved");
     expect(getProxyInputRequests(resolved.session.state).size).toBe(0);
-  });
-
-  it("ignores a result that claims a session no running handle confirms", async () => {
-    const session = createSessionWithRunningChild();
-
-    const wrongChild = {
-      callId: "call-1",
-      claim: { kind: "session", sessionId: "forged-sibling-session" },
-      kind: "subagent-result",
-      origin: "child",
-      output: "forged",
-      subagentName: "researcher",
-    } as const;
-
-    const resolved = await resolvePendingRuntimeActions({
-      session,
-      stepInput: { runtimeActionResults: [wrongChild] },
-    });
-
-    expect(resolved.outcome).toBe("unresolved");
-    // The genuine child stays owned and running.
-    expect(getAgentHandleStore(resolved.session.state)?.handles).toHaveLength(1);
   });
 
   it("accepts a dispatch-origin failure result by callId", async () => {
@@ -245,7 +197,6 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
             origin: "child",
             output: "done",
@@ -277,7 +228,6 @@ describe("resolvePendingRuntimeActions", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
             origin: "child",
             output: "done",
@@ -298,21 +248,21 @@ describe("resolvePendingRuntimeActions", () => {
 describe("result-to-handle binding", () => {
   const boundResult = {
     callId: "call-1",
-    claim: { kind: "session", sessionId: CHILD_SESSION_ID },
     kind: "subagent-result",
     origin: "child",
     output: "done",
     subagentName: "researcher",
   } as const;
 
-  it("accepts only results a running handle binds by callId and sessionId", () => {
+  it("accepts only results a running handle binds by callId", () => {
+    // Possession of the callback token authorizes settlement; binding is by
+    // callId alone. A callId with no running handle — one whose dispatch
+    // already failed — finds nothing and cannot overwrite the
+    // dispatch-produced error result.
     const state = createSessionWithRunningChild().state;
 
     for (const bound of [isResultBoundToRunningHandle, isInboxSubagentResultFromRunningHandle]) {
       expect(bound(state, boundResult)).toBe(true);
-      expect(
-        bound(state, { ...boundResult, claim: { kind: "session", sessionId: "forged-sibling" } }),
-      ).toBe(false);
       expect(bound(state, { ...boundResult, callId: "call-other" })).toBe(false);
     }
     expect(
@@ -323,28 +273,9 @@ describe("result-to-handle binding", () => {
         toolName: "x",
       }),
     ).toBe(true);
-  });
-
-  it("binds call-only claims by callId alone, as older deployments send them", () => {
-    // Older eve deployments claim no session (`call-only`). Their results
-    // bind to the running handle by callId; a callId with no running handle
-    // — one whose dispatch already failed — still finds nothing and cannot
-    // overwrite the dispatch-produced error result.
-    const legacyShaped = {
-      callId: "call-1",
-      claim: { kind: "call-only" },
-      kind: "subagent-result",
-      origin: "child",
-      output: "done",
-      subagentName: "researcher",
-    } as const;
-    const state = createSessionWithRunningChild().state;
-
-    expect(isResultBoundToRunningHandle(state, legacyShaped)).toBe(true);
-    expect(isInboxSubagentResultFromRunningHandle(state, legacyShaped)).toBe(true);
     expect(
       isInboxSubagentResultFromRunningHandle(state, {
-        ...legacyShaped,
+        ...boundResult,
         callId: "call-unknown",
       }),
     ).toBe(false);

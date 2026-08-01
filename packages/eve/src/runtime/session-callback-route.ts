@@ -3,7 +3,7 @@ import { REMOTE_AGENT_FAILED } from "#harness/agent-handle-errors.js";
 import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import type { ChildSessionClaim, RuntimeSubagentChildResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
 
@@ -12,19 +12,17 @@ export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 const HANDLED_METHODS: readonly ChannelMethod[] = ["POST"];
 
 /**
- * Wire payload of the child→parent callback route, split by protocol
- * generation. The `session.*` kinds predate session claims, so a missing or
- * empty `sessionId` is tolerated and binds by callId alone. The `turn.*`
- * kinds were introduced together with session claims — no older deployment
- * can send them — so their `sessionId` is required and its absence rejects
- * the callback instead of widening the legacy loophole.
+ * Wire payload of the child→parent callback route. Possession of the
+ * callback token is the authorization to settle; results bind to the
+ * pending call by callId. `sessionId` is informational (tracing and
+ * diagnostics) and never verified — new senders emit it, older eve
+ * deployments may omit it.
  */
 type SessionCallbackPayload =
   | {
       readonly callId: string;
       readonly kind: "session.completed";
       readonly output: JsonValue;
-      /** Absent on callbacks from older eve deployments. */
       readonly sessionId?: string;
       readonly subagentName: string;
       readonly usage?: TokenUsage;
@@ -41,7 +39,7 @@ type SessionCallbackPayload =
       readonly callId: string;
       readonly kind: "turn.completed";
       readonly output: JsonValue;
-      readonly sessionId: string;
+      readonly sessionId?: string;
       readonly subagentName: string;
       readonly usage?: TokenUsage;
     }
@@ -49,7 +47,7 @@ type SessionCallbackPayload =
       readonly callId: string;
       readonly error: JsonValue;
       readonly kind: "turn.failed";
-      readonly sessionId: string;
+      readonly sessionId?: string;
       readonly subagentName: string;
     };
 
@@ -123,25 +121,9 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
   if (typeof payload.subagentName !== "string" || payload.subagentName.length === 0) {
     return Response.json({ error: "Missing callback subagentName.", ok: false }, { status: 400 });
   }
-  const sessionId =
-    typeof payload.sessionId === "string" && payload.sessionId.length > 0
-      ? payload.sessionId
-      : undefined;
-  // `turn.*` kinds postdate session claims, so no legacy sender exists and a
-  // claim-less turn callback is rejected rather than allowed to bind by
-  // callId alone. Only the `session.*` kinds tolerate the older-deployment
-  // `call-only` claim.
-  const isTurnKind = payload.kind === "turn.completed" || payload.kind === "turn.failed";
-  if (isTurnKind && sessionId === undefined) {
-    return Response.json({ error: "Missing callback sessionId.", ok: false }, { status: 400 });
-  }
-  const claim: ChildSessionClaim =
-    sessionId === undefined ? { kind: "call-only" } : { kind: "session", sessionId };
-
   if (payload.kind === "session.completed" || payload.kind === "turn.completed") {
     const base: RuntimeSubagentChildResult = {
       callId: payload.callId,
-      claim,
       kind: "subagent-result",
       origin: "child",
       output: payload.output ?? "",
@@ -154,7 +136,6 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
   if (payload.kind === "session.failed") {
     return {
       callId: payload.callId,
-      claim,
       isError: true,
       kind: "subagent-result",
       origin: "child",
@@ -175,7 +156,6 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
     }
     return {
       callId: payload.callId,
-      claim,
       isError: true,
       kind: "subagent-result",
       origin: "child",

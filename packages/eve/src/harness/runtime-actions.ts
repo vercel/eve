@@ -243,10 +243,7 @@ export async function resolvePendingRuntimeActions(input: {
     if (result.kind !== "subagent-result" || result.origin !== "child") {
       continue;
     }
-    const handle = findRunningAgentHandle(nextSession.state, {
-      callId: result.callId,
-      claim: result.claim,
-    });
+    const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
     if (handle === undefined) {
       continue;
     }
@@ -254,7 +251,6 @@ export async function resolvePendingRuntimeActions(input: {
       nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
     }
     const settled = settleAgentTurn(nextSession, {
-      claim: result.claim,
       operationId: handle.operation.id,
       outcome: {
         kind: "terminal",

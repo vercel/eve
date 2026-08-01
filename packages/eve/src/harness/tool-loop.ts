@@ -49,7 +49,7 @@ import {
 } from "#protocol/message.js";
 import type { InstrumentationDefinition } from "#public/instrumentation/index.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
-import { projectParkedAgentHandles, renderAgentsSnippet } from "#harness/handles/prompt.js";
+import { resolveAgentsAnnouncement } from "#harness/handles/prompt.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import {
   getWorkflowRuntimeActionInterrupts,
@@ -753,6 +753,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
+    if (config.persistentSubagentSessions === true) {
+      const announcement = resolveAgentsAnnouncement({
+        messages,
+        store: getAgentHandleStore(session.state),
+      });
+      if (announcement !== undefined) {
+        messages.push({ content: announcement, role: "assistant" });
+      }
+    }
+
     if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
       for (const entry of effectiveStepInput.context) {
         messages.push({ content: entry, role: "user" });
@@ -852,14 +862,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
         systemMessages.push({ role: "system", content: skillAnnouncement });
-      }
-    }
-    if (config.persistentSubagentSessions === true) {
-      const handles = getAgentHandleStore(session.state);
-      // Only parked handles render; without one the snippet would be empty
-      // scaffolding, so it is not injected at all.
-      if (handles !== undefined && projectParkedAgentHandles(handles).length > 0) {
-        systemMessages.push({ role: "system", content: renderAgentsSnippet(handles) });
       }
     }
     if (emptyDeliveryEnabled) {

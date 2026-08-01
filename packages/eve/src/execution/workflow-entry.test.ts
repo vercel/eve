@@ -517,7 +517,6 @@ describe("workflowEntry", () => {
     expect(notifyDelegatedParentStep).toHaveBeenCalledWith({
       result: {
         callId: "call-1",
-        claim: { kind: "session", sessionId: "wrun_test_123" },
         isError: true,
         kind: "subagent-result",
         origin: "child",

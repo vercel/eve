@@ -691,7 +691,7 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
-  it("derives the current agents listing from the handle store for each model call", async () => {
+  it("announces current agents outside the cacheable system prompt", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -701,7 +701,15 @@ describe("createToolLoopHarness", () => {
     });
 
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
+      createTestConfig("conversation", undefined, {
+        persistentSubagentSessions: true,
+        resolveModel: vi.fn().mockResolvedValue(
+          new MockLanguageModelV3({
+            modelId: "claude-sonnet-4-5",
+            provider: "anthropic.messages",
+          }),
+        ),
+      }),
     );
     const session = createTestSession({
       state: {
@@ -726,16 +734,26 @@ describe("createToolLoopHarness", () => {
       },
     });
 
-    await runStep(session, { message: "Hi" });
+    const result = await runStep(session, { message: "Hi" });
 
-    const instructions = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions;
-    expect(instructions).toMatchObject({
+    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    expect(instructions).toBe("You are a test assistant.");
+    expect(messages).toContainEqual({
       content: expect.stringContaining(
         '<agent id="ag_research:123456789012" name="research">waiting</agent>',
       ),
-      role: "system",
+      role: "assistant",
     });
-    expect(JSON.stringify(instructions)).not.toContain("private-token");
+    expect(messages.at(-1)).toEqual({ content: "Hi", role: "user" });
+    expect(JSON.stringify({ instructions, messages })).not.toContain("private-token");
+    expect(result.session.history).toContainEqual({
+      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
+      role: "assistant",
+    });
   });
 
   it("skips the agents snippet when no handle is parked", async () => {
@@ -776,8 +794,13 @@ describe("createToolLoopHarness", () => {
 
     await runStep(session, { message: "Hi" });
 
-    const instructions = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions;
-    expect(JSON.stringify(instructions ?? "")).not.toContain("<agents>");
+    const call = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    expect(JSON.stringify(call?.instructions ?? "")).not.toContain("<agents>");
+    expect(JSON.stringify(messages)).not.toContain("<agents>");
   });
 
   it("uses dynamic model selection for the model call", async () => {

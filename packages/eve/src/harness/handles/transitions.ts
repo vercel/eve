@@ -11,7 +11,6 @@ import {
 } from "#harness/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
-import type { ChildSessionClaim } from "#runtime/actions/types.js";
 
 /**
  * Records intent to start a fresh child. Must be applied to the step's
@@ -220,22 +219,20 @@ export function rejectAgentEffect(
 /** Result of applying a settled child turn to the store. */
 export type SettleAgentTurnResult =
   | { readonly kind: "settled"; readonly session: HarnessSession }
-  | { readonly kind: "ignored"; readonly reason: "unknown-operation" | "session-mismatch" };
+  | { readonly kind: "ignored"; readonly reason: "unknown-operation" };
 
 /**
  * Applies one settled child turn: `running` becomes `parked` for a parked
  * outcome or is deleted for a terminal outcome.
  *
  * The settlement must carry the operation currently recorded on the
- * running handle and a claim the handle's address confirms (see
- * {@link ChildSessionClaim}); anything else is ignored so a stale or forged
- * delivery can never move a newer turn.
+ * running handle; anything else is ignored so a stale delivery can never
+ * move a newer turn.
  */
 export function settleAgentTurn(
   session: HarnessSession,
   input: {
     readonly operationId: string;
-    readonly claim: ChildSessionClaim;
     readonly outcome: AgentTurnOutcome;
   },
 ): SettleAgentTurnResult {
@@ -245,9 +242,6 @@ export function settleAgentTurn(
   );
   if (existing === undefined || existing.phase !== "running") {
     return { kind: "ignored", reason: "unknown-operation" };
-  }
-  if (input.claim.kind === "session" && existing.address.sessionId !== input.claim.sessionId) {
-    return { kind: "ignored", reason: "session-mismatch" };
   }
 
   if (input.outcome.kind === "terminal") {

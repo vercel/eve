@@ -77,7 +77,6 @@ function subagentResult(input: {
     data: {
       result: {
         callId: input.callId,
-        claim: { kind: "session", sessionId: "child-session" },
         kind: "subagent-result",
         origin: "child",
         output: input.output as never,

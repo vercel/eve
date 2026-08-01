@@ -250,24 +250,22 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       state: dispatched.sessionState.snapshot?.session.state,
     };
 
-    // A result claiming a session no running handle confirms never settles
-    // the call.
-    const forged = await resolvePendingRuntimeActions({
+    // A result for a callId no running handle records never settles the call.
+    const unbound = await resolvePendingRuntimeActions({
       session: committedSession,
       stepInput: {
         runtimeActionResults: [
           {
-            callId: "call-1",
-            claim: { kind: "session", sessionId: "forged-sibling-session" },
+            callId: "call-unknown",
             kind: "subagent-result",
             origin: "child",
-            output: "forged",
+            output: "stray",
             subagentName: "research",
           },
         ],
       },
     });
-    expect(forged.outcome).toBe("unresolved");
+    expect(unbound.outcome).toBe("unresolved");
 
     const resolved = await resolvePendingRuntimeActions({
       session: committedSession,
@@ -275,7 +273,6 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         runtimeActionResults: [
           {
             callId: "call-1",
-            claim: { kind: "session", sessionId: CHILD_SESSION_ID },
             kind: "subagent-result",
             origin: "child",
             output: "done",
