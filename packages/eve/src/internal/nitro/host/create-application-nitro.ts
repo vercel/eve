@@ -36,8 +36,7 @@ import type {
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-import { transformDynamicRemoteAgentCredentials } from "#internal/workflow-bundle/dynamic-remote-agent-transform.js";
-import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
+import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
@@ -509,30 +508,7 @@ function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
     if (!Array.isArray(config.plugins)) {
       return;
     }
-
-    config.plugins.unshift({
-      async transform(code: string, id: string) {
-        if (!id.includes("/tools/") && !id.includes("/subagents/")) return null;
-        let transformed = code;
-        let changed = false;
-        if (id.includes("/tools/")) {
-          const result = await transformDynamicToolExecute(id, transformed);
-          if (result !== null) {
-            transformed = result.code;
-            changed = true;
-          }
-        }
-        if (id.includes("/subagents/")) {
-          const result = await transformDynamicRemoteAgentCredentials(id, transformed);
-          if (result !== null) {
-            transformed = result.code;
-            changed = true;
-          }
-        }
-        return changed ? { code: transformed, map: null } : null;
-      },
-      name: "eve:dynamic-capability-transform",
-    });
+    config.plugins.unshift(createDynamicCapabilityTransformPlugin());
   });
 }
 
