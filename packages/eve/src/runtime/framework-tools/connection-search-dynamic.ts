@@ -30,8 +30,6 @@ import {
   type InteractiveAuthorizationDefinition,
   supportsInteractiveAuthorization,
 } from "#runtime/connections/types.js";
-import { resolveDynamicToolValue } from "#runtime/resolve-dynamic-tool.js";
-import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import { toError } from "#shared/errors.js";
 import type { ModelMessage } from "ai";
@@ -392,7 +390,7 @@ export function extractDiscoveredTools(
 
 // The step-scoped definition re-derives its tools from conversation history.
 // After compaction removes old search results, those tools naturally disappear.
-const CONNECTION_SEARCH_DYNAMIC_DEFINITION = defineDynamic({
+const connectionSearchDynamicDefinition = defineDynamic({
   events: {
     "step.started": async (_event, ctx) => {
       const registry = loadContext().get(ConnectionRegistryKey);
@@ -516,16 +514,4 @@ const CONNECTION_SEARCH_DYNAMIC_DEFINITION = defineDynamic({
   },
 });
 
-/**
- * Creates a `ResolvedDynamicToolResolver` for the framework connection
- * search tool. Used by graph resolution to register alongside authored
- * dynamic tool resolvers.
- */
-export function createConnectionSearchResolver(): ResolvedDynamicToolResolver {
-  return resolveDynamicToolValue(CONNECTION_SEARCH_DYNAMIC_DEFINITION, {
-    sourceId: "eve:connection-search-dynamic",
-    sourceKind: "module",
-    logicalPath: "eve:framework/connection-search-dynamic",
-    slug: "connection",
-  });
-}
+export default connectionSearchDynamicDefinition;

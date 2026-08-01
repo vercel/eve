@@ -35,8 +35,8 @@ export async function resolveDynamicToolDefinition(
       moduleMap,
       nodeId,
     });
-    return createResolvedDynamicToolResolver(
-      expectDynamicToolValue(resolvedExportValue, definition),
+    return resolveLoadedDynamicToolDefinition(
+      resolvedExportValue,
       definition,
       definition.eventNames,
     );
@@ -55,21 +55,23 @@ export async function resolveDynamicToolDefinition(
 }
 
 /**
- * Resolves an in-memory public `defineDynamic()` value into the runtime shape
- * used by the dynamic-tool lifecycle.
+ * Resolves a loaded public `defineDynamic()` value into the runtime shape used
+ * by the dynamic-tool lifecycle.
  *
- * Framework-owned dynamic tools use this path because they have no authored
- * module to load from the compiled module map. Their definitions otherwise
- * follow the same public contract as authored dynamic tools.
+ * Authored definitions reach this boundary after module-map loading.
+ * Framework-owned definitions are already loaded with eve itself. Both use
+ * the same validation, source registration, and resolver construction here.
  */
-export function resolveDynamicToolValue(
-  value: DynamicSentinel,
+export function resolveLoadedDynamicToolDefinition(
+  value: unknown,
   source: DynamicToolResolverSource,
+  eventNames?: readonly string[],
 ): ResolvedDynamicToolResolver {
+  const definition = expectDynamicToolValue(value, source);
   return createResolvedDynamicToolResolver(
-    expectDynamicToolValue(value, source),
+    definition,
     source,
-    Object.keys(value.events),
+    eventNames ?? Object.keys(definition.events),
   );
 }
 

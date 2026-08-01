@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
+  getFrameworkDynamicToolResolvers,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
 import { isToolSchema } from "#shared/tool-schema.js";
@@ -61,12 +62,15 @@ describe("framework-tools/index", () => {
     }
   });
 
-  it("returns the same registered tools regardless of hasConnections", () => {
-    const withConnections = getFrameworkToolDefinitions({ hasConnections: true });
-    const withoutConnections = getFrameworkToolDefinitions({ hasConnections: false });
-
-    expect(withConnections.map((tool) => tool.name)).toEqual(
-      withoutConnections.map((tool) => tool.name),
-    );
+  it("registers connection search through the framework dynamic tool registry", () => {
+    expect(getFrameworkDynamicToolResolvers({ hasConnections: false })).toEqual([]);
+    expect(getFrameworkDynamicToolResolvers({ hasConnections: true })).toMatchObject([
+      {
+        eventNames: ["step.started"],
+        logicalPath: "eve:framework/connection-search-dynamic",
+        slug: "connection",
+        sourceId: "eve:connection-search-dynamic",
+      },
+    ]);
   });
 });

@@ -7,10 +7,8 @@ import { CallbackBaseUrlKey, isAuthorizationSignal } from "#harness/authorizatio
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ConnectionRegistry, ConnectionToolMetadata } from "#runtime/connections/types.js";
-import {
-  createConnectionSearchResolver,
-  extractDiscoveredTools,
-} from "#runtime/framework-tools/connection-search-dynamic.js";
+import { extractDiscoveredTools } from "#runtime/framework-tools/connection-search-dynamic.js";
+import { getFrameworkDynamicToolResolvers } from "#runtime/framework-tools/index.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   isBrandedToolEntry,
@@ -43,7 +41,7 @@ async function executeConnectionSearch(
   setupContext?.(ctx);
 
   return contextStorage.run(ctx, async () => {
-    const resolve = createConnectionSearchResolver().events["step.started"]!;
+    const resolve = getConnectionSearchResolver().events["step.started"]!;
     const resolved = (await resolve({}, {
       channel: {},
       messages: [],
@@ -52,6 +50,10 @@ async function executeConnectionSearch(
 
     return resolved["connection_search"]!.execute(input, {} as ToolContext);
   });
+}
+
+function getConnectionSearchResolver() {
+  return getFrameworkDynamicToolResolvers({ hasConnections: true })[0]!;
 }
 
 function registry(input: {
@@ -103,7 +105,7 @@ describe("connection dynamic tools", () => {
     ];
     const ctx = new ContextContainer();
     ctx.set(ConnectionRegistryKey, connectionRegistry);
-    const resolver = createConnectionSearchResolver();
+    const resolver = getConnectionSearchResolver();
     const resolve = resolver.events["step.started"]!;
 
     const tools = await contextStorage.run(ctx, async () => {

@@ -2,12 +2,12 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
+  getFrameworkDynamicToolResolvers,
 } from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
 } from "#runtime/framework-channels/index.js";
-import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
 import type {
   AgentInfoData,
   CompiledAgentManifest,
@@ -356,8 +356,9 @@ function buildToolInfo(
   const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
   const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
   const allFrameworkToolNames = getAllFrameworkToolNames();
-  const dynamicFrameworkResolvers =
-    agent.connections.length > 0 ? [createConnectionSearchResolver()] : [];
+  const dynamicFrameworkResolvers = getFrameworkDynamicToolResolvers({
+    hasConnections: agent.connections.length > 0,
+  });
   const authored = agent.tools.map((tool) =>
     renderTool(tool, {
       origin: "authored",
