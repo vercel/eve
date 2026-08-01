@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { defineAgent } from "#public/definitions/agent.js";
+import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
@@ -49,6 +49,26 @@ describe("definition helper exact inputs", () => {
 });
 
 function typeOnlyFixtures(): void {
+  // @ts-expect-error Dynamic subagents require a parent-facing description.
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        defineAgent({
+          model: "anthropic/claude-sonnet-5",
+        }),
+    },
+  });
+
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        defineAgent({
+          description: "Delegate research tasks.",
+          model: "anthropic/claude-sonnet-5",
+        }),
+    },
+  });
+
   defineAgent({
     limits: {
       // @ts-expect-error Recursive delegation is root-only; this limit was removed.
