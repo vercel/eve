@@ -19,7 +19,7 @@ const result = await response.result();
 
 Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally.
 
-Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; confirm completion by reading `compaction.requested` and `compaction.completed` from the durable stream. A never-started session returns `no_active_session` as a successful no-op.
+Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through the following `session.waiting` boundary before sending the next turn, checking for `compaction.requested` and `compaction.completed` along the way. A never-started session returns `no_active_session` as a successful no-op.
 
 ```ts
 const compaction = await session.compact();

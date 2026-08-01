@@ -201,7 +201,8 @@ export class ClientSession {
   /**
    * Queues context compaction without sending model input. The request is
    * asynchronous; observe `compaction.completed` on the durable event stream
-   * to confirm completion. A never-started handle is a successful no-op.
+   * and consume its following session boundary before sending another turn.
+   * A never-started handle is a successful no-op.
    */
   async compact(): Promise<CompactResult> {
     const state = this.#state;

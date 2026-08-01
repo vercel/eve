@@ -661,6 +661,17 @@ describe("EveTUIRunner development session continuity", () => {
     const compact = vi
       .spyOn(session, "compact")
       .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    const stream = vi.spyOn(session, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent(
+          {
+            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            type: "session.waiting",
+          },
+          0,
+        );
+      })(),
+    );
     const results: string[] = [];
     const prompts: Array<string | undefined> = ["/compact", undefined];
     const runner = new EveTUIRunner({
@@ -668,6 +679,11 @@ describe("EveTUIRunner development session continuity", () => {
       renderer: fakeRenderer({
         readPrompt: vi.fn(async () => prompts.shift()),
         renderCommandResult: (message) => results.push(message),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) {
+            void event;
+          }
+        }),
       }),
       session,
     });
@@ -675,6 +691,7 @@ describe("EveTUIRunner development session continuity", () => {
     await runner.run();
 
     expect(compact).toHaveBeenCalledOnce();
+    expect(stream).toHaveBeenCalledOnce();
     expect(session.send).not.toHaveBeenCalled();
     expect(results).toEqual(["Compaction requested."]);
   });

@@ -408,12 +408,12 @@ async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly deliveryHook: SessionDeliveryHook;
 }): Promise<NextSessionAction> {
-  if (input.deliveryHook.consumeCompactRequest()) {
-    return { kind: "compact" };
-  }
-
   if (input.deliveryHook.consumeSessionTimeout()) {
     return { kind: "expired" };
+  }
+
+  if (input.deliveryHook.consumeCompactRequest()) {
+    return { kind: "compact" };
   }
 
   if (input.bufferedDeliveries.length > 0) {
