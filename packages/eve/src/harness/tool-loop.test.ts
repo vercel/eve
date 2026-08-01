@@ -45,7 +45,7 @@ import {
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionTokenLimitViolation,
@@ -10214,5 +10214,81 @@ describe("createToolLoopHarness", () => {
       ).toBe(false);
       errorSpy.mockRestore();
     });
+  });
+});
+
+describe("appendMissingToolResultMessages", () => {
+  const searchResult = {
+    type: "tool-result" as const,
+    toolCallId: "toolu_1",
+    toolName: "web_search",
+    output: { type: "json" as const, value: { winner: "OKC" } },
+  };
+
+  it("skips synthesized results for provider-executed calls already answered inline", () => {
+    // Provider-executed results live inside the *assistant* message until
+    // provider history normalization; a second result for the same id makes
+    // Anthropic reject the whole history on the next call.
+    const assistantWithInlineResult = {
+      role: "assistant" as const,
+      content: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "toolu_1",
+          toolName: "web_search",
+          input: { query: "2025 NBA Finals" },
+          providerExecuted: true,
+        },
+        { ...searchResult, providerExecuted: true },
+      ],
+    };
+
+    const messages = appendMissingToolResultMessages({
+      append: [
+        {
+          type: "tool-result",
+          toolCallId: "toolu_1",
+          toolName: "web_search",
+          output: { type: "error-text", value: "Failed to parse tool-call arguments" },
+        },
+      ],
+      responseMessages: [assistantWithInlineResult],
+    });
+
+    expect(messages).toEqual([assistantWithInlineResult]);
+  });
+
+  it("still backfills calls with no result anywhere", () => {
+    const assistant = {
+      role: "assistant" as const,
+      content: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "toolu_2",
+          toolName: "web_search",
+          input: {},
+        },
+      ],
+    };
+    const backfill = {
+      type: "tool-result" as const,
+      toolCallId: "toolu_2",
+      toolName: "web_search",
+      output: { type: "error-text" as const, value: "invalid input" },
+    };
+
+    expect(
+      appendMissingToolResultMessages({ append: [backfill], responseMessages: [assistant] }),
+    ).toEqual([assistant, { role: "tool", content: [backfill] }]);
+  });
+
+  it("dedupes against results already in tool messages", () => {
+    const toolMessage = { role: "tool" as const, content: [searchResult] };
+    expect(
+      appendMissingToolResultMessages({
+        append: [searchResult],
+        responseMessages: [toolMessage],
+      }),
+    ).toEqual([toolMessage]);
   });
 });

@@ -1732,7 +1732,15 @@ function withAccumulatedResponseMessages(input: {
   };
 }
 
-function appendMissingToolResultMessages(input: {
+/**
+ * Appends synthesized tool results for calls that have no result anywhere in
+ * the step's response messages. Exported for its dedupe contract: a call
+ * already answered — including provider-executed results the SDK keeps
+ * inline in the assistant message — must never receive a second
+ * `tool-result`, or the next Anthropic call rejects the history with
+ * "each tool_use must have a single result".
+ */
+export function appendMissingToolResultMessages(input: {
   readonly append: readonly ToolResultPart[];
   readonly responseMessages: readonly StepResponseMessage[];
 }): StepResponseMessage[] {
@@ -1764,16 +1772,23 @@ function getInvalidToolCallInputErrors(input: {
   return errors;
 }
 
+/**
+ * CallIds answered anywhere in the response messages. Scans every message
+ * role: provider-executed tool results arrive inline in the *assistant*
+ * message (the SDK only moves them to a `tool` message during provider
+ * history normalization, which runs after the backfill paths), so a
+ * tool-message-only scan would let a synthesized result duplicate them.
+ */
 function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
   const callIds = new Set<string>();
 
   for (const message of messages) {
-    if (message.role !== "tool" || !Array.isArray(message.content)) {
+    if (!Array.isArray(message.content)) {
       continue;
     }
 
     for (const part of message.content) {
-      if (part.type === "tool-result") {
+      if (typeof part === "object" && part !== null && part.type === "tool-result") {
         callIds.add(part.toolCallId);
       }
     }
