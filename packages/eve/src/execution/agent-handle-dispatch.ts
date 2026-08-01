@@ -157,6 +157,14 @@ export async function dispatchToAgentHandle(input: {
   }
 
   const { handle } = prepared;
+  // Not exactly-once: `prepareAgentContinuation` only moved the handle to
+  // `running` on the step's working snapshot, which durably commits when the
+  // enclosing dispatch step's result commits. If delivery succeeds and the
+  // step dies before that commit, replay starts from `parked` and delivers
+  // the same operation again — the same start-effect/step-commit window
+  // accepted for child starts. The callee has no receiver-side dedup for
+  // this; `prepareAgentContinuation` treating the recorded operation as a
+  // replay only makes the parent-side transition idempotent.
   const delivery = await deliverToAgentHandle({
     action,
     bundle,
