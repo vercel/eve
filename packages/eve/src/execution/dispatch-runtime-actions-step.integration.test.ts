@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import {
@@ -24,6 +26,7 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const mocks = vi.hoisted(() => ({
+  continueRemoteAgentSession: vi.fn(),
   createDurableSessionState: vi.fn(),
   deserializeContext: vi.fn(),
   hydrateDurableSession: vi.fn(),
@@ -58,6 +61,7 @@ vi.mock("#execution/workflow-runtime.js", () => ({
 // retry/forfeit policy.
 vi.mock("#execution/remote-agent-dispatch.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/remote-agent-dispatch.js")>()),
+  continueRemoteAgentSession: mocks.continueRemoteAgentSession,
   startRemoteAgentSession: mocks.startRemoteAgentSession,
 }));
 
@@ -71,6 +75,46 @@ const BASE_STATE: DurableSessionState = {
 };
 const CHILD_SESSION_ID = "child-session-123456789012";
 
+const PARKED_START_OPERATION_ID = deriveAgentOperationId({
+  callId: "call-0",
+  parentSessionId: "parent-session",
+  parentTurnId: "turn-0",
+});
+
+const LOCAL_CHILD_CONTINUATION_TOKEN = "subagent:parent:child";
+
+const LOCAL_PARKED_HANDLE: AgentHandle = {
+  address: {
+    continuationToken: LOCAL_CHILD_CONTINUATION_TOKEN,
+    kind: "agent/local",
+    sessionId: CHILD_SESSION_ID,
+  },
+  identity: {
+    id: deriveAgentId("research", PARKED_START_OPERATION_ID),
+    name: "research",
+    nodeId: "subagents/research",
+  },
+  lastStatus: "initial result",
+  phase: "parked",
+};
+
+const REMOTE_PARKED_HANDLE: AgentHandle = {
+  address: {
+    callbackBaseUrl: "https://caller.example.com",
+    continuationToken: "remote-token",
+    kind: "agent/remote",
+    sessionId: "remote-session-123456789012",
+    url: "https://remote.example.com",
+  },
+  identity: {
+    id: deriveAgentId("research", PARKED_START_OPERATION_ID),
+    name: "research",
+    nodeId: "remote/research",
+  },
+  lastStatus: "initial result",
+  phase: "parked",
+};
+
 const REMOTE_REGISTRY_DEFINITION = {
   description: "Remote research",
   kind: "remote",
@@ -83,6 +127,7 @@ const REMOTE_REGISTRY_DEFINITION = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID });
+  mocks.continueRemoteAgentSession.mockResolvedValue(undefined);
   mocks.startRemoteAgentSession.mockResolvedValue({
     continuationToken: "remote-child-token",
     sessionId: "remote-session-123456789012",
@@ -283,6 +328,251 @@ describe("dispatchRuntimeActionsStep child starts", () => {
   });
 });
 
+describe("dispatchRuntimeActionsStep agent delivery", () => {
+  const continueOperationId = deriveAgentOperationId({
+    callId: "call-1",
+    parentSessionId: "parent-session",
+    parentTurnId: "turn-1",
+  });
+
+  it("delivers the raw message to a parked local handle and records the running operation", async () => {
+    const session = createPendingSession({
+      handle: LOCAL_PARKED_HANDLE,
+      agentId: LOCAL_PARKED_HANDLE.identity.id,
+    });
+    installContext(session);
+    const writes: Uint8Array[] = [];
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(writes),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results).toEqual([]);
+    expect(mocks.deliver).toHaveBeenCalledWith({
+      caller: {
+        callId: "call-1",
+        replyTo: { kind: "hook", token: "turn-inbox" },
+        subagentName: "research",
+      },
+      continuationToken: LOCAL_CHILD_CONTINUATION_TOKEN,
+      payload: {
+        message: "continue with raw input",
+        outputSchema: undefined,
+      },
+    });
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
+      handles: [
+        {
+          address: LOCAL_PARKED_HANDLE.address,
+          identity: LOCAL_PARKED_HANDLE.identity,
+          operation: {
+            callId: "call-1",
+            id: continueOperationId,
+            kind: "continue",
+            parentTurnId: "turn-1",
+            previousStatus: "initial result",
+          },
+          phase: "running",
+        },
+      ],
+    });
+    expect(writes).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      handle: undefined,
+      agentId: "ag_research:missing",
+      code: "AGENT_UNKNOWN",
+      title: "unknown",
+    },
+    {
+      handle: {
+        ...LOCAL_PARKED_HANDLE,
+        identity: { ...LOCAL_PARKED_HANDLE.identity, name: "writer" },
+      },
+      agentId: LOCAL_PARKED_HANDLE.identity.id,
+      code: "AGENT_MISMATCH",
+      title: "mismatched",
+    },
+    {
+      handle: {
+        address: LOCAL_PARKED_HANDLE.address,
+        identity: LOCAL_PARKED_HANDLE.identity,
+        operation: {
+          callId: "call-other",
+          id: "op-other",
+          kind: "start",
+          parentTurnId: "turn-0",
+        },
+        phase: "running",
+      } satisfies AgentHandle,
+      agentId: LOCAL_PARKED_HANDLE.identity.id,
+      code: "AGENT_BUSY",
+      title: "busy",
+    },
+  ])("returns $code for a $title agent", async ({ handle, agentId, code }) => {
+    const session = createPendingSession({ handle, agentId });
+    installContext(session);
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: expect.objectContaining({ code }),
+      }),
+    ]);
+    expect(mocks.deliver).not.toHaveBeenCalled();
+    expect(mocks.continueRemoteAgentSession).not.toHaveBeenCalled();
+    // Addressing mistakes and busy conflicts never touch the store.
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual(
+      getAgentHandleStore(session.state),
+    );
+  });
+
+  it("returns AGENT_UNREACHABLE and removes a stale local handle", async () => {
+    const session = createPendingSession({
+      handle: LOCAL_PARKED_HANDLE,
+      agentId: LOCAL_PARKED_HANDLE.identity.id,
+    });
+    installContext(session);
+    mocks.deliver.mockRejectedValue(
+      new RuntimeNoActiveSessionError(LOCAL_CHILD_CONTINUATION_TOKEN),
+    );
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: { code: "AGENT_UNREACHABLE" },
+    });
+    expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [],
+    });
+  });
+
+  it("continues a stored remote handle and maps a permanent failure to AGENT_UNREACHABLE", async () => {
+    const session = createPendingSession({
+      handle: REMOTE_PARKED_HANDLE,
+      agentId: REMOTE_PARKED_HANDLE.identity.id,
+    });
+    installContext(session, {
+      definition: REMOTE_REGISTRY_DEFINITION,
+      nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
+    });
+    mocks.continueRemoteAgentSession.mockRejectedValue(
+      new RemoteAgentContinueRequestError(
+        "continue-session request failed permanently with HTTP 404.",
+        { retryable: false },
+      ),
+    );
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.continueRemoteAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuationToken: REMOTE_PARKED_HANDLE.address.continuationToken,
+        message: "continue with raw input",
+        remote: expect.objectContaining({
+          nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
+          url: "https://remote.example.com",
+        }),
+        sessionId: REMOTE_PARKED_HANDLE.address.sessionId,
+      }),
+    );
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: { code: "AGENT_UNREACHABLE" },
+    });
+    expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [],
+    });
+  });
+
+  it("surfaces a transient remote continue failure without retrying and restores the parked handle", async () => {
+    const session = createPendingSession({
+      handle: REMOTE_PARKED_HANDLE,
+      agentId: REMOTE_PARKED_HANDLE.identity.id,
+    });
+    installContext(session, {
+      definition: REMOTE_REGISTRY_DEFINITION,
+      nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
+    });
+    mocks.continueRemoteAgentSession.mockRejectedValue(new Error("HTTP 503"));
+
+    // A rethrow would durably replay the whole step and re-dispatch started
+    // siblings, and a re-send could double-deliver a turn the callee already
+    // accepted — so the failure settles as a retryable error in one attempt.
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.continueRemoteAgentSession).toHaveBeenCalledTimes(1);
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: {
+        code: "AGENT_UNREACHABLE",
+        message: expect.stringContaining("temporarily unreachable"),
+      },
+    });
+    // The child may still be alive: the handle is restored to parked with
+    // its pre-delivery status so the model can retry the same agentId.
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
+      handles: [REMOTE_PARKED_HANDLE],
+    });
+  });
+
+  it("forfeits a remote handle whose agent node is gone from the registry", async () => {
+    const session = createPendingSession({
+      handle: REMOTE_PARKED_HANDLE,
+      agentId: REMOTE_PARKED_HANDLE.identity.id,
+    });
+    // No remote registry entry installed: resolution fails before delivery.
+    installContext(session);
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.continueRemoteAgentSession).not.toHaveBeenCalled();
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: {
+        code: "AGENT_UNREACHABLE",
+        message: expect.stringContaining("no longer reachable"),
+      },
+    });
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
+      handles: [],
+    });
+  });
+});
+
 /**
  * The step returns the input state unchanged when the session object is
  * untouched; otherwise the mocked `createDurableSessionState` carries the
@@ -334,6 +624,28 @@ function createStartSession(input: { readonly kind: "local" | "remote" }): Harne
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
     responseMessages: [],
     session: createBaseSession(),
+  });
+}
+
+function createPendingSession(input: {
+  readonly handle?: AgentHandle;
+  readonly agentId: string;
+}): HarnessSession {
+  return setPendingRuntimeActionBatch({
+    actions: [
+      {
+        callId: "call-1",
+        description: "Research",
+        input: { agentId: input.agentId, message: "continue with raw input" },
+        kind: "subagent-call",
+        name: "research",
+        nodeId: "subagents/research",
+        subagentName: "research",
+      },
+    ],
+    event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+    responseMessages: [],
+    session: createBaseSession(input.handle),
   });
 }
 

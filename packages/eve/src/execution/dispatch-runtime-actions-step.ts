@@ -1,12 +1,13 @@
 /**
- * Starts every pending runtime action for the parked parent session.
+ * Starts or continues every pending runtime action for the parked parent
+ * session.
  *
- * The batch is classified into a dispatch plan first (reject / start), then
- * each entry dispatches and emits one parent `subagent.called` control-plane
- * event through a single tail. Every start commits an agent handle
- * (`starting`) before its side effect and confirms it (`running`) once the
- * child reports coordinates, so the returned snapshot-bearing state owns
- * every child it may have created.
+ * The batch is classified into a dispatch plan first (reject / resume /
+ * start), then each entry dispatches and emits one
+ * parent `subagent.called` control-plane event through a single tail.
+ * Every start commits an agent handle (`starting`) before its side effect
+ * and confirms it (`running`) once the child reports coordinates, so the
+ * returned snapshot-bearing state owns every child it may have created.
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -23,7 +24,13 @@ import {
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
-import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import {
+  dispatchToAgentHandle,
+  isAgentHandleAction,
+  type DispatchOutcome,
+  type RuntimeAgentHandleAction,
+  type RuntimeSession,
+} from "#execution/agent-handle-dispatch.js";
 import { REMOTE_AGENT_START_FAILED, SUBAGENT_START_FAILED } from "#harness/agent-handle-errors.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
@@ -86,6 +93,12 @@ type DynamicRemoteAgentConfig = NonNullable<
 >;
 
 type DispatchPlanEntry =
+  | {
+      readonly kind: "resume";
+      readonly action: RuntimeAgentHandleAction;
+      readonly agentId: string;
+      readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+    }
   | { readonly kind: "reject"; readonly result: RuntimeSubagentDispatchFailure }
   | { readonly kind: "start"; readonly target: DispatchStartTarget };
 
@@ -152,8 +165,9 @@ export async function dispatchRuntimeActionsStep(input: {
   const writer = input.parentWritable.getWriter();
   // Split the parent's remaining token quota across the batch's freshly
   // started local subagents, the children that actually receive an enforced
-  // cap. Remote agents run on their own deployment under their own limits,
-  // so they do not dilute the local shares.
+  // cap. Continuations already run under their own budget, and remote agents
+  // run on their own deployment under their own limits, so neither dilutes
+  // the local shares.
   const fanoutSize = plan.filter(
     (entry) => entry.kind === "start" && entry.target.kind === "local",
   ).length;
@@ -168,21 +182,40 @@ export async function dispatchRuntimeActionsStep(input: {
         continue;
       }
 
-      const outcome: DispatchOutcome = await startSubagent({
-        auth,
-        batchEvent: batch.event,
-        bundle,
-        callbackBaseUrl: input.callbackBaseUrl,
-        capabilities,
-        channelMetadata,
-        currentSession: nextSession,
-        fanoutSize,
-        initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
-        session,
-        target: entry.target,
-      });
+      let outcome: DispatchOutcome;
+      switch (entry.kind) {
+        case "resume":
+          outcome = await dispatchToAgentHandle({
+            action: entry.action,
+            agentId: entry.agentId,
+            bundle: createAgentContinuationBundle({
+              action: entry.action,
+              bundle,
+              dynamicRemoteAgent: entry.dynamicRemoteAgent,
+            }),
+            currentSession: nextSession,
+            parentToken: input.parentContinuationToken ?? session.continuationToken,
+            parentTurnId: batch.event.turnId,
+          });
+          break;
+        case "start":
+          outcome = await startSubagent({
+            auth,
+            batchEvent: batch.event,
+            bundle,
+            callbackBaseUrl: input.callbackBaseUrl,
+            capabilities,
+            channelMetadata,
+            currentSession: nextSession,
+            fanoutSize,
+            initiatorAuth,
+            parentContinuationToken: input.parentContinuationToken,
+            parentTraceContext,
+            session,
+            target: entry.target,
+          });
+          break;
+      }
 
       nextSession = outcome.session;
       if (outcome.kind === "error") {
@@ -256,6 +289,23 @@ function planDispatch(input: {
     const dynamicSubagentSelection = isDynamicSubagent
       ? getDynamicSubagentSelection(input.ctx, action.nodeId)
       : undefined;
+    const agentId = typeof action.input.agentId === "string" ? action.input.agentId : undefined;
+    // Resume classification runs before the recursion guard: an agentId
+    // continuation resumes an already-adopted child rather than starting a
+    // new one, and a non-root session can never own an `agent`-tool handle,
+    // so an agentId-carrying recursive call falls through to AGENT_UNKNOWN.
+    if (agentId !== undefined && isAgentHandleAction(action)) {
+      return {
+        action,
+        agentId,
+        dynamicRemoteAgent:
+          action.kind === "remote-agent-call" && dynamicSubagentSelection?.kind === "remote"
+            ? dynamicSubagentSelection.remoteAgent
+            : undefined,
+        kind: "resume",
+      };
+    }
+
     if (
       isDynamicSubagent &&
       (dynamicSubagentSelection === undefined ||
@@ -321,6 +371,38 @@ function planDispatch(input: {
         throw new Error(`Unsupported runtime action kind "${action.kind}" in workflow runtime.`);
     }
   });
+}
+
+function createAgentContinuationBundle(input: {
+  readonly action: RuntimeAgentHandleAction;
+  readonly bundle: CompiledBundle;
+  readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+}): CompiledBundle {
+  const { action, dynamicRemoteAgent } = input;
+  if (action.kind !== "remote-agent-call" || dynamicRemoteAgent === undefined) {
+    return input.bundle;
+  }
+
+  const registry = input.bundle.subagentRegistry.subagentsByNodeId;
+  const subagentsByNodeId = Object.assign(new Map(registry), {
+    // Resolve only after the handle dispatcher validates and prepares ownership.
+    get: (nodeId: string) =>
+      nodeId === action.nodeId
+        ? {
+            definition: resolveRemoteAgentForAction({
+              dynamicRemoteAgent,
+              nodeId,
+              registry,
+              remoteAgentName: action.remoteAgentName,
+            }),
+          }
+        : registry.get(nodeId),
+  });
+
+  return {
+    ...input.bundle,
+    subagentRegistry: { ...input.bundle.subagentRegistry, subagentsByNodeId },
+  };
 }
 
 async function startSubagent(input: {
