@@ -136,7 +136,6 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const hasConnections = agent.connections.length > 0;
   const frameworkTools = getFrameworkToolDefinitions({
     authoredSkills: agent.skills,
   });
@@ -231,10 +230,7 @@ async function resolveRuntimeAgentNode(
   });
   const resolvedAgent = {
     ...agent,
-    dynamicToolResolvers: [
-      ...agent.dynamicToolResolvers,
-      ...getFrameworkDynamicToolResolvers({ hasConnections }),
-    ],
+    dynamicToolResolvers: [...agent.dynamicToolResolvers, ...getFrameworkDynamicToolResolvers()],
   };
 
   const node: ResolvedAgentGraphBundle["root"] = {

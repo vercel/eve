@@ -63,8 +63,7 @@ describe("framework-tools/index", () => {
   });
 
   it("registers connection search through the framework dynamic tool registry", () => {
-    expect(getFrameworkDynamicToolResolvers({ hasConnections: false })).toEqual([]);
-    expect(getFrameworkDynamicToolResolvers({ hasConnections: true })).toMatchObject([
+    expect(getFrameworkDynamicToolResolvers()).toMatchObject([
       {
         eventNames: ["step.started"],
         logicalPath: "eve:framework/connection-search-dynamic",

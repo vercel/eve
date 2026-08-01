@@ -356,9 +356,7 @@ function buildToolInfo(
   const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
   const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
   const allFrameworkToolNames = getAllFrameworkToolNames();
-  const dynamicFrameworkResolvers = getFrameworkDynamicToolResolvers({
-    hasConnections: agent.connections.length > 0,
-  });
+  const dynamicFrameworkResolvers = getFrameworkDynamicToolResolvers();
   const authored = agent.tools.map((tool) =>
     renderTool(tool, {
       origin: "authored",

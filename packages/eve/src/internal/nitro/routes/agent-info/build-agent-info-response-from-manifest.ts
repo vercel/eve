@@ -204,9 +204,9 @@ export function buildAgentInfoResponseFromManifest(
       authored: authoredTools,
       disabledFramework: [...manifest.disabledFrameworkTools],
       dynamic: [
-        ...getFrameworkDynamicToolResolvers({
-          hasConnections: manifest.connections.length > 0,
-        }).map((resolver) => renderDynamicResolver(resolver, { origin: "framework" })),
+        ...getFrameworkDynamicToolResolvers().map((resolver) =>
+          renderDynamicResolver(resolver, { origin: "framework" }),
+        ),
         ...manifest.dynamicTools.map((resolver) =>
           renderDynamicResolver(resolver, { origin: "authored" }),
         ),

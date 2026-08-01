@@ -53,7 +53,7 @@ async function executeConnectionSearch(
 }
 
 function getConnectionSearchResolver() {
-  return getFrameworkDynamicToolResolvers({ hasConnections: true })[0]!;
+  return getFrameworkDynamicToolResolvers()[0]!;
 }
 
 function registry(input: {
@@ -76,6 +76,31 @@ function registry(input: {
 }
 
 describe("connection dynamic tools", () => {
+  it("contributes no tools when no connections are available", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(
+      ConnectionRegistryKey,
+      registry({
+        connections: [],
+        loadTools: {},
+      }),
+    );
+    const resolve = getConnectionSearchResolver().events["step.started"]!;
+
+    const tools = await contextStorage.run(ctx, () =>
+      resolve(
+        {},
+        {
+          channel: {},
+          messages: [],
+          session: { auth: { current: null, initiator: null }, id: "test-session" },
+        },
+      ),
+    );
+
+    expect(tools).toBeNull();
+  });
+
   it("uses the shared resolver and public tool definitions", async () => {
     const linear = connection("linear");
     const connectionRegistry = registry({

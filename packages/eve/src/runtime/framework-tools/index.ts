@@ -30,20 +30,14 @@ import type { DynamicSentinel } from "#shared/dynamic-tool-definition.js";
 
 interface FrameworkDynamicToolDefinition {
   readonly definition: DynamicSentinel;
-  readonly isEnabled: (config: FrameworkDynamicToolConfig) => boolean;
   readonly logicalPath: string;
   readonly slug: string;
   readonly sourceId: string;
 }
 
-interface FrameworkDynamicToolConfig {
-  readonly hasConnections: boolean;
-}
-
 const REGISTERED_FRAMEWORK_DYNAMIC_TOOLS: readonly FrameworkDynamicToolDefinition[] = [
   {
     definition: connectionSearchDynamicDefinition,
-    isEnabled: (config) => config.hasConnections,
     logicalPath: "eve:framework/connection-search-dynamic",
     slug: "connection",
     sourceId: "eve:connection-search-dynamic",
@@ -89,21 +83,18 @@ export function getFrameworkToolDefinitions(config?: {
 }
 
 /**
- * Returns framework-owned dynamic tool resolvers enabled for an agent.
+ * Returns framework-owned dynamic tool resolvers.
  * Framework definitions use the public `defineDynamic()` contract and enter
  * the same loaded-definition resolver path as authored dynamic tools.
  */
-export function getFrameworkDynamicToolResolvers(
-  config: FrameworkDynamicToolConfig,
-): readonly ResolvedDynamicToolResolver[] {
-  return REGISTERED_FRAMEWORK_DYNAMIC_TOOLS.filter((entry) => entry.isEnabled(config)).map(
-    (entry) =>
-      resolveLoadedDynamicToolDefinition(entry.definition, {
-        logicalPath: entry.logicalPath,
-        slug: entry.slug,
-        sourceId: entry.sourceId,
-        sourceKind: "module",
-      }),
+export function getFrameworkDynamicToolResolvers(): readonly ResolvedDynamicToolResolver[] {
+  return REGISTERED_FRAMEWORK_DYNAMIC_TOOLS.map((entry) =>
+    resolveLoadedDynamicToolDefinition(entry.definition, {
+      logicalPath: entry.logicalPath,
+      slug: entry.slug,
+      sourceId: entry.sourceId,
+      sourceKind: "module",
+    }),
   );
 }
 
