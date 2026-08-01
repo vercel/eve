@@ -83,6 +83,9 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async cancelTurn() {
       throw new Error("cancelTurn should not be called in this scenario");
     },
+    async compactSession() {
+      throw new Error("compactSession should not be called in this scenario");
+    },
     async resolveSession() {
       throw new Error("resolveSession should not be called in this scenario");
     },
@@ -184,6 +187,9 @@ describe("cross-channel receive end-to-end", () => {
           },
           cancel: async () => {
             throw new Error("webhook should not cancel turns");
+          },
+          compact: async () => {
+            throw new Error("webhook should not compact sessions");
           },
           reset: async () => {
             throw new Error("webhook should not reset sessions");

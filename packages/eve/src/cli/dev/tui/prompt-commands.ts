@@ -5,6 +5,7 @@ type PromptCommandTarget = "local" | "remote";
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
   | { type: "new" }
+  | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
   | { type: "loglevel"; argument: string }
@@ -56,6 +57,14 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Start a fresh session",
     takesArgument: false,
     build: () => ({ type: "new" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "compact",
+    aliases: [],
+    description: "Compact the current session context",
+    takesArgument: false,
+    build: () => ({ type: "compact" }),
     targets: ["local", "remote"],
   },
   {
@@ -147,7 +156,7 @@ export function isPromptCommandAvailableFor(
 
 /**
  * Recognizes the slash commands the prompt accepts. `/new` clears the
- * session and transcript; `/exit` (and `/quit`) terminate the TUI like
+ * session and transcript; `/compact` queues context compaction; `/exit` (and `/quit`) terminate the TUI like
  * Ctrl+C; extension commands are dispatched outside the runner. Anything
  * else — including unknown `/text` — is a normal message.
  */

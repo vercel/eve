@@ -199,6 +199,39 @@ describe("createWorkflowRuntime#cancelTurn", () => {
   });
 });
 
+describe("createWorkflowRuntime#compactSession", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("queues compaction on the continuation hook and returns its owner", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:token" }),
+    ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", { kind: "compact" });
+  });
+
+  it("reports a missing continuation hook as an inactive session", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("eve:missing"));
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:missing" }),
+    ).resolves.toEqual({ status: "no_active_session" });
+  });
+
+  it("treats a terminal owner race as an inactive session", async () => {
+    const { RunExpiredError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new RunExpiredError("session already completed"));
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:completed" }),
+    ).resolves.toEqual({ status: "no_active_session" });
+  });
+});
+
 describe("createWorkflowRuntime#terminateSession", () => {
   function buildRuntime() {
     return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });

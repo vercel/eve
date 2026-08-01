@@ -265,6 +265,7 @@ describe("dispatchChannelRequest", () => {
   it("tags route sends with Vercel's request id", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
+      compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
@@ -314,6 +315,7 @@ describe("dispatchChannelRequest", () => {
   it("supplies a channel-scoped reset helper", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
+      compactSession: vi.fn(),
       deliver: vi.fn(),
       getEventStream: vi.fn(),
       getStreamTailIndex: vi.fn(),
@@ -366,6 +368,7 @@ describe("dispatchChannelRequest", () => {
   it("does not invent a channel request id when Vercel did not send one", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
+      compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
@@ -410,6 +413,7 @@ describe("dispatchChannelRequest", () => {
   it("does not mutate route-owned run and deliver inputs", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
+      compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_deliver" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),

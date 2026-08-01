@@ -8,6 +8,7 @@ import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#
 function createRuntime(): Runtime {
   return {
     cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
+    compactSession: vi.fn(),
     deliver: vi.fn(),
     getEventStream: vi.fn(),
     getStreamTailIndex: vi.fn(),

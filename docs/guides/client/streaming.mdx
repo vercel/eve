@@ -19,6 +19,13 @@ const result = await response.result();
 
 Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally.
 
+Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; confirm completion by reading `compaction.requested` and `compaction.completed` from the durable stream. A never-started session returns `no_active_session` as a successful no-op.
+
+```ts
+const compaction = await session.compact();
+console.log(compaction.status);
+```
+
 ## Aggregate a turn
 
 Use `result()` when you only need the final turn summary:

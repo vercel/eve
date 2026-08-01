@@ -420,6 +420,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         const step = createExecutionNodeStep({
           abortSignal: input.abortSignal,
           capabilities,
+          compactOnly: input.input?.kind === "compact",
           createRuntime: createWorkflowRuntime,
           handleEvent,
           mode,

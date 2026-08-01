@@ -8,6 +8,8 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  CompactSessionInput,
+  CompactSessionResult,
   DeliverInput,
   GetEventStreamOptions,
   HookPayload,
@@ -192,6 +194,23 @@ export function createWorkflowRuntime(config: {
 
     async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
       return await requestWorkflowTurnCancellation(input);
+    },
+
+    async compactSession(input: CompactSessionInput): Promise<CompactSessionResult> {
+      try {
+        const hook = normalizeWorkflowHook(
+          await resumeHook(input.continuationToken, { kind: "compact" }),
+        );
+        return { sessionId: hook.runId, status: "accepted" };
+      } catch (error) {
+        if (HookNotFoundError.is(error) || isAlreadyTerminalSessionError(error)) {
+          return { status: "no_active_session" };
+        }
+        logError(log, "failed to request session compaction", error, {
+          continuationToken: input.continuationToken,
+        });
+        throw error;
+      }
     },
 
     async terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult> {

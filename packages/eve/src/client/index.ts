@@ -43,6 +43,7 @@ export type {
   AgentInfoToolEntry,
   AgentInfoTools,
   CancelSessionResult,
+  CompactResult,
   ClientAuth,
   ClientOptions,
   ClientRedirectPolicy,

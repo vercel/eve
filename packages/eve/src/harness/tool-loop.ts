@@ -572,6 +572,50 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       turnId: activeTurnId(emissionState),
     });
 
+    if (config.compactOnly === true) {
+      if (session.history.length === 0) {
+        return { next: null, session };
+      }
+
+      const ctx = contextStorage.getStore();
+      const resolvedModel = await resolveActiveRuntimeModel({ config, ctx, session });
+      session = resolvedModel.session;
+
+      try {
+        const compacted = await maybeCompact({
+          abortSignal: config.abortSignal,
+          emit,
+          emissionState: {
+            ...emissionState,
+            turnId: activeTurnId(emissionState),
+          },
+          force: true,
+          messages: [...session.history],
+          model: resolvedModel.model,
+          onCompaction: config.onCompaction,
+          resolveModel: config.resolveModel,
+          runtimeIdentity: config.runtimeIdentity,
+          session,
+          telemetry: enrichTelemetry(telemetryConfig, agentName) ?? undefined,
+        });
+
+        return {
+          next: null,
+          session: {
+            ...compacted.session,
+            compaction: {
+              recentWindowSize: compacted.session.compaction.recentWindowSize,
+              threshold: compacted.session.compaction.threshold,
+            },
+            history: compacted.messages,
+          },
+        };
+      } catch (error) {
+        logError(log, "manual session compaction failed", error, { sessionId: session.sessionId });
+        return { next: null, session };
+      }
+    }
+
     // Resolve deferred input, runtime actions, then HITL input; each stage
     // may park when its resume payload has not arrived.
 
@@ -2514,6 +2558,7 @@ async function maybeCompact(input: {
   readonly abortSignal?: AbortSignal;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly force?: boolean;
   readonly messages: ModelMessage[];
   readonly model: LanguageModel;
   readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
@@ -2526,7 +2571,7 @@ async function maybeCompact(input: {
   let messages = input.messages;
   const session = input.session;
 
-  if (!shouldCompact(messages, session.compaction)) {
+  if (input.force !== true && !shouldCompact(messages, session.compaction)) {
     return { messages, session };
   }
 
@@ -2557,6 +2602,7 @@ async function maybeCompact(input: {
     input.telemetry,
     buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
     input.abortSignal,
+    input.force === true,
   );
 
   if (input.onCompaction) {

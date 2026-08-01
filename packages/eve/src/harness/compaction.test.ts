@@ -547,6 +547,30 @@ describe("compactMessages: tool-result cap heuristic", () => {
   });
 });
 
+describe("compactMessages: forced summary", () => {
+  it("summarizes the full conversation even when it is already under the threshold", async () => {
+    const { generateText } = await import("ai");
+    vi.mocked(generateText).mockResolvedValue({
+      text: "forced checkpoint",
+    } as Awaited<ReturnType<typeof generateText>>);
+    const messages = [user("old message"), assistant("old reply")];
+
+    const result = await compactMessages(
+      messages,
+      {} as Parameters<typeof compactMessages>[1],
+      { recentWindowSize: 10, threshold: ROOMY },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect(generateText).toHaveBeenCalledOnce();
+    expect(result).toContainEqual({ content: "forced checkpoint", role: "assistant" });
+  });
+});
+
 describe("compactMessages: summarization fallback", () => {
   it("summarizes when capping cannot free enough space", async () => {
     // All bulk is conversational prose — capping removes nothing — and the

@@ -238,6 +238,8 @@ export interface ToolLoopHarnessConfig {
    * per-step toolset to decide whether `ask_question` is available.
    */
   readonly capabilities?: SessionCapabilities;
+  /** Forces one context-compaction pass without running a model turn. */
+  readonly compactOnly?: boolean;
   /**
    * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote

@@ -79,6 +79,7 @@ function createEveCreateHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        compact: vi.fn(),
         reset: vi.fn(),
         getSession: vi.fn(),
         receive: vi.fn() as any,
@@ -126,6 +127,7 @@ function createEveContinueHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        compact: vi.fn(),
         reset: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
@@ -160,6 +162,7 @@ function createEveCancelHandler(input: EveChannelInput) {
           send: vi.fn(),
           resolveActiveSession: async () => undefined,
           cancel: vi.fn(),
+          compact: vi.fn(),
           reset: vi.fn(),
           getSession: vi.fn(),
           receive: vi.fn() as any,
@@ -206,6 +209,7 @@ function createEveResetHandler(input: EveChannelInput) {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        compact: vi.fn(),
         reset,
         getSession: vi.fn(),
         receive: vi.fn() as any,
@@ -224,6 +228,39 @@ function resetRequest(body: unknown): Request {
     headers: { "content-type": "application/json" },
     method: "POST",
   });
+}
+
+/** Creates a POST handler test harness for the continuation-addressed compact route. */
+function createEveCompactHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const compactRoute = channel.routes.find(
+    (route) => route.method === "POST" && route.path === "/eve/v1/session/compact",
+  );
+  if (!compactRoute) throw new Error("No session compact POST route found");
+
+  const compact = vi.fn().mockResolvedValue({
+    sessionId: "test-session-id",
+    status: "accepted",
+  });
+
+  return {
+    compact,
+    async fetch(req: Request) {
+      const args: RouteHandlerArgs = {
+        send: vi.fn(),
+        resolveActiveSession: async () => undefined,
+        cancel: vi.fn(),
+        compact,
+        reset: vi.fn(),
+        getSession: vi.fn(),
+        receive: vi.fn() as any,
+        params: {},
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      };
+      return (compactRoute as any).handler(req, args);
+    },
+  };
 }
 
 /** Creates a GET handler test harness for the durable session stream route. */
@@ -252,6 +289,7 @@ function createEveStreamHandler(input: EveChannelInput) {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        compact: vi.fn(),
         reset: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
@@ -1535,6 +1573,33 @@ describe("eveChannel — reset session", () => {
       error: "Failed to reset the session.",
       ok: false,
     });
+  });
+});
+
+describe("eveChannel — compact session", () => {
+  it("queues compaction for the supplied channel-local continuation token", async () => {
+    const handler = createEveCompactHandler({ auth: none() });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "test-session-id",
+      status: "accepted",
+    });
+    expect(handler.compact).toHaveBeenCalledWith({ continuationToken: "eve:token" });
+  });
+
+  it("reports a token that no active session owns", async () => {
+    const handler = createEveCompactHandler({ auth: none() });
+    handler.compact.mockResolvedValue({ status: "no_active_session" });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
   });
 });
 

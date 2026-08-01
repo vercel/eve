@@ -37,6 +37,16 @@ export interface CancelTurnResult {
   readonly reason?: string;
 }
 
+/** Identifies the continuation hook whose durable session should compact. */
+export interface CompactSessionInput {
+  readonly continuationToken: string;
+}
+
+/** Result of queueing manual context compaction for a session. */
+export type CompactSessionResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "no_active_session" };
+
 /** Identifies a session to transition permanently to a terminal state. */
 export interface TerminateSessionInput {
   /** Human-readable reason recorded on the terminal workflow transition. */
@@ -181,6 +191,11 @@ export interface SessionTimeoutHookPayload {
   readonly kind: "session-timeout";
 }
 
+/** Requests a context compaction without delivering model input. */
+export interface CompactSessionHookPayload {
+  readonly kind: "compact";
+}
+
 /**
  * Runtime-action results resumed back into a parked parent workflow.
  */
@@ -243,6 +258,7 @@ export interface SubagentAuthorizationEventHookPayload {
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
+  | CompactSessionHookPayload
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
@@ -437,6 +453,9 @@ export interface Runtime {
 
   /** Requests cancellation of a session's in-flight turn. */
   cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+
+  /** Queues context compaction on the session owning a continuation token. */
+  compactSession(input: CompactSessionInput): Promise<CompactSessionResult>;
 
   /** Terminally retires a session and releases its non-retained continuation hooks. */
   terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult>;

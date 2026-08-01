@@ -21,6 +21,7 @@ interface SessionDeliveryHookState {
 
 /** Reads and rekeys the public delivery hook for one session driver. */
 export interface SessionDeliveryHook {
+  consumeCompactRequest(): boolean;
   consumeNext(): void;
   consumeSessionTimeout(): boolean;
   next(): Promise<IteratorResult<HookPayload>>;
@@ -50,6 +51,7 @@ export function createSessionDeliveryHook(
   let offered: Promise<IteratorResult<HookPayload>> | null = null;
   let offeredRead: HookRead | undefined;
   let sessionTimedOut = false;
+  let compactRequested = false;
   let wake: (() => void) | undefined;
 
   const enqueue = (read: HookRead): void => {
@@ -115,10 +117,14 @@ export function createSessionDeliveryHook(
 
       if (read.result.done) {
         read.state.closed = true;
-      } else if (read.result.value.kind === "deliver") {
-        bufferedDeliveries.push(read.result.value);
-      } else if (read.result.value.kind === "session-timeout") {
-        sessionTimedOut = true;
+      } else {
+        if (read.result.value.kind === "deliver") {
+          bufferedDeliveries.push(read.result.value);
+        } else if (read.result.value.kind === "session-timeout") {
+          sessionTimedOut = true;
+        } else if (read.result.value.kind === "compact") {
+          compactRequested = true;
+        }
       }
 
       arm(read.state);
@@ -127,6 +133,12 @@ export function createSessionDeliveryHook(
   };
 
   return {
+    consumeCompactRequest(): boolean {
+      const requested = compactRequested;
+      compactRequested = false;
+      return requested;
+    },
+
     consumeNext(): void {
       if (offeredRead === undefined) {
         throw new Error("Cannot consume a public delivery before it resolves.");
@@ -134,6 +146,9 @@ export function createSessionDeliveryHook(
 
       if (!offeredRead.result.done && offeredRead.result.value.kind === "session-timeout") {
         sessionTimedOut = true;
+      }
+      if (!offeredRead.result.done && offeredRead.result.value.kind === "compact") {
+        compactRequested = true;
       }
       offeredRead.state.pending = false;
       offeredRead.state.resolved = undefined;

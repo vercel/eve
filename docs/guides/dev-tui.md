@@ -42,6 +42,7 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 | `/loglevel`   | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                             |
 | `/traces`     | Opens the full-screen local trace viewer. See [Inspect traces](#inspect-traces).                                                                             |
 | `/new`        | Starts a fresh session.                                                                                                                                      |
+| `/compact`    | Queues context compaction for the current session without sending a message.                                                                                 |
 | `/exit`       | Quits the TUI.                                                                                                                                               |
 | `/help`       | Lists the commands available for the current local or remote session.                                                                                        |
 

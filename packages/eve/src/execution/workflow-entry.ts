@@ -71,6 +71,7 @@ type DriverLoopOutcome =
     };
 
 type NextSessionAction =
+  | { readonly kind: "compact" }
   | {
       readonly delivery: DeliverHookPayload | null;
       readonly kind: "delivery";
@@ -337,6 +338,15 @@ async function runDriverLoop(input: {
         };
       }
 
+      if (nextAction.kind === "compact") {
+        action = await runTurn({
+          delivery: { kind: "compact" },
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        continue;
+      }
+
       const nextDeliver = nextAction.delivery;
       if (nextDeliver === null) {
         return { kind: "result", result: { output: "" } };
@@ -398,6 +408,10 @@ async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly deliveryHook: SessionDeliveryHook;
 }): Promise<NextSessionAction> {
+  if (input.deliveryHook.consumeCompactRequest()) {
+    return { kind: "compact" };
+  }
+
   if (input.deliveryHook.consumeSessionTimeout()) {
     return { kind: "expired" };
   }
@@ -419,6 +433,11 @@ async function waitForNextSessionAction(input: {
 
     if (first.value.kind === "session-timeout") {
       return { kind: "expired" };
+    }
+
+    if (first.value.kind === "compact") {
+      input.deliveryHook.consumeCompactRequest();
+      return { kind: "compact" };
     }
 
     if (first.value.kind !== "deliver") {
@@ -446,6 +465,10 @@ async function waitForNextSessionAction(input: {
       }
 
       input.deliveryHook.consumeNext();
+
+      if (ready.value.kind === "compact") {
+        continue;
+      }
 
       if (ready.value.kind !== "deliver") {
         continue;

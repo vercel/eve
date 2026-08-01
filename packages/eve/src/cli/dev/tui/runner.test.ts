@@ -197,8 +197,9 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("recognizes /new, /exit, and /quit", () => {
+  it("recognizes /new, /compact, /exit, and /quit", () => {
     expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+    expect(parsePromptCommand("/compact")).toEqual({ type: "compact" });
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });
   });
@@ -653,6 +654,29 @@ describe("EveTUIRunner development session continuity", () => {
     expect(reset).toHaveBeenCalledOnce();
     expect(initialSession.send).toHaveBeenCalledOnce();
     expect(newSession.send).toHaveBeenCalledOnce();
+  });
+
+  it("compacts the active session without sending a prompt", async () => {
+    const session = sessionYielding([]);
+    const compact = vi
+      .spyOn(session, "compact")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/compact", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(compact).toHaveBeenCalledOnce();
+    expect(session.send).not.toHaveBeenCalled();
+    expect(results).toEqual(["Compaction requested."]);
   });
 
   it("keeps the current transcript and session when /new cannot reset the owner", async () => {

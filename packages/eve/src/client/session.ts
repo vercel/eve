@@ -1,9 +1,11 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
+import { CompactResponseSchema } from "#protocol/compact-session.js";
 import { ResetResponseSchema } from "#protocol/reset-session.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
+  EVE_COMPACT_SESSION_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
   createEveCancelTurnRoutePath,
   createEveContinueSessionRoutePath,
@@ -16,6 +18,7 @@ import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
 import type {
   CancelSessionResult,
+  CompactResult,
   ClientRedirectPolicy,
   ResetResult,
   SendTurnInput,
@@ -193,6 +196,67 @@ export class ClientSession {
     }
 
     return { sessionId: result.data.sessionId, status: result.data.status };
+  }
+
+  /**
+   * Queues context compaction without sending model input. The request is
+   * asynchronous; observe `compaction.completed` on the durable event stream
+   * to confirm completion. A never-started handle is a successful no-op.
+   */
+  async compact(): Promise<CompactResult> {
+    const state = this.#state;
+    const continuationToken = state.continuationToken;
+
+    if (continuationToken === undefined) {
+      if (state.sessionId !== undefined) {
+        throw new Error(
+          "Session has no continuation token. Consume its event stream before compacting.",
+        );
+      }
+      return { status: "no_active_session" };
+    }
+
+    const url = createClientUrl(this.#context.host, EVE_COMPACT_SESSION_ROUTE_PATH);
+    const headers = await this.#context.resolveHeaders();
+    headers.set("content-type", "application/json");
+
+    const response = await fetch(
+      url,
+      withRedirectPolicy(
+        {
+          body: JSON.stringify({ continuationToken }),
+          headers,
+          method: "POST",
+        },
+        this.#context.redirect,
+      ),
+    );
+    const body = await response.text();
+
+    if (!response.ok) {
+      throw new ClientError(response.status, body, response.headers);
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      throw new Error(`Compact route returned invalid JSON (${response.status}).`);
+    }
+
+    const result = CompactResponseSchema.safeParse(payload);
+    if (
+      !result.success ||
+      (result.data.status === "accepted" &&
+        state.sessionId !== undefined &&
+        result.data.sessionId !== state.sessionId)
+    ) {
+      throw new Error(`Compact route returned an invalid response (${response.status}).`);
+    }
+
+    return result.data.status === "accepted"
+      ? { sessionId: result.data.sessionId, status: "accepted" }
+      : { status: "no_active_session" };
   }
 
   /**
