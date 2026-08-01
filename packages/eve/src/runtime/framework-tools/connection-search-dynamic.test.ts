@@ -8,11 +8,15 @@ import { ConnectionAuthorizationRequiredError } from "#public/connections/errors
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ConnectionRegistry, ConnectionToolMetadata } from "#runtime/connections/types.js";
 import {
-  createConnectionSearchEvents,
+  createConnectionSearchResolver,
   extractDiscoveredTools,
 } from "#runtime/framework-tools/connection-search-dynamic.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import type { DynamicResolveContext, DynamicToolSet } from "#shared/dynamic-tool-definition.js";
+import {
+  isBrandedToolEntry,
+  type DynamicResolveContext,
+  type DynamicToolSet,
+} from "#shared/dynamic-tool-definition.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Msg = any;
@@ -39,7 +43,7 @@ async function executeConnectionSearch(
   setupContext?.(ctx);
 
   return contextStorage.run(ctx, async () => {
-    const resolve = createConnectionSearchEvents()["step.started"]!;
+    const resolve = createConnectionSearchResolver().events["step.started"]!;
     const resolved = (await resolve({}, {
       channel: {},
       messages: [],
@@ -68,6 +72,56 @@ function registry(input: {
     getConnections: () => input.connections,
   };
 }
+
+describe("connection dynamic tools", () => {
+  it("uses the shared resolver and public tool definitions", async () => {
+    const linear = connection("linear");
+    const connectionRegistry = registry({
+      connections: [linear],
+      loadTools: { linear: async () => [] },
+    });
+    const messages: Msg[] = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "connection_search",
+            output: [
+              {
+                connection: "linear",
+                description: "List issues",
+                inputSchema: { type: "object" },
+                qualifiedName: "linear__list_issues",
+                tool: "list_issues",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, connectionRegistry);
+    const resolver = createConnectionSearchResolver();
+    const resolve = resolver.events["step.started"]!;
+
+    const tools = await contextStorage.run(ctx, async () => {
+      return (await resolve(
+        {},
+        {
+          channel: {},
+          messages,
+          session: { auth: { current: null, initiator: null }, id: "test-session" },
+        },
+      )) as DynamicToolSet;
+    });
+
+    expect(resolver.eventNames).toEqual(["step.started"]);
+    expect(Object.keys(tools)).toEqual(["connection_search", "linear__list_issues"]);
+    expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
+  });
+});
 
 describe("connection_search", () => {
   it("fails when every targeted connection fails to load", async () => {

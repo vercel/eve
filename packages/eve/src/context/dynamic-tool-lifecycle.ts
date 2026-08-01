@@ -202,6 +202,31 @@ interface ResolveResult {
   readonly liveTools: readonly HarnessToolDefinition[];
 }
 
+function readDynamicToolResult(
+  resolver: ResolvedDynamicToolResolver,
+  value: unknown,
+): { readonly entries: Record<string, DynamicToolEntry>; readonly isSingle: boolean } {
+  if (isBrandedToolEntry(value)) {
+    return { entries: { _single: value as DynamicToolEntry }, isSingle: true };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(
+      `Dynamic tool resolver "${resolver.logicalPath}" must return defineTool(), a map of defineTool() values, or null.`,
+    );
+  }
+
+  const entries: Record<string, DynamicToolEntry> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    if (!isBrandedToolEntry(entry)) {
+      throw new Error(
+        `Dynamic tool resolver "${resolver.logicalPath}" returned "${name}" without defineTool(). Wrap every dynamic tool entry in defineTool().`,
+      );
+    }
+    entries[name] = entry as DynamicToolEntry;
+  }
+  return { entries, isSingle: false };
+}
+
 async function resolveToolsFromEvent(
   ctx: ContextContainer,
   resolvers: readonly ResolvedDynamicToolResolver[],
@@ -216,17 +241,7 @@ async function resolveToolsFromEvent(
       const resolveCtx = buildResolveContext(ctx, messages);
       const rawResult = await handler(event, resolveCtx);
       if (rawResult === null || rawResult === undefined) return null;
-
-      let entries: Record<string, DynamicToolEntry>;
-      let isSingle: boolean;
-      if (isBrandedToolEntry(rawResult)) {
-        entries = { _single: rawResult as DynamicToolEntry };
-        isSingle = true;
-      } else {
-        entries = rawResult as Record<string, DynamicToolEntry>;
-        isSingle = false;
-      }
-
+      const { entries, isSingle } = readDynamicToolResult(resolver, rawResult);
       return { resolver, entries, isSingle };
     }),
   );

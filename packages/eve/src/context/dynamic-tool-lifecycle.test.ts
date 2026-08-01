@@ -5,6 +5,7 @@ import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import type { ApprovalContext } from "#public/definitions/approval.js";
 import { defineTool, type ToolContext } from "#public/definitions/tool.js";
+import type { JsonObject } from "#shared/json.js";
 import { serializeOutputSchema, type ToolSchema } from "#shared/tool-schema.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
@@ -589,7 +590,7 @@ describe("dispatchDynamicToolEvent", () => {
 
   it("leaves unsupported connection input schemas for the MCP server to validate", async () => {
     const ctx = createCtx();
-    const inputSchema = {
+    const inputSchema: JsonObject = {
       properties: {
         filters: {
           anyOf: [
@@ -606,11 +607,11 @@ describe("dispatchDynamicToolEvent", () => {
       type: "object",
     };
     const resolver = createResolver("connection", ["step.started"], () => ({
-      remote: {
+      remote: defineTool({
         description: "remote tool",
         inputSchema,
         execute: async (): Promise<unknown> => ({ ok: true }),
-      },
+      }),
     }));
 
     await dispatchDynamicToolEvent({
@@ -956,6 +957,26 @@ describe("dispatchDynamicToolEvent", () => {
     expect(buildDynamicTools(ctx)).toHaveLength(0);
   });
 
+  it("skips map entries that were not created with defineTool", async () => {
+    const ctx = createCtx();
+    const rawResolver = createResolver("raw", ["step.started"], () => ({
+      unwrapped: {
+        description: "raw tool",
+        inputSchema: { type: "object" },
+        execute: async () => ({ ok: true }),
+      },
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [rawResolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    expect(buildDynamicTools(ctx)).toHaveLength(0);
+  });
+
   it("resolver throwing is logged and skipped — other resolvers still work", async () => {
     const ctx = createCtx();
     const badResolver = createResolver("bad", ["session.started"], () => {
@@ -1122,12 +1143,12 @@ describe("framework dynamic tools (no bundler transform)", () => {
   it("propagates approval from a step-scoped entry into the harness tool", async () => {
     const ctx = createCtx();
     const approvalFn = vi.fn(() => "user-approval" as const);
-    const entry: DynamicToolEntry = {
+    const entry: DynamicToolEntry = defineTool({
       description: "destructive op",
       inputSchema: { type: "object" },
       approval: approvalFn,
       execute: async (): Promise<unknown> => ({ ok: true }),
-    };
+    });
     const resolver = createResolver("connection", ["step.started"], () => ({ risky: entry }));
     testRegistry.delete("eve:framework-dynamic:connection:risky");
     testRegistry.delete("eve:dynamic-tool-approval:connection:risky");
@@ -1152,12 +1173,12 @@ describe("framework dynamic tools (no bundler transform)", () => {
   it("replays approval from session-scoped dynamic tools", async () => {
     const ctx = createCtx();
     const approvalFn = vi.fn(async () => "user-approval" as const);
-    const entry: DynamicToolEntry = {
+    const entry: DynamicToolEntry = defineTool({
       description: "destructive op",
       inputSchema: { type: "object" },
       approval: approvalFn,
       execute: async (): Promise<unknown> => ({ ok: true }),
-    };
+    });
     const resolver = createResolver("session_guard", ["session.started"], () => ({
       guarded: entry,
     }));
@@ -1190,12 +1211,12 @@ describe("framework dynamic tools (no bundler transform)", () => {
       required: ["ok"],
       type: "object",
     };
-    const entry: DynamicToolEntry = {
+    const entry: DynamicToolEntry = defineTool({
       description: "typed op",
       inputSchema: { type: "object" },
       outputSchema,
       execute: async (): Promise<unknown> => ({ ok: true }),
-    };
+    });
     const resolver = createResolver("connection", ["session.started"], () => ({ typed: entry }));
 
     await dispatchDynamicToolEvent({
