@@ -2,6 +2,7 @@ import { type FilePart, type TextPart, type UserContent } from "ai";
 
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
+import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import type { SendOptions } from "#channel/routes.js";
 import { resolveForwardedPrincipal, type TrustedForwarders } from "#channel/forwarded-principal.js";
@@ -23,6 +24,7 @@ import {
 } from "#protocol/message.js";
 import {
   EVE_CANCEL_TURN_ROUTE_PATTERN,
+  EVE_COMPACT_SESSION_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
 } from "#protocol/routes.js";
@@ -307,6 +309,34 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             : { ok: true, status: "no_active_session" };
         return Response.json(response, {
           headers: { "cache-control": "no-store" },
+        });
+      }),
+
+      POST(EVE_COMPACT_SESSION_ROUTE_PATH, async (req, { compact }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const body = await parseResetSessionBody(req);
+        if (body instanceof Response) return body;
+
+        let result: Awaited<ReturnType<typeof compact>>;
+        try {
+          result = await compact({ continuationToken: body.continuationToken });
+        } catch (error) {
+          const errorId = logError(log, "session-compaction request failed", error);
+          return Response.json(
+            { error: "Failed to compact the session.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+
+        const response: CompactResponse =
+          result.status === "accepted"
+            ? { ok: true, sessionId: result.sessionId, status: "accepted" }
+            : { ok: true, status: "no_active_session" };
+        return Response.json(response, {
+          headers: { "cache-control": "no-store" },
+          status: result.status === "accepted" ? 202 : 200,
         });
       }),
 

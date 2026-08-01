@@ -99,6 +99,20 @@ describe("createSessionDeliveryHook", () => {
     await deliveryHook.dispose();
   });
 
+  it("latches compaction requests consumed while a turn owns delivery reads", async () => {
+    const hook = createMockHook({ reads: [Promise.resolve(compact())], token: "active" });
+    installHooks(hook);
+    const deliveryHook = createSessionDeliveryHook([]);
+
+    await deliveryHook.rekey("active");
+    await expect(deliveryHook.next()).resolves.toEqual(compact());
+    deliveryHook.consumeNext();
+
+    expect(deliveryHook.consumeCompactRequest()).toBe(true);
+    expect(deliveryHook.consumeCompactRequest()).toBe(false);
+    await deliveryHook.dispose();
+  });
+
   it("disposes a conflicting candidate without releasing the active hook", async () => {
     const oldHook = createMockHook({ token: "old" });
     const candidateHook = createMockHook({
@@ -270,6 +284,10 @@ function deliveryPayload(message: string): DeliverHookPayload {
 
 function sessionTimeout(): IteratorResult<HookPayload> {
   return { done: false, value: { kind: "session-timeout" } };
+}
+
+function compact(): IteratorResult<HookPayload> {
+  return { done: false, value: { kind: "compact" } };
 }
 
 function createDeferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void } {

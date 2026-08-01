@@ -150,7 +150,7 @@ void (async () => {
       // The title paints before registry loading necessarily yields to the
       // category picker. Wait for a real option so Escape belongs to the
       // question rather than the setup flow's between-questions interrupt trap.
-      await screen.waitForText("Chat channels", 5_000);
+      await screen.waitForText("Channels", 5_000);
       input.send("\x1b");
       await screen.waitForText("/add dismissed.", 5_000);
       await screen.waitForIdlePrompt(5_000);

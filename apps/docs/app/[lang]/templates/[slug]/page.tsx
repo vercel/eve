@@ -62,9 +62,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
 
       <header className="mt-8 grid gap-4 lg:grid-cols-2 lg:items-start lg:gap-8">
         <div className="min-w-0">
-          <h1 className="m-0 font-medium! text-heading-40 text-gray-1000 tracking-tighter sm:text-heading-48">
-            {entry.title}
-          </h1>
+          <h1 className="m-0 text-heading-40 text-gray-1000 sm:text-heading-48">{entry.title}</h1>
           <div className="hidden lg:block">
             <IntegrationList entry={entry} />
           </div>

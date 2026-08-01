@@ -6,6 +6,10 @@ import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-li
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
+  dispatchDynamicSubagentEvent,
+  refreshDynamicSessionSubagentsForRuntimeRevision,
+} from "#context/dynamic-subagent-lifecycle.js";
+import {
   dispatchDynamicToolEvent,
   refreshDynamicSessionToolsForRuntimeRevision,
 } from "#context/dynamic-tool-lifecycle.js";
@@ -13,6 +17,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   ModeKey,
+  SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -67,6 +72,7 @@ import {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
@@ -144,6 +150,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -216,10 +223,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   const initialSession = hydrateDurableSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
-    turnAgent: bundle.turnAgent,
+    turnAgent: effectiveAgent.turnAgent,
   });
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
@@ -273,24 +280,40 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const hookRegistry = bundle.hookRegistry;
   const dynamicInstructionsResolvers = bundle.resolvedAgent.dynamicInstructionsResolvers ?? [];
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
+  const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
-  const runtimeIdentity = buildRuntimeIdentity(bundle.graph.root);
+  const effectiveNode = {
+    ...bundle.graph.root,
+    turnAgent: effectiveAgent.turnAgent,
+  };
+  const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
   const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  const dynamicToolRuntimeRevision = deploymentId
+  const dynamicRuntimeRevision = deploymentId
     ? `deployment:${deploymentId}`
     : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
   const sessionStarted = getHarnessEmissionState(initialSession.state).sessionStarted;
 
   if (!sessionStarted) {
-    ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicToolRuntimeRevision);
+    ctx.set(SessionDynamicSubagentRuntimeRevisionKey, dynamicRuntimeRevision);
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicRuntimeRevision);
   } else {
-    await refreshDynamicSessionToolsForRuntimeRevision({
-      ctx,
-      resolvers: dynamicToolResolvers,
-      event: createSessionStartedEvent({ runtime: runtimeIdentity }),
-      messages: initialSession.history,
-      runtimeRevision: dynamicToolRuntimeRevision,
-    });
+    const refreshEvent = createSessionStartedEvent({ runtime: runtimeIdentity });
+    await Promise.all([
+      refreshDynamicSessionSubagentsForRuntimeRevision({
+        ctx,
+        resolvers: dynamicSubagentResolvers,
+        event: refreshEvent,
+        messages: initialSession.history,
+        runtimeRevision: dynamicRuntimeRevision,
+      }),
+      refreshDynamicSessionToolsForRuntimeRevision({
+        ctx,
+        resolvers: dynamicToolResolvers,
+        event: refreshEvent,
+        messages: initialSession.history,
+        runtimeRevision: dynamicRuntimeRevision,
+      }),
+    ]);
   }
 
   const writer = input.parentWritable.getWriter();
@@ -313,9 +336,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({
         ctx,
-        dynamicModel: bundle.turnAgent.dynamicModel,
+        dynamicModel: effectiveAgent.turnAgent.dynamicModel,
         event: emitted,
-        fallback: bundle.turnAgent.model,
+        fallback: effectiveAgent.turnAgent.model,
         messages: messages ?? [],
         scope: {
           moduleMap: bundle.moduleMap,
@@ -323,6 +346,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         },
       });
     }
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      resolvers: dynamicSubagentResolvers,
+      event: emitted,
+      messages: messages ?? [],
+    });
     await dispatchDynamicToolEvent({
       ctx,
       resolvers: dynamicToolResolvers,
@@ -353,7 +382,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     throwIfTurnAborted(input.abortSignal);
     stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
       const schemaSession = resolveEffectiveOutputSchema({
-        agentOutputSchema: bundle.turnAgent.outputSchema,
+        agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
         input: resolved,
         mode,
         session: enrichedSession,
@@ -382,15 +411,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ): Promise<StepResult> => {
         const refreshedSession = refreshSessionFromTurnAgent({
           compactionOverrides: {
-            thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+            thresholdPercent: effectiveAgent.thresholdPercent,
           },
           session: lifecycleSession,
-          turnAgent: bundle.turnAgent,
+          turnAgent: effectiveAgent.turnAgent,
         });
 
         const step = createExecutionNodeStep({
           abortSignal: input.abortSignal,
           capabilities,
+          compactOnly: input.input?.kind === "compact",
           createRuntime: createWorkflowRuntime,
           handleEvent,
           mode,
@@ -398,7 +428,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             moduleMap: bundle.moduleMap,
             nodeId: bundle.nodeId,
           },
-          node: bundle.graph.root,
+          node: effectiveNode,
           workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });
         return step(refreshedSession, stepInput);

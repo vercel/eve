@@ -21,16 +21,18 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   getPendingRuntimeActionBatch,
-  recordPendingSubagentChildToken,
+  recordPendingSubagentChild,
 } from "#harness/runtime-actions.js";
 import {
   createSubagentCalledEvent,
   encodeMessageStreamEvent,
-  type HandleMessageStreamEvent,
-  timestampHandleMessageStreamEvent,
+  stampMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type {
+  RuntimeActionRequest,
   RuntimeRemoteAgentCallActionRequest,
+  RuntimeSubagentCallActionRequest,
   RuntimeSubagentResultActionResult,
 } from "#runtime/actions/types.js";
 import {
@@ -50,13 +52,9 @@ import { createWorkflowRuntime, workflowEntryReference } from "#execution/workfl
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
-import {
-  type DelegatedRuntimeActionRequest,
-  getSubagentDelegationName,
-  isSubagentDelegationAction,
-  resolveSubagentDelegationLimit,
-  type SubagentDelegationLimit,
-} from "#harness/subagent-depth.js";
+import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -87,12 +85,13 @@ export async function dispatchRuntimeActionsStep(input: {
   // start. A missing channel after the first start would otherwise retry the
   // whole durable step and duplicate that child.
   ctx.require(ChannelKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const session = hydrateDurableSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
-    turnAgent: bundle.turnAgent,
+    turnAgent: effectiveAgent.turnAgent,
   });
   const auth = ctx.get(AuthKey) ?? null;
   const capabilities = ctx.get(CapabilitiesKey);
@@ -100,7 +99,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
   const writer = input.parentWritable.getWriter();
 
-  const delegationLimit = resolveSubagentDelegationLimit(session);
+  const subagentDepth = resolveSubagentDepth(session);
   // Read here, not in the child: trace state is scoped to one session's
   // context, so this is the last place the parent's window is visible.
   const parentTraceContext = readSessionTraceContext(input.serializedContext, session.sessionId);
@@ -116,15 +115,34 @@ export async function dispatchRuntimeActionsStep(input: {
 
   try {
     for (const action of batch.actions) {
-      if (delegationLimit.reached && isSubagentDelegationAction(action)) {
-        log.warn("subagent depth limit reached; blocking delegated call", {
+      const isDynamicSubagent =
+        action.kind === "subagent-call" &&
+        bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true;
+      const dynamicSubagentSelection = isDynamicSubagent
+        ? getDynamicSubagentSelection(ctx, action.nodeId)
+        : undefined;
+      if (
+        isRecursiveAgentAction(action, bundle.subagentRegistry.subagentsByNodeId) &&
+        (session.rootSessionId !== undefined || subagentDepth.currentDepth > 0)
+      ) {
+        log.warn("recursive agent call blocked outside the root session", {
           callId: action.callId,
-          currentDepth: delegationLimit.currentDepth,
-          maxDepth: delegationLimit.maxDepth,
+          currentDepth: subagentDepth.currentDepth,
           nodeId: action.nodeId,
-          subagentName: getSubagentDelegationName(action),
+          subagentName: action.subagentName,
         });
-        results.push(createSubagentDepthLimitResult({ action, delegationLimit }));
+        results.push(createRecursiveAgentRootOnlyResult(action));
+        continue;
+      }
+
+      if (isDynamicSubagent && dynamicSubagentSelection === undefined) {
+        const subagentName = getSubagentName(action);
+        log.warn("dynamic subagent call blocked after availability changed", {
+          callId: action.callId,
+          nodeId: action.nodeId,
+          subagentName,
+        });
+        results.push(createUnavailableDynamicSubagentResult(action));
         continue;
       }
 
@@ -135,35 +153,37 @@ export async function dispatchRuntimeActionsStep(input: {
 
       switch (action.kind) {
         case "subagent-call": {
-          let childContinuationToken: string;
-          let handle: { readonly sessionId: string };
+          const registered = bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId);
+          const description =
+            dynamicSubagentSelection?.agentConfig.description ??
+            (registered?.definition.kind === "subagent"
+              ? registered.definition.description
+              : undefined);
+          const source: SubagentInputSource =
+            description !== undefined ? { description, type: "local" } : { type: "runtime" };
+          const childRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: bundle.compiledArtifactsSource,
+            dynamicSubagentAgentConfig: dynamicSubagentSelection?.agentConfig,
+            nodeId: action.nodeId,
+          });
+          const { childContinuationToken, runInput } = buildSubagentRunInput({
+            action,
+            auth,
+            batchEvent: batch.event,
+            capabilities,
+            channelMetadata,
+            fanoutSize,
+            initiatorAuth,
+            parentContinuationToken: input.parentContinuationToken,
+            parentTraceContext,
+            session,
+            source,
+          });
           try {
-            const registered = bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId);
-            const source: SubagentInputSource =
-              registered?.definition.kind === "subagent"
-                ? { description: registered.definition.description, type: "local" }
-                : { type: "runtime" };
-            const childRuntime = createWorkflowRuntime({
-              compiledArtifactsSource: bundle.compiledArtifactsSource,
-              nodeId: action.nodeId,
-            });
-            const built = buildSubagentRunInput({
-              action,
-              auth,
-              batchEvent: batch.event,
-              capabilities,
-              channelMetadata,
-              fanoutSize,
-              initiatorAuth,
-              parentContinuationToken: input.parentContinuationToken,
-              parentTraceContext,
-              session,
-              source,
-            });
-            childContinuationToken = built.childContinuationToken;
-            handle = await childRuntime.run(built.runInput);
+            const handle = await childRuntime.run(runInput);
+            childSessionId = handle.sessionId;
           } catch (error) {
-            logError(log, "subagent start failed", error, {
+            logError(log, "local subagent start failed", error, {
               callId: action.callId,
               nodeId: action.nodeId,
               subagentName: action.subagentName,
@@ -172,12 +192,15 @@ export async function dispatchRuntimeActionsStep(input: {
             continue;
           }
 
-          nextSession = recordPendingSubagentChildToken({
+          nextSession = recordPendingSubagentChild({
             callId: action.callId,
-            childContinuationToken,
+            child: {
+              continuationToken: childContinuationToken,
+              kind: "local",
+              sessionId: childSessionId,
+            },
             session: nextSession,
           });
-          childSessionId = handle.sessionId;
           name = action.name;
           toolName = action.subagentName;
           break;
@@ -192,8 +215,10 @@ export async function dispatchRuntimeActionsStep(input: {
             });
             childSessionId = await startRemoteAgentSession({
               action,
+              auth,
               callbackBaseUrl: input.callbackBaseUrl,
               callbackToken: input.parentContinuationToken,
+              initiatorAuth,
               remote: resolvedRemote,
               session,
             });
@@ -209,6 +234,11 @@ export async function dispatchRuntimeActionsStep(input: {
           name = action.name;
           remote = { url: resolvedRemote.url };
           toolName = action.remoteAgentName;
+          nextSession = recordPendingSubagentChild({
+            callId: action.callId,
+            child: { kind: "remote", sessionId: childSessionId },
+            session: nextSession,
+          });
           break;
         }
         default:
@@ -300,13 +330,11 @@ export async function dispatchRuntimeActionsStep(input: {
 }
 
 async function writeParentEventBestEffort(input: {
-  readonly event: HandleMessageStreamEvent;
+  readonly event: UnstampedMessageStreamEvent;
   readonly writer: WritableStreamDefaultWriter<Uint8Array>;
 }): Promise<void> {
   try {
-    await input.writer.write(
-      encodeMessageStreamEvent(timestampHandleMessageStreamEvent(input.event)),
-    );
+    await input.writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(input.event)));
   } catch (error) {
     logError(log, "subagent.called stream write failed after child start", error, {
       eventType: input.event.type,
@@ -315,7 +343,7 @@ async function writeParentEventBestEffort(input: {
 }
 
 function createSubagentStartFailureResult(input: {
-  readonly action: Extract<DelegatedRuntimeActionRequest, { readonly kind: "subagent-call" }>;
+  readonly action: RuntimeSubagentCallActionRequest;
   readonly error: unknown;
 }): RuntimeSubagentResultActionResult {
   return {
@@ -328,6 +356,28 @@ function createSubagentStartFailureResult(input: {
     },
     subagentName: input.action.subagentName,
   };
+}
+
+function createUnavailableDynamicSubagentResult(
+  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
+): RuntimeSubagentResultActionResult {
+  const subagentName = getSubagentName(action);
+  return {
+    callId: action.callId,
+    isError: true,
+    kind: "subagent-result",
+    output: {
+      code: "SUBAGENT_UNAVAILABLE",
+      message: `Subagent "${subagentName}" is not available in the current session context.`,
+    },
+    subagentName,
+  };
+}
+
+function getSubagentName(
+  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
+): string {
+  return action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
 }
 
 function createRemoteAgentStartFailureResult(input: {
@@ -346,21 +396,28 @@ function createRemoteAgentStartFailureResult(input: {
   };
 }
 
-function createSubagentDepthLimitResult(input: {
-  readonly action: DelegatedRuntimeActionRequest;
-  readonly delegationLimit: SubagentDelegationLimit;
-}): RuntimeSubagentResultActionResult {
-  const subagentName = getSubagentDelegationName(input.action);
+function createRecursiveAgentRootOnlyResult(
+  action: RuntimeSubagentCallActionRequest,
+): RuntimeSubagentResultActionResult {
   return {
-    callId: input.action.callId,
+    callId: action.callId,
     isError: true,
     kind: "subagent-result",
     output: {
-      code: "SUBAGENT_DEPTH_LIMIT_REACHED",
-      currentDepth: input.delegationLimit.currentDepth,
-      maxDepth: input.delegationLimit.maxDepth,
-      message: `Subagent depth limit reached (${input.delegationLimit.maxDepth}); "${subagentName}" was not called.`,
+      code: "RECURSIVE_AGENT_ROOT_ONLY",
+      message: 'The built-in "agent" tool is only available to the root session.',
     },
-    subagentName,
+    subagentName: action.subagentName,
   };
+}
+
+function isRecursiveAgentAction(
+  action: RuntimeActionRequest,
+  subagentsByNodeId: ReadonlyMap<string, unknown>,
+): action is RuntimeSubagentCallActionRequest {
+  return (
+    action.kind === "subagent-call" &&
+    action.subagentName === "agent" &&
+    !subagentsByNodeId.has(action.nodeId)
+  );
 }

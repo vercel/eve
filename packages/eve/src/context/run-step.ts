@@ -77,9 +77,9 @@ export async function runStep(
   callback: (session: HarnessSession) => Promise<StepResult>,
 ): Promise<StepResult> {
   const { result, session } = await withContextScope(ctx, harnessSession, async (enriched) => {
-    const stepResult = await callback(enriched);
-    return { result: stepResult.next, session: stepResult.session };
+    const result = await callback(enriched);
+    return { result, session: result.session };
   });
 
-  return { next: result, session };
+  return { ...result, session };
 }

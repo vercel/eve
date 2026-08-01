@@ -711,6 +711,7 @@ export class EveTUIRunner {
     let prompt: string | undefined;
     let pendingInputResponses: readonly InputResponse[] | undefined;
     let hasRunTurn = false;
+    let followCurrentSession = false;
     let streamWithoutPrompt = false;
     // `--input` seed: applied to the first prompt's editable buffer, then
     // cleared so later prompts open empty.
@@ -784,6 +785,7 @@ export class EveTUIRunner {
         const command = parsePromptCommand(prompt);
 
         if (command?.type === "exit") {
+          this.#lifecycle?.requestStop();
           return;
         }
 
@@ -798,6 +800,35 @@ export class EveTUIRunner {
           streamWithoutPrompt = false;
           prompt = undefined;
           continue;
+        }
+
+        if (command?.type === "compact") {
+          try {
+            const result = await this.#session.compact();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Compaction requested."
+                : "No active session to compact.",
+            );
+            if (result.status === "no_active_session") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't compact the session: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
         }
 
         // Help renders locally; unlike extension commands it must work even
@@ -846,10 +877,12 @@ export class EveTUIRunner {
         hasRunTurn = true;
       }
 
-      let result = await this.#streamTurn({
-        prompt: streamWithoutPrompt ? undefined : prompt,
-        inputResponses: pendingInputResponses,
-      });
+      let result = followCurrentSession
+        ? this.#streamCurrentSession()
+        : await this.#streamTurn({
+            prompt: streamWithoutPrompt ? undefined : prompt,
+            inputResponses: pendingInputResponses,
+          });
       // The session id becomes known once the send is accepted; keep the
       // renderer's copy fresh so the parting line can name the session.
       const acceptedSessionId = this.#session.state.sessionId;
@@ -934,7 +967,7 @@ export class EveTUIRunner {
           }
 
           if (this.#enterPendingConnectionAuthorization(result)) {
-            result = this.#streamConnectionAuthorization();
+            result = this.#streamCurrentSession();
             submittedPrompt = undefined;
             continue;
           }
@@ -965,6 +998,7 @@ export class EveTUIRunner {
         continue;
       }
 
+      followCurrentSession = false;
       streamWithoutPrompt = false;
       pendingInputResponses = undefined;
       prompt = undefined;
@@ -1192,12 +1226,8 @@ export class EveTUIRunner {
     }
   }
 
-  /**
-   * Follows the same session after an interactive authorization callback.
-   * `send()` stops at the parked `session.waiting` boundary; the callback's
-   * completion events arrive in the next durable turn on `session.stream()`.
-   */
-  #streamConnectionAuthorization(): AgentTUIStreamResult {
+  /** Follows the current session without dispatching another turn. */
+  #streamCurrentSession(): AgentTUIStreamResult {
     const abortController = new AbortController();
     return this.#createTUIStreamResult(
       this.#session.stream({ signal: abortController.signal }),

@@ -238,6 +238,34 @@ describe("normalizeAgentDefinition", () => {
       ),
     ).toThrow('"experimental.workflow.world" must be a non-empty package name');
   });
+
+  it("accepts a boolean subagentPersistentSessions flag", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          subagentPersistentSessions: true,
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.subagentPersistentSessions).toBe(true);
+  });
+
+  it("rejects non-boolean subagentPersistentSessions values", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            subagentPersistentSessions: "yes",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.subagentPersistentSessions" must be a boolean.');
+  });
 });
 
 describe("normalizeScheduleDefinition", () => {

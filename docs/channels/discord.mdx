@@ -4,31 +4,28 @@ description: "Reach your agent from Discord HTTP Interactions, including slash c
 type: integration
 ---
 
-The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel verifies inbound requests, acknowledges the command right away, and runs the eve work in the background. See [Channels](./overview) for the contract this builds on.
+The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve. See [Channels](./overview) for the contract this builds on.
 
-## Set up Connect
+## Set up Discord
 
-Create a Discord connector with **Bot and interactions** enabled, copy its UID (e.g. `discord/my-agent`), and attach this project as the trigger destination at eve's Discord route:
-
-```bash
-npm install -g vercel@latest
-vercel connect create discord --triggers
-vercel connect attach <uid> --triggers --trigger-path /eve/v1/discord --yes
-```
-
-You can also create the connector from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect). Connect stores the bot token, verifies Discord's signed interactions, and forwards them to your project with Vercel OIDC.
-
-Open the connector's **Triggers** section and copy its webhook URL (`https://connect.vercel.com/trigger/<connector-id>`). In the [Discord Developer Portal](https://discord.com/developers/applications), open your application, go to **General Information**, paste the URL into **Interactions Endpoint URL**, and save. Discord sends a signed validation request before accepting the URL.
-
-## Add the channel
-
-Install the Connect SDK:
+Run the guided setup from your eve project:
 
 ```bash
-npm install @vercel/connect
+pnpm eve add channel/discord
 ```
 
-Then create:
+The setup guides you through creating a Discord application and bot, then:
+
+- validates the bot token;
+- creates a Vercel Connect client and attaches `/eve/v1/discord` as its trigger destination;
+- registers an application command with a required `message` option;
+- configures the Discord application's Interactions Endpoint URL;
+- scaffolds the channel with Connect-managed credentials; and
+- prints the bot installation URL.
+
+The command defaults to `/ask` with the description **Ask the eve agent**. You can edit both during setup. Discord global commands can take up to an hour to appear after registration.
+
+The generated channel looks like this:
 
 ```ts title="agent/channels/discord.ts"
 import { connectDiscordCredentials } from "@vercel/connect/eve";
@@ -39,23 +36,11 @@ export default discordChannel({
 });
 ```
 
-`connectDiscordCredentials` supplies the application ID and bot token from Connect and verifies forwarded interactions with Vercel OIDC. The route is `POST /eve/v1/discord` by default.
+The route is `POST /eve/v1/discord` by default. Connect resolves the application ID and bot token lazily and verifies forwarded interactions with same-project Vercel OIDC.
 
-### Direct credentials
+### Configure Discord manually
 
-To connect Discord without Vercel Connect, provide credentials through environment variables:
-
-```bash
-DISCORD_PUBLIC_KEY=...      # verifies X-Signature-Ed25519 + X-Signature-Timestamp
-DISCORD_APPLICATION_ID=...  # edits the deferred response and sends followups
-DISCORD_BOT_TOKEN=...       # proactive messages + fallback + typing indicators
-```
-
-Or pass the same values through `credentials: { applicationId, botToken, publicKey }`. Paste the deployed `/eve/v1/discord` URL into your Discord application's Interactions Endpoint URL.
-
-## Register a command
-
-Registering commands is on you, not the channel. Use Discord's API or the Developer Portal. A string option named `message` lines up with eve's default prompt extraction:
+If you do not use the guided Connect setup, register a command with Discord's API or the Developer Portal. A string option named `message` lines up with eve's default prompt extraction:
 
 ```bash
 curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/commands" \
@@ -64,7 +49,7 @@ curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/co
     "options":[{"name":"message","description":"What should the agent do?","type":3,"required":true}]}]'
 ```
 
-Use guild commands during development for faster propagation.
+Then configure the public `https://…/eve/v1/discord` route as the application's Interactions Endpoint URL. Pass `credentials: { applicationId, botToken, publicKey }` to `discordChannel`, or set the corresponding `DISCORD_APPLICATION_ID`, `DISCORD_BOT_TOKEN`, and `DISCORD_PUBLIC_KEY` environment variables.
 
 ## How the channel handles messages
 

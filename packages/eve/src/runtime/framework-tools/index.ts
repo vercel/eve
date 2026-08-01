@@ -12,6 +12,8 @@ import { TODO_TOOL_DEFINITION } from "#runtime/framework-tools/todo.js";
 import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { WRITE_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/write-file.js";
+import connectionSearchDynamicDefinition from "#runtime/framework-tools/connection-search-dynamic.js";
+import { resolveLoadedDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
 
 export { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 export type { ReadFileStamp, ReadFileState } from "#runtime/framework-tools/file-state.js";
@@ -19,7 +21,28 @@ export { ReadFileStateKey } from "#runtime/framework-tools/file-state.js";
 export type { TodoItem, TodoState } from "#runtime/framework-tools/todo.js";
 export { TodoStateKey } from "#runtime/framework-tools/todo.js";
 
-import type { ResolvedSkillDefinition, ResolvedToolDefinition } from "#runtime/types.js";
+import type {
+  ResolvedDynamicToolResolver,
+  ResolvedSkillDefinition,
+  ResolvedToolDefinition,
+} from "#runtime/types.js";
+import type { DynamicSentinel } from "#shared/dynamic-tool-definition.js";
+
+interface FrameworkDynamicToolDefinition {
+  readonly definition: DynamicSentinel;
+  readonly logicalPath: string;
+  readonly slug: string;
+  readonly sourceId: string;
+}
+
+const REGISTERED_FRAMEWORK_DYNAMIC_TOOLS: readonly FrameworkDynamicToolDefinition[] = [
+  {
+    definition: connectionSearchDynamicDefinition,
+    logicalPath: "eve:framework/connection-search-dynamic",
+    slug: "connection",
+    sourceId: "eve:connection-search-dynamic",
+  },
+];
 
 const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ASK_QUESTION_TOOL_DEFINITION,
@@ -48,7 +71,6 @@ const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
  */
 export function getFrameworkToolDefinitions(config?: {
   readonly authoredSkills?: readonly ResolvedSkillDefinition[];
-  readonly hasConnections?: boolean;
 }): readonly ResolvedToolDefinition[] {
   const authoredSkills = config?.authoredSkills;
   if (authoredSkills === undefined) return REGISTERED_FRAMEWORK_TOOLS;
@@ -57,6 +79,22 @@ export function getFrameworkToolDefinitions(config?: {
     definition.name === SKILL_TOOL_DEFINITION.name
       ? createSkillToolDefinition(authoredSkills)
       : definition,
+  );
+}
+
+/**
+ * Returns framework-owned dynamic tool resolvers.
+ * Framework definitions use the public `defineDynamic()` contract and enter
+ * the same loaded-definition resolver path as authored dynamic tools.
+ */
+export function getFrameworkDynamicToolResolvers(): readonly ResolvedDynamicToolResolver[] {
+  return REGISTERED_FRAMEWORK_DYNAMIC_TOOLS.map((entry) =>
+    resolveLoadedDynamicToolDefinition(entry.definition, {
+      logicalPath: entry.logicalPath,
+      slug: entry.slug,
+      sourceId: entry.sourceId,
+      sourceKind: "module",
+    }),
   );
 }
 

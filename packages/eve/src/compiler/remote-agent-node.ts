@@ -5,6 +5,10 @@ import type { JsonObject } from "#shared/json.js";
 import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
+export interface CompiledDynamicSubagentDefinition {
+  readonly eventNames: readonly string[];
+}
+
 /**
  * Remote subagent entry owned by one compiled agent node manifest. Like
  * channels, remote subagents are node-local manifest entries rather than a

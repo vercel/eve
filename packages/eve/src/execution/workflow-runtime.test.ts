@@ -199,6 +199,39 @@ describe("createWorkflowRuntime#cancelTurn", () => {
   });
 });
 
+describe("createWorkflowRuntime#compactSession", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("queues compaction on the continuation hook and returns its owner", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:token" }),
+    ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", { kind: "compact" });
+  });
+
+  it("reports a missing continuation hook as an inactive session", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("eve:missing"));
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:missing" }),
+    ).resolves.toEqual({ status: "no_active_session" });
+  });
+
+  it("treats a terminal owner race as an inactive session", async () => {
+    const { RunExpiredError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new RunExpiredError("session already completed"));
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:completed" }),
+    ).resolves.toEqual({ status: "no_active_session" });
+  });
+});
+
 describe("createWorkflowRuntime#terminateSession", () => {
   function buildRuntime() {
     return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
@@ -385,6 +418,39 @@ describe("createWorkflowRuntime#run", () => {
     expect(workflowInput).toMatchObject({
       input: { message: "hello" },
       sessionTimeoutMs: 86_400_000,
+    });
+  });
+
+  it("serializes the selected dynamic subagent config for the child workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 86_400_000);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await createWorkflowRuntime({
+      compiledArtifactsSource,
+      dynamicSubagentAgentConfig: {
+        description: "Perform deep research.",
+        limits: { sessionTimeoutMs: 120_000 },
+        model: { id: "anthropic/claude-opus-4.6" },
+      },
+      nodeId: "subagents/researcher",
+    }).run({
+      adapter,
+      auth: null,
+      input: { message: "research this" },
+      mode: "task",
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput).toMatchObject({
+      serializedContext: {
+        "eve.dynamicSubagentAgentConfig": {
+          description: "Perform deep research.",
+          limits: { sessionTimeoutMs: 120_000 },
+          model: { id: "anthropic/claude-opus-4.6" },
+        },
+      },
+      sessionTimeoutMs: 120_000,
     });
   });
 

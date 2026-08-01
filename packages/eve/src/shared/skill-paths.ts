@@ -1,10 +1,10 @@
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
-export const MODEL_SKILL_ROOT = "$HOME/.agents/skills";
+const MODEL_HOME_ROOT = "$HOME";
+
+export const MODEL_SKILL_ROOT = `${MODEL_HOME_ROOT}/.agents/skills`;
 export const FALLBACK_SKILL_ROOT = "/workspace/skills";
 
-const MODEL_HOME_ROOT = "$HOME";
-const HOME_SKILL_SUFFIX = ".agents/skills";
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 const sandboxHomeCache = new WeakMap<SandboxSession, Promise<string | null>>();
 
@@ -30,11 +30,14 @@ export function formatFallbackSkillPath(input: {
   });
 }
 
+/**
+ * Resolves where skills live in the sandbox: under the probed home when it has
+ * one, and under {@link FALLBACK_SKILL_ROOT} when it does not.
+ */
 export async function resolveSandboxSkillRoot(input: {
   readonly sandbox: SandboxSession;
 }): Promise<string> {
-  const home = await resolveSandboxHome(input.sandbox);
-  return home === null ? FALLBACK_SKILL_ROOT : joinHomeSkillRoot(home);
+  return await resolveSandboxModelPath({ path: MODEL_SKILL_ROOT, sandbox: input.sandbox });
 }
 
 /**
@@ -90,17 +93,6 @@ export async function resolveSandboxSkillWritePath(input: {
   });
 }
 
-export async function resolveSandboxSeedFilePath(input: {
-  readonly path: string;
-  readonly sandbox: SandboxSession;
-}): Promise<string> {
-  if (!isModelSkillPath(input.path)) {
-    return input.path;
-  }
-
-  return await resolveSandboxModelPath(input);
-}
-
 function formatSkillPath(input: {
   readonly name: string;
   readonly relativePath: string;
@@ -154,10 +146,6 @@ function isUsableSandboxHome(path: string): boolean {
     !path.includes("\n") &&
     !path.includes("\r")
   );
-}
-
-function joinHomeSkillRoot(home: string): string {
-  return `${home === "/" ? "" : home}/${HOME_SKILL_SUFFIX}`;
 }
 
 function normalizeSandboxHome(home: string): string {

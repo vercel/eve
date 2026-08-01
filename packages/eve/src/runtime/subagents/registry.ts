@@ -2,7 +2,10 @@ import { z } from "#compiled/zod/index.js";
 
 import { RuntimeRegistry, RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
-import type { ResolvedRuntimeDelegationNode } from "#runtime/types.js";
+import type {
+  ResolvedDynamicSubagentDefinition,
+  ResolvedRuntimeDelegationNode,
+} from "#runtime/types.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
 
 /**
@@ -10,13 +13,21 @@ import { serializeInputSchema } from "#shared/tool-schema.js";
  */
 interface RuntimeRegisteredSubagent {
   readonly definition: ResolvedRuntimeDelegationNode;
-  readonly prepared: PreparedRuntimeDelegationTool;
+  readonly prepared?: PreparedRuntimeDelegationTool;
+}
+
+export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagentDefinition {
+  readonly kind: "subagent";
+  readonly name: string;
+  readonly nodeId: string;
 }
 
 /**
  * Runtime-owned registry that exposes resolved subagents as model-visible tools.
  */
 export interface RuntimeSubagentRegistry {
+  readonly dynamicNodeIds: ReadonlySet<string>;
+  readonly dynamicResolvers: readonly ResolvedDynamicSubagentResolver[];
   readonly preparedTools: readonly PreparedRuntimeDelegationTool[];
   readonly subagentsByName: ReadonlyMap<string, RuntimeRegisteredSubagent>;
   readonly subagentsByNodeId: ReadonlyMap<string, RuntimeRegisteredSubagent>;
@@ -51,6 +62,8 @@ export function createRuntimeSubagentRegistry(input: {
   readonly subagents: readonly ResolvedRuntimeDelegationNode[];
 }): RuntimeSubagentRegistry {
   const preparedTools: PreparedRuntimeDelegationTool[] = [];
+  const dynamicNodeIds = new Set<string>();
+  const dynamicResolvers: ResolvedDynamicSubagentResolver[] = [];
   const registry = new RuntimeRegistry<RuntimeRegisteredSubagent>(
     "subagent",
     input.reservedToolNames ?? [],
@@ -71,32 +84,53 @@ export function createRuntimeSubagentRegistry(input: {
       );
     }
 
-    const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
-    const registeredSubagent: RuntimeRegisteredSubagent = {
-      definition: subagentDefinition,
-      prepared,
-    };
-
-    registry.register(subagentDefinition.name, registeredSubagent, {
-      location,
-      duplicateMessage: `Found multiple subagents named "${subagentDefinition.name}". Subagent names must be unique at runtime.`,
-      reservedMessage: `Subagent "${subagentDefinition.name}" collides with another runtime-visible tool name.`,
-    });
-
-    preparedTools.push(prepared);
+    let registeredSubagent: RuntimeRegisteredSubagent;
+    const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
+    if (dynamic === undefined) {
+      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
+      registeredSubagent = {
+        definition: subagentDefinition,
+        prepared,
+      };
+      registry.register(subagentDefinition.name, registeredSubagent, {
+        location,
+        duplicateMessage: `Found multiple subagents named "${subagentDefinition.name}". Subagent names must be unique at runtime.`,
+        reservedMessage: `Subagent "${subagentDefinition.name}" collides with another runtime-visible tool name.`,
+      });
+      preparedTools.push(prepared);
+    } else {
+      dynamicNodeIds.add(subagentDefinition.nodeId);
+      dynamicResolvers.push({
+        ...dynamic,
+        kind: "subagent",
+        logicalPath: subagentDefinition.logicalPath,
+        name: subagentDefinition.name,
+        nodeId: subagentDefinition.nodeId,
+        sourceId: subagentDefinition.sourceId,
+        sourceKind: "module",
+      });
+      registeredSubagent = {
+        definition: subagentDefinition,
+      };
+    }
     subagentsByNodeId.set(subagentDefinition.nodeId, registeredSubagent);
   }
 
   return {
+    dynamicNodeIds,
+    dynamicResolvers,
     preparedTools,
     subagentsByName: registry.asMap(),
     subagentsByNodeId,
   };
 }
 
-function createPreparedRuntimeSubagentTool(
+export function createPreparedRuntimeSubagentTool(
   definition: ResolvedRuntimeDelegationNode,
 ): PreparedRuntimeDelegationTool {
+  if (definition.description === undefined) {
+    throw new Error(`Static subagent "${definition.name}" is missing a description.`);
+  }
   return {
     description: definition.description,
     inputSchema: SUBAGENT_TOOL_INPUT_JSON_SCHEMA,

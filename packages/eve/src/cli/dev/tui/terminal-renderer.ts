@@ -163,6 +163,7 @@ import {
   formatTokenFlow,
   formatTurnDuration,
   typewriterText,
+  isIncompleteOsc,
   isIncompletePaste,
   nextKey,
   sanitizePastedText,
@@ -171,6 +172,11 @@ import {
   takeUntil,
   type TerminalKey,
 } from "./stream-format.js";
+import {
+  BACKGROUND_COLOR_QUERY,
+  parseBackgroundColorReply,
+  type RgbColor,
+} from "./terminal-background.js";
 
 type SetupOptionPanelState = Exclude<SetupSelectPanelState, { kind: "actions" }>;
 
@@ -554,6 +560,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #flowIdleConsumer?: (key: TerminalKey) => void;
   /** The open `/traces` viewer session, if the alt-screen viewer is active. */
   #traceView?: TraceViewerSession;
+  /**
+   * The terminal's default background from its last OSC 11 reply. Cached so
+   * a reopened trace viewer paints its derived card surfaces immediately;
+   * every open re-probes in case the user switched terminal themes.
+   */
+  #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
     begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
@@ -2671,9 +2683,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
       paint: (rows) => this.#altScreen.paint(rows, this.#height()),
       tracingDisabled: process.env.EVE_TRACES === "off",
       copyText: (text) => copyTextToClipboard(text, (chunk) => this.#altScreen.writeRaw(chunk)),
+      terminalBackground: this.#terminalBackground,
     });
     this.#traceView = session;
     this.#altScreen.enter();
+    // Ask the terminal for its background so the viewer can derive card
+    // surfaces from the user's own palette. The reply arrives on stdin as an
+    // OSC key (see #drainKeys); terminals that never answer leave the viewer
+    // on its rail rendering, so no timeout is needed.
+    if (this.#theme.color) this.#altScreen.writeRaw(BACKGROUND_COLOR_QUERY);
     await new Promise<void>((resolve) => {
       this.#traceViewClose = resolve;
       this.#consumeKey = (key) => {
@@ -2883,6 +2901,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
       }, incompletePasteFlushMs);
       this.#keyFlushTimer.unref?.();
+      return;
+    }
+    // An OSC reply whose terminator never arrives (a garbled terminal answer
+    // to the background probe) would otherwise wedge input forever; drop it.
+    if (isIncompleteOsc(this.#keyBuffer)) {
+      const stuck = this.#keyBuffer;
+      this.#keyFlushTimer = setTimeout(() => {
+        if (this.#keyBuffer !== stuck) return;
+        this.#keyBuffer = "";
+      }, incompletePasteFlushMs);
+      this.#keyFlushTimer.unref?.();
     }
   }
 
@@ -2891,8 +2920,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const token = nextKey(this.#keyBuffer);
       if (token.incomplete) return;
       this.#keyBuffer = this.#keyBuffer.slice(token.consumed);
-      if (token.key && token.key.type !== "ignore") this.#consumeKey?.(token.key);
+      if (token.key === undefined || token.key.type === "ignore") continue;
+      // OSC sequences are terminal replies (not keystrokes): route them to
+      // their handler instead of the active mode's key consumer.
+      if (token.key.type === "osc") {
+        this.#handleOscReply(token.key.value);
+        continue;
+      }
+      this.#consumeKey?.(token.key);
     }
+  }
+
+  /** Applies a terminal OSC reply; currently only the OSC 11 background probe. */
+  #handleOscReply(value: string): void {
+    const background = parseBackgroundColorReply(value);
+    if (background === undefined) return;
+    this.#terminalBackground = background;
+    this.#traceView?.setTerminalBackground(background);
   }
 
   #clearKeyFlush() {

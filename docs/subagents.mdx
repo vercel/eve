@@ -47,11 +47,41 @@ export default defineAgent({
 
 `description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out.
 
+### Conditional availability
+
+To expose a declared subagent only for certain sessions or turns, export
+`defineDynamic` from that subagent's `agent.ts`. Return a `defineAgent`
+configuration to expose the subagent, or nil to omit it from the parent's tools.
+
+```ts title="agent/subagents/researcher/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) =>
+      ctx.session.auth.current?.attributes.research === true
+        ? defineAgent({
+            description: "Investigate ambiguous questions before the parent responds.",
+            model: "anthropic/claude-opus-4.8",
+          })
+        : null,
+  },
+});
+```
+
+Resolvers run at `session.started` or `turn.started`; `step.started` is not
+supported for subagents. A nil result (`null` or `undefined`) removes the
+subagent's description and tool definition from the model-visible surface.
+The subagent's filesystem manifest is always compiled; a non-nil result injects
+the returned agent configuration when the child runs.
+See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for
+scope precedence, failure behavior, and the dispatch-time guard.
+
 Minimum files:
 
 ```text
 agent/subagents/researcher/
-├── agent.ts            # required (must export a description)
+├── agent.ts            # required
 ├── instructions.md     # or instructions.ts, optional
 ├── tools/              # optional, its own tools
 ├── skills/             # optional, its own skills
@@ -100,7 +130,7 @@ A declared subagent's tool name is the bare path-derived name, with no prefix. `
 }
 ```
 
-Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects the build rather than picking a winner, so keep subagent directory names distinct from tool names.
+Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects static collisions at build time and active dynamic collisions at runtime rather than picking a winner, so keep subagent directory names distinct from tool names.
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 

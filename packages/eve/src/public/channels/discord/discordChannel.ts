@@ -47,6 +47,7 @@ import {
 } from "#public/channels/discord/responses.js";
 import { type DiscordWebhookVerifier } from "#public/channels/discord/verify.js";
 import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js";
+import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel, type SendFn } from "#public/definitions/channel.js";
 
@@ -262,11 +263,11 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
 
     async receive(input, { send }) {
       const receiveTarget = input.target as Partial<DiscordReceiveTarget>;
-      const channelId = readString(receiveTarget.channelId);
+      const channelId = readNonEmptyString(receiveTarget.channelId);
       if (!channelId) {
         throw new Error("discordChannel().receive requires target.channelId.");
       }
-      const requestedConversationId = readString(receiveTarget.conversationId);
+      const requestedConversationId = readNonEmptyString(receiveTarget.conversationId);
       const initialMessage = receiveTarget.initialMessage;
       if (initialMessage !== undefined && requestedConversationId !== undefined) {
         throw new Error(
@@ -702,8 +703,4 @@ function expandPostBodies(body: DiscordMessageBody): readonly DiscordMessageBody
       content,
     };
   });
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

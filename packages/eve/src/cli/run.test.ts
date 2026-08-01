@@ -75,6 +75,19 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("--path");
   });
 
+  it("registers JSON output for registry discovery commands", async () => {
+    const output: string[] = [];
+    const logger = {
+      error: (message: string) => output.push(message),
+      log: (message: string) => output.push(message),
+    };
+
+    await runCli(["registry", "list", "--help"], logger).catch(() => {});
+    await runCli(["registry", "search", "--help"], logger).catch(() => {});
+
+    expect(output.join("\n")).toContain("--json");
+  });
+
   it("registers only supported shadcn registry commands", async () => {
     const output: string[] = [];
     const logger = {

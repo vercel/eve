@@ -1,9 +1,11 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
+import { CompactResponseSchema } from "#protocol/compact-session.js";
 import { ResetResponseSchema } from "#protocol/reset-session.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
+  EVE_COMPACT_SESSION_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
   createEveCancelTurnRoutePath,
   createEveContinueSessionRoutePath,
@@ -16,10 +18,12 @@ import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
 import type {
   CancelSessionResult,
+  CompactResult,
   ClientRedirectPolicy,
   ResetResult,
   SendTurnInput,
   SendTurnPayload,
+  SessionSnapshot,
   SessionState,
   StreamOptions,
 } from "#client/types.js";
@@ -62,6 +66,54 @@ export class ClientSession {
    */
   get state(): SessionState {
     return this.#state;
+  }
+
+  /**
+   * Reads a finite, point-in-time prefix of this session's durable event stream.
+   *
+   * The read starts at the beginning of the session and stops at the durable
+   * tail observed when it opens. The returned cursor points exactly after the
+   * returned events, so it can hydrate a UI and resume without a gap.
+   * Reading a snapshot does not advance or reset this handle's state.
+   *
+   * @throws {Error} If the session has no session ID (no message has been sent
+   *   yet).
+   */
+  async snapshot(options?: { readonly signal?: AbortSignal }): Promise<SessionSnapshot> {
+    options?.signal?.throwIfAborted();
+
+    const initialState = this.#state;
+    const sessionId = initialState.sessionId;
+    if (!sessionId) {
+      throw new Error("Session has no session ID. Send a message first.");
+    }
+
+    const events: MessageStreamEvent[] = [];
+
+    for await (const event of this.#readStream({
+      follow: false,
+      sessionId,
+      signal: options?.signal,
+      startIndex: 0,
+    })) {
+      events.push(event);
+    }
+
+    options?.signal?.throwIfAborted();
+
+    const lastEvent = events.at(-1);
+    const continuationToken =
+      lastEvent?.type === "session.waiting"
+        ? lastEvent.data.continuationToken
+        : lastEvent?.type === "session.completed" && this.#context.preserveCompletedSessions
+          ? initialState.continuationToken
+          : undefined;
+    const session: SessionState =
+      continuationToken === undefined
+        ? { sessionId, streamIndex: events.length }
+        : { continuationToken, sessionId, streamIndex: events.length };
+
+    return { events, session };
   }
 
   /**
@@ -144,6 +196,68 @@ export class ClientSession {
     }
 
     return { sessionId: result.data.sessionId, status: result.data.status };
+  }
+
+  /**
+   * Queues context compaction without sending model input. The request is
+   * asynchronous; consume the durable event stream through its next session
+   * boundary before sending another turn. `compaction.completed` confirms that
+   * summarization succeeded. A never-started handle is a successful no-op.
+   */
+  async compact(): Promise<CompactResult> {
+    const state = this.#state;
+    const continuationToken = state.continuationToken;
+
+    if (continuationToken === undefined) {
+      if (state.sessionId !== undefined) {
+        throw new Error(
+          "Session has no continuation token. Consume its event stream before compacting.",
+        );
+      }
+      return { status: "no_active_session" };
+    }
+
+    const url = createClientUrl(this.#context.host, EVE_COMPACT_SESSION_ROUTE_PATH);
+    const headers = await this.#context.resolveHeaders();
+    headers.set("content-type", "application/json");
+
+    const response = await fetch(
+      url,
+      withRedirectPolicy(
+        {
+          body: JSON.stringify({ continuationToken }),
+          headers,
+          method: "POST",
+        },
+        this.#context.redirect,
+      ),
+    );
+    const body = await response.text();
+
+    if (!response.ok) {
+      throw new ClientError(response.status, body, response.headers);
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      throw new Error(`Compact route returned invalid JSON (${response.status}).`);
+    }
+
+    const result = CompactResponseSchema.safeParse(payload);
+    if (
+      !result.success ||
+      (result.data.status === "accepted" &&
+        state.sessionId !== undefined &&
+        result.data.sessionId !== state.sessionId)
+    ) {
+      throw new Error(`Compact route returned an invalid response (${response.status}).`);
+    }
+
+    return result.data.status === "accepted"
+      ? { sessionId: result.data.sessionId, status: "accepted" }
+      : { status: "no_active_session" };
   }
 
   /**
@@ -316,10 +430,8 @@ export class ClientSession {
     const events: MessageStreamEvent[] = [];
 
     try {
-      for await (const event of followStreamIterable({
-        host: this.#context.host,
-        resolveHeaders: () => this.#context.resolveHeaders(input.headers),
-        redirect: this.#context.redirect,
+      for await (const event of this.#readStream({
+        headers: input.headers,
         streamReconnectPolicy: input.streamReconnectPolicy,
         sessionId,
         signal: input.signal,
@@ -352,15 +464,12 @@ export class ClientSession {
     const events: MessageStreamEvent[] = [];
 
     try {
-      for await (const event of followStreamIterable({
+      for await (const event of this.#readStream({
         follow: options?.follow,
-        host: this.#context.host,
-        resolveHeaders: () => this.#context.resolveHeaders(),
-        redirect: this.#context.redirect,
-        streamReconnectPolicy: options?.streamReconnectPolicy,
         sessionId,
         signal: options?.signal,
         startIndex: streamIndex,
+        streamReconnectPolicy: options?.streamReconnectPolicy,
       })) {
         events.push(event);
         yield event;
@@ -376,6 +485,26 @@ export class ClientSession {
         });
       }
     }
+  }
+
+  #readStream(input: {
+    readonly follow?: boolean;
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly sessionId: string;
+    readonly signal?: AbortSignal;
+    readonly startIndex: number;
+    readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
+  }): AsyncIterable<MessageStreamEvent> {
+    return followStreamIterable({
+      follow: input.follow,
+      host: this.#context.host,
+      resolveHeaders: () => this.#context.resolveHeaders(input.headers),
+      redirect: this.#context.redirect,
+      streamReconnectPolicy: input.streamReconnectPolicy,
+      sessionId: input.sessionId,
+      signal: input.signal,
+      startIndex: input.startIndex,
+    });
   }
 }
 

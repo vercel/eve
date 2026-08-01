@@ -3,6 +3,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
+import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -237,6 +238,18 @@ export interface CancelSessionResult {
   readonly status: CancelTurnStatus;
 }
 
+/** Result of requesting context compaction for a client session. */
+export type CompactResult =
+  | {
+      /** Session whose compaction request was queued. */
+      readonly sessionId: string;
+      readonly status: Extract<CompactStatus, "accepted">;
+    }
+  | {
+      /** The client had no continuation token or the token was already free. */
+      readonly status: Extract<CompactStatus, "no_active_session">;
+    };
+
 /** Result of terminally resetting a client session. */
 export type ResetResult =
   | {
@@ -310,4 +323,15 @@ export interface SessionState {
   readonly continuationToken?: string;
   readonly sessionId?: string;
   readonly streamIndex: number;
+}
+
+/**
+ * Finite, cursor-consistent prefix of one durable session stream.
+ */
+export interface SessionSnapshot {
+  /** Events from the start of the session through the durable tail observed when the read opened. */
+  readonly events: readonly MessageStreamEvent[];
+
+  /** Session cursor advanced exactly past {@link events}. */
+  readonly session: SessionState;
 }

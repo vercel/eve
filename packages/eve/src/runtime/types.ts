@@ -268,10 +268,18 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
 export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
-      description: string;
       kind: "subagent";
       name: string;
-    }
+    } & (
+      | {
+          description: string;
+          dynamic?: never;
+        }
+      | {
+          description?: never;
+          dynamic: ResolvedDynamicSubagentDefinition;
+        }
+    )
 >;
 
 /**
@@ -299,6 +307,13 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
 export type ResolvedRuntimeDelegationNode =
   | ResolvedRuntimeRemoteAgentNode
   | ResolvedRuntimeSubagentNode;
+
+export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
+  readonly eventNames: readonly string[];
+  readonly events: Readonly<
+    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
+  >;
+}
 
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.

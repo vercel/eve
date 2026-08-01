@@ -197,8 +197,9 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("recognizes /new, /exit, and /quit", () => {
+  it("recognizes /new, /compact, /exit, and /quit", () => {
     expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+    expect(parsePromptCommand("/compact")).toEqual({ type: "compact" });
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });
   });
@@ -653,6 +654,46 @@ describe("EveTUIRunner development session continuity", () => {
     expect(reset).toHaveBeenCalledOnce();
     expect(initialSession.send).toHaveBeenCalledOnce();
     expect(newSession.send).toHaveBeenCalledOnce();
+  });
+
+  it("compacts the active session without sending a prompt", async () => {
+    const session = sessionYielding([]);
+    const compact = vi
+      .spyOn(session, "compact")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    const stream = vi.spyOn(session, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent(
+          {
+            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            type: "session.waiting",
+          },
+          0,
+        );
+      })(),
+    );
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/compact", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) {
+            void event;
+          }
+        }),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(compact).toHaveBeenCalledOnce();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(session.send).not.toHaveBeenCalled();
+    expect(results).toEqual(["Compaction requested."]);
   });
 
   it("keeps the current transcript and session when /new cannot reset the owner", async () => {
@@ -2066,6 +2107,8 @@ describe("EveTUIRunner renderer teardown", () => {
 
   it("shuts the renderer down once when /exit ends the run loop", async () => {
     const shutdown = vi.fn();
+    const controller = new AbortController();
+    const requestStop = vi.fn(() => controller.abort());
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async () => "/exit"),
       shutdown,
@@ -2074,11 +2117,18 @@ describe("EveTUIRunner renderer teardown", () => {
       session: sessionYielding([]),
       renderer,
       name: "Weather Agent",
+      lifecycle: {
+        signal: controller.signal,
+        stopped: new Promise<NodeJS.Signals | undefined>(() => {}),
+        requestStop,
+        dispose: () => {},
+      },
     });
 
     await runner.run();
 
     expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(requestStop).toHaveBeenCalledOnce();
   });
 
   it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {

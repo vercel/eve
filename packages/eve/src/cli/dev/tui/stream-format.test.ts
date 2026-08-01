@@ -168,6 +168,31 @@ describe("nextKey", () => {
     expect(nextKey("\r")).toEqual({ key: { type: "enter" }, consumed: 1 });
     expect(nextKey("\u007f")).toEqual({ key: { type: "backspace" }, consumed: 1 });
   });
+
+  it("decodes a BEL-terminated OSC reply as one token", () => {
+    const buffer = "\x1b]11;rgb:1e1e/2a2a/3b3b\x07";
+    expect(nextKey(buffer)).toEqual({
+      key: { type: "osc", value: "11;rgb:1e1e/2a2a/3b3b" },
+      consumed: buffer.length,
+    });
+  });
+
+  it("decodes an ST-terminated OSC reply and re-tokenizes what follows", () => {
+    const buffer = "\x1b]11;rgb:0000/0000/0000\x1b\\\x1b[A";
+    const token = nextKey(buffer);
+    expect(token).toEqual({
+      key: { type: "osc", value: "11;rgb:0000/0000/0000" },
+      consumed: buffer.length - 3,
+    });
+    expect(nextKey(buffer.slice(token.consumed))).toEqual({ key: { type: "up" }, consumed: 3 });
+  });
+
+  it("waits for an OSC terminator that is still arriving", () => {
+    expect(nextKey("\x1b]")).toEqual({ consumed: 0, incomplete: true });
+    expect(nextKey("\x1b]11;rgb:1e1e")).toEqual({ consumed: 0, incomplete: true });
+    // A trailing ESC may be the start of the ST terminator.
+    expect(nextKey("\x1b]11;rgb:1e1e/2a2a/3b3b\x1b")).toEqual({ consumed: 0, incomplete: true });
+  });
 });
 
 describe("parseKey", () => {

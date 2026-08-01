@@ -1092,19 +1092,19 @@
       "name": "channel/discord",
       "type": "registry:item",
       "title": "Discord",
-      "description": "Run your agent as a Discord bot across servers and threads.",
-      "envVars": {
-        "DISCORD_APPLICATION_ID": "",
-        "DISCORD_BOT_TOKEN": "",
-        "DISCORD_PUBLIC_KEY": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/discord.ts",
-          "type": "registry:file",
-          "target": "agent/channels/discord.ts"
+      "description": "Connect an eve agent to Discord with guided connector and slash-command setup.",
+      "dependencies": ["@vercel/connect@0.6.0"],
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "discord"]
+          },
+          "requires": ">=0.30.0"
         }
-      ]
+      }
     },
     {
       "name": "channel/teams",

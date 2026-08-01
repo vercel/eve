@@ -30,6 +30,12 @@ export interface AddCommandOptions {
   silent?: boolean;
 }
 
+/** Options shared by registry catalog commands. */
+export interface RegistryCommandOptions {
+  /** Emit the underlying registry result as JSON. */
+  json?: boolean;
+}
+
 type SetupCommandOptions = Pick<AddCommandOptions, "yes"> & {
   prompter?: Prompter;
   signal?: AbortSignal;
@@ -212,8 +218,13 @@ function validateRegistrySource(source: string | undefined): void {
 function printSearchResults(
   logger: RegistryCommandLogger,
   result: Awaited<ReturnType<typeof searchRegistries>>,
-  options: { query: string | undefined; sources: string[] },
+  options: { query: string | undefined; sources: string[]; json?: boolean },
 ): void {
+  if (options.json) {
+    logger.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
   if (result.items.length === 0) {
     logger.log("No registry items found.");
     return;
@@ -293,11 +304,12 @@ async function browseRegistryItems(
   appRoot: string,
   query: string | undefined,
   source: string | undefined,
+  options: RegistryCommandOptions = {},
 ): Promise<void> {
   const { result, sources } = await searchRegistryCatalog(appRoot, { query, source });
   const errors = result.errors ?? [];
-  if (errors.length < sources.length) {
-    printSearchResults(logger, result, { query, sources });
+  if (options.json || errors.length < sources.length) {
+    printSearchResults(logger, result, { ...options, query, sources });
   }
   for (const error of errors) {
     logger.error(`${error.registry}: ${error.message}`);
@@ -467,9 +479,10 @@ export async function runRegistryListCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
   source?: string,
+  options: RegistryCommandOptions = {},
 ): Promise<void> {
   await runRegistryAction(logger, appRoot, () =>
-    browseRegistryItems(logger, appRoot, undefined, source),
+    browseRegistryItems(logger, appRoot, undefined, source, options),
   );
 }
 
@@ -479,9 +492,10 @@ export async function runRegistrySearchCommand(
   appRoot: string,
   query: string,
   source?: string,
+  options: RegistryCommandOptions = {},
 ): Promise<void> {
   await runRegistryAction(logger, appRoot, () =>
-    browseRegistryItems(logger, appRoot, query, source),
+    browseRegistryItems(logger, appRoot, query, source, options),
   );
 }
 

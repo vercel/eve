@@ -35,6 +35,7 @@ import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
+import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -70,6 +71,7 @@ type DriverLoopOutcome =
     };
 
 type NextSessionAction =
+  | { readonly kind: "compact" }
   | {
       readonly delivery: DeliverHookPayload | null;
       readonly kind: "delivery";
@@ -115,10 +117,14 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     // chain-root id can never drift between persisted session and tags.
     const rootSessionIdFromParent = readRootSessionId(input.serializedContext);
     const subagentDepth = readSerializedSubagentDepth(input.serializedContext);
+    const dynamicSubagentAgentConfig = input.serializedContext["eve.dynamicSubagentAgentConfig"] as
+      | DynamicSubagentAgentConfig
+      | undefined;
 
     const { state: sessionState } = await createSessionStep({
       compiledArtifactsSource: serializedBundle.source,
       continuationToken,
+      dynamicSubagentAgentConfig,
       inheritedLimits: input.limits,
       nodeId: serializedBundle.nodeId,
       outputSchema: input.input.outputSchema,
@@ -332,6 +338,15 @@ async function runDriverLoop(input: {
         };
       }
 
+      if (nextAction.kind === "compact") {
+        action = await runTurn({
+          delivery: { kind: "compact" },
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        continue;
+      }
+
       const nextDeliver = nextAction.delivery;
       if (nextDeliver === null) {
         return { kind: "result", result: { output: "" } };
@@ -397,6 +412,10 @@ async function waitForNextSessionAction(input: {
     return { kind: "expired" };
   }
 
+  if (input.deliveryHook.consumeCompactRequest()) {
+    return { kind: "compact" };
+  }
+
   if (input.bufferedDeliveries.length > 0) {
     return {
       delivery: coalesceDeliveries(input.bufferedDeliveries.splice(0)),
@@ -414,6 +433,11 @@ async function waitForNextSessionAction(input: {
 
     if (first.value.kind === "session-timeout") {
       return { kind: "expired" };
+    }
+
+    if (first.value.kind === "compact") {
+      input.deliveryHook.consumeCompactRequest();
+      return { kind: "compact" };
     }
 
     if (first.value.kind !== "deliver") {
@@ -441,6 +465,10 @@ async function waitForNextSessionAction(input: {
       }
 
       input.deliveryHook.consumeNext();
+
+      if (ready.value.kind === "compact") {
+        continue;
+      }
 
       if (ready.value.kind !== "deliver") {
         continue;

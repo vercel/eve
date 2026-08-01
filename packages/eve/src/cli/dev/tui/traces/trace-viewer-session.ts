@@ -6,10 +6,13 @@
  */
 
 import type { TerminalKey } from "../stream-format.js";
+import type { RgbColor } from "../terminal-background.js";
 import type { Theme } from "../theme.js";
 import type { TraceStore, TraceStoreEntry } from "./trace-store.js";
 import { createTraceStore } from "./trace-store.js";
 import { conversationItemLineCount } from "./trace-conversation.js";
+import type { TraceViewerSurfaces } from "./trace-surfaces.js";
+import { deriveTraceViewerSurfaces } from "./trace-surfaces.js";
 import { conversationSelectionText, panelSelectionText, renderTraceViewer } from "./trace-view.js";
 import type {
   TextSelectionRange,
@@ -50,6 +53,12 @@ export interface TraceViewerSessionOptions extends TraceViewerOpenOptions {
   readonly store?: TraceStore;
   /** Receives drag-selected text (wired to the clipboard by the renderer). */
   readonly copyText?: (text: string) => void;
+  /**
+   * The terminal's default background from an earlier OSC 11 reply, so a
+   * reopened viewer paints its card surfaces on the first frame instead of
+   * waiting for the terminal to answer the probe again.
+   */
+  readonly terminalBackground?: RgbColor;
 }
 
 export class TraceViewerSession {
@@ -72,6 +81,7 @@ export class TraceViewerSession {
   #disposed = false;
   #refreshing = false;
   #refreshAgain = false;
+  #surfaces?: TraceViewerSurfaces;
   #metrics: TraceViewerKeyEnvironment = {
     timelineViewportRows: 0,
     panelViewportRows: 0,
@@ -82,6 +92,9 @@ export class TraceViewerSession {
   constructor(options: TraceViewerSessionOptions) {
     this.#options = options;
     this.#store = options.store ?? createTraceStore({ appRoot: options.appRoot });
+    if (options.terminalBackground !== undefined && options.theme.color) {
+      this.#surfaces = deriveTraceViewerSurfaces(options.terminalBackground);
+    }
     if (options.sessionId !== undefined) {
       this.#preferSessionId = options.sessionId;
     }
@@ -121,6 +134,17 @@ export class TraceViewerSession {
     return undefined;
   }
 
+  /**
+   * Applies the terminal's OSC 11 background reply: derives the card
+   * surfaces from the user's own palette and repaints. No-color themes keep
+   * the plain rail rendering.
+   */
+  setTerminalBackground(background: RgbColor): void {
+    if (this.#disposed || !this.#options.theme.color) return;
+    this.#surfaces = deriveTraceViewerSurfaces(background);
+    this.repaint();
+  }
+
   repaint(): void {
     if (this.#disposed) return;
     const { width, height } = this.#options.dimensions();
@@ -131,6 +155,7 @@ export class TraceViewerSession {
       tracingDisabled: this.#options.tracingDisabled,
       activeWindowEndNs: this.#activeWindowEndNs(),
       toast: this.#toast,
+      surfaces: this.#surfaces,
     });
     this.#metrics = {
       timelineViewportRows: frame.timelineViewportRows,
@@ -176,6 +201,7 @@ export class TraceViewerSession {
             this.#metrics.contentWidth,
             this.#options.theme,
             selection,
+            this.#surfaces,
           );
     if (text.trim().length === 0) return;
     this.#options.copyText?.(text);

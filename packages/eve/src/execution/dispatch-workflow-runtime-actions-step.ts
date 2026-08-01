@@ -20,6 +20,7 @@ import type {
   RuntimeActionRequest,
   RuntimeSubagentResultActionResult,
 } from "#runtime/actions/types.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 const log = createLogger("execution.dispatch-workflow-runtime-actions");
 
@@ -46,6 +47,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
 
   const plan = planWorkflowSubagentDispatch({
     actions,
@@ -71,10 +73,10 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   const session = hydrateDurableSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
-    turnAgent: bundle.turnAgent,
+    turnAgent: effectiveAgent.turnAgent,
   });
 
   const sessionWithBatch = setPendingRuntimeActionBatch({

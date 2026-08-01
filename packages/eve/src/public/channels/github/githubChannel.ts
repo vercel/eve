@@ -47,6 +47,7 @@ import {
 import type { GitHubPullRequestContextConfig } from "#public/channels/github/pr-context.js";
 import { verifyGitHubRequest } from "#public/channels/github/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import { readNonEmptyString } from "#shared/guards.js";
 
 const log = createLogger("github.channel");
 
@@ -453,10 +454,6 @@ async function verifyInbound(
     log.warn("github inbound verification failed", { error });
     return null;
   }
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function missingGitHubWebhookHeaders(headers: Headers): readonly string[] {

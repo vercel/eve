@@ -22,13 +22,20 @@ import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/chan
 
 declare const CHANNEL_METADATA_TYPE: unique symbol;
 
-export type { CancelTurnInput, CancelTurnResult, GetEventStreamOptions } from "#channel/types.js";
+export type {
+  CancelTurnInput,
+  CancelTurnResult,
+  CompactSessionResult,
+  GetEventStreamOptions,
+} from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
   CancelFn,
   CancelOptions,
+  CompactFn,
+  CompactOptions,
   ResetFn,
   ResetOptions,
   ResetResult,
@@ -236,6 +243,8 @@ type ChannelSessionFailedHandler<TCtx> = (
  * and the channel context, with no `ctx`.
  */
 export interface ChannelEvents<TCtx = void> {
+  readonly "compaction.requested"?: ChannelEventHandler<"compaction.requested", TCtx>;
+  readonly "compaction.completed"?: ChannelEventHandler<"compaction.completed", TCtx>;
   readonly "turn.started"?: ChannelEventHandler<"turn.started", TCtx>;
   readonly "actions.requested"?: ChannelEventHandler<"actions.requested", TCtx>;
   readonly "action.result"?: ChannelEventHandler<"action.result", TCtx>;
@@ -257,6 +266,8 @@ export interface ChannelEvents<TCtx = void> {
 }
 
 const CHANNEL_EVENT_TYPES = [
+  "compaction.requested",
+  "compaction.completed",
   "turn.started",
   "actions.requested",
   "action.result",
@@ -269,6 +280,7 @@ const CHANNEL_EVENT_TYPES = [
   "input.requested",
   "turn.failed",
   "turn.completed",
+  "turn.cancelled",
   "session.failed",
   "session.completed",
   "session.waiting",
@@ -359,11 +371,16 @@ export function defineChannel<
 }
 
 // The Record type fails to compile if this map drifts from the ChannelEvents
-// keys in either direction.
+// keys in either direction. Kept as a compile-time drift guard for
+// CHANNEL_EVENT_TYPES above; referenced below so it is not tree-shaken as dead.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  "compaction.requested": null,
+  "compaction.completed": null,
   "turn.started": null,
   "actions.requested": null,
   "action.result": null,
+  "subagent.called": null,
+  "subagent.completed": null,
   "message.completed": null,
   "message.appended": null,
   "reasoning.appended": null,
@@ -379,7 +396,11 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "authorization.completed": null,
 };
 
-const eventTypes = Object.keys(channelEventTypes) as readonly (keyof ChannelEvents)[];
+// CHANNEL_EVENT_TYPES drives runtime wiring; the drift guard above pins the
+// full ChannelEvents key set. Bind each wiring entry to a guard key so both
+// stay referenced and any drift in either direction fails to compile.
+const channelEventWiring: readonly (keyof typeof channelEventTypes)[] = CHANNEL_EVENT_TYPES;
+void channelEventWiring;
 
 function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<string, unknown>>(
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,

@@ -42,6 +42,7 @@ import {
   type TwilioRoutes,
 } from "#public/channels/twilio/routing.js";
 import { type TwilioAuthToken, type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
+import { readNonEmptyString } from "#shared/guards.js";
 import {
   defineChannel,
   GET,
@@ -330,11 +331,11 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     ],
 
     async receive(input, { send }) {
-      const phoneNumber = readString(input.target.phoneNumber);
+      const phoneNumber = readNonEmptyString(input.target.phoneNumber);
       if (!phoneNumber) {
         throw new Error("twilioChannel().receive requires target.phoneNumber.");
       }
-      const from = readString(input.target.from) ?? config.messaging?.from ?? null;
+      const from = readNonEmptyString(input.target.from) ?? config.messaging?.from ?? null;
       return send(input.message, {
         auth: input.auth,
         continuationToken: twilioContinuationToken(phoneNumber, from ?? undefined),
@@ -662,8 +663,4 @@ async function isAllowed(from: string, allowFrom: TwilioAllowFrom): Promise<bool
   const resolved = typeof allowFrom === "function" ? await allowFrom() : allowFrom;
   if (resolved === "*") return true;
   return typeof resolved === "string" ? resolved === from : resolved.includes(from);
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

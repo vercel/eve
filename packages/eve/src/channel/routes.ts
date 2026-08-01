@@ -1,7 +1,12 @@
 import type { UserContent } from "ai";
 
 import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
-import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type {
+  CancelTurnResult,
+  CompactSessionResult,
+  SessionAuthContext,
+  SessionCallback,
+} from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { Session } from "#channel/session.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -13,7 +18,8 @@ type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Recor
 /**
  * Second argument passed to every route handler. `send` starts or continues a
  * session on this channel; `cancel` stops the active turn on a session
- * addressed by continuation token; `reset` retires a session so its
+ * addressed by continuation token; `compact` summarizes its context without
+ * sending model input; `reset` retires a session so its
  * token can start a fresh session; `getSession` looks one up by id; `receive`
  * hands inbound work to a different channel; `params` contains the matched
  * path parameters; `waitUntil` keeps background work alive past the response;
@@ -27,6 +33,7 @@ export interface RouteHandlerArgs<TState = undefined> {
    */
   resolveActiveSession: ResolveActiveSessionFn;
   cancel: CancelFn;
+  compact: CompactFn;
   reset: ResetFn;
   getSession: GetSessionFn;
   /**
@@ -131,6 +138,20 @@ export interface CancelOptions {
  * on the event stream.
  */
 export type CancelFn = (options: CancelOptions) => Promise<CancelTurnResult>;
+
+/** Options for {@link CompactFn}. */
+export interface CompactOptions {
+  /** Channel-local raw token, in the same format accepted by {@link SendFn}. */
+  readonly continuationToken: string;
+}
+
+/**
+ * Queues context compaction for the session owning a continuation token.
+ * Never sends model input or starts a new session. An accepted request returns
+ * to `session.waiting`; successful compaction emits `compaction.requested`
+ * followed by `compaction.completed` on the session stream.
+ */
+export type CompactFn = (options: CompactOptions) => Promise<CompactSessionResult>;
 
 /** Options for {@link ResetFn}. */
 export interface ResetOptions {

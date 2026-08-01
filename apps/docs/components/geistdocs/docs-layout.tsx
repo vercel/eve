@@ -11,7 +11,7 @@ export const DocsLayout = ({ tree, children }: DocsLayoutProps) => (
   <PackageDocsLayout
     config={config}
     containerProps={{
-      className: "bg-background-100 max-w-[1448px] mx-auto",
+      className: "max-w-[1448px] mx-auto",
     }}
     tree={tree}
   >

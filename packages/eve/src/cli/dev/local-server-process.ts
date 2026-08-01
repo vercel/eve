@@ -68,6 +68,7 @@ export function createDevelopmentServer(
   let child: ChildProcess | undefined;
   let handoff: Promise<void> | undefined;
   let expectedExit = false;
+  let childExited = false;
   const exited = Promise.withResolvers<void>();
   const terminated = Promise.withResolvers<void>();
   void exited.promise.catch(() => undefined);
@@ -113,6 +114,7 @@ export function createDevelopmentServer(
       let settled = false;
       spawned.once("error", reject);
       spawned.once("exit", (code, signal) => {
+        childExited = true;
         terminated.resolve();
         release();
         if (!settled) {
@@ -160,11 +162,20 @@ export function createDevelopmentServer(
       expectedExit = true;
       handoff = (async () => {
         if (active.connected) active.send({ type: "shutdown" });
-        if (await settlesWithin(terminated.promise, IPC_SHUTDOWN_GRACE_MS)) return;
+        if (
+          await terminatesWithin(
+            active,
+            terminated.promise,
+            () => childExited,
+            IPC_SHUTDOWN_GRACE_MS,
+          )
+        )
+          return;
         signalProcessGroup(active, "SIGTERM");
-        if (await settlesWithin(terminated.promise, SIGTERM_GRACE_MS)) return;
+        if (await terminatesWithin(active, terminated.promise, () => childExited, SIGTERM_GRACE_MS))
+          return;
         signalProcessGroup(active, "SIGKILL");
-        await settlesWithin(terminated.promise, SIGKILL_REAP_MS);
+        await terminatesWithin(active, terminated.promise, () => childExited, SIGKILL_REAP_MS);
         release();
       })();
       return handoff;
@@ -173,17 +184,49 @@ export function createDevelopmentServer(
   };
 }
 
-async function settlesWithin(operation: Promise<void>, ms: number): Promise<boolean> {
+async function terminatesWithin(
+  child: ChildProcess,
+  exited: Promise<void>,
+  childExited: () => boolean,
+  ms: number,
+): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  await settlesOrTimesOut(exited, ms);
+  while (!hasTerminated(child, childExited()) && Date.now() < deadline) {
+    await sleep(Math.min(25, deadline - Date.now()));
+  }
+  return hasTerminated(child, childExited());
+}
+
+async function settlesOrTimesOut(operation: Promise<void>, ms: number): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
   try {
-    return await Promise.race([
-      operation.then(() => true),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), ms);
+    await Promise.race([
+      operation,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
       }),
     ]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hasTerminated(child: ChildProcess, childExited: boolean): boolean {
+  return childExited && !isProcessGroupAlive(child);
+}
+
+function isProcessGroupAlive(child: ChildProcess): boolean {
+  if (process.platform === "win32" || child.pid === undefined) return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch {
+    return false;
   }
 }
 

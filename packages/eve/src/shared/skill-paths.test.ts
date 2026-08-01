@@ -7,7 +7,6 @@ import {
   formatFallbackSkillPath,
   formatSkillModelPath,
   resolveSandboxModelPath,
-  resolveSandboxSeedFilePath,
   resolveSandboxSkillReadPaths,
   resolveSandboxSkillRoot,
 } from "#shared/skill-paths.js";
@@ -126,7 +125,7 @@ describe("skill path helpers", () => {
     });
 
     await expect(
-      resolveSandboxSeedFilePath({
+      resolveSandboxModelPath({
         path: `${MODEL_SKILL_ROOT}/research/references/catalog.md`,
         sandbox: sandbox.session,
       }),
