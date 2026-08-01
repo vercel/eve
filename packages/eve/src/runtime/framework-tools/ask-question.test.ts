@@ -48,6 +48,12 @@ describe("ASK_QUESTION_INPUT_SCHEMA", () => {
           description: "The prompt to present to the user.",
           type: "string",
         },
+        responseType: {
+          description:
+            "Protocol response shape expected when this request is resolved.",
+          enum: ["approval", "tool-result"],
+          type: "string",
+        },
       },
       required: ["prompt"],
       type: "object",

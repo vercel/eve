@@ -9,7 +9,10 @@ import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
 import type { Approval } from "#public/definitions/approval.js";
-import type { ToolModelOutput } from "#public/definitions/tool.js";
+import type {
+  ClientToolInputRequestDefinition,
+  ToolModelOutput,
+} from "#public/definitions/tool.js";
 import type {
   AuthorizationDefinition,
   ConnectionAuthResolver,
@@ -171,6 +174,11 @@ export type ResolvedToolDefinition = Readonly<
      * {@link Approval} for the shared callback contract.
      */
     readonly approval?: Approval;
+    /**
+     * Client-side input request metadata for tools that park the run instead
+     * of executing app-runtime code.
+     */
+    readonly inputRequest?: ClientToolInputRequestDefinition;
     /**
      * Optional function that derives a compound approval key from the tool
      * input. When present, the runtime records this key (instead of just

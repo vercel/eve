@@ -668,6 +668,19 @@ function buildToolResponsePartsForRequest(
   ];
 }
 
+function isApprovalRequest(request: InputRequest): boolean {
+  if (request.responseType !== undefined) {
+    return request.responseType === "approval";
+  }
+
+  // Legacy persisted requests predate the explicit response discriminator.
+  return (
+    request.options?.length === 2 &&
+    request.options[0]?.id === "approve" &&
+    request.options[1]?.id === "deny"
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tool call helpers
 // ---------------------------------------------------------------------------

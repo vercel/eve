@@ -44,20 +44,36 @@ export async function resolveToolDefinition(
     registerDefinitionSource(sourceKey, sourceEntry);
     registerDefinitionSource(`tool:${resolvedRecord.description}`, sourceEntry);
 
-    const execute = expectFunction(
-      resolvedRecord.execute,
-      describe(definition, "to provide an execute function"),
-    ) as ResolvedToolDefinition["execute"];
+    const execute =
+      resolvedRecord.execute === undefined
+        ? undefined
+        : (expectFunction(
+            resolvedRecord.execute,
+            describe(definition, "to provide an execute function"),
+          ) as ResolvedToolDefinition["execute"]);
     const inputSchema = isToolSchema(resolvedRecord.inputSchema)
       ? resolvedRecord.inputSchema
       : toInputSchema(definition.inputSchema);
     const outputSchema = isToolSchema(resolvedRecord.outputSchema)
       ? resolvedRecord.outputSchema
       : toOutputSchema(definition.outputSchema);
+    const optionalHooks = extractOptionalHooks(resolvedRecord, definition);
 
-    return {
+    if (execute === undefined && optionalHooks.inputRequest === undefined) {
+      throw new TypeError(
+        describe(definition, "to provide an execute function or inputRequest metadata"),
+      );
+    }
+    if (execute !== undefined && optionalHooks.inputRequest !== undefined) {
+      throw new TypeError(
+        describe(definition, "to provide only one of execute or inputRequest metadata"),
+      );
+    }
+
+    const resolvedDefinition: Omit<ResolvedToolDefinition, "execute"> & {
+      execute?: ResolvedToolDefinition["execute"];
+    } = {
       description: definition.description,
-      execute,
       exportName: definition.exportName,
       inputSchema,
       logicalPath: definition.logicalPath,
@@ -65,8 +81,12 @@ export async function resolveToolDefinition(
       outputSchema,
       sourceId: definition.sourceId,
       sourceKind: "module",
-      ...extractOptionalHooks(resolvedRecord, definition),
+      ...optionalHooks,
     };
+    if (execute !== undefined) {
+      resolvedDefinition.execute = execute;
+    }
+    return resolvedDefinition;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
       throw error;
@@ -88,7 +108,12 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [K in
+    | "approval"
+    | "inputRequest"
+    | "toModelOutput"
+    | "inputStandardSchema"
+    | "outputStandardSchema"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -114,6 +139,18 @@ function extractOptionalHooks(
       record.toModelOutput,
       describe(definition, "to provide a toModelOutput function"),
     ) as ResolvedToolDefinition["toModelOutput"];
+  }
+
+  if (record.inputRequest !== undefined) {
+    optional.inputRequest = record.inputRequest as ResolvedToolDefinition["inputRequest"];
+  }
+
+  if (record.inputSchema !== undefined && isFlexibleSchema(record.inputSchema)) {
+    optional.inputStandardSchema = record.inputSchema;
+  }
+
+  if (record.outputSchema !== undefined && isFlexibleSchema(record.outputSchema)) {
+    optional.outputStandardSchema = record.outputSchema;
   }
 
   return optional;

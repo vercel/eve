@@ -256,6 +256,118 @@ describe("resolvePendingInput", () => {
     });
   });
 
+  it("resolves client-side tool input as a normal tool result", () => {
+    const session = setPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "choose-plan-call",
+            input: { accountId: "acct_1" },
+            kind: "tool-call",
+            toolName: "choose_plan",
+          },
+          allowFreeform: false,
+          display: "select",
+          options: [
+            { id: "basic", label: "Basic" },
+            { id: "pro", label: "Pro" },
+          ],
+          prompt: "Choose a plan.",
+          requestId: "choose-plan-call",
+          responseType: "tool-result",
+        } satisfies InputRequest,
+      ],
+      responseMessages: [
+        {
+          content: [
+            { text: "Need input.", type: "text" },
+            {
+              input: { accountId: "acct_1" },
+              toolCallId: "choose-plan-call",
+              toolName: "choose_plan",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        } satisfies ModelMessage,
+      ],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({
+      stepInput: {
+        inputResponses: [{ optionId: "pro", requestId: "choose-plan-call" }],
+      },
+      session,
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.messages.at(-1)).toEqual({
+      content: [
+        {
+          output: {
+            type: "json",
+            value: {
+              optionId: "pro",
+              text: undefined,
+              status: "answered",
+            },
+          },
+          toolCallId: "choose-plan-call",
+          toolName: "choose_plan",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    });
+  });
+
+  it("keeps approve and deny client choices on the normal tool-result protocol", () => {
+    const session = setPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "confirm-call",
+            input: {},
+            kind: "tool-call",
+            toolName: "confirm_choice",
+          },
+          display: "confirmation",
+          options: [
+            { id: "approve", label: "Approve" },
+            { id: "deny", label: "Deny" },
+          ],
+          prompt: "Continue?",
+          requestId: "confirm-call",
+          responseType: "tool-result",
+        },
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({
+      stepInput: { inputResponses: [{ optionId: "approve", requestId: "confirm-call" }] },
+      session,
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.messages.at(-1)).toEqual({
+      content: [
+        {
+          output: {
+            type: "json",
+            value: { optionId: "approve", text: undefined, status: "answered" },
+          },
+          toolCallId: "confirm-call",
+          toolName: "confirm_choice",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    });
+  });
+
   it("defers a follow-up message until after tool approvals are resolved", () => {
     const session = setPendingInputBatch({
       requests: [

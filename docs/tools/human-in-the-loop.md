@@ -93,6 +93,37 @@ The built-in `ask_question` tool lets the model pause and ask the user, rather t
 
 `ask_question` is part of the [default harness](/docs/concepts/default-harness), so it is available without you defining anything. It produces the same `input.requested` pause as an approval, and resumes the same way.
 
+### Client-side tools
+
+Use `defineClientTool` when the model-facing action should be named and typed like one of your tools, but the work belongs to your client or channel UI. A client-side tool does not have `execute`; when the model calls it, eve turns the call into an `input.requested` event and parks the run until the user answers.
+
+```ts title="agent/tools/choose_plan.ts"
+import { defineClientTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineClientTool({
+  description: "Ask the user which billing plan to apply.",
+  inputSchema: z.object({ accountId: z.string() }),
+  inputRequest: {
+    display: "select",
+    allowFreeform: false,
+    prompt: ({ accountId }) => `Choose a plan for ${accountId}.`,
+    options: ({ accountId }) => [
+      { id: "basic", label: `Basic for ${accountId}` },
+      { id: "pro", label: "Pro" },
+    ],
+  },
+});
+```
+
+The tool input remains model-visible and schema-checked. `inputRequest.prompt`, `inputRequest.options`, and `inputRequest.allowFreeform` can be static values or functions of that parsed tool input. The answer resumes the tool call with a JSON result:
+
+```ts
+{ status: "answered", optionId: "pro" }
+```
+
+If the answer is ignored or cannot be matched, the result uses `status: "ignored"`. Client-side tools are only exposed when the active harness can request input, just like `ask_question`.
+
 ## How pause and resume works
 
 Approvals and questions share one protocol:

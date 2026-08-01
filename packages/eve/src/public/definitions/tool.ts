@@ -11,6 +11,7 @@ import type {
   NonInteractiveAuthorizationDefinition,
   TokenResult,
 } from "#runtime/connections/types.js";
+import type { InputOption, InputRequest } from "#runtime/input/types.js";
 import {
   DYNAMIC_SENTINEL_KIND,
   TOOL_BRAND,
@@ -29,6 +30,43 @@ type DynamicEventMapResult<TEvents extends DynamicEvents> = Awaited<
 >;
 
 export type { ToolModelOutput, ToolModelOutputPart } from "#shared/tool-definition.js";
+
+/** JSON result returned to the model after a client-side tool is answered or ignored. */
+export interface ClientToolResult {
+  readonly optionId?: string;
+  readonly status: "answered" | "ignored";
+  readonly text?: string;
+}
+
+/** UI request metadata used to turn a client-side tool call into a durable input pause. */
+export interface ClientToolInputRequestDefinition<TInput = unknown> {
+  readonly allowFreeform?: boolean | ((input: TInput) => boolean | undefined);
+  readonly display?: InputRequest["display"];
+  readonly options?:
+    | readonly InputOption[]
+    | ((input: TInput) => readonly InputOption[] | undefined);
+  readonly prompt: string | ((input: TInput) => string);
+}
+
+/** Authored tool definition fulfilled by a client response instead of a server executor. */
+export type ClientToolDefinition<TInput = unknown> = PublicToolDefinition<
+  TInput,
+  ClientToolResult
+> & {
+  readonly inputRequest: ClientToolInputRequestDefinition<TInput>;
+  readonly outputSchema: JsonObject;
+};
+
+const CLIENT_TOOL_OUTPUT_SCHEMA: JsonObject = {
+  additionalProperties: false,
+  properties: {
+    optionId: { type: "string" },
+    status: { enum: ["answered", "ignored"], type: "string" },
+    text: { type: "string" },
+  },
+  required: ["status"],
+  type: "object",
+};
 
 /**
  * Authorization provider passed to {@link ToolContext.getToken} or
@@ -226,6 +264,35 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
   Object.assign(definition, { [TOOL_BRAND]: true });
   stampDefinitionKey(definition, `tool:${definition.description}`);
   return definition;
+}
+
+/**
+ * Defines a client-side tool that parks the run and asks the channel/client
+ * for user input instead of executing code in the app runtime.
+ */
+export function defineClientTool<
+  TSchema extends StandardJSONSchemaV1<unknown, unknown>,
+>(definition: {
+  description: ToolDefinition<unknown, unknown>["description"];
+  inputSchema: TSchema;
+  inputRequest: ClientToolInputRequestDefinition<StandardJSONSchemaV1.InferOutput<TSchema>>;
+}): ClientToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>>;
+export function defineClientTool(definition: {
+  description: ToolDefinition<unknown, unknown>["description"];
+  inputSchema: JsonObject;
+  inputRequest: ClientToolInputRequestDefinition<Record<string, unknown>>;
+}): ClientToolDefinition<Record<string, unknown>>;
+export function defineClientTool<TInput = unknown>(definition: {
+  description: ToolDefinition<unknown, unknown>["description"];
+  inputSchema: PublicToolDefinition<TInput>["inputSchema"];
+  inputRequest: ClientToolInputRequestDefinition<TInput>;
+}): ClientToolDefinition<TInput> {
+  const clientTool = {
+    ...definition,
+    outputSchema: CLIENT_TOOL_OUTPUT_SCHEMA,
+  };
+  stampDefinitionKey(clientTool, `client-tool:${definition.description}`);
+  return clientTool;
 }
 
 /**

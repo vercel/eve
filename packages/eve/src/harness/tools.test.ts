@@ -448,6 +448,33 @@ describe("buildToolSet", () => {
     expect(withCapability.ask_question).toBeDefined();
   });
 
+  it("omits client-side input tools when the session cannot request input", () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "choose_plan",
+        {
+          description: "Ask the user which plan to apply.",
+          inputRequest: {
+            allowFreeform: false,
+            options: [{ id: "pro", label: "Pro" }],
+            prompt: "Choose a plan.",
+          },
+          inputSchema: jsonSchema({}),
+          name: "choose_plan",
+        },
+      ],
+    ]);
+
+    const withoutCapability = buildToolSet({ tools });
+    const withCapability = buildToolSet({
+      capabilities: { requestInput: true },
+      tools,
+    });
+
+    expect(withoutCapability.choose_plan).toBeUndefined();
+    expect(withCapability.choose_plan).toBeDefined();
+  });
+
   it("defaults to no approval when no approval function is set", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
