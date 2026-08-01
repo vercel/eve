@@ -568,6 +568,82 @@ describe("workflowEntry", () => {
       },
     });
     expect(fireSessionCallbackStep).not.toHaveBeenCalled();
+    // The caller cell was already populated; the crash path must reuse it
+    // instead of resolving a second time.
+    expect(resolveInitialTurnCallerStep).toHaveBeenCalledOnce();
+  });
+
+  it("rejects the delegated caller when the session fails before the caller is resolved", async () => {
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-token" },
+      subagentName: "researcher",
+    };
+    // Crash before `resolveInitialTurnCallerStep` ever runs: the cleanup
+    // cell is unpopulated, so the catch must re-resolve the caller from the
+    // serialized context or the delegated parent's call parks forever.
+    vi.mocked(createSessionStep).mockRejectedValueOnce(new Error("session creation failed"));
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    const serializedContext = createSerializedContext({
+      "eve.channel": {
+        kind: "subagent",
+        state: {
+          callId: "call-1",
+          parentContinuationToken: "parent-token",
+          subagentName: "researcher",
+        },
+      },
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext,
+      }),
+    ).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+
+    expect(resolveInitialTurnCallerStep).toHaveBeenCalledOnce();
+    expect(notifyTurnCallerStep).toHaveBeenCalledOnce();
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
+      caller,
+      lifecycle: "terminal",
+      sessionId: "wrun_test_123",
+      settled: {
+        isError: true,
+        output: expect.objectContaining({ message: "session creation failed" }),
+      },
+    });
+    // No snapshot was ever received, so there are no children to terminate.
+    expect(terminateChildSessionsStep).not.toHaveBeenCalled();
+  });
+
+  it("does not re-resolve a caller the loop already settled and cleared", async () => {
+    // A crash after a settled reply cleared the cell must notify no one:
+    // `caller: undefined` with the resolution flag set means "nothing left
+    // to notify", not "never resolved".
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(undefined);
+    installHookMocks({
+      turnControls: [
+        {
+          error: { message: "root turn crashed", name: "Error" },
+          kind: "turn-error",
+        },
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+
+    expect(resolveInitialTurnCallerStep).toHaveBeenCalledOnce();
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith(
+      expect.objectContaining({ caller: undefined }),
+    );
   });
 
   it("notifies the latest delegated exchange when a resumed turn fails terminally", async () => {

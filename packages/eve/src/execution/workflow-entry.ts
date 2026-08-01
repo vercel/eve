@@ -97,6 +97,12 @@ interface CrashCleanupState {
   // reject it with the error instead of leaving it parked forever.
   // Populated for every session; only conversation-mode paths read it.
   caller: TurnCaller | undefined;
+  // Whether `resolveInitialTurnCallerStep` has run. `caller: undefined` is
+  // ambiguous on its own: it also means "resolved and later cleared because
+  // its reply settled". This flag lets the crash path tell that apart from
+  // "crashed before the caller was ever resolved", where a delegated caller
+  // may still be parked on this session's reply.
+  callerResolved: boolean;
   // The latest snapshot the driver has received, so the catch can
   // terminate children adopted after turn 1. Honest staleness window: the
   // driver only sees state at turn boundaries, so children dispatched by a
@@ -140,6 +146,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   const driverWritable = getWritable<Uint8Array>();
   const crashCleanupState: CrashCleanupState = {
     caller: undefined,
+    callerResolved: false,
     lastSessionState: undefined,
   };
 
@@ -170,6 +177,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     crashCleanupState.caller = await resolveInitialTurnCallerStep({
       serializedContext: input.serializedContext,
     });
+    crashCleanupState.callerResolved = true;
 
     const outcome = await runDriverLoop({
       capabilities,
@@ -233,13 +241,37 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       });
     } else {
       await notifyTurnCallerStep({
-        caller: crashCleanupState.caller,
+        caller: await resolveCallerForCrash(crashCleanupState, input.serializedContext),
         lifecycle: "terminal",
         sessionId,
         settled: { isError: true, output: error },
       });
     }
     throw createSafeOuterWorkflowError();
+  }
+}
+
+/**
+ * Caller to reject from the crash path. Normally the resolved cell value —
+ * including `undefined` after a settled reply cleared it, when there is
+ * nothing left to notify. When the crash happened before
+ * `resolveInitialTurnCallerStep` ever ran (e.g. `createSessionStep` threw),
+ * the cell is empty even though a delegated caller may be parked on this
+ * session's reply, so the caller is re-resolved from the serialized context
+ * — which needs nothing from the failed steps. Best-effort: when resolution
+ * fails again there is no reachable caller to notify.
+ */
+async function resolveCallerForCrash(
+  state: CrashCleanupState,
+  serializedContext: Record<string, unknown>,
+): Promise<TurnCaller | undefined> {
+  if (state.callerResolved) {
+    return state.caller;
+  }
+  try {
+    return await resolveInitialTurnCallerStep({ serializedContext });
+  } catch {
+    return undefined;
   }
 }
 
