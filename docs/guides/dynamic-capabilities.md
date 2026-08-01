@@ -51,10 +51,10 @@ compiled manifest. Each resolution can return a different model or other
 runtime agent settings. Runtime-selected models must use string model IDs;
 build and Workflow-world configuration cannot be selected at runtime.
 
-Dynamic subagents support `session.started` and `turn.started`, not
-`step.started`. A turn selection shadows the session selection for that turn,
-including when the turn handler returns nil. If a resolver throws or returns an
-invalid definition, eve logs the failure and omits the subagent.
+Dynamic subagents support `session.started` and `turn.started`. A turn selection
+shadows the session selection for that turn, including when the turn handler
+returns nil. If a resolver throws or returns an invalid definition, eve logs the
+failure and omits the subagent.
 
 The resolved set applies to direct delegation and the `Workflow` tool. eve
 also checks availability again before starting the child, so a stale or
