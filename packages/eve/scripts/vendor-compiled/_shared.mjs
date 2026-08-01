@@ -188,7 +188,112 @@ export function createDeclarationCopier({
         }),
       );
     }
+
+    // (eve#1500) Some upstream packages emit rollup content-hashed sibling
+    // chunks that their public `.d.ts` files reference via relative import
+    // (`from './messages-BSoJG691.js'`, `from './types-WYjTBVDi.js'`).
+    // `collectExternalDeclarationImports` intentionally skips relative
+    // specifiers, so without further handling those chunks would be left
+    // behind — the published declarations then resolve to `any` (or fail
+    // `skipLibCheck: false`). Scan each written declaration for relative
+    // import specifiers, resolve them against the upstream `dist/`, and
+    // co-copy any matches, recursively, with cycle protection. This
+    // subsumes `discoverExtraFiles` for the sibling-chunk class of problem.
+    const outputsAlreadyWritten = new Set(declarations.map((d) => d.output));
+    const extrasAlreadyWritten = new Set(
+      typeof discoverExtraFiles === "function" ? discoverExtraFiles(distEntries) : [],
+    );
+    const copiedChunks = new Set([...outputsAlreadyWritten, ...extrasAlreadyWritten]);
+    await coCopyRelativeDeclarationChunks(
+      declarations.map((d) => d.output),
+      destinationRoot,
+      distDir,
+      copiedChunks,
+    );
   };
+}
+
+/**
+ * Regex mirroring the relative side of `collectExternalDeclarationImports`:
+ * finds `from './x'`, `from '.../x'`, and side-effect `import './x'` specifiers.
+ */
+const RELATIVE_DECLARATION_IMPORT_PATTERN =
+  /^(?:import|export)\s+(?:type\s+)?(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*|\*)?\s*(?:from\s+)?['"](\.[^'"]+)['"]/gm;
+
+/**
+ * Walks a set of already-written declaration outputs, finds relative import
+ * specifiers in their source (looking at the post-rewrite output), and
+ * co-copies any matching upstream `.d.ts` chunk the package embeds. Recurses
+ * into newly-copied chunks so transitively-referenced chunks survive.
+ *
+ * Resolves the specifier against the chunk's own directory (which matches
+ * the upstream layout because we copy files verbatim with their basenames).
+ * Normalizes the `.js` specifier to `.d.ts` — rollup emits `.d.ts` files
+ * whose import clauses reference the `.js` companion.
+ */
+async function coCopyRelativeDeclarationChunks(
+  outputPathsRelativeToDestination,
+  destinationRoot,
+  distDir,
+  copiedChunks,
+) {
+  const queue = [...outputPathsRelativeToDestination];
+  const processed = new Set();
+  while (queue.length > 0) {
+    const relativeOutput = queue.pop();
+    if (processed.has(relativeOutput)) continue;
+    processed.add(relativeOutput);
+
+    const outputPath = join(destinationRoot, relativeOutput);
+    let sourceText;
+    try {
+      sourceText = await readFile(outputPath, "utf8");
+    } catch {
+      // The just-written declaration may not exist yet if a caller raced us;
+      // or the file may be a stub written via a different pathway. Skip.
+      continue;
+    }
+    const fromDir = dirname(relativeOutput);
+
+    for (const match of sourceText.matchAll(RELATIVE_DECLARATION_IMPORT_PATTERN)) {
+      let specifier = match[1];
+      // Skip anchor-only relative specifiers (`./foo.d.ts#Anchor`).
+      const hashIndex = specifier.indexOf("#");
+      if (hashIndex !== -1) specifier = specifier.slice(0, hashIndex);
+      if (specifier.length === 0) continue;
+
+      // Rollup outputs reference the `.js` companion in their `.d.ts`.
+      // Try the `.d.ts` twin first, then the specifier verbatim (in case
+      // the upstream file genuinely ends `.js`, e.g. a paired JS file).
+      const candidateNames = specifier.endsWith(".js")
+        ? [specifier.slice(0, -".js".length) + ".d.ts", specifier]
+        : specifier.endsWith(".d.ts")
+          ? [specifier, specifier.slice(0, -".d.ts".length) + ".d.ts"]
+          : [specifier + ".d.ts"];
+
+      for (const candidateName of candidateNames) {
+        const resolvedOutputRelative = posix.normalize(posix.join(fromDir, candidateName));
+        if (copiedChunks.has(resolvedOutputRelative)) {
+          queue.push(resolvedOutputRelative);
+          break;
+        }
+        const upstreamSource = join(distDir, resolvedOutputRelative);
+        let exists;
+        try {
+          exists = (await stat(upstreamSource)).isFile();
+        } catch {
+          exists = false;
+        }
+        if (!exists) continue;
+        const outputPathForChunk = join(destinationRoot, resolvedOutputRelative);
+        await mkdir(dirname(outputPathForChunk), { recursive: true });
+        await copyFile(upstreamSource, outputPathForChunk);
+        copiedChunks.add(resolvedOutputRelative);
+        queue.push(resolvedOutputRelative);
+        break;
+      }
+    }
+  }
 }
 
 function mergeExternalDeclarationImports(sources) {

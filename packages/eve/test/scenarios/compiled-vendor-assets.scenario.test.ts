@@ -304,4 +304,36 @@ describe("compiled vendor assets", () => {
       expect(vendored).toBe(upstream);
     }
   });
+
+  it("(eve#1500) co-copies content-hashed sibling declaration chunks referenced by vendored entries", async () => {
+    // Some upstream packages emit rollup content-hashed sibling chunks whose
+    // public `.d.ts` files reference them via relative import. If these are
+    // left behind at vendor time, the published package's declarations
+    // resolve them to `any` (or fail `skipLibCheck: false`). Pin the two
+    // chunks the original report surfaced plus the transitive closure.
+    const chatHashedChunk = join(COMPILED_VENDOR_ROOT, "chat/messages-BSoJG691.d.ts");
+    const twilioHashedChunk = join(
+      COMPILED_VENDOR_ROOT,
+      "@chat-adapter/twilio/types-WYjTBVDi.d.ts",
+    );
+
+    for (const chunkPath of [chatHashedChunk, twilioHashedChunk]) {
+      const [chunk, chunkStats] = await Promise.all([readFile(chunkPath, "utf8"), readdir(dirname(chunkPath))]);
+      expect(chunk.length).toBeGreaterThan(0);
+      expect(chunkStats).toContain(chunkPath.split("/").pop());
+    }
+
+    // The chat entry source should still reference its hashed sibling
+    // (i.e. we did NOT strip or break the import — we copied the target
+    // alongside so the specifier resolves).
+    const chatIndex = await readFile(join(COMPILED_VENDOR_ROOT, "chat/index.d.ts"), "utf8");
+    expect(chatIndex).toContain("./messages-BSoJG691");
+
+    // The Twilio webhook entry should reference its hashed sibling too.
+    const twilioWebhook = await readFile(
+      join(COMPILED_VENDOR_ROOT, "@chat-adapter/twilio/webhook.d.ts"),
+      "utf8",
+    );
+    expect(twilioWebhook).toContain("./types-WYjTBVDi");
+  });
 });
