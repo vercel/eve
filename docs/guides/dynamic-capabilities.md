@@ -51,12 +51,37 @@ compiled manifest. Each resolution can return a different model or other
 runtime agent settings. Runtime-selected models must use string model IDs;
 build and Workflow-world configuration cannot be selected at runtime.
 
+A single-file remote subagent uses the same lifecycle. Return
+`defineRemoteAgent(...)` to expose the selected deployment, or nil to omit it:
+
+```ts title="agent/subagents/finance.ts"
+import { defineDynamic, defineRemoteAgent } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) =>
+      ctx.session.auth.current?.attributes.plan === "enterprise"
+        ? defineRemoteAgent({
+            description: "Analyze financial and accounting data.",
+            url: "https://finance-agent.example.com",
+          })
+        : null,
+  },
+});
+```
+
+The returned remote definition can change its URL, path, headers, auth,
+principal forwarding, and output schema. Function-valued URLs resolve when the
+dynamic event runs. Auth and headers remain lazy and resolve before each
+outbound request without entering durable workflow state.
+
 Dynamic subagents support `session.started` and `turn.started`. A turn selection
 shadows the session selection for that turn, including when the turn handler
 returns nil. If a resolver throws or returns an invalid definition, eve logs the
 failure and omits the subagent.
 
-The resolved set applies to direct delegation and the `Workflow` tool. eve
+The resolved set applies to local and remote direct delegation and the
+`Workflow` tool. eve
 also checks availability again before starting the child, so a stale or
 manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
 availability as capability composition, not as the only authorization

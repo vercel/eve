@@ -19,6 +19,7 @@ import type {
 import { ContextKey } from "#context/key.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -167,10 +168,20 @@ export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamic
  */
 export const LiveStepToolsKey = new ContextKey<HarnessToolDefinition[]>("eve.liveStepTools");
 
-export type DurableDynamicSubagentSelection = {
-  readonly agentConfig: DynamicSubagentAgentConfig;
-  readonly prepared: PreparedRuntimeDelegationTool;
-} | null;
+export type DurableDynamicSubagentSelection =
+  | {
+      readonly agentConfig: DynamicSubagentAgentConfig;
+      readonly kind: "subagent";
+      readonly prepared: PreparedRuntimeDelegationTool;
+      readonly remoteAgent?: never;
+    }
+  | {
+      readonly agentConfig?: never;
+      readonly kind: "remote";
+      readonly prepared: PreparedRuntimeDelegationTool;
+      readonly remoteAgent: DynamicRemoteAgentConfig;
+    }
+  | null;
 
 export const SessionDynamicSubagentSelectionsKey = new ContextKey<
   Readonly<Record<string, DurableDynamicSubagentSelection>>

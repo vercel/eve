@@ -15,6 +15,8 @@ import type {
   RuntimeSubagentCallActionRequest,
 } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
+import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
+import type { ContextContainer } from "#context/container.js";
 
 // Retry through transient world contention (queue wakes, hook-claim
 // conflicts), then log loudly: a silently dropped cancel leaves the child
@@ -57,11 +59,17 @@ export async function cancelDescendantTurnsStep(input: {
     return;
   }
 
-  let remoteRegistry: Promise<RuntimeSubagentRegistry["subagentsByNodeId"]> | undefined;
-  const getRemoteRegistry = () =>
-    (remoteRegistry ??= deserializeContext(input.serializedContext).then(
-      (ctx) => ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
-    ));
+  let remoteContext:
+    | Promise<{
+        readonly ctx: ContextContainer;
+        readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
+      }>
+    | undefined;
+  const getRemoteContext = () =>
+    (remoteContext ??= deserializeContext(input.serializedContext).then((ctx) => ({
+      ctx,
+      registry: ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
+    })));
 
   const cancellations = batch.actions.flatMap((action): Promise<void>[] => {
     const childSessionId = childSessionIds[action.callId];
@@ -75,7 +83,7 @@ export async function cancelDescendantTurnsStep(input: {
         cancelRemoteDescendant({
           action,
           childSessionId,
-          remoteRegistry: getRemoteRegistry(),
+          remoteContext: getRemoteContext(),
         }),
       ];
     }
@@ -115,11 +123,16 @@ async function cancelLocalDescendant(input: {
 async function cancelRemoteDescendant(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
   readonly childSessionId: string;
-  readonly remoteRegistry: Promise<RuntimeSubagentRegistry["subagentsByNodeId"]>;
+  readonly remoteContext: Promise<{
+    readonly ctx: ContextContainer;
+    readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
+  }>;
 }): Promise<void> {
   try {
-    const registry = await input.remoteRegistry;
-    const remote = resolveRemoteAgentForAction({
+    const { ctx, registry } = await input.remoteContext;
+    const selection = getDynamicSubagentSelection(ctx, input.action.nodeId);
+    const remote = await resolveRemoteAgentForAction({
+      dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
       nodeId: input.action.nodeId,
       remoteAgentName: input.action.remoteAgentName,
       registry,

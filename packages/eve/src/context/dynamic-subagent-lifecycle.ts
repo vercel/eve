@@ -16,6 +16,7 @@ import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#pr
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-subagents");
@@ -40,13 +41,34 @@ async function resolveSelections(input: {
       if (result === null || result === undefined) {
         return [resolver.nodeId, null] as const;
       }
+      if (isRemoteAgentDefinition(result)) {
+        const remoteAgent = await normalizeDynamicRemoteAgentConfig({
+          name: resolver.name,
+          value: result,
+        });
+        const prepared = createPreparedRuntimeSubagentTool({
+          description: remoteAgent.description,
+          kind: "remote",
+          logicalPath: resolver.logicalPath,
+          name: resolver.name,
+          nodeId: resolver.nodeId,
+          outputSchema: remoteAgent.outputSchema,
+          path: remoteAgent.path,
+          sourceId: resolver.sourceId,
+          sourceKind: resolver.sourceKind,
+          url: remoteAgent.url,
+        });
+
+        return [resolver.nodeId, { kind: "remote", prepared, remoteAgent }] as const;
+      }
+
       const agentConfig = normalizeDynamicSubagentAgentConfig({
         name: resolver.name,
         value: result,
       });
       const prepared = createPreparedRuntimeSubagentTool({
         description: agentConfig.description,
-        kind: resolver.kind,
+        kind: "subagent",
         logicalPath: resolver.logicalPath,
         name: resolver.name,
         nodeId: resolver.nodeId,
@@ -54,7 +76,7 @@ async function resolveSelections(input: {
         sourceKind: resolver.sourceKind,
       });
 
-      return [resolver.nodeId, { agentConfig, prepared }] as const;
+      return [resolver.nodeId, { agentConfig, kind: "subagent", prepared }] as const;
     }),
   );
   const selections: Record<string, DurableDynamicSubagentSelection> = {};
@@ -74,6 +96,14 @@ async function resolveSelections(input: {
   }
 
   return selections;
+}
+
+function isRemoteAgentDefinition(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { readonly kind?: unknown }).kind === "remote"
+  );
 }
 
 export async function dispatchDynamicSubagentEvent(input: {

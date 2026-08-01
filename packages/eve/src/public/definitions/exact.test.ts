@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
+import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
@@ -56,6 +57,21 @@ function typeOnlyFixtures(): void {
         defineAgent({
           model: "anthropic/claude-sonnet-5",
         }),
+    },
+  });
+
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        Math.random() > 0.5
+          ? defineAgent({
+              description: "Delegate local research tasks.",
+              model: "anthropic/claude-sonnet-5",
+            })
+          : defineRemoteAgent({
+              description: "Delegate remote research tasks.",
+              url: "https://research.example.com",
+            }),
     },
   });
 

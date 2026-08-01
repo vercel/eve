@@ -107,7 +107,7 @@ export async function dispatchRuntimeActionsStep(input: {
   try {
     for (const action of batch.actions) {
       const isDynamicSubagent =
-        action.kind === "subagent-call" &&
+        (action.kind === "subagent-call" || action.kind === "remote-agent-call") &&
         bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true;
       const dynamicSubagentSelection = isDynamicSubagent
         ? getDynamicSubagentSelection(ctx, action.nodeId)
@@ -126,7 +126,12 @@ export async function dispatchRuntimeActionsStep(input: {
         continue;
       }
 
-      if (isDynamicSubagent && dynamicSubagentSelection === undefined) {
+      if (
+        isDynamicSubagent &&
+        (dynamicSubagentSelection === undefined ||
+          (action.kind === "subagent-call" && dynamicSubagentSelection.kind !== "subagent") ||
+          (action.kind === "remote-agent-call" && dynamicSubagentSelection.kind !== "remote"))
+      ) {
         const subagentName = getSubagentName(action);
         log.warn("dynamic subagent call blocked after availability changed", {
           callId: action.callId,
@@ -144,9 +149,13 @@ export async function dispatchRuntimeActionsStep(input: {
 
       switch (action.kind) {
         case "subagent-call": {
+          const dynamicAgentConfig =
+            dynamicSubagentSelection?.kind === "subagent"
+              ? dynamicSubagentSelection.agentConfig
+              : undefined;
           const registered = bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId);
           const description =
-            dynamicSubagentSelection?.agentConfig.description ??
+            dynamicAgentConfig?.description ??
             (registered?.definition.kind === "subagent"
               ? registered.definition.description
               : undefined);
@@ -154,7 +163,7 @@ export async function dispatchRuntimeActionsStep(input: {
             description !== undefined ? { description, type: "local" } : { type: "runtime" };
           const childRuntime = createWorkflowRuntime({
             compiledArtifactsSource: bundle.compiledArtifactsSource,
-            dynamicSubagentAgentConfig: dynamicSubagentSelection?.agentConfig,
+            dynamicSubagentAgentConfig: dynamicAgentConfig,
             nodeId: action.nodeId,
           });
           const { childContinuationToken, runInput } = buildSubagentRunInput({
@@ -208,7 +217,11 @@ export async function dispatchRuntimeActionsStep(input: {
         case "remote-agent-call": {
           let resolvedRemote;
           try {
-            resolvedRemote = resolveRemoteAgentForAction({
+            resolvedRemote = await resolveRemoteAgentForAction({
+              dynamicRemoteAgent:
+                dynamicSubagentSelection?.kind === "remote"
+                  ? dynamicSubagentSelection.remoteAgent
+                  : undefined,
               nodeId: action.nodeId,
               remoteAgentName: action.remoteAgentName,
               registry: bundle.subagentRegistry.subagentsByNodeId,

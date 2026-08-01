@@ -1,5 +1,6 @@
 import type { PublicAgentDefinition } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
+import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
 import { defineDynamic as defineDynamicBase } from "#public/definitions/tool.js";
 import type {
   DynamicEvents,
@@ -48,9 +49,12 @@ export type DefinedAgent<TAgent extends AgentDefinition = AgentDefinition> = TAg
  * Agent configuration returned by a dynamic subagent resolver. The description
  * tells the parent agent when to delegate.
  */
-export type DynamicSubagentDefinition = AgentDefinition & {
+export type DynamicLocalSubagentDefinition = AgentDefinition & {
   readonly description: string;
 };
+
+/** Definition a dynamic subagent resolver may select at runtime. */
+export type DynamicSubagentDefinition = DynamicLocalSubagentDefinition | RemoteAgentDefinition;
 
 type DynamicEventHandler<TEvents extends DynamicEvents> = Extract<
   NonNullable<TEvents[keyof TEvents]>,
@@ -62,7 +66,7 @@ type DynamicEventResult<TEvents extends DynamicEvents> = Awaited<
 type DynamicSubagentDescriptionConstraint<TEvents extends DynamicEvents> =
   Exclude<
     Extract<DynamicEventResult<TEvents>, DefinedAgent>,
-    DynamicSubagentDefinition
+    DynamicLocalSubagentDefinition
   > extends never
     ? unknown
     : { readonly "Dynamic subagent definitions require a description": never };

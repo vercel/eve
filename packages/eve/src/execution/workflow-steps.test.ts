@@ -9,6 +9,7 @@ import {
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
+  SessionDynamicSubagentSelectionsKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
@@ -656,6 +657,119 @@ describe("dispatchRuntimeActionsStep", () => {
       {
         childSessionIds: { "call-remote": "remote-child" },
       },
+    );
+  });
+
+  it("starts a remote agent from the current dynamic selection", async () => {
+    const nodeId = "subagents/research";
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        dynamicNodeIds: new Set([nodeId]),
+        subagentsByNodeId: new Map([
+          [
+            nodeId,
+            {
+              definition: {
+                kind: "subagent",
+                logicalPath: "subagents/research.ts",
+                name: "research",
+                nodeId,
+                sourceId: "subagents/research.ts",
+                sourceKind: "module",
+              },
+            },
+          ],
+        ]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const credentialsStepId = "eve:dynamic-remote-agent//workflow-research";
+    const registryKey = Symbol.for("@workflow/core//registeredSteps");
+    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
+    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
+    globalRecord[registryKey] = stepRegistry;
+    stepRegistry.set(credentialsStepId, () => ({
+      headers: { authorization: "Bearer selected" },
+    }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { sessionId: "dynamic-remote-child" },
+          { headers: { "x-eve-session-id": "dynamic-remote-child" }, status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-dynamic-remote",
+          description: "Delegate the work.",
+          input: { message: "investigate latest routing" },
+          kind: "remote-agent-call",
+          name: "research",
+          nodeId,
+          remoteAgentName: "research",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+    const serializedContext = createSerializedContext();
+    serializedContext[SessionDynamicSubagentSelectionsKey.name] = {
+      [nodeId]: {
+        kind: "remote",
+        prepared: {},
+        remoteAgent: {
+          credentialsStepId,
+          description: "Selected remote research.",
+          path: "/custom/session",
+          url: "https://selected.example.com",
+        },
+      },
+    };
+
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext,
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(result.results).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://selected.example.com/custom/session",
+      expect.objectContaining({
+        headers: {
+          authorization: "Bearer selected",
+          "content-type": "application/json",
+        },
+      }),
     );
   });
 

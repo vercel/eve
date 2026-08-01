@@ -79,6 +79,7 @@ describe("cancelDescendantTurnsStep", () => {
       sessionId: "local-child",
     });
     expect(resolveRemoteAgentForAction).toHaveBeenCalledWith({
+      dynamicRemoteAgent: undefined,
       nodeId: remoteAction.nodeId,
       registry: expect.any(Map),
       remoteAgentName: remoteAction.remoteAgentName,
@@ -101,6 +102,35 @@ describe("cancelDescendantTurnsStep", () => {
       sessionId: "local-child",
     });
     expect(deserializeContext).not.toHaveBeenCalled();
+  });
+
+  it("uses the selected dynamic remote config when cancelling", async () => {
+    const dynamicRemoteAgent = {
+      description: "Selected remote.",
+      path: "/eve/v1/session",
+      url: "https://selected.example.com",
+    };
+    installRemoteRegistry({
+      agentConfig: undefined,
+      kind: "remote",
+      prepared: {} as never,
+      remoteAgent: dynamicRemoteAgent,
+    });
+    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote);
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({ status: "accepted" });
+
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createPendingState(),
+    });
+
+    expect(resolveRemoteAgentForAction).toHaveBeenCalledWith({
+      dynamicRemoteAgent,
+      nodeId: remoteAction.nodeId,
+      registry: expect.any(Map),
+      remoteAgentName: remoteAction.remoteAgentName,
+    });
   });
 
   it("retries no-active-turn responses during the child adoption window", async () => {
@@ -206,8 +236,9 @@ describe("cancelDescendantTurnsStep", () => {
   });
 });
 
-function installRemoteRegistry(): void {
+function installRemoteRegistry(selection?: unknown): void {
   vi.mocked(deserializeContext).mockResolvedValue({
+    get: vi.fn(() => (selection === undefined ? undefined : { [remoteAction.nodeId]: selection })),
     require: vi.fn(() => ({
       subagentRegistry: { subagentsByNodeId: new Map([[remoteAction.nodeId, remote]]) },
     })),

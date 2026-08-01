@@ -36,6 +36,7 @@ import type {
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
+import { transformDynamicRemoteAgentCredentials } from "#internal/workflow-bundle/dynamic-remote-agent-transform.js";
 import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
@@ -503,12 +504,7 @@ function addNitroStepTransformPlugin(
   return clearCachedStepTransformTargets;
 }
 
-/**
- * Adds the dynamic tool transform plugin that hoists execute functions
- * from defineDynamic event handlers to module scope. Runs
- * unconditionally for all tool files regardless of workflow mode.
- */
-function addDynamicToolTransformPlugin(nitro: Nitro): void {
+function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
       return;
@@ -516,12 +512,26 @@ function addDynamicToolTransformPlugin(nitro: Nitro): void {
 
     config.plugins.unshift({
       async transform(code: string, id: string) {
-        if (!id.includes("/tools/")) return null;
-        const result = await transformDynamicToolExecute(id, code);
-        if (result === null) return null;
-        return { code: result.code, map: null };
+        if (!id.includes("/tools/") && !id.includes("/subagents/")) return null;
+        let transformed = code;
+        let changed = false;
+        if (id.includes("/tools/")) {
+          const result = await transformDynamicToolExecute(id, transformed);
+          if (result !== null) {
+            transformed = result.code;
+            changed = true;
+          }
+        }
+        if (id.includes("/subagents/")) {
+          const result = await transformDynamicRemoteAgentCredentials(id, transformed);
+          if (result !== null) {
+            transformed = result.code;
+            changed = true;
+          }
+        }
+        return changed ? { code: transformed, map: null } : null;
       },
-      name: "eve:dynamic-tool-transform",
+      name: "eve:dynamic-capability-transform",
     });
   });
 }
@@ -688,7 +698,7 @@ function configureSharedApplicationNitro(
   addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
   patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
 
-  addDynamicToolTransformPlugin(nitro);
+  addDynamicCapabilityTransformPlugin(nitro);
 
   if (preparedHost.compiledArtifacts.instrumentationSourcePath !== undefined) {
     addInstrumentationModuleSideEffectsPlugin(

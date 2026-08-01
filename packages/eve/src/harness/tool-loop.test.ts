@@ -966,6 +966,7 @@ describe("createToolLoopHarness", () => {
           description: "Research the request.",
           model: { id: "openai/gpt-5.5" },
         },
+        kind: "subagent",
         prepared: {
           description: "Research the request.",
           inputSchema: { type: "object" },
