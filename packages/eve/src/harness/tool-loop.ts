@@ -160,6 +160,7 @@ import {
   applySystemCacheBreakpoint,
   detectPromptCachePath,
   getAnthropicCacheMarker,
+  type PromptCacheHint,
 } from "#harness/prompt-cache.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 import {
@@ -343,11 +344,13 @@ async function resolveActiveRuntimeModel(input: {
   readonly session: HarnessSession;
 }): Promise<{
   readonly model: LanguageModel;
+  readonly modelReference: RuntimeModelReference;
   readonly session: HarnessSession;
 }> {
   if (input.ctx === undefined) {
     return {
       model: await input.config.resolveModel(input.session.agent.modelReference),
+      modelReference: input.session.agent.modelReference,
       session: input.session,
     };
   }
@@ -359,6 +362,7 @@ async function resolveActiveRuntimeModel(input: {
   if (selected === null) {
     return {
       model: await input.config.resolveModel(fallback),
+      modelReference: fallback,
       session: updateSessionModelReference(input.session, fallback),
     };
   }
@@ -368,8 +372,27 @@ async function resolveActiveRuntimeModel(input: {
       selected.model !== undefined
         ? selected.model
         : await input.config.resolveModel(selected.reference),
+    modelReference: selected.reference,
     session: updateSessionModelReference(input.session, selected.reference),
   };
+}
+
+/**
+ * Extracts prompt-cache hints from the resolved model reference's
+ * `providerOptions`. Bedrock application inference profiles can have opaque
+ * ids; an agent can declare the underlying provider family explicitly via
+ * `modelOptions.providerOptions.bedrock.inferenceProfileTarget = "anthropic"`.
+ */
+function resolvePromptCacheHints(reference: RuntimeModelReference): PromptCacheHint | undefined {
+  const bedrock = reference.providerOptions?.["bedrock"];
+  if (typeof bedrock !== "object" || bedrock === null) {
+    return undefined;
+  }
+  const target = (bedrock as Record<string, unknown>)["inferenceProfileTarget"];
+  if (target === "anthropic") {
+    return { bedrockInferenceProfileTarget: "anthropic" };
+  }
+  return undefined;
 }
 
 function updateSessionModelReference(
@@ -791,7 +814,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     session = resolvedModel.session;
     const model = resolvedModel.model;
-    const cachePath = detectPromptCachePath(model);
+    const cacheHints = resolvePromptCacheHints(resolvedModel.modelReference);
+    const cachePath = detectPromptCachePath(model, cacheHints);
     const marker = cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
 
     // --- Compaction ---------------------------------------------------------
