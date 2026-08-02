@@ -22,7 +22,7 @@ function spec(name: string, options?: Partial<PromptCommandSpec>): PromptCommand
     aliases: [],
     description: `${name} command`,
     takesArgument: false,
-    build: () => ({ type: "new" }),
+    build: () => ({ type: "reset" }),
     ...options,
   };
 }

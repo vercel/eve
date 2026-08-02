@@ -41,7 +41,7 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 | `/vc:login`   | Logs in to Vercel locally. On a remote session, resolves the deployment's project, refreshes its OIDC token, and confirms any required Trusted Sources rule. |
 | `/loglevel`   | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                             |
 | `/traces`     | Opens the full-screen local trace viewer. See [Inspect traces](#inspect-traces).                                                                             |
-| `/new`        | Starts a fresh session.                                                                                                                                      |
+| `/reset`      | Starts a fresh session.                                                                                                                                      |
 | `/cancel`     | Cooperatively cancels the running turn while preserving the session and settled context.                                                                     |
 | `/clear`      | Clears model-message history while preserving the current session and its durable resources.                                                                 |
 | `/compact`    | Queues context compaction for the current session without sending a message.                                                                                 |

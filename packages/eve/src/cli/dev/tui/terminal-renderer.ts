@@ -1504,7 +1504,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#lastCommitted = undefined;
     this.#committedTranscriptRows.length = 0;
     this.#transcriptBlocks.length = 0;
-    // `/new` resets the conversation, not the workspace: keep #agentHeader
+    // `/reset` resets the conversation, not the workspace: keep #agentHeader
     // (the status line's model segment reads it — the header is not re-sent
     // after a reset) and #vercelStatus (link + pending-deploy outlive the
     // conversation). The header *block* still leaves the transcript because
@@ -1547,7 +1547,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /**
    * THE one authority for state scoped to a server-side conversation
-   * context. Called by both context cuts — `/new` (`reset`) and the
+   * context. Called by both context cuts — `/reset` and the
    * mid-conversation session replacement (`renderSessionBoundary`) — so the
    * two can never drift on what dies with the old context: the pinned todo
    * list (its tasks were not finished — dismiss, don't commit), write-diff

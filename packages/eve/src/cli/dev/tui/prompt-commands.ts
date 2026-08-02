@@ -4,7 +4,7 @@ type PromptCommandTarget = "local" | "remote";
 
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
-  | { type: "new" }
+  | { type: "reset" }
   | { type: "cancel" }
   | { type: "clear" }
   | { type: "compact" }
@@ -44,7 +44,7 @@ interface PromptCommandDefinition extends PromptCommandSpec {
  */
 const PROMPT_COMMAND_DEFINITIONS = [
   // `help` leads so that the typeahead's default highlight — what a bare `/`
-  // plus Enter submits — is the safest command, not session-resetting `/new`.
+  // plus Enter submits — is the safest command, not session-resetting `/reset`.
   {
     name: "help",
     aliases: [],
@@ -54,11 +54,11 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
-    name: "new",
+    name: "reset",
     aliases: [],
     description: "Start a fresh session",
     takesArgument: false,
-    build: () => ({ type: "new" }),
+    build: () => ({ type: "reset" }),
     targets: ["local", "remote"],
   },
   {
@@ -173,7 +173,7 @@ export function isPromptCommandAvailableFor(
 }
 
 /**
- * Recognizes the slash commands the prompt accepts. `/new` clears the
+ * Recognizes the slash commands the prompt accepts. `/reset` clears the
  * session and transcript; `/cancel` stops the running turn; `/clear` clears
  * context; `/compact` queues context compaction; `/exit` (and `/quit`)
  * terminate the TUI like Ctrl+C; extension commands are dispatched outside

@@ -2525,15 +2525,15 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
-    input.type("/new");
+    input.type("/reset");
     input.enter();
-    expect(await prompt).toBe("/new");
+    expect(await prompt).toBe("/reset");
     renderer.shutdown();
 
     // The echo anchors in the user-message grammar (gutter bar), never the
     // prompt glyph: that one is the live-input rendezvous marker.
-    expect(screen.snapshot()).toContain("\u2502 /new");
-    expect(screen.snapshot()).not.toContain("\u276f /new");
+    expect(screen.snapshot()).toContain("\u2502 /reset");
+    expect(screen.snapshot()).not.toContain("\u276f /reset");
   });
 
   it("reassembles an arrow key split across reads", async () => {
@@ -4510,9 +4510,9 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /help → /new; history recall would have submitted the
+    // Down moved /help → /reset; history recall would have submitted the
     // earlier prompt instead.
-    expect(await second).toBe("/new");
+    expect(await second).toBe("/reset");
     renderer.shutdown();
   });
 

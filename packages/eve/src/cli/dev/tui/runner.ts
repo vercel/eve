@@ -276,7 +276,7 @@ export type AgentTUIRenderer = {
   /**
    * Reports the server session id backing the conversation — pushed by the
    * runner once a send is accepted, and overwritten when a later session's
-   * turn is accepted. Deliberately sticky across `/new` and interrupt
+   * turn is accepted. Deliberately sticky across `/reset` and interrupt
    * recovery: the terminal renderer echoes the LAST session this TUI talked
    * to in the parting line on exit, so an interrupted conversation (whose
    * replacement session never ran a turn) can still be found again
@@ -345,7 +345,7 @@ export type AgentTUIRenderer = {
   /**
    * Clears the rendered transcript and resets per-conversation display
    * state, leaving the UI interactive on a fresh screen. Used by the
-   * `/new` command to start a new session with a clean slate.
+   * `/reset` command to start a new session with a clean slate.
    */
   reset?(): void;
   /**
@@ -826,7 +826,7 @@ export class EveTUIRunner {
           prompt = undefined;
         }
 
-        if (command?.type === "new") {
+        if (command?.type === "reset") {
           if (!(await this.#resetCurrentSession())) {
             pendingInputResponses = undefined;
             streamWithoutPrompt = false;
@@ -1109,7 +1109,7 @@ export class EveTUIRunner {
   /**
    * Resets all per-conversation runner state and, when a client is
    * available, replaces the active session with a fresh one so the next
-   * turn starts a new server-side conversation. Backs the `/new` command.
+   * turn starts a new server-side conversation. Backs the `/reset` command.
    * In-flight subagent child-session streams are aborted.
    */
   #startNewSession(): void {

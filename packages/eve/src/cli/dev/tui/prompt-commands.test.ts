@@ -9,8 +9,8 @@ import {
 } from "./prompt-commands.js";
 
 describe("parsePromptCommand", () => {
-  it("parses /new", () => {
-    expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+  it("parses /reset", () => {
+    expect(parsePromptCommand("/reset")).toEqual({ type: "reset" });
   });
 
   it("parses /cancel", () => {
@@ -76,10 +76,11 @@ describe("parsePromptCommand", () => {
   });
 
   it("trims surrounding whitespace before matching", () => {
-    expect(parsePromptCommand("  /new  ")).toEqual({ type: "new" });
+    expect(parsePromptCommand("  /reset  ")).toEqual({ type: "reset" });
   });
 
   it("rejects near-misses and ordinary prompts", () => {
+    expect(parsePromptCommand("/new")).toBeNull();
     expect(parsePromptCommand("/models")).toBeNull();
     expect(parsePromptCommand("/vercel")).toBeNull();
     expect(parsePromptCommand("/vc")).toBeNull();
@@ -130,7 +131,7 @@ describe("promptCommandsFor", () => {
 
 describe("isPromptControlCommand", () => {
   it("is true exactly for recognized commands", () => {
-    expect(isPromptControlCommand("/new")).toBe(true);
+    expect(isPromptControlCommand("/reset")).toBe(true);
     expect(isPromptControlCommand("/model gpt-5")).toBe(true);
     expect(isPromptControlCommand("/unknown")).toBe(false);
     expect(isPromptControlCommand("hello")).toBe(false);
