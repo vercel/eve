@@ -172,16 +172,27 @@ class BraintrustReporter implements EvalReporter {
       reasoningBlockCount: result.result.derived.reasoningBlockCount,
     };
 
-    this.#experiment.log({
-      id: result.id,
-      input: evaluation?.description ?? "",
-      output: result.result.output,
-      error: result.error ?? undefined,
-      scores,
-      metadata,
-      metrics,
-      tags: evaluation?.tags ? [...evaluation.tags] : undefined,
-    });
+    try {
+      this.#experiment.log({
+        id: result.id,
+        input: evaluation?.description ?? "",
+        // Braintrust's SDK rejects null/undefined output ("output must be
+        // specified"). A no-turn eval (e.g. schedule-dispatch + DB assertions)
+        // legitimately produces output === null per the eval API's own
+        // derivation. Coalesce to an empty string so the reporter doesn't
+        // crash the entire eval run. See #1405.
+        output: result.result.output ?? "",
+        error: result.error ?? undefined,
+        scores,
+        metadata,
+        metrics,
+        tags: evaluation?.tags ? [...evaluation.tags] : undefined,
+      });
+    } catch (error) {
+      // A reporter throw in onEvalComplete must not abort the run and
+      // drop the remaining evals + artifacts. Log and continue. See #1405.
+      console.error(`Braintrust reporter: failed to log eval "${result.id}":`, error);
+    }
   }
 
   async onRunComplete(_summary: EveEvalRunSummary): Promise<void> {

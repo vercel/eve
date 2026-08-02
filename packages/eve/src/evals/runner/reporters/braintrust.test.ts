@@ -199,4 +199,60 @@ describe("Braintrust", () => {
       }),
     );
   });
+
+  it("coalesces null output to empty string for no-turn evals (#1405)", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(
+      makeEvalResult({
+        result: {
+          // A no-turn eval (schedule-dispatch + DB assertions) produces
+          // output === null per the eval API's own derivation.
+          output: null,
+          finalMessage: null,
+          status: "completed",
+          events: [],
+          derived: {
+            toolCalls: [],
+            toolCallCount: 0,
+            subagentCalls: [],
+            subagentCallCount: 0,
+            inputRequests: [],
+            parked: false,
+            messageCount: 0,
+            reasoningBlockCount: 0,
+          },
+          sessionId: "session-456",
+        },
+        verdict: "passed",
+      }),
+    );
+
+    // Braintrust's SDK rejects null output ("output must be specified").
+    // The reporter coalesces to "" so the run doesn't crash.
+    expect(braintrustMocks.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output: "",
+      }),
+    );
+  });
+
+  it("survives a log() throw without aborting the run (#1405)", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    // Simulate Braintrust SDK throwing on log — the reporter must catch
+    // so the remaining evals still execute.
+    braintrustMocks.log.mockImplementationOnce(() => {
+      throw new Error("output must be specified");
+    });
+
+    // Should NOT throw
+    expect(() => reporter.onEvalComplete(makeEvalResult())).not.toThrow();
+
+    // A second call (the next eval) should still reach log
+    reporter.onEvalComplete(makeEvalResult());
+    expect(braintrustMocks.log).toHaveBeenCalledTimes(2);
+  });
 });
