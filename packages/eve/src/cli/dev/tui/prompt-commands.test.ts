@@ -17,6 +17,10 @@ describe("parsePromptCommand", () => {
     expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
   });
 
+  it("parses /new as a context clear", () => {
+    expect(parsePromptCommand("/new")).toEqual({ type: "clear" });
+  });
+
   it("parses /exit and its /quit alias", () => {
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });
@@ -80,7 +84,6 @@ describe("parsePromptCommand", () => {
   });
 
   it("rejects near-misses and ordinary prompts", () => {
-    expect(parsePromptCommand("/new")).toBeNull();
     expect(parsePromptCommand("/models")).toBeNull();
     expect(parsePromptCommand("/vercel")).toBeNull();
     expect(parsePromptCommand("/vc")).toBeNull();
@@ -132,6 +135,7 @@ describe("promptCommandsFor", () => {
 describe("isPromptControlCommand", () => {
   it("is true exactly for recognized commands", () => {
     expect(isPromptControlCommand("/reset")).toBe(true);
+    expect(isPromptControlCommand("/new")).toBe(true);
     expect(isPromptControlCommand("/model gpt-5")).toBe(true);
     expect(isPromptControlCommand("/unknown")).toBe(false);
     expect(isPromptControlCommand("hello")).toBe(false);

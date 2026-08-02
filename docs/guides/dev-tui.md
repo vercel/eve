@@ -43,7 +43,7 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 | `/traces`     | Opens the full-screen local trace viewer. See [Inspect traces](#inspect-traces).                                                                             |
 | `/reset`      | Starts a fresh session.                                                                                                                                      |
 | `/cancel`     | Cooperatively cancels the running turn while preserving the session and settled context.                                                                     |
-| `/clear`      | Clears model-message history while preserving the current session and its durable resources.                                                                 |
+| `/clear`      | Clears model-message history while preserving the current session and its durable resources. `/new` is an alias.                                             |
 | `/compact`    | Queues context compaction for the current session without sending a message.                                                                                 |
 | `/exit`       | Quits the TUI.                                                                                                                                               |
 | `/help`       | Lists the commands available for the current local or remote session.                                                                                        |
