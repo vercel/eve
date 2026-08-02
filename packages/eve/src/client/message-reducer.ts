@@ -401,6 +401,14 @@ type EveRunPart = Extract<EveMessagePart, { readonly type: "text" | "reasoning" 
 // We find the latest same-step run of this type: while it is still streaming,
 // its snapshots replace it in place; once it is done (or there is none), `next`
 // begins a new run appended in arrival order.
+//
+// Replay-safety (#1507): if the latest same-step run is already `done` and the
+// incoming snapshot is a prefix of its recorded text, the stream is replaying
+// events we've already consumed — decline the upsert. This covers the case
+// where `message.completed` marked the run done and a stale cursor replays
+// `message.appended` with the same (or shorter) snapshot. New turns producing
+// *different* text for the same stepIndex still append a new run, preserving
+// the multi-run pattern (text → tool call → more text).
 function upsertRun(message: EveAssistantMessage, next: EveRunPart): EveAssistantMessage {
   let lastIndex = -1;
   for (let index = message.parts.length - 1; index >= 0; index -= 1) {
@@ -408,6 +416,17 @@ function upsertRun(message: EveAssistantMessage, next: EveRunPart): EveAssistant
     if (part?.type === next.type && part.stepIndex === next.stepIndex) {
       lastIndex = index;
       break;
+    }
+  }
+
+  if (lastIndex !== -1) {
+    const last = message.parts[lastIndex] as EveRunPart;
+    // A done run's recorded text is the terminal snapshot. If `next` is a
+    // strict prefix of it, this is a replay of an earlier streaming event;
+    // the terminal state is already correct, so keep the message as-is.
+    if (last.state === "done" && next.text.length <= last.text.length
+        && last.text.startsWith(next.text)) {
+      return message;
     }
   }
 

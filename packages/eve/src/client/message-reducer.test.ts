@@ -829,4 +829,90 @@ describe("defaultMessageReducer", () => {
     const userMessage = data.messages.find((message) => message.role === "user");
     expect(userMessage?.parts).toEqual([{ state: "done", text: "hello there", type: "text" }]);
   });
+
+  it("skips replayed message.appended / message.completed snapshots that are already done (#1507)", () => {
+    const reducer = defaultMessageReducer();
+    const stream: UnstampedMessageStreamEvent[] = [
+      createMessageAppendedEvent({
+        messageDelta: "Hel",
+        messageSoFar: "Hel",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "lo",
+        messageSoFar: "Hello",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Hello",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ];
+
+    // One delivery: a single done text part with the final snapshot.
+    let data = reduceServerEvents(reducer, reducer.initial(), stream);
+    const initialTextParts = data.messages.flatMap((message) =>
+      message.parts.filter((part) => part.type === "text"),
+    );
+    expect(initialTextParts).toHaveLength(1);
+    expect(initialTextParts[0]).toMatchObject({
+      state: "done",
+      stepIndex: 0,
+      text: "Hello",
+    });
+
+    // Replay the same stream — the second pass must not append a second
+    // done text part for the same step. (The resume stream can sit behind
+    // the session cursor while a send opens a turn stream at a stale
+    // streamIndex; see #1507.)
+    data = reduceServerEvents(reducer, data, stream);
+    const replayedTextParts = data.messages.flatMap((message) =>
+      message.parts.filter((part) => part.type === "text"),
+    );
+    expect(replayedTextParts).toHaveLength(1);
+    expect(replayedTextParts[0]).toMatchObject({
+      state: "done",
+      stepIndex: 0,
+      text: "Hello",
+    });
+  });
+
+  it("still appends a new text run for the same step when the message differs", () => {
+    const reducer = defaultMessageReducer();
+    // First run: text part completes.
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "First response.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+    // Second run for the same stepIndex: must NOT be dropped just because
+    // a "done" run exists — this is the multi-run pattern the reducer
+    // explicitly supports (text → tool call → more text).
+    data = reduceServerEvents(reducer, data, [
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Second response.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    const textParts = data.messages.flatMap((message) =>
+      message.parts.filter((part) => part.type === "text"),
+    );
+    expect(textParts).toHaveLength(2);
+    expect(textParts.map((part) => part.text)).toEqual(["First response.", "Second response."]);
+  });
 });
