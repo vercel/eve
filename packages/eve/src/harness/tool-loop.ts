@@ -118,6 +118,7 @@ import {
   getPendingInputRequestIds,
   hasDeferredStepInput,
   hasStepInput,
+  queueDeferredStepInput,
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
@@ -649,7 +650,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInput: stepInput.input,
     });
     if (resolvedRuntimeActions.outcome === "unresolved") {
-      return { next: null, session: resolvedRuntimeActions.session };
+      // The step parks until the runtime-action results arrive. Any user
+      // input that rode in on this step must survive the park — queue it for
+      // replay on the resuming step instead of dropping it on the floor.
+      let parkedSession = resolvedRuntimeActions.session;
+      if (hasStepInput(stepInput.input)) {
+        parkedSession = queueDeferredStepInput(parkedSession, stepInput.input!);
+      }
+      return { next: null, session: parkedSession };
     }
     session = resolvedRuntimeActions.session;
 

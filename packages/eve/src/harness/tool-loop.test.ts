@@ -42,7 +42,10 @@ import {
   hasPendingInputBatch,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
-import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import {
+  getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
+} from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -5381,6 +5384,41 @@ describe("createToolLoopHarness", () => {
       result.session.history.at(-1)?.role,
     ]).toEqual(["assistant", "tool-call", "tool-result", "assistant"]);
     expect(toolResult).toEqual(resumedToolResultMessage.content[0]);
+  });
+
+  it("defers a follow-up message that arrives while a runtime-action batch is parked", async () => {
+    const { emit } = createEventCollector();
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Delegate the work.",
+          input: { message: "investigate latest routing" },
+          kind: "subagent-call",
+          name: "delegate",
+          nodeId: "subagents/delegate",
+          subagentName: "delegate",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createTestSession(),
+    });
+
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", emit, { tools: new Map() }),
+    );
+    const result = await harness(session, {
+      message: "Can you do this in three separate tool calls?",
+    });
+
+    // The step parks until the runtime-action results arrive...
+    expect(result.next).toBeNull();
+    // ...and the user's message survives the park as deferred step input
+    // instead of being dropped on the floor.
+    expect(result.session.state?.["eve.runtime.deferredStepInput"]).toMatchObject({
+      message: "Can you do this in three separate tool calls?",
+    });
   });
 
   it("does not persist provider-executed deferred tool-results as generic tool messages", async () => {

@@ -426,7 +426,12 @@ function getDeferredStepInput(session: HarnessSession): StepInput | undefined {
   return session.state?.[DEFERRED_STEP_INPUT_KEY] as StepInput | undefined;
 }
 
-function queueDeferredStepInput(session: HarnessSession, input: StepInput): HarnessSession {
+/**
+ * Queues step input to replay on the next internal harness step. Also used by
+ * the tool loop when a pending runtime-action batch parks the step: the
+ * user's follow-up input must survive the park rather than being dropped.
+ */
+export function queueDeferredStepInput(session: HarnessSession, input: StepInput): HarnessSession {
   const existing = getDeferredStepInput(session);
   const deferredInput = existing === undefined ? input : coalesceTurnInputs(existing, input);
   const state = { ...session.state };
