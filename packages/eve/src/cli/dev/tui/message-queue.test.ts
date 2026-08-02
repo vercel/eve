@@ -113,7 +113,7 @@ describe("renderMessageQueueRows", () => {
 
     const rows = render(queue);
     expect(rows[0]).toContain("↑ Queue 2/5");
-    expect(rows[0]).toContain("esc steers with the next message");
+    expect(rows[0]).toContain("esc or ctrl+c steers with the next message");
     expect(rows[1]).toContain("│ first message");
     expect(rows[1]).not.toContain("second line");
     expect(rows[2]).toContain("└ second message");

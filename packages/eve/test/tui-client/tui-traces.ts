@@ -297,6 +297,7 @@ void (async () => {
         await withTimeout(emptyRunner.runPromise, 5_000, "empty /exit did not terminate");
       } finally {
         emptyRunner.input.ctrlC();
+        emptyRunner.input.ctrlC();
         await emptyRunner.runPromise.catch(() => {});
       }
     } finally {

@@ -309,8 +309,8 @@ describe("takeUntil", () => {
     expect(cleaned).toBe(false);
 
     // The caller aborting the underlying stream settles the pull (mirrors the
-    // renderer's Ctrl+C firing `result.abort()`); only then does the
-    // generator's cleanup run.
+    // renderer firing `result.abort()` on lifecycle interruption); only then
+    // does the generator's cleanup run.
     rejectPull(new Error("aborted"));
     await new Promise((resolve) => setImmediate(resolve));
     expect(cleaned).toBe(true);

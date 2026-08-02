@@ -152,6 +152,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Ctrl-C at the prompt restores the terminal inside the reader itself;
     // the runner's teardown-time shutdown() must still print the tag.
     input.ctrlC();
+    input.ctrlC();
     await expect(prompt).rejects.toThrow("Interrupted");
     renderer.shutdown();
 
@@ -173,6 +174,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.setSessionId("ses_0123456789");
     const prompt = renderer.readPrompt();
     input.ctrlC();
+    input.ctrlC();
     await expect(prompt).rejects.toThrow("Interrupted");
     renderer.shutdown();
 
@@ -185,6 +187,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     latest.renderer.setSessionId("ses_first");
     latest.renderer.setSessionId("ses_second");
     const latestPrompt = latest.renderer.readPrompt();
+    latest.input.ctrlC();
     latest.input.ctrlC();
     await expect(latestPrompt).rejects.toThrow("Interrupted");
     latest.renderer.shutdown();
@@ -206,6 +209,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.rawOutput()).toContain("\x1b[?25h"); // cursor visible
 
     // A normal teardown removes the last-resort hook.
+    input.ctrlC();
     input.ctrlC();
     await expect(prompt).rejects.toThrow("Interrupted");
     expect(process.listeners("exit")).toEqual(before);
@@ -715,13 +719,15 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("interrupts a running response and returns to the prompt without exiting", async () => {
+  it("cooperatively cancels a running response on Ctrl+C and preserves the prompt", async () => {
     const { screen, input, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const abort = vi.fn();
+    const cancel = vi.fn();
     const rendering = renderer.renderStream(
       {
         abort,
+        cancel,
         events: new ReadableStream<AgentTUIStreamEvent>({
           start(controller) {
             streamController = controller;
@@ -740,14 +746,16 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toContain("partial response");
     });
 
-    // The first Ctrl+C aborts the in-flight turn and unblocks the render
-    // loop even though the server stream never closes on its own. Draining
-    // instead would wait forever for an event that never arrives.
     input.ctrlC();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(abort).not.toHaveBeenCalled();
+    expect(screen.snapshot()).toContain("Cancelling turn…");
+
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
     await expect(rendering).resolves.toBeUndefined();
 
-    expect(abort).toHaveBeenCalledTimes(1);
-    expect(screen.snapshot()).toContain("Interrupted");
+    expect(screen.snapshot()).toContain("Cancelled");
     expect(input.rawModes).toEqual([true]);
     expect(screen.rawOutput()).toContain("\x1b[?2004h");
 
@@ -783,22 +791,29 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("clears a non-empty prompt on Ctrl+C, and quits only when already empty", async () => {
-    const { input, renderer } = makeRenderer();
+  it("clears and arms on the first idle Ctrl+C, then exits on a second press", async () => {
+    const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("draft message");
-    input.ctrlC(); // first Ctrl+C clears the buffer instead of quitting
+    input.ctrlC();
+    expect(renderer.exitRequested()).toBe(false);
+    expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
     input.type("real message");
+    expect(screen.snapshot()).not.toContain("Press Ctrl+C again to exit");
     input.enter();
 
     // The cleared draft is gone (otherwise this would be "draft messagereal message").
     expect(await prompt).toBe("real message");
 
-    // A Ctrl+C on the now-empty prompt quits.
+    // Consecutive Ctrl+C presses on the now-empty prompt quit.
     const second = renderer.readPrompt();
     input.ctrlC();
+    expect(renderer.exitRequested()).toBe(false);
+    expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
+    input.ctrlC();
     await expect(second).rejects.toThrow();
+    expect(renderer.exitRequested()).toBe(true);
 
     renderer.shutdown();
   });
@@ -1352,6 +1367,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const second = renderer.readPrompt();
     expect(countOccurrences(screen.snapshot(), "└ Done in")).toBe(1);
     input.ctrlC();
+    input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
   });
@@ -1582,6 +1598,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // crossing the 20K input threshold is what earns the row.
     expect(screen.snapshot()).toContain("└ Done in 1s ── ↑ 20.5K ↓ 43");
     input.ctrlC();
+    input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
   });
@@ -1608,6 +1625,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Under 10s and under 20K turn input: no coda row.
     const second = renderer.readPrompt();
     expect(screen.snapshot()).not.toContain("\n└ ");
+    input.ctrlC();
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1713,6 +1731,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       const second = renderer.readPrompt();
       expect(screen.snapshot()).toContain("└ Done in 12s");
       expect(screen.snapshot()).not.toContain("Thought for");
+      input.ctrlC();
       input.ctrlC();
       await expect(second).rejects.toThrow();
       renderer.shutdown();
@@ -2093,8 +2112,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toContain("Queue 2/5");
     });
 
-    // A client-side interrupt skips the runner's queue drain…
-    input.ctrlC();
+    // A lifecycle interruption skips the runner's queue drain…
+    renderer.requestInterrupt();
     await rendering;
     expect(abort).toHaveBeenCalledTimes(1);
     void streamController;
@@ -2135,6 +2154,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await rendering;
     const prompt = renderer.readPrompt();
     await screen.waitForIdlePrompt(1_000);
+    input.ctrlC();
     input.ctrlC();
     await expect(prompt).rejects.toThrow();
     renderer.shutdown();

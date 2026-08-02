@@ -8,12 +8,12 @@ import { run } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof of the mid-turn message queue, Esc steering, and
- * single-Esc cooperative cancellation against a live server:
+ * End-to-end proof of the mid-turn message queue, Ctrl+C steering, single-Esc
+ * cooperative cancellation, and double-Ctrl+C exit against a live server:
  *
  *   1. Start a long turn, then submit two messages while it streams —
  *      both must land in the pinned `↑ Queue n/5` panel, not the turn.
- *   2. Esc pops the oldest queued message: the panel flips to Steering,
+ *   2. Ctrl+C pops the oldest queued message: the panel flips to Steering,
  *      the running turn settles as `turn.cancelled` → `session.waiting`
  *      (cooperative — the session keeps its context), and the popped
  *      message runs as the replacement turn.
@@ -67,9 +67,8 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   await screen.waitForText("Queue 2/5", 10_000);
   console.log(theme.muted("[tui-queue-steer] two messages queued behind the running turn"));
 
-  // Esc pops the oldest message and cooperatively cancels the running turn.
-  input.emit("data", Buffer.from("\x1b"));
-  await sleep(60); // the decoder holds a lone ESC briefly (escape-vs-sequence)
+  // Ctrl+C pops the oldest message and cooperatively cancels the running turn.
+  input.ctrlC();
   await screen.waitForText("Steering", 10_000);
   console.log(theme.muted("[tui-queue-steer] steering engaged, cancelling the turn"));
 
@@ -129,6 +128,8 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   await screen.waitForIdlePrompt(60_000);
   console.log(theme.muted("[tui-queue-steer] preserved session answered after cancellation"));
 
+  input.ctrlC();
+  await screen.waitForText("Press Ctrl+C again to exit", 5_000);
   input.ctrlC();
   await runPromise;
 });

@@ -469,6 +469,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #partingLinePrinted = false;
   #interrupted = false;
   #exitRequested = false;
+  /** True after the first consecutive Ctrl+C at the idle chat prompt. */
+  #exitArmed = false;
   readonly #onExitRequest?: () => void;
   #caretVisible = true;
   #spinnerIndex = 0;
@@ -533,13 +535,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #todoCommittedSignature?: string;
   /**
    * Messages submitted while a turn streams, pinned in a panel directly
-   * above the input. Enter queues, `/cancel` cancels directly, and Esc
-   * pops-to-steer or cancels immediately when empty; the runner drains via
-   * {@link takeQueuedPrompt} at a clean turn boundary and {@link readPrompt}
-   * restores any leftovers as a draft.
+   * above the input. Enter queues, `/cancel` cancels directly, and Esc or
+   * Ctrl+C pops-to-steer or cancels immediately when empty; the runner drains
+   * via {@link takeQueuedPrompt} at a clean turn boundary and
+   * {@link readPrompt} restores any leftovers as a draft.
    */
   readonly #messageQueue = new MessageQueue();
-  /** The streaming result's cooperative cancel, armed for Esc while it renders. */
+  /** The streaming result's cooperative cancel, available to Esc and Ctrl+C. */
   #requestTurnCancel?: () => void;
   /** Set by the `turn-cancelled` stream event: settle in-flight tool blocks. */
   #turnCancelled = false;
@@ -654,6 +656,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#promptPlaceholderActive = true;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
+    this.#exitArmed = false;
     // A draft typed during the turn carries into the prompt; an explicit
     // initial draft (`eve dev --input`) wins over it. Queued messages the
     // runner never drained (an interrupted or failed turn) fold back in
@@ -709,6 +712,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
       };
 
       this.#consumeKey = (key) => {
+        if (key.type !== "ctrl-c" && this.#exitArmed) {
+          this.#exitArmed = false;
+          this.#paint();
+        }
         // Chat keeps pasted newlines and honors Shift+Enter. Setup-panel inputs
         // stay single-line; freeform questions opt in separately below.
         const edited = applyLineEditorKey(editor, key, { multiline: true });
@@ -811,12 +818,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#paint();
             break;
           case "ctrl-c":
-            if (editor.text.length === 0) {
+            if (this.#exitArmed) {
               this.#requestExit();
               interrupt();
-            } else {
-              apply(EMPTY_LINE);
+              break;
             }
+            this.#exitArmed = true;
+            apply(EMPTY_LINE);
             break;
           default:
             break;
@@ -2953,15 +2961,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       case "ctrl-r":
         this.#paint();
         break;
-      case "ctrl-c":
-        if (!this.#interrupted) {
-          this.#interrupted = true;
-          this.#turnIndicator = { kind: "idle" };
-          this.#status = "Interrupted";
-          this.#resolveStreamInterrupt?.();
-          this.#paint();
-        }
-        break;
       case "enter": {
         const message = this.#streamDraft.text;
         if (message.trim().length === 0) break;
@@ -2979,7 +2978,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           break;
         }
         // Mid-turn Enter queues the draft as a message for the next turn
-        // (or for an Esc steer pop). A full queue keeps the draft in place —
+        // (or for a steer-key pop). A full queue keeps the draft in place —
         // the panel header says why — rather than silently dropping input.
         if (this.#messageQueue.enqueue(message)) {
           this.#streamDraft = EMPTY_LINE;
@@ -2987,11 +2986,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#paint();
         break;
       }
+      case "ctrl-c":
       case "escape": {
-        // Esc drives steering and cancellation: pop the oldest queued
-        // message and cancel the running turn so the runner submits it as
-        // the replacement turn; with nothing queued, cancel immediately.
-        // Without a cancel capability an empty queue leaves Esc inert.
+        // Esc and Ctrl+C drive steering and cancellation: pop the oldest
+        // queued message and cancel the running turn so the runner submits it
+        // as the replacement turn; with nothing queued, cancel immediately.
+        // Without a cancel capability an empty queue leaves either key inert.
         if (this.#messageQueue.idle && this.#requestTurnCancel === undefined) break;
         this.#messageQueue.handleEscape();
         this.#cancelRequestedByUser = true;
@@ -3372,8 +3372,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
 
       case "turn-cancelled":
-        // The server settled the turn cooperatively (an Esc steer or an
-        // empty-queue Esc); its in-flight tool calls get no further updates.
+        // The server settled the turn cooperatively (a key-driven steer or an
+        // empty-queue cancel); its in-flight tool calls get no further updates.
         // The interrupted-blocks sweep settles them at stream end.
         this.#turnCancelled = true;
         // A cancellation nobody asked for through THIS prompt — a stale
@@ -3931,7 +3931,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // The message-queue panel takes the slot directly above the input —
     // ahead of the todo panel — because it holds the user's own undelivered
-    // words and carries the Esc steering/cancel affordance.
+    // words and carries the steering/cancel affordance.
     const queueRows = renderMessageQueueRows({
       view: this.#messageQueue.view(),
       width,
@@ -3952,6 +3952,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
         isTypeaheadOpen(this.#typeahead)
       ) {
         rows.push(...renderCommandSuggestions(this.#typeahead, this.#theme, width));
+      }
+      if (this.#exitArmed) {
+        rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
       }
       // A fully typed known command paints blue, confirming it will dispatch
       // as a command instead of being sent to the agent as a message.

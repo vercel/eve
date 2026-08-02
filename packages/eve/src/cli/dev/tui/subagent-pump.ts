@@ -187,8 +187,8 @@ export class SubagentPump {
 
   /**
    * Settles every live run and stops its child stream. Called when the
-   * parent turn is cancelled (`/cancel`, an Esc steer, or an empty-queue
-   * Esc): the server cancels the pending descendants, so their sections must
+   * parent turn is cancelled (`/cancel`, a key-driven steer, or an empty-queue
+   * cancel): the server cancels the pending descendants, so their sections must
    * close now. A child still flushing reasoning would otherwise keep painting
    * stale sections into the next (steered) turn's transcript. Runs stay
    * registered so a late parent `subagent.completed` settles as a no-op.

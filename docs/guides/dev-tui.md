@@ -71,9 +71,9 @@ Chat and freeform `ask_question` inputs behave like a shell line editor.
 | Key                                            | Action                                                                                                            |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `Enter`                                        | Submit the message or question response. While a turn is running, queue the message for the next turn.            |
-| `Esc`                                          | While a turn runs: pop the oldest queued message and steer with it; with nothing queued, press twice to cancel.   |
+| `Esc`                                          | While a turn runs: pop the oldest queued message and steer with it; with nothing queued, cancel the turn.         |
 | `Shift+Enter`                                  | Insert a newline without sending (needs a terminal that reports modified keys).                                   |
-| `Ctrl+C`                                       | Interrupt a running turn. At the chat or freeform-question prompt, clear non-empty input; when empty, quit.       |
+| `Ctrl+C`                                       | While a turn runs, behave like Esc. At the idle chat prompt, clear input and arm exit; press again to quit.       |
 | `↑` / `↓`                                      | Move between input lines; at a chat-buffer edge, navigate messages you have sent this session.                    |
 | `←` / `→`, `Home` / `End`, `Ctrl+A` / `Ctrl+E` | Move the caret; Home/End stay within the current line.                                                            |
 | `Ctrl+U` / `Ctrl+K` / `Ctrl+W`                 | Delete to the start of the line, to its end, or through the previous word.                                        |
@@ -86,7 +86,7 @@ In terminals that support bracketed paste, pasting multi-line text into chat or 
 
 Sending a message while a turn is still running does not interrupt it — the message joins a queue of up to five, pinned in a panel directly above the input with one line per message. When the turn ends, the queued messages coalesce into the next turn's message. Submit `/cancel` during a turn to cancel it immediately without queueing the command as model input; `/cancel` also works from the idle prompt when a prior stream disconnected while its server turn may still be running.
 
-`Esc` steers instead of waiting: it pops the oldest queued message, cancels the running turn cooperatively, and submits the popped message as the replacement turn. In the transcript, a steered message carries an accent `↑` on its own line above its gutter bar; a queued message that waited for the boundary carries it below. Any remaining messages stay queued behind it. With nothing queued, one `Esc` cancels the turn immediately. Unlike `Ctrl+C` — which drops the stream client-side — a cancelled turn ends cleanly on the server and the session keeps its context; the conversation picks up at the next prompt.
+`Esc` and `Ctrl+C` steer instead of waiting: either key pops the oldest queued message, cancels the running turn cooperatively, and submits the popped message as the replacement turn. In the transcript, a steered message carries an accent `↑` on its own line above its gutter bar; a queued message that waited for the boundary carries it below. Any remaining messages stay queued behind it. With nothing queued, either key cancels the turn immediately. A cancelled turn ends cleanly on the server and the session keeps its context; the conversation picks up at the next prompt.
 
 If a turn fails terminally (the server session dies or the connection drops), the TUI starts a fresh session and notes it inline so you can keep going. Server-side context resets with the old session. Messages still queued when a turn is interrupted or fails are restored into the next prompt's input instead of being sent blind.
 

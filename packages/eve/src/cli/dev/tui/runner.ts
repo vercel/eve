@@ -126,7 +126,7 @@ export type AgentTUIStreamResult = {
   abort?: () => void;
   /**
    * Requests cooperative server-side cancellation of the streaming turn
-   * (`/cancel` or Esc, which steers when a message is queued). Unlike
+   * (`/cancel`, Esc, or Ctrl+C; the keys steer when a message is queued). Unlike
    * {@link abort} — which drops the client stream and forces a fresh session —
    * the server settles the turn as `turn.cancelled` → `session.waiting`, so
    * the stream reaches its boundary normally and the session keeps its context.
@@ -1069,7 +1069,7 @@ export class EveTUIRunner {
       pendingInputResponses = undefined;
       prompt = undefined;
 
-      // A staged Esc steer message, or messages queued during the turn,
+      // A staged key-driven steer message, or messages queued during the turn,
       // submit immediately as the next turn — but only across a clean turn
       // boundary. A failed session or a lost stream keeps them; the renderer
       // restores them into the next prompt's editable buffer instead of
@@ -1201,7 +1201,7 @@ export class EveTUIRunner {
     prompt: string | undefined;
     inputResponses: readonly InputResponse[] | undefined;
   }): Promise<AgentTUIStreamResult> {
-    // Backs the result's `abort`: the renderer fires it on Ctrl+C so the
+    // Backs the result's `abort`: lifecycle interruption fires it so the
     // in-flight stream read settles instead of dangling until server close.
     const abortController = new AbortController();
     const sendInput: {
@@ -1251,9 +1251,9 @@ export class EveTUIRunner {
 
   /**
    * Requests cooperative cancellation of the streaming turn and retries
-   * while the turn stays live. An Esc that lands in the dispatch window —
-   * after the turn was sent but before the turn workflow claims its cancel
-   * hook (i.e. before `turn.started` reaches the client) — resolves as a
+   * while the turn stays live. A key-driven cancel that lands in the dispatch
+   * window — after the turn was sent but before the turn workflow claims its
+   * cancel hook (i.e. before `turn.started` reaches the client) — resolves as a
    * benign `no_active_turn` and would otherwise be silently lost, leaving
    * the TUI showing "Cancelling…" while the turn runs to completion.
    * Retrying until the stream reaches its boundary closes that window.
@@ -1265,9 +1265,9 @@ export class EveTUIRunner {
    * complete while the request is in flight, the cancel can land on the
    * next turn. Closing it needs turn-scoped cancel admission server-side
    * (the #867 ledger); until then the renderer backstops it — a
-   * `turn.cancelled` arriving without an Esc in that stream restores the
-   * submitted message into the prompt instead of losing it.
-   * Single-flight per turn: repeated Esc presses join the running loop.
+   * `turn.cancelled` arriving without a local cancel request in that stream
+   * restores the submitted message into the prompt instead of losing it.
+   * Single-flight per turn: repeated cancel keys join the running loop.
    */
   async #requestTurnCancellation(turnState: AgentTUITurnState): Promise<void> {
     if (turnState.cancelInFlight === true) return;
@@ -1283,7 +1283,7 @@ export class EveTUIRunner {
           if (result.status === "accepted") return;
         } catch {
           // No accepted session yet or a transport failure — retry below;
-          // Ctrl+C remains the hard client-side interrupt.
+          // lifecycle interruption remains the hard client-side escape hatch.
         }
         await delayMs(turnCancelRetryDelayMs);
       }
@@ -1834,7 +1834,7 @@ async function* eveEventsToTUIStream(
         break;
 
       case "turn.started":
-        // Recorded so Esc-driven cancellation can scope its request to the
+        // Recorded so key-driven cancellation can scope its request to the
         // turn the user is watching; a cancel that arrives after the
         // boundary then no-ops instead of hitting the next turn.
         turnState.turnId = event.data.turnId;
@@ -2122,7 +2122,7 @@ async function* eveEventsToTUIStream(
         break;
 
       case "turn.cancelled":
-        // A cooperative cancel (`/cancel`, Esc, or an Esc steer) — not a failure.
+        // A cooperative cancel (`/cancel`, Esc, Ctrl+C, or a steer) — not a failure.
         // `session.waiting` follows and finishes the stream normally.
         onTurnCancelled?.();
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
