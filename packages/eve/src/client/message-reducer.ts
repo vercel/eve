@@ -148,22 +148,54 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       let next = data;
       for (const request of event.data.requests) {
         const descriptor = normalizeActionRequest(request.action);
-        next = updateAssistantMessage(next, event.data.turnId, (message) =>
-          upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
-            approval: {
-              id: request.requestId,
-            },
-            input: request.action.input,
-            state: "approval-requested",
-            stepIndex: event.data.stepIndex,
-            toolCallId: request.action.callId,
-            toolMetadata: createToolMetadata(descriptor, {
-              inputRequest: toMessageInputRequest(request),
+        // Idempotent under replay: if we already recorded this tool's part
+        // (e.g. the resume stream replayed `input.requested` after the user
+        // answered), preserve the existing `approval` and any merged
+        // metadata — most importantly `eve.inputResponse` written by
+        // `respondToInputRequest` — rather than rebuilding the part
+        // wholesale. Mirrors what `action.result` does via
+        // `mergeToolMetadata` below. (#1507)
+        const existing = findToolPart(next, request.action.callId);
+        // Replay-safe partition:
+        //   (1) Resumed flow already responded → keep the prior part (with its
+        //       `approval`/`inputResponse`) verbatim; only refresh toolCallId
+        //       and stepIndex to match the latest event. Never collapse the
+        //       approval shape into `approval-requested`'s narrower variant.
+        //   (2) Fresh / pre-response replay → emit `approval-requested` with
+        //       a fresh `approval: { id }`, preserving any prior toolMetadata.
+        if (existing?.state === "approval-responded") {
+          next = updateAssistantMessage(next, event.data.turnId, (message) =>
+            upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+              approval: existing.approval,
+              input: existing.input,
+              state: "approval-responded",
+              stepIndex: event.data.stepIndex,
+              toolCallId: request.action.callId,
+              toolMetadata: existing.toolMetadata,
+              toolName: existing.toolName,
+              type: "dynamic-tool",
             }),
-            toolName: descriptor.toolName,
-            type: "dynamic-tool",
-          }),
-        );
+          );
+        } else {
+          next = updateAssistantMessage(next, event.data.turnId, (message) =>
+            upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+              approval: {
+                id: request.requestId,
+              },
+              input: request.action.input,
+              state: "approval-requested",
+              stepIndex: event.data.stepIndex,
+              toolCallId: request.action.callId,
+              toolMetadata: mergeToolMetadata(existing?.toolMetadata,
+                createToolMetadata(descriptor, {
+                  inputRequest: toMessageInputRequest(request),
+                }),
+              ),
+              toolName: existing?.toolName ?? descriptor.toolName,
+              type: "dynamic-tool",
+            }),
+          );
+        }
       }
       return next;
     }

@@ -560,40 +560,74 @@ describe("defaultMessageReducer", () => {
       }),
     ]);
 
-    const toolParts = data.messages.flatMap((message) =>
-      message.parts.filter((part) => part.type === "dynamic-tool"),
-    );
-
     expect(
       data.messages.map((message) => [message.id, message.parts.map((part) => part.type)]),
     ).toEqual([
       ["turn_0:assistant", ["step-start", "dynamic-tool"]],
       ["turn_1:assistant", ["step-start"]],
     ]);
-    expect(toolParts).toHaveLength(1);
-    expect(toolParts[0]).toMatchObject({
-      approval: {
-        approved: true,
-        id: "approval_1",
+  });
+
+  it("replayed input.requested does not erase a prior approval-responded part (#1507)", () => {
+    const reducer = defaultMessageReducer();
+    const inputRequest = {
+      action: {
+        callId: "call_1",
+        input: { command: "rm -rf tmp" },
+        kind: "tool-call" as const,
+        toolName: "bash",
       },
-      input: { command: "echo 1" },
-      output: "1",
-      state: "output-available",
-      toolCallId: "call_1",
-      toolMetadata: {
-        eve: {
-          inputRequest: {
-            prompt: "Approve tool call: bash",
-            requestId: "approval_1",
-          },
-          inputResponse: { optionId: "approve", requestId: "approval_1" },
-          kind: "tool-call",
-          name: "bash",
-        },
+      display: "confirmation" as const,
+      kind: "tool-approval" as const,
+      options: [
+        { id: "approve", label: "Yes", style: "primary" as const },
+        { id: "deny", label: "No", style: "danger" as const },
+      ],
+      prompt: "Approve tool call: bash",
+      requestId: "approval_1",
+    };
+
+    // Original flow: input.requested → user responds ("deny").
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createInputRequestedEvent({
+        requests: [inputRequest],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+    data = reducer.reduce(data, {
+      data: {
+        createdAt: 1,
+        responses: [{ optionId: "deny", requestId: "approval_1" }],
       },
-      toolName: "bash",
-      type: "dynamic-tool",
+      type: "client.input.responded",
     });
+
+    // Simulate the resume stream replaying the same input.requested event.
+    data = reduceServerEvents(reducer, data, [
+      createInputRequestedEvent({
+        requests: [inputRequest],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    const toolParts = data.messages.flatMap((message) =>
+      message.parts.filter((part) => part.type === "dynamic-tool"),
+    );
+
+    expect(toolParts).toHaveLength(1);
+    expect(toolParts[0]?.state).toBe("approval-responded");
+    expect(toolParts[0]?.approval).toEqual({ id: "approval_1" });
+    expect(toolParts[0]?.toolMetadata?.eve?.inputResponse).toEqual({
+      optionId: "deny",
+      requestId: "approval_1",
+    });
+    expect(toolParts[0]?.toolMetadata?.eve?.inputRequest?.prompt).toBe(
+      "Approve tool call: bash",
+    );
   });
 
   it("keeps text from separate steps as separate parts", () => {
