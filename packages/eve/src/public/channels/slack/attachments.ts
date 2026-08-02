@@ -179,11 +179,37 @@ export function createSlackFetchFile(input: {
     if (!response.ok) {
       throw new Error(`Slack file fetch returned HTTP ${response.status} for ${url}.`);
     }
+    const contentType = response.headers.get("content-type") ?? undefined;
+    const bytes = Buffer.from(await response.arrayBuffer());
+    // Slack can return HTTP 200 with a browser login page (not a 401/403) when the
+    // bot token is missing `files:read` or the workspace app has not been
+    // reinstalled after the scope was added. Staging that HTML as the
+    // attachment reads back as "Slack sign-in page" to the model; fail loudly
+    // here so the misconfiguration is obvious (#1317).
+    if (looksLikeSlackLoginHtml(contentType, bytes)) {
+      throw new Error(
+        `Slack file fetch for ${url} returned an HTML login page (HTTP 200). ` +
+          `The bot token likely lacks the \`files:read\` scope, or the Slack/Bolt app ` +
+          `has not been reinstalled since the scope was added. Add \`files:read\` via ` +
+          `your Slack app manifest (or Connect "Advanced scopes"), reinstall the app ` +
+          `into the workspace, then retry.`,
+      );
+    }
     return {
-      bytes: Buffer.from(await response.arrayBuffer()),
-      mediaType: response.headers.get("content-type") ?? undefined,
+      bytes,
+      mediaType: contentType,
     };
   };
+}
+
+function looksLikeSlackLoginHtml(contentType: string | undefined, bytes: Buffer): boolean {
+  if (typeof contentType === "string" && contentType.toLowerCase().includes("text/html")) {
+    return true;
+  }
+  // Some Slack login responses omit the content-type on proxies; sniff a small
+  // prefix instead of parsing the whole body.
+  const head = bytes.subarray(0, 256).toString("utf-8").trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html");
 }
 
 function isSlackFileUrl(url: string): boolean {
