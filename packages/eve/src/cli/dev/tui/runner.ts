@@ -126,11 +126,11 @@ export type AgentTUIStreamResult = {
   abort?: () => void;
   /**
    * Requests cooperative server-side cancellation of the streaming turn
-   * (`/cancel`, Esc Esc, or an Esc steer pop). Unlike {@link abort} — which
-   * drops the client stream and forces a fresh session — the server settles
-   * the turn as `turn.cancelled` → `session.waiting`, so the stream reaches
-   * its boundary normally and the session keeps its context. Best-effort and
-   * idempotent; scoped to the turn the user observed when its id is known.
+   * (`/cancel` or Esc, which steers when a message is queued). Unlike
+   * {@link abort} — which drops the client stream and forces a fresh session —
+   * the server settles the turn as `turn.cancelled` → `session.waiting`, so
+   * the stream reaches its boundary normally and the session keeps its context.
+   * Best-effort and idempotent; scoped to the turn the user observed when its id is known.
    */
   cancel?: () => void;
   turnState?: AgentTUITurnState;
@@ -2122,7 +2122,7 @@ async function* eveEventsToTUIStream(
         break;
 
       case "turn.cancelled":
-        // A cooperative cancel (Esc Esc or an Esc steer) — not a failure.
+        // A cooperative cancel (`/cancel`, Esc, or an Esc steer) — not a failure.
         // `session.waiting` follows and finishes the stream normally.
         onTurnCancelled?.();
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);

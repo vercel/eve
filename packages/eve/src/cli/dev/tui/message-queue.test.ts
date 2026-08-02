@@ -39,28 +39,26 @@ describe("MessageQueue", () => {
     expect(queue.idle).toBe(true);
   });
 
-  it("re-reports steer (not armed) while a steer payload is staged", () => {
+  it("re-reports steer while a steer payload is staged", () => {
     const queue = new MessageQueue();
     queue.enqueue("only");
     queue.handleEscape();
 
     expect(queue.handleEscape()).toBe("steer");
-    expect(queue.view().armed).toBe(false);
+    expect(queue.view().cancelling).toBe(false);
   });
 
-  it("arms on the first empty-queue Esc and cancels on the second", () => {
+  it("cancels on the first empty-queue Esc", () => {
     const queue = new MessageQueue();
-    expect(queue.handleEscape()).toBe("armed");
-    expect(queue.view().armed).toBe(true);
     expect(queue.handleEscape()).toBe("cancel");
-    expect(queue.view()).toMatchObject({ armed: true, cancelling: true });
+    expect(queue.view().cancelling).toBe(true);
   });
 
-  it("disarms on other activity so a stale Esc cannot cancel", () => {
+  it("keeps repeated empty-queue Esc cancellation idempotent", () => {
     const queue = new MessageQueue();
-    queue.handleEscape();
-    queue.disarm();
-    expect(queue.handleEscape()).toBe("armed");
+    expect(queue.handleEscape()).toBe("cancel");
+    expect(queue.handleEscape()).toBe("cancel");
+    expect(queue.view().cancelling).toBe(true);
   });
 
   it("requests direct cancellation without consuming queued messages", () => {
@@ -69,7 +67,7 @@ describe("MessageQueue", () => {
 
     queue.requestCancellation();
 
-    expect(queue.view()).toMatchObject({ armed: false, cancelling: true });
+    expect(queue.view().cancelling).toBe(true);
     expect(queue.takePrompt()).toBe("follow-up");
   });
 
@@ -96,7 +94,7 @@ describe("MessageQueue", () => {
     queue.handleEscape();
     queue.handleEscape();
     queue.beginTurn();
-    expect(queue.view()).toMatchObject({ armed: false, cancelling: false });
+    expect(queue.view().cancelling).toBe(false);
   });
 });
 
@@ -145,11 +143,8 @@ describe("renderMessageQueueRows", () => {
     expect(rows[1]).toContain("└ go south");
   });
 
-  it("teaches the second Esc after arming, and confirms cancellation", () => {
+  it("confirms cancellation after one empty-queue Esc", () => {
     const queue = new MessageQueue();
-    queue.handleEscape();
-    expect(render(queue)).toEqual([expect.stringContaining("Press esc again to cancel the turn")]);
-
     queue.handleEscape();
     expect(render(queue)).toEqual([expect.stringContaining("Cancelling turn…")]);
   });

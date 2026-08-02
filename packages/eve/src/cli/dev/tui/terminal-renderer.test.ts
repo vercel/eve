@@ -1843,7 +1843,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("arms on the first empty-queue Esc and cancels the turn on the second", async () => {
+  it("cancels the turn on the first empty-queue Esc", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {
       input.send("\x1b");
@@ -1865,16 +1865,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await vi.waitFor(() => {
       expect(screen.snapshot()).toContain("›");
     });
-
-    await escape();
-    expect(cancel).not.toHaveBeenCalled();
-    expect(screen.snapshot()).toContain("Press esc again to cancel the turn");
-
-    // Any other key backs out of the armed state.
-    input.left();
-    await escape();
-    expect(cancel).not.toHaveBeenCalled();
-    expect(screen.snapshot()).toContain("Press esc again to cancel the turn");
 
     await escape();
     expect(cancel).toHaveBeenCalledTimes(1);

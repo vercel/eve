@@ -534,7 +534,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Messages submitted while a turn streams, pinned in a panel directly
    * above the input. Enter queues, `/cancel` cancels directly, and Esc
-   * pops-to-steer or (empty) arms and then cancels; the runner drains via
+   * pops-to-steer or cancels immediately when empty; the runner drains via
    * {@link takeQueuedPrompt} at a clean turn boundary and {@link readPrompt}
    * restores any leftovers as a draft.
    */
@@ -551,7 +551,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * the user block can carry its steer/queue gutter arrow.
    */
   #nextSubmittedPromptOrigin?: "steer" | "queue";
-  /** True once an Esc in THIS stream requested cancellation (steer or Esc Esc). */
+  /** True once this stream's prompt requested cancellation or steering. */
   #cancelRequestedByUser = false;
   /** The prompt submitted for the streaming turn, for external-cancel recovery. */
   #currentSubmittedPrompt?: string;
@@ -2990,20 +2990,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       case "escape": {
         // Esc drives steering and cancellation: pop the oldest queued
         // message and cancel the running turn so the runner submits it as
-        // the replacement turn; with nothing queued, arm once and cancel on
-        // the second press. Without a cancel capability an empty queue
-        // leaves Esc inert — arming would promise a cancel that can't land.
+        // the replacement turn; with nothing queued, cancel immediately.
+        // Without a cancel capability an empty queue leaves Esc inert.
         if (this.#messageQueue.idle && this.#requestTurnCancel === undefined) break;
-        const outcome = this.#messageQueue.handleEscape();
-        if (outcome === "steer" || outcome === "cancel") {
-          this.#cancelRequestedByUser = true;
-          this.#requestTurnCancel?.();
-        }
+        this.#messageQueue.handleEscape();
+        this.#cancelRequestedByUser = true;
+        this.#requestTurnCancel?.();
         this.#paint();
         break;
       }
       default: {
-        this.#messageQueue.disarm();
         const edited = applyLineEditorKey(this.#streamDraft, key, { multiline: true });
         if (edited !== undefined) {
           this.#streamDraft = edited;
@@ -3376,9 +3372,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
 
       case "turn-cancelled":
-        // The server settled the turn cooperatively (an Esc steer or
-        // Esc Esc); its in-flight tool calls get no further updates and are
-        // settled by the interrupted-blocks sweep at stream end.
+        // The server settled the turn cooperatively (an Esc steer or an
+        // empty-queue Esc); its in-flight tool calls get no further updates.
+        // The interrupted-blocks sweep settles them at stream end.
         this.#turnCancelled = true;
         // A cancellation nobody asked for through THIS prompt — a stale
         // cancel from the previous turn landing late (the unguarded
