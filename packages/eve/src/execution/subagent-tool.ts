@@ -1,4 +1,4 @@
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import {
   formatSubagentInput,
   normalizeRequestedOutputSchema,
@@ -9,6 +9,7 @@ import type {
   RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
+  SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
@@ -69,6 +70,7 @@ export function buildSubagentRunInput(input: {
   readonly initiatorAuth: SessionAuthContext | null;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
+  readonly parentTraceContext?: SessionTraceContext;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -136,6 +138,7 @@ export function buildSubagentRunInput(input: {
         sequence: batchEvent.sequence,
       },
     },
+    parentTraceContext: input.parentTraceContext,
     subagentDepth: subagentDepth.nextChildDepth,
   };
 

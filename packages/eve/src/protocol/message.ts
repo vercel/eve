@@ -476,6 +476,19 @@ export interface TurnCancelledStreamEvent {
 }
 
 /**
+ * Stream event emitted after the durable model-message history is cleared.
+ * The session itself and its non-message state remain active.
+ */
+export interface ContextClearedStreamEvent {
+  data: {
+    sequence: number;
+    sessionId: string;
+    turnId: string;
+  };
+  type: "context.cleared";
+}
+
+/**
  * Stream event emitted when the workflow decides to compact the current
  * visible session history before the next model fragment runs.
  */
@@ -598,6 +611,7 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | ContextClearedStreamEvent
   | CompactionCompletedStreamEvent
   | CompactionRequestedStreamEvent
   | AuthorizationCompletedStreamEvent
@@ -1334,6 +1348,22 @@ export function createTurnCancelledEvent(input: {
       turnId: input.turnId,
     },
     type: "turn.cancelled",
+  };
+}
+
+/** Creates the `context.cleared` event for one manual history clear. */
+export function createContextClearedEvent(input: {
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly turnId: string;
+}): ContextClearedStreamEvent {
+  return {
+    data: {
+      sequence: input.sequence,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+    },
+    type: "context.cleared",
   };
 }
 

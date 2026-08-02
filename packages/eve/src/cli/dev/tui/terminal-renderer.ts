@@ -112,6 +112,10 @@ import {
   type LineState,
 } from "./line-editor.js";
 import { LiveRegion } from "#cli/ui/live-region.js";
+import { AltScreen } from "#cli/ui/alt-screen.js";
+import { copyTextToClipboard } from "./clipboard.js";
+import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
+import { TraceViewerSession } from "./traces/trace-viewer-session.js";
 import { buildStatusLine } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
@@ -159,6 +163,7 @@ import {
   formatTokenFlow,
   formatTurnDuration,
   typewriterText,
+  isIncompleteOsc,
   isIncompletePaste,
   nextKey,
   sanitizePastedText,
@@ -167,6 +172,11 @@ import {
   takeUntil,
   type TerminalKey,
 } from "./stream-format.js";
+import {
+  BACKGROUND_COLOR_QUERY,
+  parseBackgroundColorReply,
+  type RgbColor,
+} from "./terminal-background.js";
 
 type SetupOptionPanelState = Exclude<SetupSelectPanelState, { kind: "actions" }>;
 
@@ -344,6 +354,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #input: TerminalInput;
   readonly #output: TerminalOutput;
   readonly #live: LiveRegion;
+  readonly #altScreen: AltScreen;
   readonly #theme: Theme;
   readonly #tools: TerminalPartDisplayMode;
   readonly #reasoning: TerminalPartDisplayMode;
@@ -522,9 +533,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #todoCommittedSignature?: string;
   /**
    * Messages submitted while a turn streams, pinned in a panel directly
-   * above the input. Enter queues, Esc pops-to-steer or (empty) arms and
-   * then cancels; the runner drains via {@link takeQueuedPrompt} at a clean
-   * turn boundary and {@link readPrompt} restores any leftovers as a draft.
+   * above the input. Enter queues, `/cancel` cancels directly, and Esc
+   * pops-to-steer or cancels immediately when empty; the runner drains via
+   * {@link takeQueuedPrompt} at a clean turn boundary and {@link readPrompt}
+   * restores any leftovers as a draft.
    */
   readonly #messageQueue = new MessageQueue();
   /** The streaming result's cooperative cancel, armed for Esc while it renders. */
@@ -539,7 +551,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * the user block can carry its steer/queue gutter arrow.
    */
   #nextSubmittedPromptOrigin?: "steer" | "queue";
-  /** True once an Esc in THIS stream requested cancellation (steer or Esc Esc). */
+  /** True once this stream's prompt requested cancellation or steering. */
   #cancelRequestedByUser = false;
   /** The prompt submitted for the streaming turn, for external-cancel recovery. */
   #currentSubmittedPrompt?: string;
@@ -547,6 +559,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #flowInterrupt?: () => void;
   /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
   #flowIdleConsumer?: (key: TerminalKey) => void;
+  /** The open `/traces` viewer session, if the alt-screen viewer is active. */
+  #traceView?: TraceViewerSession;
+  /**
+   * The terminal's default background from its last OSC 11 reply. Cached so
+   * a reopened trace viewer paints its derived card surfaces immediately;
+   * every open re-probes in case the user switched terminal themes.
+   */
+  #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
     begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
@@ -565,6 +585,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     waitForInterrupt: (options) => this.#waitForFlowInterrupt(options),
   };
 
+  /** The `/traces` full-screen viewer; resolves when the user closes it. */
+  readonly traceViewer: TraceViewerRenderer = {
+    open: (options) => this.#openTraceViewer(options),
+  };
+
   constructor(options?: TerminalRendererOptions) {
     this.#input = options?.input ?? process.stdin;
     this.#output = options?.output ?? process.stdout;
@@ -573,6 +598,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // every frame the live region paints would be intercepted as foreign log
     // output and re-trigger a paint — unbounded recursion.
     this.#live = new LiveRegion(this.#output);
+    this.#altScreen = new AltScreen(this.#output);
     this.#theme = createTheme({
       color: options?.color ?? true,
       unicode: options?.unicode ?? detectUnicode(),
@@ -1478,7 +1504,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#lastCommitted = undefined;
     this.#committedTranscriptRows.length = 0;
     this.#transcriptBlocks.length = 0;
-    // `/new` resets the conversation, not the workspace: keep #agentHeader
+    // `/reset` resets the conversation, not the workspace: keep #agentHeader
     // (the status line's model segment reads it — the header is not re-sent
     // after a reset) and #vercelStatus (link + pending-deploy outlive the
     // conversation). The header *block* still leaves the transcript because
@@ -1521,7 +1547,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /**
    * THE one authority for state scoped to a server-side conversation
-   * context. Called by both context cuts — `/new` (`reset`) and the
+   * context. Called by both context cuts — `/reset` and the
    * mid-conversation session replacement (`renderSessionBoundary`) — so the
    * two can never drift on what dies with the old context: the pinned todo
    * list (its tasks were not finished — dismiss, don't commit), write-diff
@@ -2641,6 +2667,64 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   // ---------------------------------------------------------------------------
+  // Trace viewer (alt-screen)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Opens the `/traces` viewer on the alternate screen and owns the keyboard
+   * until the user closes it. The transcript's live region stays untouched
+   * underneath — the terminal restores it on exit, so closing just repaints.
+   */
+  async #openTraceViewer(options: TraceViewerOpenOptions): Promise<void> {
+    if (this.#traceView !== undefined || !this.#isInteractive) return;
+    const session = new TraceViewerSession({
+      ...options,
+      theme: this.#theme,
+      dimensions: () => ({ width: this.#width(), height: this.#height() }),
+      paint: (rows) => this.#altScreen.paint(rows, this.#height()),
+      tracingDisabled: process.env.EVE_TRACES === "off",
+      copyText: (text) => copyTextToClipboard(text, (chunk) => this.#altScreen.writeRaw(chunk)),
+      terminalBackground: this.#terminalBackground,
+    });
+    this.#traceView = session;
+    this.#altScreen.enter();
+    // Ask the terminal for its background so the viewer can derive card
+    // surfaces from the user's own palette. The reply arrives on stdin as an
+    // OSC key (see #drainKeys); terminals that never answer leave the viewer
+    // on its rail rendering, so no timeout is needed.
+    if (this.#theme.color) this.#altScreen.writeRaw(BACKGROUND_COLOR_QUERY);
+    await new Promise<void>((resolve) => {
+      this.#traceViewClose = resolve;
+      this.#consumeKey = (key) => {
+        if (session.handleKey(key) === "close") this.#closeTraceViewer();
+      };
+      this.#attachInput();
+      session.start();
+    });
+  }
+
+  #closeTraceViewer(): void {
+    const session = this.#traceView;
+    if (session === undefined) return;
+    this.#traceView = undefined;
+    session.dispose();
+    this.#detachInput();
+    this.#altScreen.exit();
+    // exit() shows the cursor; hide it before the repaint so it doesn't
+    // blink over the transcript while the live region re-anchors.
+    this.#live.hideCursor();
+    // The main screen comes back exactly as it was (the engine's live-region
+    // row count still matches it), so a normal paint re-anchors cleanly.
+    this.#paint();
+    this.#live.showCursor();
+    const resolve = this.#traceViewClose;
+    this.#traceViewClose = undefined;
+    resolve?.();
+  }
+
+  #traceViewClose?: () => void;
+
+  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
@@ -2681,6 +2765,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   readonly #onProcessExit = () => {
     if (!this.#isInteractive) return;
+    this.#altScreen.exit();
     if (this.#input.isTTY) {
       this.#live.emitBracketedPaste(false);
       this.#input.setRawMode?.(false);
@@ -2689,6 +2774,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   };
 
   #stop() {
+    // An open trace viewer must leave the alt screen before teardown, and its
+    // awaited `open()` resolves so the runner loop can observe the shutdown.
+    this.#closeTraceViewer();
     // A reader still awaiting keys can never settle once input detaches;
     // rejecting a promise that already settled is a no-op.
     const rejectReader = this.#rejectActiveReader;
@@ -2814,6 +2902,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
       }, incompletePasteFlushMs);
       this.#keyFlushTimer.unref?.();
+      return;
+    }
+    // An OSC reply whose terminator never arrives (a garbled terminal answer
+    // to the background probe) would otherwise wedge input forever; drop it.
+    if (isIncompleteOsc(this.#keyBuffer)) {
+      const stuck = this.#keyBuffer;
+      this.#keyFlushTimer = setTimeout(() => {
+        if (this.#keyBuffer !== stuck) return;
+        this.#keyBuffer = "";
+      }, incompletePasteFlushMs);
+      this.#keyFlushTimer.unref?.();
     }
   }
 
@@ -2822,8 +2921,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const token = nextKey(this.#keyBuffer);
       if (token.incomplete) return;
       this.#keyBuffer = this.#keyBuffer.slice(token.consumed);
-      if (token.key && token.key.type !== "ignore") this.#consumeKey?.(token.key);
+      if (token.key === undefined || token.key.type === "ignore") continue;
+      // OSC sequences are terminal replies (not keystrokes): route them to
+      // their handler instead of the active mode's key consumer.
+      if (token.key.type === "osc") {
+        this.#handleOscReply(token.key.value);
+        continue;
+      }
+      this.#consumeKey?.(token.key);
     }
+  }
+
+  /** Applies a terminal OSC reply; currently only the OSC 11 background probe. */
+  #handleOscReply(value: string): void {
+    const background = parseBackgroundColorReply(value);
+    if (background === undefined) return;
+    this.#terminalBackground = background;
+    this.#traceView?.setTerminalBackground(background);
   }
 
   #clearKeyFlush() {
@@ -2849,11 +2963,24 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
         break;
       case "enter": {
+        const message = this.#streamDraft.text;
+        if (message.trim().length === 0) break;
+        if (
+          parsePromptCommand(message)?.type === "cancel" &&
+          this.#requestTurnCancel !== undefined
+        ) {
+          this.#streamDraft = EMPTY_LINE;
+          this.#messageQueue.requestCancellation();
+          this.#cancelRequestedByUser = true;
+          this.renderCommandInvocation(message.trim());
+          this.renderCommandResult("Turn cancellation requested.");
+          this.#requestTurnCancel();
+          this.#paint();
+          break;
+        }
         // Mid-turn Enter queues the draft as a message for the next turn
         // (or for an Esc steer pop). A full queue keeps the draft in place —
         // the panel header says why — rather than silently dropping input.
-        const message = this.#streamDraft.text;
-        if (message.trim().length === 0) break;
         if (this.#messageQueue.enqueue(message)) {
           this.#streamDraft = EMPTY_LINE;
         }
@@ -2863,20 +2990,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       case "escape": {
         // Esc drives steering and cancellation: pop the oldest queued
         // message and cancel the running turn so the runner submits it as
-        // the replacement turn; with nothing queued, arm once and cancel on
-        // the second press. Without a cancel capability an empty queue
-        // leaves Esc inert — arming would promise a cancel that can't land.
+        // the replacement turn; with nothing queued, cancel immediately.
+        // Without a cancel capability an empty queue leaves Esc inert.
         if (this.#messageQueue.idle && this.#requestTurnCancel === undefined) break;
-        const outcome = this.#messageQueue.handleEscape();
-        if (outcome === "steer" || outcome === "cancel") {
-          this.#cancelRequestedByUser = true;
-          this.#requestTurnCancel?.();
-        }
+        this.#messageQueue.handleEscape();
+        this.#cancelRequestedByUser = true;
+        this.#requestTurnCancel?.();
         this.#paint();
         break;
       }
       default: {
-        this.#messageQueue.disarm();
         const edited = applyLineEditorKey(this.#streamDraft, key, { multiline: true });
         if (edited !== undefined) {
           this.#streamDraft = edited;
@@ -3249,9 +3372,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
 
       case "turn-cancelled":
-        // The server settled the turn cooperatively (an Esc steer or
-        // Esc Esc); its in-flight tool calls get no further updates and are
-        // settled by the interrupted-blocks sweep at stream end.
+        // The server settled the turn cooperatively (an Esc steer or an
+        // empty-queue Esc); its in-flight tool calls get no further updates.
+        // The interrupted-blocks sweep settles them at stream end.
         this.#turnCancelled = true;
         // A cancellation nobody asked for through THIS prompt — a stale
         // cancel from the previous turn landing late (the unguarded
@@ -3502,6 +3625,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #paintNow() {
     if (!this.#isInteractive) return;
+
+    // The alt-screen viewer owns the screen while open; resize and stray
+    // paint triggers repaint its frame instead of the transcript.
+    if (this.#traceView !== undefined) {
+      this.#traceView.repaint();
+      return;
+    }
 
     const width = this.#width();
     const footer = this.#footerRows(width);

@@ -1757,6 +1757,44 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("runs a mid-turn /cancel as a control instead of queueing it", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const cancel = vi.fn();
+    const rendering = renderer.renderStream(
+      {
+        cancel,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+    input.type("/cancel");
+    input.enter();
+
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(screen.snapshot()).toContain("/cancel");
+      expect(screen.snapshot()).toContain("Turn cancellation requested.");
+      expect(screen.snapshot()).toContain("Cancelling turn…");
+    });
+
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
+    await rendering;
+
+    expect(renderer.takeQueuedPrompt()).toBeUndefined();
+    expect(screen.snapshot()).toContain("Cancelled");
+    renderer.shutdown();
+  });
+
   it("pops the oldest queued message on Esc, cancels the turn, and stages the steer prompt", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {
@@ -1805,7 +1843,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("arms on the first empty-queue Esc and cancels the turn on the second", async () => {
+  it("cancels the turn on the first empty-queue Esc", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {
       input.send("\x1b");
@@ -1827,16 +1865,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await vi.waitFor(() => {
       expect(screen.snapshot()).toContain("›");
     });
-
-    await escape();
-    expect(cancel).not.toHaveBeenCalled();
-    expect(screen.snapshot()).toContain("Press esc again to cancel the turn");
-
-    // Any other key backs out of the armed state.
-    input.left();
-    await escape();
-    expect(cancel).not.toHaveBeenCalled();
-    expect(screen.snapshot()).toContain("Press esc again to cancel the turn");
 
     await escape();
     expect(cancel).toHaveBeenCalledTimes(1);
@@ -2497,15 +2525,15 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
-    input.type("/new");
+    input.type("/reset");
     input.enter();
-    expect(await prompt).toBe("/new");
+    expect(await prompt).toBe("/reset");
     renderer.shutdown();
 
     // The echo anchors in the user-message grammar (gutter bar), never the
     // prompt glyph: that one is the live-input rendezvous marker.
-    expect(screen.snapshot()).toContain("\u2502 /new");
-    expect(screen.snapshot()).not.toContain("\u276f /new");
+    expect(screen.snapshot()).toContain("\u2502 /reset");
+    expect(screen.snapshot()).not.toContain("\u276f /reset");
   });
 
   it("reassembles an arrow key split across reads", async () => {
@@ -4482,9 +4510,9 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /help → /new; history recall would have submitted the
+    // Down moved /help → /reset; history recall would have submitted the
     // earlier prompt instead.
-    expect(await second).toBe("/new");
+    expect(await second).toBe("/reset");
     renderer.shutdown();
   });
 

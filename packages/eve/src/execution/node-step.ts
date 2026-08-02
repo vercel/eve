@@ -3,6 +3,7 @@ import type { LanguageModel } from "ai";
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
@@ -11,7 +12,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
-import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
+import { UNSPECIFIED_INPUT_SCHEMA } from "#shared/tool-schema.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type {
@@ -59,6 +60,10 @@ export interface CreateExecutionNodeStepInput {
    * current run.
    */
   readonly capabilities?: SessionCapabilities;
+  /** Runs only a context clear and returns to the parked session. */
+  readonly clearOnly?: boolean;
+  /** Runs only a forced context compaction and returns to the parked session. */
+  readonly compactOnly?: boolean;
   /**
    * Runtime constructor used by the subagent tool executor to start
    * delegated child runs on the same workflow runtime as the parent.
@@ -100,6 +105,8 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const step = createToolLoopHarness({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
+    clearOnly: input.clearOnly,
+    compactOnly: input.compactOnly,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
@@ -254,26 +261,7 @@ function resolveHarnessToolDefinition(input: {
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
   if (input.tool.kind === "subagent" || input.tool.kind === "remote") {
-    const runtimeAction: HarnessToolDefinition["runtimeAction"] =
-      input.tool.kind === "remote"
-        ? {
-            kind: "remote-agent-call",
-            nodeId: input.tool.nodeId,
-            remoteAgentName: input.tool.name,
-            subagentName: input.tool.name,
-          }
-        : {
-            kind: "subagent-call",
-            nodeId: input.tool.nodeId,
-            subagentName: input.tool.name,
-          };
-    return {
-      description: input.tool.description ?? "",
-      inputSchema: toInputSchema(input.tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
-      name: input.tool.name,
-      outputSchema: toOutputSchema(input.tool.outputSchema),
-      runtimeAction,
-    };
+    return createHarnessDelegationToolDefinition(input.tool);
   }
 
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);

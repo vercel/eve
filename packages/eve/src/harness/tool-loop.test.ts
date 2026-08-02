@@ -22,6 +22,7 @@ import {
   SessionKey,
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
+  SessionDynamicSubagentSelectionsKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
@@ -1184,6 +1185,77 @@ describe("createToolLoopHarness", () => {
         nodeId: "workers",
         subagentName: "worker",
       },
+    ]);
+  });
+
+  it("parks dynamic subagent calls as pending runtime actions", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { message: "investigate" },
+                toolCallId: "call-dynamic",
+                toolName: "researcher",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { message: "investigate" },
+          toolCallId: "call-dynamic",
+          toolName: "researcher",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+    const ctx = new ContextContainer();
+    ctx.set(SessionDynamicSubagentSelectionsKey, {
+      "subagents/researcher": {
+        agentConfig: {
+          description: "Research the request.",
+          model: { id: "openai/gpt-5.5" },
+        },
+        prepared: {
+          description: "Research the request.",
+          inputSchema: { type: "object" },
+          kind: "subagent",
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          sourceId: "subagents/researcher",
+        },
+      },
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Research this." }),
+    );
+
+    expect(events.find((event) => event.type === "actions.requested")?.data.actions).toEqual([
+      expect.objectContaining({
+        callId: "call-dynamic",
+        kind: "subagent-call",
+        nodeId: "subagents/researcher",
+        subagentName: "researcher",
+      }),
+    ]);
+    expect(getPendingRuntimeActionBatch(result.session.state)?.actions).toEqual([
+      expect.objectContaining({
+        callId: "call-dynamic",
+        kind: "subagent-call",
+        nodeId: "subagents/researcher",
+      }),
     ]);
   });
 
@@ -7959,6 +8031,168 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turnId: "turn_0",
     });
+  });
+
+  it("clears model history without replacing the session or its durable state", async () => {
+    const { emit, events } = createEventCollector();
+    const resolveModel = vi.fn();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        clearOnly: true,
+        resolveModel,
+      }),
+    );
+    const state = { retained: "yes" };
+    const limits = { maxInputTokensPerSession: 1_000 };
+    const outputSchema = { type: "string" };
+    const session = createTestSession({
+      compaction: {
+        lastKnownInputTokens: 9000,
+        lastKnownPromptMessageCount: 2,
+        recentWindowSize: 10,
+        threshold: 100_000,
+      },
+      history: [
+        { content: "old message", role: "user" },
+        { content: "old reply", role: "assistant" },
+      ],
+      limits,
+      outputSchema,
+      state,
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toMatchObject({
+      agent: session.agent,
+      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      continuationToken: session.continuationToken,
+      history: [],
+      limits,
+      outputSchema,
+      sessionId: session.sessionId,
+      state,
+    });
+    expect(getCompatibilityEventTypes(events)).toEqual(["context.cleared", "session.waiting"]);
+    expect(events.find((event) => event.type === "context.cleared")?.data).toEqual({
+      sequence: 0,
+      sessionId: "test-session",
+      turnId: "turn_0",
+    });
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(compactMessages).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("forces compaction without starting a model turn", async () => {
+    const compactedHistory: ModelMessage[] = [
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: "summary", role: "assistant" },
+    ];
+    vi.mocked(compactMessages).mockResolvedValue(compactedHistory);
+
+    const { emit, events } = createEventCollector();
+    const onCompaction = vi.fn(() => []);
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        onCompaction,
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
+      }),
+    );
+    const session = createTestSession({
+      compaction: {
+        lastKnownInputTokens: 9000,
+        lastKnownPromptMessageCount: 2,
+        recentWindowSize: 10,
+        threshold: 100_000,
+      },
+      history: [
+        { content: "old message", role: "user" },
+        { content: "old reply", role: "assistant" },
+      ],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session.history).toEqual(compactedHistory);
+    expect(result.session.compaction).toEqual({ recentWindowSize: 10, threshold: 100_000 });
+    expect(shouldCompact).not.toHaveBeenCalled();
+    expect(compactMessages).toHaveBeenCalledOnce();
+    expect(onCompaction).toHaveBeenCalledOnce();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(getCompatibilityEventTypes(events)).toEqual([
+      "compaction.requested",
+      "compaction.completed",
+      "session.waiting",
+    ]);
+  });
+
+  it("returns an empty session to its waiting boundary after manual compaction", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+      }),
+    );
+    const session = createTestSession({ history: [] });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(compactMessages).not.toHaveBeenCalled();
+  });
+
+  it("returns a failed manual compaction to its waiting boundary", async () => {
+    vi.mocked(compactMessages).mockRejectedValueOnce(new Error("summary failed"));
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
+      }),
+    );
+    const session = createTestSession({
+      history: [{ content: "old message", role: "user" }],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["compaction.requested", "session.waiting"]);
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns a failed manual model resolution to its waiting boundary", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        resolveModel: vi.fn().mockRejectedValueOnce(new Error("model unavailable")),
+      }),
+    );
+    const session = createTestSession({
+      history: [{ content: "old message", role: "user" }],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(compactMessages).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
   it("uses the authored compaction model when one is configured", async () => {

@@ -83,6 +83,32 @@ describe("compileAgentConfig", () => {
       sourceKind: "module",
     });
   });
+
+  it("compiles an injected dynamic-subagent placeholder without reloading agent.ts", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "researcher",
+      agentRoot: "/app/agent/subagents/researcher",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "agent.ts",
+        sourceId: "agent-config",
+      }),
+    });
+
+    const compiled = await compileAgentConfig(
+      manifest,
+      { modelCatalog: createModelCatalog() },
+      {
+        definition: {
+          model: "openai/gpt-5.5",
+        },
+      },
+    );
+
+    expect(mocks.loadModuleBackedDefinition).not.toHaveBeenCalled();
+    expect(compiled.description).toBeUndefined();
+    expect(compiled.source?.sourceId).toBe("agent-config");
+  });
 });
 
 function createModelCatalog(): ManifestCompileContext["modelCatalog"] {

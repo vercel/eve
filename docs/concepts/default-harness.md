@@ -20,6 +20,10 @@ export default defineAgent({
 
 Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 
+Clients and channels can also request compaction between turns. Call `ClientSession.compact()` or a custom route's `compact({ continuationToken })` helper. The request does not append a user message; if a turn is running, eve queues it until that turn settles. A successful manual compaction emits the same `compaction.requested` and `compaction.completed` events as automatic compaction, followed by `session.waiting`.
+
+To discard model-message history instead of summarizing it, call `ClientSession.clear()` or a custom route's `clear({ continuationToken })` helper. Clearing preserves the session identity, system prompt, configured tools and skills, durable state, limits, and sandbox. Its stream boundary is `context.cleared` followed by `session.waiting`.
+
 ## Built-in tools
 
 Built-in tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
@@ -40,6 +44,8 @@ The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) run
 | `agent`             | From the root session, delegate a subtask to a fresh copy of the root agent.                                                                                                                                        | App runtime   |
 | `load_skill`        | Pull an on-demand [skill](../skills)'s instructions into the current turn. Present only when the agent declares skills.                                                                                             | App runtime   |
 | `connection_search` | Discover tools across declared [connections](../connections); matched tools become directly callable. Present only when the agent declares connections.                                                             | App runtime   |
+
+The model-facing file tools accept absolute paths and paths beginning with `$HOME/`. eve resolves `$HOME` against the sandbox before invoking non-shell file operations, so packaged skill references such as `$HOME/.agents/skills/<skill>/references/...` work consistently across `read_file`, `write_file`, `glob`, and `grep`.
 
 Notes:
 

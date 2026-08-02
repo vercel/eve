@@ -227,6 +227,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
+      subagentPersistentSessions: manifest.config.experimental.subagentPersistentSessions,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined

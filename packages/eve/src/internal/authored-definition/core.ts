@@ -265,8 +265,15 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["workflow"], message);
+  expectOnlyKnownKeys(record, ["subagentPersistentSessions", "workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
+
+  if (record.subagentPersistentSessions !== undefined) {
+    if (typeof record.subagentPersistentSessions !== "boolean") {
+      throw new Error(`${message} "experimental.subagentPersistentSessions" must be a boolean.`);
+    }
+    normalizedDefinition.subagentPersistentSessions = record.subagentPersistentSessions;
+  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);

@@ -1,5 +1,13 @@
 import type { PublicAgentDefinition } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
+import { defineDynamic as defineDynamicBase } from "#public/definitions/tool.js";
+import type {
+  DynamicEvents,
+  DynamicEventsWithFallback,
+  DynamicSentinel,
+} from "#shared/dynamic-tool-definition.js";
+
+declare const DEFINED_AGENT: unique symbol;
 
 export type {
   AgentModelResolveContext,
@@ -41,6 +49,52 @@ export type {
  */
 export type AgentDefinition = PublicAgentDefinition;
 
+/** Literal-preserving value returned by {@link defineAgent}. */
+export type DefinedAgent<TAgent extends AgentDefinition = AgentDefinition> = TAgent & {
+  readonly [DEFINED_AGENT]: true;
+};
+
+/**
+ * Agent configuration returned by a dynamic subagent resolver. The description
+ * tells the parent agent when to delegate.
+ */
+export type DynamicSubagentDefinition = AgentDefinition & {
+  readonly description: string;
+};
+
+type DynamicEventHandler<TEvents extends DynamicEvents> = Extract<
+  NonNullable<TEvents[keyof TEvents]>,
+  (...args: never[]) => unknown
+>;
+type DynamicEventResult<TEvents extends DynamicEvents> = Awaited<
+  ReturnType<DynamicEventHandler<TEvents>>
+>;
+type DynamicSubagentDescriptionConstraint<TEvents extends DynamicEvents> =
+  Exclude<
+    Extract<DynamicEventResult<TEvents>, DefinedAgent>,
+    DynamicSubagentDefinition
+  > extends never
+    ? unknown
+    : { readonly "Dynamic subagent definitions require a description": never };
+
+/**
+ * Defines dynamic agent configuration. A returned subagent requires a
+ * description so its parent knows when to delegate.
+ */
+export const defineDynamic: {
+  <const TEvents extends DynamicEventsWithFallback, TFallback = unknown>(
+    definition: {
+      readonly fallback: TFallback;
+      readonly events: TEvents;
+    } & DynamicSubagentDescriptionConstraint<TEvents>,
+  ): DynamicSentinel<Exclude<DynamicEventResult<TEvents>, undefined>, TFallback>;
+  <const TEvents extends DynamicEvents>(
+    definition: {
+      readonly events: TEvents;
+    } & DynamicSubagentDescriptionConstraint<TEvents>,
+  ): DynamicSentinel<DynamicEventResult<TEvents>>;
+} = defineDynamicBase;
+
 /**
  * Defines the agent configuration authored in `agent.ts` and returns it
  * unchanged, preserving its literal type.
@@ -52,6 +106,7 @@ export type AgentDefinition = PublicAgentDefinition;
  */
 export function defineAgent<TAgent extends AgentDefinition>(
   definition: ExactDefinition<TAgent, AgentDefinition>,
-): TAgent {
+): DefinedAgent<TAgent>;
+export function defineAgent(definition: AgentDefinition): AgentDefinition {
   return definition;
 }

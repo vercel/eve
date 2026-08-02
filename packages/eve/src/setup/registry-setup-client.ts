@@ -16,8 +16,12 @@ import {
   type RegistrySetupPrompt,
 } from "./registry-setup-protocol.js";
 
-interface SetupProcess extends NodeJS.Process {
+interface SetupProcess {
+  connected?: boolean;
   send?: (message: RegistrySetupChildMessage) => boolean;
+  disconnect?: () => void;
+  on(event: "message", listener: (message: RegistrySetupParentMessage) => void): unknown;
+  off(event: "message", listener: (message: RegistrySetupParentMessage) => void): unknown;
 }
 
 function send(process: SetupProcess, message: RegistrySetupChildMessage): void {
@@ -202,6 +206,8 @@ export function createRegistrySetupClient(
     if (terminal) return;
     terminal = true;
     send(childProcess, { type: "result", outcome });
+    childProcess.off("message", onMessage);
+    childProcess.disconnect?.();
   };
   return {
     prompter,

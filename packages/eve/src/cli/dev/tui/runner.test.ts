@@ -197,8 +197,11 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("recognizes /new, /exit, and /quit", () => {
-    expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+  it("recognizes /reset, /cancel, /clear, /compact, /exit, and /quit", () => {
+    expect(parsePromptCommand("/reset")).toEqual({ type: "reset" });
+    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
+    expect(parsePromptCommand("/clear")).toEqual({ type: "clear" });
+    expect(parsePromptCommand("/compact")).toEqual({ type: "compact" });
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });
   });
@@ -624,7 +627,7 @@ describe("EveTUIRunner development session continuity", () => {
     ).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
   });
 
-  it("starts a fresh session only after an explicit /new command", async () => {
+  it("starts a fresh session only after an explicit /reset command", async () => {
     const initialSession = sessionYielding([{ type: "session.waiting" }]);
     const reset = vi
       .spyOn(initialSession, "reset")
@@ -632,7 +635,7 @@ describe("EveTUIRunner development session continuity", () => {
     const newSession = sessionYielding([{ type: "session.waiting" }]);
     const client = stubClient();
     const createSession = vi.spyOn(client, "session").mockReturnValue(newSession);
-    const prompts: Array<string | undefined> = ["first", "/new", "second", undefined];
+    const prompts: Array<string | undefined> = ["first", "/reset", "second", undefined];
     const runner = new EveTUIRunner({
       client,
       name: "Weather Agent",
@@ -655,12 +658,157 @@ describe("EveTUIRunner development session continuity", () => {
     expect(newSession.send).toHaveBeenCalledOnce();
   });
 
-  it("keeps the current transcript and session when /new cannot reset the owner", async () => {
+  it("compacts the active session without sending a prompt", async () => {
+    const session = sessionYielding([]);
+    const compact = vi
+      .spyOn(session, "compact")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    const stream = vi.spyOn(session, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent(
+          {
+            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            type: "session.waiting",
+          },
+          0,
+        );
+      })(),
+    );
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/compact", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) {
+            void event;
+          }
+        }),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(compact).toHaveBeenCalledOnce();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(session.send).not.toHaveBeenCalled();
+    expect(results).toEqual(["Compaction requested."]);
+  });
+
+  it("clears the active session context without sending a prompt", async () => {
+    const session = sessionYielding([]);
+    const clear = vi
+      .spyOn(session, "clear")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    const stream = vi.spyOn(session, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent(
+          {
+            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            type: "session.waiting",
+          },
+          0,
+        );
+      })(),
+    );
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/clear", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) {
+            void event;
+          }
+        }),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(clear).toHaveBeenCalledOnce();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(session.send).not.toHaveBeenCalled();
+    expect(results).toEqual(["Context clear requested."]);
+  });
+
+  it("cancels an active turn without sending a prompt", async () => {
+    const session = stubClient().session({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 0,
+    });
+    const cancel = vi
+      .spyOn(session, "cancel")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    const send = vi.spyOn(session, "send");
+    const stream = vi.spyOn(session, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent(
+          {
+            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            type: "session.waiting",
+          },
+          0,
+        );
+      })(),
+    );
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/cancel", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) {
+            void event;
+          }
+        }),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(results).toEqual(["Turn cancellation requested."]);
+  });
+
+  it("does not call the cancel API before a session has started", async () => {
+    const session = stubSession();
+    const cancel = vi.spyOn(session, "cancel");
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/cancel", undefined];
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (message) => results.push(message),
+      }),
+      session,
+    });
+
+    await runner.run();
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(results).toEqual(["No active turn to cancel."]);
+  });
+
+  it("keeps the current transcript and session when /reset cannot reset the owner", async () => {
     const session = sessionYielding([]);
     const reset = vi.spyOn(session, "reset").mockRejectedValue(new Error("World unavailable"));
     const resetRenderer = vi.fn();
     const notices: string[] = [];
-    const prompts: Array<string | undefined> = ["/new", undefined];
+    const prompts: Array<string | undefined> = ["/reset", undefined];
     const runner = new EveTUIRunner({
       name: "Weather Agent",
       renderer: fakeRenderer({
@@ -678,7 +826,7 @@ describe("EveTUIRunner development session continuity", () => {
     expect(notices).toEqual(["Couldn't reset the session: World unavailable"]);
   });
 
-  it("resets rather than sending a queued /new after a turn boundary", async () => {
+  it("resets rather than sending a queued /reset after a turn boundary", async () => {
     const initialSession = sessionYielding([{ type: "session.waiting" }]);
     const reset = vi
       .spyOn(initialSession, "reset")
@@ -694,7 +842,7 @@ describe("EveTUIRunner development session continuity", () => {
           void event;
         }
       }),
-      takeQueuedPrompt: vi.fn(() => "/new"),
+      takeQueuedPrompt: vi.fn(() => "/reset"),
     });
     const runner = new EveTUIRunner({
       client,
@@ -866,6 +1014,61 @@ describe("EveTUIRunner delayed dev build errors", () => {
     await runner.run();
 
     expect(renderer.flushDelayedDevBuildErrors).not.toHaveBeenCalled();
+  });
+});
+
+describe("EveTUIRunner /traces", () => {
+  it("opens the renderer's trace viewer with the app root and optional reference", async () => {
+    const prompts: Array<string | undefined> = ["/traces abc123", "/traces", undefined];
+    const open = vi.fn(async () => {});
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async () => {}),
+      traceViewer: { open },
+    };
+
+    const runner = new EveTUIRunner({
+      session: sessionYielding([{ type: "session.waiting" }]),
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+    });
+
+    await runner.run();
+
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenNthCalledWith(1, {
+      appRoot: "/tmp/weather-agent",
+      sessionId: undefined,
+      reference: "abc123",
+    });
+    expect(open).toHaveBeenNthCalledWith(2, {
+      appRoot: "/tmp/weather-agent",
+      sessionId: undefined,
+      reference: undefined,
+    });
+  });
+
+  it("renders a local-only notice when the session has no trace viewer", async () => {
+    const prompts: Array<string | undefined> = ["/traces", undefined];
+    const notices: string[] = [];
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderNotice: vi.fn((text: string) => {
+        notices.push(text);
+      }),
+      renderStream: vi.fn(async () => {}),
+    };
+
+    const runner = new EveTUIRunner({
+      session: sessionYielding([{ type: "session.waiting" }]),
+      renderer,
+      name: "Weather Agent",
+    });
+
+    await runner.run();
+
+    expect(notices.some((text) => text.includes("/traces is only available"))).toBe(true);
   });
 });
 
@@ -1672,7 +1875,7 @@ describe("EveTUIRunner replay guards", () => {
 
 describe("parsePromptCommand", () => {
   it.each([
-    ["/new", { type: "new" }],
+    ["/reset", { type: "reset" }],
     ["/exit", { type: "exit" }],
     ["/quit", { type: "exit" }],
     ["/deploy", { type: "extension", name: "deploy", argument: "" }],
@@ -2011,6 +2214,8 @@ describe("EveTUIRunner renderer teardown", () => {
 
   it("shuts the renderer down once when /exit ends the run loop", async () => {
     const shutdown = vi.fn();
+    const controller = new AbortController();
+    const requestStop = vi.fn(() => controller.abort());
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async () => "/exit"),
       shutdown,
@@ -2019,11 +2224,18 @@ describe("EveTUIRunner renderer teardown", () => {
       session: sessionYielding([]),
       renderer,
       name: "Weather Agent",
+      lifecycle: {
+        signal: controller.signal,
+        stopped: new Promise<NodeJS.Signals | undefined>(() => {}),
+        requestStop,
+        dispose: () => {},
+      },
     });
 
     await runner.run();
 
     expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(requestStop).toHaveBeenCalledOnce();
   });
 
   it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {
@@ -2957,14 +3169,14 @@ describe("EveTUIRunner mid-turn message queue", () => {
 });
 
 describe("EveTUIRunner session id reporting", () => {
-  it("pushes the accepted session id and keeps it sticky across /new", async () => {
+  it("pushes the accepted session id and keeps it sticky across /reset", async () => {
     const session = sessionYielding([{ type: "session.waiting" }]);
     vi.spyOn(session, "state", "get").mockReturnValue({
       sessionId: "session_test",
       streamIndex: 0,
     });
     const reported: string[] = [];
-    const prompts: Array<string | undefined> = ["hello", "/new", undefined];
+    const prompts: Array<string | undefined> = ["hello", "/reset", undefined];
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async () => prompts.shift()),
       renderStream: vi.fn(async (result) => {
@@ -2978,7 +3190,7 @@ describe("EveTUIRunner session id reporting", () => {
     const runner = new EveTUIRunner({ session, renderer, name: "Weather Agent" });
     await runner.run();
 
-    // Named once the turn's send is accepted. `/new` (and interrupt
+    // Named once the turn's send is accepted. `/reset` (and interrupt
     // recovery, which shares #startNewSession) must NOT clear it: the
     // parting line names the last session this TUI talked to, and the
     // replacement session has no id until its first turn is accepted.

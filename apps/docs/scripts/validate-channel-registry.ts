@@ -34,6 +34,7 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
 };
 
 const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
+  discord: "discord",
   eve: "web",
   photon: "photon",
 };
@@ -110,7 +111,12 @@ for (const [index, item] of items.entries()) {
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
   const registrySlug = expectedSlugs[index];
 
-  if (entry.slug === "slack" || entry.slug === "eve" || entry.slug === "photon") {
+  if (
+    entry.slug === "slack" ||
+    entry.slug === "discord" ||
+    entry.slug === "eve" ||
+    entry.slug === "photon"
+  ) {
     const expectedArgs = [
       "integration",
       "setup",

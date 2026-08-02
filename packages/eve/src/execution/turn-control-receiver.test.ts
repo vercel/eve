@@ -125,6 +125,7 @@ function parkResult(): Extract<TurnControlPayload, { readonly kind: "turn-result
 
 function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
   return {
+    consumeSessionControl: vi.fn(() => undefined),
     consumeNext: vi.fn(),
     consumeSessionTimeout: vi.fn(() => false),
     next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),
