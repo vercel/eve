@@ -56,6 +56,7 @@ export {
   callSlackApi,
   resolveSlackBotToken,
   slackContinuationToken,
+  type SlackBotTokenContext,
   type SlackPostInput,
   type SlackPostedMessage,
   type SlackThreadMessage,

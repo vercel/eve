@@ -164,15 +164,23 @@ export function buildSlackTurnMessage(
  * Returns `null` for URLs that don't belong to Slack so they pass
  * through to the model provider unchanged. Fetches Slack file URLs
  * with the bot token.
+ *
+ * `teamId` (static value or lazy getter) is forwarded to context-aware
+ * token callbacks so a multi-install Slack connector resolves the correct
+ * workspace's token. A getter is read per fetch, so a caller may hand in
+ * the live channel state identity once it supports per-event dispatch.
+ * Omitting it preserves the single-token behaviour.
  */
 export function createSlackFetchFile(input: {
   readonly botToken?: SlackBotToken;
+  readonly teamId?: string | (() => string | null | undefined);
 }): (url: string) => Promise<FetchFileResult | null> {
   return async (url) => {
     if (!isSlackFileUrl(url)) {
       return null;
     }
-    const token = await resolveSlackBotToken(input.botToken);
+    const teamId = typeof input.teamId === "function" ? input.teamId() : input.teamId;
+    const token = await resolveSlackBotToken(input.botToken, teamId ? { teamId } : {});
     const response = await fetch(url, {
       headers: { authorization: `Bearer ${token}` },
     });

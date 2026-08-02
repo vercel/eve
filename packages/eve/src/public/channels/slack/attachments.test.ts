@@ -6,6 +6,7 @@ import {
   collectSlackFileParts,
   createSlackFetchFile,
 } from "#public/channels/slack/attachments.js";
+import type { SlackBotTokenContext } from "#public/channels/slack/api.js";
 import type { SlackAttachment } from "#public/channels/slack/inbound.js";
 import { DEFAULT_UPLOAD_POLICY, mergeUploadPolicy } from "#public/channels/upload-policy.js";
 
@@ -206,6 +207,66 @@ describe("createSlackFetchFile", () => {
     expect((init as RequestInit | undefined)?.headers).toEqual({
       authorization: "Bearer xoxb-rotated-token",
     });
+  });
+
+  it("forwards a static teamId to a context-aware token callback", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(new Uint8Array([0]), { status: 200 }));
+
+    const seen: unknown[] = [];
+    const tokenFn = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-team-token";
+    });
+    const fetchFile = createSlackFetchFile({ botToken: tokenFn, teamId: "T-team-1" });
+
+    await fetchFile("https://files.slack.com/x");
+
+    expect(seen).toEqual([{ teamId: "T-team-1" }]);
+    const [, init] = fetchSpy.mock.calls[0]!;
+    expect((init as RequestInit | undefined)?.headers).toEqual({
+      authorization: "Bearer xoxb-team-token",
+    });
+  });
+
+  it("reads a lazy teamId getter per fetch so the resolved workspace is current", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Promise.resolve(new Response(new Uint8Array([0]), { status: 200 })),
+    );
+
+    const seen: unknown[] = [];
+    const tokenFn = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-team-token";
+    });
+    let liveTeamId: string | null = "T-ws-a";
+    const fetchFile = createSlackFetchFile({ botToken: tokenFn, teamId: () => liveTeamId });
+
+    await fetchFile("https://files.slack.com/one");
+    liveTeamId = "T-ws-b";
+    await fetchFile("https://files.slack.com/two");
+    liveTeamId = null;
+    await fetchFile("https://files.slack.com/three");
+
+    expect(seen).toEqual([{ teamId: "T-ws-a" }, { teamId: "T-ws-b" }, {}]);
+  });
+
+  it("omits teamId (empty context) when the caller provides none", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Uint8Array([0]), { status: 200 }),
+    );
+
+    const seen: unknown[] = [];
+    const tokenFn = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-team-token";
+    });
+    const fetchFile = createSlackFetchFile({ botToken: tokenFn });
+
+    await fetchFile("https://files.slack.com/x");
+
+    expect(seen).toEqual([{}]);
   });
 
   it.each([
