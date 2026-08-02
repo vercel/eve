@@ -1,5 +1,18 @@
 # eve
 
+## 0.29.5
+
+### Patch Changes
+
+- c0dc572: Rename the TUI `/new` command to `/reset` so session reset uses the same name across the client, HTTP, channel, and TUI APIs.
+- 3dce30a: Add manual session compaction through custom-channel helpers, the eve HTTP client, and the `eve dev` TUI's `/compact` command. Compaction preserves the session, queues behind an active turn, and does not send synthetic model input.
+- 910805e: Make a single `Esc` cancel the running turn in the eve dev TUI when no message is queued. Queued messages still use `Esc` to steer the oldest message into the next turn.
+- 9c51755: Connection search and discovered connection tools now use the same `defineDynamic` and `defineTool` pipeline as authored tools. Dynamic tool maps now reject entries that omit `defineTool` instead of accepting unsupported raw objects.
+- 84aa671: Clarify the dev TUI’s `/add` flow with consistent integration categories and category-specific browsing labels. MCP connections are now named explicitly, and the flow more clearly explains channels, extensions, and observability integrations.
+- 0c28eb7: Allow declared subagents to export `defineDynamic` from `agent.ts`. Session and turn resolvers can now return an agent configuration to expose it or nil to omit it from direct and Workflow delegation.
+- f3bb60d: Add manual session-context clearing through custom-channel helpers, the eve HTTP client, and the `eve dev` TUI's `/clear` command. Clearing removes model-message history while preserving the session, agent configuration, durable state, limits, and sandbox.
+- ac7d3c6: Add `/cancel` to the eve dev TUI. The command cooperatively cancels a running turn from either the live streaming input or the idle prompt while preserving the session and settled context.
+
 ## 0.29.4
 
 ### Patch Changes
