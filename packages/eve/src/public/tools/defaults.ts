@@ -4,6 +4,7 @@
  * `agent/tools/*.ts` files.
  */
 import { BASH_TOOL_DEFINITION } from "#runtime/framework-tools/bash.js";
+import { EDIT_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/edit-file.js";
 import { GLOB_TOOL_DEFINITION } from "#runtime/framework-tools/glob.js";
 import { GREP_TOOL_DEFINITION } from "#runtime/framework-tools/grep.js";
 import { READ_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/read-file.js";
@@ -46,6 +47,13 @@ export const readFile: ToolDefinition = toPublicToolDefinition(READ_FILE_TOOL_DE
  * Enforces read-before-write for existing files and stale-read detection.
  */
 export const writeFile: ToolDefinition = toPublicToolDefinition(WRITE_FILE_TOOL_DEFINITION);
+
+/**
+ * Framework-provided partial-edit tool (`edit_file`). Replaces one unique
+ * substring with a new one; fails if the substring is missing or ambiguous.
+ * Prefer `edit_file` over `write_file` for targeted changes on existing files.
+ */
+export const editFile: ToolDefinition = toPublicToolDefinition(EDIT_FILE_TOOL_DEFINITION);
 
 /**
  * Framework-provided HTTP fetch tool. Spread or wrap to customize.

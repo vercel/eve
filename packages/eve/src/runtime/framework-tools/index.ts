@@ -1,6 +1,7 @@
 import { AGENT_TOOL_DEFINITION } from "#runtime/framework-tools/agent.js";
 import { ASK_QUESTION_TOOL_DEFINITION } from "#runtime/framework-tools/ask-question.js";
 import { BASH_TOOL_DEFINITION } from "#runtime/framework-tools/bash.js";
+import { EDIT_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/edit-file.js";
 import { GLOB_TOOL_DEFINITION } from "#runtime/framework-tools/glob.js";
 import { GREP_TOOL_DEFINITION } from "#runtime/framework-tools/grep.js";
 import { READ_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/read-file.js";
@@ -47,6 +48,7 @@ const REGISTERED_FRAMEWORK_DYNAMIC_TOOLS: readonly FrameworkDynamicToolDefinitio
 const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ASK_QUESTION_TOOL_DEFINITION,
   BASH_TOOL_DEFINITION,
+  EDIT_FILE_TOOL_DEFINITION,
   GLOB_TOOL_DEFINITION,
   GREP_TOOL_DEFINITION,
   READ_FILE_TOOL_DEFINITION,
