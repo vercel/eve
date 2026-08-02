@@ -1,7 +1,14 @@
 import { z } from "#compiled/zod/index.js";
 
+import { loadContext } from "#context/container.js";
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import {
+  buildReadFileTargetKey,
+  createReadFileStamp,
+  normalizeModelPath,
+  setReadFileStamp,
+} from "#runtime/framework-tools/file-state.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
@@ -86,9 +93,19 @@ export async function executeEditFileOnSandbox(
     );
   }
 
-  // Perform the guaranteed-unique replacement.
-  const next = current.replace(args.oldString, args.newString);
+  // Perform the guaranteed-unique replacement. Use a replacer function so that
+  // `$`-prefixed sequences in `newString` ($$, $&, $`, $', $n) are inserted
+  // literally instead of being interpreted as special replacement patterns.
+  const next = current.replace(args.oldString, () => args.newString);
   await sandbox.writeTextFile({ content: next, path: resolvedPath });
+
+  // Refresh the read-file stamp so that a subsequent `write_file` on this file
+  // does not spuriously fail with "modified since it was last read" — the only
+  // mutation was this authorized edit.
+  const ctx = loadContext();
+  const normalizedPath = normalizeModelPath(resolvedPath);
+  const targetKey = buildReadFileTargetKey(normalizedPath);
+  setReadFileStamp(ctx, targetKey, createReadFileStamp({ content: next, filePath: normalizedPath }));
 
   return { path: resolvedPath, replacements: 1 };
 }
