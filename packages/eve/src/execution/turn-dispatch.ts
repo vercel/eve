@@ -1,4 +1,5 @@
-import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
+import type { HookPayload, SessionCapabilities } from "#channel/types.js";
+import type { DeliveryBuffers } from "#execution/delivery-buffers.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
@@ -22,9 +23,9 @@ export interface DispatchedTurn {
 
 /** Dispatches one turn and services its private-inbox control protocol until it terminates. */
 export async function dispatchAndAwaitTurn(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
   readonly capabilities?: SessionCapabilities;
   readonly controlToken: string;
+  readonly deliveryBuffers: DeliveryBuffers;
   readonly delivery: HookPayload;
   readonly deliveryHook: SessionDeliveryHook;
   readonly mode: RunMode;
@@ -33,7 +34,7 @@ export async function dispatchAndAwaitTurn(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<DispatchedTurn> {
   const control = new TurnControlReceiver({
-    bufferedDeliveries: input.bufferedDeliveries,
+    deliveryBuffers: input.deliveryBuffers,
     deliveryHook: input.deliveryHook,
     token: input.controlToken,
   });

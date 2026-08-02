@@ -1,4 +1,5 @@
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import { createDeliveryBuffers, takeBufferedDelivery } from "#execution/delivery-buffers.js";
 import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
@@ -10,8 +11,8 @@ export async function sessionDeliveryHookWorkflow(input: {
 }): Promise<string[]> {
   "use workflow";
 
-  const bufferedDeliveries: DeliverHookPayload[] = [];
-  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+  const deliveryBuffers = createDeliveryBuffers();
+  const deliveryHook = createSessionDeliveryHook(deliveryBuffers);
 
   try {
     await deliveryHook.rekey(input.token);
@@ -22,7 +23,7 @@ export async function sessionDeliveryHookWorkflow(input: {
     collectMessages(await pendingDelivery, deliveryHook, messages);
 
     while (messages.length < 2) {
-      const buffered = bufferedDeliveries.shift();
+      const buffered = takeBufferedDelivery(deliveryBuffers);
       if (buffered !== undefined) {
         appendMessages(buffered, messages);
         continue;
