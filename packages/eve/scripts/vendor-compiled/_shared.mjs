@@ -120,8 +120,21 @@ export function createDeclarationCopier({
           ? files
           : [{ source: "index.d.ts", output: "index.d.ts" }];
 
+    // discoverExtraFiles names content-hashed sibling chunks (e.g.
+    // `messages-<hash>.d.ts`, `types-<hash>.d.ts`) that the upstream
+    // bundler emits next to the entry .d.ts. They must flow through the
+    // same rewrite pass as the named `files` — chat's `messages-<hash>`
+    // chunk imports `mdast`, and the published package cannot ship that
+    // bare specifier (no @types/mdast in scope; see #1500).
+    const extraFileNames =
+      typeof discoverExtraFiles === "function" ? discoverExtraFiles(distEntries) : [];
+    const allFiles = [
+      ...declarationFiles,
+      ...extraFileNames.map((name) => ({ source: name, output: name })),
+    ];
+
     const declarations = await Promise.all(
-      declarationFiles.map(async (file) => ({
+      allFiles.map(async (file) => ({
         ...file,
         sourceText: await readFile(join(distDir, file.source), "utf8"),
       })),
@@ -178,16 +191,10 @@ export function createDeclarationCopier({
       }),
     );
 
-    if (typeof discoverExtraFiles === "function") {
-      const extras = discoverExtraFiles(distEntries);
-      await Promise.all(
-        extras.map(async (file) => {
-          const outputPath = join(destinationRoot, file);
-          await mkdir(dirname(outputPath), { recursive: true });
-          await copyFile(join(distDir, file), outputPath);
-        }),
-      );
-    }
+    // NOTE: the previous tail block that re-copied each extra file verbatim
+    // (via copyFile) is removed — extras are folded into `declarations`
+    // above so they receive the same rewrite pass. Re-adding it would
+    // overwrite the rewritten output with the un-rewritten source.
   };
 }
 

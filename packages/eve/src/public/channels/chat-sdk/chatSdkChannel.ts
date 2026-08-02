@@ -270,7 +270,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       { inputResponses: [response] },
       {
         auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-        thread: event.thread,
+        thread: event.thread as Thread,
       },
     );
   });

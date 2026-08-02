@@ -42,8 +42,11 @@ describe("photonIMessageChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      author: { fullName: "user", isBot: false, isMe: false, userId: "user", userName: "user" },
+      formatted: { type: "root", children: [] },
       id: "message-id",
+      metadata: { dateSent: new Date(), edited: false },
       raw: {},
       text: "Steer this response",
       threadId: thread.id,
@@ -65,8 +68,11 @@ describe("photonIMessageChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      author: { fullName: "user", isBot: false, isMe: false, userId: "user", userName: "user" },
+      formatted: { type: "root", children: [] },
       id: "message-id",
+      metadata: { dateSent: new Date(), edited: false },
       raw: {},
       text: "  \n",
       threadId: thread.id,
@@ -87,8 +93,11 @@ describe("photonIMessageChannel", () => {
     }
     const thread = { id: "group-thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      author: { fullName: "user", isBot: false, isMe: false, userId: "user", userName: "user" },
+      formatted: { type: "root", children: [] },
       id: "message-id",
+      metadata: { dateSent: new Date(), edited: false },
       raw: {},
       text: "Hello group",
       threadId: thread.id,

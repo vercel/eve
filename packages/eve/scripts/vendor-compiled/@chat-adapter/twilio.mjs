@@ -35,5 +35,14 @@ export default {
     rewrites: {
       chat: { kind: "vendored", compiledPath: "chat" },
     },
+    discoverExtraFiles: (distEntries) =>
+      // The upstream bundler emits content-hashed sibling declaration
+      // chunks (`types-<hash>.d.ts`) that the entry .d.ts files import by
+      // relative path. Co-copy them verbatim so the specifier resolves
+      // inside the published tarball — the miss here produced TS2307 for
+      // `TwilioWebhookUrl` and `TwilioVerifiedRequest` under
+      // skipLibCheck:false (see #1500). Mirrors the @chat-adapter/slack
+      // pattern a few directories over.
+      distEntries.filter((name) => /^types-[^./]+\.d\.ts$/.test(name)),
   }),
 };
