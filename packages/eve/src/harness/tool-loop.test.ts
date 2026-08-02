@@ -5151,6 +5151,17 @@ describe("createToolLoopHarness", () => {
         webhookUrl: "https://app.example/callback",
       });
 
+      // Conversation mode must close the turn so the client settles:
+      // `turn.completed` followed by `session.waiting` carrying the
+      // continuation token. Without this epilogue the chat UI hangs on
+      // "Thinking…" after `authorization.required` and never renders the
+      // connect card (issue #1525).
+      const eventTypes = events.map((event) => event.type);
+      const authIndex = eventTypes.indexOf("authorization.required");
+      expect(eventTypes.slice(authIndex + 1)).toEqual(["turn.completed", "session.waiting"]);
+      const waiting = events.find((event) => event.type === "session.waiting");
+      expect(waiting?.data).toMatchObject({ continuationToken: "test-session" });
+
       const actionResults = events.filter((event) => event.type === "action.result");
       expect(actionResults).toHaveLength(0);
     });

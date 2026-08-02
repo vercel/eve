@@ -2137,6 +2137,12 @@ async function handleStepResult(input: {
   if (authSignal) {
     const { challenges } = authSignal;
 
+    let parkedSession: HarnessSession = {
+      ...baseSession,
+      history: [...promptMessages],
+      state: setPendingAuthorization(baseSession.state, { challenges }),
+    };
+
     if (emit) {
       for (const ch of challenges) {
         await emit(
@@ -2151,19 +2157,19 @@ async function handleStepResult(input: {
           }),
         );
       }
+
+      if (config.mode === "conversation") {
+        emissionState = await emitTurnEpilogue(
+          emit,
+          emissionState,
+          config.mode,
+          parkedSession.continuationToken,
+        );
+        parkedSession = setHarnessEmissionState(parkedSession, emissionState);
+      }
     }
 
-    return {
-      next: null,
-      session: setHarnessEmissionState(
-        {
-          ...baseSession,
-          history: [...promptMessages],
-          state: setPendingAuthorization(baseSession.state, { challenges }),
-        },
-        emissionState,
-      ),
-    };
+    return { next: null, session: parkedSession };
   }
 
   // --- Continue or terminate ------------------------------------------------
