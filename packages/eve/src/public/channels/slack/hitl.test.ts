@@ -360,6 +360,25 @@ describe("renderInputRequestBlocks", () => {
       optionId: "weekly_report",
     });
   });
+
+  it("converts model-authored GFM in the prompt block to Slack mrkdwn (#1293)", () => {
+    const request = makeRequest({
+      prompt:
+        "Got it — a couple things to confirm:\n\n1. **Which environment** should I deploy to?\n2. Should the deploy *[skip the build cache](https://example.com)*?\n\n```ts\n// ** keep literal in code **\nconst x = 1;\n```",
+    });
+
+    const blocks = renderInputRequestBlocks(request);
+    const section = blocks[0] as { text: { type: string; text: string }; type: string };
+
+    // `**bold**` and `*italic*` collapse to Slack's single-asterisk bold.
+    expect(section.text.text).toContain("*Which environment*");
+    // Markdown links become Slack's `<url|label>` form.
+    expect(section.text.text).toContain("<https://example.com|skip the build cache>");
+    // Code fence content is passed through untouched — asterisks stay literal.
+    expect(section.text.text).toContain("** keep literal in code **");
+    // The prompt surface must advertise Slack's mrkdwn dialect.
+    expect(section.text.type).toBe("mrkdwn");
+  });
 });
 
 describe("formatInputRequestFallbackText", () => {
@@ -453,6 +472,28 @@ describe("buildFreeformModalView", () => {
     });
     const blocks = view.blocks as Array<Record<string, unknown>>;
     expect(blocks.find((b) => b.type === "section")).toBeUndefined();
+  });
+
+  it("converts model-authored GFM in the modal prompt to Slack mrkdwn (#1293)", () => {
+    const view = buildFreeformModalView({
+      metadata: {
+        continuationToken: "slack:C01:1.0",
+        channelId: "C01",
+        threadTs: "1.0",
+        messageTs: "1.1",
+        requestId: "call_abc",
+      },
+      prompt:
+        "One more before I proceed — **which environment** should I target? See [the runbook](https://example.com/runbook).",
+    });
+
+    const blocks = view.blocks as Array<{ type: string; text?: { type: string; text: string } }>;
+    const section = blocks.find((b) => b.type === "section");
+
+    expect(section?.text?.text).toContain("*which environment*");
+    expect(section?.text?.text).toContain("<https://example.com/runbook|the runbook>");
+    // The prompt surface must advertise Slack's mrkdwn dialect.
+    expect(section?.text?.type).toBe("mrkdwn");
   });
 });
 

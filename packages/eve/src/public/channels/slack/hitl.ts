@@ -19,6 +19,7 @@ import {
   truncatePlainText,
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
+import { gfmToSlackMrkdwn } from "#public/channels/slack/mrkdwn.js";
 import type { InputRequest } from "#runtime/input/types.js";
 
 /**
@@ -144,8 +145,17 @@ export function isHitlAction(actionId: string): boolean {
  * Always emits at least the prompt section.
  */
 export function renderInputRequestBlocks(request: InputRequest): unknown[] {
+  // Model-authored prompts are GitHub-flavored markdown by default; convert
+  // to Slack's mrkdwn dialect before embedding so `**bold**`, `__bold__`,
+  // `~~strike~~`, and `[label](url)` render natively instead of showing up
+  // as literal punctuation. The conversion is fence-aware — inline code and
+  // code blocks are passed through untouched. Truncate after conversion so
+  // the limit applies to the rendered text, not the source markdown. (#1293)
   const prompt = {
-    text: { text: truncateSectionText(request.prompt), type: "mrkdwn" },
+    text: {
+      text: truncateSectionText(gfmToSlackMrkdwn(request.prompt)),
+      type: "mrkdwn",
+    },
     type: "section",
   };
   const details = renderInputRequestDetailBlocks(request);
@@ -231,8 +241,16 @@ export function buildFreeformModalView(input: {
   readonly prompt?: string;
 }): Record<string, unknown> {
   const title = input.prompt ? truncateModalTitle(input.prompt) : "Your answer";
+  // See the matching conversion in `renderInputRequestBlocks` — the modal
+  // prompt is the same model-authored markdown surface and needs the same
+  // gfm → mrkdwn pass before reaching Slack. (#1293)
   const promptBlocks = input.prompt
-    ? [{ type: "section", text: { type: "mrkdwn", text: truncateSectionText(input.prompt) } }]
+    ? [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: truncateSectionText(gfmToSlackMrkdwn(input.prompt)) },
+        },
+      ]
     : [];
   return {
     type: "modal",
