@@ -197,6 +197,13 @@ export interface AgentLimitsDefinition {
  */
 export interface AgentExperimentalDefinition {
   /**
+   * Keeps this agent's delegated subagent sessions alive after they answer.
+   * The model can pass `agentId` to a subagent tool to continue a previous
+   * delegation, and the system prompt documents the `<agents>` listing.
+   * When unset, delegated children run as one-shot tasks.
+   */
+  readonly subagentPersistentSessions?: boolean;
+  /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.
    */

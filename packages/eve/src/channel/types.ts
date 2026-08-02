@@ -37,6 +37,26 @@ export interface CancelTurnResult {
   readonly reason?: string;
 }
 
+/** Identifies the continuation hook whose durable session should compact. */
+export interface CompactSessionInput {
+  readonly continuationToken: string;
+}
+
+/** Result of queueing manual context compaction for a session. */
+export type CompactSessionResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "no_active_session" };
+
+/** Identifies the continuation hook whose durable session should clear context. */
+export interface ClearSessionInput {
+  readonly continuationToken: string;
+}
+
+/** Result of queueing a manual context clear for a session. */
+export type ClearSessionResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "no_active_session" };
+
 /** Identifies a session to transition permanently to a terminal state. */
 export interface TerminateSessionInput {
   /** Human-readable reason recorded on the terminal workflow transition. */
@@ -127,6 +147,15 @@ export type EventEmitFn = (event: UnstampedMessageStreamEvent) => Promise<void>;
 // Deliver payload
 // ---------------------------------------------------------------------------
 
+/** Framework-internal caller waiting for one delegated conversation turn. */
+export interface TurnCaller {
+  readonly callId: string;
+  readonly subagentName: string;
+  readonly replyTo:
+    | { readonly kind: "hook"; readonly token: string }
+    | { readonly kind: "callback"; readonly url: string };
+}
+
 /**
  * Base deliver payload crossing the runtime boundary.
  *
@@ -154,12 +183,13 @@ export interface DeliverPayload {
 /**
  * Deliver payload sent through the workflow `resumeHook`.
  *
- * Wraps the raw {@link DeliverPayload} with an optional auth update so
- * deliver-time auth crosses the durable hook boundary without a process-local
- * side-channel.
+ * Wraps the raw {@link DeliverPayload} with optional auth and turn-caller
+ * metadata so both cross the durable hook boundary outside adapter-owned data.
  */
 export interface DeliverHookPayload {
   readonly auth?: SessionAuthContext | null;
+  /** Delegated caller waiting for this turn's settled result. */
+  readonly caller?: TurnCaller;
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";
@@ -169,6 +199,16 @@ export interface DeliverHookPayload {
 /** Internal deadline signal sent through the session's delivery hook. */
 export interface SessionTimeoutHookPayload {
   readonly kind: "session-timeout";
+}
+
+/** Requests a context compaction without delivering model input. */
+export interface CompactSessionHookPayload {
+  readonly kind: "compact";
+}
+
+/** Requests a context clear without delivering model input. */
+export interface ClearSessionHookPayload {
+  readonly kind: "clear";
 }
 
 /**
@@ -233,6 +273,8 @@ export interface SubagentAuthorizationEventHookPayload {
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
+  | ClearSessionHookPayload
+  | CompactSessionHookPayload
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
@@ -240,11 +282,13 @@ export type HookPayload =
   | SubagentInputRequestHookPayload;
 
 /**
- * Terminal callback metadata attached to a session at creation.
+ * Initial caller callback attached to a delegated session at creation.
  *
  * `url` is the absolute callback endpoint. `token` is the capability token
  * embedded in the framework-owned callback route. `callId` and `subagentName`
- * correlate the callee's terminal callback to the pending parent tool call.
+ * correlate the callee's result to the pending tool call. Task sessions send a
+ * terminal session result. Conversation sessions use this as their first turn's
+ * caller; each continuation supplies the caller for that turn.
  */
 export interface SessionCallback {
   readonly callId: string;
@@ -321,8 +365,9 @@ export interface RunInput {
    */
   readonly title?: string;
   /**
-   * Optional terminal callback. When present, the runtime posts a single
-   * callback when the session completes or fails.
+   * Optional caller callback. Task sessions post when the session completes or
+   * fails. Conversation sessions use it for the first turn; continuations carry
+   * the caller for their own turn.
    */
   readonly callback?: SessionCallback;
   /**
@@ -369,12 +414,14 @@ export interface RunInput {
 
 export interface DeliverInput {
   /**
-   * Authenticated caller principal for this follow-up message.
+   * Authenticated principal for this follow-up message.
    * May differ from the session initiator when different users send
    * messages to the same session. The runtime updates `AuthKey` from
    * this field before calling the adapter's hooks.
    */
   readonly auth?: SessionAuthContext | null;
+  /** Delegated caller waiting for this turn's settled result. */
+  readonly caller?: TurnCaller;
   /** Inbound channel request id used to correlate workflow attributes. */
   readonly requestId?: string;
   readonly continuationToken: string;
@@ -422,6 +469,12 @@ export interface Runtime {
 
   /** Requests cancellation of a session's in-flight turn. */
   cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+
+  /** Queues context compaction on the session owning a continuation token. */
+  compactSession(input: CompactSessionInput): Promise<CompactSessionResult>;
+
+  /** Queues a context clear on the session owning a continuation token. */
+  clearSession(input: ClearSessionInput): Promise<ClearSessionResult>;
 
   /** Terminally retires a session and releases its non-retained continuation hooks. */
   terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult>;

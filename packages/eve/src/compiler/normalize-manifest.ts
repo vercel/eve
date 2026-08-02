@@ -75,11 +75,16 @@ async function compileAgentNodeManifest(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
   options: {
+    readonly agentConfigDefinition?: unknown;
     readonly externalDependencies?: readonly string[];
     readonly allowWorkflowConfig?: boolean;
   } = {},
 ): Promise<CompiledAgentNodeManifest> {
-  const rawConfig = await compileAgentConfig(manifest, context);
+  const rawConfig = Object.hasOwn(options, "agentConfigDefinition")
+    ? await compileAgentConfig(manifest, context, {
+        definition: options.agentConfigDefinition,
+      })
+    : await compileAgentConfig(manifest, context);
   if (options.allowWorkflowConfig === false && rawConfig.experimental?.workflow !== undefined) {
     throw new Error(
       `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${manifest.agentId}".`,

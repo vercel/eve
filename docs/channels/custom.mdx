@@ -48,6 +48,8 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 
 - `send(message, { auth, continuationToken, state?, title? })` starts or resumes a session. `title` overrides the new workflow session's display title without changing the model message. Returns a `Session`.
 - `cancel({ continuationToken, turnId? })` requests cancellation of the active turn on the session that owns the token. See [Cancel a turn](#cancel-a-turn).
+- `clear({ continuationToken })` removes the model-message history while preserving the session and its durable resources. See [Clear session context](#clear-session-context).
+- `compact({ continuationToken })` queues context compaction for the session that owns the token without sending model input. See [Compact a session](#compact-a-session).
 - `reset({ continuationToken, reason? })` retires the session that owns the token so the next `send()` starts a fresh session. See [Reset a session](#reset-a-session).
 - `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming, `getStreamTailIndex()` for resolving the durable tail when a route wants to serve bounded reads, and `cancel({ turnId? })` for session-id-addressed cancellation.
 - `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
@@ -85,6 +87,44 @@ Semantics:
 - The route owns authentication of the inbound stop request, exactly as for `send()`.
 
 When you already hold a `Session` — returned by `send()` or `getSession(sessionId)` — call `session.cancel({ turnId? })` to request the same cancellation addressed by session id.
+
+## Clear session context
+
+Call `clear` with the channel-local continuation token to remove a session's durable model-message history without replacing the session:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/threads/:threadId/clear", async (_req, { clear, params }) => {
+      const result = await clear({ continuationToken: params.threadId });
+      return Response.json(result);
+    }),
+  ],
+});
+```
+
+`"accepted"` means the clear was queued. The stream emits `context.cleared` followed by `session.waiting`, after which the next ordinary message resumes the same session with no prior model messages. The system prompt, configured tools and skills, durable state, limits, continuation-token ownership, and session-scoped sandbox remain. `"no_active_session"` means the token has no current owner.
+
+## Compact a session
+
+Call `compact` with the channel-local continuation token to summarize durable conversation history without delivering a command to the model:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/threads/:threadId/compact", async (_req, { compact, params }) => {
+      const result = await compact({ continuationToken: params.threadId });
+      return Response.json(result);
+    }),
+  ],
+});
+```
+
+`"accepted"` means the durable session queued the operation. A successful compaction emits `compaction.requested` followed by `compaction.completed`, then the operation returns through `session.waiting`. If summarization fails, the stream returns through `session.waiting` without `compaction.completed` and preserves the previous history. If a turn is active, eve runs the compaction after that turn settles; it does not cancel the turn. `"no_active_session"` means the token has no current owner. Both outcomes are successful, and compaction never starts a session or appends a synthetic user message.
 
 ## Reset a session
 
@@ -160,7 +200,7 @@ export default defineChannel({
 });
 ```
 
-`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `cancel`, `reset`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
+`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `cancel`, `clear`, `compact`, `reset`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
 
 ### Node upgrade server escape hatch
 

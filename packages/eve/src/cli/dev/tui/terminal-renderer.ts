@@ -533,9 +533,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #todoCommittedSignature?: string;
   /**
    * Messages submitted while a turn streams, pinned in a panel directly
-   * above the input. Enter queues, Esc pops-to-steer or (empty) arms and
-   * then cancels; the runner drains via {@link takeQueuedPrompt} at a clean
-   * turn boundary and {@link readPrompt} restores any leftovers as a draft.
+   * above the input. Enter queues, `/cancel` cancels directly, and Esc
+   * pops-to-steer or cancels immediately when empty; the runner drains via
+   * {@link takeQueuedPrompt} at a clean turn boundary and {@link readPrompt}
+   * restores any leftovers as a draft.
    */
   readonly #messageQueue = new MessageQueue();
   /** The streaming result's cooperative cancel, armed for Esc while it renders. */
@@ -550,7 +551,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * the user block can carry its steer/queue gutter arrow.
    */
   #nextSubmittedPromptOrigin?: "steer" | "queue";
-  /** True once an Esc in THIS stream requested cancellation (steer or Esc Esc). */
+  /** True once this stream's prompt requested cancellation or steering. */
   #cancelRequestedByUser = false;
   /** The prompt submitted for the streaming turn, for external-cancel recovery. */
   #currentSubmittedPrompt?: string;
@@ -1503,7 +1504,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#lastCommitted = undefined;
     this.#committedTranscriptRows.length = 0;
     this.#transcriptBlocks.length = 0;
-    // `/new` resets the conversation, not the workspace: keep #agentHeader
+    // `/reset` resets the conversation, not the workspace: keep #agentHeader
     // (the status line's model segment reads it — the header is not re-sent
     // after a reset) and #vercelStatus (link + pending-deploy outlive the
     // conversation). The header *block* still leaves the transcript because
@@ -1546,7 +1547,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /**
    * THE one authority for state scoped to a server-side conversation
-   * context. Called by both context cuts — `/new` (`reset`) and the
+   * context. Called by both context cuts — `/reset` and the
    * mid-conversation session replacement (`renderSessionBoundary`) — so the
    * two can never drift on what dies with the old context: the pinned todo
    * list (its tasks were not finished — dismiss, don't commit), write-diff
@@ -2962,11 +2963,24 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
         break;
       case "enter": {
+        const message = this.#streamDraft.text;
+        if (message.trim().length === 0) break;
+        if (
+          parsePromptCommand(message)?.type === "cancel" &&
+          this.#requestTurnCancel !== undefined
+        ) {
+          this.#streamDraft = EMPTY_LINE;
+          this.#messageQueue.requestCancellation();
+          this.#cancelRequestedByUser = true;
+          this.renderCommandInvocation(message.trim());
+          this.renderCommandResult("Turn cancellation requested.");
+          this.#requestTurnCancel();
+          this.#paint();
+          break;
+        }
         // Mid-turn Enter queues the draft as a message for the next turn
         // (or for an Esc steer pop). A full queue keeps the draft in place —
         // the panel header says why — rather than silently dropping input.
-        const message = this.#streamDraft.text;
-        if (message.trim().length === 0) break;
         if (this.#messageQueue.enqueue(message)) {
           this.#streamDraft = EMPTY_LINE;
         }
@@ -2976,20 +2990,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       case "escape": {
         // Esc drives steering and cancellation: pop the oldest queued
         // message and cancel the running turn so the runner submits it as
-        // the replacement turn; with nothing queued, arm once and cancel on
-        // the second press. Without a cancel capability an empty queue
-        // leaves Esc inert — arming would promise a cancel that can't land.
+        // the replacement turn; with nothing queued, cancel immediately.
+        // Without a cancel capability an empty queue leaves Esc inert.
         if (this.#messageQueue.idle && this.#requestTurnCancel === undefined) break;
-        const outcome = this.#messageQueue.handleEscape();
-        if (outcome === "steer" || outcome === "cancel") {
-          this.#cancelRequestedByUser = true;
-          this.#requestTurnCancel?.();
-        }
+        this.#messageQueue.handleEscape();
+        this.#cancelRequestedByUser = true;
+        this.#requestTurnCancel?.();
         this.#paint();
         break;
       }
       default: {
-        this.#messageQueue.disarm();
         const edited = applyLineEditorKey(this.#streamDraft, key, { multiline: true });
         if (edited !== undefined) {
           this.#streamDraft = edited;
@@ -3362,9 +3372,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
 
       case "turn-cancelled":
-        // The server settled the turn cooperatively (an Esc steer or
-        // Esc Esc); its in-flight tool calls get no further updates and are
-        // settled by the interrupted-blocks sweep at stream end.
+        // The server settled the turn cooperatively (an Esc steer or an
+        // empty-queue Esc); its in-flight tool calls get no further updates.
+        // The interrupted-blocks sweep settles them at stream end.
         this.#turnCancelled = true;
         // A cancellation nobody asked for through THIS prompt — a stale
         // cancel from the previous turn landing late (the unguarded

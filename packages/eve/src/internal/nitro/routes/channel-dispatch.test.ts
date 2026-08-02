@@ -265,6 +265,8 @@ describe("dispatchChannelRequest", () => {
   it("tags route sends with Vercel's request id", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
+      clearSession: vi.fn(),
+      compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
@@ -314,6 +316,8 @@ describe("dispatchChannelRequest", () => {
   it("supplies a channel-scoped reset helper", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
+      clearSession: vi.fn(),
+      compactSession: vi.fn(),
       deliver: vi.fn(),
       getEventStream: vi.fn(),
       getStreamTailIndex: vi.fn(),
@@ -363,9 +367,58 @@ describe("dispatchChannelRequest", () => {
     });
   });
 
+  it("supplies a channel-scoped clear helper", async () => {
+    const runtimeForTest: Runtime = {
+      cancelTurn: vi.fn(),
+      clearSession: vi.fn().mockResolvedValue({ sessionId: "sess_active", status: "accepted" }),
+      compactSession: vi.fn(),
+      deliver: vi.fn(),
+      getEventStream: vi.fn(),
+      getStreamTailIndex: vi.fn(),
+      resolveSession: vi.fn(),
+      run: vi.fn(),
+      terminateSession: vi.fn(),
+    };
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        {
+          handler: async (_req, args) =>
+            Response.json(
+              await args.clear({ continuationToken: "direct:+15551234567:+15557654321" }),
+            ),
+          fetch: async () => new Response("ok"),
+          logicalPath: "agent/channels/imessage.ts",
+          method: "POST",
+          name: "imessage",
+          sourceId: "channel-imessage",
+          sourceKind: "module",
+          urlPath: "/imessage",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /imessage",
+      {} as never,
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      sessionId: "sess_active",
+      status: "accepted",
+    });
+    expect(runtimeForTest.clearSession).toHaveBeenCalledWith({
+      continuationToken: "imessage:direct:+15551234567:+15557654321",
+    });
+  });
+
   it("does not invent a channel request id when Vercel did not send one", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn(),
+      clearSession: vi.fn(),
+      compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
@@ -410,6 +463,8 @@ describe("dispatchChannelRequest", () => {
   it("does not mutate route-owned run and deliver inputs", async () => {
     const runtimeForTest: Runtime = {
       cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
+      clearSession: vi.fn(),
+      compactSession: vi.fn(),
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_deliver" }),
       resolveSession: vi.fn(),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),

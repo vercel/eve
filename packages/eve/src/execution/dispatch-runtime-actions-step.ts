@@ -48,6 +48,8 @@ import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -73,12 +75,13 @@ export async function dispatchRuntimeActionsStep(input: {
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const session = hydrateDurableSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
-    turnAgent: bundle.turnAgent,
+    turnAgent: effectiveAgent.turnAgent,
   });
   const adapter = ctx.require(ChannelKey);
   const auth = ctx.get(AuthKey) ?? null;
@@ -103,6 +106,12 @@ export async function dispatchRuntimeActionsStep(input: {
 
   try {
     for (const action of batch.actions) {
+      const isDynamicSubagent =
+        action.kind === "subagent-call" &&
+        bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true;
+      const dynamicSubagentSelection = isDynamicSubagent
+        ? getDynamicSubagentSelection(ctx, action.nodeId)
+        : undefined;
       if (
         isRecursiveAgentAction(action, bundle.subagentRegistry.subagentsByNodeId) &&
         (session.rootSessionId !== undefined || subagentDepth.currentDepth > 0)
@@ -117,6 +126,17 @@ export async function dispatchRuntimeActionsStep(input: {
         continue;
       }
 
+      if (isDynamicSubagent && dynamicSubagentSelection === undefined) {
+        const subagentName = getSubagentName(action);
+        log.warn("dynamic subagent call blocked after availability changed", {
+          callId: action.callId,
+          nodeId: action.nodeId,
+          subagentName,
+        });
+        results.push(createUnavailableDynamicSubagentResult(action));
+        continue;
+      }
+
       let childSessionId: string;
       let name: string;
       let remote: { readonly url: string } | undefined;
@@ -125,12 +145,16 @@ export async function dispatchRuntimeActionsStep(input: {
       switch (action.kind) {
         case "subagent-call": {
           const registered = bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId);
+          const description =
+            dynamicSubagentSelection?.agentConfig.description ??
+            (registered?.definition.kind === "subagent"
+              ? registered.definition.description
+              : undefined);
           const source: SubagentInputSource =
-            registered?.definition.kind === "subagent"
-              ? { description: registered.definition.description, type: "local" }
-              : { type: "runtime" };
+            description !== undefined ? { description, type: "local" } : { type: "runtime" };
           const childRuntime = createWorkflowRuntime({
             compiledArtifactsSource: bundle.compiledArtifactsSource,
+            dynamicSubagentAgentConfig: dynamicSubagentSelection?.agentConfig,
             nodeId: action.nodeId,
           });
           const { childContinuationToken, runInput } = buildSubagentRunInput({
@@ -248,6 +272,28 @@ export async function dispatchRuntimeActionsStep(input: {
       : createDurableSessionState({ session: nextSession });
 
   return { results, sessionState: nextState };
+}
+
+function createUnavailableDynamicSubagentResult(
+  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
+): RuntimeSubagentResultActionResult {
+  const subagentName = getSubagentName(action);
+  return {
+    callId: action.callId,
+    isError: true,
+    kind: "subagent-result",
+    output: {
+      code: "SUBAGENT_UNAVAILABLE",
+      message: `Subagent "${subagentName}" is not available in the current session context.`,
+    },
+    subagentName,
+  };
+}
+
+function getSubagentName(
+  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
+): string {
+  return action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
 }
 
 function createRemoteAgentStartFailureResult(input: {

@@ -16,13 +16,21 @@ import {
 } from "#compiler/normalize-helpers.js";
 import {
   expectBoolean,
+  expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
   expectString,
 } from "#internal/authored-module.js";
 import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
+import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+
+const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
+  "session.started",
+  "turn.started",
+]);
 
 /**
  * Callback the subagent compiler uses to recurse into the per-node
@@ -34,6 +42,7 @@ export type CompileAgentNodeManifestFn = (
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
   options?: {
+    readonly agentConfigDefinition?: unknown;
     readonly externalDependencies?: readonly string[];
     readonly allowWorkflowConfig?: boolean;
   },
@@ -131,8 +140,11 @@ async function compileSubagentDefinition(input: {
     kind: "subagent config",
     source: configModule,
   });
-
-  if (readAgentDefinitionKind(definition) === "remote") {
+  const dynamic = normalizeDynamicSubagentDefinition(
+    definition,
+    `Expected the dynamic subagent config export "${configModule.exportName ?? "default"}" from "${configModuleSource.logicalPath}" to match the public eve shape.`,
+  );
+  if (dynamic === undefined && readAgentDefinitionKind(definition) === "remote") {
     return {
       kind: "remote",
       node: compileRemoteAgent({
@@ -144,7 +156,11 @@ async function compileSubagentDefinition(input: {
 
   return {
     kind: "local",
-    ...(await compileLocalSubagent(input)),
+    ...(await compileLocalSubagent({
+      ...input,
+      agentConfigDefinition: dynamic === undefined ? definition : { model: DEFAULT_AGENT_MODEL_ID },
+      dynamic: dynamic?.definition,
+    })),
   };
 }
 
@@ -152,6 +168,8 @@ async function compileSubagent(input: {
   readonly appRoot: string;
   readonly compileAgentNodeManifest: CompileAgentNodeManifestFn;
   readonly context: ManifestCompileContext;
+  readonly agentConfigDefinition?: unknown;
+  readonly dynamic?: { readonly eventNames: readonly string[] };
   readonly externalDependencies?: readonly string[];
   readonly parentNodeId: string;
   readonly source: LocalSubagentSourceRef;
@@ -171,15 +189,31 @@ async function compileSubagent(input: {
       appRoot: input.appRoot,
     },
     input.context,
-    { allowWorkflowConfig: false, externalDependencies: input.externalDependencies },
+    {
+      agentConfigDefinition: input.agentConfigDefinition,
+      allowWorkflowConfig: false,
+      externalDependencies: input.externalDependencies,
+    },
   );
 
   const description = agent.config.description;
 
-  if (!description) {
-    throw new Error(
-      `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,
-    );
+  let variant:
+    | { readonly description: string; readonly dynamic?: never }
+    | {
+        readonly description?: never;
+        readonly dynamic: { readonly eventNames: readonly string[] };
+      };
+
+  if (input.dynamic !== undefined) {
+    variant = { dynamic: input.dynamic };
+  } else {
+    if (!description) {
+      throw new Error(
+        `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,
+      );
+    }
+    variant = { description };
   }
 
   const descendants = await compileSubagentGraph({
@@ -190,7 +224,6 @@ async function compileSubagent(input: {
     parentNodeId: nodeId,
     subagents: input.source.manifest.subagents,
   });
-
   return {
     descendants,
     node: {
@@ -198,7 +231,7 @@ async function compileSubagent(input: {
         ...agent,
         remoteAgents: [...descendants.remoteAgents],
       },
-      description,
+      ...variant,
       entryPath: input.source.entryPath,
       logicalPath: input.source.logicalPath,
       name: subagentName,
@@ -229,7 +262,6 @@ function compileRemoteAgent(input: {
     input.value,
     `Expected the remote agent config export "${configModule.exportName ?? "default"}" from "${moduleSource.logicalPath}" to match the public eve shape.`,
   );
-
   const node = {
     ...moduleSource,
     description: definition.description,
@@ -243,6 +275,40 @@ function compileRemoteAgent(input: {
 
   // A function `url` is deferred, so the compiled node omits it entirely.
   return definition.url === undefined ? node : { ...node, url: definition.url };
+}
+
+function normalizeDynamicSubagentDefinition(
+  value: unknown,
+  message: string,
+): { readonly definition: { readonly eventNames: readonly DynamicToolEventName[] } } | undefined {
+  if (!isDynamicSentinel(value)) {
+    return undefined;
+  }
+
+  const record = expectObjectRecord(value, message);
+  if (Object.hasOwn(record, "fallback")) {
+    throw new Error(
+      `${message} Dynamic subagent definitions do not support "fallback". Return defineAgent(...) from an event handler instead.`,
+    );
+  }
+  expectOnlyKnownKeys(record, ["events", "kind"], message);
+
+  const rawEvents = expectObjectRecord(record.events, message);
+  const eventNames: DynamicToolEventName[] = [];
+
+  for (const [eventName, handler] of Object.entries(rawEvents)) {
+    if (!ALLOWED_DYNAMIC_SUBAGENT_EVENTS.has(eventName as DynamicToolEventName)) {
+      throw new Error(
+        `${message} Dynamic subagents support only "session.started" and "turn.started" handlers.`,
+      );
+    }
+    expectFunction(handler, message);
+    eventNames.push(eventName as DynamicToolEventName);
+  }
+
+  return {
+    definition: { eventNames },
+  };
 }
 
 function createSubagentConfigModuleSourceRef(

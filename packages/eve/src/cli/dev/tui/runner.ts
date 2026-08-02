@@ -126,11 +126,11 @@ export type AgentTUIStreamResult = {
   abort?: () => void;
   /**
    * Requests cooperative server-side cancellation of the streaming turn
-   * (Esc Esc, or an Esc steer pop). Unlike {@link abort} — which drops the
-   * client stream and forces a fresh session — the server settles the turn
-   * as `turn.cancelled` → `session.waiting`, so the stream reaches its
-   * boundary normally and the session keeps its context. Best-effort and
-   * idempotent; scoped to the turn the user observed when its id is known.
+   * (`/cancel` or Esc, which steers when a message is queued). Unlike
+   * {@link abort} — which drops the client stream and forces a fresh session —
+   * the server settles the turn as `turn.cancelled` → `session.waiting`, so
+   * the stream reaches its boundary normally and the session keeps its context.
+   * Best-effort and idempotent; scoped to the turn the user observed when its id is known.
    */
   cancel?: () => void;
   turnState?: AgentTUITurnState;
@@ -276,7 +276,7 @@ export type AgentTUIRenderer = {
   /**
    * Reports the server session id backing the conversation — pushed by the
    * runner once a send is accepted, and overwritten when a later session's
-   * turn is accepted. Deliberately sticky across `/new` and interrupt
+   * turn is accepted. Deliberately sticky across `/reset` and interrupt
    * recovery: the terminal renderer echoes the LAST session this TUI talked
    * to in the parting line on exit, so an interrupted conversation (whose
    * replacement session never ran a turn) can still be found again
@@ -345,7 +345,7 @@ export type AgentTUIRenderer = {
   /**
    * Clears the rendered transcript and resets per-conversation display
    * state, leaving the UI interactive on a fresh screen. Used by the
-   * `/new` command to start a new session with a clean slate.
+   * `/reset` command to start a new session with a clean slate.
    */
   reset?(): void;
   /**
@@ -711,6 +711,7 @@ export class EveTUIRunner {
     let prompt: string | undefined;
     let pendingInputResponses: readonly InputResponse[] | undefined;
     let hasRunTurn = false;
+    let followCurrentSession = false;
     let streamWithoutPrompt = false;
     // `--input` seed: applied to the first prompt's editable buffer, then
     // cleared so later prompts open empty.
@@ -788,7 +789,44 @@ export class EveTUIRunner {
           return;
         }
 
-        if (command?.type === "new") {
+        if (command?.type === "cancel") {
+          if (this.#session.state.sessionId === undefined) {
+            this.#renderCommandOutcome("No active turn to cancel.");
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          try {
+            const result = await this.#session.cancel();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Turn cancellation requested."
+                : "No active turn to cancel.",
+            );
+            if (result.status === "no_active_turn") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+        }
+
+        if (command?.type === "reset") {
           if (!(await this.#resetCurrentSession())) {
             pendingInputResponses = undefined;
             streamWithoutPrompt = false;
@@ -799,6 +837,64 @@ export class EveTUIRunner {
           streamWithoutPrompt = false;
           prompt = undefined;
           continue;
+        }
+
+        if (command?.type === "compact") {
+          try {
+            const result = await this.#session.compact();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Compaction requested."
+                : "No active session to compact.",
+            );
+            if (result.status === "no_active_session") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't compact the session: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+        }
+
+        if (command?.type === "clear") {
+          try {
+            const result = await this.#session.clear();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Context clear requested."
+                : "No active session to clear.",
+            );
+            if (result.status === "no_active_session") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't clear the session: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
         }
 
         // Help renders locally; unlike extension commands it must work even
@@ -847,10 +943,12 @@ export class EveTUIRunner {
         hasRunTurn = true;
       }
 
-      let result = await this.#streamTurn({
-        prompt: streamWithoutPrompt ? undefined : prompt,
-        inputResponses: pendingInputResponses,
-      });
+      let result = followCurrentSession
+        ? this.#streamCurrentSession()
+        : await this.#streamTurn({
+            prompt: streamWithoutPrompt ? undefined : prompt,
+            inputResponses: pendingInputResponses,
+          });
       // The session id becomes known once the send is accepted; keep the
       // renderer's copy fresh so the parting line can name the session.
       const acceptedSessionId = this.#session.state.sessionId;
@@ -935,7 +1033,7 @@ export class EveTUIRunner {
           }
 
           if (this.#enterPendingConnectionAuthorization(result)) {
-            result = this.#streamConnectionAuthorization();
+            result = this.#streamCurrentSession();
             submittedPrompt = undefined;
             continue;
           }
@@ -966,6 +1064,7 @@ export class EveTUIRunner {
         continue;
       }
 
+      followCurrentSession = false;
       streamWithoutPrompt = false;
       pendingInputResponses = undefined;
       prompt = undefined;
@@ -1010,7 +1109,7 @@ export class EveTUIRunner {
   /**
    * Resets all per-conversation runner state and, when a client is
    * available, replaces the active session with a fresh one so the next
-   * turn starts a new server-side conversation. Backs the `/new` command.
+   * turn starts a new server-side conversation. Backs the `/reset` command.
    * In-flight subagent child-session streams are aborted.
    */
   #startNewSession(): void {
@@ -1193,12 +1292,8 @@ export class EveTUIRunner {
     }
   }
 
-  /**
-   * Follows the same session after an interactive authorization callback.
-   * `send()` stops at the parked `session.waiting` boundary; the callback's
-   * completion events arrive in the next durable turn on `session.stream()`.
-   */
-  #streamConnectionAuthorization(): AgentTUIStreamResult {
+  /** Follows the current session without dispatching another turn. */
+  #streamCurrentSession(): AgentTUIStreamResult {
     const abortController = new AbortController();
     return this.#createTUIStreamResult(
       this.#session.stream({ signal: abortController.signal }),
@@ -2027,7 +2122,7 @@ async function* eveEventsToTUIStream(
         break;
 
       case "turn.cancelled":
-        // A cooperative cancel (Esc Esc or an Esc steer) — not a failure.
+        // A cooperative cancel (`/cancel`, Esc, or an Esc steer) — not a failure.
         // `session.waiting` follows and finishes the stream normally.
         onTurnCancelled?.();
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);

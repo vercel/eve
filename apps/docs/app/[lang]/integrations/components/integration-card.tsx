@@ -45,9 +45,7 @@ export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
         </div>
       </div>
       <div className="flex min-w-0 flex-col gap-1">
-        <h3 className="break-words font-medium text-base text-gray-1000 tracking-tight">
-          {integration.name}
-        </h3>
+        <h3 className="break-words text-gray-1000 text-heading-16">{integration.name}</h3>
         <p className="break-words text-gray-900 text-sm leading-relaxed">{integration.tagline}</p>
       </div>
     </Link>

@@ -19,6 +19,20 @@ const result = await response.result();
 
 Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally.
 
+Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through the following `session.waiting` boundary before sending the next turn. `compaction.completed` confirms that summarization succeeded; without it, eve preserves the previous history. A never-started session returns `no_active_session` as a successful no-op.
+
+```ts
+const compaction = await session.compact();
+console.log(compaction.status);
+```
+
+Use `session.clear()` to remove model-message history while retaining the session and its durable resources. Consume `context.cleared` and the following `session.waiting` before sending the next turn.
+
+```ts
+const cleared = await session.clear();
+console.log(cleared.status);
+```
+
 ## Aggregate a turn
 
 Use `result()` when you only need the final turn summary:

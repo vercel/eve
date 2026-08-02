@@ -75,6 +75,8 @@ function createEveCreateHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
+        compact: vi.fn(),
         reset: vi.fn(),
         getSession: vi.fn(),
         receive: vi.fn() as never,

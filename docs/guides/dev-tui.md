@@ -35,13 +35,16 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 | Command       | Does                                                                                                                                                         |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/model`      | Opens a configure menu that loops until Done (or Esc). See [Configure the model and provider](#configure-the-model-and-provider).                            |
-| `/add`        | Searches registry integrations or adds an item address entered directly.                                                                                     |
+| `/add`        | Adds an integration from the registry or an item address entered directly.                                                                                   |
 | `/deploy`     | Ships the agent to Vercel production, linking the directory first when it is unlinked.                                                                       |
 | `/vc:install` | Installs the Vercel CLI. Available locally and on a remote session.                                                                                          |
 | `/vc:login`   | Logs in to Vercel locally. On a remote session, resolves the deployment's project, refreshes its OIDC token, and confirms any required Trusted Sources rule. |
 | `/loglevel`   | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                             |
 | `/traces`     | Opens the full-screen local trace viewer. See [Inspect traces](#inspect-traces).                                                                             |
-| `/new`        | Starts a fresh session.                                                                                                                                      |
+| `/reset`      | Starts a fresh session.                                                                                                                                      |
+| `/cancel`     | Cooperatively cancels the running turn while preserving the session and settled context.                                                                     |
+| `/clear`      | Clears model-message history while preserving the current session and its durable resources.                                                                 |
+| `/compact`    | Queues context compaction for the current session without sending a message.                                                                                 |
 | `/exit`       | Quits the TUI.                                                                                                                                               |
 | `/help`       | Lists the commands available for the current local or remote session.                                                                                        |
 
@@ -55,11 +58,11 @@ The provider row opens one menu: AI Gateway via a project, AI Gateway via `AI_GA
 
 The provider row demands attention (a bold yellow "Configure model access" with a yellow "Not configured" hint that dims when unselected and uses the terminal foreground when selected) until a link or gateway credential is detected, then names the connection afterward (for example "AI Gateway (Linked to my-project in my-team)"). Setup menus mark the cursor row with a padded, filled-arrow inverse label that inherits the row's accent: blue normally and yellow for warning rows. In stacked menus, the selected row's description appears directly beneath that option. The completed command's outcome stays in the transcript after the panel closes. When a turn fails because AI Gateway authentication is missing or stale, the error points you at `/model` directly.
 
-### Browse registry integrations
+### Add registry integrations
 
-`/add` first organizes integrations by what they add: a way to chat, tools and data, capabilities, or observability. Pick a category to open its searchable catalog from the official eve registry and the registry namespaces configured in `package.json`, or browse everything. Each integration shows its source beside its name, such as `Vercel` or a configured registry namespace. Select a result to review its source, packages, environment variables, and target files before adding it, or type an official item path, configured namespace address, or HTTP(S) URL directly into the search bar. After an add attempt finishes, the panel closes instead of returning to the catalog.
+`/add` groups integrations by their role: **Channels** for where people talk to your agent, **MCP connections** for external services and data, **Extensions** for reusable capabilities, and **Observability** for tracing and evaluation. Pick a category to open its searchable catalog from the official eve registry and the registry namespaces configured in `package.json`, or browse every integration. Each result shows its source beside its name, such as `Vercel` or a configured registry namespace. Select a result to review its source, packages, environment variables, and target files before adding it, or enter an official item path, configured namespace address, or HTTP(S) URL directly in the search bar. After an add attempt finishes, the panel closes instead of returning to the catalog.
 
-Connection registry items install their definition and then configure Vercel Connect through the same `/add` flow. If the directory is unlinked, setup first offers to create or link a project. Run `eve add connection/<name>` for the equivalent CLI flow.
+MCP connection registry items install their definition and then configure Vercel Connect through the same `/add` flow. If the directory is unlinked, setup first offers to create or link a project. Run `eve add connection/<name>` for the equivalent CLI flow.
 
 ## Keyboard shortcuts
 
@@ -81,9 +84,9 @@ In terminals that support bracketed paste, pasting multi-line text into chat or 
 
 ### Queue and steer while the agent works
 
-Sending a message while a turn is still running does not interrupt it — the message joins a queue of up to five, pinned in a panel directly above the input with one line per message. When the turn ends, the queued messages coalesce into the next turn's message.
+Sending a message while a turn is still running does not interrupt it — the message joins a queue of up to five, pinned in a panel directly above the input with one line per message. When the turn ends, the queued messages coalesce into the next turn's message. Submit `/cancel` during a turn to cancel it immediately without queueing the command as model input; `/cancel` also works from the idle prompt when a prior stream disconnected while its server turn may still be running.
 
-`Esc` steers instead of waiting: it pops the oldest queued message, cancels the running turn cooperatively, and submits the popped message as the replacement turn. In the transcript, a steered message carries an accent `↑` on its own line above its gutter bar; a queued message that waited for the boundary carries it below. Any remaining messages stay queued behind it. With nothing queued, the first `Esc` arms cancellation and a second `Esc` cancels the turn. Unlike `Ctrl+C` — which drops the stream client-side — a cancelled turn ends cleanly on the server and the session keeps its context; the conversation picks up at the next prompt.
+`Esc` steers instead of waiting: it pops the oldest queued message, cancels the running turn cooperatively, and submits the popped message as the replacement turn. In the transcript, a steered message carries an accent `↑` on its own line above its gutter bar; a queued message that waited for the boundary carries it below. Any remaining messages stay queued behind it. With nothing queued, one `Esc` cancels the turn immediately. Unlike `Ctrl+C` — which drops the stream client-side — a cancelled turn ends cleanly on the server and the session keeps its context; the conversation picks up at the next prompt.
 
 If a turn fails terminally (the server session dies or the connection drops), the TUI starts a fresh session and notes it inline so you can keep going. Server-side context resets with the old session. Messages still queued when a turn is interrupted or fails are restored into the next prompt's input instead of being sent blind.
 
