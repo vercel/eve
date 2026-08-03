@@ -179,9 +179,20 @@ export function createSlackFetchFile(input: {
     if (!response.ok) {
       throw new Error(`Slack file fetch returned HTTP ${response.status} for ${url}.`);
     }
+    const mediaType = response.headers.get("content-type") ?? undefined;
+    // Slack answers a private-file request with an HTTP 200 HTML sign-in page
+    // when the bot token lacks the `files:read` scope. Reject it so the login
+    // page never reaches the model as file content.
+    if (mediaType?.startsWith("text/html")) {
+      throw new Error(
+        `Slack returned an HTML login page instead of file bytes for ${url}. ` +
+          `The Slack bot token is likely missing the "files:read" scope — add it to ` +
+          `the app's bot scopes and reinstall the app to the workspace.`,
+      );
+    }
     return {
       bytes: Buffer.from(await response.arrayBuffer()),
-      mediaType: response.headers.get("content-type") ?? undefined,
+      mediaType,
     };
   };
 }
